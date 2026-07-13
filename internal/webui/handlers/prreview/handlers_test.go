@@ -25,9 +25,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	localsettingshandler "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -163,11 +165,20 @@ func writeUpstreamJSON(w http.ResponseWriter, status int, v any) {
 }
 
 type prReviewHarness struct {
-	store  store.Store
-	github *fakeGitHub
-	mux    *http.ServeMux
-	module *Module
+	store   store.Store
+	github  *fakeGitHub
+	mux     *http.ServeMux
+	module  *Module
+	dataDir string
 }
+
+type testCredentialSource string
+
+const (
+	testCredentialEnv      testCredentialSource = "env"
+	testCredentialSettings testCredentialSource = "settings"
+	testCredentialNone     testCredentialSource = "none"
+)
 
 type fallbackAgentService struct {
 	service.AgentService
@@ -191,19 +202,46 @@ func newPRReviewHarness(t *testing.T, withDispatcher bool) *prReviewHarness {
 }
 
 func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc service.AgentService) *prReviewHarness {
+	return newPRReviewHarnessWithCredential(t, withDispatcher, agentSvc, testCredentialEnv, prReviewTestToken)
+}
+
+func newPRReviewHarnessWithCredential(
+	t *testing.T,
+	withDispatcher bool,
+	agentSvc service.AgentService,
+	source testCredentialSource,
+	token string,
+) *prReviewHarness {
 	t.Helper()
-	h := &prReviewHarness{store: memstore.New(), github: newFakeGitHub(t), mux: http.NewServeMux()}
+	h := &prReviewHarness{
+		store:   memstore.New(),
+		github:  newFakeGitHub(t),
+		mux:     http.NewServeMux(),
+		dataDir: t.TempDir(),
+	}
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	t.Setenv(connector.VaultKeyEnvVar, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32)))
 	t.Setenv(connector.GitHubBaseURLEnvVar, h.github.server.URL)
-	t.Setenv(webuiGitHubTokenEnv, prReviewTestToken)
+	switch source {
+	case testCredentialEnv:
+		t.Setenv(connector.VaultKeyEnvVar, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32)))
+		t.Setenv(webuiGitHubTokenEnv, token)
+	case testCredentialSettings:
+		t.Setenv(connector.VaultKeyEnvVar, "")
+		t.Setenv(webuiGitHubTokenEnv, "")
+		h.setSettingsGitHubToken(t, token)
+	case testCredentialNone:
+		t.Setenv(connector.VaultKeyEnvVar, "")
+		t.Setenv(webuiGitHubTokenEnv, "")
+	default:
+		t.Fatalf("unknown test credential source %q", source)
+	}
 	h.seedWorkspace(t)
 
 	var dispatcher *connector.Dispatcher
 	if withDispatcher {
-		vault, err := connector.NewVaultFromEnv()
+		vault, err := connector.NewVaultFromEnvOrKeyFile(h.dataDir)
 		if err != nil {
-			t.Fatalf("NewVaultFromEnv: %v", err)
+			t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
 		}
 		dispatcher = &connector.Dispatcher{
 			Connectors: h.store.Connectors(),
@@ -213,9 +251,49 @@ func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc ser
 			Providers:  connector.DefaultProviderRegistry(h.github.server.Client()),
 		}
 	}
-	h.module = NewModule(h.store, dispatcher, agentSvc, nil)
+	h.module = NewModule(h.store, dispatcher, agentSvc, nil, h.dataDir)
 	h.module.Register(h.mux)
 	return h
+}
+
+func (h *prReviewHarness) setSettingsGitHubToken(t *testing.T, token string) {
+	t.Helper()
+	settings, err := localsettings.Load(h.dataDir)
+	if err != nil {
+		t.Fatalf("Load local settings: %v", err)
+	}
+	credential, err := localsettings.SealRuntimeCredential(
+		h.dataDir,
+		localsettings.RuntimeCredentialProviderGitHub,
+		token,
+		time.Now(),
+	)
+	if err != nil {
+		t.Fatalf("SealRuntimeCredential: %v", err)
+	}
+	settings.RuntimeCredentials.GitHub = credential
+	if err := localsettings.Save(h.dataDir, settings); err != nil {
+		t.Fatalf("Save local settings: %v", err)
+	}
+}
+
+func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
+	t.Helper()
+	vault, err := connector.NewVaultFromEnvOrKeyFile(dataDir)
+	if err != nil {
+		t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
+	}
+	dispatcher := &connector.Dispatcher{
+		Connectors: h.store.Connectors(),
+		Grants:     h.store.ConnectorGrants(),
+		Audit:      h.store.ConnectorCalls(),
+		Vault:      vault,
+		Providers:  connector.DefaultProviderRegistry(h.github.server.Client()),
+	}
+	h.dataDir = dataDir
+	h.module = NewModule(h.store, dispatcher, nil, nil, dataDir)
+	h.mux = http.NewServeMux()
+	h.module.Register(h.mux)
 }
 
 func (h *prReviewHarness) seedWorkspace(t *testing.T) {
@@ -289,6 +367,16 @@ func (h *prReviewHarness) post(t *testing.T, path, body string) (int, []byte) {
 	return rec.Code, rec.Body.Bytes()
 }
 
+func (h *prReviewHarness) patchLocalSettings(t *testing.T, body string, onGitHubCredentialChanged func()) (int, []byte) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, "/api/local/settings", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	localsettingshandler.HandlePatch(h.dataDir, localsettingshandler.PatchOptions{
+		OnGitHubRuntimeCredentialChanged: onGitHubCredentialChanged,
+	}).ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
 func assertGrantActions(t *testing.T, h *prReviewHarness, want []string) {
 	t.Helper()
 	grants, err := h.store.ConnectorGrants().ListByBinding(context.Background(), prReviewTestWorkspace, bindingID)
@@ -331,6 +419,223 @@ func TestGetPullRequestDetail(t *testing.T) {
 		t.Fatalf("authorization = %q, want bearer token", calls[0].authorization)
 	}
 	assertGrantActions(t, h, prReadActions)
+}
+
+func TestGetPullRequestUsesSettingsGitHubCredential(t *testing.T) {
+	const settingsToken = "github-settings-token"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, settingsToken)
+	if !h.module.connectorListAvailable() {
+		t.Fatal("settings credential was not reflected in connector availability")
+	}
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 1 || calls[0].authorization != "Bearer "+settingsToken {
+		t.Fatalf("calls = %+v, want settings-token authorization", calls)
+	}
+	assertGrantActions(t, h, prReadActions)
+}
+
+func TestGetPullRequestEnvTokenOverridesSettings(t *testing.T) {
+	const settingsToken = "github-settings-token"
+	const envToken = "github-env-token"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, settingsToken)
+	t.Setenv(webuiGitHubTokenEnv, "  "+envToken+"  ")
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 1 || calls[0].authorization != "Bearer "+envToken {
+		t.Fatalf("calls = %+v, want trimmed env-token authorization", calls)
+	}
+}
+
+func TestPRReviewWithoutGitHubCredentialFailsAndWarns(t *testing.T) {
+	fallback := &fallbackAgentService{result: &ops.GitPullRequestList{}}
+	h := newPRReviewHarnessWithCredential(t, true, fallback, testCredentialNone, "")
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("detail status = %d, want 503 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "egress_unavailable" {
+		t.Fatalf("detail code = %q, want egress_unavailable", code)
+	}
+
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("list status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Data struct {
+			Warnings []string `json:"warnings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode list response: %v (body %s)", err, raw)
+	}
+	if !slices.Contains(decoded.Data.Warnings, connectorUnavailableWarning) {
+		t.Fatalf("list warnings = %v, want %q", decoded.Data.Warnings, connectorUnavailableWarning)
+	}
+}
+
+func TestSettingsGitHubCredentialPatchInvalidatesSeedAndRotates(t *testing.T) {
+	const oldToken = "github-settings-token-old"
+	const newToken = "github-settings-token-new"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, oldToken)
+	cacheKey := grantSeedCacheKey(prReviewTestWorkspace, prResource("octocat", "hello"), prReadActions)
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("initial status = %d, want 200 (body %s)", status, raw)
+	}
+	if _, seeded := h.module.seeded.Load(cacheKey); !seeded {
+		t.Fatal("read seed cache entry missing after initial request")
+	}
+	status, raw = h.patchLocalSettings(t,
+		`{"runtime_credentials":{"github":{"token":"github-settings-token-new"}}}`,
+		h.module.InvalidateCredentialSeeds,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("settings PATCH status = %d, want 200 (body %s)", status, raw)
+	}
+	if _, seeded := h.module.seeded.Load(cacheKey); seeded {
+		t.Fatal("read seed cache entry survived GitHub credential PATCH")
+	}
+
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("rotation status = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %+v, want initial and post-PATCH reads", calls)
+	}
+	if calls[0].authorization != "Bearer "+oldToken {
+		t.Fatalf("initial authorization = %q, want old token", calls[0].authorization)
+	}
+	if calls[1].authorization != "Bearer "+newToken {
+		t.Fatalf("post-PATCH authorization = %q, want new token", calls[1].authorization)
+	}
+}
+
+func TestSettingsCredentialResealsAfterVaultKeyChanges(t *testing.T) {
+	const token = "github-settings-token"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, token)
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("initial status = %d, want 200 (body %s)", status, raw)
+	}
+
+	newDataDir := t.TempDir()
+	h.dataDir = newDataDir
+	h.setSettingsGitHubToken(t, token)
+	h.rebuildWithDataDir(t, newDataDir)
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("status after vault-key change = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 2 || calls[1].authorization != "Bearer "+token {
+		t.Fatalf("calls after vault-key change = %+v, want dispatch with current token", calls)
+	}
+	sealed, err := h.store.Connectors().ResolveOutboundCredentialSealed(
+		context.Background(), prReviewTestWorkspace, connectorID,
+	)
+	if err != nil {
+		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
+	}
+	if _, err := h.module.dispatcher.Vault.Unseal(
+		sealed, connector.CredentialAAD(prReviewTestWorkspace, connectorID),
+	); err != nil {
+		t.Fatalf("credential was not re-sealed under the replacement vault key: %v", err)
+	}
+}
+
+func TestCredentialInvalidationDuringEnsureUsesNewToken(t *testing.T) {
+	const oldToken = "github-settings-token-old"
+	const newToken = "github-settings-token-new"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, oldToken)
+	cacheKey := grantSeedCacheKey(prReviewTestWorkspace, prResource("octocat", "hello"), prReadActions)
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("initial status = %d, want 200 (body %s)", status, raw)
+	}
+	h.module.InvalidateCredentialSeeds()
+
+	var invalidate sync.Once
+	h.module.beforeCredentialSeedCommit = func() {
+		invalidate.Do(func() {
+			h.setSettingsGitHubToken(t, newToken)
+			h.module.InvalidateCredentialSeeds()
+		})
+	}
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("status after raced invalidation = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 2 || calls[1].authorization != "Bearer "+newToken {
+		t.Fatalf("calls after raced invalidation = %+v, want new-token dispatch", calls)
+	}
+	if _, seeded := h.module.seeded.Load(cacheKey); !seeded {
+		t.Fatal("new credential seed was not cached")
+	}
+	sealed, err := h.store.Connectors().ResolveOutboundCredentialSealed(
+		context.Background(), prReviewTestWorkspace, connectorID,
+	)
+	if err != nil {
+		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
+	}
+	plain, err := h.module.dispatcher.Vault.Unseal(
+		sealed, connector.CredentialAAD(prReviewTestWorkspace, connectorID),
+	)
+	if err != nil {
+		t.Fatalf("Unseal raced credential: %v", err)
+	}
+	if string(plain) != newToken {
+		t.Fatalf("stored credential = %q, want new token", plain)
+	}
+}
+
+func TestDaytonaCredentialPatchDoesNotInvalidatePRReviewSeeds(t *testing.T) {
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, "github-settings-token")
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("initial status = %d, want 200 (body %s)", status, raw)
+	}
+	cacheKey := grantSeedCacheKey(prReviewTestWorkspace, prResource("octocat", "hello"), prReadActions)
+	invalidations := 0
+	status, raw = h.patchLocalSettings(t,
+		`{"runtime_credentials":{"daytona":{"api_key":"dtn-new"}}}`,
+		func() {
+			invalidations++
+			h.module.InvalidateCredentialSeeds()
+		},
+	)
+	if status != http.StatusOK {
+		t.Fatalf("settings PATCH status = %d, want 200 (body %s)", status, raw)
+	}
+	if invalidations != 0 {
+		t.Fatalf("PR-review seed invalidations = %d, want 0", invalidations)
+	}
+	if _, seeded := h.module.seeded.Load(cacheKey); !seeded {
+		t.Fatal("Daytona-only PATCH cleared PR-review seed cache")
+	}
+	rotations, err := h.store.ConnectorCalls().ListByBinding(
+		context.Background(), prReviewTestWorkspace, connector.RotationAuditBindingID, store.ConnectorCallFilter{},
+	)
+	if err != nil {
+		t.Fatalf("list connector rotations: %v", err)
+	}
+	if len(rotations) != 0 {
+		t.Fatalf("connector rotations after Daytona-only PATCH = %d, want 0", len(rotations))
+	}
 }
 
 func TestListPullRequestsConnector(t *testing.T) {
@@ -689,6 +994,26 @@ func TestGrantSeedCacheKeyScopesCanonicalActionSet(t *testing.T) {
 	}
 	if writeKey := grantSeedCacheKey(prReviewTestWorkspace, resource, prReviewSubmissionActions); writeKey == readKey {
 		t.Fatalf("read and review-submission action sets share cache key %q", readKey)
+	}
+}
+
+func TestInvalidateCredentialSeedsClearsAllEntries(t *testing.T) {
+	module := &Module{}
+	module.seeded.Store("read", struct{}{})
+	module.seeded.Store("write", struct{}{})
+
+	module.InvalidateCredentialSeeds()
+
+	count := 0
+	module.seeded.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	if count != 0 {
+		t.Fatalf("seed cache entries after invalidation = %d, want 0", count)
+	}
+	if generation := module.credentialSeedGeneration.Load(); generation != 1 {
+		t.Fatalf("credential seed generation = %d, want 1", generation)
 	}
 }
 

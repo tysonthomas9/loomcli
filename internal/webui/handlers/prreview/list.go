@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
@@ -27,7 +26,11 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !m.connectorListAvailable() {
-		m.ghListFallback(w, r.Context(), ws, state)
+		var warnings []string
+		if m != nil && m.dispatcher != nil && !m.githubTokenConfigured() {
+			warnings = append(warnings, connectorUnavailableWarning)
+		}
+		m.ghListFallback(w, r.Context(), ws, state, warnings...)
 		return
 	}
 
@@ -111,11 +114,7 @@ func (m *Module) connectorListAvailable() bool {
 	if m == nil || m.dispatcher == nil {
 		return false
 	}
-	if strings.TrimSpace(os.Getenv(webuiGitHubTokenEnv)) == "" {
-		return false
-	}
-	_, err := connector.NewVaultFromEnv()
-	return err == nil
+	return m.githubTokenConfigured()
 }
 
 // connectorUnavailableWarning is surfaced (via the response warnings the PR

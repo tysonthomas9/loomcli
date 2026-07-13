@@ -575,7 +575,7 @@ export function SettingsView({
             </div>
             <div className={styles.formGroup}>
               <label className={styles.label} htmlFor="github-token-input">
-                GitHub Token
+                GitHub Token for Runtimes and PR Review
               </label>
               <input
                 id="github-token-input"
@@ -592,8 +592,8 @@ export function SettingsView({
               />
               <p className={styles.description}>
                 {runtimeCredentials?.github.configured
-                  ? "GitHub credential saved"
-                  : "No GitHub credential saved"}
+                  ? "Credential saved. Used by remote runtimes and GitHub PR review in this workspace."
+                  : "Used by remote runtimes and GitHub PR review in this workspace."}
               </p>
               {runtimeCredentials?.github.configured && (
                 <button

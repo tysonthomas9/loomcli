@@ -114,10 +114,16 @@ type Server struct {
 	// Pre-built top-level handlers (built by handlermux.BuildHandlers)
 	handlers *handlermux.Handlers
 
+	prReviewCredentialSeeds credentialSeedInvalidator
+
 	// startedAt captures server-process boot time. Used to distinguish
 	// "tab metadata from a prior server process" (PTY is gone) from
 	// "tab metadata just created in this process" (PTY about to spawn).
 	startedAt time.Time
+}
+
+type credentialSeedInvalidator interface {
+	InvalidateCredentialSeeds()
 }
 
 // buildHandlers constructs all top-level HTTP handlers from the current dependency

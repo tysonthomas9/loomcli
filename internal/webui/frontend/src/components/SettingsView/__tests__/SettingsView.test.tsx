@@ -299,6 +299,23 @@ describe("SettingsView", () => {
     });
   });
 
+  describe("runtime credentials", () => {
+    it("describes the GitHub token as shared by remote runtimes and PR review", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      expect(
+        screen.getByLabelText("GitHub Token for Runtimes and PR Review"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Used by remote runtimes and GitHub PR review in this workspace.",
+        ),
+      ).toBeInTheDocument();
+    });
+  });
+
   describe("save button", () => {
     it("save button disabled when no changes", () => {
       mockUseBackendConfig.mockReturnValue(createMockHookReturn());
