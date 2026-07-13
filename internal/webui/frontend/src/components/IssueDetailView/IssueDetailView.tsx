@@ -14,6 +14,7 @@ import { useRegisterEscapeLayer, LAYER_ISSUE_PANEL } from "@/hooks";
 import { getReviewType } from "@/utils/issue";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { ErrorToast } from "@/components/ErrorToast";
+import { MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
@@ -594,7 +595,10 @@ export function IssueDetailView({
         {issue.description && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Description</h3>
-            <p className={styles.description}>{issue.description}</p>
+            <MarkdownRenderer
+              className={styles.description ?? ""}
+              content={issue.description}
+            />
           </section>
         )}
 
@@ -602,7 +606,10 @@ export function IssueDetailView({
         {issue.design && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Design</h3>
-            <p className={styles.description}>{issue.design}</p>
+            <MarkdownRenderer
+              className={styles.description ?? ""}
+              content={issue.design}
+            />
           </section>
         )}
 
@@ -610,7 +617,10 @@ export function IssueDetailView({
         {issue.notes && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Notes</h3>
-            <p className={styles.description}>{issue.notes}</p>
+            <MarkdownRenderer
+              className={styles.description ?? ""}
+              content={issue.notes}
+            />
           </section>
         )}
 
@@ -654,7 +664,10 @@ export function IssueDetailView({
                   {comment.author} &middot;{" "}
                   {comment.created_at ? formatDate(comment.created_at) : ""}
                 </div>
-                <p className={styles.description}>{comment.text}</p>
+                <MarkdownRenderer
+                  className={styles.description ?? ""}
+                  content={comment.text}
+                />
               </div>
             ))}
           </section>
