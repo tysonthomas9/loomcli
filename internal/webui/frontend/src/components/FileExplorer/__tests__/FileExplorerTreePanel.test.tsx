@@ -186,23 +186,38 @@ describe("FileExplorerTreePanel", () => {
     expect(onCompareModeChange).toHaveBeenCalledWith("working");
   });
 
-  it("shows the branch base name when it is known", () => {
+  it("folds a known base name into the branch segment", () => {
     renderPanel({ compareMode: "branch", branchBaseName: "main" });
 
-    expect(screen.getByText("vs main")).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Branch vs main · 2" }),
+    ).toHaveAttribute(
+      "title",
+      "Committed changes on each agent branch, diffed against the merge-base with main.",
+    );
   });
 
-  it("omits the branch hint when the base name is unknown", () => {
+  it("uses the branch label and tooltip fallback when the base is unknown", () => {
     renderPanel({ compareMode: "branch" });
 
-    expect(screen.queryByText(/^vs /)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Branch vs base · 2" }),
+    ).toHaveAttribute(
+      "title",
+      "Committed changes on each agent branch, diffed against the merge-base with the repo default branch.",
+    );
   });
 
-  it("keeps the working-tree hint", () => {
+  it("describes working-tree mode without a separate hint", () => {
     renderPanel({ compareMode: "working", branchBaseName: "main" });
 
-    expect(screen.getByText("uncommitted only")).toBeInTheDocument();
-    expect(screen.queryByText("vs main")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Working tree · 3" }),
+    ).toHaveAttribute(
+      "title",
+      "Uncommitted changes in each checkout — like git status. Committed work does not appear here.",
+    );
+    expect(screen.queryByText("uncommitted only")).not.toBeInTheDocument();
   });
 
   it("opens branch diffs with source branch and no from revision", () => {

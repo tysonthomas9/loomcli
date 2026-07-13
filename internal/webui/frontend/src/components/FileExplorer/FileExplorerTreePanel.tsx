@@ -114,9 +114,25 @@ function CompareToggle({
   branchBaseName?: string | undefined;
   onChange: (compareMode: CompareMode) => void;
 }) {
-  const tabs: Array<{ id: CompareMode; label: string; count: number }> = [
-    { id: "branch", label: "Branch vs base", count: branchChangeCount },
-    { id: "working", label: "Working tree", count: workingChangeCount },
+  const tabs: Array<{
+    id: CompareMode;
+    label: string;
+    count: number;
+    title: string;
+  }> = [
+    {
+      id: "branch",
+      label: `Branch vs ${branchBaseName ?? "base"}`,
+      count: branchChangeCount,
+      title: `Committed changes on each agent branch, diffed against the merge-base with ${branchBaseName ?? "the repo default branch"}.`,
+    },
+    {
+      id: "working",
+      label: "Working tree",
+      count: workingChangeCount,
+      title:
+        "Uncommitted changes in each checkout — like git status. Committed work does not appear here.",
+    },
   ];
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const currentIndex = tabs.findIndex((tab) => tab.id === compareMode);
@@ -132,38 +148,30 @@ function CompareToggle({
     }
   };
   return (
-    <div className={styles.compareToggleRow}>
-      <div
-        className={styles.compareToggle}
-        role="tablist"
-        aria-label="Compare mode"
-        onKeyDown={handleKeyDown}
-      >
-        {tabs.map((tab) => {
-          const active = compareMode === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              className={styles.compareTab}
-              data-active={active || undefined}
-              aria-selected={active}
-              tabIndex={active ? 0 : -1}
-              onClick={() => onChange(tab.id)}
-            >
-              {tab.label} · {tab.count}
-            </button>
-          );
-        })}
-      </div>
-      {compareMode === "branch" ? (
-        branchBaseName ? (
-          <span className={styles.compareHint}>vs {branchBaseName}</span>
-        ) : null
-      ) : (
-        <span className={styles.compareHint}>uncommitted only</span>
-      )}
+    <div
+      className={styles.compareToggle}
+      role="tablist"
+      aria-label="Compare mode"
+      onKeyDown={handleKeyDown}
+    >
+      {tabs.map((tab) => {
+        const active = compareMode === tab.id;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            className={styles.compareTab}
+            data-active={active || undefined}
+            aria-selected={active}
+            tabIndex={active ? 0 : -1}
+            title={tab.title}
+            onClick={() => onChange(tab.id)}
+          >
+            {tab.label} · {tab.count}
+          </button>
+        );
+      })}
     </div>
   );
 }
