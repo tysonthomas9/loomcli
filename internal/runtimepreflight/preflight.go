@@ -13,6 +13,7 @@ package runtimepreflight
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -30,9 +31,29 @@ const LocalTaskRunnerEntrypoint = "local-task-runner"
 // Default Backend") used when no DaemonProfile.AgentBackend is set.
 const DefaultBackend = backendnames.Codex
 
+const (
+	// ErrorClassBackendUnavailable identifies a backend that cannot be used by
+	// the local task runner because its CLI or health check is unavailable.
+	ErrorClassBackendUnavailable = "local_backend_unavailable"
+	// ErrorClassBackendAuthMissing identifies a backend that is installed but
+	// cannot run because provider auth is missing.
+	ErrorClassBackendAuthMissing = "local_backend_auth_missing"
+)
+
 // HealthStatus describes backend readiness for local-runner preflight tests
 // without making webui packages import the CLI backend package directly.
 type HealthStatus = backends.HealthStatus
+
+// LocalTaskRunnerPreflightResult is the structured form of the local runner
+// backend readiness check. Message mirrors the user-facing error returned by
+// PreflightLocalTaskRunner when Ready is false.
+type LocalTaskRunnerPreflightResult struct {
+	Backend    string
+	Health     HealthStatus
+	Ready      bool
+	ErrorClass string
+	Message    string
+}
 
 // healthChecker reports a backend's installation/auth status by name. It is a
 // package var so tests can stub the backend registry without registering real
@@ -66,6 +87,50 @@ func ResolveLocalBackend(ctx context.Context, st daemonGetter, ws string) string
 	return DefaultBackend
 }
 
+// CheckLocalTaskRunner resolves the effective local-task-runner backend (or
+// uses backendOverride when non-empty) and returns structured readiness state.
+func CheckLocalTaskRunner(ctx context.Context, st daemonGetter, ws, backendOverride string) LocalTaskRunnerPreflightResult {
+	backend := strings.TrimSpace(backendOverride)
+	if backend == "" {
+		backend = ResolveLocalBackend(ctx, st, ws)
+	}
+
+	status, ok := healthChecker(backend)
+	result := LocalTaskRunnerPreflightResult{
+		Backend: backend,
+		Health:  status,
+		Ready:   ok && status.Healthy,
+	}
+	if result.Ready {
+		return result
+	}
+	if !ok {
+		result.ErrorClass = ErrorClassBackendUnavailable
+		result.Message = fmt.Sprintf("local task runner backend %q is not available for health checks; "+
+			"set a supported Project Default Backend (claude, codex, opencode, gemini, cursor) (%s)",
+			backend, result.ErrorClass)
+		return result
+	}
+
+	switch {
+	case !status.Installed:
+		result.ErrorClass = ErrorClassBackendUnavailable
+		result.Message = fmt.Sprintf("local task runner cannot start: backend %q CLI is not installed (%s); "+
+			"install it or switch the Project Default Backend (%s)",
+			backend, healthMessage(status), result.ErrorClass)
+	case !status.APIKeySet:
+		result.ErrorClass = ErrorClassBackendAuthMissing
+		result.Message = fmt.Sprintf("local task runner cannot start: backend %q is missing auth (%s); "+
+			"set the provider credentials or switch the Project Default Backend (%s)",
+			backend, healthMessage(status), result.ErrorClass)
+	default:
+		result.ErrorClass = ErrorClassBackendUnavailable
+		result.Message = fmt.Sprintf("local task runner cannot start: backend %q is not ready (%s) (%s)",
+			backend, healthMessage(status), result.ErrorClass)
+	}
+	return result
+}
+
 // PreflightLocalTaskRunner resolves the effective backend for workspace ws and
 // runs that backend's HealthCheck. It returns a clear, actionable error if the
 // local runner cannot execute (backend binary not on PATH, or provider auth
@@ -75,34 +140,14 @@ func ResolveLocalBackend(ctx context.Context, st daemonGetter, ws string) string
 // run from being queued rather than letting it surface as a fake completion or
 // an opaque deep failure.
 func PreflightLocalTaskRunner(ctx context.Context, st daemonGetter, ws string) error {
-	backend := ResolveLocalBackend(ctx, st, ws)
-
-	status, ok := healthChecker(backend)
-	if !ok {
-		// Unknown/unregistered backend, or one without a HealthCheck. Fail
-		// closed: we cannot prove the local runner can execute.
-		return fmt.Errorf("local task runner backend %q is not available for health checks; "+
-			"set a supported Project Default Backend (claude, codex, opencode, gemini, cursor)", backend)
-	}
-	if status.Healthy {
+	result := CheckLocalTaskRunner(ctx, st, ws, "")
+	if result.Ready {
 		return nil
 	}
-
-	// Distinguish the two fail classes for a precise message; the error-class
-	// registry (§4.5) names these local_backend_unavailable / _auth_missing.
-	switch {
-	case !status.Installed:
-		return fmt.Errorf("local task runner cannot start: backend %q CLI is not installed (%s); "+
-			"install it or switch the Project Default Backend (local_backend_unavailable)",
-			backend, healthMessage(status))
-	case !status.APIKeySet:
-		return fmt.Errorf("local task runner cannot start: backend %q is missing auth (%s); "+
-			"set the provider credentials or switch the Project Default Backend (local_backend_auth_missing)",
-			backend, healthMessage(status))
-	default:
-		return fmt.Errorf("local task runner cannot start: backend %q is not ready (%s)",
-			backend, healthMessage(status))
+	if result.Message != "" {
+		return errors.New(result.Message)
 	}
+	return fmt.Errorf("local task runner cannot start: backend %q is not ready", result.Backend)
 }
 
 // SetHealthCheckerForTest overrides the backend health checker and returns a

@@ -42,6 +42,14 @@ func (sw *Writer) WriteEventID(id, event, data string) error {
 	return err
 }
 
+// WriteEventNoID writes a named event without an id: field. It is used for
+// control frames and intentionally non-resumable streams.
+func (sw *Writer) WriteEventNoID(event, data string) error {
+	_, err := io.WriteString(sw.W, fmt.Sprintf("event: %s\ndata: %s\n\n", event, data))
+	sw.Flusher.Flush()
+	return err
+}
+
 // WriteComment writes a comment to the SSE stream.
 func (sw *Writer) WriteComment(text string) error {
 	_, err := fmt.Fprintf(sw.W, ": %s\n\n", text)
