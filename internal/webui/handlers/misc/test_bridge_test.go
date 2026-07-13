@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/service/pathsec"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
@@ -110,6 +111,22 @@ func (s *testFileServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWo
 	if agentName == "" || !service.ValidAgentName.MatchString(agentName) {
 		return nil, service.ErrValidation("invalid agent name")
 	}
+	// List/Read use the lead-aware resolver so a lead (no local worktree) falls
+	// back to the workspace primary worktree. Mirrors svcimpl.fileServiceImpl.
+	wt, err := s.fileOps.ResolveAgentWorktreeOrPrimary(wsID, agentName)
+	if err != nil {
+		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
+	}
+	return wt, nil
+}
+
+// resolveAgentForWrite resolves the agent's own worktree for writes — no lead
+// primary fallback, so a lead can't mutate the primary repo from the viewer.
+// Mirrors svcimpl.fileServiceImpl.resolveAgentForWrite.
+func (s *testFileServiceImpl) resolveAgentForWrite(wsID, agentName string) (*ops.AgentWorktree, error) {
+	if agentName == "" || !service.ValidAgentName.MatchString(agentName) {
+		return nil, service.ErrValidation("invalid agent name")
+	}
 	wt, err := s.fileOps.ResolveAgentWorktree(wsID, agentName)
 	if err != nil {
 		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
@@ -185,14 +202,14 @@ func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path 
 	if path == "" {
 		return nil, service.ErrValidation("path parameter is required")
 	}
-	if isDeniedPath(path) {
+	if pathsec.IsDeniedPath(path) {
 		return nil, service.ErrForbidden("access to this file type is denied")
 	}
 	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
 	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
 		return nil, service.ErrForbidden("path outside worktree")
 	}
-	if isDeniedPath(fullPath) {
+	if pathsec.IsDeniedPath(fullPath) {
 		return nil, service.ErrForbidden("access to this file type is denied")
 	}
 	fi, err := os.Lstat(fullPath)
@@ -230,21 +247,21 @@ func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path 
 }
 
 func (s *testFileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, content string) error {
-	wt, err := s.resolveAgent(wsID, agentName)
+	wt, err := s.resolveAgentForWrite(wsID, agentName)
 	if err != nil {
 		return err
 	}
 	if path == "" {
 		return service.ErrValidation("path parameter is required")
 	}
-	if isDeniedPath(path) {
+	if pathsec.IsDeniedPath(path) {
 		return service.ErrForbidden("access to this file type is denied")
 	}
 	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
 	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
 		return service.ErrForbidden("path outside worktree")
 	}
-	if isDeniedPath(fullPath) {
+	if pathsec.IsDeniedPath(fullPath) {
 		return service.ErrForbidden("access to this file type is denied")
 	}
 	if writeErr := ValidateParentDir(fullPath, wt.Path); writeErr != nil {

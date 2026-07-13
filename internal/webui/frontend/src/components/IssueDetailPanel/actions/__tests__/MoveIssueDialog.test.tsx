@@ -50,9 +50,30 @@ function createTestIssue(overrides: Partial<Issue> = {}): Issue {
  */
 function createTestWorkspaces(): WorkspaceSummary[] {
   return [
-    { name: "alpha", path: "/ws/alpha", active: true, repo_count: 2 },
-    { name: "beta", path: "/ws/beta", active: false, repo_count: 1 },
-    { name: "gamma", path: "/ws/gamma", active: false, repo_count: 3 },
+    {
+      id: "alpha",
+      name: "alpha",
+      path: "/ws/alpha",
+      active: true,
+      repo_count: 2,
+      is_default: false,
+    },
+    {
+      id: "beta",
+      name: "beta",
+      path: "/ws/beta",
+      active: false,
+      repo_count: 1,
+      is_default: false,
+    },
+    {
+      id: "gamma",
+      name: "gamma",
+      path: "/ws/gamma",
+      active: false,
+      repo_count: 3,
+      is_default: false,
+    },
   ];
 }
 
@@ -317,8 +338,22 @@ describe("MoveIssueDialog", () => {
     it("auto-selects workspace when only one available", () => {
       // Only two workspaces total: alpha (current) and beta
       const twoWorkspaces: WorkspaceSummary[] = [
-        { name: "alpha", path: "/ws/alpha", active: true, repo_count: 2 },
-        { name: "beta", path: "/ws/beta", active: false, repo_count: 1 },
+        {
+          id: "alpha",
+          name: "alpha",
+          path: "/ws/alpha",
+          active: true,
+          repo_count: 2,
+          is_default: false,
+        },
+        {
+          id: "beta",
+          name: "beta",
+          path: "/ws/beta",
+          active: false,
+          repo_count: 1,
+          is_default: false,
+        },
       ];
 
       render(

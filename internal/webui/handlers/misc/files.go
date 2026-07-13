@@ -15,39 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// deniedExtensions lists file extensions that must not be read or written.
-var deniedExtensions = map[string]bool{
-	".key": true,
-	".pem": true,
-	".p12": true,
-	".pfx": true,
-	".env": true,
-	".gpg": true,
-	".asc": true,
-}
-
-// deniedFilenames lists filenames (without path) that must not be read or written.
-var deniedFilenames = map[string]bool{
-	"id_rsa":          true,
-	"id_ed25519":      true,
-	"id_ecdsa":        true,
-	"id_dsa":          true,
-	".env":            true,
-	".env.local":      true,
-	".env.production": true,
-	".netrc":          true,
-}
-
-// isDeniedPath checks if a path refers to a sensitive file by extension or filename.
-func isDeniedPath(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	if deniedExtensions[ext] {
-		return true
-	}
-	base := strings.ToLower(filepath.Base(path))
-	return deniedFilenames[base]
-}
-
 // IsBinaryContent checks if data is likely binary (non-UTF-8 or contains null bytes).
 func IsBinaryContent(data []byte) bool {
 	return !utf8.Valid(data) || bytes.IndexByte(data, 0) >= 0

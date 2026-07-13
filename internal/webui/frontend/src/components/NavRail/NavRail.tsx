@@ -8,6 +8,9 @@ import { useEffect, useRef } from "react";
 import type { ViewMode } from "@/types";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
+import { CompactRailHost } from "@/components/CompactRail";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
+
 import styles from "./NavRail.module.css";
 
 /** Aether wireframe pin 5: ~5 workspace dots visible, then scroll. */
@@ -87,29 +90,6 @@ const TOP_ITEMS: NavItem[] = [
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "agents",
-    label: "Agents",
-    icon: (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle
-          cx="12"
-          cy="8"
-          r="4"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        />
-        <path
-          d="M4 21v-1a6 6 0 016-6h4a6 6 0 016 6v1"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
         />
       </svg>
     ),
@@ -292,14 +272,16 @@ export function NavRail({
                 const color = getAvatarColor(ws.name);
                 const isActive = ws.id === activeWorkspaceId;
                 return (
-                  <button
+                  <CompactRailHost
                     key={ws.id}
-                    ref={isActive ? activeWorkspaceRef : undefined}
+                    as="button"
                     type="button"
+                    label={ws.name}
+                    aria-label={`Switch to ${ws.name}`}
+                    hostRef={isActive ? activeWorkspaceRef : undefined}
                     className={styles.wsAvatar}
                     data-active={isActive || undefined}
                     onClick={() => onWorkspaceSwitch?.(ws.id)}
-                    aria-label={`Switch to ${ws.name}`}
                   >
                     <span
                       className={styles.wsAvatarCircle}
@@ -309,27 +291,22 @@ export function NavRail({
                       }}
                       aria-hidden="true"
                     >
-                      {ws.name.charAt(0).toUpperCase()}
+                      {getCompactAvatarInitials(ws.name)}
                     </span>
-                    <span className={styles.tooltip} role="tooltip">
-                      {ws.name}
-                    </span>
-                  </button>
+                  </CompactRailHost>
                 );
               })}
             </div>
             {onAddWorkspace && (
-              <button
+              <CompactRailHost
+                as="button"
                 type="button"
+                label="Add workspace"
                 className={styles.wsAdd}
                 onClick={onAddWorkspace}
-                aria-label="Add workspace"
               >
                 +
-                <span className={styles.tooltip} role="tooltip">
-                  Add workspace
-                </span>
-              </button>
+              </CompactRailHost>
             )}
           </section>
           <div className={styles.wsDivider} aria-hidden="true" />

@@ -13,6 +13,22 @@ import "@testing-library/jest-dom";
 import { DesignPanel } from "../DesignPanel";
 
 describe("DesignPanel", () => {
+  it("renders explicitly formatted HTML through the design-only sanitizer", () => {
+    render(
+      <DesignPanel
+        format="html"
+        content={'<h2>Plan</h2>\n<p class="safe">Ship it</p>'}
+      />,
+    );
+    expect(screen.getByText("Ship it")).toHaveClass("safe");
+  });
+
+  it("keeps explicit markdown authoritative even when it starts with HTML", () => {
+    render(<DesignPanel format="markdown" content='<p class="raw">text</p>' />);
+    expect(
+      screen.getByTestId("design-panel").querySelector("p.raw"),
+    ).toBeNull();
+  });
   describe("Empty states", () => {
     it("renders empty placeholder when content is null", () => {
       render(<DesignPanel content={null} />);

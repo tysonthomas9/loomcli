@@ -81,9 +81,12 @@ make local-mode-codex-verify
 
 Common knobs:
 
+The stack installs npm's current `latest` Codex CLI by default. Set
+`LOCAL_MODE_CODEX_CLI_VERSION` only when the test requires a reproducible pin.
+
 ```bash
 LOCAL_MODE_CODEX_HOME=<codex-home> make local-mode-codex-up
-LOCAL_MODE_CODEX_CLI_VERSION=0.128.0 make local-mode-codex-up
+LOCAL_MODE_CODEX_CLI_VERSION=0.144.1 make local-mode-codex-up
 ```
 
 If auth is missing, do not fake the result. Report the missing auth as a blocker or switch to a test path that does not claim real backend behavior.

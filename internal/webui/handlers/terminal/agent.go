@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -123,10 +124,18 @@ func agentPTYTerminalAvailable(ctx context.Context, termSvc service.TerminalServ
 		}
 	}
 	agent, err := loadTerminalAgent(ctx, st, workspace, agentName)
-	if err != nil || isDaemonOwnedEphemeralWorker(agent) {
+	if err != nil {
 		return false
 	}
-	return agentTerminalLaunchAllowed(agent)
+	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+	if err != nil {
+		return false
+	}
+	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
+	if isDaemonOwnedEphemeralWorker(agent, roleKind) {
+		return false
+	}
+	return agentTerminalLaunchAllowed(agent, roleKind)
 }
 
 // HandleGetAgentTerminalToken generates a one-time token scoped to an agent logs stream.

@@ -24,6 +24,10 @@ import {
 } from "react";
 
 import { getTerminalConfig } from "@/hooks/api";
+import {
+  TERMINAL_FONT_CHANGE_EVENT,
+  type TerminalFontChangeDetail,
+} from "@/hooks/terminal/useTerminalFont";
 import { useWorkspaceContext } from "@/hooks/workspace";
 import {
   startAutoReconnect,
@@ -672,6 +676,33 @@ export const TerminalInstance = forwardRef<
       if (frame) cancelAnimationFrame(frame);
     };
   }, [isActive, readyVersion, syncActiveLayout]);
+
+  // Re-measure the grid when font prefs change so cols/rows stay accurate.
+  useEffect(() => {
+    const onFontChange = () => {
+      const wt = wtermInstanceRef.current;
+      if (!wt) return;
+      const measured = measureTerminalSize(wt);
+      if (measured) {
+        terminalSizeRef.current = measured;
+        if (wt.cols !== measured.cols || wt.rows !== measured.rows) {
+          wt.resize(measured.cols, measured.rows);
+        }
+        handleResize(measured.cols, measured.rows);
+      }
+      forceRendererPaint(wt);
+    };
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<TerminalFontChangeDetail>).detail;
+      if (!detail) return;
+      onFontChange();
+    };
+
+    window.addEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
+    return () =>
+      window.removeEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
+  }, [forceRendererPaint, handleResize, measureTerminalSize]);
 
   useImperativeHandle(
     ref,

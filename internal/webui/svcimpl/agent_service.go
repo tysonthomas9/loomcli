@@ -353,10 +353,14 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 		return nil, service.ErrUnavailable("fleet-db store not configured")
 	}
 	in.RoleName = normalizeFirstClassAgentRole(in.RoleName)
+	in.Name = normalizeStoredAgentName(in.Name)
+	in.Kind = normalizeAgentRoleKind(in.Kind)
+	in.Prompt = strings.TrimSpace(in.Prompt)
+	in.PromptFile = strings.TrimSpace(in.PromptFile)
 	if err := validateAgentCreateInput(in); err != nil {
 		return nil, err
 	}
-	if err := s.ensureFirstClassAgentRole(ctx, in.WorkspaceKey, in.RoleName); err != nil {
+	if err := s.ensureAgentRole(ctx, in.WorkspaceKey, in.RoleName, in.Kind, in.Prompt, in.PromptFile); err != nil {
 		return nil, err
 	}
 	created, err := s.store.Agents().Create(ctx, store.AgentCreate{
@@ -383,7 +387,11 @@ func (s *agentServiceImpl) CreateAgent(ctx context.Context, in service.AgentCrea
 }
 
 func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent domain.Agent) error {
-	if isLeadAgentRole(agent.RoleName) {
+	role, err := s.loadAgentRoleForKind(ctx, agent.WorkspaceKey, agent.RoleName)
+	if err != nil {
+		return err
+	}
+	if domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive {
 		return nil
 	}
 	ws, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, agent.WorkspaceKey)
@@ -429,23 +437,80 @@ func (s *agentServiceImpl) ensureLocalAgentWorktrees(ctx context.Context, agent 
 	return nil
 }
 
-func (s *agentServiceImpl) ensureFirstClassAgentRole(ctx context.Context, workspaceKey, roleName string) error {
-	if !isLeadAgentRole(roleName) {
+func (s *agentServiceImpl) loadAgentRoleForKind(ctx context.Context, workspaceKey, roleName string) (*domain.Role, error) {
+	role, err := s.store.Roles().Get(ctx, workspaceKey, roleName)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, service.ErrInternal("load agent role", err)
+	}
+	return role, nil
+}
+
+func (s *agentServiceImpl) ensureAgentRole(ctx context.Context, workspaceKey, roleName, kind, prompt, promptFile string) error {
+	if existing, err := s.store.Roles().Get(ctx, workspaceKey, roleName); err == nil {
+		return reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return service.ErrInternal("load agent role", err)
+	}
+
+	resolved := domain.ResolveRoleKind(&domain.Role{Kind: domain.RoleKind(kind)}, roleName)
+	if kind == string(domain.RoleKindWorker) {
+		return service.ErrValidation(fmt.Sprintf("role %q must exist before creating a worker agent", roleName))
+	}
+	if resolved != domain.RoleKindInteractive {
 		return nil
 	}
-	if _, err := s.store.Roles().Get(ctx, workspaceKey, roleName); err == nil {
-		return nil
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return service.ErrInternal("load lead role", err)
+
+	description := "Interactive terminal agent"
+	if isLeadAgentRole(roleName) {
+		description = "Lead/orchestrator interactive"
 	}
 	if _, err := s.store.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: workspaceKey,
 		Name:         roleName,
-		Description:  "Lead/orchestrator terminal",
-	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		return classifyStoreError("create lead role", err)
+		Kind:         string(domain.RoleKindInteractive),
+		Description:  description,
+		Prompt:       prompt,
+		PromptFile:   promptFile,
+	}); err != nil {
+		if !errors.Is(err, domain.ErrAlreadyExists) {
+			return classifyStoreError("create agent role", err)
+		}
+		existing, getErr := s.store.Roles().Get(ctx, workspaceKey, roleName)
+		if getErr != nil {
+			return classifyStoreError("load concurrently created agent role", getErr)
+		}
+		return reconcileExistingAgentRole(existing, roleName, kind, prompt, promptFile)
 	}
 	return nil
+}
+
+// reconcileExistingAgentRole guards against silently launching an interactive
+// agent under a pre-existing role of a different kind or prompt. Agent creation
+// never mutates an existing role — so when the caller explicitly asks for an
+// interactive role (e.g. a custom-file agent whose name collides with the
+// seeded "task"/"plan" worker roles) that conflicts with the stored role, we
+// surface the conflict instead of quietly running the agent as the wrong kind.
+func reconcileExistingAgentRole(existing *domain.Role, roleName, kind, prompt, promptFile string) error {
+	if kind != string(domain.RoleKindInteractive) {
+		return nil
+	}
+	if domain.ResolveRoleKind(existing, roleName) != domain.RoleKindInteractive {
+		return service.ErrValidation(fmt.Sprintf("role %q already exists and is not interactive; choose a different agent name", roleName))
+	}
+	if p := strings.TrimSpace(prompt); p != "" && strings.TrimSpace(existing.Prompt) != p {
+		return service.ErrValidation(fmt.Sprintf("role %q already exists with a different prompt; choose a different agent name or reuse its prompt", roleName))
+	}
+	if pf := strings.TrimSpace(promptFile); pf != "" && strings.TrimSpace(existing.PromptFile) != pf {
+		return service.ErrValidation(fmt.Sprintf("role %q already exists with a different prompt; choose a different agent name or reuse its prompt", roleName))
+	}
+	return nil
+}
+
+func normalizeAgentRoleKind(kind string) string {
+	return strings.ToLower(strings.TrimSpace(kind))
 }
 
 func normalizeFirstClassAgentRole(roleName string) string {
@@ -459,12 +524,7 @@ func normalizeFirstClassAgentRole(roleName string) string {
 }
 
 func isLeadAgentRole(roleName string) bool {
-	switch strings.ToLower(strings.TrimSpace(roleName)) {
-	case "lead", "orchestrator":
-		return true
-	default:
-		return false
-	}
+	return domain.IsInteractiveRoleName(roleName)
 }
 
 // UpdateAgent applies a partial update to an existing agent.
@@ -472,7 +532,8 @@ func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, 
 	if s.store == nil {
 		return nil, service.ErrUnavailable("fleet-db store not configured")
 	}
-	if err := validateAgentName(name); err != nil {
+	name = normalizeStoredAgentName(name)
+	if err := validateStoredAgentName(name); err != nil {
 		return nil, err
 	}
 	updated, err := s.store.Agents().Update(ctx, wsKey, name, store.AgentUpdate{
@@ -499,7 +560,8 @@ func (s *agentServiceImpl) RequestAgentLifecycle(ctx context.Context, wsKey, nam
 	if s.store == nil {
 		return nil, service.ErrUnavailable("fleet-db store not configured")
 	}
-	if err := validateAgentName(name); err != nil {
+	name = normalizeStoredAgentName(name)
+	if err := validateStoredAgentName(name); err != nil {
 		return nil, err
 	}
 	if err := validateAgentCommandType(in.CommandType); err != nil {
@@ -531,7 +593,8 @@ func (s *agentServiceImpl) DeleteAgent(ctx context.Context, wsKey, name string) 
 	if s.store == nil {
 		return service.ErrUnavailable("fleet-db store not configured")
 	}
-	if err := validateAgentName(name); err != nil {
+	name = normalizeStoredAgentName(name)
+	if err := validateStoredAgentName(name); err != nil {
 		return err
 	}
 	if err := s.store.Agents().Delete(ctx, wsKey, name); err != nil {
@@ -554,13 +617,18 @@ func validateAgentCreateInput(in service.AgentCreateInput) error {
 	if in.WorkspaceKey == "" {
 		return service.ErrValidation("workspace_key required")
 	}
-	if err := validateAgentName(in.Name); err != nil {
+	if err := validateStoredAgentName(in.Name); err != nil {
 		return err
 	}
 	if in.RoleName == "" {
 		return service.ErrValidation("role_name required")
 	}
-	return nil
+	switch in.Kind {
+	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
+		return nil
+	default:
+		return service.ErrValidation("invalid role kind")
+	}
 }
 
 func (s *agentServiceImpl) SetTargetBranch(_ context.Context, wsID, agentName, branch string) error {

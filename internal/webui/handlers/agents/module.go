@@ -21,6 +21,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	if m.agentSvc == nil {
 		return
 	}
+	mux.HandleFunc("GET /api/workspaces/{ws}/interactive-prompts", HandleInteractivePrompts())
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents", HandleList(m.agentSvc))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents", HandleCreate(m.agentSvc, m.hub))
 	mux.HandleFunc("PATCH /api/workspaces/{ws}/agents/{name}", HandleUpdate(m.agentSvc, m.hub))

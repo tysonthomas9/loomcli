@@ -510,6 +510,19 @@ func publishCmd() *cobra.Command {
 				Forge: stackpublish.NewGitHubForge(token, nil, ""),
 			}
 			opts := stackpublish.Options{DryRun: dryRun}
+			// Seed PR titles/bodies from issue metadata when available; the
+			// reconciler falls back to the owned commit's subject otherwise.
+			opts.PRMetaFor = func(ctx context.Context, taskID string) (stackpublish.PRMeta, bool) {
+				d, derr := cli.DefaultIssueBackend().Get(ctx, taskID)
+				if derr != nil || d == nil {
+					return stackpublish.PRMeta{}, false
+				}
+				return stackpublish.PRMeta{
+					Title:              d.Title,
+					Summary:            d.Description,
+					AcceptanceCriteria: d.AcceptanceCriteria,
+				}, true
+			}
 			if autoRebase {
 				opts.Resolver = newResolver(headless)
 			}

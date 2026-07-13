@@ -205,15 +205,13 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 	if err := runGit(t, wtPath, "init", "-b", "feature/nova"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version:       1,
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {
-				Path:  wsRoot,
-				Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path:  wsRoot,
+			Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
@@ -244,4 +242,90 @@ func runGit(t *testing.T, dir string, args ...string) error {
 		t.Logf("git %v output: %s", args, out)
 	}
 	return err
+}
+
+// TestResolveAgentWorktreeOrPrimary_LeadFallsBackToPrimaryRepo verifies that a
+// lead agent (which has no local worktree) resolves to the workspace's primary
+// repo worktree via ResolveAgentWorktreeOrPrimary, while a non-lead agent with
+// no worktree still errors (so non-lead behavior is unchanged). ResolveAgentWorktree
+// itself keeps erroring for the lead — only the lead-aware resolver falls back.
+func TestResolveAgentWorktreeOrPrimary_LeadFallsBackToPrimaryRepo(t *testing.T) {
+	ctx := context.Background()
+	loomDir := t.TempDir()
+	wsRoot := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{
+		WorkspaceKey:  "WS1",
+		Name:          "api",
+		DefaultBranch: "main",
+		Remote:        "origin",
+	}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "lead"}); err != nil {
+		t.Fatalf("create lead role: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
+		t.Fatalf("create task role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "lead-b",
+		RoleName:     "lead",
+	}); err != nil {
+		t.Fatalf("create lead agent: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS1",
+		Name:         "nova",
+		RoleName:     "task",
+	}); err != nil {
+		t.Fatalf("create task agent: %v", err)
+	}
+
+	// Primary repo worktree exists at <wsRoot>/api, but NO agent worktrees are
+	// checked out (leads get none; nova's is also missing here).
+	primaryPath := filepath.Join(wsRoot, "api")
+	if err := runGit(t, primaryPath, "init", "-b", "main"); err != nil {
+		t.Fatalf("git init primary: %v", err)
+	}
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path:  wsRoot,
+			Repos: map[string]string{"api": primaryPath},
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("save state cache: %v", err)
+	}
+
+	g := NewGitOps().WithStore(st)
+
+	// ResolveAgentWorktree still 404s for the lead (no agent worktree on disk).
+	if _, err := g.ResolveAgentWorktree("WS1", "lead-b"); err == nil {
+		t.Fatal("ResolveAgentWorktree(lead-b): expected error, got nil")
+	}
+
+	// OrPrimary falls back to the primary repo worktree for the lead.
+	got, err := g.ResolveAgentWorktreeOrPrimary("WS1", "lead-b")
+	if err != nil {
+		t.Fatalf("ResolveAgentWorktreeOrPrimary(lead-b): %v", err)
+	}
+	if got.Path != primaryPath {
+		t.Fatalf("Path = %q, want %q", got.Path, primaryPath)
+	}
+	if got.RepoName != "api" || got.DefaultBranch != "main" || !got.IsWorkspace {
+		t.Fatalf("unexpected primary worktree: %+v", got)
+	}
+
+	// Non-lead agent with no worktree: OrPrimary still errors (no fallback).
+	if _, err := g.ResolveAgentWorktreeOrPrimary("WS1", "nova"); err == nil {
+		t.Fatal("ResolveAgentWorktreeOrPrimary(nova): expected error for non-lead, got nil")
+	}
 }

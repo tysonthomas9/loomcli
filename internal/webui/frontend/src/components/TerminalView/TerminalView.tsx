@@ -13,6 +13,11 @@ import {
   type CliSetupInstructions,
   type CliSetupRequest,
 } from "@/utils/cliSetup";
+import {
+  publishTerminalSidebarState,
+  TERMINAL_SIDEBAR_NEW_TAB_EVENT,
+  TERMINAL_SIDEBAR_SELECT_EVENT,
+} from "@/utils/terminalSidebarBridge";
 
 import { NoBackendsEmptyState, useTabEditorGroups } from "./layout";
 import groupStyles from "./layout/TerminalGroupLayout.module.css";
@@ -647,6 +652,49 @@ export function TerminalView({
       announce,
     ],
   );
+
+  useEffect(() => {
+    if (hideTabs) return;
+    if (!isActive) {
+      publishTerminalSidebarState({ tabs: [], activeTabId: "" });
+      return;
+    }
+    publishTerminalSidebarState({
+      tabs: visibleTabs.map((tab) => ({
+        id: tab.id,
+        label: tab.label,
+        backendName: tab.backendName,
+        connectionState: tab.connectionState,
+        ...(tab.pinned !== undefined ? { pinned: tab.pinned } : {}),
+      })),
+      activeTabId,
+    });
+  }, [hideTabs, isActive, visibleTabs, activeTabId]);
+
+  useEffect(() => {
+    if (hideTabs || !isActive) return;
+
+    const onSelect = (event: Event) => {
+      const tabId = (event as CustomEvent<{ tabId: string }>).detail?.tabId;
+      if (tabId) handleTabChange(tabId);
+    };
+    const onNewTab = () => {
+      handleBackendSelect(selectableBackends[0] ?? "shell");
+    };
+
+    window.addEventListener(TERMINAL_SIDEBAR_SELECT_EVENT, onSelect);
+    window.addEventListener(TERMINAL_SIDEBAR_NEW_TAB_EVENT, onNewTab);
+    return () => {
+      window.removeEventListener(TERMINAL_SIDEBAR_SELECT_EVENT, onSelect);
+      window.removeEventListener(TERMINAL_SIDEBAR_NEW_TAB_EVENT, onNewTab);
+    };
+  }, [
+    hideTabs,
+    isActive,
+    handleTabChange,
+    handleBackendSelect,
+    selectableBackends,
+  ]);
 
   const setInstanceRef = useCallback(
     (tabId: string) => (handle: TerminalInstanceHandle | null) => {

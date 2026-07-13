@@ -53,40 +53,50 @@
  * Relocated here from the top bar to match the Aether design.
  * =========================== */
 .boardToolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr calc(100vw / 3) 1fr;
+  grid-template-areas: "tabs search actions";
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   min-height: 48px;
   padding: 6px 16px;
   background-color: var(--color-chrome); /* Aether #1a1a1a board-header strip */
   border-bottom: 1px solid var(--color-border);
-  flex-wrap: wrap;
 }
 
-.boardToolbarControls {
+.boardToolbarTabs {
+  grid-area: tabs;
+  justify-self: start;
+  min-width: 0;
+}
+
+.boardToolbarSearch {
+  grid-area: search;
+  justify-self: stretch;
+  min-width: 0;
+  width: 100%;
+}
+
+.boardToolbarActions {
+  grid-area: actions;
   display: flex;
   align-items: center;
   gap: 12px;
+  justify-self: end;
   min-width: 0;
-  flex: 1 1 auto;
-  justify-content: flex-end;
 }
 
 @media (width <= 768px) {
-  .boardToolbarControls {
-    flex-basis: 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-}
-
-/* Desktop: keep the toolbar a single 48px strip — let the search/filters
-   compress instead of wrapping to a 90px double row at 1280–1432px. (Mobile
-   above keeps wrapping so controls can drop to their own full-width row.) */
-@media (width >= 769px) {
   .boardToolbar {
-    flex-wrap: nowrap;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "tabs actions"
+      "search search";
+  }
+
+  .boardToolbarSearch {
+    justify-self: center;
+    width: calc(100vw / 3);
   }
 }
 
@@ -100,7 +110,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: min(280px, 24vw);
+  width: 100%;
   flex-shrink: 1;
   min-width: 0;
 }
@@ -206,19 +216,11 @@
   .headerControls {
     gap: var(--space-3);
   }
-
-  .searchWrapper {
-    width: min(380px, 44vw);
-  }
 }
 
 @media (width <= 768px) {
   .headerControls {
     gap: var(--space-2);
-  }
-
-  .searchWrapper {
-    width: min(280px, 56vw);
   }
 }
 
@@ -226,11 +228,6 @@
   .headerControls {
     width: 100%;
     gap: var(--space-2);
-  }
-
-  .searchWrapper {
-    flex: 1 1 auto;
-    width: auto;
   }
 
   .filtersWrapper {

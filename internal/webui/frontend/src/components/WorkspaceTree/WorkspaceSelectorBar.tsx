@@ -6,7 +6,9 @@
 import { useState, useCallback } from "react";
 
 import type { WorkspaceSummary } from "@/api/workspace";
+import { CompactRailHost } from "@/components/CompactRail";
 import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { shouldUseWhiteText } from "@/utils/colorUtils";
 import { getWorkspaceColor } from "@/utils/workspace";
 
@@ -25,11 +27,6 @@ export interface WorkspaceSelectorBarProps {
   onWorkspaceSwitch: (workspaceName: string) => void;
   /** Called when "+ New Workspace" is clicked in the switcher */
   onAddWorkspace?: (() => void) | undefined;
-}
-
-function workspaceInitial(name: string): string {
-  const trimmed = name.trim();
-  return trimmed ? trimmed[0]!.toUpperCase() : "?";
 }
 
 export function WorkspaceSelectorBar({
@@ -62,18 +59,19 @@ export function WorkspaceSelectorBar({
   );
 
   const workspaceColor = getWorkspaceColor(workspaceName);
-  const initial = workspaceInitial(workspaceName);
+  const initial = getCompactAvatarInitials(workspaceName);
 
   return (
     <>
       {variant === "collapsed" ? (
-        <button
+        <CompactRailHost
+          as="button"
           type="button"
+          label={workspaceName}
           className={styles.collapsedWorkspaceDot}
           onClick={handleOpen}
           aria-haspopup="dialog"
           aria-expanded={isSwitcherOpen}
-          title={workspaceName}
           aria-label={`Active workspace: ${workspaceName}. Click to switch.`}
         >
           <span
@@ -85,7 +83,7 @@ export function WorkspaceSelectorBar({
           >
             {initial}
           </span>
-        </button>
+        </CompactRailHost>
       ) : (
         <button
           type="button"

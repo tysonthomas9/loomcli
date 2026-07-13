@@ -141,8 +141,9 @@
   aspect-ratio: 1;
   border-radius: 50%;
   border: 1.6px solid rgb(0 0 0 / 18%);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 1;
   box-sizing: border-box;
   transition:
@@ -224,9 +225,7 @@
 
 /* Hover-only: showing on :focus-visible left the tooltip stuck open after a
    nav click. Keyboard users still get aria-label on the button. */
-.navButton:hover .tooltip,
-.wsAvatar:hover .tooltip,
-.wsAdd:hover .tooltip {
+.navButton:hover .tooltip {
   opacity: 1;
 }
 

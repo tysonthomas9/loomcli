@@ -212,6 +212,21 @@ func runGit(dir string, args ...string) (string, error) {
 	return string(out), nil
 }
 
+// GitRemoteURL returns the configured URL of the named remote (default "origin")
+// for the git checkout at dir. It returns an error when dir is not a git work
+// tree or the remote is unset — callers treat that as the "not a usable
+// checkout" signal (e.g. workspace local-path self-heal verification).
+func GitRemoteURL(dir, remote string) (string, error) {
+	if strings.TrimSpace(remote) == "" {
+		remote = "origin"
+	}
+	out, err := runGit(dir, "remote", "get-url", remote)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 func branchAlreadyExists(out string, err error) bool {
 	msg := out
 	if err != nil {

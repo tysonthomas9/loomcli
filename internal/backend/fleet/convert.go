@@ -30,6 +30,7 @@ type fleetIssueWire struct {
 	Notes       string     `json:"notes,omitempty"`
 	Description string     `json:"description,omitempty"`
 	Acceptance  string     `json:"acceptance_criteria,omitempty"`
+	ExternalRef string     `json:"external_ref,omitempty"`
 	CreatedAt   time.Time  `json:"created_at,omitempty"`
 	CreatedBy   string     `json:"created_by,omitempty"`
 	UpdatedAt   time.Time  `json:"updated_at,omitempty"`
@@ -55,6 +56,7 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		Labels:             w.Labels,
 		SourceRepo:         w.sourceRepo(),
 		Design:             w.Design,
+		ExternalRef:        strOrNil(w.ExternalRef),
 		CreatedAt:          w.CreatedAt,
 		CreatedBy:          w.CreatedBy,
 		UpdatedAt:          w.UpdatedAt,
@@ -63,6 +65,23 @@ func (w fleetIssueWire) toIssue() types.Issue {
 		ClosedAt:           w.ClosedAt,
 		CloseReason:        w.CloseReason,
 	}
+}
+
+// strOrNil maps a fleet-db wire string to the optional *string the canonical
+// types.Issue uses (empty -> nil). derefStr is its inverse for the slim
+// backend.IssueData projection (nil -> "").
+func strOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (w fleetIssueWire) parent() string {
@@ -173,6 +192,7 @@ func issueToData(issue *types.Issue) backend.IssueData {
 		SourceRepo:  issue.SourceRepo,
 		Design:      issue.Design,
 		Notes:       issue.Notes,
+		ExternalRef: derefStr(issue.ExternalRef),
 		CreatedAt:   issue.CreatedAt,
 		UpdatedAt:   issue.UpdatedAt,
 		DueAt:       issue.DueAt,
@@ -225,9 +245,7 @@ func detailsToDetailData(details *types.IssueDetails) backend.IssueDetailData {
 	d.ClosedBySession = details.ClosedBySession
 
 	// External integration.
-	if details.ExternalRef != nil {
-		d.ExternalRef = *details.ExternalRef
-	}
+	d.ExternalRef = derefStr(details.ExternalRef)
 	d.EstimatedMinutes = details.EstimatedMinutes
 
 	// Parent.

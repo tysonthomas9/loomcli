@@ -16,7 +16,8 @@
  *   agent. A legacy ?agent=<name> query param is honored as a redirect.
  * - Task: local state (selectedTask). When set, the right column hides the
  *   work panel and renders the IssueDetailPanel inline. Closing the panel
- *   restores the work panel. Switching agent clears the task selection.
+ *   restores the work panel. Per-agent task selection is restored from
+ *   scoped localStorage when switching back to an agent.
  */
 
 import {
@@ -34,6 +35,7 @@ import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
 import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
+import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
 import {
   isLiveAgentRailVisible,
   orderAgentsForEpicRunner,
@@ -45,14 +47,22 @@ import {
   startWorkflowRun,
   type WorkflowRun,
 } from "@/api";
-import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
+import {
+  useWorkspaceViewActions,
+  useWorkspaceViewData,
+} from "@/contexts/WorkspaceViewContext";
 import { useAgentStoreInstance } from "@/hooks";
 import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
-import { useOpenQueuePanelWidth } from "@/hooks/ui/useOpenQueuePanelWidth";
+import {
+  OPEN_QUEUE_PANEL_MAX_WIDTH,
+  OPEN_QUEUE_PANEL_MIN_WIDTH,
+  useOpenQueuePanelWidth,
+} from "@/hooks/ui/useOpenQueuePanelWidth";
 import { useToast } from "@/hooks/ui/useToast";
 import { useWorkflowRunStreams } from "@/hooks/workflows/useWorkflowRunStreams";
 import { parseLoomStatus } from "@/types";
 import type { Issue } from "@/types";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import {
   epicRunnerRuntimePayload,
@@ -60,6 +70,11 @@ import {
 } from "@/utils/epicRunnerPayload";
 import { formatStatusLabel } from "@/utils/issue";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
+
+import {
+  loadAgentWorkPanelView,
+  saveAgentWorkPanelView,
+} from "@/utils/agentWorkPanelStorage";
 
 import { AgentEditorGroups, type AgentEditorTab } from "./AgentEditorGroups";
 import styles from "./AgentsPage.module.css";
@@ -93,7 +108,16 @@ function AgentsPageInner(): JSX.Element {
   const [searchParams] = useSearchParams();
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
-  const { issues } = useWorkspaceViewData();
+  const { issues, issueDetails, isLoadingDetails, detailError } =
+    useWorkspaceViewData();
+  const {
+    fetchIssue,
+    clearIssue,
+    updateIssueDetails,
+    handleApprove,
+    handleReject,
+    handleCopyLink,
+  } = useWorkspaceViewActions();
   const { repos } = useWorkspaceContext();
   const { settings: localSettings } = useLocalSettings();
   const { showToast } = useToast();
@@ -125,8 +149,7 @@ function AgentsPageInner(): JSX.Element {
     [agents, agentName],
   );
 
-  // Inline task-detail selection. Cleared when the user switches agents so
-  // the right column starts fresh on every agent change.
+  // Inline task-detail selection, restored per agent from scoped storage.
   const [selectedTask, setSelectedTask] = useState<Issue | null>(null);
   const [pendingTerminalInput, setPendingTerminalInput] = useState<
     TerminalInputRequest | undefined
@@ -134,9 +157,35 @@ function AgentsPageInner(): JSX.Element {
   const [epicRunnerRuns, setEpicRunnerRuns] = useState<
     Record<string, WorkflowRun>
   >({});
+
+  const persistSelectedTaskId = useCallback(
+    (taskId: string | null) => {
+      if (!agentName) return;
+      saveAgentWorkPanelView(workspaceId, agentName, {
+        selectedTaskId: taskId,
+      });
+    },
+    [agentName, workspaceId],
+  );
+
   useEffect(() => {
-    setSelectedTask(null);
-  }, [agentName]);
+    clearIssue();
+    if (!agentName) {
+      setSelectedTask(null);
+      return;
+    }
+    const { selectedTaskId } = loadAgentWorkPanelView(workspaceId, agentName);
+    if (!selectedTaskId) {
+      setSelectedTask(null);
+      return;
+    }
+    const match = issues.find((issue) => issue.id === selectedTaskId);
+    setSelectedTask(match ?? null);
+  }, [agentName, workspaceId, issues, clearIssue]);
+  useEffect(() => {
+    if (!selectedTask) return;
+    void fetchIssue(selectedTask.id);
+  }, [selectedTask, fetchIssue]);
   useEffect(() => {
     setEpicRunnerRuns({});
   }, [workspaceId]);
@@ -250,6 +299,34 @@ function AgentsPageInner(): JSX.Element {
     [navigate, workspaceId],
   );
 
+  const handleCloseInlineDetail = useCallback(() => {
+    setSelectedTask(null);
+    clearIssue();
+    persistSelectedTaskId(null);
+  }, [clearIssue, persistSelectedTaskId]);
+
+  const handleInlineTaskNavigate = useCallback(
+    (issue: Issue) => {
+      setSelectedTask(issue);
+      persistSelectedTaskId(issue.id);
+    },
+    [persistSelectedTaskId],
+  );
+
+  const handleTaskClick = useCallback(
+    (task: Issue) => {
+      setSelectedTask(task);
+      persistSelectedTaskId(task.id);
+    },
+    [persistSelectedTaskId],
+  );
+
+  const inlinePanelIssue = useMemo(() => {
+    if (!selectedTask) return null;
+    if (issueDetails?.id === selectedTask.id) return issueDetails;
+    return selectedTask;
+  }, [selectedTask, issueDetails]);
+
   // Workspace-wide counts for the Info tab stat cards.
   const counts = useMemo(() => {
     let done = 0;
@@ -321,7 +398,7 @@ function AgentsPageInner(): JSX.Element {
                     className={styles.infoAvatar}
                     style={{ backgroundColor: selColor, color: selText }}
                   >
-                    {selected.name.charAt(0).toUpperCase()}
+                    {getCompactAvatarInitials(selected.name)}
                   </span>
                   <div>
                     <h1 className={styles.agentName}>{selected.name}</h1>
@@ -431,6 +508,8 @@ function AgentsPageInner(): JSX.Element {
               >
                 <FileEditorPanel
                   agentName={selected.name}
+                  agentRole={selected.role}
+                  agentRepo={selected.repo}
                   isActive={isActive}
                 />
               </Suspense>
@@ -462,12 +541,28 @@ function AgentsPageInner(): JSX.Element {
       {/* Right column: epic-runner Open Queue or inline task detail */}
       {selectedTask ? (
         <div className={styles.inlineDetail} style={{ width: openQueueWidth }}>
-          <IssueDetailPanel
-            inline
-            isOpen={true}
-            issue={selectedTask}
-            onClose={() => setSelectedTask(null)}
+          <PanelWidthResizeHandle
+            width={openQueueWidth}
+            onDelta={applyOpenQueueWidthDelta}
+            onReset={resetOpenQueueWidth}
+            minWidth={OPEN_QUEUE_PANEL_MIN_WIDTH}
+            maxWidth={OPEN_QUEUE_PANEL_MAX_WIDTH}
           />
+          <div className={styles.inlineDetailContent}>
+            <IssueDetailPanel
+              inline
+              isOpen={true}
+              issue={inlinePanelIssue}
+              isLoading={isLoadingDetails}
+              error={detailError}
+              onClose={handleCloseInlineDetail}
+              onApprove={handleApprove}
+              onReject={handleReject}
+              onIssueUpdate={updateIssueDetails}
+              onCopyLink={handleCopyLink}
+              onNavigateToIssue={handleInlineTaskNavigate}
+            />
+          </div>
         </div>
       ) : (
         <AgentWorkPanel
@@ -476,7 +571,7 @@ function AgentsPageInner(): JSX.Element {
           onPanelWidthDelta={applyOpenQueueWidthDelta}
           onPanelWidthReset={resetOpenQueueWidth}
           epicRunnerRuns={epicRunnerRuns}
-          onTaskClick={(task) => setSelectedTask(task)}
+          onTaskClick={handleTaskClick}
           onRunEpic={handleRunEpic}
           onAgentClick={handleAgentClick}
         />

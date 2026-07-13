@@ -65,7 +65,8 @@ func TestGenerateTaskPrompt(t *testing.T) {
 				"--assignee ember", // Reclaiming stale tasks still sets assignee.
 				"Implementation Task",
 				"--design",
-				"loom push \"ember\"",
+				"loom stack publish <stack-id>",
+				"git branch -f <output-branch> HEAD",
 				"loom plan",
 			},
 		},
@@ -635,6 +636,110 @@ func TestGenerateConflictResolutionPrompt_DelegatesToInternal(t *testing.T) {
 	}
 }
 
+func TestGenerateTerminalPromptUsesBuiltInLeadWhenPromptFileEmpty(t *testing.T) {
+	prompt, err := GenerateTerminalPrompt("")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt empty: %v", err)
+	}
+	if prompt != GenerateLeadPrompt() {
+		t.Fatal("GenerateTerminalPrompt empty did not preserve built-in lead prompt")
+	}
+}
+
+func TestGenerateTerminalPromptBuiltinPRReview(t *testing.T) {
+	t.Setenv("LOOM_AGENT_NAME", "review-nova")
+	t.Setenv("LOOM_AGENT_ROLE", "pr-review")
+
+	prompt, err := GenerateTerminalPrompt("builtin:pr-review")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt builtin pr-review: %v", err)
+	}
+	for _, want := range []string{
+		"PR-REVIEW-READY",
+		"You are review-nova (role pr-review)",
+		"gh pr diff",
+		"ASK before posting",
+		"Multi-Agent Safety Rules",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("builtin pr-review prompt missing %q", want)
+		}
+	}
+	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+		t.Fatalf("safety block count = %d, want 1", got)
+	}
+}
+
+func TestGenerateTerminalPromptBuiltinLeadMatchesLeadPrompt(t *testing.T) {
+	prompt, err := GenerateTerminalPrompt("builtin:lead")
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt builtin lead: %v", err)
+	}
+	if prompt != GenerateLeadPrompt() {
+		t.Fatal("builtin:lead did not render the built-in lead prompt")
+	}
+	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+		t.Fatalf("safety block count = %d, want 1", got)
+	}
+}
+
+func TestGenerateTerminalPromptBuiltinUnknownErrors(t *testing.T) {
+	_, err := GenerateTerminalPrompt("builtin:nope")
+	if err == nil {
+		t.Fatal("GenerateTerminalPrompt builtin:nope error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), `unknown built-in interactive prompt "nope"`) {
+		t.Fatalf("error = %q, want unknown built-in prompt", err.Error())
+	}
+}
+
+func TestGenerateTerminalPromptCustomReplacesBaseAndAppendsSafety(t *testing.T) {
+	t.Setenv("LOOM_AGENT_NAME", "nova")
+	t.Setenv("LOOM_AGENT_ROLE", "operator")
+	promptFile := filepath.Join(t.TempDir(), "terminal.md")
+	if err := os.WriteFile(promptFile, []byte("Custom terminal for {{.AgentName}}/{{.WorktreeName}} as {{.Role}}"), 0644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	prompt, err := GenerateTerminalPrompt(promptFile)
+	if err != nil {
+		t.Fatalf("GenerateTerminalPrompt custom: %v", err)
+	}
+	if !strings.HasPrefix(prompt, "Custom terminal for nova/nova as operator") {
+		t.Fatalf("prompt = %q, want custom prompt as base", prompt)
+	}
+	if strings.Contains(prompt, "Lead Mode") {
+		t.Fatalf("prompt contains built-in lead template, want custom prompt replacement")
+	}
+	if !strings.Contains(prompt, "Multi-Agent Safety Rules") {
+		t.Fatalf("prompt missing appended safety guardrails")
+	}
+}
+
+func TestGenerateTerminalPromptTextPreservesLiteralTextAndAppendsSafetyOnce(t *testing.T) {
+	text := "Literal {{ .AgentName }} marker"
+	prompt, err := GenerateTerminalPromptText(text)
+	if err != nil {
+		t.Fatalf("GenerateTerminalPromptText: %v", err)
+	}
+	if !strings.HasPrefix(prompt, text) {
+		t.Fatalf("prompt = %q, want literal prefix %q", prompt, text)
+	}
+	if got := strings.Count(prompt, "Multi-Agent Safety Rules"); got != 1 {
+		t.Fatalf("safety block count = %d, want 1", got)
+	}
+}
+
+func TestGenerateTerminalPromptMissingFileErrors(t *testing.T) {
+	_, err := GenerateTerminalPrompt(filepath.Join(t.TempDir(), "missing.md"))
+	if err == nil {
+		t.Fatal("GenerateTerminalPrompt missing file error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "reading prompt template") && !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("error = %q, want clear prompt file error", err.Error())
+	}
+}
+
 func TestGenerateFleetPlanningPrompt(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -707,7 +812,8 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				"loom data show loomcli-kv6.4 --output json",
 				"already claimed",
 				"JSON `design`",
-				"git push origin HEAD",
+				"loom stack publish <stack-id>",
+				"git branch -f <output-branch> HEAD",
 			},
 		},
 		{
@@ -733,6 +839,41 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTaskPromptsRequireStackedPRDelivery(t *testing.T) {
+	prompts := map[string]string{
+		"task":       GenerateTaskPrompt("test", nil, "", "claude"),
+		"fleet_task": GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude"),
+	}
+
+	wantParts := []string{
+		"Publish through Loom stacked PR delivery (MANDATORY)",
+		"loom stack init <stack-id>",
+		"loom stack add <task-id>",
+		"loom stack publish <stack-id>",
+		"git branch -f <output-branch> HEAD",
+		"Do not use direct integration or direct branch pushes as the completion path.",
+	}
+	notWantParts := []string{
+		"loom push \"test\"",
+		"git push origin HEAD",
+		"Stage and commit: git add -A",
+		"git add -A && git commit",
+	}
+
+	for name, prompt := range prompts {
+		for _, part := range wantParts {
+			if !strings.Contains(prompt, part) {
+				t.Errorf("%s prompt missing expected stacked PR instruction: %q", name, part)
+			}
+		}
+		for _, part := range notWantParts {
+			if strings.Contains(prompt, part) {
+				t.Errorf("%s prompt should not contain direct publish instruction: %q", name, part)
+			}
+		}
 	}
 }
 
@@ -1190,6 +1331,83 @@ func TestResolveActiveWorkspace_NoConfig(t *testing.T) {
 	}
 	if ws != nil {
 		t.Errorf("expected nil workspace when config dir is empty, got: %+v", ws)
+	}
+}
+
+func TestResolveDesignFormat(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace *WorkspaceConfig
+		want      string
+	}{
+		{name: "nil workspace", workspace: nil, want: "markdown"},
+		{name: "empty design format", workspace: &WorkspaceConfig{}, want: "markdown"},
+		{name: "explicit markdown", workspace: &WorkspaceConfig{DesignFormat: "markdown"}, want: "markdown"},
+		{name: "html", workspace: &WorkspaceConfig{DesignFormat: "html"}, want: "html"},
+		{name: "garbage value falls back to markdown", workspace: &WorkspaceConfig{DesignFormat: "yaml"}, want: "markdown"},
+		{name: "case-sensitive: HTML is not html", workspace: &WorkspaceConfig{DesignFormat: "HTML"}, want: "markdown"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveDesignFormat(tc.workspace); got != tc.want {
+				t.Errorf("resolveDesignFormat() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+const designFormatHTMLGuidance = "Design format: HTML"
+
+func TestGeneratePlanningPrompt_DesignFormat(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace *WorkspaceConfig
+		wantHTML  bool
+	}{
+		{name: "nil workspace", workspace: nil, wantHTML: false},
+		{name: "empty design format", workspace: &WorkspaceConfig{}, wantHTML: false},
+		{name: "markdown", workspace: &WorkspaceConfig{DesignFormat: "markdown"}, wantHTML: false},
+		{name: "garbage value", workspace: &WorkspaceConfig{DesignFormat: "garbage"}, wantHTML: false},
+		{name: "html", workspace: &WorkspaceConfig{DesignFormat: "html"}, wantHTML: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := GeneratePlanningPrompt("falcon", tc.workspace, "")
+			gotHTML := strings.Contains(prompt, designFormatHTMLGuidance)
+			if gotHTML != tc.wantHTML {
+				t.Errorf("planning prompt contains %q = %v, want %v", designFormatHTMLGuidance, gotHTML, tc.wantHTML)
+			}
+			// The standard plan-content instruction must remain regardless of format.
+			if !strings.Contains(prompt, "Write a comprehensive plan that includes:") {
+				t.Error("planning prompt missing comprehensive plan instruction")
+			}
+		})
+	}
+}
+
+func TestGenerateFleetPlanningPrompt_DesignFormat(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace *WorkspaceConfig
+		wantHTML  bool
+	}{
+		{name: "nil workspace", workspace: nil, wantHTML: false},
+		{name: "empty design format", workspace: &WorkspaceConfig{}, wantHTML: false},
+		{name: "markdown", workspace: &WorkspaceConfig{DesignFormat: "markdown"}, wantHTML: false},
+		{name: "garbage value", workspace: &WorkspaceConfig{DesignFormat: "garbage"}, wantHTML: false},
+		{name: "html", workspace: &WorkspaceConfig{DesignFormat: "html"}, wantHTML: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prompt := GenerateFleetPlanningPrompt("falcon", "loom-test.1", tc.workspace)
+			gotHTML := strings.Contains(prompt, designFormatHTMLGuidance)
+			if gotHTML != tc.wantHTML {
+				t.Errorf("fleet planning prompt contains %q = %v, want %v", designFormatHTMLGuidance, gotHTML, tc.wantHTML)
+			}
+			if !strings.Contains(prompt, "Write a comprehensive plan that includes:") {
+				t.Error("fleet planning prompt missing comprehensive plan instruction")
+			}
+		})
 	}
 }
 

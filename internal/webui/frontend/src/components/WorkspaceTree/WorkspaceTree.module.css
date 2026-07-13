@@ -109,6 +109,24 @@
   flex-shrink: 0;
 }
 
+.collapsedBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.collapsedSectionDivider {
+  width: 28px;
+  height: 1px;
+  margin: 6px 0 4px;
+  background: var(--color-border-light);
+  flex-shrink: 0;
+}
+
 .expandButton {
   display: flex;
   align-items: center;

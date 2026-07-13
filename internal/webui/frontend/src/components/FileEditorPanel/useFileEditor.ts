@@ -38,11 +38,22 @@ function getLanguageFromPath(path: string): string | undefined {
   }
 }
 
+export interface UseFileEditorOptions {
+  /** Browse workspace primary repo (lead agents). Disables saving. */
+  useWorkspaceTree?: boolean;
+  /** Primary repo label for UI hints. */
+  workspaceRepoLabel?: string | null;
+}
+
 export interface UseFileEditorReturn {
   /** File tree state (passthrough from useFileTree) */
   tree: UseFileTreeReturn;
   /** File content state (passthrough from useFileContent) */
   fileContent: UseFileContentReturn;
+  /** Whether the panel is browsing the workspace primary repo */
+  isWorkspaceTree: boolean;
+  /** Primary repo name when browsing workspace tree */
+  workspaceRepoLabel: string | null;
   /** Current editor buffer */
   content: string;
   /** Language derived from file extension */
@@ -68,9 +79,12 @@ export interface UseFileEditorReturn {
 export function useFileEditor(
   agentName: string,
   isActive: boolean,
+  options?: UseFileEditorOptions,
 ): UseFileEditorReturn {
+  const useWorkspaceTree = options?.useWorkspaceTree ?? false;
+  const workspaceRepoLabel = options?.workspaceRepoLabel ?? null;
   const { workspaceId } = useWorkspaceContext();
-  const tree = useFileTree(agentName);
+  const tree = useFileTree(agentName, { useWorkspaceTree });
   const fileContent = useFileContent(agentName);
   const { showToast } = useToast();
 
@@ -136,6 +150,12 @@ export function useFileEditor(
   }, []);
 
   const save = useCallback(async () => {
+    if (useWorkspaceTree) {
+      showToast("Workspace repository files are read-only for lead agents", {
+        type: "info",
+      });
+      return;
+    }
     if (!tree.selectedPath || !isDirty || isSaving) return;
 
     setIsSaving(true);
@@ -163,6 +183,7 @@ export function useFileEditor(
       }
     }
   }, [
+    useWorkspaceTree,
     workspaceId,
     agentName,
     tree.selectedPath,
@@ -208,6 +229,8 @@ export function useFileEditor(
   return {
     tree,
     fileContent,
+    isWorkspaceTree: useWorkspaceTree,
+    workspaceRepoLabel,
     content,
     language,
     isDirty,

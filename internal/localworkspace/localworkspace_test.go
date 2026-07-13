@@ -92,6 +92,34 @@ func TestEnsureGitWorktreeFromBranchFallsBackToLocalDefaultBranch(t *testing.T) 
 	}
 }
 
+func TestGitRemoteURL(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	const url = "https://github.com/owner/repo.git"
+	dir := t.TempDir()
+	git(t, "", "init", dir)
+	git(t, dir, "remote", "add", "origin", url)
+
+	got, err := GitRemoteURL(dir, "origin")
+	if err != nil {
+		t.Fatalf("GitRemoteURL: %v", err)
+	}
+	if got != url {
+		t.Errorf("GitRemoteURL = %q, want %q", got, url)
+	}
+
+	// Empty remote name defaults to origin.
+	if got, err := GitRemoteURL(dir, ""); err != nil || got != url {
+		t.Errorf("GitRemoteURL(\"\") = %q, %v; want %q", got, err, url)
+	}
+
+	// A non-git directory is reported as an error (the "not a usable checkout" signal).
+	if _, err := GitRemoteURL(t.TempDir(), "origin"); err == nil {
+		t.Error("GitRemoteURL on a non-git dir should return an error")
+	}
+}
+
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...) //nolint:norawexec,gosec // fixed test helper commands.

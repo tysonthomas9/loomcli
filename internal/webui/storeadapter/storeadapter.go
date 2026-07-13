@@ -175,6 +175,7 @@ func loadAgents(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspa
 	for _, a := range agents {
 		out = append(out, ops.WorkspaceAgentInfo{
 			Name:       a.Name,
+			RoleName:   a.RoleName,
 			Repos:      a.Repos,
 			RepoGroups: a.RepoGroups,
 			CrossRepo:  a.CrossRepo,

@@ -25,6 +25,13 @@
   flex-shrink: 0;
 }
 
+.workspaceTreeHint {
+  margin: 0 0 6px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  line-height: 1.3;
+}
+
 .filterInput {
   width: 100%;
   padding: 6px 8px;

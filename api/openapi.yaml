@@ -2208,6 +2208,33 @@ paths:
           description: Invalid or expired token
 
   # ── Agent Control ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/interactive-prompts:
+    get:
+      operationId: listInteractivePrompts
+      tags: [agent-control]
+      summary: List built-in interactive terminal prompt options
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Built-in interactive prompts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prompts]
+                properties:
+                  prompts:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, label]
+                      properties:
+                        id:
+                          type: string
+                        label:
+                          type: string
+
   /api/workspaces/{ws}/agents:
     get:
       operationId: listAgents
@@ -2232,6 +2259,70 @@ paths:
                       $ref: "#/components/schemas/AgentControlEntry"
         "503":
           description: Daemon unavailable
+    post:
+      operationId: createAgent
+      tags: [agent-control]
+      summary: Create an agent assignment
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, role_name]
+              properties:
+                workspace_key:
+                  type: string
+                name:
+                  type: string
+                role_name:
+                  type: string
+                kind:
+                  type: string
+                  description: Optional role kind for creating an interactive role.
+                prompt:
+                  type: string
+                  description: Literal inline prompt text for interactive roles.
+                prompt_file:
+                  type: string
+                  description: Custom or builtin prompt selector for interactive roles.
+                auto:
+                  type: boolean
+                backend:
+                  type: string
+                fallback_backends:
+                  type: array
+                  items:
+                    type: string
+                repos:
+                  type: array
+                  items:
+                    type: string
+                repo_groups:
+                  type: array
+                  items:
+                    type: string
+                cross_repo:
+                  type: boolean
+                parent:
+                  type: string
+                desired_state:
+                  type: string
+      responses:
+        "201":
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAgentInfo"
+        "400":
+          description: Invalid agent create request
+        "409":
+          description: Agent already exists
+        "503":
+          description: Agent service unavailable
 
   /api/workspaces/{ws}/agents/{name}/stop:
     post:
@@ -4653,6 +4744,9 @@ components:
           type: integer
         role:
           type: string
+        role_kind:
+          type: string
+          enum: [interactive, worker]
         repo:
           type: string
         workspace:

@@ -1,37 +1,57 @@
 /**
- * AgentSection displays a flat list of agents in the sidebar.
- * Merges fleet (live) agents with workspace config (placeholder) agents.
+ * AgentSection displays agents in the sidebar, split into regular (interactive
+ * lead) agents and background (daemon-supervised plan/task) workers.
  */
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
-import { AgentCard } from "@/components/AgentCard";
 import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
 import type { LoomAgentStatus } from "@/types";
+import {
+  SK_AGENT_SECTION_ORDER,
+  applyAgentSectionOrder,
+  mergeAgentSectionOrder,
+  parseStoredAgentSectionOrder,
+} from "@/utils/agentSectionOrder";
+import {
+  orderAgentsForEpicRunner,
+  splitAgentsByRuntime,
+} from "@/utils/agentRole";
+import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
+import { SortableAgentList } from "./SortableAgentList";
 
 export interface AgentSectionProps {
   onAgentClick?: ((agentName: string) => void) | undefined;
+  selectedAgentName?: string | null | undefined;
   agentTasks?: Record<string, { title: string }> | undefined;
   onAddClick?: (() => void) | undefined;
 }
 
 export function AgentSection({
   onAgentClick,
+  selectedAgentName = null,
   agentTasks,
   onAddClick,
 }: AgentSectionProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const fleetAgents = useStore(agentStore, (s) => s.agents);
-  const { agents: workspaceConfigAgents, workspace } = useWorkspaceContext();
+  const {
+    agents: workspaceConfigAgents,
+    workspace,
+    workspaceId,
+  } = useWorkspaceContext();
+  const [agentOrder, setAgentOrder] = useState<string[]>([]);
 
   // Merge fleet agents with workspace config agents.
   // Config agents that aren't yet running appear as "configured" placeholders.
   const agents = useMemo<LoomAgentStatus[]>(() => {
-    if (workspaceConfigAgents.length === 0) return fleetAgents;
-    const fleetNames = new Set(fleetAgents.map((a) => a.name));
+    const orderedFleetAgents = orderAgentsForEpicRunner(fleetAgents);
+    if (workspaceConfigAgents.length === 0) return orderedFleetAgents;
+
+    const fleetNames = new Set(orderedFleetAgents.map((a) => a.name));
     const configPlaceholders: LoomAgentStatus[] = workspaceConfigAgents
       .filter((ca) => !fleetNames.has(ca.name))
       .map((ca) => {
@@ -45,10 +65,47 @@ export function AgentSection({
           cross_repo: ca.cross_repo,
         };
         if (ca.repos?.[0]) entry.repo = ca.repos[0];
+        if (ca.role_name) entry.role = ca.role_name;
         return entry;
       });
-    return [...fleetAgents, ...configPlaceholders];
+    return [...orderedFleetAgents, ...configPlaceholders];
   }, [fleetAgents, workspaceConfigAgents, workspace?.name]);
+
+  const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents]);
+  const agentNamesKey = agentNames.join("\0");
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setAgentOrder(agentNames);
+      return;
+    }
+
+    const stored = parseStoredAgentSectionOrder(
+      wsGet(workspaceId, SK_AGENT_SECTION_ORDER),
+    );
+    setAgentOrder(mergeAgentSectionOrder(agentNames, stored));
+  }, [workspaceId, agentNamesKey, agentNames]);
+
+  const persistAgentOrder = useCallback(
+    (nextOrder: string[]) => {
+      setAgentOrder(nextOrder);
+      if (workspaceId) {
+        wsSet(workspaceId, SK_AGENT_SECTION_ORDER, JSON.stringify(nextOrder));
+      }
+    },
+    [workspaceId],
+  );
+
+  const orderedAgents = useMemo(
+    () => applyAgentSectionOrder(agents, agentOrder),
+    [agents, agentOrder],
+  );
+
+  const { regular, background } = useMemo(
+    () => splitAgentsByRuntime(orderedAgents),
+    [orderedAgents],
+  );
+  const showBackgroundGroup = regular.length > 0 && background.length > 0;
 
   if (agents.length === 0 && !onAddClick) return <></>;
 
@@ -56,41 +113,46 @@ export function AgentSection({
     <div className={`${styles.section} agentSection`}>
       <div className={`${styles.header} agentSectionHeader`}>
         <span>Agents</span>
-        <span className="sectionCount">{agents.length}</span>
       </div>
       <div className={styles.list}>
-        {agents.map((agent) => {
-          const handleClick = onAgentClick
-            ? () => onAgentClick(agent.name)
-            : undefined;
-          return (
-            <div
-              key={agent.name}
-              className={styles.agentRow}
-              onClick={handleClick}
-              role={handleClick ? "button" : undefined}
-              tabIndex={handleClick ? 0 : undefined}
-              aria-label={handleClick ? `Agent: ${agent.name}` : undefined}
-              onKeyDown={
-                handleClick
-                  ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handleClick();
-                      }
-                    }
-                  : undefined
-              }
-            >
-              <AgentCard
-                agent={agent}
-                compact
-                showRepoBadge={false}
-                taskTitle={agentTasks?.[agent.name]?.title}
-              />
+        <SortableAgentList
+          agents={regular}
+          fullOrder={agentOrder}
+          onReorder={persistAgentOrder}
+          onAgentClick={onAgentClick}
+          selectedAgentName={selectedAgentName}
+          agentTasks={agentTasks}
+          listClassName={styles.sortableList}
+        />
+        {showBackgroundGroup ? (
+          <div
+            className={styles.subgroup}
+            data-testid="agent-section-background"
+          >
+            <div className={styles.subgroupHeader}>
+              <span>Background</span>
             </div>
-          );
-        })}
+            <SortableAgentList
+              agents={background}
+              fullOrder={agentOrder}
+              onReorder={persistAgentOrder}
+              onAgentClick={onAgentClick}
+              selectedAgentName={selectedAgentName}
+              agentTasks={agentTasks}
+              listClassName={styles.subgroupList}
+            />
+          </div>
+        ) : (
+          <SortableAgentList
+            agents={background}
+            fullOrder={agentOrder}
+            onReorder={persistAgentOrder}
+            onAgentClick={onAgentClick}
+            selectedAgentName={selectedAgentName}
+            agentTasks={agentTasks}
+            listClassName={styles.sortableList}
+          />
+        )}
       </div>
       {onAddClick && (
         <button type="button" className={styles.addButton} onClick={onAddClick}>
