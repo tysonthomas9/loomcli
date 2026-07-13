@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
@@ -287,6 +289,24 @@ func (h *prReviewHarness) post(t *testing.T, path, body string) (int, []byte) {
 	return rec.Code, rec.Body.Bytes()
 }
 
+func assertGrantActions(t *testing.T, h *prReviewHarness, want []string) {
+	t.Helper()
+	grants, err := h.store.ConnectorGrants().ListByBinding(context.Background(), prReviewTestWorkspace, bindingID)
+	if err != nil {
+		t.Fatalf("ListByBinding: %v", err)
+	}
+	got := make([]string, 0, len(grants))
+	for _, grant := range grants {
+		got = append(got, grant.Action)
+	}
+	slices.Sort(got)
+	want = slices.Clone(want)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("grant actions = %v, want %v", got, want)
+	}
+}
+
 func TestGetPullRequestDetail(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
@@ -310,6 +330,7 @@ func TestGetPullRequestDetail(t *testing.T) {
 	if calls[0].authorization != "Bearer "+prReviewTestToken {
 		t.Fatalf("authorization = %q, want bearer token", calls[0].authorization)
 	}
+	assertGrantActions(t, h, prReadActions)
 }
 
 func TestListPullRequestsConnector(t *testing.T) {
@@ -381,6 +402,7 @@ func TestListPullRequestsConnector(t *testing.T) {
 	if len(calls) != 1 || calls[0].path != "/repos/octocat/hello/pulls" {
 		t.Fatalf("calls = %+v, want one PR list", calls)
 	}
+	assertGrantActions(t, h, prReadActions)
 }
 
 func TestNormalizePullState(t *testing.T) {
@@ -582,6 +604,7 @@ func TestGetPullRequestDiff(t *testing.T) {
 	if calls[1].path != "/repos/octocat/hello/compare/main...headsha-123" {
 		t.Fatalf("second call path = %q, want compare pinned to head sha", calls[1].path)
 	}
+	assertGrantActions(t, h, prReadActions)
 }
 
 func TestGetPullRequestUnregisteredRepoDoesNotDispatch(t *testing.T) {
@@ -628,14 +651,16 @@ func TestPostPullRequestReviewApprove(t *testing.T) {
 	if calls[1].body["event"] != "APPROVE" || calls[1].body["body"] != "LGTM" {
 		t.Fatalf("review payload = %+v, want APPROVE body", calls[1].body)
 	}
+	assertGrantActions(t, h, prReviewSubmissionActions)
 }
 
-func TestPostPullRequestReviewAfterReadUsesSeededReviewGrant(t *testing.T) {
+func TestPostPullRequestReviewSeedsWriteGrantAfterRead(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
 	if status != http.StatusOK {
 		t.Fatalf("read status = %d, want 200 (body %s)", status, raw)
 	}
+	assertGrantActions(t, h, prReadActions)
 
 	status, raw = h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/review",
 		`{"event":"approve","body":"LGTM","expected_head_sha":"headsha-123"}`)
@@ -645,6 +670,25 @@ func TestPostPullRequestReviewAfterReadUsesSeededReviewGrant(t *testing.T) {
 	calls := h.github.snapshot()
 	if len(calls) != 3 || calls[2].method != http.MethodPost || calls[2].path != "/repos/octocat/hello/pulls/7/reviews" {
 		t.Fatalf("calls = %+v, want read GET, liveness GET, review POST", calls)
+	}
+	want := append(slices.Clone(prReadActions), prReviewWriteAction)
+	assertGrantActions(t, h, want)
+}
+
+func TestGrantSeedCacheKeyScopesCanonicalActionSet(t *testing.T) {
+	resource := prResource("octocat", "hello")
+	readKey := grantSeedCacheKey(prReviewTestWorkspace, resource, prReadActions)
+	reordered := []string{
+		providers.ActionGitHubCompareRead,
+		providers.ActionGitHubPullRequestRead,
+		providers.ActionGitHubPullsList,
+		providers.ActionGitHubPullRequestRead,
+	}
+	if got := grantSeedCacheKey(prReviewTestWorkspace, resource, reordered); got != readKey {
+		t.Fatalf("reordered/deduplicated read key = %q, want %q", got, readKey)
+	}
+	if writeKey := grantSeedCacheKey(prReviewTestWorkspace, resource, prReviewSubmissionActions); writeKey == readKey {
+		t.Fatalf("read and review-submission action sets share cache key %q", readKey)
 	}
 }
 
@@ -1006,6 +1050,7 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
+	assertGrantActions(t, h, prReadActions)
 	var decoded struct {
 		Success bool                     `json:"success"`
 		Data    gen.ReviewerEnsureResult `json:"data"`

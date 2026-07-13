@@ -169,7 +169,7 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 // itself and returns ok=false on failure; a response without a head sha is an
 // upstream error because everything downstream (the pinned checkout) needs it.
 func (m *Module) fetchPullRequestHead(w http.ResponseWriter, r *http.Request, ws string, params pullRequestPath) (headSHA, title, baseRef string, ok bool) {
-	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewActions); err != nil {
+	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReadActions); err != nil {
 		writePRReviewError(w, err)
 		return "", "", "", false
 	}

@@ -78,7 +78,7 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 			continue
 		}
 		attempted++
-		if err := m.ensureConnectorAndGrants(r.Context(), ws, owner, repo, prReviewActions); err != nil {
+		if err := m.ensureConnectorAndGrants(r.Context(), ws, owner, repo, prReadActions); err != nil {
 			failed++
 			warnings = append(warnings, repoWarning(owner, repo, err))
 			continue

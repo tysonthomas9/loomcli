@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	vault "github.com/tysonthomas9/loomcli/internal/connector"
@@ -15,21 +16,27 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-var prReviewActions = []string{
+const prReviewWriteAction = providers.ActionGitHubReviewPost
+
+var prReadActions = []string{
 	providers.ActionGitHubPullRequestRead,
 	providers.ActionGitHubPullsList,
 	providers.ActionGitHubCompareRead,
-	providers.ActionGitHubReviewPost,
+}
+
+var prReviewSubmissionActions = []string{
+	providers.ActionGitHubPullRequestRead,
+	prReviewWriteAction,
 }
 
 func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo string, actions []string) error {
 	if m == nil || m.dispatcher == nil {
 		return errEgressUnavailable
 	}
-	// Fast-path: once the connector + grants for this canonical repo are
+	// Fast-path: once the connector + requested action set for this canonical repo are
 	// ensured, the sealed credential lives in the store and the dispatcher
 	// unseals it per call — so a polled read API need not re-seal/re-Create.
-	cacheKey := ws + "|" + prResource(owner, repo)
+	cacheKey := grantSeedCacheKey(ws, prResource(owner, repo), actions)
 	if _, done := m.seeded.Load(cacheKey); done {
 		return nil
 	}
@@ -71,6 +78,22 @@ func (m *Module) ensureConnectorAndGrants(ctx context.Context, ws, owner, repo s
 	}
 	m.seeded.Store(cacheKey, struct{}{})
 	return nil
+}
+
+func grantSeedCacheKey(ws, resource string, actions []string) string {
+	set := make(map[string]struct{}, len(actions))
+	for _, action := range actions {
+		action = strings.TrimSpace(action)
+		if action != "" {
+			set[action] = struct{}{}
+		}
+	}
+	canonical := make([]string, 0, len(set))
+	for action := range set {
+		canonical = append(canonical, action)
+	}
+	sort.Strings(canonical)
+	return ws + "|" + resource + "|" + strings.Join(canonical, ",")
 }
 
 // grantID is derived from the EXACT resource pattern + action via a hash, not

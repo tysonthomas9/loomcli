@@ -20,7 +20,10 @@ const (
 	webuiGitHubTokenEnv = "LOOM_WEBUI_GITHUB_TOKEN" //nolint:gosec // G101: env var name, not a credential
 )
 
-// Module serves connector-backed, read-only pull request review routes.
+// Module serves connector-backed pull request review routes. Serve is assumed
+// to have one operator: the configured GitHub PAT scopes are the outer
+// authority bound, while connector grants provide defense in depth. Read
+// grants are seeded on read paths; write grants only on explicit review posts.
 type Module struct {
 	store                   store.Store
 	dispatcher              *connector.Dispatcher
@@ -30,9 +33,8 @@ type Module struct {
 	dialCodex               func(ctx context.Context, endpoint string) (codexThreadReader, error)
 	streamPollInterval      time.Duration
 	streamHeartbeatInterval time.Duration
-	// seeded caches "connector+grants already ensured" per canonical
-	// ws|owner/repo so a polled read API does not re-seal + re-Create on
-	// every request. Key is the canonical resource; value struct{}{}.
+	// seeded caches "connector+grants already ensured" by canonical resource
+	// and action set so read and write authority cannot share a cache hit.
 	seeded sync.Map
 }
 

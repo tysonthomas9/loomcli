@@ -35,7 +35,7 @@ func (m *Module) getPullRequest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewActions); err != nil {
+	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReadActions); err != nil {
 		writePRReviewError(w, err)
 		return
 	}
@@ -61,7 +61,7 @@ func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewActions); err != nil {
+	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReadActions); err != nil {
 		writePRReviewError(w, err)
 		return
 	}
@@ -127,7 +127,7 @@ func (m *Module) postReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewActions); err != nil {
+	if err := m.ensureConnectorAndGrants(r.Context(), ws, params.owner, params.repo, prReviewSubmissionActions); err != nil {
 		writePRReviewError(w, err)
 		return
 	}
