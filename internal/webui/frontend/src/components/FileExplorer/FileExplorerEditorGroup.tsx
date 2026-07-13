@@ -2,20 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DiffFileViewer } from "@/components/AgentDetailPanel";
 import type { FileBlameData } from "@/api/workspace";
-import {
-  blameScopedFile,
-  diffScopedFile,
-  readScopedFile,
-  writeScopedFile,
-} from "@/hooks/api";
+import { blameScopedFile, diffScopedFile, readScopedFile } from "@/hooks/api";
 import {
   useFileBrowserStoreInstance,
-  useScopedFileContent,
+  useFileDocument,
   useWorkspaceContext,
   type FileBrowserGroup,
   type FileBrowserTab,
 } from "@/hooks";
-import { useFileEditorBuffer } from "@/hooks/common/useFileEditorBuffer";
 import {
   checkoutRefKey,
   tabIdentityKey,
@@ -226,16 +220,13 @@ export function FileExplorerEditorGroup({
     () => activeTab?.ref ?? { scope: "workspace" },
     [activeTab],
   );
-  const { fileData, isLoading, error, fetchFile, clearFile } =
-    useScopedFileContent(scopeRef);
-  const fetchFileRef = useRef(fetchFile);
-  const clearFileRef = useRef(clearFile);
-  fetchFileRef.current = fetchFile;
-  clearFileRef.current = clearFile;
   const activePath = activeTab?.path ?? null;
   const activeKey = activeTab ? tabIdentityKey(activeTab) : null;
   const scopeKey = checkoutRefKey(scopeRef);
-  const pathDirty = activeKey ? !!dirty[activeKey] : false;
+  const fileDocument = useFileDocument(workspaceId, scopeRef, activePath ?? "");
+  const { fileData, isLoading, error } = fileDocument;
+  const refreshDocumentRef = useRef(fileDocument.refresh);
+  refreshDocumentRef.current = fileDocument.refresh;
   const appliedReloadRef = useRef<FileReloadRequest>({
     key: null,
     token: undefined,
@@ -277,27 +268,15 @@ export function FileExplorerEditorGroup({
       appliedReloadRef.current = { key: activeKey, token: reloadToken };
     }
     if (activePath) {
-      if (!pathDirty || hasReloadRequest) {
-        void fetchFileRef.current(activePath);
-      }
+      void refreshDocumentRef.current();
     } else {
       appliedReloadRef.current = { key: null, token: undefined };
-      clearFileRef.current();
     }
-  }, [activeKey, activePath, pathDirty, reloadToken, scopeKey]);
+  }, [activeKey, activePath, reloadToken, scopeKey]);
 
-  const writeFile = useCallback(
-    async (path: string, content: string) => {
-      await writeScopedFile(workspaceId, scopeRef, path, content);
-    },
-    [workspaceId, scopeRef],
-  );
-  const setDirty = useCallback(
-    (_path: string, isDirty: boolean) => {
-      if (activeKey) store.getState().setDirty(activeKey, isDirty);
-    },
-    [activeKey, store],
-  );
+  useEffect(() => {
+    if (activeKey) store.getState().setDirty(activeKey, fileDocument.dirty);
+  }, [activeKey, fileDocument.dirty, store]);
 
   const canSave =
     !!activePath && !!fileData && !fileData.binary && !fileData.truncated;
@@ -321,20 +300,28 @@ export function FileExplorerEditorGroup({
     [scopeRef, workspaceId],
   );
 
-  const editor = useFileEditorBuffer({
-    path: activePath,
-    fileData,
-    isActive: isActiveGroup,
-    canSave,
-    writeFile,
-    onDirtyChange: setDirty,
-    onSaved: () => {
-      if (activeTab && activePath) {
-        onSaved(activeTab);
-        void loadBaseContent(activePath);
+  const save = useCallback(async () => {
+    if (!canSave || !activeTab || !activePath) return;
+    const result = await fileDocument.save();
+    if (result) {
+      onSaved(activeTab);
+      void loadBaseContent(activePath);
+    }
+  }, [activePath, activeTab, canSave, fileDocument, loadBaseContent, onSaved]);
+
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (!isActiveGroup) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void saveRef.current();
       }
-    },
-  });
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isActiveGroup]);
 
   useEffect(() => {
     setBasePath(null);
@@ -351,6 +338,7 @@ export function FileExplorerEditorGroup({
   useEffect(() => {
     const handleFocus = () => {
       if (activePath && canSave) {
+        void refreshDocumentRef.current();
         void loadBaseContent(activePath);
       }
     };
@@ -364,10 +352,12 @@ export function FileExplorerEditorGroup({
         setGitGutterMarks([]);
         return;
       }
-      setGitGutterMarks(computeGitGutterLineMarks(baseContent, editor.content));
+      setGitGutterMarks(
+        computeGitGutterLineMarks(baseContent, fileDocument.content),
+      );
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [activePath, baseContent, basePath, editor.content]);
+  }, [activePath, baseContent, basePath, fileDocument.content]);
 
   useEffect(() => {
     let canceled = false;
@@ -481,12 +471,12 @@ export function FileExplorerEditorGroup({
             isActive={isActiveGroup}
             isLoading={isLoading}
             error={error}
-            content={editor.content}
-            isDirty={editor.isDirty}
-            isSaving={editor.isSaving}
+            content={fileDocument.content}
+            isDirty={fileDocument.dirty}
+            isSaving={fileDocument.isSaving}
             searchOpen={searchOpen}
-            onContentChange={editor.handleContentChange}
-            onSave={() => void editor.save()}
+            onContentChange={fileDocument.edit}
+            onSave={() => void save()}
             historyOpen={historyOpen}
             onToggleHistory={toggleHistory}
             onToggleSearch={() => setSearchOpen((open) => !open)}

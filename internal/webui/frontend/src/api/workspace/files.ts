@@ -307,10 +307,18 @@ export async function readScopedFile(
   scopeRef: FileScopeRef,
   path: string,
   rev?: string,
+  requestOptions: { signal?: AbortSignal } = {},
 ): Promise<FileReadData> {
-  return get<FileReadData>(
-    scopedUrl(workspaceId, "/files", scopeRef, path, rev ? { rev } : undefined),
+  const url = scopedUrl(
+    workspaceId,
+    "/files",
+    scopeRef,
+    path,
+    rev ? { rev } : undefined,
   );
+  return requestOptions.signal
+    ? get<FileReadData>(url, requestOptions)
+    : get<FileReadData>(url);
 }
 
 /** Get the strong mutation version for a file or bounded directory manifest. */
@@ -450,14 +458,17 @@ export async function writeScopedFile(
   path: string,
   content: string,
   preconditions: FileWritePreconditions = {},
+  requestOptions: { signal?: AbortSignal } = {},
 ): Promise<FileMutationData> {
   const headers: Record<string, string> = {};
   if (preconditions.ifMatch) headers["If-Match"] = `"${preconditions.ifMatch}"`;
   if (preconditions.createOnly) headers["If-None-Match"] = "*";
   const url = scopedUrl(workspaceId, "/files", scopeRef, path);
   return Object.keys(headers).length > 0
-    ? put<FileMutationData>(url, { content }, { headers })
-    : put<FileMutationData>(url, { content });
+    ? put<FileMutationData>(url, { content }, { ...requestOptions, headers })
+    : requestOptions.signal
+      ? put<FileMutationData>(url, { content }, requestOptions)
+      : put<FileMutationData>(url, { content });
 }
 
 /**
