@@ -1,4 +1,5 @@
 import type { FileCheckout } from "@/api/workspace";
+import type { DiffFile } from "@/api/issues";
 import { checkoutRefKey, type CheckoutRef } from "@/utils/fileExplorerRefs";
 
 import { hasAvailableCheckoutStatus } from "./checkoutAvailability";
@@ -15,6 +16,8 @@ export interface ChangeListItem {
   name: string;
   parentPath: string;
   status: ChangeStatusChip;
+  additions?: number;
+  deletions?: number;
 }
 
 export interface ChangeCheckoutGroup {
@@ -49,6 +52,15 @@ export function changeStatusFromPorcelain(xy: string): ChangeStatusChip {
   if (indexStatus === "D" || worktreeStatus === "D") {
     return { kind: "deleted", label: "Deleted" };
   }
+  return { kind: "modified", label: "Modified" };
+}
+
+export function changeStatusFromDiffStatus(
+  status: DiffFile["status"],
+): ChangeStatusChip {
+  if (status === "A") return { kind: "new", label: "New" };
+  if (status === "D") return { kind: "deleted", label: "Deleted" };
+  if (status === "R") return { kind: "renamed", label: "Renamed" };
   return { kind: "modified", label: "Modified" };
 }
 
@@ -111,5 +123,49 @@ export function buildChangeGroups(
         loaded: status !== undefined,
         items,
       };
+    });
+}
+
+export function buildBranchChangeGroups(
+  checkouts: FileCheckout[],
+  diffFilesByRef: Record<string, DiffFile[] | undefined>,
+): ChangeCheckoutGroup[] {
+  return checkouts
+    .filter(
+      (checkout) =>
+        checkout.kind === "agent" && hasAvailableCheckoutStatus(checkout),
+    )
+    .sort(compareCheckouts)
+    .flatMap((checkout) => {
+      const ref = checkoutRefFromCheckout(checkout);
+      const key = checkoutRefKey(ref);
+      const diffFiles = diffFilesByRef[key];
+      const loaded = diffFiles !== undefined;
+      const count = diffFiles?.length ?? 0;
+      if (loaded && count === 0) return [];
+      const items = (diffFiles ?? [])
+        .slice()
+        .sort((a, b) => a.path.localeCompare(b.path))
+        .map((file) => {
+          const { name, parentPath } = splitChangePath(file.path);
+          return {
+            path: file.path,
+            name,
+            parentPath,
+            status: changeStatusFromDiffStatus(file.status),
+            additions: file.additions,
+            deletions: file.deletions,
+          };
+        });
+      return [
+        {
+          id: key,
+          ref,
+          label: `${checkout.agent ?? "agent"} · ${checkout.repo} · ${count}`,
+          changeCount: count,
+          loaded,
+          items,
+        },
+      ];
     });
 }

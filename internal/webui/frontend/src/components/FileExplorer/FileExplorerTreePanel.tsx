@@ -27,6 +27,7 @@ import { dirname } from "./fileExplorerLocalUtils";
 import type { HistoryOpenDiffRequest } from "./FileHistoryPanel";
 import styles from "./FileExplorer.module.css";
 import type {
+  CompareMode,
   ExplorerLens,
   ScopedInlineEdit,
   TreeRefreshRequest,
@@ -100,23 +101,130 @@ function LensToggle({
   );
 }
 
+function CompareToggle({
+  compareMode,
+  branchChangeCount,
+  workingChangeCount,
+  onChange,
+}: {
+  compareMode: CompareMode;
+  branchChangeCount: number;
+  workingChangeCount: number;
+  onChange: (compareMode: CompareMode) => void;
+}) {
+  const tabs: Array<{ id: CompareMode; label: string; count: number }> = [
+    { id: "branch", label: "Branch vs base", count: branchChangeCount },
+    { id: "working", label: "Working tree", count: workingChangeCount },
+  ];
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const currentIndex = tabs.findIndex((tab) => tab.id === compareMode);
+    let nextIndex = -1;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % tabs.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+    }
+    if (nextIndex >= 0) {
+      event.preventDefault();
+      onChange(tabs[nextIndex]!.id);
+    }
+  };
+  return (
+    <div className={styles.compareToggleRow}>
+      <div
+        className={styles.compareToggle}
+        role="tablist"
+        aria-label="Compare mode"
+        onKeyDown={handleKeyDown}
+      >
+        {tabs.map((tab) => {
+          const active = compareMode === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              className={styles.compareTab}
+              data-active={active || undefined}
+              aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onChange(tab.id)}
+            >
+              {tab.label} · {tab.count}
+            </button>
+          );
+        })}
+      </div>
+      <span className={styles.compareHint}>
+        {compareMode === "branch" ? "vs base" : "uncommitted only"}
+      </span>
+    </div>
+  );
+}
+
 function ChangesList({
   groups,
   unavailableLabels,
+  compareMode,
+  showSharedCheckoutNotice,
   onOpenDiff,
 }: {
   groups: ChangeCheckoutGroup[];
   unavailableLabels: string[];
+  compareMode: CompareMode;
+  showSharedCheckoutNotice: boolean;
   onOpenDiff: (request: HistoryOpenDiffRequest) => void;
 }) {
   const unavailableText = unavailableCheckoutSummary(unavailableLabels);
-  if (groups.length === 0 && unavailableLabels.length === 0) {
-    return (
-      <div className={styles.changesEmpty}>
-        No uncommitted changes across this workspace.
-      </div>
-    );
+  const emptyText =
+    compareMode === "branch"
+      ? "No committed changes vs base across this workspace."
+      : "No uncommitted changes across this workspace.";
+  if (
+    groups.length === 0 &&
+    unavailableLabels.length === 0 &&
+    !showSharedCheckoutNotice
+  ) {
+    return <div className={styles.changesEmpty}>{emptyText}</div>;
   }
+
+  const openDiffRequest = (
+    group: ChangeCheckoutGroup,
+    item: ChangeCheckoutGroup["items"][number],
+  ): HistoryOpenDiffRequest =>
+    compareMode === "branch"
+      ? {
+          ref: group.ref,
+          path: item.path,
+          source: "branch",
+          title: checkoutLabel(group.ref),
+          canOpenFile: item.status.kind !== "deleted",
+        }
+      : {
+          ref: group.ref,
+          path: item.path,
+          from: "HEAD",
+          title: checkoutLabel(group.ref),
+          canOpenFile: item.status.kind !== "deleted",
+        };
+
+  const renderStats = (
+    item: ChangeCheckoutGroup["items"][number],
+  ): JSX.Element | null => {
+    const hasAdditions = item.additions !== undefined && item.additions !== 0;
+    const hasDeletions = item.deletions !== undefined && item.deletions !== 0;
+    if (!hasAdditions && !hasDeletions) return null;
+    return (
+      <span className={styles.changeStats} aria-label="Line changes">
+        {hasAdditions && (
+          <span className={styles.changeStatAdd}>+{item.additions}</span>
+        )}
+        {hasDeletions && (
+          <span className={styles.changeStatDelete}>−{item.deletions}</span>
+        )}
+      </span>
+    );
+  };
 
   return (
     <div className={styles.changesList} aria-label="Workspace changes">
@@ -125,10 +233,13 @@ function ChangesList({
           {unavailableText}
         </div>
       )}
-      {groups.length === 0 && (
-        <div className={styles.changesEmpty}>
-          No uncommitted changes across this workspace.
+      {showSharedCheckoutNotice && (
+        <div className={styles.changesNotice} role="status">
+          Shared checkout changes appear under Working tree.
         </div>
+      )}
+      {groups.length === 0 && (
+        <div className={styles.changesEmpty}>{emptyText}</div>
       )}
       {groups.map((group) => (
         <section key={group.id} className={styles.changesGroup}>
@@ -144,15 +255,7 @@ function ChangesList({
                 key={item.path}
                 className={styles.changeRow}
                 aria-label={`Open diff for ${item.path} (${item.status.label})`}
-                onClick={() =>
-                  onOpenDiff({
-                    ref: group.ref,
-                    path: item.path,
-                    from: "HEAD",
-                    title: checkoutLabel(group.ref),
-                    canOpenFile: item.status.kind !== "deleted",
-                  })
-                }
+                onClick={() => onOpenDiff(openDiffRequest(group, item))}
               >
                 <span className={styles.changePath}>
                   <span className={styles.changeName}>{item.name}</span>
@@ -162,11 +265,14 @@ function ChangesList({
                     </span>
                   )}
                 </span>
-                <span
-                  className={styles.changeStatusChip}
-                  data-status={item.status.kind}
-                >
-                  {item.status.label}
+                <span className={styles.changeMeta}>
+                  {renderStats(item)}
+                  <span
+                    className={styles.changeStatusChip}
+                    data-status={item.status.kind}
+                  >
+                    {item.status.label}
+                  </span>
                 </span>
               </button>
             ))
@@ -174,6 +280,19 @@ function ChangesList({
         </section>
       ))}
     </div>
+  );
+}
+
+function hasRepoScopeChanges(sections: FileTreeSection[]): boolean {
+  return sections.some((section) =>
+    section.roots.some((root) => {
+      if (root.kind === "checkout") {
+        return root.ref.scope === "repo" && root.changeCount > 0;
+      }
+      return root.children.some(
+        (child) => child.ref.scope === "repo" && child.changeCount > 0,
+      );
+    }),
   );
 }
 
@@ -529,6 +648,9 @@ function CheckoutTreeBlock({
 export function FileExplorerTreePanel({
   lens,
   changeCount,
+  compareMode,
+  branchChangeCount,
+  workingChangeCount,
   checkoutError,
   repairError,
   sections,
@@ -544,6 +666,7 @@ export function FileExplorerTreePanel({
   treeRefreshRequests,
   hideAgentSectionHeading,
   onLensChange,
+  onCompareModeChange,
   onQuickOpen,
   onOpenDiff,
   onToggleRoot,
@@ -559,6 +682,9 @@ export function FileExplorerTreePanel({
 }: {
   lens: ExplorerLens;
   changeCount: number;
+  compareMode: CompareMode;
+  branchChangeCount: number;
+  workingChangeCount: number;
   checkoutError: string | null;
   repairError: string | null;
   sections: FileTreeSection[];
@@ -574,6 +700,7 @@ export function FileExplorerTreePanel({
   treeRefreshRequests: Record<string, TreeRefreshRequest>;
   hideAgentSectionHeading: boolean;
   onLensChange: (lens: ExplorerLens) => void;
+  onCompareModeChange: (compareMode: CompareMode) => void;
   onQuickOpen: () => void;
   onOpenDiff: (request: HistoryOpenDiffRequest) => void;
   onToggleRoot: (key: string) => void;
@@ -595,6 +722,8 @@ export function FileExplorerTreePanel({
   onInlineEditCommit: () => void;
   onInlineEditCancel: () => void;
 }) {
+  const showSharedCheckoutNotice =
+    compareMode === "branch" && hasRepoScopeChanges(sections);
   const renderCheckoutRoot = (
     root: Extract<FileTreeRoot, { kind: "checkout" }>,
     depth: number,
@@ -766,6 +895,14 @@ export function FileExplorerTreePanel({
           changeCount={changeCount}
           onChange={onLensChange}
         />
+        {lens === "changes" && (
+          <CompareToggle
+            compareMode={compareMode}
+            branchChangeCount={branchChangeCount}
+            workingChangeCount={workingChangeCount}
+            onChange={onCompareModeChange}
+          />
+        )}
         <button
           type="button"
           className={styles.quickOpenButton}
@@ -803,6 +940,8 @@ export function FileExplorerTreePanel({
           <ChangesList
             groups={changeGroups}
             unavailableLabels={unavailableCheckoutLabels}
+            compareMode={compareMode}
+            showSharedCheckoutNotice={showSharedCheckoutNotice}
             onOpenDiff={onOpenDiff}
           />
         ) : (

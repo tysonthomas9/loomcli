@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DiffFileViewer } from "@/components/AgentDetailPanel";
 import type { FileBlameData } from "@/api/workspace";
-import { blameScopedFile, diffScopedFile, readScopedFile } from "@/hooks/api";
+import {
+  blameScopedFile,
+  diffScopedFile,
+  fetchDiffFile,
+  readScopedFile,
+} from "@/hooks/api";
 import {
   useFileDocument,
   useWorkspaceContext,
@@ -62,16 +67,38 @@ function DiffEditorPane({
       };
     }
     setIsLoading(true);
-    diffScopedFile(
-      workspaceId,
-      diffView.ref,
-      diffView.path,
-      diffView.from,
-      diffView.to,
-    )
-      .then((res) => {
-        if (!canceled) setPatch(res.patch);
-      })
+    const branchAgent =
+      diffView.source === "branch" && diffView.ref.scope === "agent"
+        ? diffView.ref.target
+        : undefined;
+    const loadPatch = branchAgent
+      ? fetchDiffFile(workspaceId, branchAgent, diffView.path, "HEAD").then(
+          (res) => {
+            if (canceled) return;
+            if (res.is_binary) {
+              setError("Binary file — no text diff.");
+              setPatch(null);
+              return;
+            }
+            if (res.is_too_large) {
+              setError("Diff too large to display.");
+              setPatch(null);
+              return;
+            }
+            setPatch(res.patch);
+          },
+        )
+      : diffScopedFile(
+          workspaceId,
+          diffView.ref,
+          diffView.path,
+          diffView.from,
+          diffView.to,
+        ).then((res) => {
+          if (canceled) return;
+          setPatch(res.patch);
+        });
+    loadPatch
       .catch((err) => {
         if (!canceled)
           setError(err instanceof Error ? err.message : String(err));

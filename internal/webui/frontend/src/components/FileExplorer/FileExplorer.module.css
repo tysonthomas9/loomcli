@@ -129,6 +129,64 @@
   color: var(--color-text-primary);
 }
 
+.compareToggleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.compareToggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  flex: 1;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-card, var(--color-bg));
+  gap: 2px;
+}
+
+.compareTab {
+  min-width: 0;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  overflow: hidden;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compareTab:hover {
+  color: var(--color-text-primary);
+}
+
+.compareTab[data-active] {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.compareTab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.compareHint {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .quickOpenButton {
   display: flex;
   align-items: center;
@@ -312,6 +370,38 @@
 .changeParent {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs, 11px);
+}
+
+.changeMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.changeStats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  font-family: var(
+    --font-family-mono,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace
+  );
+  font-size: var(--font-size-xs, 11px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.changeStatAdd {
+  color: var(--color-success, #2f855a);
+}
+
+.changeStatDelete {
+  color: var(--color-danger, #dc2626);
 }
 
 .changeStatusChip {

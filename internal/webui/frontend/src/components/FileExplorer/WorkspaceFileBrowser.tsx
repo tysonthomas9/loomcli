@@ -10,9 +10,11 @@ import {
 import { useStore } from "zustand";
 
 import { ResizeHandle } from "@/components/ResizeHandle";
+import type { DiffFile } from "@/api/issues";
 import type { FileCheckout } from "@/api/workspace";
 import {
   deleteScopedPath,
+  fetchDiffFiles,
   gitStatusScoped,
   indexScopedFiles,
   listScopedDir,
@@ -77,6 +79,7 @@ import {
   DELETE_FILE_SKIP_KEY,
   dirname,
   duplicateName,
+  getStoredCompareMode,
   getStoredLens,
   getStoredTreeWidth,
   isConflictError,
@@ -91,11 +94,13 @@ import {
   resolveMoveToTarget,
   shallowRecordEqual,
   sortedEntries,
+  storeCompareMode,
   storeLens,
   storeTreeWidth,
 } from "./fileExplorerLocalUtils";
 import { buildFileTreeSections, existingCheckoutRefs } from "./treeRoots";
 import {
+  buildBranchChangeGroups,
   buildChangeGroups,
   checkoutRefFromCheckout,
   type ChangeCheckoutGroup,
@@ -105,6 +110,7 @@ import styles from "./FileExplorer.module.css";
 import type {
   ContextMenuState,
   CheckoutRepairMenuState,
+  CompareMode,
   DeleteConfirmState,
   DiffViewState,
   ExplorerLens,
@@ -117,6 +123,11 @@ import type {
   TreeRefreshRequest,
   TreeRevealRequest,
 } from "./workspaceFileBrowserTypes";
+
+interface BranchDiffRequest {
+  key: string;
+  agent: string;
+}
 
 function checkoutRepairRequest(ref: CheckoutRef, force = false) {
   if (ref.scope === "agent" && ref.target) {
@@ -179,6 +190,9 @@ function FileBrowserInner({
   const [lens, setLens] = useState<ExplorerLens>(() =>
     getStoredLens(workspaceId),
   );
+  const [compareMode, setCompareMode] = useState<CompareMode>(() =>
+    getStoredCompareMode(workspaceId),
+  );
   const [splitLeftWidth, setSplitLeftWidth] = useState(DEFAULT_GROUP_WIDTH);
   const [lineTargets, setLineTargets] = useState<Record<string, LineTarget>>(
     {},
@@ -198,6 +212,9 @@ function FileBrowserInner({
   const [quickOpenError, setQuickOpenError] = useState<string | null>(null);
   const [gitStatusByRef, setGitStatusByRef] = useState<
     Record<string, Record<string, string>>
+  >({});
+  const [branchDiffsByRef, setBranchDiffsByRef] = useState<
+    Record<string, DiffFile[] | undefined>
   >({});
   const [checkouts, setCheckouts] = useState<FileCheckout[]>([]);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -232,6 +249,7 @@ function FileBrowserInner({
   const lastLoadedChangeGroupsRef = useRef<Map<string, ChangeCheckoutGroup>>(
     new Map(),
   );
+  const branchDiffsInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (canWrite) return;
@@ -319,6 +337,40 @@ function FileBrowserInner({
       ),
     [visibleCheckouts],
   );
+  const branchDiffRequests = useMemo<BranchDiffRequest[]>(() => {
+    const seen = new Set<string>();
+    return visibleCheckouts
+      .filter(
+        (checkout) =>
+          checkout.kind === "agent" && hasAvailableCheckoutStatus(checkout),
+      )
+      .map((checkout) => {
+        const ref = checkoutRefFromCheckout(checkout);
+        return {
+          key: checkoutRefKey(ref),
+          agent: checkout.agent ?? "",
+        };
+      })
+      .filter((request) => {
+        if (seen.has(request.key)) return false;
+        seen.add(request.key);
+        return true;
+      });
+  }, [visibleCheckouts]);
+  const branchDiffRequestsKey = branchDiffRequests
+    .map((request) => `${request.key}:${request.agent}`)
+    .join("|");
+  const stableBranchDiffRequestsRef = useRef<{
+    key: string;
+    requests: BranchDiffRequest[];
+  }>({ key: "", requests: [] });
+  if (stableBranchDiffRequestsRef.current.key !== branchDiffRequestsKey) {
+    stableBranchDiffRequestsRef.current = {
+      key: branchDiffRequestsKey,
+      requests: branchDiffRequests,
+    };
+  }
+  const stableBranchDiffRequests = stableBranchDiffRequestsRef.current.requests;
   const unavailableChangeCheckoutLabels = useMemo(
     () => unavailableCheckoutLabels(visibleCheckouts),
     [visibleCheckouts],
@@ -352,6 +404,20 @@ function FileBrowserInner({
     () => buildChangeGroups(visibleCheckouts, gitStatusByRef),
     [visibleCheckouts, gitStatusByRef],
   );
+  const branchChangeGroups = useMemo(
+    () => buildBranchChangeGroups(visibleCheckouts, branchDiffsByRef),
+    [branchDiffsByRef, visibleCheckouts],
+  );
+  const branchChangeCount = useMemo(
+    () =>
+      branchChangeGroups.reduce(
+        (sum, group) => (group.loaded ? sum + group.items.length : sum),
+        0,
+      ),
+    [branchChangeGroups],
+  );
+  const activeChangeCount =
+    compareMode === "branch" ? branchChangeCount : checkoutChangeCount;
   const quickOpenIndexRefs = useMemo<CheckoutRef[]>(() => {
     if (mode !== "agent") return [];
     const agentRefs = visibleRefs.filter((ref) => ref.scope === "agent");
@@ -373,6 +439,8 @@ function FileBrowserInner({
       }),
     [changeGroups],
   );
+  const activeChangeGroups =
+    compareMode === "branch" ? branchChangeGroups : visibleChangeGroups;
   const activeTab =
     groups[activeGroup]?.tabs.find(
       (tab) => tabIdentityKey(tab) === groups[activeGroup]?.active,
@@ -427,12 +495,23 @@ function FileBrowserInner({
 
   useEffect(() => {
     setLens(getStoredLens(workspaceId));
+    setCompareMode(getStoredCompareMode(workspaceId));
+    setBranchDiffsByRef({});
+    branchDiffsInFlightRef.current.clear();
   }, [workspaceId]);
 
   const changeLens = useCallback(
     (nextLens: ExplorerLens) => {
       setLens(nextLens);
       storeLens(workspaceId, nextLens);
+    },
+    [workspaceId],
+  );
+
+  const changeCompareMode = useCallback(
+    (nextMode: CompareMode) => {
+      setCompareMode(nextMode);
+      storeCompareMode(workspaceId, nextMode);
     },
     [workspaceId],
   );
@@ -475,6 +554,23 @@ function FileBrowserInner({
       return changed ? merged : prev;
     });
   }, [stableStatusRefs, workspaceId]);
+
+  const refreshBranchDiffs = useCallback(async () => {
+    await Promise.all(
+      stableBranchDiffRequests.map(async ({ key, agent }) => {
+        if (branchDiffsInFlightRef.current.has(key)) return;
+        branchDiffsInFlightRef.current.add(key);
+        try {
+          const files = await fetchDiffFiles(workspaceId, agent, "HEAD");
+          setBranchDiffsByRef((prev) => ({ ...prev, [key]: files }));
+        } catch {
+          setBranchDiffsByRef((prev) => ({ ...prev, [key]: [] }));
+        } finally {
+          branchDiffsInFlightRef.current.delete(key);
+        }
+      }),
+    );
+  }, [stableBranchDiffRequests, workspaceId]);
 
   const fetchQuickOpenIndex = useCallback(
     async (force = false) => {
@@ -561,16 +657,18 @@ function FileBrowserInner({
 
   useEffect(() => {
     void refreshGitStatus();
-  }, [refreshGitStatus]);
+    void refreshBranchDiffs();
+  }, [refreshBranchDiffs, refreshGitStatus]);
 
   useEffect(() => {
     const handleFocus = () => {
       void refreshCheckouts();
       void refreshGitStatus();
+      void refreshBranchDiffs();
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [refreshCheckouts, refreshGitStatus]);
+  }, [refreshBranchDiffs, refreshCheckouts, refreshGitStatus]);
 
   useEffect(() => {
     const previous = reconnectAttemptsRef.current;
@@ -581,10 +679,12 @@ function FileBrowserInner({
     ) {
       void refreshCheckouts();
       void refreshGitStatus();
+      void refreshBranchDiffs();
     }
   }, [
     eventContext.reconnectAttempts,
     eventContext.state,
+    refreshBranchDiffs,
     refreshCheckouts,
     refreshGitStatus,
   ]);
@@ -762,12 +862,14 @@ function FileBrowserInner({
       markIndexStale();
       void refreshCheckouts();
       void refreshGitStatus();
+      void refreshBranchDiffs();
       setHistoryRefreshKey((key) => key + 1);
       showToast("File saved", { type: "success" });
       refreshParents(tab.ref, tab.path);
     },
     [
       markIndexStale,
+      refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
       refreshParents,
@@ -779,9 +881,11 @@ function FileBrowserInner({
     (groupIndex: number, request: HistoryOpenDiffRequest) => {
       const title =
         request.title ??
-        (request.to
-          ? `${request.from ?? "HEAD"}..${request.to}`
-          : `${request.from ?? "HEAD"} vs working tree`);
+        (request.source === "branch"
+          ? "vs base"
+          : request.to
+            ? `${request.from ?? "HEAD"}..${request.to}`
+            : `${request.from ?? "HEAD"} vs working tree`);
       setDiffViews((prev) => ({
         ...prev,
         [groupIndex]: { ...request, title },
@@ -898,6 +1002,7 @@ function FileBrowserInner({
         markIndexStale();
         void refreshCheckouts();
         void refreshGitStatus();
+        void refreshBranchDiffs();
         refreshParents(ref, path);
         openFile(ref, path);
         revealInTree(ref, path);
@@ -907,6 +1012,7 @@ function FileBrowserInner({
         markIndexStale();
         void refreshCheckouts();
         void refreshGitStatus();
+        void refreshBranchDiffs();
         refreshParents(ref, path);
         revealInTree(ref, path);
       } else if (edit.path) {
@@ -931,6 +1037,7 @@ function FileBrowserInner({
           markIndexStale();
           void refreshCheckouts();
           void refreshGitStatus();
+          void refreshBranchDiffs();
           refreshParents(ref, edit.path, nextPath);
           revealInTree(ref, nextPath);
         }
@@ -953,6 +1060,7 @@ function FileBrowserInner({
     store,
     showToast,
     markIndexStale,
+    refreshBranchDiffs,
     refreshCheckouts,
     refreshGitStatus,
     documentRegistry,
@@ -1014,6 +1122,7 @@ function FileBrowserInner({
         markIndexStale();
         void refreshCheckouts();
         void refreshGitStatus();
+        void refreshBranchDiffs();
         if (!node.isDir && skipFutureFileConfirms) {
           wsSet(workspaceId, DELETE_FILE_SKIP_KEY, "1");
         }
@@ -1034,6 +1143,7 @@ function FileBrowserInner({
       refreshParents,
       showToast,
       markIndexStale,
+      refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
       documentRegistry,
@@ -1094,6 +1204,7 @@ function FileBrowserInner({
         markIndexStale();
         void refreshCheckouts();
         void refreshGitStatus();
+        void refreshBranchDiffs();
         refreshParents(ref, nextPath);
         openFile(ref, nextPath);
       } catch (err) {
@@ -1109,6 +1220,7 @@ function FileBrowserInner({
       openFile,
       showToast,
       markIndexStale,
+      refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
     ],
@@ -1180,6 +1292,7 @@ function FileBrowserInner({
         markIndexStale();
         await refreshCheckouts();
         void refreshGitStatus();
+        void refreshBranchDiffs();
         refreshParents(ref, "");
         showToast(result.message || `Repaired ${label}.`, {
           type: "success",
@@ -1196,6 +1309,7 @@ function FileBrowserInner({
       workspaceId,
       repairingCheckoutKey,
       markIndexStale,
+      refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
       refreshParents,
@@ -1297,6 +1411,7 @@ function FileBrowserInner({
       markIndexStale();
       void refreshCheckouts();
       void refreshGitStatus();
+      void refreshBranchDiffs();
       refreshParents(ref, move.from, move.to);
       revealInTree(ref, move.to);
       showToast("Moved", { type: "success" });
@@ -1308,6 +1423,7 @@ function FileBrowserInner({
       documentRegistry,
       store,
       markIndexStale,
+      refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
       refreshParents,
@@ -1372,6 +1488,7 @@ function FileBrowserInner({
               markIndexStale();
               void refreshCheckouts();
               void refreshGitStatus();
+              void refreshBranchDiffs();
               refreshParents(searchScopeRef, ...paths);
               if (complete) showToast("Replace applied", { type: "success" });
             }}
@@ -1380,11 +1497,14 @@ function FileBrowserInner({
         ) : (
           <FileExplorerTreePanel
             lens={lens}
-            changeCount={checkoutChangeCount}
+            changeCount={activeChangeCount}
+            compareMode={compareMode}
+            branchChangeCount={branchChangeCount}
+            workingChangeCount={checkoutChangeCount}
             checkoutError={checkoutError}
             repairError={repairError}
             sections={sections}
-            changeGroups={visibleChangeGroups}
+            changeGroups={activeChangeGroups}
             unavailableCheckoutLabels={unavailableChangeCheckoutLabels}
             expandedRoots={expandedRoots}
             repairingCheckoutKey={repairingCheckoutKey}
@@ -1396,6 +1516,7 @@ function FileBrowserInner({
             treeRefreshRequests={treeRefreshRequests}
             hideAgentSectionHeading={mode === "agent"}
             onLensChange={changeLens}
+            onCompareModeChange={changeCompareMode}
             onQuickOpen={() => setQuickOpenOpen(true)}
             onOpenDiff={(request) =>
               openDiff(store.getState().activeGroup, request)

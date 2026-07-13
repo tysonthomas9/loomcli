@@ -15,6 +15,7 @@ export interface HistorySubject {
 export interface HistoryOpenDiffRequest {
   ref: CheckoutRef;
   path: string;
+  source?: "branch" | undefined;
   from?: string | undefined;
   to?: string | undefined;
   title?: string | undefined;

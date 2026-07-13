@@ -2,11 +2,12 @@ import type { FileEntry } from "@/api/workspace";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import { resolveTreeDropMove } from "./gitDecorations";
-import type { ExplorerLens } from "./workspaceFileBrowserTypes";
+import type { CompareMode, ExplorerLens } from "./workspaceFileBrowserTypes";
 
 export const TREE_WIDTH_KEY = "loom:file-browser:tree-width";
 export const DELETE_FILE_SKIP_KEY = "file-browser-delete-files-without-confirm";
 export const FILE_EXPLORER_LENS_KEY = "file-explorer-lens";
+export const FILE_EXPLORER_COMPARE_MODE_KEY = "file-explorer-compare-mode";
 export const DEFAULT_TREE_WIDTH = 320;
 export const MIN_TREE_WIDTH = 240;
 export const MAX_TREE_WIDTH = 400;
@@ -49,6 +50,19 @@ export function getStoredLens(workspaceId: string): ExplorerLens {
 
 export function storeLens(workspaceId: string, lens: ExplorerLens): void {
   wsSet(workspaceId, FILE_EXPLORER_LENS_KEY, lens);
+}
+
+export function getStoredCompareMode(workspaceId: string): CompareMode {
+  return wsGet(workspaceId, FILE_EXPLORER_COMPARE_MODE_KEY) === "working"
+    ? "working"
+    : "branch";
+}
+
+export function storeCompareMode(
+  workspaceId: string,
+  compareMode: CompareMode,
+): void {
+  wsSet(workspaceId, FILE_EXPLORER_COMPARE_MODE_KEY, compareMode);
 }
 
 export function basename(path: string): string {

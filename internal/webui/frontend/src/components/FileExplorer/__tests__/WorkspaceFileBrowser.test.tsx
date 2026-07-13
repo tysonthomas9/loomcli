@@ -34,6 +34,16 @@ const mocks = vi.hoisted(() => ({
     }),
   ),
   diffScopedFile: vi.fn(() => Promise.resolve({ path: "main.ts", patch: "" })),
+  fetchDiffFiles: vi.fn(() => Promise.resolve([])),
+  fetchDiffFile: vi.fn(() =>
+    Promise.resolve({
+      patch: "",
+      is_binary: false,
+      is_too_large: false,
+      additions: 0,
+      deletions: 0,
+    }),
+  ),
   blameScopedFile: vi.fn(() =>
     Promise.resolve({ path: "main.ts", skipped: false, lines: [] }),
   ),
@@ -186,6 +196,8 @@ vi.mock("@/hooks/api", () => ({
   deleteScopedPath: mocks.deleteScopedPath,
   blameScopedFile: mocks.blameScopedFile,
   diffScopedFile: mocks.diffScopedFile,
+  fetchDiffFile: mocks.fetchDiffFile,
+  fetchDiffFiles: mocks.fetchDiffFiles,
   gitStatusScoped: mocks.gitStatusScoped,
   historyScopedFile: mocks.historyScopedFile,
   indexScopedFiles: mocks.indexScopedFiles,
@@ -403,6 +415,10 @@ async function expandRepoRoot(): Promise<void> {
   await screen.findByLabelText("main.ts");
 }
 
+function storeWorkingCompareMode(): void {
+  localStorage.setItem("loom:ws-1:file-explorer-compare-mode", "working");
+}
+
 describe("WorkspaceFileBrowser", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -482,6 +498,15 @@ describe("WorkspaceFileBrowser", () => {
       path: "main.ts",
       patch:
         "diff --git a/main.ts b/main.ts\n--- a/main.ts\n+++ b/main.ts\n@@ -1 +1 @@\n-old\n+new\n",
+    });
+    mocks.fetchDiffFiles.mockResolvedValue([]);
+    mocks.fetchDiffFile.mockResolvedValue({
+      patch:
+        "diff --git a/main.ts b/main.ts\n--- a/main.ts\n+++ b/main.ts\n@@ -1 +1 @@\n-old\n+new\n",
+      is_binary: false,
+      is_too_large: false,
+      additions: 1,
+      deletions: 1,
     });
     mocks.blameScopedFile.mockResolvedValue({
       path: "main.ts",
@@ -718,6 +743,7 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("agent mode renders only the selected agent roots and scopes Changes", async () => {
+    storeWorkingCompareMode();
     mocks.listFileCheckouts.mockResolvedValue({
       checkouts: [
         {
@@ -1047,6 +1073,7 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("toggles the Changes lens, aggregates checkout counts, and persists per workspace", async () => {
+    storeWorkingCompareMode();
     mocks.listFileCheckouts.mockResolvedValue({
       checkouts: [
         {
@@ -1096,6 +1123,7 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("skips unavailable checkouts in Changes counts and shows a notice", async () => {
+    storeWorkingCompareMode();
     mocks.listFileCheckouts.mockResolvedValue({
       checkouts: [
         {
@@ -1440,6 +1468,7 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("shows an all-zero Changes empty state", async () => {
+    storeWorkingCompareMode();
     render(<WorkspaceFileBrowser mode="workspace" />);
 
     fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+0/ }));
@@ -1449,7 +1478,85 @@ describe("WorkspaceFileBrowser", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the default branch change count while the Files lens is active", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+      ],
+    });
+    mocks.fetchDiffFiles.mockResolvedValue([
+      {
+        path: "src/main.ts",
+        status: "M",
+        additions: 4,
+        deletions: 1,
+      },
+    ]);
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    expect(
+      await screen.findByRole("tab", { name: /Changes\s+1/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(mocks.fetchDiffFiles).toHaveBeenCalledWith("ws-1", "atlas", "HEAD");
+  });
+
+  it("uses branch compare mode by default and opens agent diff API patches", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "atlas",
+          repo: "loomcli",
+          exists: true,
+          change_count: 0,
+        },
+      ],
+    });
+    mocks.fetchDiffFiles.mockResolvedValue([
+      {
+        path: "src/main.ts",
+        status: "M",
+        additions: 4,
+        deletions: 1,
+      },
+    ]);
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+0/ }));
+
+    expect(await screen.findByText("atlas · loomcli · 1")).toBeInTheDocument();
+    expect(mocks.fetchDiffFiles).toHaveBeenCalledWith("ws-1", "atlas", "HEAD");
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open diff for src/main.ts (Modified)",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.fetchDiffFile).toHaveBeenCalledWith(
+        "ws-1",
+        "atlas",
+        "src/main.ts",
+        "HEAD",
+      );
+    });
+    expect(mocks.diffScopedFile).not.toHaveBeenCalled();
+  });
+
   it("opens a checkout-qualified unified diff from the Changes lens", async () => {
+    storeWorkingCompareMode();
     mocks.fileMap["src/main.ts"] = {
       path: "src/main.ts",
       content: "console.log('changed')\n",
@@ -1514,6 +1621,7 @@ describe("WorkspaceFileBrowser", () => {
   });
 
   it("keeps deleted files diff-only in the Changes lens", async () => {
+    storeWorkingCompareMode();
     mocks.listFileCheckouts.mockResolvedValue({
       checkouts: [
         {
