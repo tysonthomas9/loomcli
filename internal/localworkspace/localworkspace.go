@@ -168,12 +168,21 @@ func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defau
 	return err
 }
 
-// EnsureDetachedGitWorktreeAtPRHead creates or updates a detached git worktree
-// at targetPath for the fetched PR head.
 // prWorktreeLocks serializes EnsureDetachedGitWorktreeAtPRHead per target path
 // within a process, so a second concurrent call for the same PR can't tear down
 // (worktree remove --force) a checkout the first call is actively serving.
 var prWorktreeLocks sync.Map
+
+// PRHeadChangedError reports that the fetched PR tip no longer matches the
+// expected head. The target worktree is left untouched when this is returned.
+type PRHeadChangedError struct {
+	ExpectedSHA string
+	TipSHA      string
+}
+
+func (e *PRHeadChangedError) Error() string {
+	return fmt.Sprintf("fetched PR tip %s does not match expected head %s", e.TipSHA, e.ExpectedSHA)
+}
 
 // validatePRWorktreeInputs checks the required inputs and returns the
 // effective remote name (default origin).
@@ -194,6 +203,8 @@ func validatePRWorktreeInputs(repoPath, targetPath, remoteName string, prNumber 
 	return remoteName, nil
 }
 
+// EnsureDetachedGitWorktreeAtPRHead creates or updates a detached git worktree
+// at targetPath when the fetched PR tip matches the expected head.
 func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, prNumber int, headSHA string) (string, error) {
 	remoteName, err := validatePRWorktreeInputs(repoPath, targetPath, remoteName, prNumber)
 	if err != nil {
@@ -211,24 +222,17 @@ func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, 
 		return "", fmt.Errorf("fetch PR #%d head from %q: %w", prNumber, remoteName, err)
 	}
 
-	// Pin to the exact reviewed sha when it survived the fetch; otherwise fall
-	// back to the fetched tip (e.g. the requested sha was orphaned by a force
-	// push). The actually-checked-out sha is returned so the caller can detect
-	// the substitution and tell the user which head was reviewed.
-	checkout := checkoutRef
-	headSHA = strings.TrimSpace(headSHA)
-	if headSHA != "" {
-		if _, err := runGit(repoPath, "rev-parse", "--verify", headSHA+"^{commit}"); err == nil {
-			checkout = headSHA
-		}
-	}
-	expectOut, err := runGit(repoPath, "rev-parse", "--verify", checkout+"^{commit}")
+	tipOut, err := runGit(repoPath, "rev-parse", "--verify", checkoutRef+"^{commit}")
 	if err != nil {
-		return "", fmt.Errorf("resolve PR #%d checkout %q: %w", prNumber, checkout, err)
+		return "", fmt.Errorf("resolve PR #%d fetched tip %q: %w", prNumber, checkoutRef, err)
 	}
-	expectHEAD := strings.TrimSpace(expectOut)
+	tipSHA := strings.TrimSpace(tipOut)
+	expectedSHA := strings.TrimSpace(headSHA)
+	if !strings.EqualFold(tipSHA, expectedSHA) {
+		return tipSHA, &PRHeadChangedError{ExpectedSHA: expectedSHA, TipSHA: tipSHA}
+	}
 
-	return syncPRWorktree(repoPath, targetPath, checkout, expectHEAD)
+	return syncPRWorktree(repoPath, targetPath, checkoutRef, tipSHA)
 }
 
 // syncPRWorktree materializes checkout at targetPath: create when absent,

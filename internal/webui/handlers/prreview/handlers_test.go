@@ -1090,11 +1090,11 @@ func TestGetPullRequestCanonicalizesCasing(t *testing.T) {
 }
 
 func TestReviewerAgentNameSanitizesOwnerAndRepo(t *testing.T) {
-	if got := reviewerAgentName("OpenAI.Inc", "Hello.World_repo", 7); got != "review-openai-inc-hello-world-repo-pr-7" {
-		t.Fatalf("reviewerAgentName() = %q, want review-openai-inc-hello-world-repo-pr-7", got)
+	if got := reviewerAgentName("OpenAI.Inc", "Hello.World_repo", 7); got != "review-openai-inc-hello-world-repo-14113012-pr-7" {
+		t.Fatalf("reviewerAgentName() = %q, want sanitized name with canonical identity hash", got)
 	}
-	if got := reviewerAgentName("Octocat", "...///", 7); got != "review-octocat-repo-pr-7" {
-		t.Fatalf("reviewerAgentName(empty segment) = %q, want review-octocat-repo-pr-7", got)
+	if got := reviewerAgentName("Octocat", "...///", 7); got != "review-octocat-repo-b990e831-pr-7" {
+		t.Fatalf("reviewerAgentName(empty segment) = %q, want fallback segment with identity hash", got)
 	}
 }
 
@@ -1106,8 +1106,33 @@ func TestReviewerAgentNameIncludesOwnerIdentity(t *testing.T) {
 	}
 }
 
+func TestReviewerAgentNameSeparatesLossySanitizationCollisions(t *testing.T) {
+	dotted := reviewerAgentName("org-a", "api.v2", 7)
+	dashed := reviewerAgentName("org-a", "api-v2", 7)
+	if dotted == dashed {
+		t.Fatalf("reviewer names collide after sanitization: %q", dotted)
+	}
+	if !strings.Contains(dotted, "-a7549c10-pr-7") || !strings.Contains(dashed, "-6a12be2d-pr-7") {
+		t.Fatalf("reviewer names lack canonical identity hashes: %q, %q", dotted, dashed)
+	}
+}
+
+func TestReviewerAgentNameSeparatesTruncatedPrefixCollisions(t *testing.T) {
+	ownerA := strings.Repeat("owner", 30) + "a"
+	ownerB := strings.Repeat("owner", 30) + "b"
+	repo := strings.Repeat("repository", 20)
+	if oldA, oldB := intermediateReviewerAgentName(ownerA, repo, 7), intermediateReviewerAgentName(ownerB, repo, 7); oldA != oldB {
+		t.Fatalf("test inputs do not collide in the intermediate shape: %q, %q", oldA, oldB)
+	}
+	if nameA, nameB := reviewerAgentName(ownerA, repo, 7), reviewerAgentName(ownerB, repo, 7); nameA == nameB {
+		t.Fatalf("hashed reviewer names collide after truncation: %q", nameA)
+	}
+}
+
 func TestReviewerAgentNameTruncatesToStoredNameLimit(t *testing.T) {
-	name := reviewerAgentName(strings.Repeat("owner-", 40), strings.Repeat("repo-", 40), 123)
+	owner := strings.Repeat("owner-", 40)
+	repo := strings.Repeat("repo-", 40)
+	name := reviewerAgentName(owner, repo, 123)
 	if len(name) > reviewerAgentNameMaxLen {
 		t.Fatalf("reviewerAgentName length = %d, want <= %d: %q", len(name), reviewerAgentNameMaxLen, name)
 	}
@@ -1116,6 +1141,9 @@ func TestReviewerAgentNameTruncatesToStoredNameLimit(t *testing.T) {
 	}
 	if !strings.HasPrefix(name, "review-") || !strings.HasSuffix(name, "-pr-123") {
 		t.Fatalf("reviewerAgentName() = %q, want preserved prefix and suffix", name)
+	}
+	if !strings.HasSuffix(name, "-"+reviewerIdentityHash(owner, repo)+"-pr-123") {
+		t.Fatalf("reviewerAgentName() = %q, want hash segment before PR suffix", name)
 	}
 	if strings.Contains(name, "--") {
 		t.Fatalf("reviewerAgentName() = %q, want segments not ending in dashes", name)
@@ -1130,6 +1158,9 @@ func TestLegacyReviewerAgentNameUsesOldRepoOnlyShape(t *testing.T) {
 	want := "review-" + strings.Repeat("a", legacyReviewerRepoSegmentMaxLen-1) + "-pr-7"
 	if got := legacyReviewerAgentName(longRepo, 7); got != want {
 		t.Fatalf("legacyReviewerAgentName(truncated) = %q, want %q", got, want)
+	}
+	if got := intermediateReviewerAgentName("OpenAI.Inc", "Hello.World_repo", 7); got != "review-openai-inc-hello-world-repo-pr-7" {
+		t.Fatalf("intermediateReviewerAgentName() = %q, want owner-inclusive unhashed shape", got)
 	}
 }
 
@@ -1447,7 +1478,7 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	}
 }
 
-func TestEnsureReviewerRejectsSubstitutedHead(t *testing.T) {
+func TestEnsureReviewerRejectsChangedFetchedTip(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	workspacePath := t.TempDir()
 	repoPath := filepath.Join(workspacePath, "hello")
@@ -1463,7 +1494,10 @@ func TestEnsureReviewerRejectsSubstitutedHead(t *testing.T) {
 		if headSHA != "ABC123" {
 			t.Fatalf("checkout head sha = %q, want ABC123", headSHA)
 		}
-		return " def456 ", nil
+		return "def456", &localworkspace.PRHeadChangedError{
+			ExpectedSHA: headSHA,
+			TipSHA:      "def456",
+		}
 	}
 
 	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)

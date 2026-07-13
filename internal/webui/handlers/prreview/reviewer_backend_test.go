@@ -258,34 +258,44 @@ func TestEnsureReviewerAgentMigratesExistingLeadRole(t *testing.T) {
 	}
 }
 
-func TestEnsureReviewerAgentRetiresLegacyNamedAgent(t *testing.T) {
+func TestEnsureReviewerAgentRetiresBothLegacyNamedAgents(t *testing.T) {
+	const owner = "octocat"
 	const repo = "hello"
 	const number = 7
 	ctx := context.Background()
 	env := newBackendTestEnv(t, "claude")
-	legacyName := legacyReviewerAgentName(repo, number)
-	currentName := reviewerAgentName("octocat", repo, number)
-	env.seedLegacyReviewer(t, legacyName, "codex")
-	if _, err := env.store.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: prReviewTestWorkspace,
-		SessionID:    "legacy-orch",
-		AgentID:      legacyName,
-		Kind:         domain.AgentSessionKindOrchestration,
-		Status:       domain.AgentSessionRunning,
-		Metadata: map[string]string{
-			"lead_runtime_provider":     "codex",
-			"codex_app_server_endpoint": "unix:///tmp/legacy.sock",
-			"source":                    "web-terminal",
-		},
-	}); err != nil {
-		t.Fatalf("create legacy orchestration session: %v", err)
+	legacyNames := []string{
+		legacyReviewerAgentName(repo, number),
+		intermediateReviewerAgentName(owner, repo, number),
+	}
+	legacySessionIDs := []string{"legacy-orch-1", "legacy-orch-2"}
+	currentName := reviewerAgentName(owner, repo, number)
+	for i, legacyName := range legacyNames {
+		env.seedLegacyReviewer(t, legacyName, "codex")
+		if _, err := env.store.AgentSessions().Create(ctx, store.AgentSessionCreate{
+			WorkspaceKey: prReviewTestWorkspace,
+			SessionID:    legacySessionIDs[i],
+			AgentID:      legacyName,
+			Kind:         domain.AgentSessionKindOrchestration,
+			Status:       domain.AgentSessionRunning,
+			Metadata: map[string]string{
+				"lead_runtime_provider":     "codex",
+				"codex_app_server_endpoint": "unix:///tmp/legacy.sock",
+				"source":                    "web-terminal",
+			},
+		}); err != nil {
+			t.Fatalf("create legacy orchestration session: %v", err)
+		}
 	}
 	env.term.tabs = []tabmeta.TabMetadata{
-		{SessionName: "agent-legacy-reviewer", Kind: terminalKindAgent, AgentID: legacyName, PTYAlive: true},
+		{SessionName: "agent-repo-only-reviewer", Kind: terminalKindAgent, AgentID: legacyNames[0], PTYAlive: true},
+		{SessionName: "agent-unhashed-reviewer", Kind: terminalKindAgent, AgentID: legacyNames[1], PTYAlive: true},
 		{SessionName: "agent-current-reviewer", Kind: terminalKindAgent, AgentID: currentName, PTYAlive: true},
 	}
 
-	if err := env.module.ensureReviewerAgentAndRetireLegacy(ctx, prReviewTestWorkspace, currentName, repo, number); err != nil {
+	if err := env.module.ensureReviewerAgentAndRetireLegacy(
+		ctx, prReviewTestWorkspace, currentName, owner, repo, number,
+	); err != nil {
 		t.Fatalf("ensureReviewerAgentAndRetireLegacy: %v", err)
 	}
 
@@ -293,24 +303,32 @@ func TestEnsureReviewerAgentRetiresLegacyNamedAgent(t *testing.T) {
 	if current.Backend != "claude" || current.RoleName != reviewerRoleName {
 		t.Fatalf("current agent = backend:%q role:%q, want claude/%s", current.Backend, current.RoleName, reviewerRoleName)
 	}
-	if _, err := env.store.Agents().Get(ctx, prReviewTestWorkspace, legacyName); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("legacy agent lookup error = %v, want ErrNotFound", err)
+	for _, legacyName := range legacyNames {
+		if _, err := env.store.Agents().Get(ctx, prReviewTestWorkspace, legacyName); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("legacy agent %q lookup error = %v, want ErrNotFound", legacyName, err)
+		}
 	}
-	if len(env.term.deleted) != 1 || env.term.deleted[0] != "agent-legacy-reviewer" {
-		t.Fatalf("deleted tabs = %v, want only legacy reviewer tab", env.term.deleted)
+	deleted := make(map[string]bool, len(env.term.deleted))
+	for _, sessionName := range env.term.deleted {
+		deleted[sessionName] = true
 	}
-	sess, err := env.store.AgentSessions().Get(ctx, prReviewTestWorkspace, "legacy-orch")
-	if err != nil {
-		t.Fatalf("get legacy session: %v", err)
+	if len(env.term.deleted) != 2 || !deleted["agent-repo-only-reviewer"] || !deleted["agent-unhashed-reviewer"] {
+		t.Fatalf("deleted tabs = %v, want both legacy reviewer tabs", env.term.deleted)
 	}
-	if _, ok := sess.Metadata["lead_runtime_provider"]; ok {
-		t.Fatalf("legacy runtime metadata survived retirement: %v", sess.Metadata)
-	}
-	if _, ok := sess.Metadata["codex_app_server_endpoint"]; ok {
-		t.Fatalf("legacy codex metadata survived retirement: %v", sess.Metadata)
-	}
-	if _, ok := sess.Metadata["source"]; !ok {
-		t.Fatalf("non-runtime metadata was cleared: %v", sess.Metadata)
+	for i := range legacyNames {
+		sess, err := env.store.AgentSessions().Get(ctx, prReviewTestWorkspace, legacySessionIDs[i])
+		if err != nil {
+			t.Fatalf("get legacy session: %v", err)
+		}
+		if _, ok := sess.Metadata["lead_runtime_provider"]; ok {
+			t.Fatalf("legacy runtime metadata survived retirement: %v", sess.Metadata)
+		}
+		if _, ok := sess.Metadata["codex_app_server_endpoint"]; ok {
+			t.Fatalf("legacy codex metadata survived retirement: %v", sess.Metadata)
+		}
+		if _, ok := sess.Metadata["source"]; !ok {
+			t.Fatalf("non-runtime metadata was cleared: %v", sess.Metadata)
+		}
 	}
 }
 
@@ -321,7 +339,7 @@ func TestEnsureReviewerAgentWithoutLegacyNameIsNoop(t *testing.T) {
 	currentName := reviewerAgentName("octocat", repo, number)
 
 	if err := env.module.ensureReviewerAgentAndRetireLegacy(
-		context.Background(), prReviewTestWorkspace, currentName, repo, number,
+		context.Background(), prReviewTestWorkspace, currentName, "octocat", repo, number,
 	); err != nil {
 		t.Fatalf("ensureReviewerAgentAndRetireLegacy: %v", err)
 	}
@@ -336,7 +354,7 @@ func TestEnsureReviewerAgentWithoutLegacyNameIsNoop(t *testing.T) {
 
 func TestRetireLegacyReviewerSkipsLookupWhenNamesCoincide(t *testing.T) {
 	module := &Module{}
-	if err := module.retireLegacyReviewer(context.Background(), prReviewTestWorkspace, "same", "same"); err != nil {
+	if err := module.retireLegacyReviewer(context.Background(), prReviewTestWorkspace, "same", "same", "same"); err != nil {
 		t.Fatalf("retireLegacyReviewer: %v", err)
 	}
 }

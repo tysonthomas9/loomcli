@@ -3,6 +3,7 @@ package prreview
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,7 @@ import (
 
 const reviewerAgentNameMaxLen = 100
 const legacyReviewerRepoSegmentMaxLen = 48
+const reviewerIdentityHashLen = 8
 const reviewerRoleName = "pr-reviewer"
 const reviewerPromptFile = "builtin:pr-review-checkout"
 const reviewerRoleDescription = "PR review checkout terminal agent"
@@ -34,7 +36,29 @@ const reviewerRoleDescription = "PR review checkout terminal agent"
 // reviewer's agent name are the reviewer's live PTYs.
 const terminalKindAgent = "agent"
 
+// reviewerAgentName expects the canonical owner/repo pair returned by the
+// repository membership check.
 func reviewerAgentName(owner, repo string, number int) string {
+	const prefix = "review-"
+	suffix := "-pr-" + strconv.Itoa(number)
+	identityHash := reviewerIdentityHash(owner, repo)
+	segmentBudget := reviewerAgentNameMaxLen - len(prefix) - len(suffix) - len(identityHash) - 2
+	ownerSegment, repoSegment := fitReviewerAgentSegments(
+		safeAgentSegment(owner),
+		safeAgentSegment(repo),
+		segmentBudget,
+	)
+	return prefix + ownerSegment + "-" + repoSegment + "-" + identityHash + suffix
+}
+
+func reviewerIdentityHash(owner, repo string) string {
+	sum := sha256.Sum256([]byte(owner + "/" + repo))
+	return hex.EncodeToString(sum[:])[:reviewerIdentityHashLen]
+}
+
+// intermediateReviewerAgentName reproduces the owner-inclusive shape used
+// before reviewer identities gained a collision-resistant hash.
+func intermediateReviewerAgentName(owner, repo string, number int) string {
 	const prefix = "review-"
 	suffix := "-pr-" + strconv.Itoa(number)
 	segmentBudget := reviewerAgentNameMaxLen - len(prefix) - len(suffix) - 1
@@ -160,7 +184,9 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := m.ensureReviewerAgentAndRetireLegacy(r.Context(), ws, agentName, params.repo, params.number); err != nil {
+	if err := m.ensureReviewerAgentAndRetireLegacy(
+		r.Context(), ws, agentName, params.owner, params.repo, params.number,
+	); err != nil {
 		slog.Error("pr-review: ensure reviewer agent failed", "ws", ws, "agent", agentName, "err", err)
 		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to prepare the reviewer agent", false)
 		return
@@ -230,6 +256,11 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 		writePRReviewErrorCode(w, http.StatusInternalServerError, "worktree_failed", clientMsg, false)
 		return "", false
 	}
+	stale := func() (string, bool) {
+		writePRReviewErrorCode(w, http.StatusConflict, "stale_subject",
+			"pull request head changed while preparing the reviewer; refresh and retry", true)
+		return "", false
+	}
 	// Isolated PR-checkout namespace (.loom/pr-worktrees/<repo>/pr-N), distinct
 	// from the agent-worktree tree so PR review checkouts never collide with a
 	// working agent's branch worktree.
@@ -242,13 +273,15 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 		checkoutPRHead = localworkspace.EnsureDetachedGitWorktreeAtPRHead
 	}
 	checkedOutSHA, err := checkoutPRHead(spec.repoPath, target, spec.remote, spec.params.number, spec.headSHA)
+	var changed *localworkspace.PRHeadChangedError
+	if errors.As(err, &changed) {
+		return stale()
+	}
 	if err != nil {
 		return fail("prepare worktree failed", err, "failed to prepare the PR review worktree")
 	}
 	if !strings.EqualFold(strings.TrimSpace(checkedOutSHA), strings.TrimSpace(spec.headSHA)) {
-		writePRReviewErrorCode(w, http.StatusConflict, "stale_subject",
-			"pull request head changed while preparing the reviewer; refresh and retry", true)
-		return "", false
+		return stale()
 	}
 	// The remembered worktree IS the reviewer's launch cwd — if we can't persist
 	// it the agent would boot in the wrong directory, so this is a hard failure.
@@ -302,13 +335,16 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) 
 
 func (m *Module) ensureReviewerAgentAndRetireLegacy(
 	ctx context.Context,
-	ws, agentName, repo string,
+	ws, agentName, owner, repo string,
 	number int,
 ) error {
 	if err := m.ensureReviewerAgent(ctx, ws, agentName); err != nil {
 		return err
 	}
-	return m.retireLegacyReviewer(ctx, ws, agentName, legacyReviewerAgentName(repo, number))
+	return m.retireLegacyReviewer(ctx, ws, agentName,
+		legacyReviewerAgentName(repo, number),
+		intermediateReviewerAgentName(owner, repo, number),
+	)
 }
 
 func reviewerAgentCurrent(agent *domain.Agent, backend, roleName string) bool {
@@ -316,20 +352,34 @@ func reviewerAgentCurrent(agent *domain.Agent, backend, roleName string) bool {
 		strings.TrimSpace(agent.RoleName) == roleName
 }
 
-func (m *Module) retireLegacyReviewer(ctx context.Context, ws, agentName, legacyAgentName string) error {
-	if legacyAgentName == agentName {
-		return nil
+func (m *Module) retireLegacyReviewer(ctx context.Context, ws, agentName string, legacyAgentNames ...string) error {
+	seen := make(map[string]struct{}, len(legacyAgentNames))
+	for _, legacyAgentName := range legacyAgentNames {
+		if legacyAgentName == agentName {
+			continue
+		}
+		if _, duplicate := seen[legacyAgentName]; duplicate {
+			continue
+		}
+		seen[legacyAgentName] = struct{}{}
+		if err := m.retireReviewerAgent(ctx, ws, legacyAgentName); err != nil {
+			return err
+		}
 	}
-	if _, err := m.store.Agents().Get(ctx, ws, legacyAgentName); err != nil {
+	return nil
+}
+
+func (m *Module) retireReviewerAgent(ctx context.Context, ws, agentName string) error {
+	if _, err := m.store.Agents().Get(ctx, ws, agentName); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil
 		}
 		return fmt.Errorf("load legacy reviewer agent: %w", err)
 	}
-	if err := m.stopAndClearReviewerRuntime(ctx, ws, legacyAgentName); err != nil {
+	if err := m.stopAndClearReviewerRuntime(ctx, ws, agentName); err != nil {
 		return err
 	}
-	if err := m.store.Agents().Delete(ctx, ws, legacyAgentName); err != nil {
+	if err := m.store.Agents().Delete(ctx, ws, agentName); err != nil {
 		return fmt.Errorf("delete legacy reviewer agent: %w", err)
 	}
 	return nil
