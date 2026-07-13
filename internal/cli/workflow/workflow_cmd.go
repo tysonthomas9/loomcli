@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -37,6 +38,7 @@ var (
 	workflowVersionsJSON bool
 	workflowReadyzJSON   bool
 	workflowDigestJSON   bool
+	workflowDigestFiles  []string
 )
 
 var (
@@ -117,13 +119,21 @@ var workflowDigestCmd = &cobra.Command{
 	Use:   "digest <workflow>",
 	Short: "Print the canonical source digest of a built-in workflow",
 	Long: `Print the canonical source digest (workflows.SourceDigest) of a built-in
-workflow's embedded source tree.
+workflow's source tree.
 
 This is the SAME digest serve's builtin self-heal (EnsureBuiltinWorkflow)
 computes, so out-of-band registrations that stamp it — e.g.
 loom driver register --source-digest "$(loom workflow digest epic-runner)" —
 hit the self-heal's exact-match fast path instead of logging digest drift.
-Purely local: reads only the sources embedded in this binary.`,
+
+Without --file the digest covers the sources embedded in THIS binary. A
+registration should attest the bytes it actually STAGED, so register flows
+pass --file <spec-key>=<path> for every source file in the bundle (the key
+set must exactly match the workflow's source set); the digest then hashes
+the staged contents under the canonical keys. Staged bytes identical to the
+embedded sources produce the embedded digest (fast path); modified bytes
+produce an honestly different digest (serve logs drift instead of silently
+mislabeling the version). Purely local: no store or workspace is opened.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runWorkflowDigest,
 }
@@ -154,6 +164,7 @@ func init() {
 	workflowVersionsCmd.Flags().BoolVar(&workflowVersionsJSON, "json", false, "JSON output")
 	workflowReadyzCmd.Flags().BoolVar(&workflowReadyzJSON, "json", false, "JSON output")
 	workflowDigestCmd.Flags().BoolVar(&workflowDigestJSON, "json", false, "JSON output")
+	workflowDigestCmd.Flags().StringArrayVar(&workflowDigestFiles, "file", nil, "Staged source to hash as <spec-key>=<path> (repeatable; must cover the workflow's full source set)")
 
 	workflowCmd.AddCommand(workflowCloneCmd, workflowBuildCmd, workflowApproveCmd, workflowUnapproveCmd, workflowActivateCmd, workflowRunCmd, workflowListCmd, workflowVersionsCmd, workflowReadyzCmd, workflowDigestCmd)
 	cli.RegisterCommand(workflowCmd)
@@ -551,8 +562,9 @@ func packageRootAvailable(envRoot, fallback string) bool {
 }
 
 // runWorkflowDigest prints the canonical source digest of a built-in
-// workflow's embedded source tree. It never opens a store or workspace: the
-// digest is a pure function of the sources compiled into this binary, so the
+// workflow: over the sources compiled into this binary, or — with --file —
+// over the caller's STAGED copies of those sources, so a registration attests
+// the bytes it actually ships. It never opens a store or workspace, so the
 // command works before any stack is up (the e2e register scripts call it to
 // stamp `loom driver register --source-digest`).
 func runWorkflowDigest(cmd *cobra.Command, args []string) error {
@@ -561,7 +573,15 @@ func runWorkflowDigest(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return fmt.Errorf("unknown built-in workflow %q (known: %s)", name, strings.Join(workflows.BuiltinWorkflowNames(), ", "))
 	}
-	digest := workflows.SourceDigest(spec.Files)
+	files := spec.Files
+	if len(workflowDigestFiles) > 0 {
+		staged, err := readDigestFileOverrides(spec, workflowDigestFiles)
+		if err != nil {
+			return err
+		}
+		files = staged
+	}
+	digest := workflows.SourceDigest(files)
 	if workflowDigestJSON {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{
 			"workflow":      name,
@@ -570,4 +590,53 @@ func runWorkflowDigest(cmd *cobra.Command, args []string) error {
 	}
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), digest)
 	return nil
+}
+
+// readDigestFileOverrides resolves --file <spec-key>=<path> pairs into the
+// source map to hash. The provided key set must EXACTLY equal the workflow's
+// spec key set — a missing, unknown, or duplicated key would re-introduce the
+// file-set drift the canonical recipe exists to prevent — while the CONTENT
+// comes from the staged files, so the stamped digest attests the bytes the
+// registration actually ships (not whatever this binary happens to embed).
+func readDigestFileOverrides(spec workflows.Spec, pairs []string) (map[string]string, error) {
+	out := make(map[string]string, len(pairs))
+	for _, pair := range pairs {
+		key, path, ok := strings.Cut(pair, "=")
+		key = strings.TrimSpace(key)
+		path = strings.TrimSpace(path)
+		if !ok || key == "" || path == "" {
+			return nil, fmt.Errorf("--file must be <spec-key>=<path>, got %q", pair)
+		}
+		if _, known := spec.Files[key]; !known {
+			return nil, fmt.Errorf("--file key %q is not part of this workflow's source set (want: %s)", key, strings.Join(sortedSpecKeys(spec), ", "))
+		}
+		if _, dup := out[key]; dup {
+			return nil, fmt.Errorf("duplicate --file key %q", key)
+		}
+		content, err := os.ReadFile(path) //nolint:gosec // operator-provided CLI path, read-only
+		if err != nil {
+			return nil, fmt.Errorf("read --file %s: %w", key, err)
+		}
+		out[key] = string(content)
+	}
+	if len(out) != len(spec.Files) {
+		missing := make([]string, 0, len(spec.Files))
+		for key := range spec.Files {
+			if _, ok := out[key]; !ok {
+				missing = append(missing, key)
+			}
+		}
+		sort.Strings(missing)
+		return nil, fmt.Errorf("--file must cover the workflow's full source set; missing: %s", strings.Join(missing, ", "))
+	}
+	return out, nil
+}
+
+func sortedSpecKeys(spec workflows.Spec) []string {
+	keys := make([]string, 0, len(spec.Files))
+	for key := range spec.Files {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

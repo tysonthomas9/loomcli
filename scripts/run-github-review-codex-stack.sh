@@ -296,15 +296,18 @@ register_review_workflow() {
   local build_dir digest
   build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-github-review-dist.XXXXXX")"
   write_review_dist "$build_dir"
-  # Canonical source digest from the container's loom binary (workflows.SourceDigest)
-  # — one recipe shared with serve's builtin self-heal; see the slack stack script.
-  digest="$(podman exec "$CONTAINER" loom workflow digest "$A1_WORKFLOW_NAME")"
 
   log "registering builtin ${A1_WORKFLOW_NAME} workflow"
   # The container is recreated fresh each run (podman rm -f then run), so the
   # dist dir never pre-exists; mkdir -p is enough and we avoid any `rm`.
   podman exec "$CONTAINER" mkdir -p "$CONTAINER_REVIEW_DIST"
   podman cp "${build_dir}/." "${CONTAINER}:${CONTAINER_REVIEW_DIST}/"
+  # Canonical source digest over the STAGED sources (workflows.SourceDigest via
+  # the container's loom binary) — attests the bytes this registration ships;
+  # see the slack stack script for the full rationale.
+  digest="$(podman exec "$CONTAINER" loom workflow digest "$A1_WORKFLOW_NAME" \
+    --file "workflows/github-review-agent.ts=${CONTAINER_REVIEW_DIST}/workflows/github-review-agent.mjs" \
+    --file "workflows/github-review-task-runner.ts=${CONTAINER_REVIEW_DIST}/workflows/github-review-task-runner.mjs")"
   podman exec \
     -w "$CONTAINER_DRIVER_WORKDIR" \
     -e LOOM_CONFIG_DIR=/root/.loom-config \

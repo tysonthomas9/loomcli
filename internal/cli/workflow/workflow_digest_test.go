@@ -5,6 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -100,5 +103,95 @@ func TestWorkflowDigestUnknownWorkflowErrors(t *testing.T) {
 	err := runWorkflowDigest(cmd, []string{"definitely-not-a-workflow"})
 	if err == nil || !strings.Contains(err.Error(), "unknown built-in workflow") {
 		t.Fatalf("err = %v, want unknown built-in workflow error", err)
+	}
+}
+
+// stageSpecFiles writes every spec source to dir and returns --file pairs
+// mapping each spec key to its staged copy (mirroring what the e2e stack
+// scripts stage into the container before registering).
+func stageSpecFiles(t *testing.T, spec workflows.Spec) []string {
+	t.Helper()
+	dir := t.TempDir()
+	pairs := make([]string, 0, len(spec.Files))
+	i := 0
+	for key, content := range spec.Files {
+		path := filepath.Join(dir, fmt.Sprintf("staged-%d.mjs", i))
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("stage %s: %v", key, err)
+		}
+		pairs = append(pairs, key+"="+path)
+		i++
+	}
+	return pairs
+}
+
+// TestWorkflowDigestFileOverridesMatchEmbedded: staged bytes identical to the
+// embedded sources must produce the embedded digest — the register flow's
+// stamped digest then hits the self-heal's exact-match fast path.
+func TestWorkflowDigestFileOverridesMatchEmbedded(t *testing.T) {
+	spec, ok := workflows.BuiltinWorkflow(workflows.BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("epic-runner builtin missing")
+	}
+	workflowDigestFiles = stageSpecFiles(t, spec)
+	t.Cleanup(func() { workflowDigestFiles = nil })
+	got := runDigestCommand(t, []string{workflows.BuiltinEpicRunnerWorkflowName})
+	if want := workflows.SourceDigest(spec.Files); got != want {
+		t.Fatalf("staged digest = %s, embedded = %s; identical bytes must produce identical digests", got, want)
+	}
+}
+
+// TestWorkflowDigestFileOverridesAttestStagedBytes: modified staged content
+// must produce a DIFFERENT digest than the embedded sources — the stamped
+// digest attests what is actually shipped, never mislabeling modified sources
+// as the embedded version.
+func TestWorkflowDigestFileOverridesAttestStagedBytes(t *testing.T) {
+	spec, ok := workflows.BuiltinWorkflow(workflows.BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("epic-runner builtin missing")
+	}
+	pairs := stageSpecFiles(t, spec)
+	// Tamper with the first staged file.
+	path := strings.SplitN(pairs[0], "=", 2)[1]
+	if err := os.WriteFile(path, []byte("// modified\n"), 0o644); err != nil {
+		t.Fatalf("modify staged file: %v", err)
+	}
+	workflowDigestFiles = pairs
+	t.Cleanup(func() { workflowDigestFiles = nil })
+	got := runDigestCommand(t, []string{workflows.BuiltinEpicRunnerWorkflowName})
+	if want := workflows.SourceDigest(spec.Files); got == want {
+		t.Fatalf("staged digest equals embedded digest %s despite modified content; digest must attest staged bytes", want)
+	}
+}
+
+// TestWorkflowDigestFileOverridesRequireFullSourceSet: the --file key set must
+// exactly cover the workflow's source set — missing or unknown keys would
+// re-introduce the file-set drift the canonical recipe exists to prevent.
+func TestWorkflowDigestFileOverridesRequireFullSourceSet(t *testing.T) {
+	spec, ok := workflows.BuiltinWorkflow(workflows.BuiltinEpicRunnerWorkflowName)
+	if !ok {
+		t.Fatal("epic-runner builtin missing")
+	}
+	pairs := stageSpecFiles(t, spec)
+
+	runErr := func(files []string) error {
+		workflowDigestFiles = files
+		t.Cleanup(func() { workflowDigestFiles = nil })
+		cmd := &cobra.Command{}
+		cmd.SetOut(&bytes.Buffer{})
+		return runWorkflowDigest(cmd, []string{workflows.BuiltinEpicRunnerWorkflowName})
+	}
+
+	if err := runErr(pairs[:1]); err == nil || !strings.Contains(err.Error(), "missing:") {
+		t.Fatalf("subset --file set must error naming the missing keys, got %v", err)
+	}
+	if err := runErr([]string{"workflows/not-a-source.ts=" + strings.SplitN(pairs[0], "=", 2)[1]}); err == nil || !strings.Contains(err.Error(), "not part of this workflow's source set") {
+		t.Fatalf("unknown --file key must error, got %v", err)
+	}
+	if err := runErr([]string{"malformed-pair"}); err == nil || !strings.Contains(err.Error(), "--file must be") {
+		t.Fatalf("malformed --file pair must error, got %v", err)
+	}
+	if err := runErr(append(append([]string{}, pairs...), pairs[0])); err == nil || !strings.Contains(err.Error(), "duplicate --file key") {
+		t.Fatalf("duplicate --file key must error, got %v", err)
 	}
 }

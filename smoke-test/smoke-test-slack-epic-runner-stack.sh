@@ -600,17 +600,24 @@ register_epic_runner_workflow() {
   local build_dir digest
   build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-epic-runner-dist.XXXXXX")"
   write_epic_runner_dist "$build_dir"
-  # Canonical source digest from the container's loom binary — the SAME
-  # workflows.SourceDigest recipe serve's builtin self-heal compares against,
-  # so this registration hits the self-heal's exact-match fast path. (The old
-  # hand-rolled node hash used a different recipe — extra sdk file, unsorted —
-  # so its digests never matched the embedded ones.)
-  digest="$(podman exec "$CONTAINER" loom workflow digest epic-runner)"
 
   log "registering builtin epic-runner workflow"
   podman exec "$CONTAINER" rm -rf "$CONTAINER_EPIC_RUNNER_DIST"
   podman exec "$CONTAINER" mkdir -p "$CONTAINER_EPIC_RUNNER_DIST"
   podman cp "${build_dir}/." "${CONTAINER}:${CONTAINER_EPIC_RUNNER_DIST}/"
+  # Canonical source digest over the STAGED sources, via the container's loom
+  # binary — the SAME workflows.SourceDigest recipe serve's builtin self-heal
+  # compares against. --file hashes the bytes just copied into the container,
+  # so the recorded digest attests what this registration actually ships:
+  # identical to the binary's embedded sources -> exact-match fast path;
+  # modified sources -> an honestly different digest (serve logs drift instead
+  # of silently mislabeling the version). (The old hand-rolled node hash used a
+  # different recipe — extra sdk file, unsorted — so it could never match.)
+  digest="$(podman exec "$CONTAINER" loom workflow digest epic-runner \
+    --file "workflows/epic-runner.ts=${CONTAINER_EPIC_RUNNER_DIST}/workflows/epic-runner.mjs" \
+    --file "workflows/local-task-runner.ts=${CONTAINER_EPIC_RUNNER_DIST}/workflows/local-task-runner.mjs" \
+    --file "workflows/daytona-task-runner.ts=${CONTAINER_EPIC_RUNNER_DIST}/workflows/daytona-task-runner.mjs" \
+    --file "workflows/openshell-task-runner.ts=${CONTAINER_EPIC_RUNNER_DIST}/workflows/openshell-task-runner.mjs")"
   podman exec \
     -w "$CONTAINER_DRIVER_WORKDIR" \
     -e LOOM_CONFIG_DIR=/root/.loom-config \
