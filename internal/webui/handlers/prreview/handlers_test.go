@@ -719,18 +719,42 @@ func TestGetPullRequestCanonicalizesCasing(t *testing.T) {
 	}
 }
 
-func TestReviewerAgentNameSanitizesRepo(t *testing.T) {
-	if got := reviewerAgentName("Hello.World_repo", 7); got != "review-hello-world-repo-pr-7" {
-		t.Fatalf("reviewerAgentName() = %q, want review-hello-world-repo-pr-7", got)
+func TestReviewerAgentNameSanitizesOwnerAndRepo(t *testing.T) {
+	if got := reviewerAgentName("OpenAI.Inc", "Hello.World_repo", 7); got != "review-openai-inc-hello-world-repo-pr-7" {
+		t.Fatalf("reviewerAgentName() = %q, want review-openai-inc-hello-world-repo-pr-7", got)
 	}
-	if got := reviewerAgentName("...///", 7); got != "review-repo-pr-7" {
-		t.Fatalf("reviewerAgentName(empty segment) = %q, want review-repo-pr-7", got)
+	if got := reviewerAgentName("Octocat", "...///", 7); got != "review-octocat-repo-pr-7" {
+		t.Fatalf("reviewerAgentName(empty segment) = %q, want review-octocat-repo-pr-7", got)
+	}
+}
+
+func TestReviewerAgentNameIncludesOwnerIdentity(t *testing.T) {
+	orgA := reviewerAgentName("org-a", "api", 7)
+	orgB := reviewerAgentName("org-b", "api", 7)
+	if orgA == orgB {
+		t.Fatalf("reviewer names collide: %q", orgA)
+	}
+}
+
+func TestReviewerAgentNameTruncatesToStoredNameLimit(t *testing.T) {
+	name := reviewerAgentName(strings.Repeat("owner-", 40), strings.Repeat("repo-", 40), 123)
+	if len(name) > reviewerAgentNameMaxLen {
+		t.Fatalf("reviewerAgentName length = %d, want <= %d: %q", len(name), reviewerAgentNameMaxLen, name)
+	}
+	if !service.ValidStoredAgentName.MatchString(name) {
+		t.Fatalf("reviewerAgentName() = %q, want valid stored agent name", name)
+	}
+	if !strings.HasPrefix(name, "review-") || !strings.HasSuffix(name, "-pr-123") {
+		t.Fatalf("reviewerAgentName() = %q, want preserved prefix and suffix", name)
+	}
+	if strings.Contains(name, "--") {
+		t.Fatalf("reviewerAgentName() = %q, want segments not ending in dashes", name)
 	}
 }
 
 func TestPostReviewerMessageQueuesPending(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 
 	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/messages", `{"text":"hello"}`)
 	if status != http.StatusOK {
@@ -768,7 +792,7 @@ func TestPostReviewerMessageRequiresStartedReviewer(t *testing.T) {
 
 func TestPostReviewerMessageRejectsEmptyText(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/messages", `{"text":"   "}`)
 	if status != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body %s)", status, raw)
@@ -780,7 +804,7 @@ func TestPostReviewerMessageRejectsEmptyText(t *testing.T) {
 
 func TestPostReviewerMessageUnregisteredRepoDoesNotEnqueue(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/acme/widgets/7/messages", `{"text":"hello"}`)
 	if status != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (body %s)", status, raw)
@@ -788,14 +812,14 @@ func TestPostReviewerMessageUnregisteredRepoDoesNotEnqueue(t *testing.T) {
 	if code := decodeErrorCode(t, raw); code != "repo_not_registered" {
 		t.Fatalf("code = %q, want repo_not_registered", code)
 	}
-	if queued := queuedReviewerMessagesForTest(t, h.store, reviewerAgentName("hello", 7)); len(queued) != 0 {
+	if queued := queuedReviewerMessagesForTest(t, h.store, reviewerAgentName("octocat", "hello", 7)); len(queued) != 0 {
 		t.Fatalf("queued messages = %d, want 0", len(queued))
 	}
 }
 
 func TestStreamReviewerStartingWhenNoSession(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(10*time.Millisecond, cancel)
@@ -811,7 +835,7 @@ func TestStreamReviewerStartingWhenNoSession(t *testing.T) {
 
 func TestStreamReviewerEmitsMessages(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 		leadcontrol.MetadataCodexEndpoint: "ws://codex.test",
 		leadcontrol.MetadataCodexThreadID: "thread-1",
@@ -869,7 +893,7 @@ func TestStreamReviewerEmitsMessages(t *testing.T) {
 
 func TestGetReviewerConversationStartingWhenNoSession(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/conversation")
 	if status != http.StatusOK {
@@ -891,7 +915,7 @@ func TestGetReviewerConversationStartingWhenNoSession(t *testing.T) {
 
 func TestGetReviewerConversationSnapshot(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 		leadcontrol.MetadataCodexEndpoint: "ws://codex.test",
 		leadcontrol.MetadataCodexThreadID: "thread-1",
@@ -988,7 +1012,7 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
-	agentName := reviewerAgentName("hello", 7)
+	agentName := reviewerAgentName("octocat", "hello", 7)
 	if !decoded.Success || decoded.Data.AgentName != agentName || decoded.Data.CheckedOutSha != headSHA || !decoded.Data.Seeded {
 		t.Fatalf("response = %+v, want agent %s sha %s seeded", decoded, agentName, headSHA)
 	}
@@ -1066,7 +1090,7 @@ func TestGetPullRequestEgressUnavailable(t *testing.T) {
 	})
 }
 
-func createReviewerAgentForTest(t *testing.T, h *prReviewHarness, repo string, number int) string {
+func createReviewerAgentForTest(t *testing.T, h *prReviewHarness, owner, repo string, number int) string {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := h.store.Roles().Create(ctx, store.RoleCreate{
@@ -1078,7 +1102,7 @@ func createReviewerAgentForTest(t *testing.T, h *prReviewHarness, repo string, n
 	}); err != nil {
 		t.Fatalf("Create reviewer role: %v", err)
 	}
-	agentName := reviewerAgentName(repo, number)
+	agentName := reviewerAgentName(owner, repo, number)
 	if _, err := h.store.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: prReviewTestWorkspace,
 		Name:         agentName,

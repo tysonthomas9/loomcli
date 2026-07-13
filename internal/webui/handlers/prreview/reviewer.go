@@ -23,7 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
-const reviewerAgentSegmentMaxLen = 48
+const reviewerAgentNameMaxLen = 100
 const reviewerRoleName = "pr-reviewer"
 const reviewerPromptFile = "builtin:pr-review-checkout"
 const reviewerRoleDescription = "PR review checkout terminal agent"
@@ -33,8 +33,37 @@ const reviewerRoleDescription = "PR review checkout terminal agent"
 // reviewer's agent name are the reviewer's live PTYs.
 const terminalKindAgent = "agent"
 
-func reviewerAgentName(repo string, number int) string {
-	return "review-" + safeAgentSegment(repo) + "-pr-" + strconv.Itoa(number)
+func reviewerAgentName(owner, repo string, number int) string {
+	const prefix = "review-"
+	suffix := "-pr-" + strconv.Itoa(number)
+	segmentBudget := reviewerAgentNameMaxLen - len(prefix) - len(suffix) - 1
+	ownerSegment, repoSegment := fitReviewerAgentSegments(
+		safeAgentSegment(owner),
+		safeAgentSegment(repo),
+		segmentBudget,
+	)
+	return prefix + ownerSegment + "-" + repoSegment + suffix
+}
+
+func fitReviewerAgentSegments(owner, repo string, budget int) (string, string) {
+	if len(owner)+len(repo) <= budget {
+		return owner, repo
+	}
+	ownerLimit := budget / 2
+	repoLimit := budget - ownerLimit
+	if len(owner) < ownerLimit {
+		repoLimit += ownerLimit - len(owner)
+		ownerLimit = len(owner)
+	}
+	if len(repo) < repoLimit {
+		ownerLimit += repoLimit - len(repo)
+		repoLimit = len(repo)
+	}
+	return truncateAgentSegment(owner, ownerLimit), truncateAgentSegment(repo, repoLimit)
+}
+
+func truncateAgentSegment(segment string, limit int) string {
+	return strings.TrimRight(segment[:limit], "-")
 }
 
 func safeAgentSegment(value string) string {
@@ -54,9 +83,6 @@ func safeAgentSegment(value string) string {
 		}
 	}
 	out := strings.Trim(b.String(), "-")
-	if len(out) > reviewerAgentSegmentMaxLen {
-		out = strings.Trim(out[:reviewerAgentSegmentMaxLen], "-")
-	}
 	if out == "" {
 		return "repo"
 	}
@@ -114,7 +140,7 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentName := reviewerAgentName(params.repo, params.number)
+	agentName := reviewerAgentName(params.owner, params.repo, params.number)
 	checkedOutSHA, ok := prepareReviewerCheckout(w, reviewerCheckoutSpec{
 		ws: ws, agentName: agentName, params: params,
 		repoPath: repoPath, remote: remote, repoName: repoName, wsPath: wsPath,
@@ -413,7 +439,7 @@ func (m *Module) postReviewerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agentName := reviewerAgentName(params.repo, params.number)
+	agentName := reviewerAgentName(params.owner, params.repo, params.number)
 	if _, err := m.store.Agents().Get(r.Context(), ws, agentName); err != nil {
 		writePRReviewErrorCode(w, http.StatusNotFound, "reviewer_not_started", "reviewer has not been started for this pull request", false)
 		return
