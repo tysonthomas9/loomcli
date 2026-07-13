@@ -1464,6 +1464,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/files/stat": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get mutation metadata and a strong version for a scoped path */
+    get: operations["statScopedFile"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/files/capabilities": {
     parameters: {
       query?: never;
@@ -2174,6 +2191,19 @@ export interface components {
       success: true;
       message: string;
     };
+    FileMutationResponse: {
+      success: boolean;
+      version: string;
+    };
+    FileStatResponse: {
+      path: string;
+      is_dir: boolean;
+      /** Format: int64 */
+      size: number;
+      /** Format: date-time */
+      mod_time: string;
+      version: string;
+    };
     FileTreeEntry: {
       name: string;
       is_dir: boolean;
@@ -2198,6 +2228,7 @@ export interface components {
       size: number;
       binary: boolean;
       truncated: boolean;
+      version: string;
     };
     FileIndexResponse: {
       paths: string[];
@@ -2312,6 +2343,10 @@ export interface components {
       repo?: string;
       /** @default false */
       overwrite: boolean;
+      /** @description Required by the server; current strong version of the source path. */
+      source_version?: string;
+      /** @description Required when overwriting an existing regular file. */
+      destination_version?: string;
     };
     RuntimeReadyResponse: {
       ready: boolean;
@@ -6130,6 +6165,36 @@ export interface operations {
       };
     };
   };
+  statScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        repo?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Path metadata */
+      200: {
+        headers: {
+          /** @description Strong current path version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileStatResponse"];
+        };
+      };
+    };
+  };
   getFileCapabilities: {
     parameters: {
       query?: never;
@@ -6438,6 +6503,8 @@ export interface operations {
       /** @description File content */
       200: {
         headers: {
+          /** @description Strong SHA-256 version for the current file (not revision reads). */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -6453,7 +6520,12 @@ export interface operations {
         target?: string;
         path: string;
       };
-      header?: never;
+      header?: {
+        /** @description Optional strong version for replace/restore callers. Ordinary editor saves omit it and remain last-write-wins. */
+        "If-Match"?: string;
+        /** @description Use * for create-only writes. */
+        "If-None-Match"?: string;
+      };
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
@@ -6472,8 +6544,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["FileMutationResponse"];
         };
+      };
+      /** @description A supplied file precondition no longer matches */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -6487,7 +6566,10 @@ export interface operations {
         path: string;
         recursive?: boolean;
       };
-      header?: never;
+      header: {
+        /** @description Strong current source version from file stat/read. */
+        "If-Match": string;
+      };
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
@@ -6504,6 +6586,20 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["MessageResponse"];
         };
+      };
+      /** @description Source version no longer matches */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Source version is required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -6565,8 +6661,22 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["FileMutationResponse"];
         };
+      };
+      /** @description Source or destination version no longer matches */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description A required source or destination version is missing */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };
@@ -6634,7 +6744,11 @@ export interface operations {
       query: {
         path: string;
       };
-      header?: never;
+      header?: {
+        "If-Match"?: string;
+        /** @description Use * for create-only writes. */
+        "If-None-Match"?: string;
+      };
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
@@ -6655,7 +6769,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["FileMutationResponse"];
         };
       };
     };

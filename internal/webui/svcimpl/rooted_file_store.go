@@ -2,6 +2,7 @@ package svcimpl
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -26,7 +27,7 @@ type scopedRoot struct {
 	store       *rootedFileStore
 }
 
-func openScopedRoot(identity, rootPath string) (*scopedRoot, error) {
+func openScopedRoot(rootPath string) (*scopedRoot, error) {
 	rootPath, err := filepath.Abs(rootPath)
 	if err != nil {
 		return nil, service.ErrInternal("failed to resolve scope root", err)
@@ -57,6 +58,11 @@ func openScopedRoot(identity, rootPath string) (*scopedRoot, error) {
 		_ = root.Close()
 		return nil, service.ErrForbidden("scope root changed while it was opened")
 	}
+	identity, err := resolvedRootIdentity(rootPath, openedInfo)
+	if err != nil {
+		_ = root.Close()
+		return nil, err
+	}
 	platform, err := openRootedPlatform(rootPath, info)
 	if err != nil {
 		_ = root.Close()
@@ -67,6 +73,21 @@ func openScopedRoot(identity, rootPath string) (*scopedRoot, error) {
 		path:     rootPath,
 		store:    &rootedFileStore{root: root, platform: platform},
 	}, nil
+}
+
+func resolvedRootIdentity(rootPath string, openedInfo os.FileInfo) (string, error) {
+	resolvedRootPath, err := filepath.EvalSymlinks(rootPath)
+	if err != nil {
+		return "", service.ErrInternal("failed to resolve canonical scope root", err)
+	}
+	resolvedInfo, err := os.Stat(resolvedRootPath)
+	if err != nil {
+		return "", service.ErrInternal("failed to verify canonical scope root", err)
+	}
+	if !os.SameFile(openedInfo, resolvedInfo) {
+		return "", service.ErrForbidden("scope root changed while resolving canonical path")
+	}
+	return foldFilesystemCase(filepath.Clean(resolvedRootPath)), nil
 }
 
 func (r *scopedRoot) Close() {
@@ -282,6 +303,98 @@ func (s *rootedFileStore) Read(name string, limit int64) ([]byte, os.FileInfo, b
 		return nil, nil, false, service.ErrInternal("failed to read file", err)
 	}
 	return data, info, truncated, nil
+}
+
+func (s *rootedFileStore) Hash(name string) ([]byte, os.FileInfo, error) {
+	if err := s.ensureNoSymlinks(name, false); err != nil {
+		return nil, nil, err
+	}
+	if s.platform != nil {
+		return s.platform.Hash(name)
+	}
+	f, err := s.root.Open(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, service.ErrNotFound("file not found")
+		}
+		return nil, nil, service.ErrInternal("failed to open file", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, service.ErrInternal("failed to stat file", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, service.ErrValidation("path is not a regular file")
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return nil, nil, service.ErrInternal("failed to hash file", err)
+	}
+	return hash.Sum(nil), info, nil
+}
+
+func (s *rootedFileStore) ReadVersioned(name string, limit int64) ([]byte, os.FileInfo, bool, []byte, error) {
+	if err := s.ensureNoSymlinks(name, false); err != nil {
+		return nil, nil, false, nil, err
+	}
+	if s.platform != nil {
+		return s.platform.ReadVersioned(name, limit)
+	}
+	f, err := s.root.Open(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, false, nil, service.ErrNotFound("file not found")
+		}
+		return nil, nil, false, nil, service.ErrInternal("failed to open file", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, false, nil, service.ErrInternal("failed to stat file", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, false, nil, service.ErrValidation("path is not a regular file")
+	}
+	return readAndHashRootedFile(f, info, limit)
+}
+
+func (s *rootedFileStore) Readlink(name string) (string, error) {
+	if err := validateRootedName(name); err != nil {
+		return "", err
+	}
+	if s.platform != nil {
+		return s.platform.Readlink(name)
+	}
+	target, err := s.root.Readlink(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", service.ErrNotFound("symlink not found")
+		}
+		return "", service.ErrInternal("failed to read symlink", err)
+	}
+	return target, nil
+}
+
+func readAndHashRootedFile(f *os.File, info os.FileInfo, limit int64) ([]byte, os.FileInfo, bool, []byte, error) {
+	hash := sha256.New()
+	if limit < 0 {
+		data, err := io.ReadAll(io.TeeReader(f, hash))
+		if err != nil {
+			return nil, nil, false, nil, service.ErrInternal("failed to read file", err)
+		}
+		return data, info, false, hash.Sum(nil), nil
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limit))
+	if err != nil {
+		return nil, nil, false, nil, service.ErrInternal("failed to read file", err)
+	}
+	_, _ = hash.Write(data)
+	remainder, err := io.Copy(hash, f)
+	if err != nil {
+		return nil, nil, false, nil, service.ErrInternal("failed to hash file", err)
+	}
+	return data, info, remainder > 0, hash.Sum(nil), nil
 }
 
 func (s *rootedFileStore) WriteAtomic(name string, content []byte) error {

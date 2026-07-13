@@ -2549,6 +2549,47 @@ paths:
               schema:
                 type: object
 
+  /api/workspaces/{ws}/files/stat:
+    get:
+      operationId: statScopedFile
+      tags: [files]
+      summary: Get mutation metadata and a strong version for a scoped path
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [workspace, repo, agent]
+            default: workspace
+        - name: target
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Path metadata
+          headers:
+            ETag:
+              description: Strong current path version.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileStatResponse"
   # ── Files ───────────────────────────────────────────────────────────────
   /api/workspaces/{ws}/files/capabilities:
     get:
@@ -2906,6 +2947,11 @@ paths:
       responses:
         "200":
           description: File content
+          headers:
+            ETag:
+              description: Strong SHA-256 version for the current file (not revision reads).
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -2933,6 +2979,18 @@ paths:
           required: true
           schema:
             type: string
+        - name: If-Match
+          in: header
+          required: false
+          description: Optional strong version for replace/restore callers. Ordinary editor saves omit it and remain last-write-wins.
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          description: Use * for create-only writes.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -2945,7 +3003,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/FileMutationResponse"
+        "412":
+          description: A supplied file precondition no longer matches
     delete:
       operationId: deleteScopedFile
       tags: [files]
@@ -2980,6 +3040,12 @@ paths:
           required: false
           schema:
             type: boolean
+        - name: If-Match
+          in: header
+          required: true
+          description: Strong current source version from file stat/read.
+          schema:
+            type: string
       responses:
         "200":
           description: File or directory deleted
@@ -2987,6 +3053,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
+        "412":
+          description: Source version no longer matches
+        "428":
+          description: Source version is required
 
   /api/workspaces/{ws}/files/mkdir:
     post:
@@ -3063,7 +3133,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/FileMutationResponse"
+        "412":
+          description: Source or destination version no longer matches
+        "428":
+          description: A required source or destination version is missing
 
   /api/workspaces/{ws}/agents/{name}/files/tree:
     get:
@@ -3118,6 +3192,17 @@ paths:
           required: true
           schema:
             type: string
+        - name: If-Match
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          description: Use * for create-only writes.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -3130,7 +3215,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/FileMutationResponse"
 
   # ── Editors ─────────────────────────────────────────────────────────────
   /api/editors:
@@ -3802,6 +3887,32 @@ components:
         message:
           type: string
 
+    FileMutationResponse:
+      type: object
+      required: [success, version]
+      properties:
+        success:
+          type: boolean
+        version:
+          type: string
+
+    FileStatResponse:
+      type: object
+      required: [path, is_dir, size, mod_time, version]
+      properties:
+        path:
+          type: string
+        is_dir:
+          type: boolean
+        size:
+          type: integer
+          format: int64
+        mod_time:
+          type: string
+          format: date-time
+        version:
+          type: string
+
     FileTreeEntry:
       type: object
       required: [name, is_dir, size, mod_time]
@@ -3841,7 +3952,7 @@ components:
 
     FileReadResponse:
       type: object
-      required: [path, size, binary, truncated]
+      required: [path, size, binary, truncated, version]
       properties:
         path:
           type: string
@@ -3854,6 +3965,8 @@ components:
           type: boolean
         truncated:
           type: boolean
+        version:
+          type: string
 
     FileIndexResponse:
       type: object
@@ -4103,6 +4216,12 @@ components:
         overwrite:
           type: boolean
           default: false
+        source_version:
+          type: string
+          description: Required by the server; current strong version of the source path.
+        destination_version:
+          type: string
+          description: Required when overwriting an existing regular file.
 
     RuntimeReadyResponse:
       type: object

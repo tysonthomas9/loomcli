@@ -4,6 +4,7 @@ package svcimpl
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -129,6 +130,59 @@ func (p *unixRootedPlatform) Read(name string, limit int64) ([]byte, os.FileInfo
 	return readRootedFile(f, info, limit)
 }
 
+func (p *unixRootedPlatform) Hash(name string) ([]byte, os.FileInfo, error) {
+	f, err := p.open(name, unix.O_RDONLY|unix.O_NONBLOCK)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, service.ErrInternal("failed to stat rooted file", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, service.ErrValidation("path is not a regular file")
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return nil, nil, service.ErrInternal("failed to hash rooted file", err)
+	}
+	return hash.Sum(nil), info, nil
+}
+
+func (p *unixRootedPlatform) ReadVersioned(name string, limit int64) ([]byte, os.FileInfo, bool, []byte, error) {
+	f, err := p.open(name, unix.O_RDONLY|unix.O_NONBLOCK)
+	if err != nil {
+		return nil, nil, false, nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, false, nil, service.ErrInternal("failed to stat rooted file", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, false, nil, service.ErrValidation("path is not a regular file")
+	}
+	return readAndHashRootedFile(f, info, limit)
+}
+
+func (p *unixRootedPlatform) Readlink(name string) (string, error) {
+	parent, base, err := p.openParent(name)
+	if err != nil {
+		return "", err
+	}
+	defer unix.Close(parent)
+	buffer := make([]byte, 64<<10)
+	n, err := unix.Readlinkat(parent, base, buffer)
+	if err != nil {
+		return "", unixPathError("read rooted symlink", err)
+	}
+	if n == len(buffer) {
+		return "", service.ErrPayloadTooLarge("symlink target exceeds limit")
+	}
+	return string(buffer[:n]), nil
+}
+
 func readRootedFile(f *os.File, info os.FileInfo, limit int64) ([]byte, os.FileInfo, bool, error) {
 	truncated := limit >= 0 && info.Size() > limit
 	reader := io.Reader(f)
@@ -147,9 +201,9 @@ func (p *unixRootedPlatform) open(name string, flags int) (*os.File, error) {
 		return nil, err
 	}
 	if name == "." {
-		fd, err := unix.Dup(int(p.root.Fd()))
+		fd, err := unix.Openat(int(p.root.Fd()), ".", flags|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 		if err != nil {
-			return nil, service.ErrInternal("failed to duplicate scope descriptor", err)
+			return nil, unixPathError("open scope descriptor", err)
 		}
 		return os.NewFile(uintptr(fd), p.root.Name()), nil
 	}

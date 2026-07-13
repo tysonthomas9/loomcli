@@ -313,8 +313,9 @@ export function FileExplorerEditorGroup({
   }, [activeKey, activePath, pathDirty, reloadToken, scopeKey]);
 
   const writeFile = useCallback(
-    (path: string, content: string) =>
-      writeScopedFile(workspaceId, scopeRef, path, content),
+    async (path: string, content: string) => {
+      await writeScopedFile(workspaceId, scopeRef, path, content);
+    },
     [workspaceId, scopeRef],
   );
   const setDirty = useCallback(
