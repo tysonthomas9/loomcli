@@ -106,6 +106,18 @@ type ServerConfig struct {
 	DaemonStartupFn      func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
 	Logger               *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN            string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	// EnablePersistentAgents opts the server into routing service-agent
+	// terminal sessions through the agentd-backed PTYSource instead of the
+	// local PTYManager. Default false; production rollouts must opt in
+	// explicitly once a control-plane endpoint is reachable.
+	EnablePersistentAgents bool
+	// ControlPlaneEndpoint is the host:port of the loom-control-plane gRPC
+	// service used by the persistent-agent backend. Required when
+	// EnablePersistentAgents is true; ignored otherwise.
+	ControlPlaneEndpoint string
+	// AgentdRootCAPEM is the PEM-encoded CA used to verify loom-agentd server
+	// certificates. Read from LOOM_AGENTD_CA_PATH.
+	AgentdRootCAPEM []byte
 	// IssueBackendFn returns the active backend.IssueBackend used by the
 	// webui issue service for the migrated CRUD operations (Get, Create,
 	// Update/Patch, Close, Claim, Delete, AddComment, AddDependency,

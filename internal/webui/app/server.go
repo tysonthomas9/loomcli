@@ -24,6 +24,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal/agentd"
 )
 
 // logger is the package-level structured logger.
@@ -72,7 +73,13 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	ptyMgr       *terminal.MultiPTYManager  // main web terminal (per-workspace dispatch)
+	ptyMgr *terminal.MultiPTYManager // main local backend (per-workspace dispatch)
+	// ptySource is the value handlers / services route through. With
+	// persistent agents disabled this points at ptyMgr. With persistent
+	// agents enabled this points at a Dispatcher that chooses between ptyMgr
+	// and agentdClient per session.
+	ptySource    terminal.PTYSource
+	agentdClient *agentd.AgentdClient       // nil unless EnablePersistentAgents is true
 	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
 	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
 
@@ -220,6 +227,7 @@ func (app *Server) Close() {
 	if app.tabMetaStore != nil {
 		_ = app.tabMetaStore.Close()
 	}
+	app.closeAgentdClient()
 	if app.fleetRegCfg != nil && app.fleetRegCfg.RateLimiter != nil {
 		_ = app.fleetRegCfg.RateLimiter.Close()
 	}
@@ -340,6 +348,7 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 			logger.Info("pty manager stopped", "component", "terminal")
 		}
 	}
+	app.closeAgentdClient()
 	if app.agentTmuxMgr != nil {
 		if err := app.agentTmuxMgr.Shutdown(); err != nil {
 			logger.Warn("error shutting down agent tmux manager", "component", "terminal", "err", err)
@@ -372,4 +381,16 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	}
 
 	return nil
+}
+
+func (app *Server) closeAgentdClient() {
+	if app.agentdClient == nil {
+		return
+	}
+	if err := app.agentdClient.Close(); err != nil {
+		logger.Warn("error closing agentd client", "component", "terminal", "err", err)
+	} else {
+		logger.Info("agentd client stopped", "component", "terminal")
+	}
+	app.agentdClient = nil
 }

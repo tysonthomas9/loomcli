@@ -432,10 +432,21 @@ func (c *Client) RemoveActiveWorker(ctx context.Context, workerID string) error 
 func (c *Client) SetLeaderKey(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
 	if c.breaker != nil {
 		return circuitbreaker.ExecuteWithResult(c.breaker, func() (bool, error) {
-			return c.rdb.SetNX(ctx, key, value, ttl).Result()
+			return c.setLeaderKey(ctx, key, value, ttl)
 		})
 	}
-	return c.rdb.SetNX(ctx, key, value, ttl).Result()
+	return c.setLeaderKey(ctx, key, value, ttl)
+}
+
+func (c *Client) setLeaderKey(ctx context.Context, key, value string, ttl time.Duration) (bool, error) {
+	err := c.rdb.SetArgs(ctx, key, value, redis.SetArgs{Mode: "NX", TTL: ttl}).Err()
+	if errors.Is(err, redis.Nil) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // RenewLeaderKey extends the TTL on a leader key.

@@ -28,11 +28,15 @@ const (
 	ExitReasonShutdown = "shutdown" // manager-wide Shutdown
 )
 
-// attachBufferSize is the capacity of an Attachment's output channel.
+// AttachBufferSize is the capacity of an Attachment's output channel.
 // Non-blocking sends from the drain goroutine mean a slow WebSocket drops
 // frames rather than back-pressuring the shell. The ring buffer always has
-// the ground truth.
-const attachBufferSize = 64
+// the ground truth. Exported so sibling backends (agentd) share the value.
+const AttachBufferSize = 64
+
+// attachBufferSize keeps the legacy unexported name used throughout this
+// package's hot paths.
+const attachBufferSize = AttachBufferSize
 
 // localAttachment is the in-process Attachment implementation. It wraps the
 // session's PTY fd directly. An Attachment interface exists in source.go so
