@@ -7,8 +7,12 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { readWorktreeFile, readWorkspaceFile } from "@/api/workspace";
-import type { FileReadData } from "@/api/workspace";
+import {
+  readScopedFile,
+  readWorktreeFile,
+  readWorkspaceFile,
+} from "@/api/workspace";
+import type { FileReadData, FileScopeRef } from "@/api/workspace";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 export interface UseFileContentReturn {
@@ -106,4 +110,22 @@ export function useWorkspaceFileContent(): UseFileContentReturn {
     [workspaceId],
   );
   return useFileContentCore(readFile, true);
+}
+
+/**
+ * useScopedFileContent reads files from any File Browser v2 scope root.
+ */
+export function useScopedFileContent(
+  scopeRef: FileScopeRef,
+): UseFileContentReturn {
+  const { workspaceId } = useWorkspaceContext();
+  const scope = scopeRef.scope;
+  const target = scopeRef.target ?? null;
+  const readFile = useCallback<FileReader>(
+    (path) =>
+      readScopedFile(workspaceId, target ? { scope, target } : { scope }, path),
+    [workspaceId, scope, target],
+  );
+  const enabled = scope === "workspace" || !!target;
+  return useFileContentCore(readFile, enabled);
 }

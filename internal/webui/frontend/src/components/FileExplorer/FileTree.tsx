@@ -5,9 +5,40 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type FormEvent,
+  type MouseEvent,
 } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import type { FileEntry } from "@/api/workspace";
+import {
+  buildFolderGitDecorations,
+  gitDecorationForStatus,
+  type FolderGitDecoration,
+} from "./gitDecorations";
 import styles from "./FileExplorer.module.css";
+
+export interface FileTreeNodeInfo {
+  path: string;
+  name: string;
+  isDir: boolean;
+  depth: number;
+}
+
+export interface FileTreeInlineEdit {
+  kind: "create-file" | "create-folder" | "rename";
+  parentPath: string;
+  path?: string | undefined;
+  value: string;
+  isDir: boolean;
+}
 
 interface FileTreeProps {
   treeData: Map<string, FileEntry[]>;
@@ -16,6 +47,20 @@ interface FileTreeProps {
   filterText: string;
   onToggle: (dirPath: string) => Promise<void>;
   onSelectFile: (filePath: string | null) => void;
+  onContextMenuNode?: (
+    node: FileTreeNodeInfo,
+    event: MouseEvent<HTMLDivElement>,
+  ) => void;
+  onRequestRename?: (node: FileTreeNodeInfo) => void;
+  onRequestDelete?: (node: FileTreeNodeInfo) => void;
+  inlineEdit?: FileTreeInlineEdit | null | undefined;
+  onInlineEditChange?: (value: string) => void;
+  onInlineEditCommit?: () => void;
+  onInlineEditCancel?: () => void;
+  gitStatus?: Record<string, string> | undefined;
+  onMoveNode?:
+    | ((fromPath: string, targetFolderPath: string) => void)
+    | undefined;
   /** When set, scroll this path into view + focus it once it appears (jump-to). */
   scrollToPath?: string | null | undefined;
 }
@@ -162,6 +207,277 @@ const NodeIcon = ({ node }: { node: VisNode }) => (
   </span>
 );
 
+function InlineEditRow({
+  depth,
+  value,
+  isDir,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  depth: number;
+  value: string;
+  isDir: boolean;
+  onChange?: ((value: string) => void) | undefined;
+  onCommit?: (() => void) | undefined;
+  onCancel?: (() => void) | undefined;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const canceledRef = useRef(false);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    onCommit?.();
+  };
+
+  return (
+    <form
+      className={styles.inlineEditRow}
+      style={{ paddingLeft: 8 + depth * 16 }}
+      onSubmit={submit}
+      onClick={(event) => event.stopPropagation()}
+      data-testid="file-tree-inline-edit"
+    >
+      <span className={styles.fileIconSpacer} />
+      <NodeIcon
+        node={{
+          path: "__inline__",
+          name: value,
+          isDir,
+          depth,
+          isExpanded: false,
+        }}
+      />
+      <input
+        ref={inputRef}
+        className={styles.inlineEditInput}
+        value={value}
+        onChange={(event) => onChange?.(event.target.value)}
+        onBlur={() => {
+          if (!canceledRef.current) onCommit?.();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            canceledRef.current = true;
+            event.preventDefault();
+            onCancel?.();
+          }
+        }}
+        aria-label="File name"
+      />
+    </form>
+  );
+}
+
+function InlineEditInput({
+  value,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  value: string;
+  onChange?: ((value: string) => void) | undefined;
+  onCommit?: (() => void) | undefined;
+  onCancel?: (() => void) | undefined;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const canceledRef = useRef(false);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  return (
+    <input
+      ref={inputRef}
+      className={styles.inlineEditInput}
+      value={value}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => onChange?.(event.target.value)}
+      onBlur={() => {
+        if (!canceledRef.current) onCommit?.();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onCommit?.();
+        }
+        if (event.key === "Escape") {
+          canceledRef.current = true;
+          event.preventDefault();
+          onCancel?.();
+        }
+      }}
+      aria-label="File name"
+    />
+  );
+}
+
+interface FileTreeDragData {
+  type: "file-tree-node";
+  path: string;
+}
+
+interface FileTreeDropData {
+  type: "file-tree-folder";
+  path: string;
+}
+
+function TreeNodeRow({
+  node,
+  activePath,
+  selectedPath,
+  filterText,
+  inlineEdit,
+  gitStatus,
+  folderDecorations,
+  onActivate,
+  onContextMenuNode,
+  onInlineEditChange,
+  onInlineEditCommit,
+  onInlineEditCancel,
+}: {
+  node: VisNode;
+  activePath: string | null;
+  selectedPath: string | null;
+  filterText: string;
+  inlineEdit?: FileTreeInlineEdit | null | undefined;
+  gitStatus: Record<string, string>;
+  folderDecorations: Map<string, FolderGitDecoration>;
+  onActivate: (node: VisNode) => void;
+  onContextMenuNode?: (
+    node: FileTreeNodeInfo,
+    event: MouseEvent<HTMLDivElement>,
+  ) => void;
+  onInlineEditChange?: ((value: string) => void) | undefined;
+  onInlineEditCommit?: (() => void) | undefined;
+  onInlineEditCancel?: (() => void) | undefined;
+}) {
+  const draggable = useDraggable({
+    id: `file-tree-node:${node.path}`,
+    data: {
+      type: "file-tree-node",
+      path: node.path,
+    } satisfies FileTreeDragData,
+  });
+  const droppable = useDroppable({
+    id: `file-tree-folder:${node.path}`,
+    data: {
+      type: "file-tree-folder",
+      path: node.path,
+    } satisfies FileTreeDropData,
+    disabled: !node.isDir,
+  });
+  const {
+    listeners: dragListeners,
+    setNodeRef: setDragNodeRef,
+    transform: dragTransform,
+    isDragging,
+  } = draggable;
+  const { isOver, setNodeRef: setDropNodeRef } = droppable;
+
+  const setRowRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      setDragNodeRef(element);
+      if (node.isDir) {
+        setDropNodeRef(element);
+      }
+    },
+    [node.isDir, setDragNodeRef, setDropNodeRef],
+  );
+
+  const fileDecoration = node.isDir
+    ? null
+    : gitDecorationForStatus(gitStatus[node.path]);
+  const folderDecoration = node.isDir
+    ? folderDecorations.get(node.path)
+    : undefined;
+  const decorationKind =
+    fileDecoration?.kind ??
+    (folderDecoration?.conflict
+      ? "conflict"
+      : folderDecoration?.changed
+        ? "modified"
+        : undefined);
+  const hasConflict =
+    !!fileDecoration?.conflict || !!folderDecoration?.conflict;
+  const transform = dragTransform
+    ? `translate3d(${Math.round(dragTransform.x)}px, ${Math.round(
+        dragTransform.y,
+      )}px, 0)`
+    : undefined;
+
+  return (
+    <div
+      ref={setRowRef}
+      id={nodeDomId(node.path)}
+      data-path={node.path}
+      role="treeitem"
+      aria-label={node.name}
+      title={node.path}
+      aria-level={node.depth + 1}
+      aria-expanded={node.isDir ? node.isExpanded : undefined}
+      aria-selected={node.path === selectedPath || undefined}
+      data-selected={node.path === selectedPath || undefined}
+      data-dir={node.isDir || undefined}
+      data-focused={node.path === activePath || undefined}
+      data-git-status-kind={decorationKind}
+      data-conflict={hasConflict || undefined}
+      data-drop-over={isOver || undefined}
+      data-dragging={isDragging || undefined}
+      className={styles.treeNode}
+      style={{
+        paddingLeft: 8 + node.depth * 16,
+        transform,
+        opacity: isDragging ? 0.55 : undefined,
+      }}
+      onClick={() => onActivate(node)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenuNode?.(node, event);
+      }}
+      {...dragListeners}
+    >
+      {node.isDir ? (
+        <DirChevron expanded={node.isExpanded} />
+      ) : (
+        <span className={styles.fileIconSpacer} />
+      )}
+      <NodeIcon node={node} />
+      {inlineEdit?.kind === "rename" && inlineEdit.path === node.path ? (
+        <InlineEditInput
+          value={inlineEdit.value}
+          onChange={onInlineEditChange}
+          onCommit={onInlineEditCommit}
+          onCancel={onInlineEditCancel}
+        />
+      ) : (
+        <span className={styles.fileName}>
+          {highlightMatch(node.name, filterText)}
+        </span>
+      )}
+      {node.isDir && folderDecoration?.changed && (
+        <span
+          className={styles.gitStatusDot}
+          data-conflict={folderDecoration.conflict || undefined}
+          aria-hidden="true"
+        />
+      )}
+      {hasConflict && (
+        <span className={styles.conflictBadge} title="Merge conflict">
+          !
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function FileTree({
   treeData,
   expanded,
@@ -169,6 +485,15 @@ export function FileTree({
   filterText,
   onToggle,
   onSelectFile,
+  onContextMenuNode,
+  onRequestRename,
+  onRequestDelete,
+  inlineEdit,
+  onInlineEditChange,
+  onInlineEditCommit,
+  onInlineEditCancel,
+  gitStatus = {},
+  onMoveNode,
   scrollToPath,
 }: FileTreeProps) {
   const treeRef = useRef<HTMLDivElement>(null);
@@ -178,6 +503,10 @@ export function FileTree({
   const nodes = useMemo(
     () => flattenVisible(treeData, expanded, filterText),
     [treeData, expanded, filterText],
+  );
+  const folderDecorations = useMemo(
+    () => buildFolderGitDecorations(gitStatus),
+    [gitStatus],
   );
 
   // The active (keyboard) node: the explicitly focused one if still visible,
@@ -259,6 +588,19 @@ export function FileTree({
           e.preventDefault();
           if (cur) activate(cur);
           break;
+        case "F2":
+          if (cur) {
+            e.preventDefault();
+            onRequestRename?.(cur);
+          }
+          break;
+        case "Delete":
+        case "Backspace":
+          if (cur) {
+            e.preventDefault();
+            onRequestDelete?.(cur);
+          }
+          break;
         default:
           // Type-ahead: jump to the next node whose name starts with the key.
           if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -273,7 +615,30 @@ export function FileTree({
           }
       }
     },
-    [nodes, activePath, focusNode, onToggle, activate],
+    [
+      nodes,
+      activePath,
+      focusNode,
+      onToggle,
+      activate,
+      onRequestRename,
+      onRequestDelete,
+    ],
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const active = event.active.data.current as FileTreeDragData | undefined;
+      const over = event.over?.data.current as FileTreeDropData | undefined;
+      if (
+        active?.type !== "file-tree-node" ||
+        over?.type !== "file-tree-folder"
+      ) {
+        return;
+      }
+      onMoveNode?.(active.path, over.path);
+    },
+    [onMoveNode],
   );
 
   // Jump-to-folder: when a reveal target appears in the tree, focus + scroll it
@@ -294,53 +659,78 @@ export function FileTree({
 
   const filtering = filterText.length > 0;
 
+  // Require the pointer to travel a few px before a drag begins, so a plain
+  // click (which may jitter 1–2px between press and release) still fires the
+  // row's onClick to open/expand instead of being swallowed as a drag-start.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
   return (
-    <div
-      ref={treeRef}
-      className={styles.tree}
-      role="tree"
-      aria-label="File tree"
-      tabIndex={0}
-      aria-activedescendant={activePath ? nodeDomId(activePath) : undefined}
-      onKeyDown={handleKeyDown}
-    >
-      {nodes.map((node) => (
-        <div
-          key={node.path}
-          id={nodeDomId(node.path)}
-          data-path={node.path}
-          role="treeitem"
-          aria-label={node.name}
-          title={node.path}
-          aria-level={node.depth + 1}
-          aria-expanded={node.isDir ? node.isExpanded : undefined}
-          aria-selected={node.path === selectedPath || undefined}
-          data-selected={node.path === selectedPath || undefined}
-          data-dir={node.isDir || undefined}
-          data-focused={node.path === activePath || undefined}
-          className={styles.treeNode}
-          style={{ paddingLeft: 8 + node.depth * 16 }}
-          onClick={() => activate(node)}
-        >
-          {node.isDir ? (
-            <DirChevron expanded={node.isExpanded} />
-          ) : (
-            <span className={styles.fileIconSpacer} />
+    <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      <div
+        ref={treeRef}
+        className={styles.tree}
+        role="tree"
+        aria-label="File tree"
+        tabIndex={0}
+        aria-activedescendant={activePath ? nodeDomId(activePath) : undefined}
+        onKeyDown={handleKeyDown}
+      >
+        {inlineEdit &&
+          inlineEdit.kind !== "rename" &&
+          inlineEdit.parentPath === "" && (
+            <InlineEditRow
+              depth={0}
+              value={inlineEdit.value}
+              isDir={inlineEdit.isDir}
+              onChange={onInlineEditChange}
+              onCommit={onInlineEditCommit}
+              onCancel={onInlineEditCancel}
+            />
           )}
-          <NodeIcon node={node} />
-          <span className={styles.fileName}>
-            {highlightMatch(node.name, filterText)}
-          </span>
-        </div>
-      ))}
-      {nodes.length === 0 && !filtering && (
-        <div className={styles.empty}>No files found</div>
-      )}
-      {nodes.length === 0 && filtering && (
-        <div className={styles.empty}>
-          No matches in loaded folders for &ldquo;{filterText}&rdquo;
-        </div>
-      )}
-    </div>
+        {nodes.map((node) => (
+          <div key={node.path}>
+            <TreeNodeRow
+              node={node}
+              activePath={activePath}
+              selectedPath={selectedPath}
+              filterText={filterText}
+              inlineEdit={inlineEdit}
+              gitStatus={gitStatus}
+              folderDecorations={folderDecorations}
+              onActivate={activate}
+              onContextMenuNode={(rowNode, event) => {
+                setFocusedPath(rowNode.path);
+                onContextMenuNode?.(rowNode, event);
+              }}
+              onInlineEditChange={onInlineEditChange}
+              onInlineEditCommit={onInlineEditCommit}
+              onInlineEditCancel={onInlineEditCancel}
+            />
+            {inlineEdit &&
+              inlineEdit.kind !== "rename" &&
+              inlineEdit.parentPath === node.path && (
+                <InlineEditRow
+                  depth={node.depth + 1}
+                  value={inlineEdit.value}
+                  isDir={inlineEdit.isDir}
+                  onChange={onInlineEditChange}
+                  onCommit={onInlineEditCommit}
+                  onCancel={onInlineEditCancel}
+                />
+              )}
+          </div>
+        ))}
+        {nodes.length === 0 && !filtering && (
+          <div className={styles.empty}>No files found</div>
+        )}
+        {nodes.length === 0 && filtering && (
+          <div className={styles.empty}>
+            No matches in loaded folders for &ldquo;{filterText}&rdquo;
+          </div>
+        )}
+      </div>
+    </DndContext>
   );
 }

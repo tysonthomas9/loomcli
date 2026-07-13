@@ -22,6 +22,7 @@ type mockFileOps struct {
 	resolveFunc          func(name string) (*ops.AgentWorktree, error)
 	resolveOrPrimaryFunc func(name string) (*ops.AgentWorktree, error)
 	resolveWsRootFunc    func() (string, error)
+	resolveWsDataFunc    func() (*ops.WorkspaceData, error)
 }
 
 func (m *mockFileOps) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
@@ -50,6 +51,37 @@ func (m *mockFileOps) ResolveWorkspaceRoot(workspaceID string) (string, error) {
 	return "", errors.New("not found")
 }
 
+func (m *mockFileOps) ResolveWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) {
+	if m.resolveWsDataFunc != nil {
+		return m.resolveWsDataFunc()
+	}
+	return nil, errors.New("not found")
+}
+
+func (m *mockFileOps) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (m *mockFileOps) GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	return &ops.GitFileContentAtRev{Content: []byte(""), Size: 0}, nil
+}
+
+func (m *mockFileOps) GitDiffFile(worktreePath, path, from, to string) (string, error) {
+	return "", nil
+}
+
+func (m *mockFileOps) GitLogFile(worktreePath, path string, limit int) (string, error) {
+	return "", nil
+}
+
+func (m *mockFileOps) GitBlamePorcelain(worktreePath, path string) (string, error) {
+	return "", nil
+}
+
+func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
+	return os.TempDir(), nil
+}
+
 // setupTestWorktree creates a temporary directory with test files.
 func setupTestWorktree(t *testing.T) string {
 	t.Helper()
@@ -74,12 +106,12 @@ func setupTestWorktree(t *testing.T) string {
 		t.Fatal(err)
 	}
 
-	// Denied extension file
+	// Key-like filename now follows the same structural policy as any file.
 	if err := os.WriteFile(filepath.Join(dir, "secret.key"), []byte("secret key data"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Denied filename
+	// Key-like filename now follows the same structural policy as any file.
 	if err := os.WriteFile(filepath.Join(dir, "id_rsa"), []byte("private key"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +144,17 @@ func resolveToDir(dir string) *mockFileOps {
 		resolveWsRootFunc: func() (string, error) {
 			return resolved, nil
 		},
+		resolveWsDataFunc: func() (*ops.WorkspaceData, error) {
+			return &ops.WorkspaceData{
+				ID:   "test-ws",
+				Path: resolved,
+				Repos: []ops.WorkspaceRepo{{
+					Name: "repo",
+					Path: resolved,
+				}},
+				Agents: []ops.WorkspaceAgentInfo{{Name: "test-agent"}},
+			}, nil
+		},
 	}
 }
 
@@ -135,6 +178,17 @@ func resolveLeadToDir(dir string) *mockFileOps {
 				Branch:        "main",
 				DefaultBranch: "main",
 				IsWorkspace:   true,
+			}, nil
+		},
+		resolveWsRootFunc: func() (string, error) {
+			return resolved, nil
+		},
+		resolveWsDataFunc: func() (*ops.WorkspaceData, error) {
+			return &ops.WorkspaceData{
+				ID:     "test-ws",
+				Path:   resolved,
+				Repos:  []ops.WorkspaceRepo{{Name: "repo", Path: resolved}},
+				Agents: []ops.WorkspaceAgentInfo{{Name: "lead-b"}},
 			}, nil
 		},
 	}
@@ -240,15 +294,14 @@ func TestFileTree_PathTraversal(t *testing.T) {
 	fileOps := resolveToDir(dir)
 	handler := handleFileTree(NewFileService(fileOps))
 
-	// "../" is normalized by filepath.Clean to root (safe — stays within worktree)
-	// "../../etc" is normalized to "/etc" which becomes worktree/etc (does not exist)
+	// Traversal attempts are rejected instead of being normalized into the root.
 	tests := []struct {
 		path       string
 		wantStatus int
 	}{
-		{"../", http.StatusOK},             // normalized to "." (worktree root)
-		{"../../etc", http.StatusNotFound}, // normalized to "etc" subdir (doesn't exist)
-		{"../../../tmp", http.StatusNotFound},
+		{"../", http.StatusForbidden},
+		{"../../etc", http.StatusForbidden},
+		{"../../../tmp", http.StatusForbidden},
 	}
 	for _, tt := range tests {
 		req := httptest.NewRequest(http.MethodGet, "/api/agents/test-agent/files/tree?path="+tt.path, nil)
@@ -285,8 +338,8 @@ func TestFileTree_InvalidAgent(t *testing.T) {
 	fileOps := &mockFileOps{}
 	handler := handleFileTree(NewFileService(fileOps))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/agents/bad.agent/files/tree", nil)
-	req.SetPathValue("name", "bad.agent")
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/bad$agent/files/tree", nil)
+	req.SetPathValue("name", "bad$agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
@@ -481,7 +534,7 @@ func TestFileRead_MissingPath(t *testing.T) {
 	}
 }
 
-func TestFileRead_DeniedExtension(t *testing.T) {
+func TestFileRead_KeyLikeExtensionAllowed(t *testing.T) {
 	dir := setupTestWorktree(t)
 	fileOps := resolveToDir(dir)
 	handler := handleFileRead(NewFileService(fileOps))
@@ -493,12 +546,12 @@ func TestFileRead_DeniedExtension(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 }
 
-func TestFileRead_DeniedFilename(t *testing.T) {
+func TestFileRead_KeyLikeFilenameAllowed(t *testing.T) {
 	dir := setupTestWorktree(t)
 	fileOps := resolveToDir(dir)
 	handler := handleFileRead(NewFileService(fileOps))
@@ -510,8 +563,8 @@ func TestFileRead_DeniedFilename(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 }
 
@@ -557,8 +610,18 @@ func TestFileRead_LargeFile(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var resp FileReadResult
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Truncated {
+		t.Fatalf("truncated = false, want true")
+	}
+	if len(resp.Content) != maxRequestBody {
+		t.Fatalf("content len = %d, want %d", len(resp.Content), maxRequestBody)
 	}
 }
 
@@ -588,13 +651,10 @@ func TestFileRead_Symlink(t *testing.T) {
 
 // --- File Write tests ---
 
-// Lead agents have no local worktree, so the file viewer falls back to the
-// workspace primary worktree for browsing. List/Read use the lead-aware
-// resolver and succeed against the primary tree; Write uses the strict agent
-// resolver and is refused (a lead must not mutate the primary worktree from
-// the read-only viewer).
+// Deprecated agent routes now delegate to the scoped agent core. A lead without
+// an agent worktree is refused rather than falling back to the primary repo.
 
-func TestFileTree_LeadFallsBackToPrimaryWorktree(t *testing.T) {
+func TestFileTree_LeadWithoutWorktreeRefused(t *testing.T) {
 	dir := setupTestWorktree(t)
 	fileOps := resolveLeadToDir(dir)
 	handler := handleFileTree(NewFileService(fileOps))
@@ -606,29 +666,12 @@ func TestFileTree_LeadFallsBackToPrimaryWorktree(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
-	}
-	var resp FileTreeResult
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if resp.Path != "." {
-		t.Errorf("path = %q, want %q", resp.Path, ".")
-	}
-	found := false
-	for _, e := range resp.Entries {
-		if e.Name == "hello.txt" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("expected to browse primary worktree (hello.txt), got nothing")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusNotFound, w.Body.String())
 	}
 }
 
-func TestFileRead_LeadFallsBackToPrimaryWorktree(t *testing.T) {
+func TestFileRead_LeadWithoutWorktreeRefused(t *testing.T) {
 	dir := setupTestWorktree(t)
 	fileOps := resolveLeadToDir(dir)
 	handler := handleFileRead(NewFileService(fileOps))
@@ -640,15 +683,8 @@ func TestFileRead_LeadFallsBackToPrimaryWorktree(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
-	}
-	var resp FileReadResult
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode error: %v", err)
-	}
-	if resp.Content != "Hello, world!\n" {
-		t.Errorf("content = %q, want %q", resp.Content, "Hello, world!\n")
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusNotFound, w.Body.String())
 	}
 }
 
@@ -794,7 +830,7 @@ func TestFileWrite_MissingPath(t *testing.T) {
 	}
 }
 
-func TestFileWrite_DeniedExtension(t *testing.T) {
+func TestFileWrite_KeyLikeExtensionAllowed(t *testing.T) {
 	dir := setupTestWorktree(t)
 	fileOps := resolveToDir(dir)
 	handler := handleFileWrite(NewFileService(fileOps))
@@ -807,12 +843,12 @@ func TestFileWrite_DeniedExtension(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 }
 
-func TestFileWrite_DeniedFilename(t *testing.T) {
+func TestFileWrite_KeyLikeFilenameAllowed(t *testing.T) {
 	dir := setupTestWorktree(t)
 	fileOps := resolveToDir(dir)
 	handler := handleFileWrite(NewFileService(fileOps))
@@ -825,8 +861,8 @@ func TestFileWrite_DeniedFilename(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 }
 
@@ -835,14 +871,13 @@ func TestFileWrite_PathTraversal(t *testing.T) {
 	fileOps := resolveToDir(dir)
 	handler := handleFileWrite(NewFileService(fileOps))
 
-	// "../evil.txt" is normalized to "/evil.txt" → worktree/evil.txt (safe, within worktree)
-	// "../../etc/passwd" is normalized to "/etc/passwd" → worktree/etc/passwd (parent "etc" doesn't exist → 404)
+	// Traversal attempts are rejected instead of being normalized into the root.
 	tests := []struct {
 		path       string
 		wantStatus int
 	}{
-		{"../evil.txt", http.StatusOK},            // normalized to "evil.txt" in worktree root
-		{"../../etc/passwd", http.StatusNotFound}, // parent dir "etc" doesn't exist
+		{"../evil.txt", http.StatusForbidden},
+		{"../../etc/passwd", http.StatusForbidden},
 	}
 	for _, tt := range tests {
 		body := `{"content": "test"}`
@@ -857,17 +892,6 @@ func TestFileWrite_PathTraversal(t *testing.T) {
 			t.Errorf("path=%q: status = %d, want %d", tt.path, w.Code, tt.wantStatus)
 		}
 
-		// Verify that successfully written files are inside the worktree, not outside
-		if w.Code == http.StatusOK {
-			// The file should exist inside dir (the worktree root)
-			expectedFile := filepath.Join(dir, filepath.Base(tt.path))
-			data, err := os.ReadFile(expectedFile)
-			if err != nil {
-				t.Errorf("path=%q: file not found at expected location %s: %v", tt.path, expectedFile, err)
-			} else if string(data) != "test" {
-				t.Errorf("path=%q: content = %q, want %q", tt.path, string(data), "test")
-			}
-		}
 	}
 }
 
@@ -1041,46 +1065,6 @@ func TestFileHandlers_ContentType(t *testing.T) {
 			ct := w.Header().Get("Content-Type")
 			if ct != "application/json" {
 				t.Errorf("Content-Type = %q, want %q", ct, "application/json")
-			}
-		})
-	}
-}
-
-// --- isDeniedPath tests ---
-
-func TestIsDeniedPath(t *testing.T) {
-	tests := []struct {
-		path   string
-		denied bool
-	}{
-		{"file.txt", false},
-		{"main.go", false},
-		{"secret.key", true},
-		{"cert.pem", true},
-		{"store.p12", true},
-		{"keystore.pfx", true},
-		{"config.env", true},
-		{"message.gpg", true},
-		{"signature.asc", true},
-		{"id_rsa", true},
-		{"id_ed25519", true},
-		{"id_ecdsa", true},
-		{"id_dsa", true},
-		{".env", true},
-		{".env.local", true},
-		{".env.production", true},
-		{".netrc", true},
-		{"subdir/id_rsa", true},
-		{"subdir/file.txt", false},
-		{"ID_RSA", true},     // case-insensitive filename check
-		{".ENV", true},       // case-insensitive filename check
-		{"SECRET.KEY", true}, // case-insensitive extension check
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			if got := isDeniedPath(tt.path); got != tt.denied {
-				t.Errorf("isDeniedPath(%q) = %v, want %v", tt.path, got, tt.denied)
 			}
 		})
 	}

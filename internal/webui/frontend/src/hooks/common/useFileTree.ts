@@ -9,8 +9,12 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { listWorktreeDir, listWorkspaceDir } from "@/api/workspace";
-import type { FileEntry } from "@/api/workspace";
+import {
+  listScopedDir,
+  listWorktreeDir,
+  listWorkspaceDir,
+} from "@/api/workspace";
+import type { FileEntry, FileScopeRef } from "@/api/workspace";
 import { useDebounce } from "./useDebounce";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
@@ -55,8 +59,8 @@ export interface UseFileTreeReturn {
 /** DirLoader fetches one directory level's entries ("" = root). */
 type DirLoader = (path: string) => Promise<FileEntry[]>;
 
-/** Segments never worth requesting on a reveal (the API hides/denies them). */
-const HIDDEN_SEGMENTS = new Set([".git", "node_modules"]);
+/** Segments never worth requesting on a reveal (the API hides them). */
+const HIDDEN_SEGMENTS = new Set([".git"]);
 
 function useFileTreeCore(
   loadEntries: DirLoader,
@@ -256,4 +260,24 @@ export function useWorkspaceFileTree(): UseFileTreeReturn {
     [workspaceId],
   );
   return useFileTreeCore(loadEntries, true, false);
+}
+
+/**
+ * useScopedFileTree browses any File Browser v2 scope root.
+ */
+export function useScopedFileTree(scopeRef: FileScopeRef): UseFileTreeReturn {
+  const { workspaceId } = useWorkspaceContext();
+  const scope = scopeRef.scope;
+  const target = scopeRef.target ?? null;
+  const loadEntries = useCallback<DirLoader>(
+    (path) =>
+      listScopedDir(
+        workspaceId,
+        target ? { scope, target } : { scope },
+        path,
+      ).then((r) => r.entries),
+    [workspaceId, scope, target],
+  );
+  const enabled = scope === "workspace" || !!target;
+  return useFileTreeCore(loadEntries, enabled, scope === "workspace");
 }

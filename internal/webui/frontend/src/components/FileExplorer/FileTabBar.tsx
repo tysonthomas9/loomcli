@@ -5,6 +5,8 @@ interface FileTabBarProps {
   /** Open file paths, in tab order. */
   tabs: string[];
   activePath: string | null;
+  dirtyPaths?: Record<string, boolean> | undefined;
+  groupLabel?: string | undefined;
   onSelect: (path: string) => void;
   onClose: (path: string) => void;
 }
@@ -26,6 +28,8 @@ function parentDirName(p: string): string {
 export function FileTabBar({
   tabs,
   activePath,
+  dirtyPaths,
+  groupLabel,
   onSelect,
   onClose,
 }: FileTabBarProps) {
@@ -52,7 +56,11 @@ export function FileTabBar({
   if (tabs.length === 0) return null;
 
   return (
-    <div className={styles.tabBar} role="tablist" aria-label="Open files">
+    <div
+      className={styles.tabBar}
+      role="tablist"
+      aria-label={groupLabel ? `Open files ${groupLabel}` : "Open files"}
+    >
       {tabs.map((path) => {
         const active = path === activePath;
         const name = basename(path);
@@ -80,6 +88,9 @@ export function FileTabBar({
               className={styles.tabSelect}
               onClick={() => onSelect(path)}
             >
+              {dirtyPaths?.[path] && (
+                <span className={styles.tabDirty} aria-hidden="true" />
+              )}
               <span className={styles.tabName}>{name}</span>
               {hint && <span className={styles.tabHint}>{hint}</span>}
             </button>

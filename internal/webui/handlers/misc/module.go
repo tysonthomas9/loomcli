@@ -6,9 +6,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
-// Module registers the workspace file operation routes on a [*http.ServeMux]:
-// three agent-scoped routes (the per-agent file panel) and two read-only
-// scope-rooted routes (the dedicated workspace file browser).
+// Module registers the workspace file operation routes on a [*http.ServeMux].
 //
 // The module is only constructed when fileSvc is non-nil.
 // All routes are unconditional within this module.
@@ -24,13 +22,22 @@ func NewModule(fileSvc service.FileService) *Module {
 
 // Register implements [Module] by registering the file operation routes.
 func (m *Module) Register(mux *http.ServeMux) {
-	// Agent-scoped (per-agent file panel): list/read/write within a worktree.
+	// Deprecated agent-scoped routes: thin delegates to the scoped agent core.
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/files/tree", HandleFileTree(m.fileSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/files", HandleFileRead(m.fileSvc))
 	mux.HandleFunc("PUT /api/workspaces/{ws}/agents/{name}/files", HandleFileWrite(m.fileSvc))
 
-	// Scope-rooted (dedicated file browser): read-only list/read. scope defaults
-	// to the workspace folder; repo/agent scopes and writes are added later.
+	// Scope-rooted file browser. scope defaults to the workspace folder.
 	mux.HandleFunc("GET /api/workspaces/{ws}/files/tree", HandleScopedFileTree(m.fileSvc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/files/index", HandleScopedFileIndex(m.fileSvc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/files/search", HandleScopedFileSearch(m.fileSvc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/files/git-status", HandleScopedGitStatus(m.fileSvc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/files/diff", HandleScopedFileDiff(m.fileSvc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/files/history", HandleScopedFileHistory(m.fileSvc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/files/blame", HandleScopedFileBlame(m.fileSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/files", HandleScopedFileRead(m.fileSvc))
+	mux.HandleFunc("PUT /api/workspaces/{ws}/files", HandleScopedFileWrite(m.fileSvc))
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/files", HandleScopedFileDelete(m.fileSvc))
+	mux.HandleFunc("POST /api/workspaces/{ws}/files/mkdir", HandleScopedFileMkdir(m.fileSvc))
+	mux.HandleFunc("PATCH /api/workspaces/{ws}/files/move", HandleScopedFileMove(m.fileSvc))
 }

@@ -4,10 +4,10 @@ package ops
 // run against. This interface breaks the import cycle between webui and cli
 // packages; the cli package provides the concrete implementation.
 //
-// FileOps only resolves roots — the actual file I/O (read/write/listdir)
-// happens in the service layer against the resolved path. Agent roots are an
-// agent worktree (or, for a lead, the primary repo); the workspace root is the
-// workspace folder that contains every repo checkout and agent worktree.
+// FileOps only resolves roots and workspace topology — the actual file I/O
+// (read/write/listdir) happens in the service layer against the resolved path.
+// Agent roots are an agent worktree; the workspace root is the workspace folder
+// that contains every repo checkout and agent worktree.
 type FileOps interface {
 	// ResolveAgentWorktree resolves an agent name to its worktree info.
 	// Reuses the same AgentWorktree type from gitops.go.
@@ -26,10 +26,43 @@ type FileOps interface {
 
 	// ResolveWorkspaceRoot resolves a workspace to its root folder — the
 	// directory that contains every repo checkout and agent worktree — so the
-	// read-only file browser can navigate the whole workspace from a single
-	// root. Returns the absolute folder path, or an error when the workspace
-	// has no local path on this machine (e.g. a distributed/cloud workspace
-	// that is not checked out locally). The browser is read-only; this root is
-	// not used for writes.
+	// file browser can navigate the whole workspace from a single root. Returns
+	// the absolute folder path, or an error when the workspace has no local path
+	// on this machine (e.g. a distributed/cloud workspace that is not checked
+	// out locally).
 	ResolveWorkspaceRoot(workspaceID string) (string, error)
+
+	// ResolveWorkspaceData returns the workspace topology used to validate
+	// repo/agent file-browser targets against workspace state.
+	ResolveWorkspaceData(workspaceID string) (*WorkspaceData, error)
+
+	// GitStatusPorcelain returns git status --porcelain XY codes keyed by
+	// checkout-relative path. It is read-only decoration data for file-browser
+	// status and conflict badges.
+	GitStatusPorcelain(worktreePath string) (map[string]string, error)
+
+	// GitShowFileAtRev returns file content from a git revision, capped to
+	// maxBytes, keyed by checkout-relative path.
+	GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*GitFileContentAtRev, error)
+
+	// GitDiffFile returns a unified diff for one checkout-relative file path.
+	// When to is empty, the diff compares from against the working tree.
+	GitDiffFile(worktreePath, path, from, to string) (string, error)
+
+	// GitLogFile returns bounded git log output for one checkout-relative file path.
+	GitLogFile(worktreePath, path string, limit int) (string, error)
+
+	// GitBlamePorcelain returns git blame --porcelain output for one file path.
+	GitBlamePorcelain(worktreePath, path string) (string, error)
+
+	// ResolveLoomDataDir resolves the local loom data/config directory using
+	// the established CLI resolver instead of callers reading env directly.
+	ResolveLoomDataDir() (string, error)
+}
+
+// GitFileContentAtRev contains bounded content returned from a git revision.
+type GitFileContentAtRev struct {
+	Content   []byte
+	Size      int64
+	Truncated bool
 }

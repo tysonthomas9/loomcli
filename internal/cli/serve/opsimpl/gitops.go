@@ -230,6 +230,82 @@ func (g *GitOpsImpl) ResolveWorkspaceRoot(workspaceID string) (string, error) {
 	return validateWorkspaceRoot(workspaceID, resolver.Config.Workspaces[wsName].Path)
 }
 
+// ResolveWorkspaceData returns workspace topology for file-scope target
+// validation. Store-backed deployments use the fleet-db projection; the legacy
+// config path exposes repo topology from local config.
+func (g *GitOpsImpl) ResolveWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspace id is required")
+	}
+
+	if g != nil && g.store != nil {
+		return storeadapter.BuildWorkspaceDataForKey(context.Background(), g.store, workspaceID)
+	}
+
+	return resolveConfigWorkspaceData(workspaceID)
+}
+
+func resolveConfigWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) {
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		return nil, fmt.Errorf("creating resolver: %v", err)
+	}
+	wsName := resolveWorkspaceConfigName(resolver.Config, workspaceID)
+	if wsName == "" {
+		return nil, fmt.Errorf("workspace %q not found in config", workspaceID)
+	}
+	ws := resolver.Config.Workspaces[wsName]
+	root, err := validateWorkspaceRoot(workspaceID, ws.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	repos, groups := configWorkspaceRepos(ws, root)
+	return &ops.WorkspaceData{
+		ID:     ws.ID,
+		Name:   wsName,
+		Path:   root,
+		Repos:  repos,
+		Groups: groups,
+	}, nil
+}
+
+func configWorkspaceRepos(ws config.WorkspaceConfig, root string) ([]ops.WorkspaceRepo, []string) {
+	repos := make([]ops.WorkspaceRepo, 0, len(ws.Repos))
+	groupSet := make(map[string]bool)
+	for _, r := range ws.Repos {
+		db := r.DefaultBranch
+		if db == "" {
+			db = "main"
+		}
+		remote := r.Remote
+		if remote == "" {
+			remote = "origin"
+		}
+		repoPath := r.ResolveAbsPath(root)
+		if r.Path == "" {
+			repoPath = filepath.Join(root, r.Name)
+		}
+		repos = append(repos, ops.WorkspaceRepo{
+			Name:          r.Name,
+			Path:          repoPath,
+			DefaultBranch: db,
+			Remote:        remote,
+			SourceRepoID:  r.SourceRepoID,
+			Groups:        r.Groups,
+		})
+		for _, group := range r.Groups {
+			groupSet[group] = true
+		}
+	}
+	groups := make([]string, 0, len(groupSet))
+	for group := range groupSet {
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
+	return repos, groups
+}
+
 // validateWorkspaceRoot checks that path is a real directory on this machine so
 // the viewer surfaces a clear "not checked out" error instead of a read failure.
 func validateWorkspaceRoot(workspaceID, path string) (string, error) {
@@ -574,6 +650,46 @@ func (g *GitOpsImpl) Status(worktreePath, targetBranch string) (*ops.GitStatusRe
 		HasConflicts:    result.HasConflicts,
 		StashCount:      result.StashCount,
 	}, nil
+}
+
+func (g *GitOpsImpl) GitStatusPorcelain(worktreePath string) (map[string]string, error) {
+	status, err := git.GetPorcelainStatus(worktreePath)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string(status), nil
+}
+
+func (g *GitOpsImpl) GitShowFileAtRev(worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	result, err := git.ShowFileAtRev(worktreePath, rev, path, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &ops.GitFileContentAtRev{
+		Content:   result.Content,
+		Size:      result.Size,
+		Truncated: result.Truncated,
+	}, nil
+}
+
+func (g *GitOpsImpl) GitDiffFile(worktreePath, path, from, to string) (string, error) {
+	return git.DiffFile(worktreePath, path, from, to)
+}
+
+func (g *GitOpsImpl) GitLogFile(worktreePath, path string, limit int) (string, error) {
+	return git.LogFile(worktreePath, path, limit)
+}
+
+func (g *GitOpsImpl) GitBlamePorcelain(worktreePath, path string) (string, error) {
+	return git.BlamePorcelain(worktreePath, path)
+}
+
+func (g *GitOpsImpl) ResolveLoomDataDir() (string, error) {
+	dir := config.GetConfigDir()
+	if strings.TrimSpace(dir) == "" {
+		return "", fmt.Errorf("cannot resolve loom data directory")
+	}
+	return filepath.Abs(dir)
 }
 
 func (g *GitOpsImpl) GetCurrentBranch(worktreePath string) (string, error) {

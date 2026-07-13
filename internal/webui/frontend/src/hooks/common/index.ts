@@ -25,10 +25,18 @@ export type {
   SubscriptionOptions,
 } from "./useEventProvider";
 
-export { useFileContent, useWorkspaceFileContent } from "./useFileContent";
+export {
+  useFileContent,
+  useWorkspaceFileContent,
+  useScopedFileContent,
+} from "./useFileContent";
 export type { UseFileContentReturn } from "./useFileContent";
 
-export { useFileTree, useWorkspaceFileTree } from "./useFileTree";
+export {
+  useFileTree,
+  useWorkspaceFileTree,
+  useScopedFileTree,
+} from "./useFileTree";
 export type { UseFileTreeReturn, UseFileTreeOptions } from "./useFileTree";
 
 export { useFolderPicker } from "./useFolderPicker";
@@ -62,3 +70,11 @@ export {
   NO_STORE_CONTEXT,
 } from "./useStoreContext";
 export type { StoreContextValue, StoreProviderProps } from "./useStoreContext";
+
+export {
+  FileBrowserStoreProvider,
+  fileBrowserTabsStorageKey,
+  useFileBrowserStore,
+  useFileBrowserStoreInstance,
+} from "@/stores";
+export type { FileBrowserGroup, FileBrowserStore } from "@/stores";

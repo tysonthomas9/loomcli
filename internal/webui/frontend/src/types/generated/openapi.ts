@@ -1464,6 +1464,178 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/files/tree": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get file tree for a scoped file browser root */
+    get: operations["getScopedFileTree"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/index": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get quick-open file index for a scoped file browser root */
+    get: operations["getScopedFileIndex"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Search files in a scoped file browser root */
+    post: operations["searchScopedFiles"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/git-status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get git status decorations for a scoped file browser root */
+    get: operations["getScopedFileGitStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get unified diff for a file in a scoped file browser root */
+    get: operations["getScopedFileDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get commit and browser-save timeline for a file */
+    get: operations["getScopedFileHistory"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/blame": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get bounded git blame data for a file */
+    get: operations["getScopedFileBlame"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a file from a scoped file browser root */
+    get: operations["readScopedFile"];
+    /** Create or update a file in a scoped file browser root */
+    put: operations["writeScopedFile"];
+    post?: never;
+    /** Delete a file or directory in a scoped file browser root */
+    delete: operations["deleteScopedFile"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/mkdir": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create a directory in a scoped file browser root */
+    post: operations["mkdirScopedFile"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/move": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Move or rename a path in a scoped file browser root */
+    patch: operations["moveScopedFile"];
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/files/tree": {
     parameters: {
       query?: never;
@@ -1471,7 +1643,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get file tree for an agent worktree */
+    /**
+     * Get file tree for an agent worktree
+     * @deprecated
+     */
     get: operations["getFileTree"];
     put?: never;
     post?: never;
@@ -1488,9 +1663,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read a file from an agent worktree */
+    /**
+     * Read a file from an agent worktree
+     * @deprecated
+     */
     get: operations["readFile"];
-    /** Write a file to an agent worktree */
+    /**
+     * Write a file to an agent worktree
+     * @deprecated
+     */
     put: operations["writeFile"];
     post?: never;
     delete?: never;
@@ -1941,6 +2122,101 @@ export interface components {
       /** @constant */
       success: true;
       message: string;
+    };
+    FileTreeEntry: {
+      name: string;
+      is_dir: boolean;
+      /** Format: int64 */
+      size: number;
+      /** Format: date-time */
+      mod_time: string;
+    };
+    FileTreeResponse: {
+      path: string;
+      entries: components["schemas"]["FileTreeEntry"][];
+    };
+    FileReadResponse: {
+      path: string;
+      content?: string;
+      /** Format: int64 */
+      size: number;
+      binary: boolean;
+      truncated: boolean;
+    };
+    FileIndexResponse: {
+      paths: string[];
+      truncated: boolean;
+    };
+    FileSearchRequest: {
+      query: string;
+      /** @default false */
+      regex: boolean;
+      include?: string[];
+      exclude?: string[] | null;
+      /** @default false */
+      caseSensitive: boolean;
+    };
+    FileSearchMatch: {
+      line: number;
+      col: number;
+      preview: string;
+    };
+    FileSearchFileResult: {
+      path: string;
+      matches: components["schemas"]["FileSearchMatch"][];
+    };
+    FileSearchResponse: {
+      results: components["schemas"]["FileSearchFileResult"][];
+      limitHit: boolean;
+    };
+    FileGitStatusResponse: {
+      [key: string]: string;
+    };
+    FileDiffResponse: {
+      path: string;
+      patch: string;
+    };
+    FileBlameLine: {
+      line: number;
+      lines: number;
+      sha: string;
+      author: string;
+      time: string;
+      summary: string;
+    };
+    FileBlameResponse: {
+      path: string;
+      skipped: boolean;
+      reason?: string;
+      message?: string;
+      lines: components["schemas"]["FileBlameLine"][];
+    };
+    FileHistoryEntry: {
+      /** @enum {string} */
+      kind: "commit" | "save";
+      id?: string;
+      sha?: string;
+      author?: string;
+      time: string;
+      summary: string;
+      content?: string;
+      /** Format: int64 */
+      size?: number;
+      binary?: boolean;
+      truncated?: boolean;
+    };
+    FileHistoryResponse: {
+      path: string;
+      entries: components["schemas"]["FileHistoryEntry"][];
+    };
+    FileWriteRequest: {
+      content: string;
+    };
+    FileMoveRequest: {
+      from: string;
+      to: string;
+      /** @default false */
+      overwrite: boolean;
     };
     RuntimeReadyResponse: {
       ready: boolean;
@@ -5759,6 +6035,342 @@ export interface operations {
       };
     };
   };
+  getScopedFileTree: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File tree */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileTreeResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileIndex: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Quick-open file index */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileIndexResponse"];
+        };
+      };
+    };
+  };
+  searchScopedFiles: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileSearchRequest"];
+      };
+    };
+    responses: {
+      /** @description File search results */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileSearchResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileGitStatus: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Root-relative file paths mapped to raw git porcelain XY codes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileGitStatusResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileDiff: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+        from?: string;
+        to?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Unified file diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileDiffResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileHistory: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File timeline */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileHistoryResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileBlame: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File blame data or skip signal */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileBlameResponse"];
+        };
+      };
+    };
+  };
+  readScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+        rev?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File content */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileReadResponse"];
+        };
+      };
+    };
+  };
+  writeScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileWriteRequest"];
+      };
+    };
+    responses: {
+      /** @description File written */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+    };
+  };
+  deleteScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+        recursive?: boolean;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File or directory deleted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+    };
+  };
+  mkdirScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Directory created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+    };
+  };
+  moveScopedFile: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileMoveRequest"];
+      };
+    };
+    responses: {
+      /** @description Path moved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+    };
+  };
   getFileTree: {
     parameters: {
       query?: never;
@@ -5779,7 +6391,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["FileTreeResponse"];
         };
       };
     };
@@ -5806,9 +6418,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            content?: string;
-          };
+          "application/json": components["schemas"]["FileReadResponse"];
         };
       };
       /** @description File not found */
@@ -5836,9 +6446,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": {
-          content: string;
-        };
+        "application/json": components["schemas"]["FileWriteRequest"];
       };
     };
     responses: {

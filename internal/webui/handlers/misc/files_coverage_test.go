@@ -84,11 +84,8 @@ func TestHandleFileRead_PathTraversalVariants(t *testing.T) {
 	}
 }
 
-func TestHandleFileRead_DeniedPathOnFullPath(t *testing.T) {
-	// Test that the second isDeniedPath check (on fullPath) catches denied files
-	// even when the reqPath itself doesn't trigger it.
+func TestHandleFileRead_EnvPathAllowed(t *testing.T) {
 	dir := t.TempDir()
-	// Create a file with denied extension in a subdirectory
 	sub := filepath.Join(dir, "config")
 	if err := os.Mkdir(sub, 0755); err != nil {
 		t.Fatal(err)
@@ -107,8 +104,8 @@ func TestHandleFileRead_DeniedPathOnFullPath(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 }
 
@@ -833,7 +830,7 @@ func TestHandleFileTree_DirsSortedBeforeFiles(t *testing.T) {
 
 // --- handleFileWrite: validation errors ---
 
-func TestHandleFileWrite_DeniedPathOnFullPath(t *testing.T) {
+func TestHandleFileWrite_EnvPathAllowed(t *testing.T) {
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "config")
 	if err := os.Mkdir(sub, 0755); err != nil {
@@ -851,8 +848,8 @@ func TestHandleFileWrite_DeniedPathOnFullPath(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 }
 
@@ -937,8 +934,8 @@ func TestHandleFileWrite_InvalidAgent(t *testing.T) {
 	handler := handleFileWrite(NewFileService(ops))
 
 	body := `{"content": "data"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/agents/bad.agent/files?path=test.txt", strings.NewReader(body))
-	req.SetPathValue("name", "bad.agent")
+	req := httptest.NewRequest(http.MethodPut, "/api/agents/bad$agent/files?path=test.txt", strings.NewReader(body))
+	req.SetPathValue("name", "bad$agent")
 	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-ws"))
 	w := httptest.NewRecorder()
 
