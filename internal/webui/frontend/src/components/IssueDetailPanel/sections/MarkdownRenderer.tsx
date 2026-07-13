@@ -1,6 +1,9 @@
 /**
  * MarkdownRenderer component.
- * Renders markdown content with consistent styling.
+ *
+ * Renders markdown content with one consistent sanitization policy. Explicit
+ * HTML design rendering belongs to DesignPanel and must not affect comments,
+ * descriptions, or notes based on content sniffing.
  */
 
 import Markdown from "react-markdown";

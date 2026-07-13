@@ -14,6 +14,7 @@ type WorkspaceCreate struct {
 	Name          string
 	Description   string
 	DefaultBranch string
+	DesignFormat  string
 }
 
 // WorkspaceUpdate is a partial-update payload. Only non-nil fields are
@@ -22,6 +23,7 @@ type WorkspaceUpdate struct {
 	Name          *string
 	Description   *string
 	DefaultBranch *string
+	DesignFormat  *string
 	State         *domain.WorkspaceState
 	ErrorMessage  *string
 }
