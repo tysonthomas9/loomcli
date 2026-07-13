@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
 func TestParsePorcelainV1ZUnusualPathsAndRenameSource(t *testing.T) {
@@ -59,6 +61,52 @@ func TestIsolatedGitEnvDropsInheritedGitVariablesAndPinsLocale(t *testing.T) {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("missing %q in %s", required, joined)
 		}
+	}
+}
+
+func TestGitInspectorAddsSafeDirectoryForValidatedCheckout(t *testing.T) {
+	dir := t.TempDir()
+	argsPath := filepath.Join(t.TempDir(), "args.txt")
+	fake := writeInspectorScript(t, "printf '%s\n' \"$@\" > \""+argsPath+"\"")
+	inspector := &GitInspector{binary: fake}
+	if _, err := inspector.Status(context.Background(), dir); err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	if !strings.Contains(string(args), "safe.directory="+dir) {
+		t.Fatalf("args = %s, missing safe.directory for %s", args, dir)
+	}
+}
+
+func TestGitInspectorRejectsChangedCheckoutIdentity(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "checkout")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldDir := filepath.Join(parent, "checkout-old")
+	if err := os.Rename(dir, oldDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(t.TempDir(), "ran")
+	fake := writeInspectorScript(t, "touch \""+sentinel+"\"")
+	ctx := ops.WithGitWorktreeIdentity(context.Background(), dir, info)
+	_, err = (&GitInspector{binary: fake}).Status(ctx, dir)
+	if inspectionKind(err) != "validation" {
+		t.Fatalf("Status error = %T %v, want validation", err, err)
+	}
+	if _, statErr := os.Stat(sentinel); !os.IsNotExist(statErr) {
+		t.Fatalf("git executed after identity change: %v", statErr)
 	}
 }
 

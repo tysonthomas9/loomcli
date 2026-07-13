@@ -3,6 +3,7 @@
 package svcimpl
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -171,5 +172,67 @@ func assertProtectedTreeUnchanged(t *testing.T, dir, secret string) {
 		if _, err := os.Lstat(filepath.Join(dir, name)); !os.IsNotExist(err) {
 			t.Fatalf("protected path %s was created: %v", filepath.Join(dir, name), err)
 		}
+	}
+}
+
+// TestUnixRootedFileStore_ListSkipsUnopenableSocket guards the regression where a
+// directory containing a unix socket (e.g. the workspace .loom folder with its
+// live daemon.sock) failed the whole listing with "stat rooted directory entry",
+// because the lister tried to open every non-symlink entry O_RDONLY.
+func TestUnixRootedFileStore_ListSkipsUnopenableSocket(t *testing.T) {
+	rootPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(rootPath, "regular.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write regular file: %v", err)
+	}
+	// Bind the socket via a short symlink dir: macOS caps sun_path at ~104
+	// bytes, and t.TempDir() paths exceed that, which would otherwise skip this
+	// regression guard on developer machines. The listener still creates the
+	// socket file at its real path inside rootPath.
+	shortDir, err := os.MkdirTemp("", "s")
+	if err != nil {
+		t.Fatalf("short temp dir: %v", err)
+	}
+	defer os.RemoveAll(shortDir)
+	shortLink := filepath.Join(shortDir, "s.sock")
+	sockPath := filepath.Join(rootPath, "daemon.sock")
+	ln, err := net.Listen("unix", shortLink)
+	if err != nil {
+		t.Skipf("cannot create unix socket: %v", err)
+	}
+	defer ln.Close()
+	if err := os.Rename(shortLink, sockPath); err != nil {
+		t.Fatalf("move socket into root: %v", err)
+	}
+
+	root, err := openScopedRoot(rootPath)
+	if err != nil {
+		t.Fatalf("openScopedRoot: %v", err)
+	}
+	defer root.Close()
+	if root.store.platform == nil {
+		t.Skip("descriptor-relative platform backend unavailable")
+	}
+
+	entries, err := root.store.List(".")
+	if err != nil {
+		t.Fatalf("List must not fail on a directory containing a socket: %v", err)
+	}
+	names := map[string]os.FileMode{}
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			t.Fatalf("entry Info(): %v", err)
+		}
+		names[e.Name()] = info.Mode()
+	}
+	if _, ok := names["regular.txt"]; !ok {
+		t.Errorf("regular file missing from listing: %v", names)
+	}
+	mode, ok := names["daemon.sock"]
+	if !ok {
+		t.Fatalf("socket entry missing from listing: %v", names)
+	}
+	if mode&os.ModeSocket == 0 {
+		t.Errorf("socket entry should carry os.ModeSocket, got %v", mode)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -99,17 +100,54 @@ func statDirEntryAt(parent int, name string) (os.FileInfo, error) {
 	if err := unix.Fstatat(parent, name, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return nil, err
 	}
-	if stat.Mode&unix.S_IFMT == unix.S_IFLNK {
+	switch uint32(stat.Mode) & unix.S_IFMT {
+	case unix.S_IFLNK:
 		return symlinkFileInfo{name: name}, nil
+	case unix.S_IFREG, unix.S_IFDIR:
+		fd, err := unix.Openat(parent, name, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		if err != nil {
+			return nil, err
+		}
+		f := os.NewFile(uintptr(fd), name)
+		defer f.Close()
+		return f.Stat()
+	default:
+		// Sockets, FIFOs, and device nodes cannot be opened O_RDONLY (a socket
+		// returns ENXIO), so synthesize FileInfo from the stat we already hold.
+		// Without this, listing a directory that holds one — e.g. the workspace
+		// .loom folder with its live daemon.sock — fails the whole listing.
+		return specialDirEntryInfo{name: name, size: int64(stat.Size), ifmt: uint32(stat.Mode) & unix.S_IFMT}, nil
 	}
-	fd, err := unix.Openat(parent, name, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
-	if err != nil {
-		return nil, err
-	}
-	f := os.NewFile(uintptr(fd), name)
-	defer f.Close()
-	return f.Stat()
 }
+
+// specialDirEntryInfo is an os.FileInfo for a non-regular, non-directory entry
+// (socket/FIFO/device) that cannot be opened. ModTime is intentionally zero to
+// stay portable across the Stat_t timestamp field differences between platforms.
+type specialDirEntryInfo struct {
+	name string
+	size int64
+	ifmt uint32
+}
+
+func (i specialDirEntryInfo) Name() string { return i.name }
+func (i specialDirEntryInfo) Size() int64  { return i.size }
+func (i specialDirEntryInfo) Mode() os.FileMode {
+	switch i.ifmt {
+	case unix.S_IFSOCK:
+		return os.ModeSocket
+	case unix.S_IFIFO:
+		return os.ModeNamedPipe
+	case unix.S_IFBLK:
+		return os.ModeDevice
+	case unix.S_IFCHR:
+		return os.ModeDevice | os.ModeCharDevice
+	default:
+		return os.ModeIrregular
+	}
+}
+func (i specialDirEntryInfo) ModTime() time.Time { return time.Time{} }
+func (i specialDirEntryInfo) IsDir() bool        { return false }
+func (i specialDirEntryInfo) Sys() any           { return nil }
 
 func (p *unixRootedPlatform) Read(name string, limit int64) ([]byte, os.FileInfo, bool, error) {
 	f, err := p.open(name, unix.O_RDONLY|unix.O_NONBLOCK)
@@ -271,6 +309,11 @@ func unixPathError(action string, err error) error {
 		return service.ErrValidation("path component is not a directory")
 	case errors.Is(err, unix.EACCES), errors.Is(err, unix.EPERM):
 		return service.ErrForbidden("filesystem access denied")
+	case errors.Is(err, unix.ENXIO), errors.Is(err, unix.ENODEV):
+		// A socket cannot be opened O_RDONLY (ENXIO); treat these special-file
+		// opens as a client error, matching the regular-file guard, rather than
+		// surfacing a 500 when a listed socket is read.
+		return service.ErrValidation("path is not a regular file")
 	default:
 		return service.ErrInternal(action, err)
 	}

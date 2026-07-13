@@ -34,7 +34,11 @@ func (s *fileServiceImpl) ReadFileAtRevScoped(ctx context.Context, wsID string, 
 		return nil, err
 	}
 	defer root.Close()
-	result, err := s.fileOps.GitShowFileAtRev(ctx, checkout.root, strings.TrimSpace(rev), checkout.relPath, maxRequestBody)
+	gitCtx, err := withGitCheckoutIdentity(ctx, checkout.root, root)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.fileOps.GitShowFileAtRev(gitCtx, checkout.root, strings.TrimSpace(rev), checkout.relPath, maxRequestBody)
 	if err != nil {
 		return nil, mapGitInspectionError("failed to read file at revision", err)
 	}
@@ -58,7 +62,11 @@ func (s *fileServiceImpl) DiffFileScoped(ctx context.Context, wsID string, scope
 		return nil, err
 	}
 	defer root.Close()
-	patch, err := s.fileOps.GitDiffFile(ctx, checkout.root, checkout.relPath, from, to)
+	gitCtx, err := withGitCheckoutIdentity(ctx, checkout.root, root)
+	if err != nil {
+		return nil, err
+	}
+	patch, err := s.fileOps.GitDiffFile(gitCtx, checkout.root, checkout.relPath, from, to)
 	if err != nil {
 		return nil, mapGitInspectionError("failed to run git diff", err)
 	}
@@ -90,7 +98,11 @@ func (s *fileServiceImpl) BlameFileScoped(ctx context.Context, wsID string, scop
 	if countLines(string(data)) > fileBlameMaxLines {
 		return blameSkipped(cleanPath, "too_many_lines", "File is over the 5000 line blame limit."), nil
 	}
-	output, err := s.fileOps.GitBlamePorcelain(ctx, checkout.root, checkout.relPath)
+	gitCtx, err := withGitCheckoutIdentity(ctx, checkout.root, root)
+	if err != nil {
+		return nil, err
+	}
+	output, err := s.fileOps.GitBlamePorcelain(gitCtx, checkout.root, checkout.relPath)
 	if err != nil {
 		return nil, mapGitInspectionError("failed to run git blame", err)
 	}
@@ -109,7 +121,11 @@ func (s *fileServiceImpl) HistoryFileScoped(ctx context.Context, wsID string, sc
 		return nil, err
 	}
 	defer root.Close()
-	logOutput, err := s.fileOps.GitLogFile(ctx, checkout.root, checkout.relPath, fileHistoryGitLogLimit)
+	gitCtx, err := withGitCheckoutIdentity(ctx, checkout.root, root)
+	if err != nil {
+		return nil, err
+	}
+	logOutput, err := s.fileOps.GitLogFile(gitCtx, checkout.root, checkout.relPath, fileHistoryGitLogLimit)
 	if err != nil {
 		return nil, mapGitInspectionError("failed to run git log", err)
 	}

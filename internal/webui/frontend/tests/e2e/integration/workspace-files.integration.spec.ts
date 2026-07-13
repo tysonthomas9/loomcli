@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,11 +25,47 @@ async function writeFile(
   );
 }
 
+async function deleteFileIfPresent(
+  request: APIRequestContext,
+  filePath: string,
+): Promise<void> {
+  const stat = await request.get(
+    `${FILES_BASE}/stat?scope=workspace&path=${encodeURIComponent(filePath)}`,
+  );
+  if (stat.status() === 404) return;
+  expect(stat.ok(), await stat.text()).toBeTruthy();
+  const version = (await stat.json()).version as string;
+  const deleted = await request.delete(
+    `${FILES_BASE}?scope=workspace&path=${encodeURIComponent(filePath)}`,
+    { headers: { "If-Match": `"${version}"` } },
+  );
+  expect(deleted.ok(), await deleted.text()).toBeTruthy();
+}
+
+function hasStagedDiff(): boolean {
+  try {
+    execFileSync("git", ["diff", "--cached", "--quiet"], { cwd: CHECKOUT });
+    return false;
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "status" in error &&
+      error.status === 1
+    ) {
+      return true;
+    }
+    throw error;
+  }
+}
+
 async function seedWorkspace(request: APIRequestContext): Promise<void> {
   const mkdir = await request.post(
     `${FILES_BASE}/mkdir?scope=workspace&path=${encodeURIComponent(".loom/terminal-worktrees")}`,
   );
   expect(mkdir.ok()).toBeTruthy();
+  fs.rmSync(path.join(CHECKOUT, "new-file.txt"), { force: true });
+  fs.rmSync(path.join(CHECKOUT, "moved.txt"), { force: true });
 
   for (const [filePath, content] of [
     [
@@ -49,14 +86,21 @@ async function seedWorkspace(request: APIRequestContext): Promise<void> {
   }
 
   execFileSync("git", ["add", "README.md", "notes.txt"], { cwd: CHECKOUT });
-  execFileSync("git", ["commit", "-m", "Add file browser E2E fixtures"], {
-    cwd: CHECKOUT,
-  });
+  if (hasStagedDiff()) {
+    execFileSync("git", ["commit", "-m", "Add file browser E2E fixtures"], {
+      cwd: CHECKOUT,
+    });
+  }
 }
 
 test.describe.configure({ mode: "serial" });
 
 test.describe("Real workspace file browser", () => {
+  test.skip(
+    !!process.env.LOOM_LOCAL_SERVER,
+    "requires self-contained E2E workspace",
+  );
+
   test.beforeAll(async ({ playwright }) => {
     const request = await playwright.request.newContext({
       baseURL: `http://127.0.0.1:${process.env.E2E_FRONTEND_PORT || "3100"}`,
@@ -133,6 +177,8 @@ test.describe("Real workspace file browser", () => {
       ]),
     );
 
+    await deleteFileIfPresent(request, "e2e-workspace/new-file.txt");
+    await deleteFileIfPresent(request, "e2e-workspace/moved.txt");
     const created = await writeFile(
       request,
       "e2e-workspace/new-file.txt",
