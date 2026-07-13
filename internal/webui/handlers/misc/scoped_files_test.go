@@ -93,7 +93,7 @@ func (s *recordingNavigationFileService) IndexFilesScoped(_ context.Context, wsI
 	s.indexScope = scope
 	s.indexTarget = target
 	s.indexRepo = repo
-	return &service.FileIndexResult{Paths: []string{"src/main.go"}, Truncated: true}, nil
+	return &service.FileIndexResult{Paths: []string{"src/main.go"}, Truncated: true, PartialReasons: []service.FilePartialReason{service.FilePartialFileCount}}, nil
 }
 
 func (s *recordingNavigationFileService) SearchFilesScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string, req service.FileSearchRequest) (*service.FileSearchResult, error) {
@@ -111,7 +111,8 @@ func (s *recordingNavigationFileService) SearchFilesScoped(_ context.Context, ws
 				Preview: "const needle = true",
 			}},
 		}},
-		LimitHit: true,
+		LimitHit:       true,
+		PartialReasons: []service.FilePartialReason{service.FilePartialResultCount},
 	}, nil
 }
 
@@ -199,9 +200,18 @@ func TestHandleScopedFileIndex_UsesScopeTarget(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if !body.Truncated || len(body.Paths) != 1 || body.Paths[0] != "src/main.go" {
+	if !body.Truncated || len(body.Paths) != 1 || body.Paths[0] != "src/main.go" || !hasFilePartialReason(body.PartialReasons, service.FilePartialFileCount) {
 		t.Fatalf("body = %+v", body)
 	}
+}
+
+func hasFilePartialReason(reasons []service.FilePartialReason, want service.FilePartialReason) bool {
+	for _, reason := range reasons {
+		if reason == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestHandleScopedFileIndex_UsesRepoQualifier(t *testing.T) {
@@ -290,7 +300,7 @@ func TestHandleScopedFileSearch_DecodesRequest(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if !body.LimitHit || len(body.Results) != 1 || body.Results[0].Matches[0].Line != 2 {
+	if !body.LimitHit || len(body.Results) != 1 || body.Results[0].Matches[0].Line != 2 || !hasFilePartialReason(body.PartialReasons, service.FilePartialResultCount) {
 		t.Fatalf("body = %+v", body)
 	}
 }
