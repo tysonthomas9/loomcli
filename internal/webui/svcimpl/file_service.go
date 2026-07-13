@@ -42,9 +42,12 @@ func (s *fileServiceImpl) ListDirectory(ctx context.Context, wsID, agentName, pa
 // listDirectoryAt lists one level under rootDir. hidden names path segments to
 // omit from the listing (e.g. ".git"); pass nil to list everything. Shared by
 // the scope-rooted listers.
-func listDirectoryAt(store *rootedFileStore, path string, hidden map[string]bool) (*service.FileTreeResult, error) {
+func listDirectoryAt(ctx context.Context, store *rootedFileStore, path string, hidden map[string]bool) (*service.FileTreeResult, error) {
 	cleanPath, err := normalizeFilePath(path, true)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
 		return nil, err
 	}
 	dirEntries, err := store.List(cleanPath)
@@ -61,20 +64,23 @@ func listDirectoryAt(store *rootedFileStore, path string, hidden map[string]bool
 		return dirEntries[i].Name() < dirEntries[j].Name()
 	})
 
-	entries := convertDirEntries(dirEntries, hidden)
+	entries := convertDirEntries(ctx, cleanPath, dirEntries, hidden)
 
 	return &service.FileTreeResult{Path: cleanPath, Entries: entries}, nil
 }
 
 // convertDirEntries converts os.DirEntry items to service.FileTreeEntry,
 // skipping symlinks and any entry whose name is in hidden (pass nil to keep all).
-func convertDirEntries(dirEntries []os.DirEntry, hidden map[string]bool) []service.FileTreeEntry {
+func convertDirEntries(ctx context.Context, parent string, dirEntries []os.DirEntry, hidden map[string]bool) []service.FileTreeEntry {
 	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
 	for _, de := range dirEntries {
 		if de.Type()&os.ModeSymlink != 0 {
 			continue
 		}
 		if isHiddenEntry(de.Name(), hidden) {
+			continue
+		}
+		if !service.FilePathAllowsSensitive(ctx, filepath.Join(parent, de.Name())) {
 			continue
 		}
 		info, err := de.Info()
@@ -105,9 +111,12 @@ func (s *fileServiceImpl) ReadFile(ctx context.Context, wsID, agentName, path st
 }
 
 // readFileAt reads a single file under rootDir.
-func readFileAt(store *rootedFileStore, path string) (*service.FileReadResult, error) {
+func readFileAt(ctx context.Context, store *rootedFileStore, path string) (*service.FileReadResult, error) {
 	cleanPath, err := normalizeFilePath(path, false)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
 		return nil, err
 	}
 	data, fi, truncated, err := store.Read(cleanPath, maxRequestBody)
@@ -253,29 +262,29 @@ func (s *fileServiceImpl) resolveWorkspaceData(wsID string) (*ops.WorkspaceData,
 	return ws, nil
 }
 
-func (s *fileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileTreeResult, error) {
+func (s *fileServiceImpl) ListDirectoryScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileTreeResult, error) {
 	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
 	defer root.Close()
-	return listDirectoryAt(root.store, path, hiddenScopeSegments)
+	return listDirectoryAt(ctx, root.store, path, hiddenScopeSegments)
 }
 
-func (s *fileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileReadResult, error) {
+func (s *fileServiceImpl) ReadFileScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileReadResult, error) {
 	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
 	defer root.Close()
-	return readFileAt(root.store, path)
+	return readFileAt(ctx, root.store, path)
 }
 
 func (s *fileServiceImpl) WriteFile(ctx context.Context, wsID, agentName, path, content string) error {
 	return s.WriteFileScoped(ctx, wsID, service.ScopeAgent, agentName, "", path, content)
 }
 
-func (s *fileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, content string) error {
+func (s *fileServiceImpl) WriteFileScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, content string) error {
 	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
@@ -283,6 +292,9 @@ func (s *fileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope 
 	defer root.Close()
 	cleanPath, err := normalizeFilePath(path, false)
 	if err != nil {
+		return err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
 		return err
 	}
 	if err := s.snapshotBeforeOverwrite(wsID, scope, target, repo, root.store, cleanPath); err != nil {
@@ -295,7 +307,7 @@ func (s *fileServiceImpl) WriteFileScoped(_ context.Context, wsID string, scope 
 	return nil
 }
 
-func (s *fileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool) error {
+func (s *fileServiceImpl) DeletePathScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool) error {
 	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
@@ -303,6 +315,9 @@ func (s *fileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope
 	defer root.Close()
 	cleanPath, err := normalizeFilePath(path, false)
 	if err != nil {
+		return err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
 		return err
 	}
 	if err := root.store.Delete(cleanPath, recursive); err != nil {
@@ -312,7 +327,7 @@ func (s *fileServiceImpl) DeletePathScoped(_ context.Context, wsID string, scope
 	return nil
 }
 
-func (s *fileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) error {
+func (s *fileServiceImpl) MkdirScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) error {
 	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
@@ -322,6 +337,9 @@ func (s *fileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope serv
 	if err != nil {
 		return err
 	}
+	if err := requireSensitiveFileAccess(ctx, cleanPath); err != nil {
+		return err
+	}
 	if err := root.store.MkdirAll(cleanPath); err != nil {
 		return err
 	}
@@ -329,7 +347,7 @@ func (s *fileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope serv
 	return nil
 }
 
-func (s *fileServiceImpl) MovePathScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool) error {
+func (s *fileServiceImpl) MovePathScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool) error {
 	root, err := s.resolveScopedRoot(wsID, scope, target, repo)
 	if err != nil {
 		return err
@@ -339,14 +357,27 @@ func (s *fileServiceImpl) MovePathScoped(_ context.Context, wsID string, scope s
 	if err != nil {
 		return err
 	}
+	if err := requireSensitiveFileAccess(ctx, cleanFrom); err != nil {
+		return err
+	}
 	cleanTo, err := normalizeFilePath(to, false)
 	if err != nil {
+		return err
+	}
+	if err := requireSensitiveFileAccess(ctx, cleanTo); err != nil {
 		return err
 	}
 	if err := root.store.Move(cleanFrom, cleanTo, overwrite); err != nil {
 		return err
 	}
 	s.invalidateIndex(root.path)
+	return nil
+}
+
+func requireSensitiveFileAccess(ctx context.Context, path string) error {
+	if !service.FilePathAllowsSensitive(ctx, path) {
+		return service.ErrForbidden("sensitive file access denied")
+	}
 	return nil
 }
 

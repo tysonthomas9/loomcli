@@ -172,6 +172,18 @@ func decodeOptionalJSONBody(w http.ResponseWriter, r *http.Request, dst any) boo
 	return false
 }
 
+// HandleFileCapabilities returns the permissions already established by file middleware.
+func HandleFileCapabilities() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		capabilities, ok := service.FileCapabilitiesFromContext(r.Context())
+		if !ok {
+			handler.RespondError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, capabilities)
+	}
+}
+
 // HandleScopedFileTree handles GET /api/workspaces/{ws}/files/tree?scope=&target=&path=.
 func HandleScopedFileTree(svc service.FileService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

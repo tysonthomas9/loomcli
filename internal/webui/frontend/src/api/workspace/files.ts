@@ -118,6 +118,9 @@ export interface FileCheckoutsResponse {
   checkouts: FileCheckout[];
 }
 
+export type FileCapabilitiesResponse =
+  components["schemas"]["FileCapabilitiesResponse"];
+
 interface ApiSuccess {
   success: boolean;
 }
@@ -287,6 +290,15 @@ export async function listFileCheckouts(
   workspaceId: string,
 ): Promise<FileCheckoutsResponse> {
   return get<FileCheckoutsResponse>(wsUrl(workspaceId, "/files/checkouts"));
+}
+
+/** GET /api/workspaces/{ws}/files/capabilities */
+export async function getFileCapabilities(
+  workspaceId: string,
+): Promise<FileCapabilitiesResponse> {
+  return get<FileCapabilitiesResponse>(
+    wsUrl(workspaceId, "/files/capabilities"),
+  );
 }
 
 /**

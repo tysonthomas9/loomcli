@@ -42,7 +42,10 @@ type fileSaveSnapshot struct {
 
 var errNoSaveSnapshot = errors.New("no save snapshot")
 
-func (s *fileServiceImpl) ReadFileAtRevScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, rev string) (*service.FileReadResult, error) {
+func (s *fileServiceImpl) ReadFileAtRevScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, rev string) (*service.FileReadResult, error) {
+	if err := requireSensitiveFileAccess(ctx, path); err != nil {
+		return nil, err
+	}
 	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
 	if err != nil {
 		return nil, err
@@ -63,7 +66,10 @@ func (s *fileServiceImpl) ReadFileAtRevScoped(_ context.Context, wsID string, sc
 	}, nil
 }
 
-func (s *fileServiceImpl) DiffFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, from, to string) (*service.FileDiffResult, error) {
+func (s *fileServiceImpl) DiffFileScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path, from, to string) (*service.FileDiffResult, error) {
+	if err := requireSensitiveFileAccess(ctx, path); err != nil {
+		return nil, err
+	}
 	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
 	if err != nil {
 		return nil, err
@@ -76,7 +82,10 @@ func (s *fileServiceImpl) DiffFileScoped(_ context.Context, wsID string, scope s
 	return &service.FileDiffResult{Path: cleanPath, Patch: patch}, nil
 }
 
-func (s *fileServiceImpl) BlameFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileBlameResult, error) {
+func (s *fileServiceImpl) BlameFileScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileBlameResult, error) {
+	if err := requireSensitiveFileAccess(ctx, path); err != nil {
+		return nil, err
+	}
 	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
 	if err != nil {
 		return nil, err
@@ -108,7 +117,10 @@ func (s *fileServiceImpl) BlameFileScoped(_ context.Context, wsID string, scope 
 	}, nil
 }
 
-func (s *fileServiceImpl) HistoryFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileHistoryResult, error) {
+func (s *fileServiceImpl) HistoryFileScoped(ctx context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileHistoryResult, error) {
+	if err := requireSensitiveFileAccess(ctx, path); err != nil {
+		return nil, err
+	}
 	root, cleanPath, checkout, err := s.resolveScopedContainingCheckout(wsID, scope, target, repo, path)
 	if err != nil {
 		return nil, err

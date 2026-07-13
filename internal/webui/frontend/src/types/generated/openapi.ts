@@ -1464,6 +1464,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/files/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get effective workspace file-browser capabilities */
+    get: operations["getFileCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/files/tree": {
     parameters: {
       query?: never;
@@ -2164,6 +2181,11 @@ export interface components {
       size: number;
       /** Format: date-time */
       mod_time: string;
+    };
+    FileCapabilitiesResponse: {
+      read: boolean;
+      write: boolean;
+      sensitive: boolean;
     };
     FileTreeResponse: {
       path: string;
@@ -6104,6 +6126,29 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  getFileCapabilities: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Effective file-browser capabilities */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCapabilitiesResponse"];
         };
       };
     };

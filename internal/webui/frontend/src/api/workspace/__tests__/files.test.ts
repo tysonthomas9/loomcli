@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
   deleteScopedPath,
+  getFileCapabilities,
   gitStatusScoped,
   indexScopedFiles,
   listScopedDir,
@@ -37,6 +38,18 @@ const mockPut = put as ReturnType<typeof vi.fn>;
 describe("files API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe("getFileCapabilities", () => {
+    it("returns effective workspace file permissions", async () => {
+      const data = { read: true, write: false, sensitive: false };
+      mockGet.mockResolvedValue(data);
+
+      await expect(getFileCapabilities("test-ws-id")).resolves.toEqual(data);
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/test-ws-id/files/capabilities",
+      );
+    });
   });
 
   // ============= listWorktreeDir =============

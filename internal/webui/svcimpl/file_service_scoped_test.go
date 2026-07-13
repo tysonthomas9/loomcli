@@ -188,6 +188,109 @@ func scopedSvc(root string) service.FileService {
 	return NewFileService(scopedMockFileOps{wsRoot: root})
 }
 
+func TestFileServiceImpl_ViewerFiltersSensitiveSurfaces(t *testing.T) {
+	root := t.TempDir()
+	for path, content := range map[string]string{
+		"readme.txt":        "needle public",
+		".env":              "needle secret env",
+		"config/.env.local": "needle secret local",
+		"keys/server.pem":   "needle secret pem",
+		".ssh/id_ed25519":   "needle secret ssh",
+		"home/.netrc":       "needle secret netrc",
+	} {
+		mustWrite(t, filepath.Join(root, path), content)
+	}
+	svc := scopedSvc(root)
+	viewer := service.WithFileCapabilities(context.Background(), service.FileCapabilities{Read: true})
+
+	tree, err := svc.ListDirectoryScoped(viewer, "ws", service.ScopeWorkspace, "", "", ".")
+	if err != nil {
+		t.Fatalf("ListDirectoryScoped: %v", err)
+	}
+	for _, entry := range tree.Entries {
+		if service.IsSensitiveFilePath(entry.Name) {
+			t.Fatalf("tree exposed sensitive entry %q", entry.Name)
+		}
+	}
+
+	if _, err := svc.ReadFileScoped(viewer, "ws", service.ScopeWorkspace, "", "", ".env"); err == nil {
+		t.Fatal("viewer read of .env succeeded")
+	} else if serviceErr, ok := err.(*service.ServiceError); !ok || serviceErr.Kind != service.KindForbidden {
+		t.Fatalf("viewer read error = %T %v, want forbidden", err, err)
+	}
+
+	index, err := svc.IndexFilesScoped(viewer, "ws", service.ScopeWorkspace, "", "")
+	if err != nil {
+		t.Fatalf("IndexFilesScoped: %v", err)
+	}
+	if len(index.Paths) != 1 || index.Paths[0] != "readme.txt" {
+		t.Fatalf("viewer index = %v, want only readme.txt", index.Paths)
+	}
+
+	search, err := svc.SearchFilesScoped(viewer, "ws", service.ScopeWorkspace, "", "", service.FileSearchRequest{
+		Query:   "needle",
+		Exclude: &[]string{},
+	})
+	if err != nil {
+		t.Fatalf("SearchFilesScoped: %v", err)
+	}
+	if len(search.Results) != 1 || search.Results[0].Path != "readme.txt" {
+		t.Fatalf("viewer search = %+v, want only readme.txt", search.Results)
+	}
+}
+
+func TestFileServiceImpl_EditorCanAccessSensitiveFiles(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".env.production"), "TOKEN=secret")
+	svc := scopedSvc(root)
+	editor := service.WithFileCapabilities(context.Background(), service.FileCapabilities{Read: true, Write: true, Sensitive: true})
+
+	read, err := svc.ReadFileScoped(editor, "ws", service.ScopeWorkspace, "", "", ".env.production")
+	if err != nil || read.Content != "TOKEN=secret" {
+		t.Fatalf("editor read = %+v, err=%v", read, err)
+	}
+	if err := svc.WriteFileScoped(editor, "ws", service.ScopeWorkspace, "", "", ".env.production", "TOKEN=updated"); err != nil {
+		t.Fatalf("editor write: %v", err)
+	}
+}
+
+func TestFileServiceImpl_ViewerFiltersGitStatusAndCheckoutCounts(t *testing.T) {
+	wsRoot := t.TempDir()
+	repoRoot := filepath.Join(wsRoot, "repo-a")
+	if err := os.MkdirAll(repoRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, repoRoot)
+	mustWrite(t, filepath.Join(repoRoot, "public.txt"), "public")
+	mustWrite(t, filepath.Join(repoRoot, ".env"), "secret")
+	svc := NewFileService(scopedMockFileOps{
+		wsRoot:   wsRoot,
+		repoRoot: repoRoot,
+		wsData: &ops.WorkspaceData{
+			ID:    "ws",
+			Path:  wsRoot,
+			Repos: []ops.WorkspaceRepo{{Name: "repo-a", Path: repoRoot}},
+		},
+	})
+	viewer := service.WithFileCapabilities(context.Background(), service.FileCapabilities{Read: true})
+
+	status, err := svc.GitStatusScoped(viewer, "ws", service.ScopeRepo, "repo-a", "")
+	if err != nil {
+		t.Fatalf("GitStatusScoped: %v", err)
+	}
+	if _, ok := status[".env"]; ok || status["public.txt"] != "??" {
+		t.Fatalf("viewer status = %#v", status)
+	}
+
+	checkouts, err := svc.ListFileCheckouts(viewer, "ws")
+	if err != nil {
+		t.Fatalf("ListFileCheckouts: %v", err)
+	}
+	if len(checkouts.Checkouts) != 1 || checkouts.Checkouts[0].ChangeCount != 1 {
+		t.Fatalf("viewer checkouts = %+v, want one public change", checkouts.Checkouts)
+	}
+}
+
 type scopedCase struct {
 	name   string
 	scope  service.FileScope
