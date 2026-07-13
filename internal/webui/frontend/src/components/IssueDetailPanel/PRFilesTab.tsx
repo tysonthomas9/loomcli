@@ -5,12 +5,12 @@
  *
  * Data is loom's real per-agent branch diff (useDiff → /agents/{name}/diff/*)
  * — the PR author's worktree vs its merge-base; rendering reuses
- * DiffFileViewer's parsed unified diff.
+ * GitDiffViewer's unified diff rendering.
  */
 
 import { useEffect, useState, type ReactNode } from "react";
 
-import { DiffFileViewer } from "@/components/AgentDetailPanel";
+import { GitDiffViewer } from "@/components/DiffView";
 import { useDiff } from "@/hooks/terminal";
 import type { LoomAgentStatus } from "@/types";
 
@@ -141,7 +141,8 @@ export function PRFilesTab({
                 </span>
                 {selected.path}
               </h2>
-              <DiffFileViewer
+              <GitDiffViewer
+                filePath={selected.path}
                 patch={patch}
                 isLoading={!patch && !patchError}
                 {...(patchError !== undefined && { error: patchError })}

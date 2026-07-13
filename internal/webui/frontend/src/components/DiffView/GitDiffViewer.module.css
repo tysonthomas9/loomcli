@@ -1,0 +1,92 @@
+.viewerWrapper {
+  padding: 0 var(--panel-padding-md) 8px;
+}
+
+.diffView {
+  max-height: 600px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+  font-family: var(--font-family-mono);
+}
+
+.viewerWrapper :global(.diff-tailwindcss-wrapper) {
+  font-family: var(--font-family-mono);
+}
+
+.viewerWrapper :global(.diff-tailwindcss-wrapper .diff-style-root) {
+  --diff-add-content--: var(--color-diff-add-bg);
+  --diff-add-lineNumber--: var(--color-diff-add-bg);
+  --diff-add-content-highlight--: color-mix(
+    in srgb,
+    var(--color-diff-add-bg) 70%,
+    var(--color-diff-add) 30%
+  );
+  --diff-del-content--: var(--color-diff-del-bg);
+  --diff-del-lineNumber--: var(--color-diff-del-bg);
+  --diff-del-content-highlight--: color-mix(
+    in srgb,
+    var(--color-diff-del-bg) 70%,
+    var(--color-diff-del) 30%
+  );
+  --diff-hunk-content--: var(--color-diff-hunk-bg);
+  --diff-hunk-lineNumber--: var(--color-diff-hunk-bg);
+  --diff-hunk-content-color--: var(--color-diff-hunk);
+  --diff-plain-content--: var(--color-bg-secondary);
+  --diff-plain-lineNumber--: var(--color-bg-secondary);
+  --diff-plain-lineNumber-color--: var(--color-text-muted);
+  --diff-expand-content--: var(--color-bg-secondary);
+  --diff-expand-lineNumber--: var(--color-bg-secondary);
+  --diff-expand-lineNumber-color--: var(--color-text-muted);
+  --diff-border--: var(--color-border);
+  --diff-empty-content--: var(--color-bg-secondary);
+}
+
+.viewerWrapper :global(.diff-view-wrapper) {
+  width: 100%;
+}
+
+.viewerWrapper :global(.diff-style-root table) {
+  width: 100%;
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.viewerWrapper :global(.diff-line-content),
+.viewerWrapper :global(.diff-line-old-content),
+.viewerWrapper :global(.diff-line-new-content) {
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.viewerWrapper :global(.diff-line-new-content) {
+  color: var(--color-diff-add);
+}
+
+.viewerWrapper :global(.diff-line-old-content) {
+  color: var(--color-diff-del);
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.error {
+  padding: 18px var(--panel-padding-md);
+  color: var(--color-danger);
+  font-size: 13px;
+}
+
+.viewerMessage {
+  padding: 12px 16px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-style: italic;
+}

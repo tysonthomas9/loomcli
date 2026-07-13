@@ -153,9 +153,13 @@ export default defineConfig(({ mode }) => ({
   plugins: [react()],
 
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
+    alias: [
+      {
+        find: /^react-arborist$/,
+        replacement: "react-arborist/dist/module/index.js",
+      },
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+    ],
   },
 
   build: {
@@ -223,6 +227,7 @@ export default defineConfig(({ mode }) => ({
   test: {
     globals: true,
     environment: "node",
+    setupFiles: ["src/test-utils/setup.ts"],
     exclude: ["tests/e2e/**", "node_modules/**"],
     pool: "forks",
     coverage: {

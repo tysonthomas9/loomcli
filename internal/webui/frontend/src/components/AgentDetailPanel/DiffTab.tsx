@@ -1,16 +1,16 @@
 /**
  * DiffTab - orchestrates the diff viewer for an agent's worktree changes.
  * Uses useDiff hook for data, renders summary bar, file list with DiffFileRow,
- * and inline DiffFileViewer for expanded files.
+ * and inline GitDiffViewer for expanded files.
  */
 
 import { useState, useEffect } from "react";
 
 import type { LoomAgentStatus } from "@/types";
 import { useDiff } from "@/hooks/terminal";
+import { GitDiffViewer } from "@/components/DiffView";
 
 import { DiffFileRow } from "./DiffFileRow";
-import { DiffFileViewer } from "./DiffFileViewer";
 import styles from "./DiffTab.module.css";
 
 interface DiffTabProps {
@@ -102,7 +102,8 @@ export function DiffTab({ agent, isActive }: DiffTabProps): JSX.Element {
                 onToggleViewed={() => markViewed(file.path)}
               />
               {isExpanded && (
-                <DiffFileViewer
+                <GitDiffViewer
+                  filePath={file.path}
                   patch={cachedPatch}
                   isLoading={!cachedPatch && !patchErrors.has(file.path)}
                   error={patchErrors.get(file.path)?.message}

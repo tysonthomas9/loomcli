@@ -1,14 +1,33 @@
 import {
+  createContext,
+  forwardRef,
   useCallback,
+  useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent,
+  type ComponentType,
+  type CSSProperties,
   type FormEvent,
+  type HTMLAttributes,
+  type KeyboardEvent,
   type MouseEvent,
+  type RefObject,
 } from "react";
+import {
+  Tree,
+  type NodeRendererProps,
+  type RowRendererProps,
+  type TreeApi,
+} from "react-arborist";
+import { RowContainer } from "react-arborist/dist/module/components/row-container";
+import { useDataUpdates, useTreeApi } from "react-arborist/dist/module/context";
+import { FixedSizeList, type ListChildComponentProps } from "react-window";
+
 import type { FileEntry } from "@/api/workspace";
+
 import {
   buildFolderGitDecorations,
   gitDecorationForStatus,
@@ -31,7 +50,7 @@ export interface FileTreeInlineEdit {
   isDir: boolean;
 }
 
-interface FileTreeProps {
+export interface FileTreeProps {
   treeData: Map<string, FileEntry[]>;
   expanded: Set<string>;
   selectedPath: string | null;
@@ -57,7 +76,30 @@ interface FileTreeProps {
   idPrefix?: string | undefined;
 }
 
-/** A single node in the flattened, visible-order tree. */
+interface EntryTreeItem {
+  kind: "entry";
+  id: string;
+  path: string;
+  name: string;
+  isDir: boolean;
+  depth: number;
+  isExpanded: boolean;
+  children?: TreeItem[];
+}
+
+interface InlineTreeItem {
+  kind: "inline";
+  id: string;
+  path: string;
+  name: string;
+  isDir: boolean;
+  depth: number;
+  parentPath: string;
+}
+
+type TreeItem = EntryTreeItem | InlineTreeItem;
+
+/** A single entry node in the flattened, visible-order tree. */
 interface VisNode {
   path: string;
   name: string;
@@ -65,6 +107,17 @@ interface VisNode {
   depth: number;
   isExpanded: boolean;
 }
+
+interface BuiltTree {
+  data: TreeItem[];
+  visibleEntries: VisNode[];
+  visibleCount: number;
+  dirPaths: string[];
+}
+
+const ROW_HEIGHT = 28;
+const INDENT_WIDTH = 16;
+const BASE_PADDING = 8;
 
 function highlightMatch(name: string, filter: string): JSX.Element {
   if (!filter) return <>{name}</>;
@@ -82,7 +135,7 @@ function highlightMatch(name: string, filter: string): JSX.Element {
   );
 }
 
-/** Build full path from parent dir path and entry name */
+/** Build full path from parent dir path and entry name. */
 function buildPath(parentPath: string, name: string): string {
   return parentPath ? `${parentPath}/${name}` : name;
 }
@@ -123,30 +176,99 @@ function shouldShow(
   return false;
 }
 
-/**
- * flattenVisible walks treeData from the root into expanded directories,
- * applying the filter, and returns nodes in render (visible) order. The render
- * and keyboard navigation both consume this single list so they never diverge.
- */
-function flattenVisible(
+function inlineId(parentPath: string): string {
+  return `__inline__:${parentPath}`;
+}
+
+function makeInlineItem(inlineEdit: FileTreeInlineEdit, depth: number) {
+  return {
+    kind: "inline",
+    id: inlineId(inlineEdit.parentPath),
+    path: inlineId(inlineEdit.parentPath),
+    name: inlineEdit.value,
+    isDir: inlineEdit.isDir,
+    depth,
+    parentPath: inlineEdit.parentPath,
+  } satisfies InlineTreeItem;
+}
+
+function buildTree(
   treeData: Map<string, FileEntry[]>,
   expanded: Set<string>,
   filter: string,
-): VisNode[] {
-  const out: VisNode[] = [];
-  const walk = (parentPath: string, depth: number) => {
-    const entries = (treeData.get(parentPath) ?? []).filter((e) =>
-      shouldShow(e, parentPath, filter, treeData),
-    );
-    for (const e of entries) {
-      const path = buildPath(parentPath, e.name);
-      const isExpanded = e.is_dir && expanded.has(path);
-      out.push({ path, name: e.name, isDir: e.is_dir, depth, isExpanded });
-      if (isExpanded) walk(path, depth + 1);
+  inlineEdit?: FileTreeInlineEdit | null | undefined,
+): BuiltTree {
+  const visibleEntries: VisNode[] = [];
+  const dirPaths: string[] = [];
+  let visibleCount = 0;
+  const createInline =
+    inlineEdit && inlineEdit.kind !== "rename" ? inlineEdit : null;
+
+  const walk = (
+    parentPath: string,
+    depth: number,
+    includeEntries = true,
+  ): TreeItem[] => {
+    const items: TreeItem[] = [];
+    if (createInline?.parentPath === parentPath) {
+      items.push(makeInlineItem(createInline, depth));
+      visibleCount += 1;
     }
+    if (!includeEntries) return items;
+
+    const entries = (treeData.get(parentPath) ?? []).filter((entry) =>
+      shouldShow(entry, parentPath, filter, treeData),
+    );
+    for (const entry of entries) {
+      const path = buildPath(parentPath, entry.name);
+      const isExpanded = entry.is_dir && expanded.has(path);
+      if (entry.is_dir) dirPaths.push(path);
+
+      const item: EntryTreeItem = {
+        kind: "entry",
+        id: path,
+        path,
+        name: entry.name,
+        isDir: entry.is_dir,
+        depth,
+        isExpanded,
+      };
+      items.push(item);
+      visibleEntries.push({
+        path,
+        name: entry.name,
+        isDir: entry.is_dir,
+        depth,
+        isExpanded,
+      });
+      visibleCount += 1;
+      if (entry.is_dir) {
+        const hasInlineChild = createInline?.parentPath === path;
+        item.children =
+          isExpanded || hasInlineChild ? walk(path, depth + 1, isExpanded) : [];
+      }
+    }
+    return items;
   };
-  walk("", 0);
-  return out;
+
+  return {
+    data: walk("", 0),
+    visibleEntries,
+    visibleCount,
+    dirPaths,
+  };
+}
+
+function openStateFor(
+  expanded: Set<string>,
+  forcedOpenPath?: string | null,
+): Record<string, boolean> {
+  const state: Record<string, boolean> = {};
+  expanded.forEach((path) => {
+    state[path] = true;
+  });
+  if (forcedOpenPath) state[forcedOpenPath] = true;
+  return state;
 }
 
 const DirChevron = ({ expanded }: { expanded: boolean }) => (
@@ -164,12 +286,12 @@ const DirChevron = ({ expanded }: { expanded: boolean }) => (
   </span>
 );
 
-const NodeIcon = ({ node }: { node: VisNode }) => (
+const NodeIcon = ({ name, isDir }: { name: string; isDir: boolean }) => (
   <span
     className={styles.icon}
-    data-ext={node.isDir ? undefined : fileExtension(node.name)}
+    data-ext={isDir ? undefined : fileExtension(name)}
   >
-    {node.isDir ? (
+    {isDir ? (
       <svg viewBox="0 0 16 16" aria-hidden="true">
         <path
           d="M2 3h4l2 2h6v8H2V3z"
@@ -199,73 +321,6 @@ const NodeIcon = ({ node }: { node: VisNode }) => (
   </span>
 );
 
-function InlineEditRow({
-  depth,
-  value,
-  isDir,
-  onChange,
-  onCommit,
-  onCancel,
-}: {
-  depth: number;
-  value: string;
-  isDir: boolean;
-  onChange?: ((value: string) => void) | undefined;
-  onCommit?: (() => void) | undefined;
-  onCancel?: (() => void) | undefined;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const canceledRef = useRef(false);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    onCommit?.();
-  };
-
-  return (
-    <form
-      className={styles.inlineEditRow}
-      style={{ paddingLeft: 8 + depth * 16 }}
-      onSubmit={submit}
-      onClick={(event) => event.stopPropagation()}
-      data-testid="file-tree-inline-edit"
-    >
-      <span className={styles.fileIconSpacer} />
-      <NodeIcon
-        node={{
-          path: "__inline__",
-          name: value,
-          isDir,
-          depth,
-          isExpanded: false,
-        }}
-      />
-      <input
-        ref={inputRef}
-        className={styles.inlineEditInput}
-        value={value}
-        onChange={(event) => onChange?.(event.target.value)}
-        onBlur={() => {
-          if (!canceledRef.current) onCommit?.();
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            canceledRef.current = true;
-            event.preventDefault();
-            onCancel?.();
-          }
-        }}
-        aria-label="File name"
-      />
-    </form>
-  );
-}
-
 function InlineEditInput({
   value,
   onChange,
@@ -285,6 +340,11 @@ function InlineEditInput({
     inputRef.current?.select();
   }, []);
 
+  const commit = (event?: FormEvent | KeyboardEvent<HTMLInputElement>) => {
+    event?.preventDefault();
+    onCommit?.();
+  };
+
   return (
     <input
       ref={inputRef}
@@ -297,8 +357,7 @@ function InlineEditInput({
       }}
       onKeyDown={(event) => {
         if (event.key === "Enter") {
-          event.preventDefault();
-          onCommit?.();
+          commit(event);
         }
         if (event.key === "Escape") {
           canceledRef.current = true;
@@ -311,45 +370,137 @@ function InlineEditInput({
   );
 }
 
-function TreeNodeRow({
-  node,
-  depthOffset,
-  idPrefix,
-  activePath,
-  selectedPath,
-  filterText,
-  inlineEdit,
-  gitStatus,
-  folderDecorations,
-  onActivate,
-  onContextMenuNode,
-  onInlineEditChange,
-  onInlineEditCommit,
-  onInlineEditCancel,
-}: {
-  node: VisNode;
-  depthOffset: number;
+interface FileTreeRenderContextValue {
   idPrefix: string;
+  depthOffset: number;
   activePath: string | null;
   selectedPath: string | null;
   filterText: string;
-  inlineEdit?: FileTreeInlineEdit | null | undefined;
+  inlineEdit: FileTreeInlineEdit | null | undefined;
   gitStatus: Record<string, string>;
   folderDecorations: Map<string, FolderGitDecoration>;
+  treeRef: RefObject<HTMLDivElement>;
+  onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   onActivate: (node: VisNode) => void;
-  onContextMenuNode?: (
-    node: FileTreeNodeInfo,
-    event: MouseEvent<HTMLDivElement>,
-  ) => void;
-  onInlineEditChange?: ((value: string) => void) | undefined;
-  onInlineEditCommit?: (() => void) | undefined;
-  onInlineEditCancel?: (() => void) | undefined;
-}) {
-  const fileDecoration = node.isDir
+  onContextMenuNode:
+    | ((node: FileTreeNodeInfo, event: MouseEvent<HTMLDivElement>) => void)
+    | undefined;
+  onFocusPath: (path: string) => void;
+  onInlineEditChange: ((value: string) => void) | undefined;
+  onInlineEditCommit: (() => void) | undefined;
+  onInlineEditCancel: (() => void) | undefined;
+}
+
+const FileTreeRenderContext = createContext<FileTreeRenderContextValue | null>(
+  null,
+);
+
+function useFileTreeRenderContext(): FileTreeRenderContextValue {
+  const value = useContext(FileTreeRenderContext);
+  if (!value) throw new Error("FileTree render context missing");
+  return value;
+}
+
+const TreeListOuter = forwardRef<
+  HTMLDivElement,
+  HTMLAttributes<HTMLDivElement>
+>(function TreeListOuter({ style, ...props }, ref) {
+  return <div {...props} ref={ref} style={{ ...style, overflow: "visible" }} />;
+});
+
+function ArboristContainer(): JSX.Element {
+  useDataUpdates();
+  const tree = useTreeApi<TreeItem>();
+  const { treeRef, activePath, idPrefix, onKeyDown } =
+    useFileTreeRenderContext();
+  const itemCount = tree.visibleNodes.length;
+  const Row = RowContainer as ComponentType<ListChildComponentProps>;
+
+  return (
+    <div
+      ref={treeRef}
+      className={styles.tree}
+      role="tree"
+      aria-label={tree.props["aria-label"]}
+      tabIndex={0}
+      aria-activedescendant={
+        activePath ? nodeDomId(idPrefix, activePath) : undefined
+      }
+      onKeyDown={onKeyDown}
+      style={{
+        height: tree.height,
+        width: tree.width,
+        minHeight: 0,
+        minWidth: 0,
+      }}
+    >
+      {itemCount > 0 && (
+        <FixedSizeList
+          outerRef={tree.listEl}
+          itemCount={itemCount}
+          height={tree.height}
+          width={tree.width}
+          itemSize={tree.rowHeight}
+          overscanCount={tree.overscanCount}
+          itemKey={(index) => tree.visibleNodes[index]?.id ?? index}
+          ref={tree.list as RefObject<FixedSizeList>}
+          outerElementType={TreeListOuter}
+        >
+          {Row}
+        </FixedSizeList>
+      )}
+    </div>
+  );
+}
+
+function ArboristRow({
+  node,
+  attrs,
+  innerRef,
+  children,
+}: RowRendererProps<TreeItem>): JSX.Element {
+  const item = node.data;
+  const {
+    idPrefix,
+    depthOffset,
+    activePath,
+    selectedPath,
+    gitStatus,
+    folderDecorations,
+    onActivate,
+    onContextMenuNode,
+    onFocusPath,
+  } = useFileTreeRenderContext();
+  const visualDepth = item.depth + depthOffset;
+  const baseStyle = attrs.style as CSSProperties;
+
+  if (item.kind === "inline") {
+    return (
+      <div
+        {...attrs}
+        ref={innerRef}
+        role="treeitem"
+        aria-level={visualDepth + 1}
+        aria-label={item.name || "New file"}
+        data-path={item.path}
+        data-dir={item.isDir || undefined}
+        className={styles.inlineEditRow}
+        style={{
+          ...baseStyle,
+          paddingLeft: BASE_PADDING + visualDepth * INDENT_WIDTH,
+        }}
+        data-testid="file-tree-inline-edit"
+      >
+        {children}
+      </div>
+    );
+  }
+
+  const fileDecoration = item.isDir
     ? null
-    : gitDecorationForStatus(gitStatus[node.path]);
-  const folderDecoration = node.isDir
-    ? folderDecorations.get(node.path)
+    : gitDecorationForStatus(gitStatus[item.path]);
+  const folderDecoration = item.isDir
+    ? folderDecorations.get(item.path)
     : undefined;
   const decorationKind =
     fileDecoration?.kind ??
@@ -360,40 +511,70 @@ function TreeNodeRow({
         : undefined);
   const hasConflict =
     !!fileDecoration?.conflict || !!folderDecoration?.conflict;
-  const visualDepth = node.depth + depthOffset;
 
   return (
     <div
-      id={nodeDomId(idPrefix, node.path)}
-      data-path={node.path}
+      {...attrs}
+      ref={innerRef}
+      id={nodeDomId(idPrefix, item.path)}
+      data-path={item.path}
       role="treeitem"
-      aria-label={node.name}
-      title={node.path}
+      aria-label={item.name}
+      title={item.path}
       aria-level={visualDepth + 1}
-      aria-expanded={node.isDir ? node.isExpanded : undefined}
-      aria-selected={node.path === selectedPath || undefined}
-      data-selected={node.path === selectedPath || undefined}
-      data-dir={node.isDir || undefined}
-      data-focused={node.path === activePath || undefined}
+      aria-expanded={item.isDir ? item.isExpanded : undefined}
+      aria-selected={item.path === selectedPath || undefined}
+      data-selected={item.path === selectedPath || undefined}
+      data-dir={item.isDir || undefined}
+      data-focused={item.path === activePath || undefined}
       data-git-status-kind={decorationKind}
       data-conflict={hasConflict || undefined}
+      tabIndex={-1}
       className={styles.treeNode}
       style={{
-        paddingLeft: 8 + visualDepth * 16,
+        ...baseStyle,
+        paddingLeft: BASE_PADDING + visualDepth * INDENT_WIDTH,
       }}
-      onClick={() => onActivate(node)}
+      onClick={() => onActivate(item)}
       onContextMenu={(event) => {
         event.preventDefault();
-        onContextMenuNode?.(node, event);
+        onFocusPath(item.path);
+        onContextMenuNode?.(item, event);
       }}
     >
-      {node.isDir ? (
-        <DirChevron expanded={node.isExpanded} />
+      {children}
+    </div>
+  );
+}
+
+function EntryNodeContent({ item }: { item: EntryTreeItem }): JSX.Element {
+  const {
+    filterText,
+    inlineEdit,
+    gitStatus,
+    folderDecorations,
+    onInlineEditChange,
+    onInlineEditCommit,
+    onInlineEditCancel,
+  } = useFileTreeRenderContext();
+  const fileDecoration = item.isDir
+    ? null
+    : gitDecorationForStatus(gitStatus[item.path]);
+  const folderDecoration = item.isDir
+    ? folderDecorations.get(item.path)
+    : undefined;
+  const hasConflict =
+    !!fileDecoration?.conflict || !!folderDecoration?.conflict;
+
+  return (
+    <>
+      {item.isDir ? (
+        <DirChevron expanded={item.isExpanded} />
       ) : (
         <span className={styles.fileIconSpacer} />
       )}
-      <NodeIcon node={node} />
-      {inlineEdit?.kind === "rename" && inlineEdit.path === node.path ? (
+      <NodeIcon name={item.name} isDir={item.isDir} />
+      {inlineEdit?.kind === "rename" && inlineEdit.path === item.path ? (
         <InlineEditInput
           value={inlineEdit.value}
           onChange={onInlineEditChange}
@@ -402,17 +583,17 @@ function TreeNodeRow({
         />
       ) : (
         <span className={styles.fileName}>
-          {highlightMatch(node.name, filterText)}
+          {highlightMatch(item.name, filterText)}
         </span>
       )}
-      {node.isDir && folderDecoration?.changed && (
+      {item.isDir && folderDecoration?.changed && (
         <span
           className={styles.gitStatusDot}
           data-conflict={folderDecoration.conflict || undefined}
           aria-hidden="true"
         />
       )}
-      {!node.isDir && fileDecoration && (
+      {!item.isDir && fileDecoration && (
         <span
           className={styles.gitStatusDot}
           data-kind={fileDecoration.kind}
@@ -425,8 +606,38 @@ function TreeNodeRow({
           !
         </span>
       )}
-    </div>
+    </>
   );
+}
+
+function InlineNodeContent({ item }: { item: InlineTreeItem }): JSX.Element {
+  const {
+    inlineEdit,
+    onInlineEditChange,
+    onInlineEditCommit,
+    onInlineEditCancel,
+  } = useFileTreeRenderContext();
+
+  return (
+    <>
+      <span className={styles.fileIconSpacer} />
+      <NodeIcon name={inlineEdit?.value ?? item.name} isDir={item.isDir} />
+      <InlineEditInput
+        value={inlineEdit?.value ?? item.name}
+        onChange={onInlineEditChange}
+        onCommit={onInlineEditCommit}
+        onCancel={onInlineEditCancel}
+      />
+    </>
+  );
+}
+
+function ArboristNode({
+  node,
+}: NodeRendererProps<TreeItem>): JSX.Element | null {
+  const item = node.data;
+  if (item.kind === "inline") return <InlineNodeContent item={item} />;
+  return <EntryNodeContent item={item} />;
 }
 
 export function FileTree({
@@ -449,27 +660,44 @@ export function FileTree({
   idPrefix = "ft",
 }: FileTreeProps) {
   const treeRef = useRef<HTMLDivElement>(null);
+  const arboristRef = useRef<TreeApi<TreeItem>>();
   const [focusedPath, setFocusedPath] = useState<string | null>(null);
   const lastRevealRef = useRef<string | null>(null);
 
-  const nodes = useMemo(
-    () => flattenVisible(treeData, expanded, filterText),
-    [treeData, expanded, filterText],
+  const builtTree = useMemo(
+    () => buildTree(treeData, expanded, filterText, inlineEdit),
+    [treeData, expanded, filterText, inlineEdit],
   );
+  const createInlineParent =
+    inlineEdit && inlineEdit.kind !== "rename" ? inlineEdit.parentPath : null;
   const folderDecorations = useMemo(
     () => buildFolderGitDecorations(gitStatus),
     [gitStatus],
   );
+  const initialOpenState = useMemo(
+    () => openStateFor(expanded, createInlineParent),
+    [createInlineParent, expanded],
+  );
+
+  useLayoutEffect(() => {
+    const tree = arboristRef.current;
+    if (!tree) return;
+    for (const path of builtTree.dirPaths) {
+      if (expanded.has(path) || createInlineParent === path) {
+        tree.open(path, false);
+      } else tree.close(path, false);
+    }
+  }, [builtTree.dirPaths, createInlineParent, expanded]);
 
   // The active (keyboard) node: the explicitly focused one if still visible,
-  // else the selected file, else the first node.
+  // else the selected file, else the first entry node.
   const activePath = useMemo(() => {
-    const has = (p: string | null) =>
-      p != null && nodes.some((n) => n.path === p);
+    const has = (path: string | null) =>
+      path != null && builtTree.visibleEntries.some((n) => n.path === path);
     if (has(focusedPath)) return focusedPath;
     if (has(selectedPath)) return selectedPath;
-    return nodes[0]?.path ?? null;
-  }, [focusedPath, selectedPath, nodes]);
+    return builtTree.visibleEntries[0]?.path ?? null;
+  }, [focusedPath, selectedPath, builtTree.visibleEntries]);
 
   const focusNode = useCallback((path: string | null) => {
     setFocusedPath(path);
@@ -497,70 +725,90 @@ export function FileTree({
   );
 
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLDivElement>) => {
-      if (nodes.length === 0) return;
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (builtTree.visibleEntries.length === 0) return;
       const idx = activePath
-        ? nodes.findIndex((n) => n.path === activePath)
+        ? builtTree.visibleEntries.findIndex((n) => n.path === activePath)
         : -1;
-      const cur = idx >= 0 ? nodes[idx] : undefined;
+      const cur = idx >= 0 ? builtTree.visibleEntries[idx] : undefined;
 
-      switch (e.key) {
+      switch (event.key) {
         case "ArrowDown":
-          e.preventDefault();
-          focusNode(nodes[Math.min(nodes.length - 1, idx + 1)]?.path ?? null);
+          event.preventDefault();
+          focusNode(
+            builtTree.visibleEntries[
+              Math.min(builtTree.visibleEntries.length - 1, idx + 1)
+            ]?.path ?? null,
+          );
           break;
         case "ArrowUp":
-          e.preventDefault();
-          focusNode(nodes[Math.max(0, idx - 1)]?.path ?? null);
+          event.preventDefault();
+          focusNode(
+            builtTree.visibleEntries[Math.max(0, idx - 1)]?.path ?? null,
+          );
           break;
         case "Home":
-          e.preventDefault();
-          focusNode(nodes[0]?.path ?? null);
+          event.preventDefault();
+          focusNode(builtTree.visibleEntries[0]?.path ?? null);
           break;
         case "End":
-          e.preventDefault();
-          focusNode(nodes[nodes.length - 1]?.path ?? null);
+          event.preventDefault();
+          focusNode(
+            builtTree.visibleEntries[builtTree.visibleEntries.length - 1]
+              ?.path ?? null,
+          );
           break;
         case "ArrowRight":
-          e.preventDefault();
+          event.preventDefault();
           if (cur?.isDir && !cur.isExpanded) void onToggle(cur.path);
-          else if (cur?.isDir && cur.isExpanded)
-            focusNode(nodes[idx + 1]?.path ?? null);
+          else if (cur?.isDir && cur.isExpanded) {
+            focusNode(builtTree.visibleEntries[idx + 1]?.path ?? null);
+          }
           break;
         case "ArrowLeft":
-          e.preventDefault();
+          event.preventDefault();
           if (cur?.isDir && cur.isExpanded) void onToggle(cur.path);
           else if (cur) {
-            const p = parentOf(cur.path);
-            if (nodes.some((n) => n.path === p)) focusNode(p);
+            const parent = parentOf(cur.path);
+            if (builtTree.visibleEntries.some((n) => n.path === parent)) {
+              focusNode(parent);
+            }
           }
           break;
         case "Enter":
         case " ":
-          e.preventDefault();
+          event.preventDefault();
           if (cur) activate(cur);
           break;
         case "F2":
           if (cur) {
-            e.preventDefault();
+            event.preventDefault();
             onRequestRename?.(cur);
           }
           break;
         case "Delete":
         case "Backspace":
           if (cur) {
-            e.preventDefault();
+            event.preventDefault();
             onRequestDelete?.(cur);
           }
           break;
         default:
           // Type-ahead: jump to the next node whose name starts with the key.
-          if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-            const lower = e.key.toLowerCase();
-            for (let i = 1; i <= nodes.length; i++) {
-              const n = nodes[(idx + i) % nodes.length];
-              if (n && n.name.toLowerCase().startsWith(lower)) {
-                focusNode(n.path);
+          if (
+            event.key.length === 1 &&
+            !event.ctrlKey &&
+            !event.metaKey &&
+            !event.altKey
+          ) {
+            const lower = event.key.toLowerCase();
+            for (let i = 1; i <= builtTree.visibleEntries.length; i++) {
+              const node =
+                builtTree.visibleEntries[
+                  (idx + i) % builtTree.visibleEntries.length
+                ];
+              if (node && node.name.toLowerCase().startsWith(lower)) {
+                focusNode(node.path);
                 break;
               }
             }
@@ -568,13 +816,13 @@ export function FileTree({
       }
     },
     [
-      nodes,
       activePath,
-      focusNode,
-      onToggle,
       activate,
-      onRequestRename,
+      builtTree.visibleEntries,
+      focusNode,
       onRequestDelete,
+      onRequestRename,
+      onToggle,
     ],
   );
 
@@ -582,7 +830,7 @@ export function FileTree({
   // into view once (guarded so expanding other folders doesn't yank the view).
   useEffect(() => {
     if (!scrollToPath || scrollToPath === lastRevealRef.current) return;
-    if (!nodes.some((n) => n.path === scrollToPath)) return;
+    if (!builtTree.visibleEntries.some((n) => n.path === scrollToPath)) return;
     lastRevealRef.current = scrollToPath;
     setFocusedPath(scrollToPath);
     treeRef.current?.focus();
@@ -592,77 +840,79 @@ export function FileTree({
     if (el && typeof el.scrollIntoView === "function") {
       el.scrollIntoView({ block: "center" });
     }
-  }, [scrollToPath, nodes]);
+  }, [scrollToPath, builtTree.visibleEntries]);
+
+  const renderContext = useMemo<FileTreeRenderContextValue>(
+    () => ({
+      idPrefix,
+      depthOffset,
+      activePath,
+      selectedPath,
+      filterText,
+      inlineEdit,
+      gitStatus,
+      folderDecorations,
+      treeRef,
+      onKeyDown: handleKeyDown,
+      onActivate: activate,
+      onContextMenuNode,
+      onFocusPath: setFocusedPath,
+      onInlineEditChange,
+      onInlineEditCommit,
+      onInlineEditCancel,
+    }),
+    [
+      idPrefix,
+      depthOffset,
+      activePath,
+      selectedPath,
+      filterText,
+      inlineEdit,
+      gitStatus,
+      folderDecorations,
+      handleKeyDown,
+      activate,
+      onContextMenuNode,
+      onInlineEditChange,
+      onInlineEditCommit,
+      onInlineEditCancel,
+    ],
+  );
 
   const filtering = filterText.length > 0;
 
   return (
-    <div
-      ref={treeRef}
-      className={styles.tree}
-      role="tree"
-      aria-label="File tree"
-      tabIndex={0}
-      aria-activedescendant={
-        activePath ? nodeDomId(idPrefix, activePath) : undefined
-      }
-      onKeyDown={handleKeyDown}
-    >
-      {inlineEdit &&
-        inlineEdit.kind !== "rename" &&
-        inlineEdit.parentPath === "" && (
-          <InlineEditRow
-            depth={depthOffset}
-            value={inlineEdit.value}
-            isDir={inlineEdit.isDir}
-            onChange={onInlineEditChange}
-            onCommit={onInlineEditCommit}
-            onCancel={onInlineEditCancel}
-          />
-        )}
-      {nodes.map((node) => (
-        <div key={node.path}>
-          <TreeNodeRow
-            node={node}
-            depthOffset={depthOffset}
-            idPrefix={idPrefix}
-            activePath={activePath}
-            selectedPath={selectedPath}
-            filterText={filterText}
-            inlineEdit={inlineEdit}
-            gitStatus={gitStatus}
-            folderDecorations={folderDecorations}
-            onActivate={activate}
-            onContextMenuNode={(rowNode, event) => {
-              setFocusedPath(rowNode.path);
-              onContextMenuNode?.(rowNode, event);
-            }}
-            onInlineEditChange={onInlineEditChange}
-            onInlineEditCommit={onInlineEditCommit}
-            onInlineEditCancel={onInlineEditCancel}
-          />
-          {inlineEdit &&
-            inlineEdit.kind !== "rename" &&
-            inlineEdit.parentPath === node.path && (
-              <InlineEditRow
-                depth={node.depth + depthOffset + 1}
-                value={inlineEdit.value}
-                isDir={inlineEdit.isDir}
-                onChange={onInlineEditChange}
-                onCommit={onInlineEditCommit}
-                onCancel={onInlineEditCancel}
-              />
-            )}
-        </div>
-      ))}
-      {nodes.length === 0 && !filtering && (
+    <FileTreeRenderContext.Provider value={renderContext}>
+      <Tree<TreeItem>
+        ref={arboristRef}
+        data={builtTree.data}
+        idAccessor="id"
+        childrenAccessor="children"
+        openByDefault={false}
+        initialOpenState={initialOpenState}
+        selection={selectedPath ?? ""}
+        disableDrag
+        disableDrop
+        disableMultiSelection
+        disableDeselectOnClick
+        rowHeight={ROW_HEIGHT}
+        height={builtTree.visibleCount * ROW_HEIGHT}
+        width="100%"
+        overscanCount={builtTree.visibleCount}
+        renderContainer={ArboristContainer}
+        renderRow={ArboristRow}
+        aria-label="File tree"
+      >
+        {ArboristNode}
+      </Tree>
+      {builtTree.visibleEntries.length === 0 && !filtering && (
         <div className={styles.empty}>No files found</div>
       )}
-      {nodes.length === 0 && filtering && (
+      {builtTree.visibleEntries.length === 0 && filtering && (
         <div className={styles.empty}>
           No matches in loaded folders for &ldquo;{filterText}&rdquo;
         </div>
       )}
-    </div>
+    </FileTreeRenderContext.Provider>
   );
 }

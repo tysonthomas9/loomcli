@@ -3,20 +3,21 @@
  */
 
 /**
- * Unit tests for DiffFileViewer (including parsePatch) and DiffFileRow components.
+ * Unit tests for GitDiffViewer and DiffFileRow components.
  *
- * parsePatch: pure function tests for hunk parsing, line numbering, multi-hunk patches.
- * DiffFileViewer: rendering tests for loading, error, binary, too-large, empty, and actual diff.
- * DiffFileRow: status badges, rename display, stats, viewed checkbox, expand chevron, click handlers.
+ * GitDiffViewer: rendering tests for loading, error, binary, too-large, empty,
+ * and actual diff content through the open-source renderer.
+ * DiffFileRow: status badges, rename display, stats, viewed checkbox, expand
+ * chevron, click handlers.
  */
 
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { DiffFile, DiffFilePatch } from "@/api/issues";
+import { GitDiffViewer } from "@/components/DiffView";
 
-import { parsePatch, DiffFileViewer } from "./DiffFileViewer";
 import { DiffFileRow } from "./DiffFileRow";
 
 // ============= Helpers =============
@@ -42,231 +43,29 @@ function makePatch(overrides: Partial<DiffFilePatch> = {}): DiffFilePatch {
   };
 }
 
-// ============= parsePatch tests =============
+// ============= GitDiffViewer rendering tests =============
 
-describe("parsePatch", () => {
-  it("returns empty hunks for an empty string", () => {
-    const result = parsePatch("");
-    expect(result.hunks).toHaveLength(0);
-  });
-
-  it("returns empty hunks when there are no @@ headers", () => {
-    const result = parsePatch("some random text\nanother line");
-    expect(result.hunks).toHaveLength(0);
-  });
-
-  it("parses a single hunk with adds, deletes, and context", () => {
-    const patch = [
-      "@@ -10,4 +10,5 @@ func main() {",
-      " context line",
-      "-deleted line",
-      "+added line",
-      "+another added",
-      " more context",
-    ].join("\n");
-
-    const result = parsePatch(patch);
-    expect(result.hunks).toHaveLength(1);
-
-    const lines = result.hunks[0].lines;
-    // First line is the hunk header itself
-    expect(lines[0]).toEqual({
-      type: "hunk",
-      content: "@@ -10,4 +10,5 @@ func main() {",
-    });
-    // Context line
-    expect(lines[1]).toEqual({
-      type: "context",
-      content: " context line",
-      oldNum: 10,
-      newNum: 10,
-    });
-    // Deleted line
-    expect(lines[2]).toEqual({
-      type: "del",
-      content: "-deleted line",
-      oldNum: 11,
-    });
-    // Added lines
-    expect(lines[3]).toEqual({
-      type: "add",
-      content: "+added line",
-      newNum: 11,
-    });
-    expect(lines[4]).toEqual({
-      type: "add",
-      content: "+another added",
-      newNum: 12,
-    });
-    // Context after
-    expect(lines[5]).toEqual({
-      type: "context",
-      content: " more context",
-      oldNum: 12,
-      newNum: 13,
-    });
-  });
-
-  it("parses multiple hunks", () => {
-    const patch = [
-      "@@ -1,3 +1,3 @@",
-      " line1",
-      "-old",
-      "+new",
-      "@@ -20,2 +20,3 @@",
-      " existing",
-      "+inserted",
-      " after",
-    ].join("\n");
-
-    const result = parsePatch(patch);
-    expect(result.hunks).toHaveLength(2);
-    expect(result.hunks[0].header).toBe("@@ -1,3 +1,3 @@");
-    expect(result.hunks[1].header).toBe("@@ -20,2 +20,3 @@");
-
-    // Second hunk should reset line numbers
-    const hunk2Lines = result.hunks[1].lines;
-    expect(hunk2Lines[1]).toMatchObject({
-      type: "context",
-      oldNum: 20,
-      newNum: 20,
-    });
-    expect(hunk2Lines[2]).toMatchObject({
-      type: "add",
-      newNum: 21,
-    });
-    expect(hunk2Lines[3]).toMatchObject({
-      type: "context",
-      oldNum: 21,
-      newNum: 22,
-    });
-  });
-
-  it("handles hunk header without comma counts", () => {
-    // Single-line range: @@ -5 +5 @@
-    const patch = "@@ -5 +7 @@\n+added";
-
-    const result = parsePatch(patch);
-    expect(result.hunks).toHaveLength(1);
-    const lines = result.hunks[0].lines;
-    expect(lines[1]).toEqual({ type: "add", content: "+added", newNum: 7 });
-  });
-
-  it("tracks line numbers correctly through consecutive deletes and adds", () => {
-    const patch = [
-      "@@ -1,4 +1,4 @@",
-      "-a",
-      "-b",
-      "+c",
-      "+d",
-      " same",
-      " same2",
-    ].join("\n");
-
-    const result = parsePatch(patch);
-    const lines = result.hunks[0].lines;
-
-    // After hunk header at [0]:
-    // del at oldNum 1
-    expect(lines[1]).toMatchObject({ type: "del", oldNum: 1 });
-    // del at oldNum 2
-    expect(lines[2]).toMatchObject({ type: "del", oldNum: 2 });
-    // add at newNum 1
-    expect(lines[3]).toMatchObject({ type: "add", newNum: 1 });
-    // add at newNum 2
-    expect(lines[4]).toMatchObject({ type: "add", newNum: 2 });
-    // context: oldNum 3, newNum 3
-    expect(lines[5]).toMatchObject({ type: "context", oldNum: 3, newNum: 3 });
-    expect(lines[6]).toMatchObject({ type: "context", oldNum: 4, newNum: 4 });
-  });
-
-  it("ignores lines before the first hunk header", () => {
-    const patch = [
-      "diff --git a/file.go b/file.go",
-      "index abc..def 100644",
-      "--- a/file.go",
-      "+++ b/file.go",
-      "@@ -1,2 +1,2 @@",
-      "-old",
-      "+new",
-    ].join("\n");
-
-    const result = parsePatch(patch);
-    expect(result.hunks).toHaveLength(1);
-    // Only hunk header + 2 content lines
-    expect(result.hunks[0].lines).toHaveLength(3);
-  });
-
-  it("does not create a new hunk for embedded @@ in file content", () => {
-    const patch = [
-      "@@ -1,4 +1,4 @@",
-      " normal line",
-      "@@ embedded but not a hunk header @@",
-      "-old line",
-      "+new line",
-    ].join("\n");
-
-    const result = parsePatch(patch);
-    expect(result.hunks).toHaveLength(1);
-
-    const lines = result.hunks[0].lines;
-    expect(lines).toHaveLength(5);
-
-    expect(lines[1]).toMatchObject({ type: "context", oldNum: 1, newNum: 1 });
-    expect(lines[2]).toMatchObject({ type: "context", oldNum: 2, newNum: 2 });
-    expect(lines[3]).toMatchObject({ type: "del", oldNum: 3 });
-    expect(lines[4]).toMatchObject({ type: "add", newNum: 3 });
-  });
-
-  it("treats raw @@ at column 0 as context when it doesn't match hunk format", () => {
-    const patch = [
-      "@@ -1,3 +1,3 @@",
-      " first",
-      "@@ not a valid hunk header",
-      " last",
-    ].join("\n");
-
-    const result = parsePatch(patch);
-    expect(result.hunks).toHaveLength(1);
-
-    const lines = result.hunks[0].lines;
-    expect(lines).toHaveLength(4);
-    expect(lines[1]).toMatchObject({ type: "context", oldNum: 1, newNum: 1 });
-    expect(lines[2]).toMatchObject({ type: "context", oldNum: 2, newNum: 2 });
-    expect(lines[3]).toMatchObject({ type: "context", oldNum: 3, newNum: 3 });
-  });
-
-  it("stores the full hunk header including trailing context", () => {
-    const header = "@@ -100,6 +110,8 @@ func (s *Server) handleRequest()";
-    const patch = `${header}\n context`;
-    const result = parsePatch(patch);
-    expect(result.hunks[0].header).toBe(header);
-  });
-});
-
-// ============= DiffFileViewer rendering tests =============
-
-describe("DiffFileViewer", () => {
+describe("GitDiffViewer", () => {
   it("shows loading message when isLoading is true", () => {
-    render(<DiffFileViewer patch={null} isLoading={true} />);
+    render(<GitDiffViewer patch={null} isLoading={true} />);
     expect(screen.getByText(/Loading diff/)).toBeInTheDocument();
   });
 
   it("shows error message when error is provided", () => {
     render(
-      <DiffFileViewer patch={null} isLoading={false} error="Fetch failed" />,
+      <GitDiffViewer patch={null} isLoading={false} error="Fetch failed" />,
     );
     expect(screen.getByText("Fetch failed")).toBeInTheDocument();
   });
 
   it("shows 'No changes' when patch is null", () => {
-    render(<DiffFileViewer patch={null} isLoading={false} />);
+    render(<GitDiffViewer patch={null} isLoading={false} />);
     expect(screen.getByText("No changes")).toBeInTheDocument();
   });
 
   it("shows binary file message for binary patches", () => {
     const patch = makePatch({ is_binary: true });
-    render(<DiffFileViewer patch={patch} isLoading={false} />);
+    render(<GitDiffViewer patch={patch} isLoading={false} />);
     expect(
       screen.getByText(/Binary file.*cannot display diff/),
     ).toBeInTheDocument();
@@ -274,17 +73,17 @@ describe("DiffFileViewer", () => {
 
   it("shows too-large message for oversized patches", () => {
     const patch = makePatch({ is_too_large: true });
-    render(<DiffFileViewer patch={patch} isLoading={false} />);
+    render(<GitDiffViewer patch={patch} isLoading={false} />);
     expect(screen.getByText("File too large to display")).toBeInTheDocument();
   });
 
   it("shows 'No changes' when patch string is empty", () => {
     const patch = makePatch({ patch: "" });
-    render(<DiffFileViewer patch={patch} isLoading={false} />);
+    render(<GitDiffViewer patch={patch} isLoading={false} />);
     expect(screen.getByText("No changes")).toBeInTheDocument();
   });
 
-  it("renders diff lines for a valid patch", () => {
+  it("renders diff lines for a valid patch", async () => {
     const patchStr = [
       "@@ -1,3 +1,3 @@",
       " unchanged",
@@ -294,59 +93,17 @@ describe("DiffFileViewer", () => {
     const patch = makePatch({ patch: patchStr });
 
     const { container } = render(
-      <DiffFileViewer patch={patch} isLoading={false} />,
+      <GitDiffViewer filePath="src/main.go" patch={patch} isLoading={false} />,
     );
 
-    // Hunk header should be rendered
-    expect(screen.getByText("@@ -1,3 +1,3 @@")).toBeInTheDocument();
-
-    // Content lines are rendered inside divs with data-type attributes.
-    // Non-hunk lines have line number spans as siblings, so we check via
-    // the data-type selector and textContent which includes child text.
-    const contextLine = container.querySelector('[data-type="context"]');
-    expect(contextLine).toBeTruthy();
-    expect(contextLine!.textContent).toContain(" unchanged");
-
-    const delLine = container.querySelector('[data-type="del"]');
-    expect(delLine).toBeTruthy();
-    expect(delLine!.textContent).toContain("-removed");
-
-    const addLine = container.querySelector('[data-type="add"]');
-    expect(addLine).toBeTruthy();
-    expect(addLine!.textContent).toContain("+added");
+    await waitFor(() => {
+      expect(container).toHaveTextContent("unchanged");
+      expect(container).toHaveTextContent("removed");
+      expect(container).toHaveTextContent("added");
+    });
   });
 
-  it("renders correct data-type attributes on diff lines", () => {
-    const patchStr = ["@@ -1,3 +1,3 @@", " ctx", "-del", "+add"].join("\n");
-    const patch = makePatch({ patch: patchStr });
-
-    const { container } = render(
-      <DiffFileViewer patch={patch} isLoading={false} />,
-    );
-
-    const lines = container.querySelectorAll("[data-type]");
-    const types = Array.from(lines).map((el) => el.getAttribute("data-type"));
-    expect(types).toEqual(["hunk", "context", "del", "add"]);
-  });
-
-  it("renders line numbers for context lines", () => {
-    const patchStr = "@@ -5,1 +8,1 @@\n same";
-    const patch = makePatch({ patch: patchStr });
-
-    const { container } = render(
-      <DiffFileViewer patch={patch} isLoading={false} />,
-    );
-
-    // The context line at oldNum=5, newNum=8
-    const contextLine = container.querySelector('[data-type="context"]');
-    expect(contextLine).toBeTruthy();
-    // Should contain line number spans with 5 and 8
-    const spans = contextLine!.querySelectorAll("span");
-    expect(spans[0].textContent).toBe("5");
-    expect(spans[1].textContent).toBe("8");
-  });
-
-  it("renders multiple hunks", () => {
+  it("renders multiple hunks", async () => {
     const patchStr = [
       "@@ -1,1 +1,1 @@",
       "-old1",
@@ -358,32 +115,21 @@ describe("DiffFileViewer", () => {
     const patch = makePatch({ patch: patchStr });
 
     const { container } = render(
-      <DiffFileViewer patch={patch} isLoading={false} />,
+      <GitDiffViewer filePath="src/main.go" patch={patch} isLoading={false} />,
     );
 
-    // Both hunk headers rendered
-    expect(screen.getByText("@@ -1,1 +1,1 @@")).toBeInTheDocument();
-    expect(screen.getByText("@@ -50,1 +50,1 @@")).toBeInTheDocument();
-
-    // Content lines (text split across spans + text node, so use textContent)
-    const delLines = container.querySelectorAll('[data-type="del"]');
-    const addLines = container.querySelectorAll('[data-type="add"]');
-    expect(delLines).toHaveLength(2);
-    expect(addLines).toHaveLength(2);
-    expect(delLines[0].textContent).toContain("-old1");
-    expect(addLines[0].textContent).toContain("+new1");
-    expect(delLines[1].textContent).toContain("-old2");
-    expect(addLines[1].textContent).toContain("+new2");
+    await waitFor(() => {
+      expect(container).toHaveTextContent("old1");
+      expect(container).toHaveTextContent("new1");
+      expect(container).toHaveTextContent("old2");
+      expect(container).toHaveTextContent("new2");
+    });
   });
 
   it("error state takes priority over patch content", () => {
     const patch = makePatch({ patch: "@@ -1 +1 @@\n+line" });
     render(
-      <DiffFileViewer
-        patch={patch}
-        isLoading={false}
-        error="Something broke"
-      />,
+      <GitDiffViewer patch={patch} isLoading={false} error="Something broke" />,
     );
     expect(screen.getByText("Something broke")).toBeInTheDocument();
     expect(screen.queryByText("+line")).not.toBeInTheDocument();
@@ -391,7 +137,7 @@ describe("DiffFileViewer", () => {
 
   it("loading state takes priority over everything", () => {
     const patch = makePatch({ patch: "@@ -1 +1 @@\n+line" });
-    render(<DiffFileViewer patch={patch} isLoading={true} error="err" />);
+    render(<GitDiffViewer patch={patch} isLoading={true} error="err" />);
     expect(screen.getByText(/Loading diff/)).toBeInTheDocument();
     expect(screen.queryByText("err")).not.toBeInTheDocument();
     expect(screen.queryByText("+line")).not.toBeInTheDocument();

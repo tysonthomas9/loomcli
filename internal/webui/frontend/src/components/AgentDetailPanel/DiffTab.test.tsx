@@ -79,17 +79,19 @@ vi.mock("./DiffFileRow", () => ({
   ),
 }));
 
-vi.mock("./DiffFileViewer", () => ({
-  DiffFileViewer: (props: {
+vi.mock("@/components/DiffView", () => ({
+  GitDiffViewer: (props: {
     patch: DiffFilePatch | null;
     isLoading: boolean;
     error?: string;
+    filePath?: string;
   }) => (
     <div
       data-testid="file-viewer"
       data-loading={props.isLoading}
       data-has-patch={props.patch !== null}
       data-error={props.error ?? ""}
+      data-file-path={props.filePath ?? ""}
     />
   ),
 }));
@@ -244,7 +246,7 @@ describe("DiffTab", () => {
   });
 
   describe("expand/collapse", () => {
-    it("clicking expand shows DiffFileViewer", async () => {
+    it("clicking expand shows GitDiffViewer", async () => {
       mockUseDiffReturn.files = [makeFile({ path: "a.go" })];
       mockUseDiffReturn.summaryStats = {
         filesChanged: 1,

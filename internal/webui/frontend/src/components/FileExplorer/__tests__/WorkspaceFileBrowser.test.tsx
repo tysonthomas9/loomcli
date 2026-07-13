@@ -312,6 +312,11 @@ vi.mock("@/hooks", async () => {
       disconnect: vi.fn(),
     }),
     useToast: () => ({ showToast: mocks.showToast }),
+    useTheme: () => ({
+      theme: "dark",
+      toggleTheme: vi.fn(),
+      setTheme: vi.fn(),
+    }),
     useScopedFileTree: () => ({
       expanded: new Set([""]),
       treeData: new Map<string, FileEntry[]>([["", mocks.rootEntries]]),
@@ -711,7 +716,9 @@ describe("WorkspaceFileBrowser", () => {
         path: "main.ts",
       }),
     );
-    expect(await screen.findByDisplayValue(/function jumpTarget/)).toBeVisible();
+    expect(
+      await screen.findByDisplayValue(/function jumpTarget/),
+    ).toBeVisible();
     confirm.mockRestore();
   });
 
@@ -1502,8 +1509,9 @@ describe("WorkspaceFileBrowser", () => {
       );
     });
     expect(screen.getByText("atlas · loomcli")).toBeInTheDocument();
-    expect(await screen.findByText("-old")).toBeInTheDocument();
-    expect(screen.getByText("+new")).toBeInTheDocument();
+    const diffViewer = await screen.findByTestId("git-diff-viewer");
+    expect(diffViewer).toHaveTextContent("old");
+    expect(diffViewer).toHaveTextContent("new");
 
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
     expect(
@@ -1861,9 +1869,9 @@ describe("WorkspaceFileBrowser", () => {
       "main.ts",
       "src/main.ts",
     );
-    expect(
-      mocks.registryReset.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.registryRetarget.mock.invocationCallOrder[0]);
+    expect(mocks.registryReset.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.registryRetarget.mock.invocationCallOrder[0],
+    );
     confirm.mockRestore();
   });
 
@@ -2040,7 +2048,8 @@ describe("WorkspaceFileBrowser", () => {
     expect(mocks.overwriteExternal).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Compare" }));
     expect(await screen.findByText("External vs local draft")).toBeVisible();
-    expect(screen.getByText("-external")).toBeVisible();
+    const diffViewer = await screen.findByTestId("git-diff-viewer");
+    expect(diffViewer).toHaveTextContent("external");
   });
 
   it("restores a commit conditionally against the current version", async () => {

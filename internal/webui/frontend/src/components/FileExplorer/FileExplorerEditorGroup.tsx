@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { DiffFileViewer } from "@/components/AgentDetailPanel";
+import { GitDiffViewer } from "@/components/DiffView";
 import type { FileBlameData } from "@/api/workspace";
 import { blameScopedFile, diffScopedFile, readScopedFile } from "@/hooks/api";
 import {
@@ -147,7 +147,8 @@ function DiffEditorPane({
         </div>
       </div>
       <div className={styles.diffEditorBody}>
-        <DiffFileViewer
+        <GitDiffViewer
+          filePath={diffView.path}
           patch={
             patch === null
               ? null

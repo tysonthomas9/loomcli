@@ -1,6 +1,6 @@
 /**
  * DiffTab component styles.
- * Covers DiffTab, DiffFileRow, and DiffFileViewer components.
+ * Covers DiffTab and DiffFileRow components.
  */
 
 /* ============= Summary Bar ============= */
@@ -147,55 +147,6 @@
   transform: rotate(90deg);
 }
 
-/* ============= DiffFileViewer ============= */
-
-.viewerWrapper {
-  padding: 0 var(--panel-padding-md) 8px;
-}
-
-.diffPre {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  max-height: 600px;
-  overflow-y: auto;
-  border-radius: 6px;
-  background: var(--color-bg-secondary);
-  margin: 0;
-  padding: 0;
-}
-
-.diffLine {
-  padding: 0 8px;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.diffLine[data-type="add"] {
-  background: var(--color-diff-add-bg);
-  color: var(--color-diff-add);
-}
-
-.diffLine[data-type="del"] {
-  background: var(--color-diff-del-bg);
-  color: var(--color-diff-del);
-}
-
-.diffLine[data-type="hunk"] {
-  background: var(--color-diff-hunk-bg);
-  color: var(--color-diff-hunk);
-  font-style: italic;
-}
-
-.lineNumber {
-  display: inline-block;
-  width: 40px;
-  text-align: right;
-  color: var(--color-text-muted);
-  user-select: none;
-  padding-right: 8px;
-}
-
 /* ============= States ============= */
 
 .loading {
@@ -217,11 +168,4 @@
   color: var(--color-text-muted);
   font-size: 13px;
   padding: 18px var(--panel-padding-md);
-}
-
-.viewerMessage {
-  padding: 12px 16px;
-  color: var(--color-text-muted);
-  font-size: 12px;
-  font-style: italic;
 }
