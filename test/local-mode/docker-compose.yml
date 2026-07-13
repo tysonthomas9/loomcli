@@ -42,6 +42,12 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    environment:
+      # fleet-db requires an explicit artifact content backend when issue-design
+      # storage is artifact-backed (v5 DYNAMIC-WORKFLOWS-18). local keeps the
+      # dogfood stack self-contained; without it fleet-db exits on startup.
+      FLEETDB_ARTIFACT_CONTENT_BACKEND: local
+      FLEETDB_ARTIFACT_CONTENT_DIR: /tmp/fleet-db-artifacts
     command:
       - "--redis-addr"
       - "redis:6379"
