@@ -1,13 +1,12 @@
 /**
  * PRReviewWorkspace — the design's full-screen PR Review Workspace
  * (review-ws), GitHub-PR-review style: the file diff is the focus, with a
- * compact identity header (state · branch · resolves), an Approve /
- * Request-changes decision bar, and a review-agent control that can assign
- * an existing agent or create a brand-new PR review agent.
+ * compact identity header (state · branch · resolves), a conversational
+ * reviewer, and a review-agent control that can assign an existing agent or
+ * create a brand-new PR review agent.
  *
  * Fully data-backed:
  *   - Diff: the review agent's real branch diff (PRFilesTab → /agents/{name}/diff/*)
- *   - Decisions: real status transitions (closed / open)
  *   - New review agent: real createWorkspaceAgent → assign → startAgent
  */
 
@@ -15,10 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { createIssue, updateIssue } from "@/api";
-import {
-  getPullRequestDetail,
-  postPullRequestReview,
-} from "@/api/workspace/prReview";
+import { getPullRequestDetail } from "@/api/workspace/prReview";
 import { startAgent } from "@/hooks/api";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
 import {
@@ -35,7 +31,6 @@ import {
 import { useWorkspaceContext } from "@/hooks/workspace";
 import type { GitPullRequest } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
-import { ApiError } from "@/types/common/errors";
 import { parseLoomStatus } from "@/types";
 import { isPRUrl } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
@@ -140,16 +135,13 @@ export function PRReviewWorkspace({
 }: PRReviewWorkspaceProps): JSX.Element {
   const navigate = useNavigate();
   const { agents, issues } = useWorkspaceViewData();
-  const { refetch, showToast, updateIssueStatus, handleIssueClick } =
-    useWorkspaceViewActions();
+  const { refetch, showToast, handleIssueClick } = useWorkspaceViewActions();
   const { repos, workspaceId } = useWorkspaceContext();
 
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
-  const [isDeciding, setIsDeciding] = useState(false);
   const [headSha, setHeadSha] = useState<string | null>(null);
-  const [reviewComment, setReviewComment] = useState("");
   const [stale, setStale] = useState(false);
   const [diffRefreshKey, setDiffRefreshKey] = useState(0);
   const [creatingTicket, setCreatingTicket] = useState(false);
@@ -234,10 +226,9 @@ export function PRReviewWorkspace({
     };
   }, [workspaceId, pullRequestRepo, prNumber]);
 
-  // Fetch the PR's authoritative head sha (the value the review precondition
-  // compares against), commit it to state, and return it — so a decision can
-  // fetch on demand when the mount-time effect hasn't resolved yet. Returns
-  // null when the PR head can't be determined.
+  // Fetch the PR's authoritative head sha after a stale-subject response and
+  // commit it to state alongside the diff refresh. Returns null when the PR
+  // head can't be determined.
   const loadHeadSha = useCallback(
     async (
       owner: string,
@@ -268,9 +259,10 @@ export function PRReviewWorkspace({
     if (pullRequestRepo && Number.isFinite(number)) {
       await loadHeadSha(pullRequestRepo.owner, pullRequestRepo.repo, number);
     }
-    showToast("The PR changed since you loaded it — refreshed. Review again.", {
-      type: "warning",
-    });
+    showToast(
+      "The PR changed since you loaded it — refreshed. Continue reviewing the latest head.",
+      { type: "warning" },
+    );
   }, [loadHeadSha, prNumber, pullRequestRepo, showToast]);
 
   const assignReviewer = async (agentName: string): Promise<void> => {
@@ -298,117 +290,6 @@ export function PRReviewWorkspace({
       );
     } finally {
       setIsAssigning(false);
-    }
-  };
-
-  const applyLocalDecision = async (
-    decision: "approve" | "changes",
-  ): Promise<void> => {
-    if (!issue) {
-      showToast("No ticket to update", { type: "error" });
-      return;
-    }
-    setIsDeciding(true);
-    try {
-      if (decision === "approve") {
-        await updateIssueStatus(issue.id, "closed");
-        showToast(`${issue.id} approved and closed`);
-      } else {
-        await updateIssueStatus(issue.id, "open");
-        showToast(`${issue.id} sent back — changes requested`);
-      }
-      onBack();
-    } catch (err) {
-      showToast(
-        err instanceof Error ? err.message : "Failed to record decision",
-        { type: "error" },
-      );
-    } finally {
-      setIsDeciding(false);
-    }
-  };
-
-  const decide = async (decision: "approve" | "changes"): Promise<void> => {
-    const number = prNumber ? Number(prNumber) : NaN;
-    // Only fall back to a local-only board flip when there is genuinely no PR
-    // to review (issue-only tickets). A resolvable PR whose head sha simply
-    // hasn't loaded must NOT silently flip the board without a GitHub review —
-    // we fetch the sha on demand below and hard-fail if it can't be obtained.
-    if (!pullRequestRepo || !Number.isFinite(number)) {
-      if (issue) {
-        await applyLocalDecision(decision);
-      } else {
-        showToast("No pull request to review", { type: "error" });
-      }
-      return;
-    }
-
-    const event = decision === "approve" ? "approve" : "request_changes";
-    const body = reviewComment.trim();
-    if (event === "request_changes" && body === "") {
-      showToast("Add a comment to request changes", { type: "warning" });
-      return;
-    }
-
-    setIsDeciding(true);
-    try {
-      const sha =
-        headSha ??
-        (await loadHeadSha(
-          pullRequestRepo.owner,
-          pullRequestRepo.repo,
-          number,
-        ));
-      if (!sha) {
-        showToast("Couldn't verify the PR's current head — try again.", {
-          type: "error",
-        });
-        return;
-      }
-      await postPullRequestReview(
-        workspaceId,
-        pullRequestRepo.owner,
-        pullRequestRepo.repo,
-        number,
-        {
-          event,
-          expected_head_sha: sha,
-          ...(body ? { body } : {}),
-        },
-      );
-      setStale(false);
-      if (issue) {
-        await updateIssueStatus(
-          issue.id,
-          decision === "approve" ? "closed" : "open",
-        );
-        showToast(
-          decision === "approve"
-            ? "Approved on GitHub — ticket closed"
-            : "Changes requested on GitHub — ticket reopened",
-        );
-      } else {
-        showToast(
-          decision === "approve"
-            ? "Approved on GitHub"
-            : "Changes requested on GitHub",
-        );
-      }
-      onBack();
-    } catch (err) {
-      if (
-        err instanceof ApiError &&
-        (err.status === 409 || err.status === 428)
-      ) {
-        await handleStaleSubject();
-      } else {
-        showToast(
-          err instanceof Error ? err.message : "Failed to record decision",
-          { type: "error" },
-        );
-      }
-    } finally {
-      setIsDeciding(false);
     }
   };
 
@@ -612,50 +493,22 @@ export function PRReviewWorkspace({
               Discuss PR
             </button>
           )}
-
-          {/* Decision bar (design rw-decision, adapted to real statuses). */}
-          <div className={styles.decisionBar}>
-            {stale && (
-              <div
-                className={styles.staleBanner}
-                data-testid="pr-review-stale-banner"
-              >
-                <span>
-                  This PR was updated after you opened it. The diff/head were
-                  refreshed — submit your review again.
-                </span>
-                <button type="button" onClick={() => setStale(false)}>
-                  Dismiss
-                </button>
-              </div>
-            )}
-            <textarea
-              className={styles.reviewComment}
-              data-testid="pr-review-comment"
-              value={reviewComment}
-              onChange={(event) => setReviewComment(event.target.value)}
-              placeholder="Add a review comment (required to request changes)"
-            />
-            <div className={styles.decisionActions}>
-              <button
-                type="button"
-                className={styles.changesButton}
-                disabled={isDeciding}
-                onClick={() => void decide("changes")}
-              >
-                ✗ Request changes
-              </button>
-              <button
-                type="button"
-                className={styles.approveButton}
-                disabled={isDeciding}
-                onClick={() => void decide("approve")}
-              >
-                ✓ Approve
-              </button>
-            </div>
-          </div>
         </div>
+        {stale && (
+          <div
+            className={styles.staleBanner}
+            data-testid="pr-review-stale-banner"
+          >
+            <span>
+              This PR was updated after you opened it. The diff was refreshed
+              {headSha ? " at the latest head" : ""} — continue reviewing the
+              updated PR.
+            </span>
+            <button type="button" onClick={() => setStale(false)}>
+              Dismiss
+            </button>
+          </div>
+        )}
       </header>
 
       {/* The focus: full-bleed file diff (design DiffPane). */}

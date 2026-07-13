@@ -103,7 +103,9 @@ func classifyErrorString(op, msg string) error {
 		strings.Contains(lower, "already closed"),
 		strings.Contains(lower, "is closed"):
 		return backend.ErrConflict(op, msg)
-	case strings.Contains(lower, "validation") || strings.Contains(lower, "invalid"):
+	case strings.Contains(lower, "validation"),
+		strings.Contains(lower, "invalid"),
+		strings.Contains(lower, "unknown field"):
 		return backend.ErrValidation(op, msg)
 	default:
 		return backend.ErrInternal(op, msg, nil)

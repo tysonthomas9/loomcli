@@ -525,6 +525,22 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 // --- Mutation operations ---
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+	result, err := b.createIssueOnce(ctx, params)
+	if err != nil && params.ExternalRef != "" && isCreateExternalRefUnsupported(err) {
+		result, err = b.createWithoutExternalRef(ctx, params)
+	}
+	if err != nil {
+		return result, err
+	}
+	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
+		// The issue itself was created; return it alongside the error so
+		// callers that inspect the partial result can still see the ID.
+		return result, err
+	}
+	return result, nil
+}
+
+func (b *FleetBackend) createIssueOnce(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	body := createParamsToBody(params)
 	apiResp, statusCode, respHeaders, err := b.doRequestHeaders(ctx, "POST", "/issues", body, params.IdempotencyHeaders())
 	if err != nil {
@@ -542,11 +558,6 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 	}
 	logIdempotencyResponse(respHeaders, issue.ID)
 	result := issueToData(&issue)
-	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
-		// The issue itself was created; return it alongside the error so
-		// callers that inspect the partial result can still see the ID.
-		return &result, err
-	}
 	return &result, nil
 }
 
