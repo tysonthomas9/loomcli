@@ -116,7 +116,7 @@ func statDirEntryAt(parent int, name string) (os.FileInfo, error) {
 		// returns ENXIO), so synthesize FileInfo from the stat we already hold.
 		// Without this, listing a directory that holds one — e.g. the workspace
 		// .loom folder with its live daemon.sock — fails the whole listing.
-		return specialDirEntryInfo{name: name, size: int64(stat.Size), ifmt: uint32(stat.Mode) & unix.S_IFMT}, nil
+		return specialDirEntryInfo{name: name, size: stat.Size, ifmt: uint32(stat.Mode) & unix.S_IFMT}, nil
 	}
 }
 
