@@ -36,13 +36,12 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "PARITY", Name: "app", DefaultBranch: "main"}); err != nil {
 		t.Fatalf("seed repo: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"PARITY": {
-				Path:  wsRoot,
-				Repos: map[string]string{"app": repoPath},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.Workspaces["PARITY"] = bootstrap.WorkspaceLocalState{
+			Path:  wsRoot,
+			Repos: map[string]string{"app": repoPath},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("seed state cache: %v", err)
 	}

@@ -20,14 +20,20 @@ func TestGetConfigDir(t *testing.T) {
 		t.Errorf("GetConfigDir() = %q, want %q", got, tmpDir)
 	}
 
-	t.Setenv("LOOM_CONFIG_DIR", "")
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("cannot determine home dir")
+	// With LOOM_CONFIG_DIR unset, bootstrap.LoomDir's testing guard must
+	// redirect away from the real ~/.loom.
+	t.Setenv("LOOM_CONFIG_DIR", "placeholder")
+	if err := os.Unsetenv("LOOM_CONFIG_DIR"); err != nil {
+		t.Fatalf("unset LOOM_CONFIG_DIR: %v", err)
 	}
-	want := filepath.Join(home, ".loom")
-	if got := GetConfigDir(); got != want {
-		t.Errorf("GetConfigDir() = %q, want %q", got, want)
+	got := GetConfigDir()
+	if got == "" {
+		t.Error("GetConfigDir() = \"\", want non-empty test temp dir")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if got == filepath.Join(home, ".loom") {
+			t.Errorf("GetConfigDir() = %q, must not be the real ~/.loom under go test", got)
+		}
 	}
 }
 
@@ -144,14 +150,13 @@ func TestLoadConfigFromStoreProjectsFleetDBWithLocalState(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {
-				Path:  "/tmp/ws1",
-				Repos: map[string]string{"api": "/tmp/ws1/api"},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path:  "/tmp/ws1",
+			Repos: map[string]string{"api": "/tmp/ws1/api"},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
