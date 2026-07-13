@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
 type testSSEEvent struct {
@@ -66,6 +68,32 @@ func (c *streamSSEClient) readEvent(timeout time.Duration) (testSSEEvent, error)
 	}
 }
 
+func (c *streamSSEClient) readRawFrame(timeout time.Duration) ([]string, error) {
+	type result struct {
+		lines []string
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		var lines []string
+		for c.scanner.Scan() {
+			line := c.scanner.Text()
+			if line == "" {
+				done <- result{lines: lines}
+				return
+			}
+			lines = append(lines, line)
+		}
+		done <- result{err: c.scanner.Err()}
+	}()
+	select {
+	case got := <-done:
+		return got.lines, got.err
+	case <-time.After(timeout):
+		return nil, context.DeadlineExceeded
+	}
+}
+
 func connectTestSSE(t *testing.T, ctx context.Context, url string) *streamSSEClient {
 	t.Helper()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -78,6 +106,43 @@ func connectTestSSE(t *testing.T, ctx context.Context, url string) *streamSSECli
 		t.Fatalf("failed to connect: %v", err)
 	}
 	return &streamSSEClient{resp: resp, scanner: bufio.NewScanner(resp.Body)}
+}
+
+func TestLogStreamer_StreamPreludeRetry(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	logDir := filepath.Join(tmpHome, ".loom", "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("failed to create log dir: %v", err)
+	}
+	logFile := filepath.Join(logDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("line\n"), 0o644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
+	}
+
+	s, err := NewLogStreamer(logFile)
+	if err != nil {
+		t.Fatalf("NewLogStreamer() error = %v", err)
+	}
+	defer func() { _ = s.Close() }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = s.Stream(r.Context(), w, 0)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := connectTestSSE(t, ctx, server.URL)
+	defer client.close()
+
+	lines, err := client.readRawFrame(5 * time.Second)
+	if err != nil {
+		t.Fatalf("failed to read first frame: %v", err)
+	}
+	if len(lines) != 1 || lines[0] != "retry: 5000" {
+		t.Fatalf("first frame lines = %#v, want retry prelude", lines)
+	}
 }
 
 func decodeChunkB64(t *testing.T, payload LogChunkPayload) string {
@@ -292,7 +357,11 @@ func TestSendLogChunk_JSONFormat(t *testing.T) {
 	defer func() { _ = s.Close() }()
 
 	recorder := httptest.NewRecorder()
-	s.sendLogChunk(recorder, recorder, []byte("raw-data"), 42)
+	sw, err := realtime.NewWriter(recorder)
+	if err != nil {
+		t.Fatalf("NewWriter() error = %v", err)
+	}
+	s.sendLogChunk(sw, []byte("raw-data"), 42)
 	output := recorder.Body.String()
 	if !strings.Contains(output, "event: log-chunk") {
 		t.Fatalf("expected log-chunk event in output")

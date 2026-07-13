@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"sync/atomic"
@@ -146,16 +145,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		handshakeSpan.End()
 		return
 	}
-	// Connected event has no id: field -- it's a control event, not a mutation
-	connFrame := fmt.Sprintf("event: connected\ndata: {\"clientId\":%d}\n\n", client.id)
-	if _, err := io.WriteString(sw.W, connFrame); err != nil {
+	// Connected event has no id: field -- it's a control event, not a mutation.
+	if err := sw.WriteEventNoID("connected", fmt.Sprintf(`{"clientId":%d}`, client.id)); err != nil {
 		slog.Error("SSE client connected event write failed", "client_id", client.id, "err", err)
 		handshakeSpan.RecordError(err)
 		handshakeSpan.SetStatus(codes.Error, "network")
 		handshakeSpan.End()
 		return
 	}
-	sw.Flusher.Flush()
 	// Handshake complete — end the span before the long-lived stream loop.
 	handshakeSpan.End()
 	_ = handshakeCtx

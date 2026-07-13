@@ -198,10 +198,18 @@ func (app *Server) registerWorkspaceRoutes() {
 }
 
 func (app *Server) workspaceMiddleware() middleware.Middleware {
-	if app.wsResolveFn != nil {
-		return middleware.WorkspaceResolved(app.wsResolveFn)
-	}
-	return middleware.Workspace(func(id string) bool {
+	workspaceMW := middleware.Workspace(func(id string) bool {
 		return app.wsExistsFn != nil && app.wsExistsFn(id)
 	})
+	if app.wsResolveFn != nil {
+		workspaceMW = middleware.WorkspaceResolved(app.wsResolveFn)
+	}
+	rbacMW := middleware.WorkspaceRBAC(middleware.WorkspaceRBACConfig{
+		Enabled:     app.config.ExtAuthURL != "",
+		ResolveRole: app.config.WorkspaceRoleResolver,
+		Logger:      app.config.Logger,
+	})
+	return func(next http.Handler) http.Handler {
+		return workspaceMW(rbacMW(next))
+	}
 }

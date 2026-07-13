@@ -1,8 +1,10 @@
 package workflows
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +19,42 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
+
+type workflowSSEFrame struct {
+	id    string
+	event string
+	data  string
+}
+
+func readWorkflowSSEFrame(t *testing.T, reader *bufio.Reader) workflowSSEFrame {
+	t.Helper()
+	var frame workflowSSEFrame
+	sawField := false
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read workflow SSE frame: %v", err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			if sawField {
+				return frame
+			}
+			continue
+		}
+		sawField = true
+		switch {
+		case strings.HasPrefix(line, "id: "):
+			frame.id = strings.TrimPrefix(line, "id: ")
+		case strings.HasPrefix(line, "event: "):
+			frame.event = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			frame.data = strings.TrimPrefix(line, "data: ")
+		default:
+			t.Fatalf("unexpected workflow SSE line %q", line)
+		}
+	}
+}
 
 func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
 	ctx := context.Background()
@@ -313,6 +351,129 @@ func TestGetRunEventsReturnsDriverRunEvents(t *testing.T) {
 	if len(page.Events) != 1 || page.Events[0].EntityID != "run-1" || page.Events[0].EntityType != "driver_run" {
 		t.Fatalf("events page = %+v, want one driver_run event", page)
 	}
+}
+
+func TestStreamRunEventsEmitsIDLessEventFrame(t *testing.T) {
+	ctx := context.Background()
+	st := seededWorkflowStore(t, ctx)
+	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "TEST",
+		RunID:           "run-1",
+		DriverID:        "demo",
+		DriverVersionID: "version-1",
+		Payload:         json.RawMessage(`{"ok":true}`),
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	reqCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, server.URL+"/api/workspaces/TEST/runs/"+run.RunID+"/stream?after=0", nil)
+	if err != nil {
+		t.Fatalf("new stream request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	frame := readWorkflowSSEFrame(t, bufio.NewReader(resp.Body))
+	if frame.id != "" {
+		t.Fatalf("workflow stream frame id = %q, want no id line", frame.id)
+	}
+	if frame.event != "event" {
+		t.Fatalf("workflow stream event = %q, want event", frame.event)
+	}
+	var event domain.PlatformEvent
+	if err := json.Unmarshal([]byte(frame.data), &event); err != nil {
+		t.Fatalf("decode workflow stream event data: %v", err)
+	}
+	if event.EntityID != run.RunID || event.EntityType != "driver_run" {
+		t.Fatalf("workflow stream event = %+v, want driver_run %q", event, run.RunID)
+	}
+}
+
+func TestStreamRunEventsEmitsIDLessErrorFrame(t *testing.T) {
+	ctx := context.Background()
+	base := seededWorkflowStore(t, ctx)
+	run, err := base.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:    "TEST",
+		RunID:           "run-1",
+		DriverID:        "demo",
+		DriverVersionID: "version-1",
+		Payload:         json.RawMessage(`{"ok":true}`),
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	st := workflowStoreWithDriverRuns{
+		Store: base,
+		runs: failingRunEventsStore{
+			DriverRunStore: base.DriverRuns(),
+			err:            errors.New("events down"),
+		},
+	}
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	reqCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, server.URL+"/api/workspaces/TEST/runs/"+run.RunID+"/stream?after=0", nil)
+	if err != nil {
+		t.Fatalf("new stream request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do stream request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	frame := readWorkflowSSEFrame(t, bufio.NewReader(resp.Body))
+	if frame.id != "" {
+		t.Fatalf("workflow stream error frame id = %q, want no id line", frame.id)
+	}
+	if frame.event != "error" {
+		t.Fatalf("workflow stream event = %q, want error", frame.event)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(frame.data), &payload); err != nil {
+		t.Fatalf("decode workflow stream error data: %v", err)
+	}
+	if payload["error"] != "events down" {
+		t.Fatalf("workflow stream error = %q, want events down", payload["error"])
+	}
+}
+
+type workflowStoreWithDriverRuns struct {
+	store.Store
+	runs store.DriverRunStore
+}
+
+func (s workflowStoreWithDriverRuns) DriverRuns() store.DriverRunStore {
+	return s.runs
+}
+
+type failingRunEventsStore struct {
+	store.DriverRunStore
+	err error
+}
+
+func (s failingRunEventsStore) Events(context.Context, string, string, string, int) (*domain.PlatformEventsPage, error) {
+	return nil, s.err
 }
 
 func TestCreateWorkflowVersionRejectsPackageManifest(t *testing.T) {
