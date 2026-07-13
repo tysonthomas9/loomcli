@@ -104,14 +104,18 @@ function LensToggle({
 function CompareToggle({
   compareMode,
   branchChangeCount,
+  taskChangeCount,
   workingChangeCount,
   branchBaseName,
+  showTaskCompareMode,
   onChange,
 }: {
   compareMode: CompareMode;
   branchChangeCount: number;
+  taskChangeCount: number;
   workingChangeCount: number;
   branchBaseName?: string | undefined;
+  showTaskCompareMode: boolean;
   onChange: (compareMode: CompareMode) => void;
 }) {
   const tabs: Array<{
@@ -126,6 +130,17 @@ function CompareToggle({
       count: branchChangeCount,
       title: `Committed changes on each agent branch, diffed against the merge-base with ${branchBaseName ?? "the repo default branch"}.`,
     },
+    ...(showTaskCompareMode
+      ? [
+          {
+            id: "tasks" as const,
+            label: "By task",
+            count: taskChangeCount,
+            title:
+              "Each task's committed increment: its stack base branch diffed against its output branch.",
+          },
+        ]
+      : []),
     {
       id: "working",
       label: "Working tree",
@@ -193,7 +208,9 @@ function ChangesList({
   const emptyText =
     compareMode === "branch"
       ? "No committed changes vs base across this workspace."
-      : "No uncommitted changes across this workspace.";
+      : compareMode === "tasks"
+        ? "No task increments found in this workspace's stacks."
+        : "No uncommitted changes across this workspace.";
   if (
     groups.length === 0 &&
     unavailableLabels.length === 0 &&
@@ -205,22 +222,34 @@ function ChangesList({
   const openDiffRequest = (
     group: ChangeCheckoutGroup,
     item: ChangeCheckoutGroup["items"][number],
-  ): HistoryOpenDiffRequest =>
-    compareMode === "branch"
-      ? {
-          ref: group.ref,
-          path: item.path,
-          source: "branch",
-          title: checkoutLabel(group.ref),
-          canOpenFile: item.status.kind !== "deleted",
-        }
-      : {
-          ref: group.ref,
-          path: item.path,
-          from: "HEAD",
-          title: checkoutLabel(group.ref),
-          canOpenFile: item.status.kind !== "deleted",
-        };
+  ): HistoryOpenDiffRequest => {
+    if (compareMode === "branch") {
+      return {
+        ref: group.ref,
+        path: item.path,
+        source: "branch",
+        title: checkoutLabel(group.ref),
+        canOpenFile: item.status.kind !== "deleted",
+      };
+    }
+    if (compareMode === "tasks") {
+      return {
+        ref: group.ref,
+        path: item.path,
+        from: group.diffFrom,
+        to: group.diffTo,
+        title: group.diffTitle,
+        canOpenFile: false,
+      };
+    }
+    return {
+      ref: group.ref,
+      path: item.path,
+      from: "HEAD",
+      title: checkoutLabel(group.ref),
+      canOpenFile: item.status.kind !== "deleted",
+    };
+  };
 
   const renderStats = (
     item: ChangeCheckoutGroup["items"][number],
@@ -258,7 +287,11 @@ function ChangesList({
       {groups.map((group) => (
         <section key={group.id} className={styles.changesGroup}>
           <h2 className={styles.changesGroupHeader}>{group.label}</h2>
-          {!group.loaded ? (
+          {group.unavailable ? (
+            <div className={styles.changesLoading}>
+              Task increment unavailable
+            </div>
+          ) : !group.loaded ? (
             <div className={styles.changesLoading}>Loading changes...</div>
           ) : group.items.length === 0 ? (
             <div className={styles.changesLoading}>No changed files found</div>
@@ -664,8 +697,10 @@ export function FileExplorerTreePanel({
   changeCount,
   compareMode,
   branchChangeCount,
+  taskChangeCount,
   workingChangeCount,
   branchBaseName,
+  showTaskCompareMode,
   checkoutError,
   repairError,
   sections,
@@ -699,8 +734,10 @@ export function FileExplorerTreePanel({
   changeCount: number;
   compareMode: CompareMode;
   branchChangeCount: number;
+  taskChangeCount: number;
   workingChangeCount: number;
   branchBaseName?: string | undefined;
+  showTaskCompareMode: boolean;
   checkoutError: string | null;
   repairError: string | null;
   sections: FileTreeSection[];
@@ -915,8 +952,10 @@ export function FileExplorerTreePanel({
           <CompareToggle
             compareMode={compareMode}
             branchChangeCount={branchChangeCount}
+            taskChangeCount={taskChangeCount}
             workingChangeCount={workingChangeCount}
             branchBaseName={branchBaseName}
+            showTaskCompareMode={showTaskCompareMode}
             onChange={onCompareModeChange}
           />
         )}

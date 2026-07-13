@@ -65,6 +65,9 @@ type FileService interface {
 	// DiffFileScoped returns a unified diff for one file in the containing checkout.
 	DiffFileScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path, from, to string) (*FileDiffResult, error)
 
+	// DiffFilesScoped returns file-level diff summaries for one scoped git checkout.
+	DiffFilesScoped(ctx context.Context, wsID string, scope FileScope, target, repo, from, to string) (*FileDiffFilesResult, error)
+
 	// BlameFileScoped returns parsed git blame line blocks or a bounded skip signal.
 	BlameFileScoped(ctx context.Context, wsID string, scope FileScope, target, repo, path string) (*FileBlameResult, error)
 
@@ -236,6 +239,11 @@ type FileDiffResult struct {
 	Patch    string `json:"patch"`
 	Partial  bool   `json:"partial"`
 	LimitHit bool   `json:"limit_hit"`
+}
+
+// FileDiffFilesResult contains file-level diff summaries for a scoped checkout.
+type FileDiffFilesResult struct {
+	Files []ops.DiffFileResult `json:"files"`
 }
 
 // FileBlameLine describes a contiguous line block from git blame --porcelain.

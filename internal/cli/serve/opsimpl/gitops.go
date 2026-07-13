@@ -754,6 +754,10 @@ func (g *GitOpsImpl) GitDiffFile(ctx context.Context, worktreePath, path, from, 
 	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err
 }
 
+func (g *GitOpsImpl) GitDiffFiles(ctx context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
+	return git.DiffFiles(ctx, worktreePath, from, to)
+}
+
 func (g *GitOpsImpl) GitLogFile(ctx context.Context, worktreePath, path string, limit int) (ops.GitBoundedTextResult, error) {
 	result, err := git.NewGitInspector().Log(ctx, worktreePath, path, limit)
 	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err

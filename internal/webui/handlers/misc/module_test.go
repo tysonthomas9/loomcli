@@ -29,6 +29,7 @@ func TestFileModule_RegisterRoutes(t *testing.T) {
 		{"GET", "/api/workspaces/test-ws/files/checkouts"},
 		{"POST", "/api/workspaces/test-ws/files/checkouts/repair"},
 		{"GET", "/api/workspaces/test-ws/files/diff"},
+		{"GET", "/api/workspaces/test-ws/files/diff-files"},
 		{"GET", "/api/workspaces/test-ws/files/history"},
 		{"GET", "/api/workspaces/test-ws/files/blame"},
 	}
@@ -44,6 +45,21 @@ func TestFileModule_RegisterRoutes(t *testing.T) {
 		if rec.Code == http.StatusMethodNotAllowed {
 			t.Errorf("%s %s: got 405, wrong method registered", rt.method, rt.path)
 		}
+	}
+}
+
+func TestFileModule_DiffFilesUsesFileAccess(t *testing.T) {
+	mod := NewFileModule(&stubFileService{}, middleware.FileAccessConfig{RemoteAuth: true})
+	mux := http.NewServeMux()
+	mod.Register(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/ws/files/diff-files?scope=repo&target=repo-a&from=main&to=task", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "ws"))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d body=%s, want 401", rec.Code, rec.Body.String())
 	}
 }
 

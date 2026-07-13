@@ -11,10 +11,12 @@ import { useStore } from "zustand";
 
 import { ResizeHandle } from "@/components/ResizeHandle";
 import type { DiffFile } from "@/api/issues";
-import type { FileCheckout } from "@/api/workspace";
+import type { FileCheckout, WorkspaceStack } from "@/api/workspace";
 import {
   deleteScopedPath,
+  fetchScopedDiffFiles,
   fetchDiffFiles,
+  fetchWorkspaceStacks,
   gitStatusScoped,
   indexScopedFiles,
   listScopedDir,
@@ -102,6 +104,7 @@ import { buildFileTreeSections, existingCheckoutRefs } from "./treeRoots";
 import {
   buildBranchChangeGroups,
   buildChangeGroups,
+  buildTaskChangeGroups,
   checkoutRefFromCheckout,
   type ChangeCheckoutGroup,
 } from "./changesLens";
@@ -128,6 +131,16 @@ interface BranchDiffRequest {
   key: string;
   agent: string;
 }
+
+interface TaskDiffRequest {
+  key: string;
+  repo: string;
+  from: string;
+  to: string;
+}
+
+const TASK_DIFF_FETCH_LIMIT = 50;
+const TASK_DIFF_CONCURRENCY = 4;
 
 function checkoutRepairRequest(ref: CheckoutRef, force = false) {
   if (ref.scope === "agent" && ref.target) {
@@ -216,6 +229,10 @@ function FileBrowserInner({
   const [branchDiffsByRef, setBranchDiffsByRef] = useState<
     Record<string, DiffFile[] | undefined>
   >({});
+  const [workspaceStacks, setWorkspaceStacks] = useState<WorkspaceStack[]>([]);
+  const [taskDiffsByNode, setTaskDiffsByNode] = useState<
+    Record<string, DiffFile[] | null | undefined>
+  >({});
   const [checkouts, setCheckouts] = useState<FileCheckout[]>([]);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [repairError, setRepairError] = useState<string | null>(null);
@@ -250,6 +267,7 @@ function FileBrowserInner({
     new Map(),
   );
   const branchDiffsInFlightRef = useRef<Set<string>>(new Set());
+  const taskDiffsInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (canWrite) return;
@@ -385,6 +403,67 @@ function FileBrowserInner({
     };
   }
   const stableBranchDiffRequests = stableBranchDiffRequestsRef.current.requests;
+  const visibleRepoNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const checkout of visibleCheckouts) {
+      if (checkout.repo) names.add(checkout.repo);
+    }
+    return names;
+  }, [visibleCheckouts]);
+  const visibleStacks = useMemo(
+    () => workspaceStacks.filter((stack) => visibleRepoNames.has(stack.repo)),
+    [visibleRepoNames, workspaceStacks],
+  );
+  const visibleStackNodeCount = useMemo(
+    () => visibleStacks.reduce((sum, stack) => sum + stack.nodes.length, 0),
+    [visibleStacks],
+  );
+  const taskStacksForDisplay = useMemo(() => {
+    let remaining = TASK_DIFF_FETCH_LIMIT;
+    const next: WorkspaceStack[] = [];
+    for (const stack of visibleStacks) {
+      if (remaining <= 0) break;
+      const nodes = stack.nodes.slice(0, remaining);
+      remaining -= nodes.length;
+      next.push({ ...stack, nodes });
+    }
+    return next;
+  }, [visibleStacks]);
+  const taskDiffRequests = useMemo<TaskDiffRequest[]>(() => {
+    const requests: TaskDiffRequest[] = [];
+    for (const stack of taskStacksForDisplay) {
+      for (const node of stack.nodes) {
+        if (!node.base_ref || !node.output_branch) continue;
+        requests.push({
+          key: `${stack.id}/${node.task_id}`,
+          repo: stack.repo,
+          from: node.base_ref,
+          to: node.output_branch,
+        });
+      }
+    }
+    return requests;
+  }, [taskStacksForDisplay]);
+  const taskDiffRequestsKey = taskDiffRequests
+    .map(
+      (request) =>
+        `${request.key}:${request.repo}:${request.from}:${request.to}`,
+    )
+    .join("|");
+  const stableTaskDiffRequestsRef = useRef<{
+    key: string;
+    requests: TaskDiffRequest[];
+  }>({ key: "", requests: [] });
+  if (stableTaskDiffRequestsRef.current.key !== taskDiffRequestsKey) {
+    stableTaskDiffRequestsRef.current = {
+      key: taskDiffRequestsKey,
+      requests: taskDiffRequests,
+    };
+  }
+  const stableTaskDiffRequests = stableTaskDiffRequestsRef.current.requests;
+  const taskCompareAvailable = mode !== "agent" && visibleStackNodeCount > 0;
+  const effectiveCompareMode: CompareMode =
+    compareMode === "tasks" && !taskCompareAvailable ? "branch" : compareMode;
   const unavailableChangeCheckoutLabels = useMemo(
     () => unavailableCheckoutLabels(visibleCheckouts),
     [visibleCheckouts],
@@ -422,6 +501,10 @@ function FileBrowserInner({
     () => buildBranchChangeGroups(visibleCheckouts, branchDiffsByRef),
     [branchDiffsByRef, visibleCheckouts],
   );
+  const taskChangeGroups = useMemo(
+    () => buildTaskChangeGroups(taskStacksForDisplay, taskDiffsByNode),
+    [taskDiffsByNode, taskStacksForDisplay],
+  );
   const branchChangeCount = useMemo(
     () =>
       branchChangeGroups.reduce(
@@ -430,8 +513,20 @@ function FileBrowserInner({
       ),
     [branchChangeGroups],
   );
+  const taskChangeCount = useMemo(
+    () =>
+      taskChangeGroups.reduce(
+        (sum, group) => (group.loaded ? sum + group.items.length : sum),
+        0,
+      ),
+    [taskChangeGroups],
+  );
   const activeChangeCount =
-    compareMode === "branch" ? branchChangeCount : checkoutChangeCount;
+    effectiveCompareMode === "branch"
+      ? branchChangeCount
+      : effectiveCompareMode === "tasks"
+        ? taskChangeCount
+        : checkoutChangeCount;
   const quickOpenIndexRefs = useMemo<CheckoutRef[]>(() => {
     if (mode !== "agent") return [];
     const agentRefs = visibleRefs.filter((ref) => ref.scope === "agent");
@@ -454,7 +549,11 @@ function FileBrowserInner({
     [changeGroups],
   );
   const activeChangeGroups =
-    compareMode === "branch" ? branchChangeGroups : visibleChangeGroups;
+    effectiveCompareMode === "branch"
+      ? branchChangeGroups
+      : effectiveCompareMode === "tasks"
+        ? taskChangeGroups
+        : visibleChangeGroups;
   const activeTab =
     groups[activeGroup]?.tabs.find(
       (tab) => tabIdentityKey(tab) === groups[activeGroup]?.active,
@@ -511,8 +610,29 @@ function FileBrowserInner({
     setLens(getStoredLens(workspaceId));
     setCompareMode(getStoredCompareMode(workspaceId));
     setBranchDiffsByRef({});
+    setWorkspaceStacks([]);
+    setTaskDiffsByNode({});
     branchDiffsInFlightRef.current.clear();
+    taskDiffsInFlightRef.current.clear();
   }, [workspaceId]);
+
+  useEffect(() => {
+    const visibleKeys = new Set(
+      stableTaskDiffRequests.map((request) => request.key),
+    );
+    setTaskDiffsByNode((prev) => {
+      const next: Record<string, DiffFile[] | null | undefined> = {};
+      let changed = false;
+      for (const [key, value] of Object.entries(prev)) {
+        if (visibleKeys.has(key)) {
+          next[key] = value;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [stableTaskDiffRequests]);
 
   const changeLens = useCallback(
     (nextLens: ExplorerLens) => {
@@ -543,6 +663,21 @@ function FileBrowserInner({
       setCheckoutError(err instanceof Error ? err.message : String(err));
     }
   }, [workspaceId]);
+
+  const refreshStacks = useCallback(async () => {
+    if (mode === "agent") {
+      setWorkspaceStacks([]);
+      setTaskDiffsByNode({});
+      taskDiffsInFlightRef.current.clear();
+      return;
+    }
+    try {
+      const data = await fetchWorkspaceStacks(workspaceId);
+      setWorkspaceStacks(data.stacks);
+    } catch {
+      setWorkspaceStacks([]);
+    }
+  }, [mode, workspaceId]);
 
   const refreshGitStatus = useCallback(async () => {
     const next: Record<string, Record<string, string>> = {};
@@ -585,6 +720,39 @@ function FileBrowserInner({
       }),
     );
   }, [stableBranchDiffRequests, workspaceId]);
+
+  const refreshTaskDiffs = useCallback(async () => {
+    if (mode === "agent" || stableTaskDiffRequests.length === 0) return;
+    for (
+      let start = 0;
+      start < stableTaskDiffRequests.length;
+      start += TASK_DIFF_CONCURRENCY
+    ) {
+      const chunk = stableTaskDiffRequests.slice(
+        start,
+        start + TASK_DIFF_CONCURRENCY,
+      );
+      await Promise.all(
+        chunk.map(async ({ key, repo, from, to }) => {
+          if (taskDiffsInFlightRef.current.has(key)) return;
+          taskDiffsInFlightRef.current.add(key);
+          try {
+            const files = await fetchScopedDiffFiles(
+              workspaceId,
+              { scope: "repo", target: repo },
+              from,
+              to,
+            );
+            setTaskDiffsByNode((prev) => ({ ...prev, [key]: files }));
+          } catch {
+            setTaskDiffsByNode((prev) => ({ ...prev, [key]: null }));
+          } finally {
+            taskDiffsInFlightRef.current.delete(key);
+          }
+        }),
+      );
+    }
+  }, [mode, stableTaskDiffRequests, workspaceId]);
 
   const fetchQuickOpenIndex = useCallback(
     async (force = false) => {
@@ -667,22 +835,32 @@ function FileBrowserInner({
 
   useEffect(() => {
     void refreshCheckouts();
-  }, [refreshCheckouts]);
+    void refreshStacks();
+  }, [refreshCheckouts, refreshStacks]);
 
   useEffect(() => {
     void refreshGitStatus();
     void refreshBranchDiffs();
-  }, [refreshBranchDiffs, refreshGitStatus]);
+    void refreshTaskDiffs();
+  }, [refreshBranchDiffs, refreshGitStatus, refreshTaskDiffs]);
 
   useEffect(() => {
     const handleFocus = () => {
       void refreshCheckouts();
+      void refreshStacks();
       void refreshGitStatus();
       void refreshBranchDiffs();
+      void refreshTaskDiffs();
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [refreshBranchDiffs, refreshCheckouts, refreshGitStatus]);
+  }, [
+    refreshBranchDiffs,
+    refreshCheckouts,
+    refreshGitStatus,
+    refreshStacks,
+    refreshTaskDiffs,
+  ]);
 
   useEffect(() => {
     const previous = reconnectAttemptsRef.current;
@@ -692,8 +870,10 @@ function FileBrowserInner({
       (previous > 0 && eventContext.state === "connected")
     ) {
       void refreshCheckouts();
+      void refreshStacks();
       void refreshGitStatus();
       void refreshBranchDiffs();
+      void refreshTaskDiffs();
     }
   }, [
     eventContext.reconnectAttempts,
@@ -701,6 +881,8 @@ function FileBrowserInner({
     refreshBranchDiffs,
     refreshCheckouts,
     refreshGitStatus,
+    refreshStacks,
+    refreshTaskDiffs,
   ]);
 
   useEffect(() => {
@@ -875,8 +1057,10 @@ function FileBrowserInner({
     (tab: FileBrowserTab) => {
       markIndexStale();
       void refreshCheckouts();
+      void refreshStacks();
       void refreshGitStatus();
       void refreshBranchDiffs();
+      void refreshTaskDiffs();
       setHistoryRefreshKey((key) => key + 1);
       showToast("File saved", { type: "success" });
       refreshParents(tab.ref, tab.path);
@@ -886,6 +1070,8 @@ function FileBrowserInner({
       refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
+      refreshStacks,
+      refreshTaskDiffs,
       refreshParents,
       showToast,
     ],
@@ -1015,8 +1201,10 @@ function FileBrowserInner({
         });
         markIndexStale();
         void refreshCheckouts();
+        void refreshStacks();
         void refreshGitStatus();
         void refreshBranchDiffs();
+        void refreshTaskDiffs();
         refreshParents(ref, path);
         openFile(ref, path);
         revealInTree(ref, path);
@@ -1025,8 +1213,10 @@ function FileBrowserInner({
         await mkdirScoped(workspaceId, ref, path);
         markIndexStale();
         void refreshCheckouts();
+        void refreshStacks();
         void refreshGitStatus();
         void refreshBranchDiffs();
+        void refreshTaskDiffs();
         refreshParents(ref, path);
         revealInTree(ref, path);
       } else if (edit.path) {
@@ -1050,8 +1240,10 @@ function FileBrowserInner({
           store.getState().retargetPathPrefix(ref, edit.path, nextPath);
           markIndexStale();
           void refreshCheckouts();
+          void refreshStacks();
           void refreshGitStatus();
           void refreshBranchDiffs();
+          void refreshTaskDiffs();
           refreshParents(ref, edit.path, nextPath);
           revealInTree(ref, nextPath);
         }
@@ -1077,6 +1269,8 @@ function FileBrowserInner({
     refreshBranchDiffs,
     refreshCheckouts,
     refreshGitStatus,
+    refreshStacks,
+    refreshTaskDiffs,
     documentRegistry,
   ]);
 
@@ -1135,8 +1329,10 @@ function FileBrowserInner({
         documentRegistry.resetPathPrefix(workspaceId, ref, node.path);
         markIndexStale();
         void refreshCheckouts();
+        void refreshStacks();
         void refreshGitStatus();
         void refreshBranchDiffs();
+        void refreshTaskDiffs();
         if (!node.isDir && skipFutureFileConfirms) {
           wsSet(workspaceId, DELETE_FILE_SKIP_KEY, "1");
         }
@@ -1160,6 +1356,8 @@ function FileBrowserInner({
       refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
+      refreshStacks,
+      refreshTaskDiffs,
       documentRegistry,
       canWrite,
     ],
@@ -1217,8 +1415,10 @@ function FileBrowserInner({
         }
         markIndexStale();
         void refreshCheckouts();
+        void refreshStacks();
         void refreshGitStatus();
         void refreshBranchDiffs();
+        void refreshTaskDiffs();
         refreshParents(ref, nextPath);
         openFile(ref, nextPath);
       } catch (err) {
@@ -1237,6 +1437,8 @@ function FileBrowserInner({
       refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
+      refreshStacks,
+      refreshTaskDiffs,
     ],
   );
 
@@ -1305,8 +1507,10 @@ function FileBrowserInner({
         }
         markIndexStale();
         await refreshCheckouts();
+        void refreshStacks();
         void refreshGitStatus();
         void refreshBranchDiffs();
+        void refreshTaskDiffs();
         refreshParents(ref, "");
         showToast(result.message || `Repaired ${label}.`, {
           type: "success",
@@ -1326,6 +1530,8 @@ function FileBrowserInner({
       refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
+      refreshStacks,
+      refreshTaskDiffs,
       refreshParents,
       showToast,
       canWrite,
@@ -1424,8 +1630,10 @@ function FileBrowserInner({
       store.getState().retargetPathPrefix(ref, move.from, move.to);
       markIndexStale();
       void refreshCheckouts();
+      void refreshStacks();
       void refreshGitStatus();
       void refreshBranchDiffs();
+      void refreshTaskDiffs();
       refreshParents(ref, move.from, move.to);
       revealInTree(ref, move.to);
       showToast("Moved", { type: "success" });
@@ -1440,6 +1648,8 @@ function FileBrowserInner({
       refreshBranchDiffs,
       refreshCheckouts,
       refreshGitStatus,
+      refreshStacks,
+      refreshTaskDiffs,
       refreshParents,
       revealInTree,
       showToast,
@@ -1501,8 +1711,10 @@ function FileBrowserInner({
               }
               markIndexStale();
               void refreshCheckouts();
+              void refreshStacks();
               void refreshGitStatus();
               void refreshBranchDiffs();
+              void refreshTaskDiffs();
               refreshParents(searchScopeRef, ...paths);
               if (complete) showToast("Replace applied", { type: "success" });
             }}
@@ -1512,10 +1724,12 @@ function FileBrowserInner({
           <FileExplorerTreePanel
             lens={lens}
             changeCount={activeChangeCount}
-            compareMode={compareMode}
+            compareMode={effectiveCompareMode}
             branchChangeCount={branchChangeCount}
+            taskChangeCount={taskChangeCount}
             workingChangeCount={checkoutChangeCount}
             branchBaseName={branchBaseName}
+            showTaskCompareMode={taskCompareAvailable}
             checkoutError={checkoutError}
             repairError={repairError}
             sections={sections}

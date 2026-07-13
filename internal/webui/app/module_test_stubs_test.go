@@ -127,6 +127,9 @@ func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ service.
 func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
 	return &service.FileDiffResult{}, nil
 }
+func (s *stubFileService) DiffFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileDiffFilesResult, error) {
+	return &service.FileDiffFilesResult{Files: []ops.DiffFileResult{}}, nil
+}
 func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
 	return &service.FileBlameResult{}, nil
 }

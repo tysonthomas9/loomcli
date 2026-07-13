@@ -4,7 +4,7 @@ import type { FileBrowserMode } from "./treeRoots";
 import type { CheckoutRef } from "@/utils/fileExplorerRefs";
 
 export type ExplorerLens = "files" | "changes";
-export type CompareMode = "branch" | "working";
+export type CompareMode = "branch" | "tasks" | "working";
 
 export interface FileBrowserProps {
   mode?: FileBrowserMode | undefined;

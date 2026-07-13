@@ -208,6 +208,10 @@ func (m *mockFileOps) GitDiffFile(_ context.Context, worktreePath, path, from, t
 	return ops.GitBoundedTextResult{}, nil
 }
 
+func (m *mockFileOps) GitDiffFiles(_ context.Context, worktreePath, from, to string) ([]ops.DiffFileResult, error) {
+	return []ops.DiffFileResult{}, nil
+}
+
 func (m *mockFileOps) GitLogFile(_ context.Context, worktreePath, path string, limit int) (ops.GitBoundedTextResult, error) {
 	return ops.GitBoundedTextResult{}, nil
 }

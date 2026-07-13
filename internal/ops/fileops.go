@@ -95,6 +95,9 @@ type FileOps interface {
 	// When to is empty, the diff compares from against the working tree.
 	GitDiffFile(ctx context.Context, worktreePath, path, from, to string) (GitBoundedTextResult, error)
 
+	// GitDiffFiles returns file-level diff summaries between two refs.
+	GitDiffFiles(ctx context.Context, worktreePath, from, to string) ([]DiffFileResult, error)
+
 	// GitLogFile returns bounded git log output for one checkout-relative file path.
 	GitLogFile(ctx context.Context, worktreePath, path string, limit int) (GitBoundedTextResult, error)
 

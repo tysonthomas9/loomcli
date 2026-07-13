@@ -4,7 +4,15 @@
  * openapi-fetch for read/write endpoints.
  */
 
-import { del, get, patch, post, put, wsUrl } from "@/api/common";
+import {
+  del,
+  get,
+  patch,
+  post,
+  put,
+  unwrapResponse,
+  wsUrl,
+} from "@/api/common";
 import type { components } from "@/types/generated/openapi";
 
 // ============= Types =============
@@ -106,6 +114,18 @@ export interface FileDiffData {
   patch: string;
   partial: boolean;
   limit_hit: boolean;
+}
+
+export interface ScopedDiffFile {
+  path: string;
+  status: "M" | "A" | "D" | "R";
+  old_path?: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface ScopedDiffFilesData {
+  files: ScopedDiffFile[];
 }
 
 export interface FileBlameLine {
@@ -343,6 +363,29 @@ export async function diffScopedFile(
   return get<FileDiffData>(
     scopedUrl(workspaceId, "/files/diff", scopeRef, path, { from, to }),
   );
+}
+
+/**
+ * Fetch changed files between two refs in a scoped git checkout.
+ * GET /api/workspaces/{ws}/files/diff-files?scope=&target=&from=&to=
+ */
+export async function fetchScopedDiffFiles(
+  workspaceId: string,
+  scopeRef: FileScopeRef,
+  from: string,
+  to: string,
+): Promise<ScopedDiffFile[]> {
+  const response = await get<{
+    success: boolean;
+    data?: ScopedDiffFilesData;
+    error?: string;
+  }>(
+    scopedUrl(workspaceId, "/files/diff-files", scopeRef, undefined, {
+      from,
+      to,
+    }),
+  );
+  return unwrapResponse(response).files;
 }
 
 /**

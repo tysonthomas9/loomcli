@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   ),
   diffScopedFile: vi.fn(() => Promise.resolve({ path: "main.ts", patch: "" })),
   fetchDiffFiles: vi.fn(() => Promise.resolve([])),
+  fetchScopedDiffFiles: vi.fn(() => Promise.resolve([])),
   fetchDiffFile: vi.fn(() =>
     Promise.resolve({
       patch: "",
@@ -51,6 +52,7 @@ const mocks = vi.hoisted(() => ({
     Promise.resolve({ path: "main.ts", entries: [] }),
   ),
   gitStatusScoped: vi.fn(() => Promise.resolve({})),
+  fetchWorkspaceStacks: vi.fn(() => Promise.resolve({ stacks: [] })),
   indexScopedFiles: vi.fn(() =>
     Promise.resolve({ paths: [] as string[], truncated: false }),
   ),
@@ -198,6 +200,8 @@ vi.mock("@/hooks/api", () => ({
   diffScopedFile: mocks.diffScopedFile,
   fetchDiffFile: mocks.fetchDiffFile,
   fetchDiffFiles: mocks.fetchDiffFiles,
+  fetchScopedDiffFiles: mocks.fetchScopedDiffFiles,
+  fetchWorkspaceStacks: mocks.fetchWorkspaceStacks,
   gitStatusScoped: mocks.gitStatusScoped,
   historyScopedFile: mocks.historyScopedFile,
   indexScopedFiles: mocks.indexScopedFiles,
@@ -419,6 +423,10 @@ function storeWorkingCompareMode(): void {
   localStorage.setItem("loom:ws-1:file-explorer-compare-mode", "working");
 }
 
+function storeTasksCompareMode(): void {
+  localStorage.setItem("loom:ws-1:file-explorer-compare-mode", "tasks");
+}
+
 describe("WorkspaceFileBrowser", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -500,6 +508,8 @@ describe("WorkspaceFileBrowser", () => {
         "diff --git a/main.ts b/main.ts\n--- a/main.ts\n+++ b/main.ts\n@@ -1 +1 @@\n-old\n+new\n",
     });
     mocks.fetchDiffFiles.mockResolvedValue([]);
+    mocks.fetchScopedDiffFiles.mockResolvedValue([]);
+    mocks.fetchWorkspaceStacks.mockResolvedValue({ stacks: [] });
     mocks.fetchDiffFile.mockResolvedValue({
       patch:
         "diff --git a/main.ts b/main.ts\n--- a/main.ts\n+++ b/main.ts\n@@ -1 +1 @@\n-old\n+new\n",
@@ -1556,6 +1566,169 @@ describe("WorkspaceFileBrowser", () => {
       );
     });
     expect(mocks.diffScopedFile).not.toHaveBeenCalled();
+  });
+
+  it("shows task compare mode and opens repo-scoped task diffs with explicit refs", async () => {
+    mocks.fetchWorkspaceStacks.mockResolvedValue({
+      stacks: [
+        {
+          id: "epic:E",
+          repo: "loomcli",
+          root_base: "main",
+          nodes: [
+            {
+              task_id: "T1",
+              output_branch: "task/T1",
+              base_ref: "main",
+              position: 0,
+            },
+          ],
+        },
+      ],
+    });
+    mocks.fetchScopedDiffFiles.mockResolvedValue([
+      {
+        path: "src/task.ts",
+        status: "M",
+        additions: 3,
+        deletions: 1,
+      },
+    ]);
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+0/ }));
+    const taskTab = await screen.findByRole("tab", { name: "By task · 1" });
+    expect(mocks.fetchScopedDiffFiles).toHaveBeenCalledWith(
+      "ws-1",
+      { scope: "repo", target: "loomcli" },
+      "main",
+      "task/T1",
+    );
+
+    fireEvent.click(taskTab);
+
+    expect(await screen.findByText("T1 · loomcli · 1")).toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Open diff for src/task.ts (Modified)",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mocks.diffScopedFile).toHaveBeenCalledWith(
+        "ws-1",
+        { scope: "repo", target: "loomcli" },
+        "src/task.ts",
+        "main",
+        "task/T1",
+      );
+    });
+    expect(mocks.fetchDiffFile).not.toHaveBeenCalled();
+  });
+
+  it("hides task compare mode in agent mode", async () => {
+    mocks.fetchWorkspaceStacks.mockResolvedValue({
+      stacks: [
+        {
+          id: "epic:E",
+          repo: "loomcli",
+          root_base: "main",
+          nodes: [
+            {
+              task_id: "T1",
+              output_branch: "task/T1",
+              base_ref: "main",
+              position: 0,
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<WorkspaceFileBrowser mode="agent" agentName="atlas" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+0/ }));
+
+    expect(
+      await screen.findByRole("tab", { name: "Branch vs main · 0" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /By task/ })).toBeNull();
+    expect(mocks.fetchWorkspaceStacks).not.toHaveBeenCalled();
+  });
+
+  it("coerces persisted task compare mode to branch when no stack nodes are available", async () => {
+    storeTasksCompareMode();
+    mocks.fetchDiffFiles.mockResolvedValue([
+      {
+        path: "src/main.ts",
+        status: "M",
+        additions: 4,
+        deletions: 1,
+      },
+    ]);
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+1/ }));
+
+    expect(
+      await screen.findByRole("tab", { name: "Branch vs main · 1" }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab", { name: /By task/ })).toBeNull();
+    expect(localStorage.getItem("loom:ws-1:file-explorer-compare-mode")).toBe(
+      "tasks",
+    );
+  });
+
+  it("isolates per-node task diff failures", async () => {
+    mocks.fetchWorkspaceStacks.mockResolvedValue({
+      stacks: [
+        {
+          id: "epic:E",
+          repo: "loomcli",
+          root_base: "main",
+          nodes: [
+            {
+              task_id: "T1",
+              output_branch: "task/T1",
+              base_ref: "main",
+              position: 0,
+            },
+            {
+              task_id: "T2",
+              base_task_id: "T1",
+              output_branch: "task/T2",
+              base_ref: "task/T1",
+              position: 1,
+            },
+          ],
+        },
+      ],
+    });
+    mocks.fetchScopedDiffFiles.mockImplementation(
+      (_workspaceId: string, _ref: unknown, _from: string, to: string) =>
+        to === "task/T1"
+          ? Promise.reject(new Error("missing ref"))
+          : Promise.resolve([
+              {
+                path: "src/task2.ts",
+                status: "A",
+                additions: 2,
+                deletions: 0,
+              },
+            ]),
+    );
+
+    render(<WorkspaceFileBrowser mode="workspace" />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+0/ }));
+    const taskTab = await screen.findByRole("tab", { name: "By task · 1" });
+    fireEvent.click(taskTab);
+
+    expect(await screen.findByText("T1 · loomcli · 0")).toBeInTheDocument();
+    expect(screen.getByText("Task increment unavailable")).toBeInTheDocument();
+    expect(screen.getByText("T2 · loomcli · 1")).toBeInTheDocument();
   });
 
   it("opens a checkout-qualified unified diff from the Changes lens", async () => {

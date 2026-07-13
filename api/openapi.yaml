@@ -56,6 +56,8 @@ tags:
     description: Git operations (status, push, pull, sync, PR, reset)
   - name: pull-requests
     description: Pull request review read APIs
+  - name: stacks
+    description: Stack lineage read APIs
   - name: diff
     description: Diff and commit inspection
   - name: files
@@ -3015,6 +3017,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/workspaces/{ws}/stacks:
+    get:
+      operationId: getWorkspaceStacks
+      tags: [stacks]
+      summary: List task stack lineage for a workspace
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Workspace stack lineage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceStacksEnvelope"
+        "500":
+          description: Stack lineage could not be read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/agents/{name}/git/diff-stat:
     get:
       operationId: getAgentDiffStat
@@ -3368,6 +3391,66 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileDiffResponse"
+
+  /api/workspaces/{ws}/files/diff-files:
+    get:
+      operationId: getScopedDiffFiles
+      tags: [files]
+      summary: List changed files between two refs in a scoped file browser checkout
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [repo, agent]
+        - name: target
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: query
+          required: false
+          description: Optional repo qualifier, valid only when scope=agent.
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Changed files
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileDiffFilesEnvelope"
+        "400":
+          description: Missing or invalid refs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: File browser access denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Checkout or ref not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/workspaces/{ws}/files/history:
     get:
@@ -4628,6 +4711,92 @@ components:
           type: boolean
         limit_hit:
           type: boolean
+
+    DiffFileSummary:
+      type: object
+      required: [path, status, additions, deletions]
+      properties:
+        path:
+          type: string
+        status:
+          type: string
+          enum: [M, A, D, R]
+        old_path:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+
+    FileDiffFilesResponse:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiffFileSummary"
+
+    FileDiffFilesEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/FileDiffFilesResponse"
+        error:
+          type: string
+
+    WorkspaceStackNode:
+      type: object
+      required: [task_id, output_branch, position]
+      properties:
+        task_id:
+          type: string
+        base_task_id:
+          type: string
+        output_branch:
+          type: string
+        base_ref:
+          type: string
+        position:
+          type: integer
+
+    WorkspaceStack:
+      type: object
+      required: [id, repo, root_base, nodes]
+      properties:
+        id:
+          type: string
+        repo:
+          type: string
+        root_base:
+          type: string
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceStackNode"
+
+    WorkspaceStacksResponse:
+      type: object
+      required: [stacks]
+      properties:
+        stacks:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceStack"
+
+    WorkspaceStacksEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/WorkspaceStacksResponse"
+        error:
+          type: string
 
     FileBlameLine:
       type: object

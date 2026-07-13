@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { DiffFile } from "@/api/issues";
-import type { FileCheckout } from "@/api/workspace";
+import type { FileCheckout, WorkspaceStack } from "@/api/workspace";
 import { checkoutRefKey } from "@/utils/fileExplorerRefs";
 
 import {
   buildBranchChangeGroups,
   buildChangeGroups,
+  buildTaskChangeGroups,
   changeStatusFromDiffStatus,
   changeStatusFromPorcelain,
   checkoutRefFromCheckout,
@@ -214,6 +215,84 @@ describe("changesLens", () => {
     expect(groups[1]).toMatchObject({
       loaded: false,
       changeCount: 0,
+      items: [],
+    });
+  });
+
+  it("builds task groups from stack node diffs", () => {
+    const stacks: WorkspaceStack[] = [
+      {
+        id: "epic:E",
+        repo: "loomcli",
+        root_base: "main",
+        nodes: [
+          {
+            task_id: "T1",
+            output_branch: "task/T1",
+            base_ref: "main",
+            position: 0,
+          },
+          {
+            task_id: "missing-base",
+            output_branch: "task/missing-base",
+            position: 1,
+          },
+          {
+            task_id: "empty",
+            output_branch: "task/empty",
+            base_ref: "task/T1",
+            position: 2,
+          },
+          {
+            task_id: "failed",
+            output_branch: "task/failed",
+            base_ref: "task/T1",
+            position: 3,
+          },
+        ],
+      },
+    ];
+
+    const groups = buildTaskChangeGroups(stacks, {
+      "epic:E/T1": [
+        diffFile({
+          path: "src/task.ts",
+          status: "A",
+          additions: 2,
+          deletions: 0,
+        }),
+      ],
+      "epic:E/empty": [],
+      "epic:E/failed": null,
+    });
+
+    expect(groups.map((group) => group.label)).toEqual([
+      "T1 · loomcli · 1",
+      "failed · loomcli · 0",
+    ]);
+    expect(groups[0]).toMatchObject({
+      id: "epic:E/T1",
+      ref: { scope: "repo", target: "loomcli" },
+      loaded: true,
+      changeCount: 1,
+      diffFrom: "main",
+      diffTo: "task/T1",
+      diffTitle: "T1",
+      items: [
+        {
+          path: "src/task.ts",
+          name: "task.ts",
+          parentPath: "src",
+          status: { kind: "new", label: "New" },
+          additions: 2,
+          deletions: 0,
+        },
+      ],
+    });
+    expect(groups[1]).toMatchObject({
+      id: "epic:E/failed",
+      loaded: true,
+      unavailable: true,
       items: [],
     });
   });

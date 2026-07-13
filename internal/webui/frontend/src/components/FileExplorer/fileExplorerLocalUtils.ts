@@ -53,9 +53,9 @@ export function storeLens(workspaceId: string, lens: ExplorerLens): void {
 }
 
 export function getStoredCompareMode(workspaceId: string): CompareMode {
-  return wsGet(workspaceId, FILE_EXPLORER_COMPARE_MODE_KEY) === "working"
-    ? "working"
-    : "branch";
+  const value = wsGet(workspaceId, FILE_EXPLORER_COMPARE_MODE_KEY);
+  if (value === "tasks" || value === "working") return value;
+  return "branch";
 }
 
 export function storeCompareMode(
