@@ -2,6 +2,8 @@ package app
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
@@ -24,13 +26,33 @@ func (app *Server) registerRoutes() {
 		app.registerWorkspaceRoutes()
 	}
 
-	// Unregistered /api/* paths return JSON 404. Must run after all specific
-	// /api/... routes are registered so Go 1.22+ longest-match prefers real
-	// handlers. Non-/api paths fall through to Go's default text 404 — the
-	// frontend is served externally (reverse proxy / Vite preview), not by
-	// this server.
-	app.mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	// Unregistered /api/* paths return JSON 404, or JSON 405 with Allow when
+	// the path is registered for other methods. This preserves Go 1.22+
+	// ServeMux method-qualified route behavior despite the methodless catch-all.
+	app.mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probeMethods := [...]string{
+			http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+			http.MethodPatch, http.MethodDelete, http.MethodOptions,
+		}
+		var allowed []string
+		for _, method := range probeMethods {
+			if method == r.Method {
+				continue
+			}
+			probe := &http.Request{Method: method, URL: &url.URL{Path: r.URL.Path}}
+			_, pattern := app.mux.Handler(probe)
+			if pattern != "" && pattern != "/api/" {
+				allowed = append(allowed, method)
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
+		if len(allowed) > 0 {
+			w.Header().Set("Allow", strings.Join(allowed, ", "))
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_, _ = w.Write([]byte(`{"error":"method not allowed"}`))
+			return
+		}
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"not found"}`))
 	}))

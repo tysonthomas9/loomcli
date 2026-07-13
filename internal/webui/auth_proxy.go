@@ -65,8 +65,10 @@ func NewAuthProxy(extAuthURL string, logger *slog.Logger) http.Handler {
 
 // rewriteAuthProxyCookies rewrites Set-Cookie headers so cookies are
 // first-party to the frontend origin (Domain stripped, SameSite=Lax, Secure
-// conditioned on TLS). Malformed upstream cookies containing CR/LF are
-// dropped as defense-in-depth.
+// conditioned on TLS). When downgrading to HTTP, __Secure-/__Host- name
+// prefixes are also stripped since browsers reject such cookies without the
+// Secure attribute. Malformed upstream cookies containing CR/LF are dropped
+// as defense-in-depth.
 func rewriteAuthProxyCookies(resp *http.Response) error {
 	cookies := resp.Header.Values("Set-Cookie")
 	if len(cookies) == 0 {
@@ -87,6 +89,7 @@ func rewriteAuthProxyCookies(resp *http.Response) error {
 			}
 		} else {
 			c = stripCookieFlag(c, "Secure")
+			c = stripCookieNamePrefix(c)
 		}
 		resp.Header.Add("Set-Cookie", c)
 	}
@@ -144,4 +147,21 @@ func stripCookieFlag(cookie, flag string) string {
 		}
 	}
 	return strings.Join(filtered, ";")
+}
+
+// stripCookieNamePrefix removes a __Secure- or __Host- prefix from the cookie
+// name in a raw Set-Cookie header value. Prefix matching is case-sensitive per
+// RFC 6265bis.
+func stripCookieNamePrefix(cookie string) string {
+	eqIdx := strings.Index(cookie, "=")
+	if eqIdx < 0 {
+		return cookie
+	}
+	name := cookie[:eqIdx]
+	for _, prefix := range []string{"__Secure-", "__Host-"} {
+		if strings.HasPrefix(name, prefix) {
+			return name[len(prefix):] + cookie[eqIdx:]
+		}
+	}
+	return cookie
 }

@@ -110,6 +110,33 @@ type resolvedRepo struct {
 	name string
 }
 
+// checkWorkspaceRepoPathCollisions rejects workspace/repo layouts where the
+// workspace root and any source repo are the same path, or one is nested inside
+// the other. Git worktree add can otherwise create nested gitlink layouts that
+// look like empty/missing repos to the UI.
+func checkWorkspaceRepoPathCollisions(wsDir string, repos []resolvedRepo) error {
+	for _, repo := range repos {
+		switch {
+		case repo.path == wsDir:
+			return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path %q collides with source repo %q: they resolve to the same directory", wsDir, repo.path), nil)
+		case isNestedPath(repo.path, wsDir):
+			return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("workspace path %q is inside source repo %q", wsDir, repo.path), nil)
+		case isNestedPath(wsDir, repo.path):
+			return workspaceerrors.New(workspaceerrors.SecurityViolation, fmt.Sprintf("source repo %q is inside workspace path %q", repo.path, wsDir), nil)
+		}
+	}
+	return nil
+}
+
+// isNestedPath reports whether child is inside parent. Equal paths are not nested.
+func isNestedPath(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil || rel == "." {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 // resolveRepoPaths validates and resolves a list of repo paths, checking that
 // each exists, is a directory, contains a .git directory, and has a unique name.
 func resolveRepoPaths(repoPaths []string) ([]resolvedRepo, error) {

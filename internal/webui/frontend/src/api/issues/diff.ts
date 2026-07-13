@@ -14,6 +14,7 @@ export interface DiffCommit {
   author: string;
   email: string;
   date: string; // ISO 8601 string from backend
+  pushed?: boolean;
 }
 
 export interface DiffFile {

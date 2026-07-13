@@ -1775,6 +1775,56 @@ func TestUnregisteredAPIPathReturnsJSONNotFound(t *testing.T) {
 	}
 }
 
+func TestAPICatchAllReturnsMethodNotAllowedForWrongMethod(t *testing.T) {
+	app := &Server{}
+	setupTestRoutes(t, app)
+
+	tests := []struct {
+		name      string
+		method    string
+		path      string
+		wantAllow string
+	}{
+		{
+			name:      "POST to GET route",
+			method:    http.MethodPost,
+			path:      "/api/health",
+			wantAllow: http.MethodGet,
+		},
+		{
+			name:      "GET to POST route",
+			method:    http.MethodGet,
+			path:      "/api/client-errors",
+			wantAllow: http.MethodPost,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			rr := httptest.NewRecorder()
+			app.mux.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("status = %d, want 405; body=%s", rr.Code, rr.Body.String())
+			}
+			if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
+				t.Errorf("Content-Type = %q, want application/json", ct)
+			}
+			if allow := rr.Header().Get("Allow"); !strings.Contains(allow, tt.wantAllow) {
+				t.Errorf("Allow = %q, want it to contain %q", allow, tt.wantAllow)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatalf("response is not JSON: %v", err)
+			}
+			if body["error"] != "method not allowed" {
+				t.Errorf("error = %q, want method not allowed", body["error"])
+			}
+		})
+	}
+}
+
 // --- Tab metadata route conditional registration tests ---
 
 // TestSetupRoutes_TabMetadataReturns404WhenStoreNil verifies that GET /api/terminal/tabs

@@ -277,6 +277,7 @@ function App() {
   );
   const retryConnection = useStore(issueStore, (s) => s.retryConnection);
   const fetchIssues = useStore(issueStore, (s) => s.fetchIssues);
+  const resetGeneration = useStore(issueStore, (s) => s.resetGeneration);
 
   // Wrap store's 3-arg updateIssueStatus to bind workspaceId (views expect 2-arg signature)
   const updateIssueStatus = useCallback(
@@ -317,7 +318,7 @@ function App() {
     if (sourceReposFilter) params.sourceRepos = sourceReposFilter;
     fetchIssues(params);
     return () => controller.abort();
-  }, [fetchIssues, workspaceId, issueMode, sourceReposFilter]);
+  }, [fetchIssues, workspaceId, issueMode, sourceReposFilter, resetGeneration]);
 
   // Filter state with URL synchronization
   const [filters, filterActions] = useFilterState();

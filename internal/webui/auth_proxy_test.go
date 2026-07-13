@@ -346,3 +346,144 @@ func TestCookieStripFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestStripCookieNamePrefix(t *testing.T) {
+	tests := []struct {
+		name   string
+		cookie string
+		want   string
+	}{
+		{
+			name:   "__Secure- prefix stripped",
+			cookie: "__Secure-better-auth.session_token=abc",
+			want:   "better-auth.session_token=abc",
+		},
+		{
+			name:   "__Host- prefix stripped",
+			cookie: "__Host-session=abc; Path=/",
+			want:   "session=abc; Path=/",
+		},
+		{
+			name:   "no prefix no-op",
+			cookie: "session=abc",
+			want:   "session=abc",
+		},
+		{
+			name:   "case-sensitive lowercase __secure- not stripped",
+			cookie: "__secure-foo=bar",
+			want:   "__secure-foo=bar",
+		},
+		{
+			name:   "cookie with no = sign is no-op",
+			cookie: "malformed",
+			want:   "malformed",
+		},
+		{
+			name:   "empty string is no-op",
+			cookie: "",
+			want:   "",
+		},
+		{
+			name:   "value contains = does not affect first =",
+			cookie: "__Secure-token=base64==value; Secure",
+			want:   "token=base64==value; Secure",
+		},
+		{
+			name:   "attributes preserved after name",
+			cookie: "__Secure-session=abc; HttpOnly; Path=/",
+			want:   "session=abc; HttpOnly; Path=/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripCookieNamePrefix(tt.cookie)
+			if got != tt.want {
+				t.Errorf("stripCookieNamePrefix(%q) = %q, want %q", tt.cookie, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRewriteAuthProxyCookies_StripsSecurePrefixOverHTTP(t *testing.T) {
+	req, _ := http.NewRequest("GET", "http://example/api/auth/x", nil)
+	req = req.WithContext(context.WithValue(req.Context(), authProxyCtxKey{}, false))
+	resp := &http.Response{Header: http.Header{}, Request: req}
+	resp.Header.Add("Set-Cookie", "__Secure-better-auth.session_token=abc; Secure; HttpOnly; SameSite=None")
+
+	if err := rewriteAuthProxyCookies(resp); err != nil {
+		t.Fatalf("rewrite returned error: %v", err)
+	}
+
+	got := resp.Header.Values("Set-Cookie")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 cookie, got %d: %v", len(got), got)
+	}
+	c := got[0]
+	assertCookieContains(t, c, "better-auth.session_token=abc")
+	assertCookieNotContains(t, c, "__Secure-")
+	if hasCookieFlag(c, "Secure") {
+		t.Errorf("expected Secure absent on HTTP, got %q", c)
+	}
+	assertCookieContains(t, c, "SameSite=Lax")
+	assertCookieContains(t, c, "HttpOnly")
+}
+
+func TestRewriteAuthProxyCookies_PreservesSecurePrefixOverTLS(t *testing.T) {
+	req, _ := http.NewRequest("GET", "http://example/api/auth/x", nil)
+	req = req.WithContext(context.WithValue(req.Context(), authProxyCtxKey{}, true))
+	resp := &http.Response{Header: http.Header{}, Request: req}
+	resp.Header.Add("Set-Cookie", "__Secure-better-auth.session_token=abc; Secure; HttpOnly; SameSite=None")
+
+	if err := rewriteAuthProxyCookies(resp); err != nil {
+		t.Fatalf("rewrite returned error: %v", err)
+	}
+
+	got := resp.Header.Values("Set-Cookie")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 cookie, got %d: %v", len(got), got)
+	}
+	c := got[0]
+	assertCookieContains(t, c, "__Secure-better-auth.session_token=abc")
+	if !hasCookieFlag(c, "Secure") {
+		t.Errorf("expected Secure present on TLS, got %q", c)
+	}
+	assertCookieContains(t, c, "SameSite=Lax")
+}
+
+func TestRewriteAuthProxyCookies_StripsHostPrefixOverHTTP(t *testing.T) {
+	req, _ := http.NewRequest("GET", "http://example/api/auth/x", nil)
+	req = req.WithContext(context.WithValue(req.Context(), authProxyCtxKey{}, false))
+	resp := &http.Response{Header: http.Header{}, Request: req}
+	resp.Header.Add("Set-Cookie", "__Host-session=abc; Secure; Path=/")
+
+	if err := rewriteAuthProxyCookies(resp); err != nil {
+		t.Fatalf("rewrite returned error: %v", err)
+	}
+
+	got := resp.Header.Values("Set-Cookie")
+	if len(got) != 1 {
+		t.Fatalf("expected 1 cookie, got %d: %v", len(got), got)
+	}
+	c := got[0]
+	assertCookieContains(t, c, "session=abc")
+	assertCookieNotContains(t, c, "__Host-")
+	if hasCookieFlag(c, "Secure") {
+		t.Errorf("expected Secure absent on HTTP, got %q", c)
+	}
+	assertCookieContains(t, c, "Path=/")
+}
+
+func assertCookieContains(t *testing.T, cookie, want string) {
+	t.Helper()
+	if !strings.Contains(cookie, want) {
+		t.Fatalf("expected cookie %q to contain %q", cookie, want)
+	}
+}
+
+func assertCookieNotContains(t *testing.T, cookie, want string) {
+	t.Helper()
+	if strings.Contains(cookie, want) {
+		t.Fatalf("expected cookie %q not to contain %q", cookie, want)
+	}
+}

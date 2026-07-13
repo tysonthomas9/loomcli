@@ -90,8 +90,10 @@ export function AgentDetailPanel({
     setActiveTab("info");
   }, [agentName]);
 
-  // Handle Escape key via global shortcut layer system
-  useRegisterEscapeLayer(LAYER_AGENT_PANEL, onClose, isOpen);
+  // Let focused inline-edit inputs handle Escape locally without closing the panel.
+  useRegisterEscapeLayer(LAYER_AGENT_PANEL, onClose, isOpen, {
+    suppressWhenInputFocused: true,
+  });
 
   // Lock body scroll when open
   useEffect(() => {

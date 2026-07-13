@@ -18,7 +18,7 @@
  *   *                                      → NotFound (404 page)
  */
 
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { createBrowserRouter, replace } from "react-router-dom";
 
 import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -26,6 +26,16 @@ import { WorkspaceLayout } from "@/components/WorkspaceLayout";
 import { RedirectToWorkspace } from "@/components/RedirectToWorkspace";
 import { NotFound } from "@/components/NotFound";
 import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
+
+export function redirectToKanbanLoader({
+  params,
+}: {
+  params: { workspaceId?: string };
+}) {
+  const workspaceId = params.workspaceId;
+  if (!workspaceId) return replace("/");
+  return replace(`/ws/${workspaceId}/kanban`);
+}
 
 const devRoutes = import.meta.env.DEV
   ? [
@@ -85,7 +95,7 @@ const devRoutes = import.meta.env.DEV
  * solely for URL matching; the Component renders null.
  */
 const viewRoutes = [
-  { index: true, element: <Navigate to="kanban" replace /> },
+  { index: true, loader: redirectToKanbanLoader },
   {
     path: "kanban",
     lazy: () =>
@@ -163,7 +173,7 @@ const viewRoutes = [
     lazy: () =>
       import("@/views/AgentsPage").then((m) => ({ Component: m.AgentsPage })),
   },
-  { path: "*", element: <Navigate to="kanban" replace /> },
+  { path: "*", loader: redirectToKanbanLoader },
 ];
 
 export const router = createBrowserRouter([

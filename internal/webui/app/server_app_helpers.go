@@ -13,7 +13,10 @@ func initExtAuth(config webui.ServerConfig) (middleware.Middleware, func()) {
 	if config.ExtAuthURL == "" {
 		return nil, nil
 	}
-	jwksURL := config.ExtAuthURL + "/api/auth/jwks"
+	jwksURL := config.ExtAuthJWKSURL
+	if jwksURL == "" {
+		jwksURL = config.ExtAuthURL + "/api/auth/jwks"
+	}
 	var jwksClient *http.Client
 	if config.ExtAuthAllowInsecure {
 		jwksClient = middleware.NewJWKSHTTPClient(webui.SafeDialContext(true))

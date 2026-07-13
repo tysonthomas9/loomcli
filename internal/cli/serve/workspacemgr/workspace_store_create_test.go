@@ -154,6 +154,33 @@ func TestStoreBackedCreateWorkspaceRejectsExternalNonEmptyPath(t *testing.T) {
 	}
 }
 
+func TestStoreBackedCreateWorkspaceRejectsPathInsideSourceRepo(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	src := initTestGitRepo(t, t.TempDir(), "app")
+	wsPath := filepath.Join(src, "nested-workspace")
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+
+	_, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name:  "bad-ws",
+		Type:  "empty",
+		Repos: []string{src},
+		Path:  wsPath,
+	})
+	if err == nil {
+		t.Fatal("create workspace succeeded, want path collision error")
+	}
+	var createErr *workspaceerrors.CreateError
+	if !errors.As(err, &createErr) || createErr.Code != workspaceerrors.SecurityViolation {
+		t.Fatalf("err = %v, want security violation", err)
+	}
+	if _, statErr := os.Stat(wsPath); !os.IsNotExist(statErr) {
+		t.Fatalf("workspace path was created despite collision, stat err=%v", statErr)
+	}
+}
+
 func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
@@ -205,6 +232,37 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	}
 	if local.Repos["api"] != filepath.Join(wsPath, "api") {
 		t.Fatalf("local repo path = %q", local.Repos["api"])
+	}
+}
+
+func TestStoreBackedAddReposRejectsSourceRepoInsideWorkspacePath(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	src := initTestGitRepo(t, wsPath, "source-inside-workspace")
+	addFn := BuildStoreBackedAddRepos(st)
+	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		Repos:       []string{src},
+	})
+	if err == nil {
+		t.Fatal("add repo succeeded, want path collision error")
+	}
+	var createErr *workspaceerrors.CreateError
+	if !errors.As(err, &createErr) || createErr.Code != workspaceerrors.SecurityViolation {
+		t.Fatalf("err = %v, want security violation", err)
 	}
 }
 

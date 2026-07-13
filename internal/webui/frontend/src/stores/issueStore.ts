@@ -627,7 +627,13 @@ export function createIssueStore(
       reconnectRecoveryPending = false;
       maxReconnectAttemptsTracked = 0;
 
-      set({ ...INITIAL_STATE, pendingIds: new Set(), issuesMap: new Map() });
+      const nextResetGeneration = get().resetGeneration + 1;
+      set({
+        ...INITIAL_STATE,
+        pendingIds: new Set(),
+        issuesMap: new Map(),
+        resetGeneration: nextResetGeneration,
+      });
     },
   }));
 

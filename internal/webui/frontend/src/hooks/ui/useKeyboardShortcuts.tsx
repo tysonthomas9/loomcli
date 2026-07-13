@@ -47,6 +47,7 @@ interface Layer {
   id: string;
   priority: number;
   handler: () => void;
+  suppressWhenInputFocused: boolean;
 }
 
 interface KeyboardShortcutContextValue {
@@ -126,7 +127,11 @@ function isTerminalFocused(event: KeyboardEvent): boolean {
 // ---------------------------------------------------------------------------
 
 export interface EscapeRegistryAPI {
-  registerLayer: (priority: number, handler: () => void) => string;
+  registerLayer: (
+    priority: number,
+    handler: () => void,
+    suppressWhenInputFocused?: boolean,
+  ) => string;
   unregisterLayer: (id: string) => void;
   destroy: () => void;
 }
@@ -141,15 +146,21 @@ function createEscapeRegistry(): EscapeRegistryAPI {
   function handleEscapeKeyDown(event: KeyboardEvent) {
     if (event.key !== "Escape") return;
     if (state.layers.length === 0) return;
-    event.preventDefault();
     const top = state.layers[0];
-    if (top) top.handler();
+    if (!top) return;
+    if (top.suppressWhenInputFocused && isInputFocused(event)) return;
+    event.preventDefault();
+    top.handler();
   }
 
   return {
-    registerLayer(priority: number, handler: () => void): string {
+    registerLayer(
+      priority: number,
+      handler: () => void,
+      suppressWhenInputFocused = false,
+    ): string {
       const id = `layer-${++state.idCounter}`;
-      state.layers.push({ id, priority, handler });
+      state.layers.push({ id, priority, handler, suppressWhenInputFocused });
       state.layers.sort((a, b) => b.priority - a.priority);
       if (!state.listenerAttached) {
         document.addEventListener("keydown", handleEscapeKeyDown);
@@ -348,6 +359,7 @@ export function useRegisterEscapeLayer(
   priority: number,
   handler: () => void,
   active: boolean,
+  options?: { suppressWhenInputFocused?: boolean },
 ): void {
   const contextRegistry = useContext(EscapeRegistryContext);
   if (!contextRegistry) {
@@ -356,6 +368,7 @@ export function useRegisterEscapeLayer(
     );
   }
   const registry = contextRegistry;
+  const suppressWhenInputFocused = options?.suppressWhenInputFocused ?? false;
 
   const layerIdRef = useRef<string | null>(null);
   const handlerRef = useRef(handler);
@@ -373,12 +386,16 @@ export function useRegisterEscapeLayer(
     // Register with a stable wrapper that reads the latest handler.
     // Capture the id locally so the cleanup closure always unregisters
     // the correct layer (not a newer one written to the ref).
-    const id = registry.registerLayer(priority, () => handlerRef.current());
+    const id = registry.registerLayer(
+      priority,
+      () => handlerRef.current(),
+      suppressWhenInputFocused,
+    );
     layerIdRef.current = id;
 
     return () => {
       registry.unregisterLayer(id);
       if (layerIdRef.current === id) layerIdRef.current = null;
     };
-  }, [active, priority, registry]);
+  }, [active, priority, registry, suppressWhenInputFocused]);
 }

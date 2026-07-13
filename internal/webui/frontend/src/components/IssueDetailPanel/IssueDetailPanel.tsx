@@ -1625,8 +1625,10 @@ export function IssueDetailPanel({
   }, [issue?.id]);
 
   // Handle Escape key to close panel via global shortcut layer system.
-  // Inline mode skips this — the embedding view owns close semantics.
-  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !inline);
+  // Inline mode skips this; focused inline-edit inputs handle Escape locally.
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !inline, {
+    suppressWhenInputFocused: true,
+  });
 
   // Lock body scroll when open as a slide-out overlay. Inline mode is part
   // of the page flow, so don't lock scroll.

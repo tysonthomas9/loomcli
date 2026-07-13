@@ -100,6 +100,7 @@ describe("issueStore", () => {
       expect(s.disconnectedSince).toBeNull();
       expect(s.pendingIds.size).toBe(0);
       expect(s.mutationCount).toBe(0);
+      expect(s.resetGeneration).toBe(0);
     });
   });
 
@@ -1497,6 +1498,17 @@ describe("issueStore", () => {
       expect(s.connectionLost).toBe(false);
       expect(s.disconnectedSince).toBeNull();
       expect(s.pendingIds.size).toBe(0);
+      expect(s.resetGeneration).toBe(1);
+    });
+
+    it("increments resetGeneration on each reset", () => {
+      expect(store.getState().resetGeneration).toBe(0);
+
+      store.getState().reset();
+      expect(store.getState().resetGeneration).toBe(1);
+
+      store.getState().reset();
+      expect(store.getState().resetGeneration).toBe(2);
     });
 
     it("clears pending optimistic timers", () => {

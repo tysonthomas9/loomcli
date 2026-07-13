@@ -8,7 +8,13 @@
  * conflict banner, and commit expand button.
  */
 
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  act,
+  waitFor,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -565,6 +571,103 @@ describe("GitTab", () => {
       );
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    it("does not link diff commits that are known unpushed", async () => {
+      mockGitStatusReturn = {
+        status: {
+          branch: "feature-x",
+          target_branch: "main",
+          is_clean: true,
+          ahead: 1,
+          behind: 0,
+          changed_files: [],
+          conflicted_files: [],
+          has_conflicts: false,
+          stash_count: 0,
+        },
+        loading: false,
+        error: null,
+      };
+      mockDiffCommitsResult = Promise.resolve([
+        {
+          hash: "abc123456789",
+          short_hash: "abc1234",
+          subject: "Unpushed work",
+          author: "Alice",
+          email: "alice@example.com",
+          date: "2026-01-01T00:00:00Z",
+          pushed: false,
+        },
+      ]);
+
+      await renderGitTab(
+        makeAgent({
+          commits: [
+            {
+              hash: "seed",
+              message: "seed",
+              url: "https://github.com/repo/project/commit/seed",
+            },
+          ],
+        }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Unpushed work")).toBeInTheDocument();
+      });
+      const hash = screen.getByText("abc1234");
+      expect(hash.closest("a")).toBeNull();
+      expect(hash).toHaveAttribute("title", "Not yet pushed to remote");
+    });
+
+    it("links diff commits that are marked pushed", async () => {
+      mockGitStatusReturn = {
+        status: {
+          branch: "feature-x",
+          target_branch: "main",
+          is_clean: true,
+          ahead: 1,
+          behind: 0,
+          changed_files: [],
+          conflicted_files: [],
+          has_conflicts: false,
+          stash_count: 0,
+        },
+        loading: false,
+        error: null,
+      };
+      mockDiffCommitsResult = Promise.resolve([
+        {
+          hash: "def123456789",
+          short_hash: "def1234",
+          subject: "Pushed work",
+          author: "Alice",
+          email: "alice@example.com",
+          date: "2026-01-01T00:00:00Z",
+          pushed: true,
+        },
+      ]);
+
+      await renderGitTab(
+        makeAgent({
+          commits: [
+            {
+              hash: "seed",
+              message: "seed",
+              url: "https://github.com/repo/project/commit/seed",
+            },
+          ],
+        }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Pushed work")).toBeInTheDocument();
+      });
+      expect(screen.getByText("def1234").closest("a")).toHaveAttribute(
+        "href",
+        "https://github.com/repo/project/commit/def123456789",
+      );
     });
   });
 

@@ -95,6 +95,24 @@ describe("AuthGate", () => {
       );
       expect(screen.getByText("app content")).toBeInTheDocument();
     });
+
+    it("renders LoginPage when authServiceDown=true", () => {
+      mockUseAuth.mockReturnValue(
+        createDefaultAuth({
+          mode: "oidc",
+          isLoading: false,
+          isAuthenticated: false,
+          authServiceDown: true,
+        }),
+      );
+      render(
+        <AuthGate>
+          <div>app content</div>
+        </AuthGate>,
+      );
+      expect(screen.getByTestId("login-page")).toBeInTheDocument();
+      expect(screen.queryByText("app content")).not.toBeInTheDocument();
+    });
   });
 
   // ========== OAuth error handling ==========
