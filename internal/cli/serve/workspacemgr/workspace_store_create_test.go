@@ -75,6 +75,9 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	if roleByName["task"].TaskFilter != "has_design" {
 		t.Fatalf("task task filter = %q, want has_design", roleByName["task"].TaskFilter)
 	}
+	if roleByName["lead"].Kind != domain.RoleKindInteractive {
+		t.Fatalf("lead kind = %q, want interactive", roleByName["lead"].Kind)
+	}
 
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {

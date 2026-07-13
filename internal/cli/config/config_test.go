@@ -20,14 +20,20 @@ func TestGetConfigDir(t *testing.T) {
 		t.Errorf("GetConfigDir() = %q, want %q", got, tmpDir)
 	}
 
-	t.Setenv("LOOM_CONFIG_DIR", "")
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("cannot determine home dir")
+	// With LOOM_CONFIG_DIR unset, bootstrap.LoomDir's testing guard must
+	// redirect away from the real ~/.loom.
+	t.Setenv("LOOM_CONFIG_DIR", "placeholder")
+	if err := os.Unsetenv("LOOM_CONFIG_DIR"); err != nil {
+		t.Fatalf("unset LOOM_CONFIG_DIR: %v", err)
 	}
-	want := filepath.Join(home, ".loom")
-	if got := GetConfigDir(); got != want {
-		t.Errorf("GetConfigDir() = %q, want %q", got, want)
+	got := GetConfigDir()
+	if got == "" {
+		t.Error("GetConfigDir() = \"\", want non-empty test temp dir")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if got == filepath.Join(home, ".loom") {
+			t.Errorf("GetConfigDir() = %q, must not be the real ~/.loom under go test", got)
+		}
 	}
 }
 
@@ -84,17 +90,42 @@ func TestAgentEntryShouldSuperviseSkipsLeadRoles(t *testing.T) {
 	tests := []struct {
 		name  string
 		entry AgentEntry
+		roles map[string]RoleConfig
 		want  bool
 	}{
 		{name: "task default runs", entry: AgentEntry{Worktree: "worker", Role: "task"}, want: true},
-		{name: "lead terminal is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "lead"}, want: false},
-		{name: "orchestrator terminal is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "orchestrator"}, want: false},
+		{name: "lead interactive is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "lead"}, want: false},
+		{name: "orchestrator interactive is not daemon supervised", entry: AgentEntry{Worktree: "lead", Role: "orchestrator"}, want: false},
+		{
+			name:  "custom interactive kind is not daemon supervised",
+			entry: AgentEntry{Worktree: "operator", Role: "operator"},
+			roles: map[string]RoleConfig{
+				"operator": {Kind: string(domain.RoleKindInteractive)},
+			},
+			want: false,
+		},
+		{
+			name:  "interactive kind ignores running desired state",
+			entry: AgentEntry{Worktree: "operator", Role: "operator", DesiredState: domain.AgentDesiredRunning},
+			roles: map[string]RoleConfig{
+				"operator": {Kind: string(domain.RoleKindInteractive)},
+			},
+			want: false,
+		},
+		{
+			name:  "worker kind uses desired state",
+			entry: AgentEntry{Worktree: "operator", Role: "operator", DesiredState: domain.AgentDesiredRunning},
+			roles: map[string]RoleConfig{
+				"operator": {Kind: string(domain.RoleKindWorker)},
+			},
+			want: true,
+		},
 		{name: "stopped worker does not run", entry: AgentEntry{Worktree: "worker", Role: "task", DesiredState: domain.AgentDesiredStopped}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.entry.ShouldSupervise(); got != tt.want {
-				t.Fatalf("ShouldSupervise() = %v, want %v", got, tt.want)
+			if got := tt.entry.ShouldSuperviseWithRoles(tt.roles); got != tt.want {
+				t.Fatalf("ShouldSuperviseWithRoles() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -119,14 +150,13 @@ func TestLoadConfigFromStoreProjectsFleetDBWithLocalState(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {
-				Path:  "/tmp/ws1",
-				Repos: map[string]string{"api": "/tmp/ws1/api"},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path:  "/tmp/ws1",
+			Repos: map[string]string{"api": "/tmp/ws1/api"},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}

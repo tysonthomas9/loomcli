@@ -183,10 +183,15 @@
 }
 
 .input,
-.select {
+.select,
+.textarea {
+  /* Explicit height so <input> and native <select> line up in the config row —
+     a native select renders ~4px taller than an input at the same padding. */
+  height: 36px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 0 10px;
   font-size: 13px;
+  line-height: normal;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-panel-bg);
@@ -196,12 +201,22 @@
   transition: border-color var(--transition-fast);
 }
 
+.textarea {
+  min-height: 108px;
+  height: auto;
+  padding: 9px 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
 .input:focus,
-.select:focus {
+.select:focus,
+.textarea:focus {
   border-color: var(--color-primary);
 }
 
-.input::placeholder {
+.input::placeholder,
+.textarea::placeholder {
   color: var(--color-text-muted);
   opacity: 0.65;
 }

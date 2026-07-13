@@ -95,31 +95,23 @@ func ResolveActiveWorkspaceKey(ctx context.Context, ws store.WorkspaceStore) (st
 // `loom workspace use <name>`.
 //
 // Caller is responsible for ensuring the key exists in fleet-db before
-// calling this — SetActiveWorkspaceKey does NOT validate. This keeps
-// the function usable inside a single WithStateLock block alongside
-// other cache mutations.
+// calling this — SetActiveWorkspaceKey does NOT validate. It acquires
+// the state lock itself (via MutateStateCache), so it must NOT be
+// called from inside a WithStateLock block.
 func SetActiveWorkspaceKey(key string) error {
 	if key == "" {
 		return errors.New("set active workspace: key must not be empty")
 	}
-	return WithStateLock(func() error {
-		sc, err := LoadStateCache()
-		if err != nil {
-			return err
-		}
+	return MutateStateCache(func(sc *StateCache) error {
 		sc.LastWorkspace = key
-		return SaveStateCache(sc)
+		return nil
 	})
 }
 
 // ClearActiveWorkspaceKey removes the per-user selected-workspace hint.
 func ClearActiveWorkspaceKey() error {
-	return WithStateLock(func() error {
-		sc, err := LoadStateCache()
-		if err != nil {
-			return err
-		}
+	return MutateStateCache(func(sc *StateCache) error {
 		sc.LastWorkspace = ""
-		return SaveStateCache(sc)
+		return nil
 	})
 }

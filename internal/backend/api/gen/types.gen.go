@@ -515,6 +515,24 @@ func (e MessageResponseSuccess) Valid() bool {
 	}
 }
 
+// Defines values for MonitorAgentStatusRoleKind.
+const (
+	Interactive MonitorAgentStatusRoleKind = "interactive"
+	Worker      MonitorAgentStatusRoleKind = "worker"
+)
+
+// Valid indicates whether the value is a known member of the MonitorAgentStatusRoleKind enum.
+func (e MonitorAgentStatusRoleKind) Valid() bool {
+	switch e {
+	case Interactive:
+		return true
+	case Worker:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MonitorWorkspaceInfoMode.
 const (
 	MonitorWorkspaceInfoModeWorkspace MonitorWorkspaceInfoMode = "workspace"
@@ -2034,9 +2052,10 @@ type MonitorAgentStatus struct {
 	OrchestratorSessionId *string `json:"orchestrator_session_id,omitempty"`
 
 	// Parent Active epic assignment for lead/workers.
-	Parent *string `json:"parent,omitempty"`
-	Repo   *string `json:"repo,omitempty"`
-	Role   *string `json:"role,omitempty"`
+	Parent   *string                     `json:"parent,omitempty"`
+	Repo     *string                     `json:"repo,omitempty"`
+	Role     *string                     `json:"role,omitempty"`
+	RoleKind *MonitorAgentStatusRoleKind `json:"role_kind,omitempty"`
 
 	// SessionId Latest control-plane session associated with this agent.
 	SessionId *string `json:"session_id,omitempty"`
@@ -2046,6 +2065,9 @@ type MonitorAgentStatus struct {
 	TaskId    *string `json:"task_id,omitempty"`
 	Workspace string  `json:"workspace"`
 }
+
+// MonitorAgentStatusRoleKind defines model for MonitorAgentStatus.RoleKind.
+type MonitorAgentStatusRoleKind string
 
 // MonitorAgentsResponse defines model for MonitorAgentsResponse.
 type MonitorAgentsResponse struct {
@@ -2733,6 +2755,30 @@ type ReorderWorkspacesJSONBody struct {
 	Order []string `json:"order"`
 }
 
+// CreateAgentJSONBody defines parameters for CreateAgent.
+type CreateAgentJSONBody struct {
+	Auto             *bool     `json:"auto,omitempty"`
+	Backend          *string   `json:"backend,omitempty"`
+	CrossRepo        *bool     `json:"cross_repo,omitempty"`
+	DesiredState     *string   `json:"desired_state,omitempty"`
+	FallbackBackends *[]string `json:"fallback_backends,omitempty"`
+
+	// Kind Optional role kind for creating an interactive role.
+	Kind   *string `json:"kind,omitempty"`
+	Name   string  `json:"name"`
+	Parent *string `json:"parent,omitempty"`
+
+	// Prompt Literal inline prompt text for interactive roles.
+	Prompt *string `json:"prompt,omitempty"`
+
+	// PromptFile Custom or builtin prompt selector for interactive roles.
+	PromptFile   *string   `json:"prompt_file,omitempty"`
+	RepoGroups   *[]string `json:"repo_groups,omitempty"`
+	Repos        *[]string `json:"repos,omitempty"`
+	RoleName     string    `json:"role_name"`
+	WorkspaceKey *string   `json:"workspace_key,omitempty"`
+}
+
 // GetDiffFileParams defines parameters for GetDiffFile.
 type GetDiffFileParams struct {
 	Path string `form:"path" json:"path"`
@@ -3143,6 +3189,9 @@ type SetDefaultWorkspaceJSONRequestBody SetDefaultWorkspaceJSONBody
 
 // ReorderWorkspacesJSONRequestBody defines body for ReorderWorkspaces for application/json ContentType.
 type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
+
+// CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
+type CreateAgentJSONRequestBody CreateAgentJSONBody
 
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody

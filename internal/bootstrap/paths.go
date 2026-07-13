@@ -7,20 +7,41 @@ package bootstrap
 import (
 	"os"
 	"path/filepath"
+	"sync"
+	"testing"
 )
+
+// testLoomDir lazily creates a per-process temp config dir used when
+// running under `go test` without LOOM_CONFIG_DIR. One dir per process
+// keeps state coherent across Save/Load calls within a test binary.
+var testLoomDir = sync.OnceValue(func() string {
+	dir, err := os.MkdirTemp("", "loom-test-config-*")
+	if err != nil {
+		return ""
+	}
+	return dir
+})
 
 // LoomDir returns loom's per-user data directory.
 //
 // Resolution order:
 //  1. LOOM_CONFIG_DIR env var (the directory holds state.json + the
 //     embedded fleet-db data dir, not yaml config).
-//  2. $HOME/.loom
+//  2. Under `go test` (testing.Testing()): a per-process temp dir —
+//     tests must NEVER touch the real ~/.loom. Note this guard does not
+//     extend to subprocesses a test spawns; tests that exec the loom
+//     binary must pass LOOM_CONFIG_DIR explicitly.
+//  3. $HOME/.loom
 //
 // Returns "" if the home directory cannot be resolved AND the env var
-// is unset; callers should treat that as a fatal bootstrap error.
+// is unset (or temp-dir creation fails under test); callers should
+// treat that as a fatal bootstrap error.
 func LoomDir() string {
 	if dir := os.Getenv("LOOM_CONFIG_DIR"); dir != "" {
 		return dir
+	}
+	if testing.Testing() {
+		return testLoomDir()
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

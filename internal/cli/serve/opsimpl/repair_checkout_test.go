@@ -90,18 +90,16 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version:       1,
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {
-				Path: wsRoot,
-				Repos: map[string]string{
-					"api":  repoPath,
-					"docs": filepath.Join(wsRoot, "docs"),
-				},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path: wsRoot,
+			Repos: map[string]string{
+				"api":  repoPath,
+				"docs": filepath.Join(wsRoot, "docs"),
 			},
-		},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}

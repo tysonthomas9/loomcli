@@ -207,15 +207,13 @@ func TestResolveAgentWorktree_StoreBackedFleetDB(t *testing.T) {
 	if err := runGit(t, wtPath, "init", "-b", "feature/nova"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version:       1,
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {
-				Path:  wsRoot,
-				Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path:  wsRoot,
+			Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
@@ -277,18 +275,16 @@ func TestResolveAgentWorktreeForRepo_StoreBackedFleetDB(t *testing.T) {
 	if err := runGit(t, anyDocsPath, "init", "-b", "feature/any-docs"); err != nil {
 		t.Fatalf("git init any docs: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version:       1,
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {
-				Path: wsRoot,
-				Repos: map[string]string{
-					"api":  filepath.Join(wsRoot, "api"),
-					"docs": filepath.Join(wsRoot, "docs"),
-				},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path: wsRoot,
+			Repos: map[string]string{
+				"api":  filepath.Join(wsRoot, "api"),
+				"docs": filepath.Join(wsRoot, "docs"),
 			},
-		},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
@@ -360,15 +356,13 @@ func TestResolveAgentWorktree_BrokenGitMetadataReturnsUnknownBranch(t *testing.T
 	if err := os.WriteFile(filepath.Join(wtPath, ".git"), []byte("gitdir: "+missingAdminDir+"\n"), 0644); err != nil {
 		t.Fatalf("write broken git pointer: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version:       1,
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {
-				Path:  wsRoot,
-				Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path:  wsRoot,
+			Repos: map[string]string{"api": filepath.Join(wsRoot, "api")},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}

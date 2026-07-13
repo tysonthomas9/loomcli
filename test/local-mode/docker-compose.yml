@@ -79,8 +79,8 @@ services:
       # File-browser routes fail closed unless the loopback frontend origin
       # is explicitly allowed; Caddy preserves the browser's Host header.
       LOOM_FRONTEND_URL: "http://localhost:${LOCAL_MODE_UI_PORT:-8283},http://127.0.0.1:${LOCAL_MODE_UI_PORT:-8283}"
-      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-1
-      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-2
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
+      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
       LOOM_LOCAL_MODE_STEP_DELAY: "2"
     networks: [local-mode]
     ports:
