@@ -72,6 +72,7 @@ function renderPanel(
     sections: FileTreeSection[];
     branchChangeCount: number;
     workingChangeCount: number;
+    branchBaseName: string;
     onCompareModeChange: (compareMode: CompareMode) => void;
     onOpenDiff: (request: HistoryOpenDiffRequest) => void;
   }> = {},
@@ -83,6 +84,7 @@ function renderPanel(
       compareMode={overrides.compareMode ?? "branch"}
       branchChangeCount={overrides.branchChangeCount ?? 2}
       workingChangeCount={overrides.workingChangeCount ?? 3}
+      branchBaseName={overrides.branchBaseName}
       checkoutError={null}
       repairError={null}
       sections={overrides.sections ?? []}
@@ -182,6 +184,25 @@ describe("FileExplorerTreePanel", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Working tree · 3" }));
 
     expect(onCompareModeChange).toHaveBeenCalledWith("working");
+  });
+
+  it("shows the branch base name when it is known", () => {
+    renderPanel({ compareMode: "branch", branchBaseName: "main" });
+
+    expect(screen.getByText("vs main")).toBeInTheDocument();
+  });
+
+  it("omits the branch hint when the base name is unknown", () => {
+    renderPanel({ compareMode: "branch" });
+
+    expect(screen.queryByText(/^vs /)).not.toBeInTheDocument();
+  });
+
+  it("keeps the working-tree hint", () => {
+    renderPanel({ compareMode: "working", branchBaseName: "main" });
+
+    expect(screen.getByText("uncommitted only")).toBeInTheDocument();
+    expect(screen.queryByText("vs main")).not.toBeInTheDocument();
   });
 
   it("opens branch diffs with source branch and no from revision", () => {

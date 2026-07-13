@@ -105,11 +105,13 @@ function CompareToggle({
   compareMode,
   branchChangeCount,
   workingChangeCount,
+  branchBaseName,
   onChange,
 }: {
   compareMode: CompareMode;
   branchChangeCount: number;
   workingChangeCount: number;
+  branchBaseName?: string | undefined;
   onChange: (compareMode: CompareMode) => void;
 }) {
   const tabs: Array<{ id: CompareMode; label: string; count: number }> = [
@@ -155,9 +157,13 @@ function CompareToggle({
           );
         })}
       </div>
-      <span className={styles.compareHint}>
-        {compareMode === "branch" ? "vs base" : "uncommitted only"}
-      </span>
+      {compareMode === "branch" ? (
+        branchBaseName ? (
+          <span className={styles.compareHint}>vs {branchBaseName}</span>
+        ) : null
+      ) : (
+        <span className={styles.compareHint}>uncommitted only</span>
+      )}
     </div>
   );
 }
@@ -651,6 +657,7 @@ export function FileExplorerTreePanel({
   compareMode,
   branchChangeCount,
   workingChangeCount,
+  branchBaseName,
   checkoutError,
   repairError,
   sections,
@@ -685,6 +692,7 @@ export function FileExplorerTreePanel({
   compareMode: CompareMode;
   branchChangeCount: number;
   workingChangeCount: number;
+  branchBaseName?: string | undefined;
   checkoutError: string | null;
   repairError: string | null;
   sections: FileTreeSection[];
@@ -900,6 +908,7 @@ export function FileExplorerTreePanel({
             compareMode={compareMode}
             branchChangeCount={branchChangeCount}
             workingChangeCount={workingChangeCount}
+            branchBaseName={branchBaseName}
             onChange={onCompareModeChange}
           />
         )}

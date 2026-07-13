@@ -270,6 +270,20 @@ function FileBrowserInner({
         : checkouts,
     [mode, agentName, checkouts],
   );
+  const branchBaseName = useMemo(() => {
+    const defaultBranches = new Set<string>();
+    const repoByName = new Map(repos.map((repo) => [repo.name, repo]));
+    for (const checkout of visibleCheckouts) {
+      if (checkout.kind !== "agent" || !checkout.repo) continue;
+      const defaultBranch = repoByName
+        .get(checkout.repo)
+        ?.default_branch.trim();
+      if (defaultBranch) defaultBranches.add(defaultBranch);
+    }
+    return defaultBranches.size === 1
+      ? defaultBranches.values().next().value
+      : undefined;
+  }, [repos, visibleCheckouts]);
   const sections = useMemo(
     () =>
       buildFileTreeSections({
@@ -1501,6 +1515,7 @@ function FileBrowserInner({
             compareMode={compareMode}
             branchChangeCount={branchChangeCount}
             workingChangeCount={checkoutChangeCount}
+            branchBaseName={branchBaseName}
             checkoutError={checkoutError}
             repairError={repairError}
             sections={sections}

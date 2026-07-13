@@ -1537,6 +1537,7 @@ describe("WorkspaceFileBrowser", () => {
     fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+0/ }));
 
     expect(await screen.findByText("atlas · loomcli · 1")).toBeInTheDocument();
+    expect(screen.getByText("vs main")).toBeInTheDocument();
     expect(mocks.fetchDiffFiles).toHaveBeenCalledWith("ws-1", "atlas", "HEAD");
     fireEvent.click(
       await screen.findByRole("button", {
