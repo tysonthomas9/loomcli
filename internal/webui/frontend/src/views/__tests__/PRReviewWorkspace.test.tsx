@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   startAgent: vi.fn(),
   getPullRequestDetail: vi.fn(),
   postPullRequestReview: vi.fn(),
+  diffRefreshKeys: [] as Array<number | undefined>,
   data: {
     agents: [] as unknown[],
     issues: [] as unknown[],
@@ -75,11 +76,28 @@ vi.mock("@/components/CreateAgentModal/CreateAgentModal", () => ({
 }));
 
 vi.mock("@/components/PRDiscussionPanel", () => ({
-  PRDiscussionPanel: () => <div data-testid="pr-discussion-panel" />,
+  PRDiscussionPanel: ({
+    onStaleSubject,
+  }: {
+    onStaleSubject?: () => void | Promise<void>;
+  }) => (
+    <div data-testid="pr-discussion-panel">
+      <button
+        type="button"
+        data-testid="pr-discussion-stale-subject"
+        onClick={() => void onStaleSubject?.()}
+      >
+        Stale subject
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/IssueDetailPanel", () => ({
-  PRCompareDiffPane: () => <div data-testid="pr-compare-diff-pane" />,
+  PRCompareDiffPane: ({ refreshKey }: { refreshKey?: number }) => {
+    mocks.diffRefreshKeys.push(refreshKey);
+    return <div data-testid="pr-compare-diff-pane" />;
+  },
   PRFilesTab: () => <div data-testid="pr-files-tab" />,
 }));
 
@@ -169,6 +187,7 @@ describe("PRReviewWorkspace decisions", () => {
     vi.clearAllMocks();
     mocks.data.agents = [];
     mocks.data.issues = [];
+    mocks.diffRefreshKeys.length = 0;
     mocks.workspaceContext.workspaceId = "WS";
     mocks.getPullRequestDetail.mockResolvedValue({
       number: 7,
@@ -209,6 +228,28 @@ describe("PRReviewWorkspace decisions", () => {
     fireEvent.click(screen.getByTestId("pr-discuss-button"));
 
     expect(screen.queryByTestId("pr-discussion-panel")).not.toBeInTheDocument();
+  });
+
+  it("shows the stale banner and refreshes the PR after reviewer ensure reports stale", async () => {
+    renderWorkspace();
+
+    await waitFor(() => {
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledTimes(1);
+    });
+    fireEvent.click(screen.getByTestId("pr-discuss-button"));
+    fireEvent.click(screen.getByTestId("pr-discussion-stale-subject"));
+
+    expect(
+      await screen.findByTestId("pr-review-stale-banner"),
+    ).toHaveTextContent("This PR was updated after you opened it.");
+    await waitFor(() => {
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledTimes(2);
+      expect(mocks.diffRefreshKeys).toContain(1);
+    });
+    expect(mocks.actions.showToast).toHaveBeenCalledWith(
+      "The PR changed since you loaded it — refreshed. Review again.",
+      { type: "warning" },
+    );
   });
 
   it("approves on GitHub before closing the ticket", async () => {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1062,6 +1063,56 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	}
 	if got := strings.TrimSpace(gitOutput(t, worktreePath, "config", "loom.reviewBase")); got != base {
 		t.Fatalf("loom.reviewBase after second ensure = %q, want %q", got, base)
+	}
+}
+
+func TestEnsureReviewerRejectsSubstitutedHead(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	workspacePath := t.TempDir()
+	repoPath := filepath.Join(workspacePath, "hello")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo path: %v", err)
+	}
+	h.rememberLocalPaths(t, workspacePath, "hello", repoPath)
+	h.github.setHead("ABC123")
+
+	checkoutCalled := false
+	h.module.checkoutReviewerPRHead = func(_, _ string, _ string, _ int, headSHA string) (string, error) {
+		checkoutCalled = true
+		if headSHA != "ABC123" {
+			t.Fatalf("checkout head sha = %q, want ABC123", headSHA)
+		}
+		return " def456 ", nil
+	}
+
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode response: %v (body %s)", err, raw)
+	}
+	if decoded.Code != "stale_subject" || !decoded.Retryable {
+		t.Fatalf("response = %+v, want stale_subject retryable=true", decoded)
+	}
+	if !checkoutCalled {
+		t.Fatal("checkout seam was not called")
+	}
+
+	agentName := reviewerAgentName("octocat", "hello", 7)
+	if _, err := h.store.Agents().Get(context.Background(), prReviewTestWorkspace, agentName); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("reviewer agent lookup error = %v, want ErrNotFound", err)
+	}
+	cache, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("LoadStateCache: %v", err)
+	}
+	if _, remembered := cache.Workspaces[prReviewTestWorkspace].Agents[agentName]; remembered {
+		t.Fatalf("reviewer worktree was remembered for stale agent %q", agentName)
 	}
 }
 

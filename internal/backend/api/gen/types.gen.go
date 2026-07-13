@@ -1230,10 +1230,11 @@ type EditorOpenRequest struct {
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
-	Code    *string                 `json:"code,omitempty"`
-	Details *map[string]interface{} `json:"details,omitempty"`
-	Error   string                  `json:"error"`
-	Success ErrorResponseSuccess    `json:"success"`
+	Code      *string                 `json:"code,omitempty"`
+	Details   *map[string]interface{} `json:"details,omitempty"`
+	Error     string                  `json:"error"`
+	Retryable *bool                   `json:"retryable,omitempty"`
+	Success   ErrorResponseSuccess    `json:"success"`
 }
 
 // ErrorResponseSuccess defines model for ErrorResponse.Success.

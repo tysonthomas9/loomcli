@@ -11,7 +11,7 @@
  *   - New review agent: real createWorkspaceAgent → assign → startAgent
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { createIssue, updateIssue } from "@/api";
@@ -151,6 +151,7 @@ export function PRReviewWorkspace({
   const [headSha, setHeadSha] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
   const [stale, setStale] = useState(false);
+  const [diffRefreshKey, setDiffRefreshKey] = useState(0);
   const [creatingTicket, setCreatingTicket] = useState(false);
   const [discussOpen, setDiscussOpen] = useState(false);
 
@@ -237,25 +238,40 @@ export function PRReviewWorkspace({
   // compares against), commit it to state, and return it — so a decision can
   // fetch on demand when the mount-time effect hasn't resolved yet. Returns
   // null when the PR head can't be determined.
-  const loadHeadSha = async (
-    owner: string,
-    repo: string,
-    number: number,
-  ): Promise<string | null> => {
-    try {
-      const detail = await getPullRequestDetail(
-        workspaceId,
-        owner,
-        repo,
-        number,
-      );
-      setHeadSha(detail.head_sha);
-      return detail.head_sha;
-    } catch {
-      setHeadSha(null);
-      return null;
+  const loadHeadSha = useCallback(
+    async (
+      owner: string,
+      repo: string,
+      number: number,
+    ): Promise<string | null> => {
+      try {
+        const detail = await getPullRequestDetail(
+          workspaceId,
+          owner,
+          repo,
+          number,
+        );
+        setHeadSha(detail.head_sha);
+        return detail.head_sha;
+      } catch {
+        setHeadSha(null);
+        return null;
+      }
+    },
+    [workspaceId],
+  );
+
+  const handleStaleSubject = useCallback(async (): Promise<void> => {
+    setStale(true);
+    setDiffRefreshKey((key) => key + 1);
+    const number = prNumber ? Number(prNumber) : NaN;
+    if (pullRequestRepo && Number.isFinite(number)) {
+      await loadHeadSha(pullRequestRepo.owner, pullRequestRepo.repo, number);
     }
-  };
+    showToast("The PR changed since you loaded it — refreshed. Review again.", {
+      type: "warning",
+    });
+  }, [loadHeadSha, prNumber, pullRequestRepo, showToast]);
 
   const assignReviewer = async (agentName: string): Promise<void> => {
     if (!issue) return;
@@ -384,14 +400,7 @@ export function PRReviewWorkspace({
         err instanceof ApiError &&
         (err.status === 409 || err.status === 428)
       ) {
-        setStale(true);
-        await loadHeadSha(pullRequestRepo.owner, pullRequestRepo.repo, number);
-        showToast(
-          "The PR changed since you loaded it — refreshed. Review again.",
-          {
-            type: "warning",
-          },
-        );
+        await handleStaleSubject();
       } else {
         showToast(
           err instanceof Error ? err.message : "Failed to record decision",
@@ -660,6 +669,7 @@ export function PRReviewWorkspace({
         <div className={styles.diffPane}>
           {diffAgent && issue ? (
             <PRFilesTab
+              key={diffRefreshKey}
               agent={diffAgent}
               isActive
               emptyFallback={
@@ -675,6 +685,7 @@ export function PRReviewWorkspace({
               owner={pullRequestRepo.owner}
               repo={pullRequestRepo.repo}
               number={pullRequest.number}
+              refreshKey={diffRefreshKey}
             />
           ) : issue ? (
             <TaskSessionDiffPane taskId={issue.id} />
@@ -691,6 +702,7 @@ export function PRReviewWorkspace({
             repo={pullRequestRepo.repo}
             number={Number(prNumber)}
             onClose={() => setDiscussOpen(false)}
+            onStaleSubject={handleStaleSubject}
           />
         )}
       </div>

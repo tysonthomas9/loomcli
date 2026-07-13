@@ -6,6 +6,7 @@ import {
   sendReviewerMessage,
   type ReviewerMessage,
 } from "@/api/workspace/prReview";
+import { ApiError } from "@/types/common/errors";
 
 const POLL_INTERVAL = 1_500;
 
@@ -15,6 +16,7 @@ export interface UsePRReviewConversationParams {
   repo: string;
   number: number;
   enabled: boolean;
+  onStaleSubject?: () => void | Promise<void>;
 }
 
 export interface UsePRReviewConversationResult {
@@ -35,12 +37,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isStaleSubjectError(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 409) return false;
+  if (!error.body || typeof error.body !== "object") return false;
+  return (error.body as { code?: unknown }).code === "stale_subject";
+}
+
 export function usePRReviewConversation({
   workspaceId,
   owner,
   repo,
   number,
   enabled,
+  onStaleSubject,
 }: UsePRReviewConversationParams): UsePRReviewConversationResult {
   const [agentName, setAgentName] = useState<string | null>(null);
   const [messages, setMessages] = useState<ReviewerMessage[]>([]);
@@ -141,6 +150,9 @@ export function usePRReviewConversation({
       } catch (err) {
         if (!ignore && mountedRef.current) {
           ensureKeyRef.current = null;
+          if (isStaleSubjectError(err)) {
+            void onStaleSubject?.();
+          }
           setError(errorMessage(err));
         }
       }
@@ -151,7 +163,16 @@ export function usePRReviewConversation({
     };
     // retryNonce lets retry() re-run ensure after a failure (the catch above
     // clears ensureKeyRef, so this effect proceeds instead of short-circuiting).
-  }, [enabled, key, number, owner, repo, workspaceId, retryNonce]);
+  }, [
+    enabled,
+    key,
+    number,
+    onStaleSubject,
+    owner,
+    repo,
+    retryNonce,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     if (!enabled || !agentName) return;

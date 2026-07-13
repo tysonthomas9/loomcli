@@ -145,6 +145,7 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		ws: ws, agentName: agentName, params: params,
 		repoPath: repoPath, remote: remote, repoName: repoName, wsPath: wsPath,
 		headSHA: headSHA, title: title, baseRef: baseRef,
+		checkoutPRHead: m.checkoutReviewerPRHead,
 	})
 	if !ok {
 		return
@@ -194,17 +195,20 @@ func (m *Module) fetchPullRequestHead(w http.ResponseWriter, r *http.Request, ws
 	return headSHA, stringValue(res.Body["title"]), stringValue(res.Body["baseRef"]), true
 }
 
+type reviewerCheckoutFunc func(repoPath, targetPath, remoteName string, prNumber int, headSHA string) (string, error)
+
 type reviewerCheckoutSpec struct {
-	ws        string
-	agentName string
-	params    pullRequestPath
-	repoPath  string
-	remote    string
-	repoName  string
-	wsPath    string
-	headSHA   string
-	title     string
-	baseRef   string
+	ws             string
+	agentName      string
+	params         pullRequestPath
+	repoPath       string
+	remote         string
+	repoName       string
+	wsPath         string
+	headSHA        string
+	title          string
+	baseRef        string
+	checkoutPRHead reviewerCheckoutFunc
 }
 
 // prepareReviewerCheckout stands up the reviewer's PR-head worktree, records
@@ -224,9 +228,18 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 	if err != nil {
 		return fail("worktree path failed", err, "failed to resolve the PR review worktree path")
 	}
-	checkedOutSHA, err := localworkspace.EnsureDetachedGitWorktreeAtPRHead(spec.repoPath, target, spec.remote, spec.params.number, spec.headSHA)
+	checkoutPRHead := spec.checkoutPRHead
+	if checkoutPRHead == nil {
+		checkoutPRHead = localworkspace.EnsureDetachedGitWorktreeAtPRHead
+	}
+	checkedOutSHA, err := checkoutPRHead(spec.repoPath, target, spec.remote, spec.params.number, spec.headSHA)
 	if err != nil {
 		return fail("prepare worktree failed", err, "failed to prepare the PR review worktree")
+	}
+	if !strings.EqualFold(strings.TrimSpace(checkedOutSHA), strings.TrimSpace(spec.headSHA)) {
+		writePRReviewErrorCode(w, http.StatusConflict, "stale_subject",
+			"pull request head changed while preparing the reviewer; refresh and retry", true)
+		return "", false
 	}
 	// The remembered worktree IS the reviewer's launch cwd — if we can't persist
 	// it the agent would boot in the wrong directory, so this is a hard failure.

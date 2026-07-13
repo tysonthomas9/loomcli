@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -25,6 +26,7 @@ type Module struct {
 	dispatcher              *connector.Dispatcher
 	agentSvc                service.AgentService
 	terminalSvc             service.TerminalService
+	checkoutReviewerPRHead  reviewerCheckoutFunc
 	dialCodex               func(ctx context.Context, endpoint string) (codexThreadReader, error)
 	streamPollInterval      time.Duration
 	streamHeartbeatInterval time.Duration
@@ -48,6 +50,7 @@ func NewModule(st store.Store, disp *connector.Dispatcher, agentSvc service.Agen
 		dispatcher:              disp,
 		agentSvc:                agentSvc,
 		terminalSvc:             terminalSvc,
+		checkoutReviewerPRHead:  localworkspace.EnsureDetachedGitWorktreeAtPRHead,
 		streamPollInterval:      reviewerStreamPollInterval,
 		streamHeartbeatInterval: reviewerStreamHeartbeatInterval,
 		dialCodex: func(ctx context.Context, endpoint string) (codexThreadReader, error) {

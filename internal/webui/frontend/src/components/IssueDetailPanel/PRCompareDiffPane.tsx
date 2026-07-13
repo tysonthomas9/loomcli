@@ -12,6 +12,7 @@ export interface PRCompareDiffPaneProps {
   owner: string;
   repo: string;
   number: number;
+  refreshKey?: number;
 }
 
 type PullRequestDiffFile = PullRequestDiff["files"][number];
@@ -56,6 +57,7 @@ export function PRCompareDiffPane({
   owner,
   repo,
   number: pullNumber,
+  refreshKey,
 }: PRCompareDiffPaneProps): JSX.Element {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const { diff, isLoading, error } = usePullRequestDiff({
@@ -63,6 +65,7 @@ export function PRCompareDiffPane({
     owner,
     repo,
     number: pullNumber,
+    ...(refreshKey !== undefined ? { refreshKey } : {}),
   });
   const files = diff?.files ?? EMPTY_FILES;
 
