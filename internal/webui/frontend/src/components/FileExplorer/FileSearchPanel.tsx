@@ -17,14 +17,20 @@ import {
   parseGlobText,
   type ReplacementPreview,
 } from "./searchReplace";
+import { isPreconditionError } from "./fileExplorerLocalUtils";
 import styles from "./FileExplorer.module.css";
 
 interface FileSearchPanelProps {
   workspaceId: string;
   scopeRef: FileScopeRef;
+  canWrite: boolean;
   onOpenResult: (path: string, line: number) => void;
-  onFilesChanged: (paths: string[]) => void;
+  onFilesChanged: (paths: string[], complete: boolean) => void;
   onClose: () => void;
+}
+
+interface VersionedReplacementPreview extends ReplacementPreview {
+  version: string;
 }
 
 function uniqueResultPaths(results: FileSearchFileResult[]): string[] {
@@ -34,6 +40,7 @@ function uniqueResultPaths(results: FileSearchFileResult[]): string[] {
 export function FileSearchPanel({
   workspaceId,
   scopeRef,
+  canWrite,
   onOpenResult,
   onFilesChanged,
   onClose,
@@ -46,7 +53,7 @@ export function FileSearchPanel({
   const [includeText, setIncludeText] = useState("");
   const [excludeText, setExcludeText] = useState("");
   const [data, setData] = useState<FileSearchData | null>(null);
-  const [previews, setPreviews] = useState<ReplacementPreview[]>([]);
+  const [previews, setPreviews] = useState<VersionedReplacementPreview[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
@@ -98,7 +105,7 @@ export function FileSearchPanel({
     setIsPreviewing(true);
     setError(null);
     try {
-      const next: ReplacementPreview[] = [];
+      const next: VersionedReplacementPreview[] = [];
       for (const path of affectedPaths) {
         const file = await readScopedFile(workspaceId, scopeRef, path);
         if (file.binary || file.truncated || file.content === undefined) {
@@ -110,7 +117,7 @@ export function FileSearchPanel({
           regex,
           caseSensitive,
         });
-        if (preview) next.push(preview);
+        if (preview) next.push({ ...preview, version: file.version });
       }
       setPreviews(next);
       if (next.length === 0) {
@@ -133,19 +140,41 @@ export function FileSearchPanel({
   ]);
 
   const applyPreviews = useCallback(async () => {
-    if (previews.length === 0) return;
+    if (!canWrite || previews.length === 0) return;
     setIsApplying(true);
     setError(null);
     try {
-      for (const preview of previews) {
-        await writeScopedFile(
-          workspaceId,
-          scopeRef,
-          preview.path,
-          preview.after,
+      const results = await Promise.allSettled(
+        previews.map((preview) =>
+          writeScopedFile(workspaceId, scopeRef, preview.path, preview.after, {
+            ifMatch: preview.version,
+          }),
+        ),
+      );
+      const changed: string[] = [];
+      const failed: VersionedReplacementPreview[] = [];
+      results.forEach((result, index) => {
+        const preview = previews[index];
+        if (!preview) return;
+        if (result.status === "fulfilled") changed.push(preview.path);
+        else failed.push(preview);
+      });
+      if (changed.length > 0) onFilesChanged(changed, failed.length === 0);
+      if (failed.length > 0) {
+        setPreviews(failed);
+        const firstFailure = results.find(
+          (result): result is PromiseRejectedResult =>
+            result.status === "rejected",
         );
+        setError(
+          firstFailure && isPreconditionError(firstFailure.reason)
+            ? "Some files changed after preview. Conflicting previews were preserved."
+            : firstFailure?.reason instanceof Error
+              ? firstFailure.reason.message
+              : "Replace failed. Unapplied previews were preserved.",
+        );
+        return;
       }
-      onFilesChanged(previews.map((preview) => preview.path));
       setPreviews([]);
       await runSearch();
     } catch (err) {
@@ -153,7 +182,7 @@ export function FileSearchPanel({
     } finally {
       setIsApplying(false);
     }
-  }, [onFilesChanged, previews, runSearch, scopeRef, workspaceId]);
+  }, [canWrite, onFilesChanged, previews, runSearch, scopeRef, workspaceId]);
 
   return (
     <aside className={styles.searchPanel} aria-label="File search">
@@ -184,13 +213,15 @@ export function FileSearchPanel({
           aria-label="Search files"
           autoFocus
         />
-        <input
-          className={styles.filterInput}
-          value={replacement}
-          onChange={(event) => setReplacement(event.target.value)}
-          placeholder="Replace..."
-          aria-label="Replace with"
-        />
+        {canWrite && (
+          <input
+            className={styles.filterInput}
+            value={replacement}
+            onChange={(event) => setReplacement(event.target.value)}
+            placeholder="Replace..."
+            aria-label="Replace with"
+          />
+        )}
         <div className={styles.searchOptions}>
           <label>
             <input
@@ -241,14 +272,16 @@ export function FileSearchPanel({
           >
             {isSearching ? "Searching..." : "Search"}
           </button>
-          <button
-            type="button"
-            className={styles.secondaryButton}
-            disabled={!data || affectedPaths.length === 0 || isPreviewing}
-            onClick={() => void buildPreview()}
-          >
-            {isPreviewing ? "Previewing..." : "Preview"}
-          </button>
+          {canWrite && (
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              disabled={!data || affectedPaths.length === 0 || isPreviewing}
+              onClick={() => void buildPreview()}
+            >
+              {isPreviewing ? "Previewing..." : "Preview"}
+            </button>
+          )}
         </div>
       </form>
       {error && <div className={styles.searchError}>{error}</div>}
@@ -257,7 +290,7 @@ export function FileSearchPanel({
           Search limit reached.
         </div>
       )}
-      {previews.length > 0 && (
+      {canWrite && previews.length > 0 && (
         <section className={styles.replacePreview}>
           <div className={styles.replacePreviewHeader}>
             <span>{previews.length} file preview</span>

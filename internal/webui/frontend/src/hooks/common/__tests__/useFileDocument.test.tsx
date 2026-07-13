@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FileMutationData, FileReadData } from "@/api/workspace";
+import { ApiError } from "@/types/common";
 import {
   FileDocumentRegistry,
   type FileDocumentOperations,
@@ -418,6 +419,97 @@ describe("FileDocumentRegistry coordination", () => {
       content: "newer local draft",
       dirty: true,
       externalConflict: { content: "external", version: "v2" },
+    });
+    registry.dispose();
+  });
+
+  it("refreshes the external version before a conditional overwrite", async () => {
+    const operations: FileDocumentOperations = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce(file("base", "v1"))
+        .mockResolvedValueOnce(file("latest external", "v2")),
+      write: vi.fn().mockResolvedValue({ success: true, version: "v3" }),
+    };
+    const registry = new FileDocumentRegistry(operations, undefined);
+    await registry.refresh(workspaceRef);
+    registry.edit(workspaceRef, "local draft");
+
+    await registry.overwriteExternal(workspaceRef);
+
+    expect(operations.write).toHaveBeenCalledWith(
+      workspaceRef,
+      "local draft",
+      expect.any(AbortSignal),
+      "v2",
+    );
+    expect(registry.get(workspaceRef)).toMatchObject({
+      content: "local draft",
+      baseVersion: "v3",
+      dirty: false,
+      externalConflict: null,
+    });
+    registry.dispose();
+  });
+
+  it("keeps a newer edit dirty against the content just overwritten", async () => {
+    const pendingWrite = deferred<FileMutationData>();
+    const operations: FileDocumentOperations = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce(file("base", "v1"))
+        .mockResolvedValueOnce(file("external", "v2")),
+      write: vi.fn().mockReturnValue(pendingWrite.promise),
+    };
+    const registry = new FileDocumentRegistry(operations, undefined);
+    await registry.refresh(workspaceRef);
+    registry.edit(workspaceRef, "overwrite snapshot");
+    const overwriting = registry.overwriteExternal(workspaceRef);
+    await vi.waitFor(() => expect(operations.write).toHaveBeenCalled());
+    registry.edit(workspaceRef, "newer local draft");
+    pendingWrite.resolve({ success: true, version: "v3" });
+    await overwriting;
+
+    expect(registry.get(workspaceRef)).toMatchObject({
+      content: "newer local draft",
+      baseContent: "overwrite snapshot",
+      baseVersion: "v3",
+      dirty: true,
+      externalConflict: { content: "overwrite snapshot", version: "v3" },
+    });
+    registry.dispose();
+  });
+
+  it("preserves the draft and refreshes conflict state after overwrite races", async () => {
+    const operations: FileDocumentOperations = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce(file("base", "v1"))
+        .mockResolvedValueOnce(file("first external", "v2"))
+        .mockResolvedValueOnce(file("second external", "v3")),
+      write: vi.fn().mockRejectedValue(
+        new ApiError(412, "Precondition Failed", {
+          error: "file changed",
+        }),
+      ),
+    };
+    const registry = new FileDocumentRegistry(operations, undefined);
+    await registry.refresh(workspaceRef);
+    registry.edit(workspaceRef, "local draft");
+
+    await registry.overwriteExternal(workspaceRef);
+
+    expect(operations.write).toHaveBeenCalledWith(
+      workspaceRef,
+      "local draft",
+      expect.any(AbortSignal),
+      "v2",
+    );
+    expect(registry.get(workspaceRef)).toMatchObject({
+      content: "local draft",
+      dirty: true,
+      error: "file changed",
+      externalConflict: { content: "second external", version: "v3" },
     });
     registry.dispose();
   });

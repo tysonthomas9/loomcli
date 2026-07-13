@@ -308,6 +308,7 @@ function RootRow({
   expanded,
   depth = 0,
   repairing,
+  canWrite,
   onToggle,
   onRepairCheckout,
   onCheckoutContextMenu,
@@ -316,6 +317,7 @@ function RootRow({
   expanded: boolean;
   depth?: number | undefined;
   repairing: boolean;
+  canWrite: boolean;
   onToggle: () => void;
   onRepairCheckout: (ref: CheckoutRef, label: string) => void;
   onCheckoutContextMenu: (
@@ -338,7 +340,10 @@ function RootRow({
   const repairRef =
     root.kind === "checkout" ? root.ref : (root.flattenedRef ?? null);
   const canRepair =
-    repairState != null && repairRef != null && repairRef.scope !== "workspace";
+    canWrite &&
+    repairState != null &&
+    repairRef != null &&
+    repairRef.scope !== "workspace";
   const repairLabel = secondary ? `${label} ${secondary}` : label;
   return (
     <div
@@ -433,8 +438,12 @@ function CheckoutTreeBlock({
     node: FileTreeNodeInfo,
     event: MouseEvent<HTMLDivElement>,
   ) => void;
-  onRequestRename: (ref: CheckoutRef, node: FileTreeNodeInfo) => void;
-  onRequestDelete: (ref: CheckoutRef, node: FileTreeNodeInfo) => void;
+  onRequestRename?:
+    | ((ref: CheckoutRef, node: FileTreeNodeInfo) => void)
+    | undefined;
+  onRequestDelete?:
+    | ((ref: CheckoutRef, node: FileTreeNodeInfo) => void)
+    | undefined;
   onInlineEditChange: (value: string) => void;
   onInlineEditCommit: () => void;
   onInlineEditCancel: () => void;
@@ -493,8 +502,18 @@ function CheckoutTreeBlock({
         if (path) onOpenFile(refInfo, path);
       }}
       onContextMenuNode={(node, event) => onContextMenu(refInfo, node, event)}
-      onRequestRename={(node) => onRequestRename(refInfo, node)}
-      onRequestDelete={(node) => onRequestDelete(refInfo, node)}
+      {...(onRequestRename
+        ? {
+            onRequestRename: (node: FileTreeNodeInfo) =>
+              onRequestRename(refInfo, node),
+          }
+        : {})}
+      {...(onRequestDelete
+        ? {
+            onRequestDelete: (node: FileTreeNodeInfo) =>
+              onRequestDelete(refInfo, node),
+          }
+        : {})}
       inlineEdit={sameRefInlineEdit(inlineEdit, refInfo)}
       onInlineEditChange={onInlineEditChange}
       onInlineEditCommit={onInlineEditCommit}
@@ -517,6 +536,7 @@ export function FileExplorerTreePanel({
   unavailableCheckoutLabels,
   expandedRoots,
   repairingCheckoutKey,
+  canWrite,
   selectedTab,
   inlineEdit,
   gitStatusByRef,
@@ -546,6 +566,7 @@ export function FileExplorerTreePanel({
   unavailableCheckoutLabels: string[];
   expandedRoots: Set<string>;
   repairingCheckoutKey: string | null;
+  canWrite: boolean;
   selectedTab: FileBrowserTab | null;
   inlineEdit: ScopedInlineEdit | null;
   gitStatusByRef: Record<string, Record<string, string>>;
@@ -587,6 +608,7 @@ export function FileExplorerTreePanel({
           depth={depth}
           expanded={expanded}
           repairing={repairingCheckoutKey === key}
+          canWrite={canWrite}
           onToggle={() => onToggleRoot(key)}
           onRepairCheckout={onRepairCheckout}
           onCheckoutContextMenu={onCheckoutContextMenu}
@@ -603,8 +625,8 @@ export function FileExplorerTreePanel({
               refreshRequest={treeRefreshRequests[key]}
               onOpenFile={onOpenFile}
               onContextMenu={onContextMenu}
-              onRequestRename={onRequestRename}
-              onRequestDelete={onRequestDelete}
+              onRequestRename={canWrite ? onRequestRename : undefined}
+              onRequestDelete={canWrite ? onRequestDelete : undefined}
               onInlineEditChange={onInlineEditChange}
               onInlineEditCommit={onInlineEditCommit}
               onInlineEditCancel={onInlineEditCancel}
@@ -627,6 +649,7 @@ export function FileExplorerTreePanel({
             root={root}
             expanded={expanded}
             repairing={repairingCheckoutKey === key}
+            canWrite={canWrite}
             onToggle={() => onToggleRoot(key)}
             onRepairCheckout={onRepairCheckout}
             onCheckoutContextMenu={onCheckoutContextMenu}
@@ -643,8 +666,8 @@ export function FileExplorerTreePanel({
                 refreshRequest={treeRefreshRequests[key]}
                 onOpenFile={onOpenFile}
                 onContextMenu={onContextMenu}
-                onRequestRename={onRequestRename}
-                onRequestDelete={onRequestDelete}
+                onRequestRename={canWrite ? onRequestRename : undefined}
+                onRequestDelete={canWrite ? onRequestDelete : undefined}
                 onInlineEditChange={onInlineEditChange}
                 onInlineEditCommit={onInlineEditCommit}
                 onInlineEditCancel={onInlineEditCancel}
@@ -662,6 +685,7 @@ export function FileExplorerTreePanel({
           root={root}
           expanded={expanded}
           repairing={repairingCheckoutKey === root.id}
+          canWrite={canWrite}
           onToggle={() => onToggleRoot(root.id)}
           onRepairCheckout={onRepairCheckout}
           onCheckoutContextMenu={onCheckoutContextMenu}
@@ -721,8 +745,8 @@ export function FileExplorerTreePanel({
               refreshRequest={treeRefreshRequests[key]}
               onOpenFile={onOpenFile}
               onContextMenu={onContextMenu}
-              onRequestRename={onRequestRename}
-              onRequestDelete={onRequestDelete}
+              onRequestRename={canWrite ? onRequestRename : undefined}
+              onRequestDelete={canWrite ? onRequestDelete : undefined}
               onInlineEditChange={onInlineEditChange}
               onInlineEditCommit={onInlineEditCommit}
               onInlineEditCancel={onInlineEditCancel}

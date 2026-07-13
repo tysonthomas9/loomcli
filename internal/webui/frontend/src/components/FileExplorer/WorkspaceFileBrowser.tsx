@@ -21,6 +21,7 @@ import {
   moveScopedPath,
   repairFileCheckout,
   readScopedFile,
+  statScopedPath,
   writeScopedFile,
 } from "@/hooks/api";
 import {
@@ -29,10 +30,12 @@ import {
   useEventContext,
   agentFileBrowserTabsStorageKey,
   FileDocumentRegistryProvider,
+  FileCapabilitiesProvider,
   FileBrowserStoreProvider,
   fileBrowserTabsStorageKey,
   useFileDocumentRegistry,
   useFileDocumentRegistryRevision,
+  useFileCapabilities,
   useFileBrowserStoreInstance,
   type FileBrowserTab,
 } from "@/hooks";
@@ -73,6 +76,7 @@ import {
   getStoredLens,
   getStoredTreeWidth,
   isConflictError,
+  isPreconditionError,
   joinPath,
   MAX_GROUP_WIDTH,
   MAX_TREE_WIDTH,
@@ -143,6 +147,13 @@ function FileBrowserInner({
   const store = useFileBrowserStoreInstance();
   const documentRegistry = useFileDocumentRegistry();
   const documentRevision = useFileDocumentRegistryRevision();
+  const {
+    capabilities,
+    isLoading: capabilitiesLoading,
+    error: capabilitiesError,
+    retry: retryCapabilities,
+  } = useFileCapabilities();
+  const canWrite = capabilities?.write === true;
   const groups = useStore(store, (s) => s.groups);
   const activeGroup = useStore(store, (s) => s.activeGroup);
   const dirty = useStore(store, (s) => s.dirty);
@@ -219,6 +230,15 @@ function FileBrowserInner({
   const lastLoadedChangeGroupsRef = useRef<Map<string, ChangeCheckoutGroup>>(
     new Map(),
   );
+
+  useEffect(() => {
+    if (canWrite) return;
+    setInlineEdit(null);
+    setDeleteConfirm(null);
+    setMoveDialog(null);
+    setRepairConfirm(null);
+    setRepairMenu(null);
+  }, [canWrite]);
 
   const visibleCheckouts = useMemo(
     () =>
@@ -792,6 +812,7 @@ function FileBrowserInner({
       kind: "create-file" | "create-folder",
       node: FileTreeNodeInfo,
     ) => {
+      if (!canWrite) return;
       setContextMenu(null);
       const parentPath = node.isDir ? node.path : dirname(node.path);
       setInlineEdit({
@@ -804,11 +825,12 @@ function FileBrowserInner({
         },
       });
     },
-    [],
+    [canWrite],
   );
 
   const beginRename = useCallback(
     (ref: CheckoutRef, node: FileTreeNodeInfo) => {
+      if (!canWrite) return;
       setContextMenu(null);
       setInlineEdit({
         ref,
@@ -821,11 +843,11 @@ function FileBrowserInner({
         },
       });
     },
-    [],
+    [canWrite],
   );
 
   const commitInlineEdit = useCallback(async () => {
-    if (!inlineEdit) return;
+    if (!inlineEdit || !canWrite) return;
     const edit = inlineEdit.edit;
     const ref = inlineEdit.ref;
     const value = edit.value.trim();
@@ -840,7 +862,9 @@ function FileBrowserInner({
     try {
       if (edit.kind === "create-file") {
         const path = joinPath(edit.parentPath, value);
-        await writeScopedFile(workspaceId, ref, path, "");
+        await writeScopedFile(workspaceId, ref, path, "", {
+          createOnly: true,
+        });
         markIndexStale();
         void refreshCheckouts();
         void refreshGitStatus();
@@ -858,7 +882,21 @@ function FileBrowserInner({
       } else if (edit.path) {
         const nextPath = joinPath(edit.parentPath, value);
         if (nextPath !== edit.path) {
-          await moveScopedPath(workspaceId, ref, edit.path, nextPath);
+          const source = await statScopedPath(workspaceId, ref, edit.path);
+          await moveScopedPath(
+            workspaceId,
+            ref,
+            edit.path,
+            nextPath,
+            false,
+            source.version,
+          );
+          documentRegistry.retargetPathPrefix(
+            workspaceId,
+            ref,
+            edit.path,
+            nextPath,
+          );
           store.getState().retargetPathPrefix(ref, edit.path, nextPath);
           markIndexStale();
           void refreshCheckouts();
@@ -868,6 +906,7 @@ function FileBrowserInner({
         }
       }
     } catch (err) {
+      setInlineEdit({ ref, edit });
       showToast(err instanceof Error ? err.message : String(err), {
         type: "error",
       });
@@ -876,6 +915,7 @@ function FileBrowserInner({
     }
   }, [
     inlineEdit,
+    canWrite,
     workspaceId,
     refreshParents,
     openFile,
@@ -885,10 +925,11 @@ function FileBrowserInner({
     markIndexStale,
     refreshCheckouts,
     refreshGitStatus,
+    documentRegistry,
   ]);
 
   const dirtyTabsForPath = useCallback(
-    (ref: CheckoutRef, path: string): string[] => {
+    (ref: CheckoutRef, path: string): Array<{ key: string; path: string }> => {
       const state = store.getState();
       const dirtyKeys = new Set(Object.keys(state.dirty));
       return state.groups
@@ -899,7 +940,7 @@ function FileBrowserInner({
             sameCheckoutRef(tab.ref, ref) &&
             pathMatchesPrefix(tab.path, path),
         )
-        .map(tabIdentityKey);
+        .map((tab) => ({ key: tabIdentityKey(tab), path: tab.path }));
     },
     [store],
   );
@@ -910,18 +951,35 @@ function FileBrowserInner({
       node: FileTreeNodeInfo,
       skipFutureFileConfirms = false,
     ) => {
+      if (!canWrite) return;
       const dirtyTabs = dirtyTabsForPath(ref, node.path);
-      if (dirtyTabs.length > 0) {
+      const dirtyDocuments = documentRegistry.dirtyPathsForPrefix(
+        workspaceId,
+        ref,
+        node.path,
+      );
+      const dirtyCount = new Set([
+        ...dirtyTabs.map((tab) => tab.path),
+        ...dirtyDocuments,
+      ]).size;
+      if (dirtyCount > 0) {
         const ok = window.confirm(
-          `Discard unsaved changes in ${dirtyTabs.length} open file${dirtyTabs.length === 1 ? "" : "s"}?`,
+          `Discard unsaved changes in ${dirtyCount} open file${dirtyCount === 1 ? "" : "s"}?`,
         );
         if (!ok) return;
-        for (const path of dirtyTabs) {
-          store.getState().setDirty(path, false);
-        }
       }
       try {
-        await deleteScopedPath(workspaceId, ref, node.path, node.isDir);
+        const source = await statScopedPath(workspaceId, ref, node.path);
+        await deleteScopedPath(
+          workspaceId,
+          ref,
+          node.path,
+          node.isDir,
+          source.version,
+        );
+        for (const tab of dirtyTabs) {
+          store.getState().setDirty(tab.key, false);
+        }
         documentRegistry.resetPathPrefix(workspaceId, ref, node.path);
         markIndexStale();
         void refreshCheckouts();
@@ -932,12 +990,11 @@ function FileBrowserInner({
         store.getState().closePathPrefix(ref, node.path);
         refreshParents(ref, node.path);
         showToast("Deleted", { type: "success" });
+        setDeleteConfirm(null);
       } catch (err) {
         showToast(err instanceof Error ? err.message : String(err), {
           type: "error",
         });
-      } finally {
-        setDeleteConfirm(null);
       }
     },
     [
@@ -950,11 +1007,13 @@ function FileBrowserInner({
       refreshCheckouts,
       refreshGitStatus,
       documentRegistry,
+      canWrite,
     ],
   );
 
   const requestDelete = useCallback(
     (ref: CheckoutRef, node: FileTreeNodeInfo) => {
+      if (!canWrite) return;
       setContextMenu(null);
       const skipFileConfirm =
         !node.isDir && wsGet(workspaceId, DELETE_FILE_SKIP_KEY) === "1";
@@ -964,11 +1023,12 @@ function FileBrowserInner({
         setDeleteConfirm({ ref, node });
       }
     },
-    [performDelete, workspaceId],
+    [canWrite, performDelete, workspaceId],
   );
 
   const duplicateFile = useCallback(
     async (ref: CheckoutRef, node: FileTreeNodeInfo) => {
+      if (!canWrite) return;
       setContextMenu(null);
       if (node.isDir) return;
       try {
@@ -980,12 +1040,27 @@ function FileBrowserInner({
           return;
         }
         const parent = dirname(node.path);
-        const entries = sortedEntries(
-          (await listScopedDir(workspaceId, ref, parent)).entries,
-        );
-        const nextName = duplicateName(basename(node.path), entries);
-        const nextPath = joinPath(parent, nextName);
-        await writeScopedFile(workspaceId, ref, nextPath, data.content ?? "");
+        let nextPath = "";
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const entries = sortedEntries(
+            (await listScopedDir(workspaceId, ref, parent)).entries,
+          );
+          const nextName = duplicateName(basename(node.path), entries);
+          nextPath = joinPath(parent, nextName);
+          try {
+            await writeScopedFile(
+              workspaceId,
+              ref,
+              nextPath,
+              data.content ?? "",
+              { createOnly: true },
+            );
+            break;
+          } catch (err) {
+            if (attempt === 0 && isPreconditionError(err)) continue;
+            throw err;
+          }
+        }
         markIndexStale();
         void refreshCheckouts();
         void refreshGitStatus();
@@ -999,6 +1074,7 @@ function FileBrowserInner({
     },
     [
       workspaceId,
+      canWrite,
       refreshParents,
       openFile,
       showToast,
@@ -1024,13 +1100,34 @@ function FileBrowserInner({
       node: FileTreeNodeInfo,
       event: MouseEvent<HTMLDivElement>,
     ) => {
-      setContextMenu({ ref, node, x: event.clientX, y: event.clientY });
+      const next = {
+        ref,
+        node,
+        x: event.clientX,
+        y: event.clientY,
+        duplicateEligible: false,
+      };
+      setContextMenu(next);
+      if (!canWrite || node.isDir) return;
+      void readScopedFile(workspaceId, ref, node.path)
+        .then((data) => {
+          if (data.binary || data.truncated) return;
+          setContextMenu((current) =>
+            current &&
+            sameCheckoutRef(current.ref, ref) &&
+            current.node.path === node.path
+              ? { ...current, duplicateEligible: true }
+              : current,
+          );
+        })
+        .catch(() => {});
     },
-    [],
+    [canWrite, workspaceId],
   );
 
   const performCheckoutRepair = useCallback(
     async (ref: CheckoutRef, label: string, force = false) => {
+      if (!canWrite) return;
       const request = checkoutRepairRequest(ref, force);
       if (!request) {
         setRepairError("Only agent and repo checkouts can be repaired.");
@@ -1073,15 +1170,17 @@ function FileBrowserInner({
       refreshGitStatus,
       refreshParents,
       showToast,
+      canWrite,
     ],
   );
 
   const handleCheckoutContextMenu = useCallback(
     (ref: CheckoutRef, label: string, event: MouseEvent<HTMLDivElement>) => {
+      if (!canWrite) return;
       setContextMenu(null);
       setRepairMenu({ ref, label, x: event.clientX, y: event.clientY });
     },
-    [],
+    [canWrite],
   );
 
   const performMove = useCallback(
@@ -1090,13 +1189,20 @@ function FileBrowserInner({
       node: FileTreeNodeInfo,
       targetFolderPath: string,
     ) => {
+      if (!canWrite) return;
       const move = resolveMoveToTarget(node.path, targetFolderPath);
       if (!move) return;
-      const applyMove = async (overwrite: boolean) => {
-        await moveScopedPath(workspaceId, ref, move.from, move.to, overwrite);
-      };
+      let discardedDestinationTabs: string[] = [];
       try {
-        await applyMove(false);
+        const source = await statScopedPath(workspaceId, ref, move.from);
+        await moveScopedPath(
+          workspaceId,
+          ref,
+          move.from,
+          move.to,
+          false,
+          source.version,
+        );
       } catch (err) {
         if (!isConflictError(err)) {
           showToast(err instanceof Error ? err.message : String(err), {
@@ -1106,8 +1212,37 @@ function FileBrowserInner({
         }
         const ok = window.confirm(`Overwrite ${move.to}?`);
         if (!ok) return;
+        const dirtyDestinationTabs = dirtyTabsForPath(ref, move.to);
+        const dirtyDestinationDocuments = documentRegistry.dirtyPathsForPrefix(
+          workspaceId,
+          ref,
+          move.to,
+        );
+        const dirtyDestinationCount = new Set([
+          ...dirtyDestinationTabs.map((tab) => tab.path),
+          ...dirtyDestinationDocuments,
+        ]).size;
+        if (dirtyDestinationCount > 0) {
+          const discard = window.confirm(
+            `Discard unsaved changes in ${dirtyDestinationCount} destination file${dirtyDestinationCount === 1 ? "" : "s"}?`,
+          );
+          if (!discard) return;
+          discardedDestinationTabs = dirtyDestinationTabs.map((tab) => tab.key);
+        }
         try {
-          await applyMove(true);
+          const [source, destination] = await Promise.all([
+            statScopedPath(workspaceId, ref, move.from),
+            statScopedPath(workspaceId, ref, move.to),
+          ]);
+          await moveScopedPath(
+            workspaceId,
+            ref,
+            move.from,
+            move.to,
+            true,
+            source.version,
+            destination.version,
+          );
         } catch (overwriteErr) {
           showToast(
             overwriteErr instanceof Error
@@ -1119,6 +1254,9 @@ function FileBrowserInner({
         }
       }
 
+      for (const key of discardedDestinationTabs) {
+        store.getState().setDirty(key, false);
+      }
       documentRegistry.retargetPathPrefix(workspaceId, ref, move.from, move.to);
       store.getState().retargetPathPrefix(ref, move.from, move.to);
       markIndexStale();
@@ -1131,6 +1269,7 @@ function FileBrowserInner({
     },
     [
       workspaceId,
+      canWrite,
       documentRegistry,
       store,
       markIndexStale,
@@ -1139,6 +1278,7 @@ function FileBrowserInner({
       refreshParents,
       revealInTree,
       showToast,
+      dirtyTabsForPath,
     ],
   );
 
@@ -1164,19 +1304,41 @@ function FileBrowserInner({
         className={styles.treePanel}
         style={{ ["--tree-width"]: `${treeWidth}px` } as CSSProperties}
       >
+        {(capabilitiesLoading || capabilitiesError) && (
+          <div className={styles.capabilitiesNotice} role="status">
+            <span>
+              {capabilitiesLoading
+                ? "Checking file permissions..."
+                : "File permissions unavailable. Editing is disabled."}
+            </span>
+            {capabilitiesError && (
+              <button type="button" onClick={retryCapabilities}>
+                Retry
+              </button>
+            )}
+          </div>
+        )}
         {searchPanelOpen ? (
           <FileSearchPanel
             workspaceId={workspaceId}
             scopeRef={workspaceRef}
+            canWrite={canWrite}
             onOpenResult={(path, line) =>
               openFile(workspaceRef, path, undefined, line)
             }
-            onFilesChanged={(paths) => {
+            onFilesChanged={(paths, complete) => {
+              for (const path of paths) {
+                void documentRegistry.refresh({
+                  workspaceId,
+                  ...workspaceRef,
+                  path,
+                });
+              }
               markIndexStale();
               void refreshCheckouts();
               void refreshGitStatus();
               refreshParents(workspaceRef, ...paths);
-              showToast("Replace applied", { type: "success" });
+              if (complete) showToast("Replace applied", { type: "success" });
             }}
             onClose={() => setSearchPanelOpen(false)}
           />
@@ -1191,6 +1353,7 @@ function FileBrowserInner({
             unavailableCheckoutLabels={unavailableChangeCheckoutLabels}
             expandedRoots={expandedRoots}
             repairingCheckoutKey={repairingCheckoutKey}
+            canWrite={canWrite}
             selectedTab={selectedTab}
             inlineEdit={inlineEdit}
             gitStatusByRef={gitStatusByRef}
@@ -1265,6 +1428,7 @@ function FileBrowserInner({
                 openFile(ref, path, groupIndex)
               }
               historyRefreshKey={historyRefreshKey}
+              canWrite={canWrite}
               onLineTargetApplied={handleLineTargetApplied}
               lineTarget={
                 groups[0]?.active ? lineTargets[groups[0].active] : undefined
@@ -1305,6 +1469,7 @@ function FileBrowserInner({
                     openFile(ref, path, groupIndex)
                   }
                   historyRefreshKey={historyRefreshKey}
+                  canWrite={canWrite}
                   onLineTargetApplied={handleLineTargetApplied}
                   lineTarget={
                     groups[1]?.active
@@ -1320,6 +1485,7 @@ function FileBrowserInner({
       {contextMenu && (
         <ContextMenu
           state={contextMenu}
+          canWrite={canWrite}
           onNewFile={(node) =>
             beginCreate(contextMenu.ref, "create-file", node)
           }
@@ -1336,7 +1502,7 @@ function FileBrowserInner({
           onCopyPath={copyPath}
         />
       )}
-      {repairMenu && (
+      {canWrite && repairMenu && (
         <div
           className={styles.contextMenu}
           style={{ left: repairMenu.x, top: repairMenu.y }}
@@ -1355,7 +1521,7 @@ function FileBrowserInner({
           </button>
         </div>
       )}
-      {repairConfirm && (
+      {canWrite && repairConfirm && (
         <RepairCheckoutConfirmDialog
           label={repairConfirm.label}
           onCancel={() => setRepairConfirm(null)}
@@ -1366,7 +1532,7 @@ function FileBrowserInner({
           }}
         />
       )}
-      {deleteConfirm && (
+      {canWrite && deleteConfirm && (
         <DeleteConfirmDialog
           node={deleteConfirm.node}
           onCancel={() => setDeleteConfirm(null)}
@@ -1375,7 +1541,7 @@ function FileBrowserInner({
           }
         />
       )}
-      {moveDialog && (
+      {canWrite && moveDialog && (
         <MoveToDialog
           state={moveDialog}
           onCancel={() => setMoveDialog(null)}
@@ -1409,19 +1575,21 @@ export function FileBrowser({
       ? agentFileBrowserTabsStorageKey(agentName)
       : fileBrowserTabsStorageKey();
   return (
-    <FileDocumentRegistryProvider>
-      <FileBrowserStoreProvider
-        key={`${workspaceId}:${storageKey}`}
-        workspaceId={workspaceId}
-        storageKey={storageKey}
-      >
-        <FileBrowserInner
-          mode={mode}
-          agentName={agentName}
-          isActive={isActive}
-        />
-      </FileBrowserStoreProvider>
-    </FileDocumentRegistryProvider>
+    <FileCapabilitiesProvider workspaceId={workspaceId}>
+      <FileDocumentRegistryProvider>
+        <FileBrowserStoreProvider
+          key={`${workspaceId}:${storageKey}`}
+          workspaceId={workspaceId}
+          storageKey={storageKey}
+        >
+          <FileBrowserInner
+            mode={mode}
+            agentName={agentName}
+            isActive={isActive}
+          />
+        </FileBrowserStoreProvider>
+      </FileDocumentRegistryProvider>
+    </FileCapabilitiesProvider>
   );
 }
 

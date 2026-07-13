@@ -42,6 +42,12 @@ export {
 export type { UseFileDocumentReturn } from "./useFileDocument";
 
 export {
+  FileCapabilitiesProvider,
+  useFileCapabilities,
+} from "./useFileCapabilities";
+export type { FileCapabilitiesState } from "./useFileCapabilities";
+
+export {
   useFileTree,
   useWorkspaceFileTree,
   useScopedFileTree,

@@ -21,8 +21,15 @@ import {
 const sessionFileDocumentRegistry = new FileDocumentRegistry({
   read: ({ workspaceId, path, ...scopeRef }, signal) =>
     readScopedFile(workspaceId, scopeRef, path, undefined, { signal }),
-  write: ({ workspaceId, path, ...scopeRef }, content, signal) =>
-    writeScopedFile(workspaceId, scopeRef, path, content, {}, { signal }),
+  write: ({ workspaceId, path, ...scopeRef }, content, signal, ifMatch) =>
+    writeScopedFile(
+      workspaceId,
+      scopeRef,
+      path,
+      content,
+      ifMatch ? { ifMatch } : {},
+      { signal },
+    ),
 });
 
 const FileDocumentRegistryContext = createContext<FileDocumentRegistry>(
@@ -49,6 +56,9 @@ export interface UseFileDocumentReturn extends FileDocumentState {
   save: () => ReturnType<FileDocumentRegistry["save"]>;
   discard: () => void;
   useExternal: () => void;
+  overwriteExternal: () => ReturnType<
+    FileDocumentRegistry["overwriteExternal"]
+  >;
 }
 
 export function useFileDocument(
@@ -83,6 +93,7 @@ export function useFileDocument(
       save: () => registry.save(ref),
       discard: () => registry.discard(ref),
       useExternal: () => registry.useExternal(ref),
+      overwriteExternal: () => registry.overwriteExternal(ref),
     }),
     [ref, registry, state],
   );
