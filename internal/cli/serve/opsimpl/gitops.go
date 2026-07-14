@@ -97,6 +97,52 @@ func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentW
 	return &aw, nil
 }
 
+// ResolveAgentWorktreeForRepo resolves one explicit agent+repo checkout under
+// <ws>/worktrees/<repo>/<agent>.
+func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName string) (*ops.AgentWorktree, error) {
+	repoName = strings.TrimSpace(repoName)
+	if repoName == "" {
+		return g.ResolveAgentWorktree(workspaceID, name)
+	}
+	if g != nil && g.store != nil {
+		ws, err := g.loadStoreWorkspace(context.Background(), workspaceID, name)
+		if err != nil {
+			return nil, err
+		}
+		agent, err := findWorkspaceAgent(ws, workspaceID, name)
+		if err != nil {
+			return nil, err
+		}
+		repo, err := selectAgentRepoByName(ws.Repos, *agent, repoName)
+		if err != nil {
+			return nil, err
+		}
+		return resolveAgentWorktreeFromWSForRepo(ws, name, repo)
+	}
+
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		return nil, fmt.Errorf("creating resolver: %v", err)
+	}
+	if err := scopeResolverToWorkspace(resolver, workspaceID); err != nil {
+		return nil, err
+	}
+	ws, ok := resolver.Config.Workspaces[resolver.Workspace]
+	if !ok {
+		return nil, fmt.Errorf("workspace %q not found in config", resolver.Workspace)
+	}
+	root, err := validateWorkspaceRoot(workspaceID, ws.Path)
+	if err != nil {
+		return nil, err
+	}
+	repos, _ := configWorkspaceRepos(ws, root)
+	repo, ok := findWorkspaceRepo(repos, repoName)
+	if !ok {
+		return nil, fmt.Errorf("%w: repo %q is not known in workspace %q", ops.ErrAgentRepoNotAllowed, repoName, workspaceID)
+	}
+	return resolveAgentWorktreeFromWSForRepo(&ops.WorkspaceData{Path: root}, name, repo)
+}
+
 // loadStoreWorkspace loads the workspace topology for store-backed agent
 // resolution, applying the shared nil-guard and not-found mapping.
 func (g *GitOpsImpl) loadStoreWorkspace(ctx context.Context, workspaceID, name string) (*ops.WorkspaceData, error) {
@@ -161,86 +207,145 @@ func resolveAgentWorktreeFromWS(ws *ops.WorkspaceData, workspaceID, name string)
 	if err != nil {
 		return nil, err
 	}
+	return resolveAgentWorktreeFromWSForRepo(ws, name, repo)
+}
+
+func resolveAgentWorktreeFromWSForRepo(ws *ops.WorkspaceData, name string, repo ops.WorkspaceRepo) (*ops.AgentWorktree, error) {
 	wtPath := filepath.Join(ws.Path, "worktrees", repo.Name, name)
 	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("agent %q worktree for repo %q is not checked out on this machine at %s", name, repo.Name, wtPath)
+			return nil, fmt.Errorf("%w: agent %q worktree for repo %q is not checked out on this machine at %s", ops.ErrAgentWorktreeNotFound, name, repo.Name, wtPath)
 		}
 		return nil, fmt.Errorf("inspect agent %q worktree: %w", name, err)
 	}
 	branch, err := cli.GetCurrentBranch(wtPath)
 	if err != nil {
-		return nil, fmt.Errorf("get current branch for agent %q: %w", name, err)
+		branch = "unknown"
 	}
 	return newWorkspaceWorktree(name, wtPath, branch, repo), nil
 }
 
-// ResolveAgentWorktreeOrPrimary resolves an agent's worktree, falling back to
-// the workspace's primary repo worktree when the agent is a lead that has no
-// local worktree of its own. Non-lead agents get the same result (and errors)
-// as ResolveAgentWorktree. See ops.FileOps for the full contract.
-func (g *GitOpsImpl) ResolveAgentWorktreeOrPrimary(workspaceID, name string) (*ops.AgentWorktree, error) {
-	// Store-backed: load the workspace ONCE and try the agent's own worktree,
-	// then the lead-primary fallback, against the same snapshot — instead of
-	// loading the workspace a second time on the lead path.
+// ResolveWorkspaceRoot resolves the workspace root folder (ws.Path) as a browse
+// root for the read-only workspace file viewer. See ops.FileOps for the
+// contract. Store-backed deployments read the per-machine path from the local
+// state cache (with a one-shot self-heal); the non-store path falls back to the
+// local config. It deliberately avoids loading the full workspace topology —
+// only the folder path is needed, and this runs on every browser list/read.
+func (g *GitOpsImpl) ResolveWorkspaceRoot(workspaceID string) (string, error) {
+	if workspaceID == "" {
+		return "", fmt.Errorf("workspace id is required")
+	}
+
 	if g != nil && g.store != nil {
-		ws, err := g.loadStoreWorkspace(context.Background(), workspaceID, name)
-		if err != nil {
-			return nil, err
-		}
-		wt, agentErr := resolveAgentWorktreeFromWS(ws, workspaceID, name)
-		if agentErr == nil {
-			return wt, nil
-		}
-		if primary, primaryErr := resolveLeadPrimaryFromWS(ws, workspaceID, name); primaryErr == nil {
-			return primary, nil
-		}
-		return nil, agentErr
+		path := storeadapter.ResolveOrHealWorkspacePath(context.Background(), g.store, workspaceID)
+		return validateWorkspaceRoot(workspaceID, path)
 	}
 
-	// Non-store (resolver) path: no lead-primary fallback is available.
-	return g.ResolveAgentWorktree(workspaceID, name)
+	// Non-store (config) path: resolve the workspace folder from local config.
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		return "", fmt.Errorf("creating resolver: %v", err)
+	}
+	wsName := resolveWorkspaceConfigName(resolver.Config, workspaceID)
+	if wsName == "" {
+		return "", fmt.Errorf("workspace %q not found in config", workspaceID)
+	}
+	return validateWorkspaceRoot(workspaceID, resolver.Config.Workspaces[wsName].Path)
 }
 
-// resolveLeadPrimaryFromWS returns the primary (main) worktree of a lead agent's
-// primary repo from an already-loaded workspace, so the file viewer can browse
-// it when the lead has no agent worktree. Returns an error for non-leads or when
-// the primary worktree is unavailable, so callers fall back to the original
-// resolution error.
-func resolveLeadPrimaryFromWS(ws *ops.WorkspaceData, workspaceID, name string) (*ops.AgentWorktree, error) {
-	agent, err := findWorkspaceAgent(ws, workspaceID, name)
+// ResolveWorkspaceData returns workspace topology for file-scope target
+// validation. Store-backed deployments use the fleet-db projection; the legacy
+// config path exposes repo topology from local config.
+func (g *GitOpsImpl) ResolveWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) {
+	if workspaceID == "" {
+		return nil, fmt.Errorf("workspace id is required")
+	}
+
+	if g != nil && g.store != nil {
+		return storeadapter.BuildWorkspaceDataForKey(context.Background(), g.store, workspaceID)
+	}
+
+	return resolveConfigWorkspaceData(workspaceID)
+}
+
+func resolveConfigWorkspaceData(workspaceID string) (*ops.WorkspaceData, error) {
+	resolver, err := cli.NewResolver()
+	if err != nil {
+		return nil, fmt.Errorf("creating resolver: %v", err)
+	}
+	wsName := resolveWorkspaceConfigName(resolver.Config, workspaceID)
+	if wsName == "" {
+		return nil, fmt.Errorf("workspace %q not found in config", workspaceID)
+	}
+	ws := resolver.Config.Workspaces[wsName]
+	root, err := validateWorkspaceRoot(workspaceID, ws.Path)
 	if err != nil {
 		return nil, err
 	}
-	if !isLeadRoleName(agent.RoleName) {
-		return nil, fmt.Errorf("agent %q is not a lead", name)
-	}
-	repo, err := selectAgentRepo(ws.Repos, *agent)
-	if err != nil {
-		return nil, err
-	}
-	if repo.Path == "" {
-		return nil, fmt.Errorf("primary repo %q has no local path on this machine", repo.Name)
-	}
-	if _, err := os.Stat(filepath.Join(repo.Path, ".git")); err != nil {
-		return nil, fmt.Errorf("primary worktree for repo %q not checked out: %w", repo.Name, err)
-	}
-	branch, err := cli.GetCurrentBranch(repo.Path)
-	if err != nil {
-		branch = "unknown"
-	}
-	return newWorkspaceWorktree(name, repo.Path, branch, repo), nil
+
+	repos, groups := configWorkspaceRepos(ws, root)
+	return &ops.WorkspaceData{
+		ID:     ws.ID,
+		Name:   wsName,
+		Path:   root,
+		Repos:  repos,
+		Groups: groups,
+	}, nil
 }
 
-// isLeadRoleName reports whether a role name denotes a lead/orchestrator agent.
-// Mirrors svcimpl.isLeadAgentRole without crossing package boundaries.
-func isLeadRoleName(roleName string) bool {
-	switch strings.ToLower(strings.TrimSpace(roleName)) {
-	case "lead", "orchestrator":
-		return true
-	default:
-		return false
+func configWorkspaceRepos(ws config.WorkspaceConfig, root string) ([]ops.WorkspaceRepo, []string) {
+	repos := make([]ops.WorkspaceRepo, 0, len(ws.Repos))
+	groupSet := make(map[string]bool)
+	for _, r := range ws.Repos {
+		db := r.DefaultBranch
+		if db == "" {
+			db = "main"
+		}
+		remote := r.Remote
+		if remote == "" {
+			remote = "origin"
+		}
+		repoPath := r.ResolveAbsPath(root)
+		if r.Path == "" {
+			repoPath = filepath.Join(root, r.Name)
+		}
+		repos = append(repos, ops.WorkspaceRepo{
+			Name:          r.Name,
+			Path:          repoPath,
+			DefaultBranch: db,
+			Remote:        remote,
+			SourceRepoID:  r.SourceRepoID,
+			Groups:        r.Groups,
+		})
+		for _, group := range r.Groups {
+			groupSet[group] = true
+		}
 	}
+	groups := make([]string, 0, len(groupSet))
+	for group := range groupSet {
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
+	return repos, groups
+}
+
+// validateWorkspaceRoot checks that path is a real directory on this machine so
+// the viewer surfaces a clear "not checked out" error instead of a read failure.
+func validateWorkspaceRoot(workspaceID, path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("workspace %q has no local path on this machine", workspaceID)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("workspace %q is not checked out on this machine at %s", workspaceID, path)
+		}
+		return "", fmt.Errorf("inspect workspace %q root: %w", workspaceID, err)
+	}
+	if !fi.IsDir() {
+		return "", fmt.Errorf("workspace %q root is not a directory: %s", workspaceID, path)
+	}
+	return path, nil
 }
 
 func selectAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo) (ops.WorkspaceRepo, error) {
@@ -270,6 +375,51 @@ func selectAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo) (o
 		}
 	}
 	return ops.WorkspaceRepo{}, fmt.Errorf("agent %q repo affinity does not match any workspace repo", agent.Name)
+}
+
+func selectAgentRepoByName(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo, repoName string) (ops.WorkspaceRepo, error) {
+	repo, ok := findWorkspaceRepo(repos, repoName)
+	if !ok {
+		return ops.WorkspaceRepo{}, fmt.Errorf("%w: repo %q is not known in workspace", ops.ErrAgentRepoNotAllowed, repoName)
+	}
+	if !agentRepoAllowed(repos, agent, repo.Name) {
+		return ops.WorkspaceRepo{}, fmt.Errorf("%w: repo %q is not allowed for agent %q", ops.ErrAgentRepoNotAllowed, repo.Name, agent.Name)
+	}
+	return repo, nil
+}
+
+func findWorkspaceRepo(repos []ops.WorkspaceRepo, repoName string) (ops.WorkspaceRepo, bool) {
+	for _, repo := range repos {
+		if repo.Name == repoName {
+			return repo, true
+		}
+	}
+	return ops.WorkspaceRepo{}, false
+}
+
+func agentRepoAllowed(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentInfo, repoName string) bool {
+	if len(agent.Repos) == 0 && len(agent.RepoGroups) == 0 {
+		_, ok := findWorkspaceRepo(repos, repoName)
+		return ok
+	}
+	for _, name := range agent.Repos {
+		if name == repoName {
+			return true
+		}
+	}
+	for _, group := range agent.RepoGroups {
+		for _, repo := range repos {
+			if repo.Name != repoName {
+				continue
+			}
+			for _, repoGroup := range repo.Groups {
+				if repoGroup == group {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (g *GitOpsImpl) Push(worktreePath, sourceBranch, targetBranch, remote string) (*ops.GitPushResult, error) {
@@ -527,6 +677,50 @@ func (g *GitOpsImpl) Status(worktreePath, targetBranch string) (*ops.GitStatusRe
 		HasConflicts:    result.HasConflicts,
 		StashCount:      result.StashCount,
 	}, nil
+}
+
+func (g *GitOpsImpl) GitStatusPorcelain(ctx context.Context, worktreePath string) (ops.GitFileStatusResult, error) {
+	status, err := git.NewGitInspector().Status(ctx, worktreePath)
+	return ops.GitFileStatusResult{Entries: status.Entries, Partial: status.Partial, LimitHit: status.LimitHit}, err
+}
+
+func (g *GitOpsImpl) GitShowFileAtRev(ctx context.Context, worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	result, err := git.NewGitInspector().Show(ctx, worktreePath, rev, path, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &ops.GitFileContentAtRev{
+		Content:   result.Content,
+		Size:      result.Size,
+		Truncated: result.Truncated,
+	}, nil
+}
+
+func (g *GitOpsImpl) GitDiffFile(ctx context.Context, worktreePath, path, from, to string) (ops.GitBoundedTextResult, error) {
+	result, err := git.NewGitInspector().Diff(ctx, worktreePath, path, from, to)
+	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err
+}
+
+func (g *GitOpsImpl) GitLogFile(ctx context.Context, worktreePath, path string, limit int) (ops.GitBoundedTextResult, error) {
+	result, err := git.NewGitInspector().Log(ctx, worktreePath, path, limit)
+	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err
+}
+
+func (g *GitOpsImpl) GitBlamePorcelain(ctx context.Context, worktreePath, path string) (ops.GitBoundedTextResult, error) {
+	result, err := git.NewGitInspector().Blame(ctx, worktreePath, path)
+	return ops.GitBoundedTextResult{Output: string(result.Output), Partial: result.Partial, LimitHit: result.LimitHit}, err
+}
+
+func (g *GitOpsImpl) ResolveLoomDataDir() (string, error) {
+	dir := config.GetConfigDir()
+	if strings.TrimSpace(dir) == "" {
+		return "", fmt.Errorf("cannot resolve loom data directory")
+	}
+	return filepath.Abs(dir)
+}
+
+func (g *GitOpsImpl) GitCurrentBranch(ctx context.Context, worktreePath string) (string, error) {
+	return git.NewGitInspector().CurrentBranch(ctx, worktreePath)
 }
 
 func (g *GitOpsImpl) GetCurrentBranch(worktreePath string) (string, error) {

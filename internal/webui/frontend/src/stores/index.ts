@@ -56,3 +56,28 @@ export type {
   WorkspaceStoreActions,
   WorkspacePollingOptions,
 } from "./workspaceStore";
+
+export {
+  agentFileBrowserTabsStorageKey,
+  createFileBrowserStore,
+  fileBrowserTabsStorageKey,
+  FileBrowserStoreProvider,
+  useFileBrowserStore,
+  useFileBrowserStoreInstance,
+} from "./fileBrowserStore";
+
+export { FileDocumentRegistry } from "./fileDocumentRegistry";
+export type {
+  ExternalFileConflict,
+  FileDocumentOperations,
+  FileDocumentRef,
+  FileDocumentState,
+} from "./fileDocumentRegistry";
+export type {
+  FileBrowserStore,
+  FileBrowserStoreState,
+  FileBrowserStoreActions,
+  FileBrowserTab,
+  FileBrowserGroup,
+  FileBrowserStoreConfig,
+} from "./fileBrowserStore";

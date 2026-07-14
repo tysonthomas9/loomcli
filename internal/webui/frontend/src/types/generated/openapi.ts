@@ -1482,15 +1482,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/agents/{name}/files/tree": {
+  "/api/workspaces/{ws}/files/stat": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Get file tree for an agent worktree */
-    get: operations["getFileTree"];
+    /** Get mutation metadata and a strong version for a scoped path */
+    get: operations["statScopedFile"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1499,22 +1499,227 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/agents/{name}/files": {
+  "/api/workspaces/{ws}/files/capabilities": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Read a file from an agent worktree */
-    get: operations["readFile"];
-    /** Write a file to an agent worktree */
-    put: operations["writeFile"];
+    /** Get effective workspace file-browser capabilities */
+    get: operations["getFileCapabilities"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/tree": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get file tree for a scoped file browser root */
+    get: operations["getScopedFileTree"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/index": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get quick-open file index for a scoped file browser root */
+    get: operations["getScopedFileIndex"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Search files in a scoped file browser root */
+    post: operations["searchScopedFiles"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/git-status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get git status decorations for a scoped file browser root */
+    get: operations["getScopedFileGitStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/checkouts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List workspace file checkouts and local change counts */
+    get: operations["getFileCheckouts"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/checkouts/repair": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Repair or provision a known workspace file checkout */
+    post: operations["repairFileCheckout"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get unified diff for a file in a scoped file browser root */
+    get: operations["getScopedFileDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get bounded commit history for a file */
+    get: operations["getScopedFileHistory"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/blame": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get bounded git blame data for a file */
+    get: operations["getScopedFileBlame"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a file from a scoped file browser root */
+    get: operations["readScopedFile"];
+    /** Create or update a file in a scoped file browser root */
+    put: operations["writeScopedFile"];
+    post?: never;
+    /** Delete a file or directory in a scoped file browser root */
+    delete: operations["deleteScopedFile"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/mkdir": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create a directory in a scoped file browser root */
+    post: operations["mkdirScopedFile"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/move": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Move or rename a path in a scoped file browser root */
+    patch: operations["moveScopedFile"];
     trace?: never;
   };
   "/api/editors": {
@@ -1959,6 +2164,191 @@ export interface components {
       /** @constant */
       success: true;
       message: string;
+    };
+    FileMutationResponse: {
+      success: boolean;
+      version: string;
+    };
+    FileStatResponse: {
+      path: string;
+      is_dir: boolean;
+      /** Format: int64 */
+      size: number;
+      /** Format: date-time */
+      mod_time: string;
+      version: string;
+    };
+    FileTreeEntry: {
+      name: string;
+      is_dir: boolean;
+      /** Format: int64 */
+      size: number;
+      /** Format: date-time */
+      mod_time: string;
+    };
+    FileCapabilitiesResponse: {
+      read: boolean;
+      write: boolean;
+      sensitive: boolean;
+    };
+    FileTreeResponse: {
+      path: string;
+      entries: components["schemas"]["FileTreeEntry"][];
+    };
+    FileReadResponse: {
+      path: string;
+      content?: string;
+      /** Format: int64 */
+      size: number;
+      binary: boolean;
+      truncated: boolean;
+      version: string;
+    };
+    FileIndexResponse: {
+      paths: string[];
+      truncated: boolean;
+      partial_reasons: components["schemas"]["FilePartialReason"][];
+    };
+    /** @enum {string} */
+    FilePartialReason:
+      | "file_count"
+      | "result_count"
+      | "byte_limit"
+      | "file_size"
+      | "deadline"
+      | "canceled";
+    FileSearchRequest: {
+      query: string;
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
+      /** @default false */
+      regex: boolean;
+      include?: string[];
+      exclude?: string[] | null;
+      /** @default false */
+      caseSensitive: boolean;
+    };
+    FileSearchMatch: {
+      line: number;
+      col: number;
+      preview: string;
+    };
+    FileSearchFileResult: {
+      path: string;
+      matches: components["schemas"]["FileSearchMatch"][];
+    };
+    FileSearchResponse: {
+      results: components["schemas"]["FileSearchFileResult"][];
+      limitHit: boolean;
+      partial_reasons: components["schemas"]["FilePartialReason"][];
+    };
+    FileGitStatusResponse: {
+      status: {
+        [key: string]: string;
+      };
+      partial: boolean;
+      limit_hit: boolean;
+      errors: components["schemas"]["FileCheckoutError"][];
+    };
+    FileCheckoutError: {
+      /** @enum {string} */
+      kind: "agent" | "repo";
+      agent?: string;
+      repo: string;
+      error: string;
+    };
+    FileCheckout: {
+      /** @enum {string} */
+      kind: "agent" | "repo";
+      agent?: string;
+      repo: string;
+      exists: boolean;
+      branch?: string;
+      change_count: number;
+      status_error?: boolean;
+      error?: string;
+      partial?: boolean;
+      limit_hit?: boolean;
+    };
+    FileCheckoutsResponse: {
+      checkouts: components["schemas"]["FileCheckout"][];
+      partial: boolean;
+      limit_hit: boolean;
+      errors: components["schemas"]["FileCheckoutError"][];
+    };
+    FileCheckoutRepairRequest: {
+      /** @enum {string} */
+      scope: "agent" | "repo";
+      target: string;
+      /** @description Repo qualifier, valid when scope=agent. */
+      repo?: string;
+      force?: boolean;
+    };
+    FileCheckoutRepairResponse: {
+      repaired: boolean;
+      /** @enum {string} */
+      method: "repair" | "recreate" | "provision" | "none";
+      requires_force?: boolean;
+      backup_path?: string;
+      message: string;
+    };
+    FileDiffResponse: {
+      path: string;
+      patch: string;
+      partial: boolean;
+      limit_hit: boolean;
+    };
+    FileBlameLine: {
+      line: number;
+      lines: number;
+      sha: string;
+      author: string;
+      time: string;
+      summary: string;
+    };
+    FileBlameResponse: {
+      path: string;
+      skipped: boolean;
+      reason?: string;
+      message?: string;
+      lines: components["schemas"]["FileBlameLine"][];
+      partial: boolean;
+      limit_hit: boolean;
+    };
+    FileHistoryEntry: {
+      /** @enum {string} */
+      kind: "commit";
+      sha: string;
+      author: string;
+      time: string;
+      summary: string;
+    };
+    FileHistoryResponse: {
+      path: string;
+      entries: components["schemas"]["FileHistoryEntry"][];
+      partial: boolean;
+      limit_hit: boolean;
+    };
+    FileWriteRequest: {
+      content: string;
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
+    };
+    FileRepoQualifierRequest: {
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
+    };
+    FileMoveRequest: {
+      from: string;
+      to: string;
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
+      /** @default false */
+      overwrite: boolean;
+      /** @description Required by the server; current strong version of the source path. */
+      source_version?: string;
+      /** @description Required when overwriting an existing regular file. */
+      destination_version?: string;
     };
     RuntimeReadyResponse: {
       ready: boolean;
@@ -5873,15 +6263,72 @@ export interface operations {
       };
     };
   };
-  getFileTree: {
+  statScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        repo?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Path metadata */
+      200: {
+        headers: {
+          /** @description Strong current path version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileStatResponse"];
+        };
+      };
+    };
+  };
+  getFileCapabilities: {
     parameters: {
       query?: never;
       header?: never;
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Effective file-browser capabilities */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCapabilitiesResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileTree: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
       };
       cookie?: never;
     };
@@ -5893,22 +6340,259 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["FileTreeResponse"];
         };
       };
     };
   };
-  readFile: {
+  getScopedFileIndex: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Quick-open file index */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileIndexResponse"];
+        };
+      };
+    };
+  };
+  searchScopedFiles: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileSearchRequest"];
+      };
+    };
+    responses: {
+      /** @description File search results */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileSearchResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileGitStatus: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Root-relative file paths mapped to raw git porcelain XY codes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileGitStatusResponse"];
+        };
+      };
+    };
+  };
+  getFileCheckouts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Known file checkouts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCheckoutsResponse"];
+        };
+      };
+    };
+  };
+  repairFileCheckout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileCheckoutRepairRequest"];
+      };
+    };
+    responses: {
+      /** @description Checkout repair result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCheckoutRepairResponse"];
+        };
+      };
+      /** @description Unknown or disallowed checkout target */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileDiff: {
     parameters: {
       query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+        from?: string;
+        to?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Unified file diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileDiffResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileHistory: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
         path: string;
       };
       header?: never;
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File timeline */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileHistoryResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileBlame: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File blame data or skip signal */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileBlameResponse"];
+        };
+      };
+    };
+  };
+  readScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+        rev?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
       };
       cookie?: never;
     };
@@ -5917,42 +6601,38 @@ export interface operations {
       /** @description File content */
       200: {
         headers: {
+          /** @description Strong SHA-256 version for the current file (not revision reads). */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            content?: string;
-          };
+          "application/json": components["schemas"]["FileReadResponse"];
         };
-      };
-      /** @description File not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
     };
   };
-  writeFile: {
+  writeScopedFile: {
     parameters: {
       query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
         path: string;
       };
-      header?: never;
+      header?: {
+        /** @description Optional strong version for replace/restore callers. Ordinary editor saves omit it and remain last-write-wins. */
+        "If-Match"?: string;
+        /** @description Use * for create-only writes. */
+        "If-None-Match"?: string;
+      };
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
       };
       cookie?: never;
     };
     requestBody: {
       content: {
-        "application/json": {
-          content: string;
-        };
+        "application/json": components["schemas"]["FileWriteRequest"];
       };
     };
     responses: {
@@ -5962,8 +6642,139 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["FileMutationResponse"];
+        };
+      };
+      /** @description A supplied file precondition no longer matches */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  deleteScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+        recursive?: boolean;
+      };
+      header: {
+        /** @description Strong current source version from file stat/read. */
+        "If-Match": string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File or directory deleted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["MessageResponse"];
         };
+      };
+      /** @description Source version no longer matches */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Source version is required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  mkdirScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["FileRepoQualifierRequest"];
+      };
+    };
+    responses: {
+      /** @description Directory created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+    };
+  };
+  moveScopedFile: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileMoveRequest"];
+      };
+    };
+    responses: {
+      /** @description Path moved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileMutationResponse"];
+        };
+      };
+      /** @description Source or destination version no longer matches */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description A required source or destination version is missing */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

@@ -25,9 +25,9 @@ import {
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus, resolveAgentByName } from "@/types";
 
-const FileEditorPanel = lazy(() =>
-  import("@/components/FileEditorPanel").then((m) => ({
-    default: m.FileEditorPanel,
+const WorkspaceFileBrowser = lazy(() =>
+  import("@/components/FileExplorer").then((m) => ({
+    default: m.WorkspaceFileBrowser,
   })),
 );
 
@@ -469,10 +469,9 @@ export function AgentDetailPanel({
                     </div>
                   }
                 >
-                  <FileEditorPanel
+                  <WorkspaceFileBrowser
+                    mode="agent"
                     agentName={agent.name}
-                    agentRole={agent.role}
-                    agentRepo={agent.repo}
                     isActive={activeTab === "files"}
                   />
                 </Suspense>
