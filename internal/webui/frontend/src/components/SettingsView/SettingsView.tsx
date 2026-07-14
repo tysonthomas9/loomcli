@@ -47,6 +47,7 @@ interface RedisFormState {
 }
 
 type AgentRuntimeDefault = "local" | "daytona";
+type RuntimeCredentialProvider = "daytona" | "github";
 
 const EMPTY_REDIS_FORM: RedisFormState = {
   enabled: false,
@@ -291,24 +292,34 @@ export function SettingsView({
     );
   };
 
-  const handleRuntimeCredentialsSave = async () => {
+  const handleRuntimeCredentialSave = async (
+    provider: RuntimeCredentialProvider,
+  ) => {
     if (isSavingLocalSettings) return;
-    const payload = {
-      ...(daytonaApiKey.trim()
-        ? { daytona: { api_key: daytonaApiKey.trim() } }
-        : {}),
-      ...(githubToken.trim() ? { github: { token: githubToken.trim() } } : {}),
-    };
-    if (Object.keys(payload).length === 0) {
-      showToast("Enter a Daytona API key or GitHub token to save", {
-        type: "error",
-      });
+    const value =
+      provider === "daytona" ? daytonaApiKey.trim() : githubToken.trim();
+    if (!value) {
+      showToast(
+        provider === "daytona"
+          ? "Enter a Daytona API key to save"
+          : "Enter a GitHub token to save",
+        {
+          type: "error",
+        },
+      );
       return;
     }
+    const payload =
+      provider === "daytona"
+        ? { daytona: { api_key: value } }
+        : { github: { token: value } };
     const ok = await updateRuntimeCredentials(payload);
     if (ok) {
-      setDaytonaApiKey("");
-      setGithubToken("");
+      if (provider === "daytona") {
+        setDaytonaApiKey("");
+      } else {
+        setGithubToken("");
+      }
       showToast("Runtime credentials saved", { type: "success" });
     } else {
       showToast("Failed to save runtime credentials", { type: "error" });
@@ -316,7 +327,7 @@ export function SettingsView({
   };
 
   const handleRuntimeCredentialClear = async (
-    provider: "daytona" | "github",
+    provider: RuntimeCredentialProvider,
   ) => {
     if (isSavingLocalSettings) return;
     const ok = await updateRuntimeCredentials({ [provider]: { clear: true } });
@@ -463,12 +474,15 @@ export function SettingsView({
         </div>
       </div>
 
-      {/* Agent Runtime */}
-      <div className={styles.panel} data-testid="agent-runtime-panel">
+      {/* Remote runtimes */}
+      <div className={styles.panel} data-testid="remote-runtimes-panel">
         <div className={styles.panelHeader}>
-          <h3 className={styles.panelTitle}>Agent Runtime</h3>
+          <h3 className={styles.panelTitle}>Remote runtimes</h3>
         </div>
         <div className={styles.panelContent}>
+          <p className={styles.description}>
+            Configure app-triggered task runtimes and Daytona access.
+          </p>
           <div className={styles.formGroup}>
             <label className={styles.label} htmlFor="agent-runtime-select">
               Run task agents
@@ -538,85 +552,104 @@ export function SettingsView({
                 : "Save Local Task Runner Settings"}
             </button>
           </div>
-          <div className={styles.fieldGrid}>
-            <div className={styles.formGroup}>
-              <label className={styles.label} htmlFor="daytona-api-key-input">
-                Daytona API Key
-              </label>
-              <input
-                id="daytona-api-key-input"
-                type="password"
-                className={styles.input}
-                value={daytonaApiKey}
-                onChange={(e) => setDaytonaApiKey(e.target.value)}
-                placeholder={
-                  runtimeCredentials?.daytona.configured
-                    ? "Saved key unchanged"
-                    : "dtn_..."
-                }
-                data-testid="daytona-api-key-input"
-              />
-              <p className={styles.description}>
-                {runtimeCredentials?.daytona.configured
-                  ? "Daytona credential saved"
-                  : "No Daytona credential saved"}
-              </p>
-              {runtimeCredentials?.daytona.configured && (
-                <button
-                  type="button"
-                  className={styles.navButton}
-                  disabled={isSavingLocalSettings}
-                  onClick={() => handleRuntimeCredentialClear("daytona")}
-                  data-testid="daytona-credential-clear-button"
-                >
-                  Clear Daytona Key
-                </button>
-              )}
-            </div>
-            <div className={styles.formGroup}>
-              <label className={styles.label} htmlFor="github-token-input">
-                GitHub Token for Runtimes and PR Review
-              </label>
-              <input
-                id="github-token-input"
-                type="password"
-                className={styles.input}
-                value={githubToken}
-                onChange={(e) => setGithubToken(e.target.value)}
-                placeholder={
-                  runtimeCredentials?.github.configured
-                    ? "Saved token unchanged"
-                    : "github_pat_..."
-                }
-                data-testid="github-token-input"
-              />
-              <p className={styles.description}>
-                {runtimeCredentials?.github.configured
-                  ? "Credential saved. Used by remote runtimes and GitHub PR review in this workspace."
-                  : "Used by remote runtimes and GitHub PR review in this workspace."}
-              </p>
-              {runtimeCredentials?.github.configured && (
-                <button
-                  type="button"
-                  className={styles.navButton}
-                  disabled={isSavingLocalSettings}
-                  onClick={() => handleRuntimeCredentialClear("github")}
-                  data-testid="github-credential-clear-button"
-                >
-                  Clear GitHub Token
-                </button>
-              )}
-            </div>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="daytona-api-key-input">
+              Daytona API Key
+            </label>
+            <input
+              id="daytona-api-key-input"
+              type="password"
+              className={styles.input}
+              value={daytonaApiKey}
+              onChange={(e) => setDaytonaApiKey(e.target.value)}
+              placeholder={
+                runtimeCredentials?.daytona.configured
+                  ? "Saved key unchanged"
+                  : "dtn_..."
+              }
+              data-testid="daytona-api-key-input"
+            />
+            <p className={styles.description}>
+              {runtimeCredentials?.daytona.configured
+                ? "Daytona credential saved"
+                : "No Daytona credential saved"}
+            </p>
+            {runtimeCredentials?.daytona.configured && (
+              <button
+                type="button"
+                className={styles.navButton}
+                disabled={isSavingLocalSettings}
+                onClick={() => handleRuntimeCredentialClear("daytona")}
+                data-testid="daytona-credential-clear-button"
+              >
+                Clear Daytona Key
+              </button>
+            )}
           </div>
           <div className={styles.formGroup}>
             <button
               type="button"
               className={styles.saveButton}
               disabled={isSavingLocalSettings}
-              onClick={handleRuntimeCredentialsSave}
-              data-testid="runtime-credentials-save-button"
+              onClick={() => handleRuntimeCredentialSave("daytona")}
+              data-testid="daytona-credential-save-button"
             >
-              {isSavingLocalSettings ? "Saving..." : "Save Runtime Credentials"}
+              {isSavingLocalSettings ? "Saving..." : "Save Daytona Credential"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* GitHub */}
+      <div className={styles.panel} data-testid="github-settings-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>GitHub</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="github-token-input">
+              GitHub Token for Runtimes and PR Review
+            </label>
+            <input
+              id="github-token-input"
+              type="password"
+              className={styles.input}
+              value={githubToken}
+              onChange={(e) => setGithubToken(e.target.value)}
+              placeholder={
+                runtimeCredentials?.github.configured
+                  ? "Saved token unchanged"
+                  : "github_pat_..."
+              }
+              data-testid="github-token-input"
+            />
+            <p className={styles.description}>
+              {runtimeCredentials?.github.configured && "Credential saved. "}
+              <span>
+                Used for GitHub PR review and remote runtime provisioning.
+              </span>
+            </p>
+            {runtimeCredentials?.github.configured && (
+              <button
+                type="button"
+                className={styles.navButton}
+                disabled={isSavingLocalSettings}
+                onClick={() => handleRuntimeCredentialClear("github")}
+                data-testid="github-credential-clear-button"
+              >
+                Clear GitHub Token
+              </button>
+            )}
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={isSavingLocalSettings}
+              onClick={() => handleRuntimeCredentialSave("github")}
+              data-testid="github-credential-save-button"
+            >
+              {isSavingLocalSettings ? "Saving..." : "Save GitHub Credential"}
             </button>
           </div>
         </div>
