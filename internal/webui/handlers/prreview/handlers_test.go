@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -42,6 +43,7 @@ const (
 type fakeGitHubCall struct {
 	method        string
 	path          string
+	query         string
 	authorization string
 	body          map[string]any
 }
@@ -80,12 +82,16 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 	g.calls = append(g.calls, fakeGitHubCall{
 		method:        r.Method,
 		path:          r.URL.Path,
+		query:         r.URL.RawQuery,
 		authorization: r.Header.Get("Authorization"),
 		body:          body,
 	})
 	headSha := g.headSha
 	state := g.state
-	list, hasList := g.lists[r.URL.Path]
+	list, hasList := g.lists[r.URL.Path+"?page="+r.URL.Query().Get("page")]
+	if !hasList {
+		list, hasList = g.lists[r.URL.Path]
+	}
 	g.mu.Unlock()
 
 	switch {
@@ -146,10 +152,31 @@ func (g *fakeGitHub) setListPayload(owner, repo string, pulls []map[string]any) 
 	g.lists["/repos/"+owner+"/"+repo+"/pulls"] = fakePullList{status: http.StatusOK, pulls: pulls}
 }
 
+func (g *fakeGitHub) setListPage(owner, repo string, page int, pulls []map[string]any) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	key := "/repos/" + owner + "/" + repo + "/pulls?page=" + strconv.Itoa(page)
+	g.lists[key] = fakePullList{status: http.StatusOK, pulls: pulls}
+}
+
 func (g *fakeGitHub) setListStatus(owner, repo string, status int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.lists["/repos/"+owner+"/"+repo+"/pulls"] = fakePullList{status: status}
+}
+
+func fakePullRequestPage(first, count int) []map[string]any {
+	pulls := make([]map[string]any, 0, count)
+	for number := first; number < first+count; number++ {
+		pulls = append(pulls, map[string]any{
+			"number": number,
+			"state":  "open",
+			"title":  "PR " + strconv.Itoa(number),
+			"head":   map[string]any{"sha": "head", "ref": "feature"},
+			"base":   map[string]any{"sha": "base", "ref": "main"},
+		})
+	}
+	return pulls
 }
 
 func (g *fakeGitHub) snapshot() []fakeGitHubCall {
@@ -162,6 +189,21 @@ func writeUpstreamJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func decodePullRequestsResponse(t *testing.T, raw []byte) pullRequestsData {
+	t.Helper()
+	var decoded struct {
+		Success bool             `json:"success"`
+		Data    pullRequestsData `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode pull request response: %v (body %s)", err, raw)
+	}
+	if !decoded.Success {
+		t.Fatalf("pull request response was not successful: %s", raw)
+	}
+	return decoded.Data
 }
 
 type prReviewHarness struct {
@@ -705,9 +747,78 @@ func TestListPullRequestsConnector(t *testing.T) {
 	}
 	calls := h.github.snapshot()
 	if len(calls) != 1 || calls[0].path != "/repos/octocat/hello/pulls" {
-		t.Fatalf("calls = %+v, want one PR list", calls)
+		t.Fatalf("calls = %+v, want one short-page PR list", calls)
+	}
+	for _, want := range []string{"state=all", "per_page=100", "page=1"} {
+		if !strings.Contains(calls[0].query, want) {
+			t.Fatalf("short-page query %q missing %q", calls[0].query, want)
+		}
 	}
 	assertGrantActions(t, h, prReadActions)
+}
+
+func TestListPullRequestsConnectorPaginatesWithDistinctCallSeq(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	h.github.setListPage("octocat", "hello", 1, fakePullRequestPage(1, 100))
+	h.github.setListPage("octocat", "hello", 2, fakePullRequestPage(101, 42))
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=all")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if len(data.PullRequests) != 142 {
+		t.Fatalf("pull request count = %d, want 142", len(data.PullRequests))
+	}
+
+	calls := h.github.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("GitHub calls = %d, want 2", len(calls))
+	}
+	for i, call := range calls {
+		for _, want := range []string{"state=all", "per_page=100", "page=" + strconv.Itoa(i+1)} {
+			if !strings.Contains(call.query, want) {
+				t.Fatalf("page %d query %q missing %q", i+1, call.query, want)
+			}
+		}
+	}
+
+	runID := "webui-review:user-1:octocat/hello:list:" + providers.ActionGitHubPullsList
+	records, err := h.store.ConnectorCalls().ListByRun(
+		context.Background(), prReviewTestWorkspace, runID, store.ConnectorCallFilter{},
+	)
+	if err != nil {
+		t.Fatalf("list connector call audit: %v", err)
+	}
+	if len(records) != 2 || records[0].Seq != 0 || records[1].Seq != 1 {
+		t.Fatalf("connector call records = %+v, want seq 0 and 1", records)
+	}
+	if records[0].CallID == records[1].CallID {
+		t.Fatalf("connector page calls reused audit id %q", records[0].CallID)
+	}
+}
+
+func TestListPullRequestsConnectorWarnsAtPageCap(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	for page := 1; page <= maxPullsListPages; page++ {
+		h.github.setListPage("octocat", "hello", page, fakePullRequestPage((page-1)*pullsListPerPage+1, pullsListPerPage))
+	}
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=all")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if len(data.PullRequests) != pullsListPerPage*maxPullsListPages {
+		t.Fatalf("pull request count = %d, want capped %d", len(data.PullRequests), pullsListPerPage*maxPullsListPages)
+	}
+	if len(data.Warnings) != 1 || !strings.Contains(data.Warnings[0], "octocat/hello") ||
+		!strings.Contains(data.Warnings[0], "truncated") {
+		t.Fatalf("warnings = %v, want repo-scoped truncation warning", data.Warnings)
+	}
+	if calls := h.github.snapshot(); len(calls) != maxPullsListPages {
+		t.Fatalf("GitHub calls = %d, want capped %d", len(calls), maxPullsListPages)
+	}
 }
 
 func TestNormalizePullState(t *testing.T) {

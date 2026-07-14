@@ -18,6 +18,11 @@ type pullRequestsData struct {
 	Warnings     []string             `json:"warnings,omitempty"`
 }
 
+const (
+	pullsListPerPage  = 100
+	maxPullsListPages = 5
+)
+
 func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("ws")
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
@@ -86,7 +91,27 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 			warnings = append(warnings, repoWarning(owner, repo, err))
 			continue
 		}
-		res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+		repoPRs, truncated, err := m.connectorListPullRequestsForRepo(r, ws, state, owner, repo)
+		prs = append(prs, repoPRs...)
+		if err != nil {
+			failed++
+			warnings = append(warnings, repoWarning(owner, repo, err))
+			continue
+		}
+		if truncated {
+			warnings = append(warnings, pullsListTruncationWarning(owner, repo))
+		}
+	}
+	return prs, warnings, attempted, failed
+}
+
+func (m *Module) connectorListPullRequestsForRepo(
+	r *http.Request,
+	ws, state, owner, repo string,
+) (prs []ops.GitPullRequest, truncated bool, err error) {
+	prs = []ops.GitPullRequest{}
+	for page := 1; page <= maxPullsListPages; page++ {
+		res, dispatchErr := m.dispatcher.Dispatch(r.Context(), connector.Request{
 			WorkspaceKey: ws,
 			RunID:        listRunID(r, owner, repo),
 			BindingID:    bindingID,
@@ -94,20 +119,28 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 			Action:       providers.ActionGitHubPullsList,
 			Resource:     prResource(owner, repo),
 			Args: map[string]any{
-				"owner": owner,
-				"repo":  repo,
-				"state": connectorListState(state),
+				"owner":   owner,
+				"repo":    repo,
+				"state":   connectorListState(state),
+				"perPage": pullsListPerPage,
+				"page":    page,
 			},
-			CallSeq: 0,
+			CallSeq: page - 1,
 		})
-		if err != nil {
-			failed++
-			warnings = append(warnings, repoWarning(owner, repo, err))
-			continue
+		if dispatchErr != nil {
+			return prs, false, dispatchErr
 		}
-		prs = append(prs, pullRequestsFromBody(owner, repo, res.Body)...)
+		pagePRs := pullRequestsFromBody(owner, repo, res.Body)
+		prs = append(prs, pagePRs...)
+		if len(pagePRs) < pullsListPerPage {
+			return prs, false, nil
+		}
 	}
-	return prs, warnings, attempted, failed
+	return prs, true, nil
+}
+
+func pullsListTruncationWarning(owner, repo string) string {
+	return fmt.Sprintf("%s/%s: pull request list truncated after %d entries", owner, repo, pullsListPerPage*maxPullsListPages)
 }
 
 func (m *Module) connectorListAvailable() bool {

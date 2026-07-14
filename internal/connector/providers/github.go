@@ -261,7 +261,7 @@ func (g *GitHub) pullRequestRead(ctx context.Context, spec CallSpec) (CallResult
 }
 
 // pullsList lists pull requests; optional camelCase args state, base, head,
-// perPage map to GitHub's query parameters.
+// perPage, and page map to GitHub's query parameters.
 func (g *GitHub) pullsList(ctx context.Context, spec CallSpec) (CallResult, error) {
 	owner, repo, err := repoArgs(spec.Args)
 	if err != nil {
@@ -281,6 +281,11 @@ func (g *GitHub) pullsList(ctx context.Context, spec CallSpec) (CallResult, erro
 		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
 	} else if ok {
 		query.Set("per_page", strconv.Itoa(v))
+	}
+	if v, ok, err := intArg(spec.Args, "page"); err != nil {
+		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
+	} else if ok {
+		query.Set("page", strconv.Itoa(v))
 	}
 	res, err := g.do(ctx, spec, http.MethodGet,
 		fmt.Sprintf("/repos/%s/%s/pulls", owner, repo), query, nil)

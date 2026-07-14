@@ -496,7 +496,7 @@ func TestGitHubReads(t *testing.T) {
 			Action: ActionGitHubPullsList,
 			Args: map[string]any{
 				"owner": "octocat", "repo": "hello",
-				"state": "open", "base": "main", "perPage": 50,
+				"state": "open", "base": "main", "perPage": 50, "page": 2,
 			},
 			Credential: testToken,
 		})
@@ -509,7 +509,7 @@ func TestGitHubReads(t *testing.T) {
 		}
 		reqs := fake.recorded()
 		last := reqs[len(reqs)-1]
-		for _, want := range []string{"state=open", "base=main", "per_page=50"} {
+		for _, want := range []string{"state=open", "base=main", "per_page=50", "page=2"} {
 			if !strings.Contains(last.Query, want) {
 				t.Errorf("query %q missing %q", last.Query, want)
 			}
