@@ -5,6 +5,9 @@
 export { useBackendConfig } from "./useBackendConfig";
 export type { UseBackendConfigReturn } from "./useBackendConfig";
 
+export { useWorkspaceDesignFormat } from "./useWorkspaceDesignFormat";
+export type { UseWorkspaceDesignFormatReturn } from "./useWorkspaceDesignFormat";
+
 export { useLocalSettings } from "./useLocalSettings";
 export type { UseLocalSettingsReturn } from "./useLocalSettings";
 

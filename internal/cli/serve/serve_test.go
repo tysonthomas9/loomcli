@@ -950,18 +950,21 @@ func TestApplyCORSConfig_FrontendURL(t *testing.T) {
 		frontendURLs []string
 		wantEnabled  bool
 		wantOrigins  []string
+		wantFrontend []string
 	}{
 		{
 			name:         "single frontend-url",
 			frontendURLs: []string{"https://app.example.com"},
 			wantEnabled:  true,
 			wantOrigins:  []string{"https://app.example.com"},
+			wantFrontend: []string{"https://app.example.com"},
 		},
 		{
 			name:         "trailing slash stripped",
 			frontendURLs: []string{"https://a.example.com/", "https://b.example.com"},
 			wantEnabled:  true,
 			wantOrigins:  []string{"https://a.example.com", "https://b.example.com"},
+			wantFrontend: []string{"https://a.example.com", "https://b.example.com"},
 		},
 		{
 			name:        "cors only",
@@ -975,6 +978,7 @@ func TestApplyCORSConfig_FrontendURL(t *testing.T) {
 			frontendURLs: []string{"https://a.example.com"},
 			wantEnabled:  true,
 			wantOrigins:  []string{"https://c.example.com", "https://a.example.com"},
+			wantFrontend: []string{"https://a.example.com"},
 		},
 		{
 			name:        "neither set disables CORS",
@@ -986,6 +990,7 @@ func TestApplyCORSConfig_FrontendURL(t *testing.T) {
 			frontendURLs: []string{"", "https://a.example.com"},
 			wantEnabled:  true,
 			wantOrigins:  []string{"https://a.example.com"},
+			wantFrontend: []string{"https://a.example.com"},
 		},
 	}
 
@@ -1002,6 +1007,9 @@ func TestApplyCORSConfig_FrontendURL(t *testing.T) {
 			}
 			if !reflect.DeepEqual(cfg.CORSOrigins, tc.wantOrigins) {
 				t.Errorf("CORSOrigins = %v, want %v", cfg.CORSOrigins, tc.wantOrigins)
+			}
+			if !reflect.DeepEqual(cfg.FrontendOrigins, tc.wantFrontend) {
+				t.Errorf("FrontendOrigins = %v, want %v", cfg.FrontendOrigins, tc.wantFrontend)
 			}
 		})
 	}

@@ -39,6 +39,18 @@ type promptTemplateData struct {
 	TargetBranch      string
 	ConflictList      string
 	PushRef           string
+	DesignFormat      string
+}
+
+// resolveDesignFormat returns the design output format for planner prompts.
+// Only an explicit workspace setting of "html" switches the format; anything
+// else (nil workspace, empty, "markdown", unrecognized values) falls back to
+// "markdown" so plan generation never breaks on bad data.
+func resolveDesignFormat(workspace *config.WorkspaceConfig) string {
+	if workspace != nil && workspace.DesignFormat == "html" {
+		return "html"
+	}
+	return "markdown"
 }
 
 // BuiltinInteractivePrompt is a selectable built-in terminal-agent prompt.
@@ -197,11 +209,13 @@ func buildTestStep(caps backendCapabilities) string {
 - Use the Task tool to spawn an agent to write tests
 - Prompt: 'Write unit tests for the changes made in [files]. Follow existing test patterns in the codebase.'
 - Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- For Go suites, isolate config state: run 'LOOM_CONFIG_DIR=$(mktemp -d) go test ./...' (or use scripts/test.sh, which isolates automatically)
 - If tests fail, fix the code or tests until they pass`
 	}
 	return `### Step 5: Write Tests
 - Write unit tests for your changes, following existing test patterns in the codebase
 - Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- For Go suites, isolate config state: run 'LOOM_CONFIG_DIR=$(mktemp -d) go test ./...' (or use scripts/test.sh, which isolates automatically)
 - If tests fail, fix the code or tests until they pass`
 }
 
@@ -254,6 +268,7 @@ func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig,
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		ReadyJSON:      readyJSON,
 		ReadyFallback:  readyFallback,
+		DesignFormat:   resolveDesignFormat(workspace),
 	})
 
 	// Inject the prior-attempt checkpoint as a FALLBACK — skipped when a session
@@ -305,6 +320,7 @@ func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.Wor
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
+		DesignFormat:   resolveDesignFormat(workspace),
 	})
 	return injectCheckpointIfNotResuming(prompt)
 }

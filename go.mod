@@ -5,6 +5,7 @@ go 1.25.6
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/alicebob/miniredis/v2 v2.36.1
+	github.com/bmatcuk/doublestar/v4 v4.7.1
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getsentry/sentry-go v0.44.1

@@ -29,14 +29,10 @@ func testSessionWorkspaceStore(t *testing.T, dir string) storepkg.Store {
 	if _, err := st.Workspaces().Create(context.Background(), storepkg.WorkspaceCreate{Key: "test-ws", Name: "test-ws"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return err
-		}
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		sc.Workspaces["test-ws"] = bootstrap.WorkspaceLocalState{Path: dir}
 		sc.LastWorkspace = "test-ws"
-		return bootstrap.SaveStateCache(sc)
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}

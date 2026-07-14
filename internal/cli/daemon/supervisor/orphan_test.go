@@ -27,6 +27,14 @@ func TestHelperProcess(t *testing.T) {
 		return
 	}
 
+	// Guard against leaking helper subprocesses when the test binary dies
+	// without running t.Cleanup (e.g. Ctrl-C / SIGKILL). The helpers run with
+	// Setpgid:true, so they don't receive the terminal's SIGINT, and on signal
+	// death the framework never fires the cleanups that would kill them — so
+	// they would otherwise squat for the full sleep below, spawning a swarm
+	// that the supervisor's per-PID lsof sweep amplifies into a load spike.
+	watchRootPID()
+
 	switch mode {
 	case "fake_worker_with_isolated_child":
 		runFakeWorkerWithIsolatedChild(t)
@@ -35,6 +43,33 @@ func TestHelperProcess(t *testing.T) {
 	default:
 		t.Fatalf("unknown helper mode %q", mode)
 	}
+}
+
+// watchRootPID exits the helper process as soon as the test binary that
+// started this chain (identified by LOOM_TEST_ROOT_PID) is gone. We watch the
+// *root* test-binary PID rather than the immediate parent on purpose: the
+// startup-sweep tests deliberately SIGKILL the intermediate worker to reparent
+// the child to init (PPID==1), so a parent-death watch would kill those
+// helpers prematurely. In that scenario the test binary is still alive, so the
+// helper keeps running; on a real Ctrl-C the whole test binary dies and every
+// descendant helper exits within a poll interval.
+func watchRootPID() {
+	v := os.Getenv("LOOM_TEST_ROOT_PID")
+	if v == "" {
+		return
+	}
+	root, err := strconv.Atoi(v)
+	if err != nil || root <= 0 {
+		return
+	}
+	go func() {
+		for {
+			if syscall.Kill(root, 0) != nil {
+				os.Exit(0)
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+	}()
 }
 
 // runFakeWorkerWithIsolatedChild mimics what the real worker (`loom agent ...`)
@@ -65,16 +100,23 @@ func runFakeWorkerWithIsolatedChild(_ *testing.T) {
 	if path := os.Getenv("LOOM_TEST_CHILD_PID_FILE"); path != "" {
 		_ = os.WriteFile(path, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
 	}
-	// Sleep long enough that the test's StopAgent will hit us with SIGTERM.
-	time.Sleep(120 * time.Second)
+	// Sleep long enough that the test's StopAgent will hit us with SIGTERM
+	// (its grace windows are ≤8s), but short enough to bound the blast radius
+	// if this helper ever leaks past watchRootPID's safety net.
+	time.Sleep(helperLingerSleep)
 	os.Exit(0)
 }
 
 // runFakeBackendSleep just sleeps in its own pgroup. It is the codex stand-in.
 func runFakeBackendSleep(_ *testing.T) {
-	time.Sleep(120 * time.Second)
+	time.Sleep(helperLingerSleep)
 	os.Exit(0)
 }
+
+// helperLingerSleep is how long a fake worker/backend lingers awaiting the
+// signals the tests deliver. The test acceptance windows are ≤8s, so 15s is
+// ample headroom while keeping a leaked helper from squatting for minutes.
+const helperLingerSleep = 15 * time.Second
 
 // spawnFakeWorker starts the helper "worker" with Setpgid:true and returns the
 // *exec.Cmd plus the PID of the helper's isolated child (the codex stand-in).
@@ -92,6 +134,9 @@ func spawnFakeWorker(t *testing.T, workerCwd string) (*exec.Cmd, int) {
 	cmd.Env = append(os.Environ(),
 		"LOOM_TEST_HELPER_MODE=fake_worker_with_isolated_child",
 		"LOOM_TEST_CHILD_PID_FILE="+childPIDFile,
+		// Let the worker (and, by inheritance, its isolated child) self-terminate
+		// if this test binary dies without running cleanups. See watchRootPID.
+		"LOOM_TEST_ROOT_PID="+strconv.Itoa(os.Getpid()),
 	)
 	cmd.Dir = workerCwd
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -284,7 +329,7 @@ func TestFindWorktreeOrphans_PrefixesMatchOnResolvedPath(t *testing.T) {
 	}
 	worktreeDir := t.TempDir()
 
-	cmd := exec.Command("sleep", "120") //nolint:norawexec,gosec // G204/norawexec: fixed args
+	cmd := exec.Command("sleep", "15") //nolint:norawexec,gosec // G204/norawexec: fixed args
 	cmd.Dir = worktreeDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
@@ -350,7 +395,7 @@ func TestKillOrphanedWorktreeProcesses_PgroupKillEndToEnd(t *testing.T) {
 	}
 	worktreeDir := t.TempDir()
 
-	cmd := exec.Command("sleep", "120") //nolint:norawexec,gosec // G204/norawexec: fixed args
+	cmd := exec.Command("sleep", "15") //nolint:norawexec,gosec // G204/norawexec: fixed args
 	cmd.Dir = worktreeDir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {

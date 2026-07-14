@@ -19,7 +19,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	"github.com/tysonthomas9/loomcli/internal/webui/service/pathsec"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
@@ -53,9 +52,6 @@ func handleAuthConfig(extAuthURL string, limiter *AuthConfigLimiter) http.Handle
 }
 
 var handleClientErrors = HandleClientErrors
-var handleFileRead = HandleFileRead
-var handleFileTree = HandleFileTree
-var handleFileWrite = HandleFileWrite
 var handleGetAgentLog = HandleGetAgentLog
 var handleGetBackendsHealth = HandleGetBackendsHealth
 var handleListEditors = HandleListEditors
@@ -82,7 +78,7 @@ type clientErrorLimiter = ClientErrorLimiter
 // AgentLogResult → service.AgentLogResult
 type AgentLogResult = service.AgentLogResult
 
-// FileReadResult → service.FileReadResult (used by files_coverage_test.go)
+// FileReadResult → service.FileReadResult
 type FileReadResult = service.FileReadResult
 
 // FileTreeResult → service.FileTreeResult
@@ -107,44 +103,88 @@ func NewFileService(fileOps ops.FileOps) service.FileService {
 	return &testFileServiceImpl{fileOps: fileOps}
 }
 
-func (s *testFileServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktree, error) {
-	if agentName == "" || !service.ValidAgentName.MatchString(agentName) {
-		return nil, service.ErrValidation("invalid agent name")
+// resolveScopeRootTest mirrors svcimpl.fileServiceImpl.resolveScopeRoot.
+func (s *testFileServiceImpl) resolveScopeRootTest(wsID string, scope service.FileScope, target, repo string) (string, error) {
+	if repo != "" && scope != service.ScopeAgent {
+		return "", service.ErrValidation("repo qualifier is only supported for agent scope")
 	}
-	// List/Read use the lead-aware resolver so a lead (no local worktree) falls
-	// back to the workspace primary worktree. Mirrors svcimpl.fileServiceImpl.
-	wt, err := s.fileOps.ResolveAgentWorktreeOrPrimary(wsID, agentName)
-	if err != nil {
-		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
+	switch scope {
+	case service.ScopeWorkspace:
+		if target != "" {
+			return "", service.ErrValidation("workspace scope does not take a target")
+		}
+		root, err := s.fileOps.ResolveWorkspaceRoot(wsID)
+		if err != nil {
+			return "", service.ErrNotFound(err.Error())
+		}
+		return root, nil
+	case service.ScopeRepo:
+		if target == "" {
+			return "", service.ErrValidation("repo scope requires a target")
+		}
+		ws, err := s.fileOps.ResolveWorkspaceData(wsID)
+		if err != nil {
+			return "", service.ErrNotFound(err.Error())
+		}
+		repoName := ""
+		for _, repo := range ws.Repos {
+			if repo.Name == target {
+				repoName = repo.Name
+				break
+			}
+		}
+		if repoName == "" {
+			return "", service.ErrNotFound(fmt.Sprintf("repo %q not found", target))
+		}
+		root, err := s.fileOps.ResolveWorkspaceRoot(wsID)
+		if err != nil {
+			return "", service.ErrNotFound(err.Error())
+		}
+		return filepath.Join(root, repoName), nil
+	case service.ScopeAgent:
+		if target == "" || !service.IsValidAgentName(target) {
+			return "", service.ErrValidation("invalid agent name")
+		}
+		ws, err := s.fileOps.ResolveWorkspaceData(wsID)
+		if err != nil {
+			return "", service.ErrNotFound(err.Error())
+		}
+		var found bool
+		for _, agent := range ws.Agents {
+			if agent.Name == target {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "", service.ErrNotFound(fmt.Sprintf("agent %q not found", target))
+		}
+		var wt *ops.AgentWorktree
+		if repo != "" {
+			wt, err = s.fileOps.ResolveAgentWorktreeForRepo(wsID, target, repo)
+		} else {
+			wt, err = s.fileOps.ResolveAgentWorktree(wsID, target)
+		}
+		if err != nil {
+			return "", service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", target))
+		}
+		return wt.Path, nil
+	default:
+		return "", service.ErrValidation(fmt.Sprintf("unsupported scope %q", scope))
 	}
-	return wt, nil
 }
 
-// resolveAgentForWrite resolves the agent's own worktree for writes — no lead
-// primary fallback, so a lead can't mutate the primary repo from the viewer.
-// Mirrors svcimpl.fileServiceImpl.resolveAgentForWrite.
-func (s *testFileServiceImpl) resolveAgentForWrite(wsID, agentName string) (*ops.AgentWorktree, error) {
-	if agentName == "" || !service.ValidAgentName.MatchString(agentName) {
-		return nil, service.ErrValidation("invalid agent name")
-	}
-	wt, err := s.fileOps.ResolveAgentWorktree(wsID, agentName)
-	if err != nil {
-		return nil, service.ErrNotFound(fmt.Sprintf("agent worktree %q not found", agentName))
-	}
-	return wt, nil
-}
-
-func (s *testFileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, path string) (*service.FileTreeResult, error) {
-	wt, err := s.resolveAgent(wsID, agentName)
+func (s *testFileServiceImpl) ListDirectoryScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileTreeResult, error) {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
-	if path == "" {
-		path = "."
+	_, fullPath, err := testScopedFullPath(root, path, true)
+	if err != nil {
+		return nil, err
 	}
-	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
-	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
-		return nil, service.ErrForbidden("path outside worktree")
+	if err := testNoSymlinkComponents(root, fullPath); err != nil {
+		return nil, err
 	}
 	fi, err := os.Lstat(fullPath)
 	if err != nil {
@@ -173,7 +213,7 @@ func (s *testFileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, 
 	})
 	entries := make([]service.FileTreeEntry, 0, len(dirEntries))
 	for _, de := range dirEntries {
-		if de.Type()&os.ModeSymlink != 0 {
+		if de.Type()&os.ModeSymlink != 0 || strings.EqualFold(de.Name(), ".git") {
 			continue
 		}
 		info, infoErr := de.Info()
@@ -187,30 +227,24 @@ func (s *testFileServiceImpl) ListDirectory(_ context.Context, wsID, agentName, 
 			ModTime: info.ModTime().UTC().Format(time.RFC3339),
 		})
 	}
-	relPath, _ := filepath.Rel(wt.Path, fullPath)
+	relPath, _ := filepath.Rel(root, fullPath)
 	if relPath == "" {
 		relPath = "."
 	}
 	return &service.FileTreeResult{Path: relPath, Entries: entries}, nil
 }
 
-func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path string) (*service.FileReadResult, error) {
-	wt, err := s.resolveAgent(wsID, agentName)
+func (s *testFileServiceImpl) ReadFileScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) (*service.FileReadResult, error) {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return nil, err
 	}
-	if path == "" {
-		return nil, service.ErrValidation("path parameter is required")
+	cleanPath, fullPath, err := testScopedFullPath(root, path, false)
+	if err != nil {
+		return nil, err
 	}
-	if pathsec.IsDeniedPath(path) {
-		return nil, service.ErrForbidden("access to this file type is denied")
-	}
-	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
-	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
-		return nil, service.ErrForbidden("path outside worktree")
-	}
-	if pathsec.IsDeniedPath(fullPath) {
-		return nil, service.ErrForbidden("access to this file type is denied")
+	if err := testNoSymlinkComponents(root, fullPath); err != nil {
+		return nil, err
 	}
 	fi, err := os.Lstat(fullPath)
 	if err != nil {
@@ -225,10 +259,7 @@ func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path 
 	if fi.IsDir() {
 		return nil, service.ErrValidation("path is a directory, not a file")
 	}
-	if fi.Size() > maxRequestBody {
-		return nil, service.ErrPayloadTooLarge(fmt.Sprintf("file too large: %d bytes (max %d)", fi.Size(), maxRequestBody))
-	}
-	f, err := OpenLogFileSecure(fullPath, wt.Path)
+	f, err := OpenLogFileSecure(fullPath, root)
 	if err != nil {
 		if strings.Contains(err.Error(), "symlink") {
 			return nil, service.ErrForbidden("refusing to follow symlink")
@@ -236,50 +267,327 @@ func (s *testFileServiceImpl) ReadFile(_ context.Context, wsID, agentName, path 
 		return nil, service.ErrInternal("failed to open file", err)
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxRequestBody+1))
+	truncated := fi.Size() > maxRequestBody
+	data, err := io.ReadAll(io.LimitReader(f, maxRequestBody))
 	if err != nil {
 		return nil, service.ErrInternal("failed to read file", err)
 	}
 	if IsBinaryContent(data) {
-		return &service.FileReadResult{Path: path, Size: fi.Size(), Binary: true}, nil
+		return &service.FileReadResult{Path: cleanPath, Size: fi.Size(), Binary: true, Truncated: truncated}, nil
 	}
-	return &service.FileReadResult{Path: path, Content: string(data), Size: fi.Size()}, nil
+	return &service.FileReadResult{Path: cleanPath, Content: string(data), Size: fi.Size(), Truncated: truncated}, nil
 }
 
-func (s *testFileServiceImpl) WriteFile(_ context.Context, wsID, agentName, path, content string) error {
-	wt, err := s.resolveAgentForWrite(wsID, agentName)
+func (s *testFileServiceImpl) StatPathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileStatResult, error) {
+	return &service.FileStatResult{}, nil
+}
+
+func (s *testFileServiceImpl) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
+	return &service.FileReadResult{}, nil
+}
+
+func (s *testFileServiceImpl) IndexFilesScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string) (*service.FileIndexResult, error) {
+	if _, err := s.resolveScopeRootTest(wsID, scope, target, repo); err != nil {
+		return nil, err
+	}
+	return &service.FileIndexResult{Paths: []string{}, Truncated: false}, nil
+}
+
+func (s *testFileServiceImpl) SearchFilesScoped(_ context.Context, wsID string, scope service.FileScope, target, repo string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
+	if _, err := s.resolveScopeRootTest(wsID, scope, target, repo); err != nil {
+		return nil, err
+	}
+	return &service.FileSearchResult{Results: []service.FileSearchFileResult{}, LimitHit: false}, nil
+}
+
+func (s *testFileServiceImpl) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (service.FileGitStatusResult, error) {
+	return service.FileGitStatusResult{}, nil
+}
+
+func (s *testFileServiceImpl) ListFileCheckouts(_ context.Context, _ string) (*service.FileCheckoutsResult, error) {
+	return &service.FileCheckoutsResult{}, nil
+}
+
+func (s *testFileServiceImpl) RepairCheckout(_ context.Context, wsID string, req service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
+	result, err := s.fileOps.RepairCheckout(wsID, req.Scope, req.Target, req.Repo, req.Force)
+	if err != nil {
+		if errors.Is(err, ops.ErrCheckoutTargetNotAllowed) || errors.Is(err, ops.ErrAgentRepoNotAllowed) {
+			return nil, service.ErrValidation("checkout target is not allowed")
+		}
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (s *testFileServiceImpl) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
+	return &service.FileDiffResult{}, nil
+}
+
+func (s *testFileServiceImpl) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
+	return &service.FileBlameResult{}, nil
+}
+
+func (s *testFileServiceImpl) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileHistoryResult, error) {
+	return &service.FileHistoryResult{}, nil
+}
+
+func (s *testFileServiceImpl) WriteFileConditionalScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path, content string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
+	if err != nil {
+		return nil, err
+	}
+	if err := testWriteFileAt(root, path, content); err != nil {
+		return nil, err
+	}
+	return &service.FileMutationResult{Success: true, Version: "sha256:test"}, nil
+}
+
+func (s *testFileServiceImpl) DeletePathVersionedScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string, recursive bool, _ string) error {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
 	if err != nil {
 		return err
 	}
+	return testDeletePathAt(root, path, recursive)
+}
+
+func (s *testFileServiceImpl) MkdirScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, path string) error {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
+	if err != nil {
+		return err
+	}
+	return testMkdirAt(root, path)
+}
+
+func (s *testFileServiceImpl) MovePathVersionedScoped(_ context.Context, wsID string, scope service.FileScope, target, repo, from, to string, overwrite bool, _, _ string) (*service.FileMutationResult, error) {
+	root, err := s.resolveScopeRootTest(wsID, scope, target, repo)
+	if err != nil {
+		return nil, err
+	}
+	if err := testMovePathAt(root, from, to, overwrite); err != nil {
+		return nil, err
+	}
+	return &service.FileMutationResult{Success: true, Version: "sha256:test"}, nil
+}
+
+func testScopedFullPath(rootDir, path string, allowEmpty bool) (string, string, error) {
 	if path == "" {
-		return service.ErrValidation("path parameter is required")
+		if !allowEmpty {
+			return "", "", service.ErrValidation("path parameter is required")
+		}
+		path = "."
 	}
-	if pathsec.IsDeniedPath(path) {
-		return service.ErrForbidden("access to this file type is denied")
+	if filepath.IsAbs(path) {
+		return "", "", service.ErrForbidden("path outside root")
 	}
-	fullPath := filepath.Join(wt.Path, filepath.Clean("/"+path))
-	if err := validatePathWithinDir(fullPath, wt.Path); err != nil {
-		return service.ErrForbidden("path outside worktree")
-	}
-	if pathsec.IsDeniedPath(fullPath) {
-		return service.ErrForbidden("access to this file type is denied")
-	}
-	if writeErr := ValidateParentDir(fullPath, wt.Path); writeErr != nil {
-		switch writeErr.Message {
-		case "parent directory does not exist":
-			return service.ErrNotFound(writeErr.Message)
-		case "parent directory is a symlink", "parent directory outside worktree":
-			return service.ErrForbidden(writeErr.Message)
-		default:
-			return service.ErrInternal(writeErr.Message, nil)
+	cleanPath := filepath.Clean(path)
+	for _, segment := range strings.Split(cleanPath, string(filepath.Separator)) {
+		if strings.EqualFold(segment, ".git") {
+			return "", "", service.ErrForbidden(".git paths are not available")
 		}
 	}
-	perm, writeErr := ResolveWritePermissions(fullPath)
-	if writeErr != nil {
-		return service.ErrForbidden(writeErr.Message)
+	fullPath := filepath.Join(rootDir, cleanPath)
+	if err := validatePathWithinDir(fullPath, rootDir); err != nil {
+		return "", "", service.ErrForbidden("path outside root")
 	}
-	if err := AtomicWriteFile(fullPath, content, perm); err != nil {
+	relPath, err := filepath.Rel(rootDir, fullPath)
+	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || filepath.IsAbs(relPath) {
+		return "", "", service.ErrForbidden("path outside root")
+	}
+	if relPath == "" {
+		relPath = "."
+	}
+	return relPath, fullPath, nil
+}
+
+func testNoSymlinkComponents(rootDir, fullPath string) error {
+	relPath, err := filepath.Rel(rootDir, fullPath)
+	if err != nil || relPath == ".." || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || filepath.IsAbs(relPath) {
+		return service.ErrForbidden("path outside root")
+	}
+	if relPath == "." {
+		return nil
+	}
+	current := rootDir
+	for _, segment := range strings.Split(relPath, string(filepath.Separator)) {
+		if segment == "" || segment == "." {
+			continue
+		}
+		current = filepath.Join(current, segment)
+		fi, err := os.Lstat(current)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return service.ErrInternal("failed to stat path", err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return service.ErrForbidden("refusing to follow symlink")
+		}
+	}
+	return nil
+}
+
+func testExistingParent(fullPath, rootDir string) error {
+	parentDir := filepath.Dir(fullPath)
+	if err := validatePathWithinDir(parentDir, rootDir); err != nil {
+		return service.ErrForbidden("parent directory outside root")
+	}
+	if err := testNoSymlinkComponents(rootDir, parentDir); err != nil {
+		return err
+	}
+	parentFi, err := os.Lstat(parentDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return service.ErrNotFound("parent directory does not exist")
+		}
+		return service.ErrInternal("failed to stat parent directory", err)
+	}
+	if parentFi.Mode()&os.ModeSymlink != 0 {
+		return service.ErrForbidden("parent directory is a symlink")
+	}
+	if !parentFi.IsDir() {
+		return service.ErrValidation("parent path is not a directory")
+	}
+	return nil
+}
+
+func testWriteFileAt(rootDir, path, content string) error {
+	_, fullPath, err := testScopedFullPath(rootDir, path, false)
+	if err != nil {
+		return err
+	}
+	if err := testNoSymlinkComponents(rootDir, fullPath); err != nil {
+		return err
+	}
+	if err := testExistingParent(fullPath, rootDir); err != nil {
+		return err
+	}
+	perm := os.FileMode(0644)
+	if fi, err := os.Lstat(fullPath); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return service.ErrForbidden("refusing to overwrite symlink")
+		}
+		if fi.IsDir() {
+			return service.ErrValidation("path is a directory, not a file")
+		}
+		perm = fi.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return service.ErrInternal("failed to stat file", err)
+	}
+	if err := os.WriteFile(fullPath, []byte(content), perm); err != nil {
 		return service.ErrInternal("failed to save file", err)
+	}
+	return nil
+}
+
+func testDeletePathAt(rootDir, path string, recursive bool) error {
+	_, fullPath, err := testScopedFullPath(rootDir, path, false)
+	if err != nil {
+		return err
+	}
+	if err := testNoSymlinkComponents(rootDir, fullPath); err != nil {
+		return err
+	}
+	if err := testExistingParent(fullPath, rootDir); err != nil {
+		return err
+	}
+	fi, err := os.Lstat(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return service.ErrNotFound("path not found")
+		}
+		return service.ErrInternal("failed to stat path", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return service.ErrForbidden("refusing to follow symlink")
+	}
+	if fi.IsDir() {
+		if recursive {
+			if err := os.RemoveAll(fullPath); err != nil {
+				return service.ErrInternal("failed to delete directory", err)
+			}
+			return nil
+		}
+		entries, err := os.ReadDir(fullPath)
+		if err != nil {
+			return service.ErrInternal("failed to read directory", err)
+		}
+		if len(entries) > 0 {
+			return service.ErrConflict("directory not empty")
+		}
+	}
+	if err := os.Remove(fullPath); err != nil {
+		return service.ErrInternal("failed to delete path", err)
+	}
+	return nil
+}
+
+func testMkdirAt(rootDir, path string) error {
+	_, fullPath, err := testScopedFullPath(rootDir, path, false)
+	if err != nil {
+		return err
+	}
+	if err := testNoSymlinkComponents(rootDir, fullPath); err != nil {
+		return err
+	}
+	if fi, err := os.Lstat(fullPath); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return service.ErrForbidden("refusing to follow symlink")
+		}
+		if !fi.IsDir() {
+			return service.ErrConflict("file exists at path")
+		}
+		return nil
+	} else if !os.IsNotExist(err) {
+		return service.ErrInternal("failed to stat path", err)
+	}
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
+		return service.ErrInternal("failed to create directory", err)
+	}
+	return nil
+}
+
+func testMovePathAt(rootDir, from, to string, overwrite bool) error {
+	_, fromPath, err := testScopedFullPath(rootDir, from, false)
+	if err != nil {
+		return err
+	}
+	_, toPath, err := testScopedFullPath(rootDir, to, false)
+	if err != nil {
+		return err
+	}
+	if err := testNoSymlinkComponents(rootDir, fromPath); err != nil {
+		return err
+	}
+	if err := testNoSymlinkComponents(rootDir, toPath); err != nil {
+		return err
+	}
+	if err := testExistingParent(fromPath, rootDir); err != nil {
+		return err
+	}
+	if err := testExistingParent(toPath, rootDir); err != nil {
+		return err
+	}
+	if fi, err := os.Lstat(fromPath); err != nil {
+		if os.IsNotExist(err) {
+			return service.ErrNotFound("source path not found")
+		}
+		return service.ErrInternal("failed to stat source path", err)
+	} else if fi.Mode()&os.ModeSymlink != 0 {
+		return service.ErrForbidden("refusing to follow symlink")
+	}
+	if destFi, err := os.Lstat(toPath); err == nil {
+		if destFi.Mode()&os.ModeSymlink != 0 {
+			return service.ErrForbidden("refusing to follow symlink")
+		}
+		if !overwrite {
+			return service.ErrConflict("destination exists")
+		}
+	} else if !os.IsNotExist(err) {
+		return service.ErrInternal("failed to stat destination path", err)
+	}
+	if err := os.Rename(fromPath, toPath); err != nil {
+		return service.ErrInternal("failed to move path", err)
 	}
 	return nil
 }
@@ -377,13 +685,54 @@ func (m *mockAgentService) DeleteAgent(_ context.Context, _, _ string) error { r
 // stubFileService implements service.FileService with no-op defaults for module tests.
 type stubFileService struct{}
 
-func (s *stubFileService) ListDirectory(_ context.Context, _, _, _ string) (*service.FileTreeResult, error) {
+func (s *stubFileService) ListDirectoryScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileTreeResult, error) {
 	return &service.FileTreeResult{}, nil
 }
-func (s *stubFileService) ReadFile(_ context.Context, _, _, _ string) (*service.FileReadResult, error) {
+func (s *stubFileService) ReadFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileReadResult, error) {
 	return &service.FileReadResult{}, nil
 }
-func (s *stubFileService) WriteFile(_ context.Context, _, _, _, _ string) error { return nil }
+func (s *stubFileService) StatPathScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileStatResult, error) {
+	return &service.FileStatResult{}, nil
+}
+func (s *stubFileService) ReadFileAtRevScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string) (*service.FileReadResult, error) {
+	return &service.FileReadResult{}, nil
+}
+func (s *stubFileService) IndexFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (*service.FileIndexResult, error) {
+	return &service.FileIndexResult{}, nil
+}
+func (s *stubFileService) SearchFilesScoped(_ context.Context, _ string, _ service.FileScope, _, _ string, _ service.FileSearchRequest) (*service.FileSearchResult, error) {
+	return &service.FileSearchResult{}, nil
+}
+func (s *stubFileService) GitStatusScoped(_ context.Context, _ string, _ service.FileScope, _, _ string) (service.FileGitStatusResult, error) {
+	return service.FileGitStatusResult{}, nil
+}
+func (s *stubFileService) ListFileCheckouts(_ context.Context, _ string) (*service.FileCheckoutsResult, error) {
+	return &service.FileCheckoutsResult{}, nil
+}
+func (s *stubFileService) RepairCheckout(_ context.Context, _ string, _ service.FileCheckoutRepairRequest) (*ops.RepairResult, error) {
+	return &ops.RepairResult{}, nil
+}
+func (s *stubFileService) DiffFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _, _ string) (*service.FileDiffResult, error) {
+	return &service.FileDiffResult{}, nil
+}
+func (s *stubFileService) BlameFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileBlameResult, error) {
+	return &service.FileBlameResult{}, nil
+}
+func (s *stubFileService) HistoryFileScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) (*service.FileHistoryResult, error) {
+	return &service.FileHistoryResult{}, nil
+}
+func (s *stubFileService) WriteFileConditionalScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ service.FileWritePreconditions) (*service.FileMutationResult, error) {
+	return &service.FileMutationResult{Success: true}, nil
+}
+func (s *stubFileService) DeletePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string, _ bool, _ string) error {
+	return nil
+}
+func (s *stubFileService) MkdirScoped(_ context.Context, _ string, _ service.FileScope, _, _, _ string) error {
+	return nil
+}
+func (s *stubFileService) MovePathVersionedScoped(_ context.Context, _ string, _ service.FileScope, _, _, _, _ string, _ bool, _, _ string) (*service.FileMutationResult, error) {
+	return &service.FileMutationResult{Success: true}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Test-local SessionService implementation

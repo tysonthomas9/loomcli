@@ -166,8 +166,9 @@ func testWorktree() *ops.AgentWorktree {
 
 // mockFileOps implements ops.FileOps for testing.
 type mockFileOps struct {
-	resolveFunc          func(name string) (*ops.AgentWorktree, error)
-	resolveOrPrimaryFunc func(name string) (*ops.AgentWorktree, error)
+	resolveFunc       func(name string) (*ops.AgentWorktree, error)
+	resolveWsRootFunc func() (string, error)
+	resolveWsDataFunc func() (*ops.WorkspaceData, error)
 }
 
 func (m *mockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, error) {
@@ -177,14 +178,54 @@ func (m *mockFileOps) ResolveAgentWorktree(_, name string) (*ops.AgentWorktree, 
 	return nil, errors.New("not found")
 }
 
-func (m *mockFileOps) ResolveAgentWorktreeOrPrimary(_, name string) (*ops.AgentWorktree, error) {
-	if m.resolveOrPrimaryFunc != nil {
-		return m.resolveOrPrimaryFunc(name)
+func (m *mockFileOps) ResolveAgentWorktreeForRepo(_, name, _ string) (*ops.AgentWorktree, error) {
+	return m.ResolveAgentWorktree("", name)
+}
+
+func (m *mockFileOps) ResolveWorkspaceRoot(_ string) (string, error) {
+	if m.resolveWsRootFunc != nil {
+		return m.resolveWsRootFunc()
 	}
-	if m.resolveFunc != nil {
-		return m.resolveFunc(name)
+	return "", errors.New("not found")
+}
+
+func (m *mockFileOps) ResolveWorkspaceData(_ string) (*ops.WorkspaceData, error) {
+	if m.resolveWsDataFunc != nil {
+		return m.resolveWsDataFunc()
 	}
 	return nil, errors.New("not found")
+}
+
+func (m *mockFileOps) GitStatusPorcelain(_ context.Context, worktreePath string) (ops.GitFileStatusResult, error) {
+	return ops.GitFileStatusResult{Entries: map[string]string{}}, nil
+}
+
+func (m *mockFileOps) GitShowFileAtRev(_ context.Context, worktreePath, rev, path string, maxBytes int64) (*ops.GitFileContentAtRev, error) {
+	return &ops.GitFileContentAtRev{Content: []byte(""), Size: 0}, nil
+}
+
+func (m *mockFileOps) GitDiffFile(_ context.Context, worktreePath, path, from, to string) (ops.GitBoundedTextResult, error) {
+	return ops.GitBoundedTextResult{}, nil
+}
+
+func (m *mockFileOps) GitLogFile(_ context.Context, worktreePath, path string, limit int) (ops.GitBoundedTextResult, error) {
+	return ops.GitBoundedTextResult{}, nil
+}
+
+func (m *mockFileOps) GitBlamePorcelain(_ context.Context, worktreePath, path string) (ops.GitBoundedTextResult, error) {
+	return ops.GitBoundedTextResult{}, nil
+}
+
+func (m *mockFileOps) ResolveLoomDataDir() (string, error) {
+	return "", errors.New("loom data directory not configured")
+}
+
+func (m *mockFileOps) GitCurrentBranch(_ context.Context, _ string) (string, error) {
+	return "main", nil
+}
+
+func (m *mockFileOps) RepairCheckout(_, _, _, _ string, _ bool) (ops.RepairResult, error) {
+	return ops.RepairResult{Repaired: false, Method: "none", Message: "not implemented"}, nil
 }
 
 // mockGitOps implements ops.GitOps for testing in the root package.

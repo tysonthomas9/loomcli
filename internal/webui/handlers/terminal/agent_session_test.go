@@ -296,16 +296,15 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 	if err := os.MkdirAll(filepath.Join(worktree, ".git"), 0755); err != nil {
 		t.Fatalf("create worktree marker: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version: 1,
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"E2E": {
-				Path: t.TempDir(),
-				Agents: map[string]bootstrap.AgentLocalState{
-					"nova": {Worktree: worktree},
-				},
+	workspacePath := t.TempDir()
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.Workspaces["E2E"] = bootstrap.WorkspaceLocalState{
+			Path: workspacePath,
+			Agents: map[string]bootstrap.AgentLocalState{
+				"nova": {Worktree: worktree},
 			},
-		},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}

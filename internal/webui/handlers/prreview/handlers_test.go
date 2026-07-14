@@ -378,15 +378,17 @@ func (h *prReviewHarness) updateRepoRemote(t *testing.T, name, remoteURL string)
 
 func (h *prReviewHarness) rememberLocalPaths(t *testing.T, workspacePath, repoName, repoPath string) {
 	t.Helper()
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			prReviewTestWorkspace: {
-				Path:  workspacePath,
-				Repos: map[string]string{repoName: repoPath},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		if sc.Workspaces == nil {
+			sc.Workspaces = map[string]bootstrap.WorkspaceLocalState{}
+		}
+		sc.Workspaces[prReviewTestWorkspace] = bootstrap.WorkspaceLocalState{
+			Path:  workspacePath,
+			Repos: map[string]string{repoName: repoPath},
+		}
+		return nil
 	}); err != nil {
-		t.Fatalf("SaveStateCache: %v", err)
+		t.Fatalf("MutateStateCache: %v", err)
 	}
 }
 

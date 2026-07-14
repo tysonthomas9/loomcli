@@ -57,19 +57,24 @@ describe("NavRail", () => {
       expect(screen.queryByLabelText("Monitor")).not.toBeInTheDocument();
     });
 
-    it("does not render Observability, Files, or Workspace buttons", () => {
+    it("does not render Observability or Workspace buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       expect(screen.queryByLabelText("Observability")).not.toBeInTheDocument();
-      expect(screen.queryByLabelText("Files")).not.toBeInTheDocument();
       expect(screen.queryByLabelText("Workspace")).not.toBeInTheDocument();
     });
 
-    it("renders exactly four navigation buttons", () => {
+    it("renders a Files navigation button", () => {
+      render(<NavRail activeView="kanban" onChange={() => {}} />);
+
+      expect(screen.getByLabelText("Files")).toBeInTheDocument();
+    });
+
+    it("renders exactly five navigation buttons", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
-      expect(buttons).toHaveLength(4);
+      expect(buttons).toHaveLength(5);
     });
 
     it("renders tooltips for each button", () => {
@@ -102,14 +107,15 @@ describe("NavRail", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders buttons in correct order: Workspaces, Pull Requests, Terminal, Settings", () => {
+    it("renders buttons in correct order: Workspaces, Pull Requests, Terminal, Files, Settings", () => {
       render(<NavRail activeView="kanban" onChange={() => {}} />);
 
       const buttons = screen.getAllByRole("button");
       expect(buttons[0]).toHaveAccessibleName("Workspaces");
       expect(buttons[1]).toHaveAccessibleName("Pull Requests");
       expect(buttons[2]).toHaveAccessibleName("Terminal");
-      expect(buttons[3]).toHaveAccessibleName("Settings");
+      expect(buttons[3]).toHaveAccessibleName("Files");
+      expect(buttons[4]).toHaveAccessibleName("Settings");
     });
 
     it("has navigation landmark with aria-label", () => {

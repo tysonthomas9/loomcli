@@ -113,7 +113,12 @@ func (app *Server) buildInfraModules() {
 	}
 
 	if app.fileSvc != nil {
-		app.wsModules = append(app.wsModules, modbuilder.NewFileModule(app.fileSvc))
+		app.wsModules = append(app.wsModules, modbuilder.NewFileModule(app.fileSvc, middleware.FileAccessConfig{
+			RemoteAuth:      app.config.ExtAuthURL != "",
+			ResolveRole:     app.config.WorkspaceRoleResolver,
+			FrontendOrigins: app.config.FrontendOrigins,
+			Logger:          app.config.Logger,
+		}))
 	}
 
 	if storeBacked {

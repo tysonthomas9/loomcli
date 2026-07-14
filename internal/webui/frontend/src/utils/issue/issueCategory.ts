@@ -19,6 +19,8 @@ export type ReviewType = "plan" | "code" | "help";
 
 interface OpenStatusCheckable {
   design?: string;
+  design_artifact_id?: string;
+  has_design?: boolean;
   labels?: string[];
 }
 
@@ -45,7 +47,9 @@ export function hasNeedsRevision(issue: { labels?: string[] }): boolean {
  * SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
  */
 export function getOpenStatus(issue: OpenStatusCheckable): OpenStatus {
-  if (issue.design && !hasNeedsRevision(issue)) {
+  const hasDesign =
+    !!issue.design || !!issue.design_artifact_id || issue.has_design === true;
+  if (hasDesign && !hasNeedsRevision(issue)) {
     return "ready";
   }
   return "needs_plan";
