@@ -466,7 +466,7 @@ if (process.send) {
 		if out.result.Status != domain.DriverRunCancelled || out.result.ErrorClass != "driver_cancelled" {
 			t.Fatalf("result = %+v, want cancelled driver_cancelled", out.result)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("NodeRunner.Run did not return after cancellation")
 	}
 	waitForFile(t, cancelledPath)
@@ -546,7 +546,10 @@ if (process.send) {
 
 func waitForFile(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	// The sentinel is written by a real child process (node) reacting to
+	// signals; loaded CI runners under -race have blown a 5s deadline.
+	// Healthy runs still return within milliseconds.
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(path); err == nil {
 			return
