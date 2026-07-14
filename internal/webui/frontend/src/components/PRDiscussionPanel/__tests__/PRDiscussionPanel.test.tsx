@@ -80,7 +80,7 @@ describe("PRDiscussionPanel", () => {
     });
 
     const messages = await screen.findByTestId("pr-chat-messages");
-    expect(within(messages).getByText("hello")).toBeInTheDocument();
+    expect(await within(messages).findByText("hello")).toBeInTheDocument();
     expect(within(messages).getByText("hi")).toBeInTheDocument();
 
     expect(screen.getByTestId("terminal-stub")).toBeInTheDocument();
