@@ -143,7 +143,7 @@ export function SettingsView({
 
   useEffect(() => {
     setDesignFormat(persistedDesignFormat);
-  }, [persistedDesignFormat]);
+  }, [persistedDesignFormat, workspaceId]);
 
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)

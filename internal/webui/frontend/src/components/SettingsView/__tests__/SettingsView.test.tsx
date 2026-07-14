@@ -468,6 +468,38 @@ describe("SettingsView", () => {
   });
 
   describe("planner design format", () => {
+    it("resets an unsaved selection when the active workspace changes", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      const { rerender } = render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("design-format-select"), {
+        target: { value: "html" },
+      });
+      expect(screen.getByTestId("design-format-select")).toHaveValue("html");
+
+      mockUseWorkspaceContext.mockReturnValue({
+        workspaceId: "BETA",
+        workspace: {
+          id: "BETA",
+          name: "Beta",
+          path: "/tmp/beta",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [],
+          default_workspace: "",
+          design_format: "markdown",
+        },
+        refetch: vi.fn(),
+      } as ReturnType<typeof useWorkspaceContext>);
+      rerender(<SettingsView />);
+
+      expect(screen.getByTestId("design-format-select")).toHaveValue(
+        "markdown",
+      );
+      expect(screen.getByTestId("design-format-save-button")).toBeDisabled();
+    });
+
     it("persists an HTML selection for the active workspace", async () => {
       const updateDesignFormat = vi.fn().mockResolvedValue(true);
       mockUseWorkspaceDesignFormat.mockReturnValue({
