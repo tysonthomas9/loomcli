@@ -249,6 +249,9 @@ func (s *stubIssueService) CloseIssue(context.Context, service.CloseIssueParams)
 func (s *stubIssueService) ReopenIssue(context.Context, service.ReopenIssueParams) error {
 	return service.ErrNotImplemented("not implemented")
 }
+func (s *stubIssueService) ReleaseIssue(context.Context, service.ReleaseIssueParams) error {
+	return service.ErrNotImplemented("not implemented")
+}
 func (s *stubIssueService) ClaimIssue(context.Context, service.ClaimIssueParams) (json.RawMessage, error) {
 	return nil, service.ErrNotImplemented("not implemented")
 }

@@ -16,8 +16,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 )
 
-// handleOrphanedTask decides whether to close or reopen an orphaned task
-func handleOrphanedTask(deps *cli.Deps, worktreePath, taskID string, analyze bool) {
+// actorReleaseBackend is the optional release API: when the issue backend
+// implements it, releases are scoped to the agent's worktree identity, so a
+// stopped duplicate worker cannot un-claim a lock held by a live sibling.
+type actorReleaseBackend interface {
+	ReleaseIssueAsActor(ctx context.Context, id, actor string) error
+}
+
+// handleOrphanedTask decides whether to close or reopen an orphaned task.
+// actor is the agent's worktree identity (may be empty for legacy callers).
+func handleOrphanedTask(deps *cli.Deps, worktreePath, taskID, actor string, analyze bool) {
 	fmt.Printf("\nHandling orphaned task: %s\n", taskID)
 
 	if analyze {
@@ -29,11 +37,11 @@ func handleOrphanedTask(deps *cli.Deps, worktreePath, taskID string, analyze boo
 			closeTask(deps, taskID, reason)
 		} else {
 			fmt.Printf("Task appears INCOMPLETE: %s\n", reason)
-			resetTask(deps, taskID)
+			resetTask(deps, taskID, actor)
 		}
 	} else {
 		fmt.Println("Skipping analysis (--no-analyze)")
-		resetTask(deps, taskID)
+		resetTask(deps, taskID, actor)
 	}
 }
 
@@ -149,7 +157,12 @@ func closeTask(deps *cli.Deps, taskID, reason string) {
 // resetTask resets a task to open status, but only if it's still in_progress.
 // Tasks that have already reached review or closed status were successfully
 // processed and should not be reset.
-func resetTask(deps *cli.Deps, taskID string) {
+//
+// When actor (the agent's worktree identity) is non-empty and the backend
+// supports actor-scoped release, the release only succeeds if this actor
+// holds the lock; a conflict means a live sibling owns it and the task is
+// left alone instead of being un-claimed out from under the survivor.
+func resetTask(deps *cli.Deps, taskID, actor string) {
 	ib := deps.IssueBackend
 	ctx := cmdstore.RootContext()
 
@@ -159,6 +172,34 @@ func resetTask(deps *cli.Deps, taskID string) {
 		if detail.Status == "review" || detail.Status == "closed" {
 			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, detail.Status)
 			return
+		}
+	}
+
+	if actor != "" {
+		if rb, ok := ib.(actorReleaseBackend); ok {
+			err = rb.ReleaseIssueAsActor(ctx, taskID, actor)
+			switch {
+			case err == nil:
+				fmt.Printf("✓ Task %s reset to open\n", taskID)
+				return
+			case backend.IsKind(err, backend.KindConflict):
+				fmt.Printf("✓ Task %s is locked by another worker, leaving it claimed\n", taskID)
+				return
+			case backend.IsKind(err, backend.KindNotImplemented) || backend.IsKind(err, backend.KindNotFound):
+				// Backend (or an older serve without the /release route) does
+				// not support actor-scoped release — degrade to the legacy
+				// status transition below.
+				fmt.Printf("Warning: actor-scoped release unsupported (%v), falling back to status update\n", err)
+			default:
+				// Transient failure (timeout, unavailable, ...): do NOT fall
+				// back to the unscoped status transition — it would impersonate
+				// whoever holds the lock and could un-claim a live sibling.
+				// Leave the task claimed; recovery can be re-run.
+				fmt.Printf("Warning: actor-scoped release failed (%v), leaving task %s claimed; re-run recovery to retry\n", err, taskID)
+				return
+			}
+		} else {
+			fmt.Printf("Warning: backend does not support actor-scoped release; resetting task %s via status update\n", taskID)
 		}
 	}
 
@@ -350,7 +391,7 @@ func resetOrphanedAgentTasks(deps *cli.Deps, worktreePath, agentName, alreadyHan
 
 	fmt.Printf("\nFound %d additional orphaned task(s) for agent %s:\n", len(orphaned), agentName)
 	for _, t := range orphaned {
-		handleOrphanedTask(deps, worktreePath, t.ID, analyze)
+		handleOrphanedTask(deps, worktreePath, t.ID, agentName, analyze)
 	}
 }
 

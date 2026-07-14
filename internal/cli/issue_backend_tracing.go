@@ -275,7 +275,6 @@ func (t *tracedIssueBackend) ReleaseClaim(ctx context.Context, id, actor string)
 	endSpan(span, err)
 	return err
 }
-
 func (t *tracedIssueBackend) DeferIssue(ctx context.Context, id string, until time.Time) error {
 	ctx, span := t.startSpan(ctx, "DeferIssue",
 		attribute.String("loom.task_id", id),

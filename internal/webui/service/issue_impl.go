@@ -365,8 +365,8 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 		return nil, err
 	}
 
-	if err := be.ClaimIssue(ctx, params.IssueID, 0); err != nil {
-		slog.Error("backend error in ClaimIssue", "issue_id", params.IssueID, "err", err)
+	if err := claimWithOptionalActor(ctx, be, params.IssueID, params.Actor); err != nil {
+		slog.Error("backend error in ClaimIssue", "issue_id", params.IssueID, "actor", params.Actor, "err", err)
 		return nil, translateBackendError(err)
 	}
 
@@ -394,6 +394,72 @@ func (s *issueServiceImpl) ClaimIssue(ctx context.Context, params ClaimIssuePara
 		return nil, ErrInternal("failed to marshal issue", err)
 	}
 	return out, nil
+}
+
+// actorClaimBackend is the optional richer claim API (same pattern as the
+// daemon supervisor): backends that implement it record the claim against
+// the supplied actor instead of their configured one.
+type actorClaimBackend interface {
+	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
+}
+
+// actorReleaseBackend is the release-side counterpart: the release is scoped
+// to the supplied actor (NOT_OWNER ⇒ conflict, never impersonation).
+type actorReleaseBackend interface {
+	ReleaseIssueAsActor(ctx context.Context, id, actor string) error
+}
+
+// claimWithOptionalActor claims under the explicit actor when the backend
+// supports it, falling back to the configured-actor claim otherwise. The
+// fallback with a non-empty actor is logged: silently collapsing distinct
+// workers to one actor is exactly the bug this path exists to avoid.
+func claimWithOptionalActor(ctx context.Context, be backend.IssueBackend, issueID, actor string) error {
+	if actor != "" {
+		if ab, ok := be.(actorClaimBackend); ok {
+			return ab.ClaimIssueAsActor(ctx, issueID, 0, actor)
+		}
+		slog.Warn("ClaimIssue: backend does not support per-actor claims; claiming as configured actor",
+			"issue_id", issueID, "requested_actor", actor, "backend", be.BackendName())
+	}
+	return be.ClaimIssue(ctx, issueID, 0)
+}
+
+// ReleaseIssue releases a claimed issue back to open. With a non-empty Actor
+// and an actor-capable backend, the release is scoped to that actor and a
+// lock held by someone else surfaces as ErrConflict (HTTP 409). Otherwise it
+// falls back to the legacy status-transition path.
+func (s *issueServiceImpl) ReleaseIssue(ctx context.Context, params ReleaseIssueParams) error {
+	if strings.TrimSpace(params.IssueID) == "" {
+		return ErrValidation("issue ID is required")
+	}
+
+	be, svcErr := s.resolveBackend(ctx)
+	if svcErr != nil {
+		return svcErr
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if params.Actor != "" {
+		if rb, ok := be.(actorReleaseBackend); ok {
+			if err := rb.ReleaseIssueAsActor(ctx, params.IssueID, params.Actor); err != nil {
+				slog.Error("backend error in ReleaseIssue", "issue_id", params.IssueID, "actor", params.Actor, "err", err)
+				return translateBackendError(err)
+			}
+			return nil
+		}
+		slog.Warn("ReleaseIssue: backend does not support per-actor release; releasing via status transition",
+			"issue_id", params.IssueID, "requested_actor", params.Actor, "backend", be.BackendName())
+	}
+
+	open := "open"
+	clear := ""
+	if err := be.Update(ctx, params.IssueID, backend.UpdateParams{Status: &open, Assignee: &clear}); err != nil {
+		slog.Error("backend error in ReleaseIssue.Update", "issue_id", params.IssueID, "err", err)
+		return translateBackendError(err)
+	}
+	return nil
 }
 
 func ensureClaimable(ctx context.Context, be backend.IssueBackend, issueID string) *ServiceError {

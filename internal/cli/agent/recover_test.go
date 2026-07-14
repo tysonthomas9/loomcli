@@ -107,7 +107,7 @@ func TestResetTask_Success(t *testing.T) {
 		return nil
 	}
 
-	resetTask(deps, "task-789")
+	resetTask(deps, "task-789", "")
 
 	if !tracker.Called("Get") {
 		t.Error("GetIssue was not called")
@@ -125,7 +125,7 @@ func TestResetTask_Failure(t *testing.T) {
 	tracker.UpdateErr = errors.New("invalid task")
 
 	// resetTask prints warning and manual instructions but doesn't panic
-	resetTask(deps, "task-789")
+	resetTask(deps, "task-789", "")
 }
 
 func TestResetTask_AlreadyReview(t *testing.T) {
@@ -134,7 +134,7 @@ func TestResetTask_AlreadyReview(t *testing.T) {
 
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "review"}}
 
-	resetTask(deps, "task-789")
+	resetTask(deps, "task-789", "")
 
 	if tracker.Called("Update") {
 		t.Error("UpdateIssue should not be called when task is already in review")
@@ -147,7 +147,7 @@ func TestResetTask_AlreadyClosed(t *testing.T) {
 
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-789", Status: "closed"}}
 
-	resetTask(deps, "task-789")
+	resetTask(deps, "task-789", "")
 
 	if tracker.Called("Update") {
 		t.Error("UpdateIssue should not be called when task is already closed")
@@ -161,7 +161,7 @@ func TestResetTask_GetIssueFails(t *testing.T) {
 	tracker.GetErr = errors.New("not found")
 
 	// When GetIssue fails, resetTask should still attempt UpdateIssue
-	resetTask(deps, "task-789")
+	resetTask(deps, "task-789", "")
 
 	if !tracker.Called("Update") {
 		t.Error("UpdateIssue should still be called when GetIssue fails")
@@ -399,7 +399,7 @@ func TestHandleOrphanedTask_AnalyzeComplete(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "COMPLETED: Task was finished\n")
 
-	handleOrphanedTask(deps, "/test/worktree", "task-orphan1", true)
+	handleOrphanedTask(deps, "/test/worktree", "task-orphan1", "", true)
 
 	if !tracker.Called("Close") {
 		t.Error("CloseIssue should be called for completed task")
@@ -424,7 +424,7 @@ func TestHandleOrphanedTask_AnalyzeIncomplete(t *testing.T) {
 	mock.InstallOn(deps)
 	installTextAnalysisResult(t, deps, "INCOMPLETE: No work found\n")
 
-	handleOrphanedTask(deps, "/test/worktree", "task-orphan2", true)
+	handleOrphanedTask(deps, "/test/worktree", "task-orphan2", "", true)
 
 	if !tracker.Called("Update") {
 		t.Error("UpdateIssue should be called for incomplete task")
@@ -437,7 +437,7 @@ func TestHandleOrphanedTask_NoAnalyze(t *testing.T) {
 
 	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-orphan3", Status: "in_progress"}}
 
-	handleOrphanedTask(deps, "/test/worktree", "task-orphan3", false)
+	handleOrphanedTask(deps, "/test/worktree", "task-orphan3", "", false)
 
 	// Get is called by resetTask to check current status before resetting,
 	// but GetIssueText (now removed) should not be called for analysis.

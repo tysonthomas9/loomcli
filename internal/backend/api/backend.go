@@ -163,6 +163,25 @@ func (b *APIBackend) execHeaders(ctx context.Context, op, method, path string, b
 	return resp, nil
 }
 
+// doRequestAsActor is doRequestHeaders with an optional X-Actor header
+// carrying the caller's worker identity. An empty actor sends no header
+// (legacy behavior: the server claims/releases as its own configured actor).
+func (b *APIBackend) doRequestAsActor(ctx context.Context, method, path string, body interface{}, actor string) (*apiResponse, int, error) {
+	if actor == "" {
+		return b.doRequestHeaders(ctx, method, path, body, nil)
+	}
+	return b.doRequestHeaders(ctx, method, path, body, map[string]string{"X-Actor": actor})
+}
+
+// execAsActor wraps doRequestAsActor with error classification.
+func (b *APIBackend) execAsActor(ctx context.Context, op, path string, body interface{}, actor string) error {
+	resp, statusCode, err := b.doRequestAsActor(ctx, http.MethodPost, path, body, actor)
+	if err != nil {
+		return classifyTransportError(op, err)
+	}
+	return classifyHTTPError(op, statusCode, *resp)
+}
+
 // hasData returns true if the response Data field is present and non-null.
 func hasData(resp *apiResponse) bool {
 	return resp != nil && resp.Data != nil && string(resp.Data) != "null"
@@ -374,6 +393,39 @@ func (b *APIBackend) ClaimIssue(ctx context.Context, id string, lockTTL time.Dur
 // back to TTL expiry. Use the fleet backend for explicit lock release.
 func (b *APIBackend) ReleaseIssueLock(_ context.Context, _, _ string) error {
 	return backend.ErrNotImplemented("ReleaseIssueLock", "APIBackend does not support explicit lock release; rely on TTL expiry")
+}
+
+// ClaimIssueAsActor is ClaimIssue with an explicit worker identity forwarded
+// via the X-Actor header, so per-worker lock arbitration applies even when
+// the claim is mediated by a loom serve instance.
+func (b *APIBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	if id == "" {
+		return backend.ErrValidation("ClaimIssue", "id must not be empty")
+	}
+	if actor == "" {
+		return backend.ErrValidation("ClaimIssue", "actor must not be empty")
+	}
+	body, err := claimIssueBody(lockTTL)
+	if err != nil {
+		return err
+	}
+	path := "/issues/" + url.PathEscape(id) + "/claim"
+	return b.execAsActor(ctx, "ClaimIssue", path, body, actor)
+}
+
+// ReleaseIssueAsActor releases an issue lock held by the given actor via
+// POST /issues/{id}/release with the X-Actor header. The server scopes the
+// release to that actor: releasing a lock held by a different actor returns
+// KindConflict rather than silently un-claiming the survivor.
+func (b *APIBackend) ReleaseIssueAsActor(ctx context.Context, id, actor string) error {
+	if id == "" {
+		return backend.ErrValidation("ReleaseIssue", "id must not be empty")
+	}
+	if actor == "" {
+		return backend.ErrValidation("ReleaseIssue", "actor must not be empty")
+	}
+	path := "/issues/" + url.PathEscape(id) + "/release"
+	return b.execAsActor(ctx, "ReleaseIssue", path, nil, actor)
 }
 
 func claimIssueBody(lockTTL time.Duration) (any, error) {
