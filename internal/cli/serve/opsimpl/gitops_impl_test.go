@@ -85,6 +85,30 @@ func TestResolveWorkspaceConfigName_NilWorkspacesMap(t *testing.T) {
 	}
 }
 
+func TestDedupeRepoPRQueriesUsesRemoteURLIdentity(t *testing.T) {
+	repos := []ops.WorkspaceRepo{
+		{Name: "one", Path: "/tmp/one", Remote: "origin", RemoteURL: "https://github.com/acme/one.git"},
+		{Name: "two", Path: "/tmp/two", Remote: "origin", RemoteURL: "https://github.com/acme/two.git"},
+	}
+
+	queries := dedupeRepoPRQueries(repos)
+	if len(queries) != 2 {
+		t.Fatalf("queries = %d, want one per remote URL", len(queries))
+	}
+}
+
+func TestDedupeRepoPRQueriesNormalizesGitHubRemoteURL(t *testing.T) {
+	repos := []ops.WorkspaceRepo{
+		{Name: "one", Path: "/tmp/one", RemoteURL: "https://github.com/Acme/Repo.git"},
+		{Name: "two", Path: "/tmp/two", RemoteURL: "https://github.com/acme/repo"},
+	}
+
+	queries := dedupeRepoPRQueries(repos)
+	if len(queries) != 1 {
+		t.Fatalf("queries = %d, want equivalent GitHub URLs deduplicated", len(queries))
+	}
+}
+
 func TestCollectRepoQueryPRsAddsWorkspaceSourceRepo(t *testing.T) {
 	queries := []*prRepoQuery{{
 		repo: ops.WorkspaceRepo{

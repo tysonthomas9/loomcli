@@ -1,6 +1,7 @@
 package localworkspace
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -49,6 +50,16 @@ func TestEnsureGitWorktreeFromBranchUsesFetchedDefaultBranch(t *testing.T) {
 	}
 	if got := string(gotBytes); got != "v2\n" {
 		t.Fatalf("target base.txt = %q, want fetched v2", got)
+	}
+}
+
+func TestRunGitHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := runGit(ctx, t.TempDir(), "status")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runGit error = %v, want context canceled", err)
 	}
 }
 
@@ -152,7 +163,7 @@ func TestEnsureDetachedGitWorktreeAtPRHead(t *testing.T) {
 	git(t, "", "clone", remote, repo)
 	git(t, repo, "checkout", "main")
 
-	gotSHA, err := EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, headSHA)
+	gotSHA, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, headSHA)
 	if err != nil {
 		t.Fatalf("EnsureDetachedGitWorktreeAtPRHead() create error = %v", err)
 	}
@@ -170,7 +181,7 @@ func TestEnsureDetachedGitWorktreeAtPRHead(t *testing.T) {
 	}
 
 	// Clean-tree cache hit: a re-ensure with no changes is a no-op at the same sha.
-	if gotSHA, err := EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, headSHA); err != nil {
+	if gotSHA, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, headSHA); err != nil {
 		t.Fatalf("EnsureDetachedGitWorktreeAtPRHead() clean cache hit error = %v", err)
 	} else if gotSHA != headSHA {
 		t.Fatalf("clean cache hit returned sha = %s, want %s", gotSHA, headSHA)
@@ -183,7 +194,7 @@ func TestEnsureDetachedGitWorktreeAtPRHead(t *testing.T) {
 	// handed back — a review checkout must faithfully match the PR head.
 	sentinel := filepath.Join(target, "cache-hit-sentinel.txt")
 	writeFile(t, sentinel, "cruft\n")
-	if _, err := EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, headSHA); err != nil {
+	if _, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, headSHA); err != nil {
 		t.Fatalf("EnsureDetachedGitWorktreeAtPRHead() pristine scrub error = %v", err)
 	}
 	if got := gitOutput(t, target, "rev-parse", "HEAD"); got != headSHA {
@@ -194,7 +205,7 @@ func TestEnsureDetachedGitWorktreeAtPRHead(t *testing.T) {
 	}
 
 	git(t, target, "reset", "--hard", "HEAD~1")
-	if _, err := EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, headSHA); err != nil {
+	if _, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, headSHA); err != nil {
 		t.Fatalf("EnsureDetachedGitWorktreeAtPRHead() drift repair error = %v", err)
 	}
 	if got := gitOutput(t, target, "rev-parse", "HEAD"); got != headSHA {
@@ -207,7 +218,7 @@ func TestEnsureDetachedGitWorktreeAtPRHead(t *testing.T) {
 	newHeadSHA := gitOutput(t, seed, "rev-parse", "HEAD")
 	git(t, seed, "push", "--force", "origin", "HEAD:refs/pull/7/head")
 
-	gotSHA, err = EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, newHeadSHA)
+	gotSHA, err = EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, newHeadSHA)
 	if err != nil {
 		t.Fatalf("EnsureDetachedGitWorktreeAtPRHead() advance error = %v", err)
 	}
@@ -245,7 +256,7 @@ func TestEnsureDetachedGitWorktreeAtPRHeadRejectsFastForwardedTip(t *testing.T) 
 
 	git(t, "", "clone", remote, repo)
 	git(t, repo, "checkout", "main")
-	if _, err := EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, headA); err != nil {
+	if _, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, headA); err != nil {
 		t.Fatalf("materialize head A: %v", err)
 	}
 	sentinel := filepath.Join(target, "stale-sentinel.txt")
@@ -257,7 +268,7 @@ func TestEnsureDetachedGitWorktreeAtPRHeadRejectsFastForwardedTip(t *testing.T) 
 	headB := gitOutput(t, seed, "rev-parse", "HEAD")
 	git(t, seed, "push", "origin", "HEAD:refs/pull/7/head")
 
-	gotTip, err := EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, " "+strings.ToUpper(headA)+" ")
+	gotTip, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, " "+strings.ToUpper(headA)+" ")
 	var changed *PRHeadChangedError
 	if !errors.As(err, &changed) {
 		t.Fatalf("stale ensure error = %v, want PRHeadChangedError", err)
@@ -275,7 +286,7 @@ func TestEnsureDetachedGitWorktreeAtPRHeadRejectsFastForwardedTip(t *testing.T) 
 		t.Fatalf("stale outcome scrubbed existing worktree: %v", err)
 	}
 
-	gotSHA, err := EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, "\n"+strings.ToUpper(headB)+"\t")
+	gotSHA, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, "\n"+strings.ToUpper(headB)+"\t")
 	if err != nil {
 		t.Fatalf("ensure expected head B: %v", err)
 	}
@@ -384,11 +395,11 @@ func TestRecordPRReviewContext(t *testing.T) {
 	git(t, seed, "push", "origin", "HEAD:refs/pull/7/head")
 
 	git(t, "", "clone", remote, repo)
-	if _, err := EnsureDetachedGitWorktreeAtPRHead(repo, target, "origin", 7, prHeadSHA); err != nil {
+	if _, err := EnsureDetachedGitWorktreeAtPRHead(context.Background(), repo, target, "origin", 7, prHeadSHA); err != nil {
 		t.Fatalf("worktree: %v", err)
 	}
 
-	got, err := RecordPRReviewContext(target, "origin", "main", map[string]string{"Pr": "7", "Title": "Add X"})
+	got, err := RecordPRReviewContext(context.Background(), target, "origin", "main", map[string]string{"Pr": "7", "Title": "Add X"})
 	if err != nil {
 		t.Fatalf("RecordPRReviewContext: %v", err)
 	}

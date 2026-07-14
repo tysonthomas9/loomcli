@@ -185,8 +185,9 @@ export function PRReviewWorkspace({
     prUrl?.match(/\/pulls?\/(\d+)/)?.[1] ??
     null;
   const pullRequestRepo = useMemo(
-    () => resolvePullRequestRepo(pullRequest),
-    [pullRequest],
+    () =>
+      resolvePullRequestRepo(pullRequest) ?? repoRefFromUrl(prUrl ?? undefined),
+    [pullRequest, prUrl],
   );
   const displayTitle = pullRequest?.title || issue?.title || "Pull request";
   const reviewStateLabel = (() => {
@@ -308,7 +309,10 @@ export function PRReviewWorkspace({
       try {
         await updateIssue(workspaceId, created.id, { status: "review" });
       } catch {
-        // Non-fatal: the new ticket still exists and can be linked.
+        showToast(
+          `Ticket ${created.id} created, but moving it to Review failed — set it manually`,
+          { type: "warning" },
+        );
       }
       // Refetch before navigating so the freshly-created issue is present in
       // the issues list when the parent switches to ?review=<newId> (matches

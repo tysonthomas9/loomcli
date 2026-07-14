@@ -56,16 +56,14 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 	prs, warnings, attempted, failed := m.connectorListPullRequests(r, ws, state, data.Repos)
 
 	// Fall back to gh when the connector learned nothing: either no repo was
-	// parseable (attempted == 0 — e.g. ssh-scheme remotes the parser rejects,
-	// which the old gh-only route would have listed) or every repo errored.
+	// parseable or every repo errored.
 	if len(prs) == 0 && (attempted == 0 || failed == attempted) {
 		// When the connector was configured and actually tried but failed for
 		// every repo, surface that (with the per-repo reasons) instead of
-		// silently pretending gh is the intended source. attempted == 0 means
-		// the repos simply aren't connector-eligible — stay quiet there.
-		var notice []string
+		// silently pretending gh is the intended source.
+		notice := append([]string(nil), warnings...)
 		if attempted > 0 {
-			notice = append([]string{connectorUnavailableWarning}, warnings...)
+			notice = append([]string{connectorUnavailableWarning}, notice...)
 		}
 		m.ghListFallback(w, r.Context(), ws, state, notice...)
 		return
@@ -83,6 +81,11 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 	for _, workspaceRepo := range repos {
 		owner, repo, ok := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
 		if !ok {
+			if strings.TrimSpace(workspaceRepo.RemoteURL) != "" {
+				warnings = append(warnings, fmt.Sprintf(
+					"%s: remote URL is not a supported GitHub URL", workspaceRepo.Name,
+				))
+			}
 			continue
 		}
 		attempted++
@@ -216,6 +219,8 @@ func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) [
 func pullRequestFromSummary(owner, repo, sourceRepo string, body map[string]any) ops.GitPullRequest {
 	number := intValue(body["number"])
 	repoName := owner + "/" + repo
+	// GitHub's REST list payload does not expose aggregate review decision,
+	// so ReviewDecision intentionally remains empty on the connector path.
 	return ops.GitPullRequest{
 		Number:      number,
 		Title:       stringValue(body["title"]),
@@ -224,6 +229,8 @@ func pullRequestFromSummary(owner, repo, sourceRepo string, body map[string]any)
 		IsDraft:     boolValue(body["draft"]),
 		HeadRefName: stringValue(body["headRef"]),
 		BaseRefName: stringValue(body["baseRef"]),
+		AuthorLogin: stringValue(body["authorLogin"]),
+		UpdatedAt:   stringValue(body["updatedAt"]),
 		RepoName:    repoName,
 		SourceRepo:  sourceRepo,
 	}

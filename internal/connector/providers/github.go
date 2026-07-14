@@ -564,16 +564,25 @@ func nestedString(obj map[string]any, keys ...string) string {
 // pullSummary whitelists the camelCase PR fields exposed in CallResult.Body.
 func pullSummary(pr map[string]any) map[string]any {
 	return map[string]any{
-		"number":  pr["number"],
-		"state":   pr["state"],
-		"title":   pr["title"],
-		"draft":   pr["draft"],
-		"merged":  pr["merged"],
-		"headSha": nestedString(pr, "head", "sha"),
-		"headRef": nestedString(pr, "head", "ref"),
-		"baseSha": nestedString(pr, "base", "sha"),
-		"baseRef": nestedString(pr, "base", "ref"),
+		"number":      pr["number"],
+		"state":       pr["state"],
+		"title":       pr["title"],
+		"draft":       pr["draft"],
+		"merged":      pullMerged(pr),
+		"authorLogin": nestedString(pr, "user", "login"),
+		"updatedAt":   pr["updated_at"],
+		"headSha":     nestedString(pr, "head", "sha"),
+		"headRef":     nestedString(pr, "head", "ref"),
+		"baseSha":     nestedString(pr, "base", "sha"),
+		"baseRef":     nestedString(pr, "base", "ref"),
 	}
+}
+
+func pullMerged(pr map[string]any) bool {
+	if merged, ok := pr["merged"].(bool); ok {
+		return merged
+	}
+	return pr["merged_at"] != nil
 }
 
 // requireIdempotencyKey enforces the §9.3 fencing contract on write actions:

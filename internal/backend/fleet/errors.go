@@ -22,6 +22,9 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 	if msg == "" {
 		msg = "unknown error"
 	}
+	if classified := classifyErrorCode(op, body.Code, msg); classified != nil {
+		return attachMeta(classified, body.Meta)
+	}
 
 	// 2xx with success=false: classify from error string.
 	if statusCode >= 200 && statusCode < 300 {
@@ -35,12 +38,13 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 	// precondition failed", so run the string matcher first and promote
 	// its verdict when it's non-default. Genuine internal errors fall
 	// through to the status-based switch below.
-	if classified := classifyErrorString(op, msg); !isInternalBucket(classified) {
+	if classified := classifyErrorString(op, msg); !isInternalBucket(classified) &&
+		!(statusCode == 422 && backend.IsKind(classified, backend.KindNotFound)) {
 		return attachMeta(classified, body.Meta)
 	}
 
 	switch statusCode {
-	case 400:
+	case 400, 422:
 		return attachMeta(backend.ErrValidation(op, msg), body.Meta)
 	case 401, 403:
 		return attachMeta(backend.ErrUnavailable(op, "authentication failed: "+msg, nil), body.Meta)
@@ -58,6 +62,21 @@ func classifyHTTPError(op string, statusCode int, body apiResponse) error {
 		if statusCode >= 400 {
 			return attachMeta(backend.ErrInternal(op, msg, nil), body.Meta)
 		}
+		return nil
+	}
+}
+
+func classifyErrorCode(op, code, msg string) error {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "validation_failed", "invalid_json", "invalid_parameter", "missing_content_type",
+		"unsupported_media_type", "body_too_large", "batch_too_large":
+		return backend.ErrValidation(op, msg)
+	case "not_claimable", "conflict", "already_exists", "already_claimed",
+		"invalid_transition", "idempotency_in_progress":
+		return backend.ErrConflict(op, msg)
+	case "not_found":
+		return backend.ErrNotFound(op, msg)
+	default:
 		return nil
 	}
 }

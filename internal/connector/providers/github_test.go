@@ -466,7 +466,9 @@ func TestGitHubReads(t *testing.T) {
 	})
 	fake.route(http.MethodGet, "/repos/octocat/hello/pulls", fakeResponse{
 		status: http.StatusOK,
-		body:   `[{"number":7,"state":"open","title":"feat","head":{"sha":"deadbeef","ref":"feat"},"base":{"ref":"main"}}]`,
+		body: `[{"number":7,"state":"closed","title":"feat","merged_at":"2026-07-13T12:00:00Z",
+			"updated_at":"2026-07-13T13:00:00Z","user":{"login":"octocat"},
+			"head":{"sha":"deadbeef","ref":"feat"},"base":{"ref":"main"}}]`,
 	})
 	fake.route(http.MethodGet, "/repos/octocat/hello/compare/main...feat", fakeResponse{
 		status: http.StatusOK,
@@ -506,6 +508,10 @@ func TestGitHubReads(t *testing.T) {
 		pulls, ok := result.Body["pullRequests"].([]map[string]any)
 		if !ok || len(pulls) != 1 || pulls[0]["headSha"] != "deadbeef" {
 			t.Errorf("body = %+v", result.Body)
+		}
+		if pulls[0]["merged"] != true || pulls[0]["authorLogin"] != "octocat" ||
+			pulls[0]["updatedAt"] != "2026-07-13T13:00:00Z" {
+			t.Errorf("projected list fields = %+v", pulls[0])
 		}
 		reqs := fake.recorded()
 		last := reqs[len(reqs)-1]

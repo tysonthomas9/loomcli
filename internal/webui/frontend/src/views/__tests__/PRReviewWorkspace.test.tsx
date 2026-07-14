@@ -163,17 +163,21 @@ function makePullRequestIssue(overrides: Partial<Issue> = {}): Issue {
 function renderWorkspace(
   props: Partial<{
     issue: Issue | null;
-    pullRequest: GitPullRequest;
+    pullRequest: GitPullRequest | null;
     onBack: () => void;
     onLinkedTicket: (issueId: string) => void;
   }> = {},
 ) {
   const issue =
     props.issue === null ? undefined : (props.issue ?? makePullRequestIssue());
+  const pullRequest =
+    props.pullRequest === null
+      ? undefined
+      : (props.pullRequest ?? makePullRequest());
   return render(
     <PRReviewWorkspace
       {...(issue ? { issue } : {})}
-      pullRequest={props.pullRequest ?? makePullRequest()}
+      {...(pullRequest ? { pullRequest } : {})}
       onBack={props.onBack ?? mocks.onBack}
       onLinkedTicket={props.onLinkedTicket ?? mocks.onLinkedTicket}
     />,
@@ -222,6 +226,24 @@ describe("PRReviewWorkspace", () => {
     fireEvent.click(screen.getByTestId("pr-discuss-button"));
 
     expect(screen.queryByTestId("pr-discussion-panel")).not.toBeInTheDocument();
+  });
+
+  it("exposes Discuss for an issue-only PR URL", async () => {
+    renderWorkspace({
+      issue: makePullRequestIssue(),
+      pullRequest: null,
+    });
+
+    await waitFor(() => {
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
+        "WS",
+        "octocat",
+        "hello",
+        7,
+      );
+    });
+    fireEvent.click(screen.getByTestId("pr-discuss-button"));
+    expect(screen.getByTestId("pr-discussion-panel")).toBeInTheDocument();
   });
 
   it("shows the stale banner and refreshes the PR after reviewer ensure reports stale", async () => {
@@ -300,6 +322,24 @@ describe("PRReviewWorkspace", () => {
       "Created TASK-99 for this pull request",
     );
     expect(onLinkedTicket).toHaveBeenCalledWith("TASK-99");
+  });
+
+  it("warns when the created ticket cannot move to Review", async () => {
+    mocks.updateIssue.mockRejectedValueOnce(new Error("status update failed"));
+
+    renderWorkspace({ issue: null });
+    fireEvent.click(screen.getByTestId("pr-create-ticket"));
+
+    await waitFor(() => {
+      expect(mocks.actions.showToast).toHaveBeenCalledWith(
+        "Ticket TASK-99 created, but moving it to Review failed — set it manually",
+        { type: "warning" },
+      );
+    });
+    expect(mocks.actions.showToast).toHaveBeenCalledWith(
+      "Created TASK-99 for this pull request",
+    );
+    expect(mocks.onLinkedTicket).toHaveBeenCalledWith("TASK-99");
   });
 
   it("omits source_repo when the pull request has no workspace repo mapping", async () => {

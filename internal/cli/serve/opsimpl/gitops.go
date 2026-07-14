@@ -362,10 +362,7 @@ func dedupeRepoPRQueries(repos []ops.WorkspaceRepo) []*prRepoQuery {
 		if repo.Path == "" {
 			continue
 		}
-		key := repo.Remote
-		if key == "" {
-			key = repo.Name
-		}
+		key := repoPRQueryKey(repo)
 		if _, ok := seenRepo[key]; ok {
 			continue
 		}
@@ -373,6 +370,20 @@ func dedupeRepoPRQueries(repos []ops.WorkspaceRepo) []*prRepoQuery {
 		queries = append(queries, &prRepoQuery{repo: repo})
 	}
 	return queries
+}
+
+func repoPRQueryKey(repo ops.WorkspaceRepo) string {
+	remoteURL := strings.TrimSpace(repo.RemoteURL)
+	if githubName := githubRepoName(remoteURL); githubName != "" {
+		return "github:" + strings.ToLower(githubName)
+	}
+	if remoteURL != "" {
+		return "remote:" + strings.TrimSuffix(strings.TrimSuffix(remoteURL, "/"), ".git")
+	}
+	if name := strings.TrimSpace(repo.Name); name != "" {
+		return "name:" + strings.ToLower(name)
+	}
+	return "path:" + filepath.Clean(repo.Path)
 }
 
 // collectRepoQueryPRs merges per-repo results into one list, deduping by PR

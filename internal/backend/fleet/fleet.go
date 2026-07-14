@@ -49,6 +49,7 @@ type apiResponse struct {
 	Success bool              `json:"success"`
 	Data    json.RawMessage   `json:"data,omitempty"`
 	Error   string            `json:"error,omitempty"`
+	Code    string            `json:"code,omitempty"`
 	Meta    map[string]string `json:"-"` // populated from native dialect error.meta
 }
 
@@ -196,7 +197,7 @@ func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 	// Try envelope first.
 	var env apiResponse
 	envErr := json.Unmarshal(body, &env)
-	hasEnvelopeFields := envErr == nil && (env.Success || env.Error != "" || env.Data != nil)
+	hasEnvelopeFields := envErr == nil && (env.Success || env.Error != "" || env.Code != "" || env.Data != nil)
 	if hasEnvelopeFields {
 		return &env, nil
 	}
@@ -221,7 +222,12 @@ func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 		} `json:"error"`
 	}
 	if json.Unmarshal(body, &errEnv) == nil && errEnv.Error.Message != "" {
-		return &apiResponse{Success: false, Error: errEnv.Error.Message, Meta: errEnv.Error.Meta}, nil
+		return &apiResponse{
+			Success: false,
+			Error:   errEnv.Error.Message,
+			Code:    errEnv.Error.Code,
+			Meta:    errEnv.Error.Meta,
+		}, nil
 	}
 
 	// Last resort: surface the raw body as the error string. If even THAT

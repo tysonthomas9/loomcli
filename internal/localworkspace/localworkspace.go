@@ -164,7 +164,7 @@ func EnsureDetachedGitWorktreeFromBranch(repoPath, targetPath, remoteName, defau
 	if baseRef != "" {
 		args = append(args, baseRef)
 	}
-	_, err = runGit(repoPath, args...)
+	_, err = runGit(context.Background(), repoPath, args...)
 	return err
 }
 
@@ -205,7 +205,12 @@ func validatePRWorktreeInputs(repoPath, targetPath, remoteName string, prNumber 
 
 // EnsureDetachedGitWorktreeAtPRHead creates or updates a detached git worktree
 // at targetPath when the fetched PR tip matches the expected head.
-func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, prNumber int, headSHA string) (string, error) {
+func EnsureDetachedGitWorktreeAtPRHead(
+	ctx context.Context,
+	repoPath, targetPath, remoteName string,
+	prNumber int,
+	headSHA string,
+) (string, error) {
 	remoteName, err := validatePRWorktreeInputs(repoPath, targetPath, remoteName, prNumber)
 	if err != nil {
 		return "", err
@@ -218,11 +223,13 @@ func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, 
 
 	checkoutRef := fmt.Sprintf("refs/loom/pr/%d/head", prNumber)
 	fetchRef := fmt.Sprintf("+refs/pull/%d/head:%s", prNumber, checkoutRef)
-	if _, err = runGit(repoPath, "fetch", remoteName, fetchRef); err != nil {
+	// Authentication remains the responsibility of the configured git remote
+	// and credential helper; direct connector-token injection is deferred.
+	if _, err = runGit(ctx, repoPath, "fetch", remoteName, fetchRef); err != nil {
 		return "", fmt.Errorf("fetch PR #%d head from %q: %w", prNumber, remoteName, err)
 	}
 
-	tipOut, err := runGit(repoPath, "rev-parse", "--verify", checkoutRef+"^{commit}")
+	tipOut, err := runGit(ctx, repoPath, "rev-parse", "--verify", checkoutRef+"^{commit}")
 	if err != nil {
 		return "", fmt.Errorf("resolve PR #%d fetched tip %q: %w", prNumber, checkoutRef, err)
 	}
@@ -232,26 +239,26 @@ func EnsureDetachedGitWorktreeAtPRHead(repoPath, targetPath, remoteName string, 
 		return tipSHA, &PRHeadChangedError{ExpectedSHA: expectedSHA, TipSHA: tipSHA}
 	}
 
-	return syncPRWorktree(repoPath, targetPath, checkoutRef, tipSHA)
+	return syncPRWorktree(ctx, repoPath, targetPath, checkoutRef, tipSHA)
 }
 
 // syncPRWorktree materializes checkout at targetPath: create when absent,
 // cache-hit when already there and pristine, else scrub back to the exact
 // sha (reset+clean), recreating the worktree when even that fails.
-func syncPRWorktree(repoPath, targetPath, checkout, expectHEAD string) (string, error) {
+func syncPRWorktree(ctx context.Context, repoPath, targetPath, checkout, expectHEAD string) (string, error) {
 	addWorktree := func() error {
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
 			return fmt.Errorf("creating PR worktree parent: %w", err)
 		}
-		out, err := runGit(repoPath, "worktree", "add", "--detach", targetPath, checkout)
+		out, err := runGit(ctx, repoPath, "worktree", "add", "--detach", targetPath, checkout)
 		if err == nil {
 			return nil
 		}
 		if !branchAlreadyExists(out, err) {
 			return fmt.Errorf("add PR worktree at %s: %w", targetPath, err)
 		}
-		_, _ = runGit(repoPath, "worktree", "remove", "--force", targetPath)
-		if _, err := runGit(repoPath, "worktree", "add", "--detach", targetPath, checkout); err != nil {
+		_, _ = runGit(ctx, repoPath, "worktree", "remove", "--force", targetPath)
+		if _, err := runGit(ctx, repoPath, "worktree", "add", "--detach", targetPath, checkout); err != nil {
 			return fmt.Errorf("add PR worktree at %s after removing stale registration: %w", targetPath, err)
 		}
 		return nil
@@ -271,21 +278,21 @@ func syncPRWorktree(repoPath, targetPath, checkout, expectHEAD string) (string, 
 	// review checkout must faithfully match the PR head, so drift left by a
 	// prior session (untracked/modified files, interrupted clean) is scrubbed
 	// via the reset+clean path rather than handed back dirty.
-	head, _ := runGit(targetPath, "rev-parse", "HEAD")
+	head, _ := runGit(ctx, targetPath, "rev-parse", "HEAD")
 	if strings.TrimSpace(head) == expectHEAD {
-		if status, err := runGit(targetPath, "status", "--porcelain"); err == nil && strings.TrimSpace(status) == "" {
+		if status, err := runGit(ctx, targetPath, "status", "--porcelain"); err == nil && strings.TrimSpace(status) == "" {
 			return expectHEAD, nil
 		}
 	}
 
-	if _, err := runGit(targetPath, "reset", "--hard", checkout); err != nil {
-		_, _ = runGit(repoPath, "worktree", "remove", "--force", targetPath)
+	if _, err := runGit(ctx, targetPath, "reset", "--hard", checkout); err != nil {
+		_, _ = runGit(ctx, repoPath, "worktree", "remove", "--force", targetPath)
 		if err := addWorktree(); err != nil {
 			return "", fmt.Errorf("recreate PR worktree at %s after reset failure: %w", targetPath, err)
 		}
 		return expectHEAD, nil
 	}
-	if _, err := runGit(targetPath, "clean", "-fdx"); err != nil {
+	if _, err := runGit(ctx, targetPath, "clean", "-fdx"); err != nil {
 		return "", fmt.Errorf("clean PR worktree at %s: %w", targetPath, err)
 	}
 	return expectHEAD, nil
@@ -312,12 +319,12 @@ func EnsureGitWorktreeFromBranch(repoPath, targetPath, branchName, remoteName, d
 	if baseRef != "" {
 		args = append(args, baseRef)
 	}
-	if out, err := runGit(repoPath, args...); err == nil {
+	if out, err := runGit(context.Background(), repoPath, args...); err == nil {
 		return nil
 	} else if !branchAlreadyExists(out, err) {
 		return err
 	}
-	if _, err := runGit(repoPath, "worktree", "add", targetPath, branchName); err != nil {
+	if _, err := runGit(context.Background(), repoPath, "worktree", "add", targetPath, branchName); err != nil {
 		return err
 	}
 	return nil
@@ -333,9 +340,9 @@ func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, er
 		remoteName = "origin"
 	}
 
-	if _, err := runGit(repoPath, "remote", "get-url", remoteName); err == nil {
-		if _, err := runGit(repoPath, "fetch", remoteName, defaultBranch); err != nil {
-			if _, localErr := runGit(repoPath, "rev-parse", "--verify", defaultBranch); localErr == nil {
+	if _, err := runGit(context.Background(), repoPath, "remote", "get-url", remoteName); err == nil {
+		if _, err := runGit(context.Background(), repoPath, "fetch", remoteName, defaultBranch); err != nil {
+			if _, localErr := runGit(context.Background(), repoPath, "rev-parse", "--verify", defaultBranch); localErr == nil {
 				return defaultBranch, nil
 			}
 			return "", fmt.Errorf("fetch base branch %q from %q: %w", defaultBranch, remoteName, err)
@@ -343,10 +350,10 @@ func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, er
 		return remoteName + "/" + defaultBranch, nil
 	}
 
-	if _, err := runGit(repoPath, "fetch", remoteName, defaultBranch); err == nil {
+	if _, err := runGit(context.Background(), repoPath, "fetch", remoteName, defaultBranch); err == nil {
 		return remoteName + "/" + defaultBranch, nil
 	}
-	if _, err := runGit(repoPath, "rev-parse", "--verify", defaultBranch); err != nil {
+	if _, err := runGit(context.Background(), repoPath, "rev-parse", "--verify", defaultBranch); err != nil {
 		return "", fmt.Errorf("resolve base branch %q: %w", defaultBranch, err)
 	}
 	return defaultBranch, nil
@@ -359,7 +366,11 @@ func resolveFreshBaseRef(repoPath, remoteName, defaultBranch string) (string, er
 // PR-specific data being injected into the prompt. Per-worktree config keeps
 // concurrent reviews of different PRs in the same repo from colliding. Returns
 // the resolved base commit sha.
-func RecordPRReviewContext(worktreePath, remoteName, baseRef string, meta map[string]string) (string, error) {
+func RecordPRReviewContext(
+	ctx context.Context,
+	worktreePath, remoteName, baseRef string,
+	meta map[string]string,
+) (string, error) {
 	if strings.TrimSpace(worktreePath) == "" {
 		return "", fmt.Errorf("worktree path is empty")
 	}
@@ -373,20 +384,20 @@ func RecordPRReviewContext(worktreePath, remoteName, baseRef string, meta map[st
 	}
 	// extensions.worktreeConfig must be enabled before --worktree config writes
 	// land in this worktree's private config (idempotent, main-repo scoped).
-	if out, err := runGit(worktreePath, "config", "extensions.worktreeConfig", "true"); err != nil {
+	if out, err := runGit(ctx, worktreePath, "config", "extensions.worktreeConfig", "true"); err != nil {
 		return "", fmt.Errorf("enable worktree config: %w: %s", err, out)
 	}
 	// `--` terminates option parsing so a base ref can never be read as a git
 	// flag (baseRef comes from the connector's PR metadata).
-	if out, err := runGit(worktreePath, "fetch", remoteName, "--", baseRef); err != nil {
+	if out, err := runGit(ctx, worktreePath, "fetch", remoteName, "--", baseRef); err != nil {
 		return "", fmt.Errorf("fetch review base %q from %q: %w: %s", baseRef, remoteName, err, out)
 	}
-	out, err := runGit(worktreePath, "rev-parse", "FETCH_HEAD")
+	out, err := runGit(ctx, worktreePath, "rev-parse", "FETCH_HEAD")
 	if err != nil {
 		return "", fmt.Errorf("resolve review base sha: %w", err)
 	}
 	baseSHA := strings.TrimSpace(out)
-	if _, err := runGit(worktreePath, "config", "--worktree", "loom.reviewBase", baseSHA); err != nil {
+	if _, err := runGit(ctx, worktreePath, "config", "--worktree", "loom.reviewBase", baseSHA); err != nil {
 		return "", fmt.Errorf("record review base: %w", err)
 	}
 	for key, value := range meta {
@@ -395,14 +406,15 @@ func RecordPRReviewContext(worktreePath, remoteName, baseRef string, meta map[st
 			continue
 		}
 		// Best-effort niceties (PR number/title/url) for the reviewer's summary.
-		_, _ = runGit(worktreePath, "config", "--worktree", "loom.review"+key, value)
+		_, _ = runGit(ctx, worktreePath, "config", "--worktree", "loom.review"+key, value)
 	}
 	return baseSHA, nil
 }
 
-func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...) //nolint:gosec // G204: fixed git executable; args are controlled by internal worktree callers.
+func runGit(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: fixed git executable; args are controlled by internal worktree callers.
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -418,7 +430,7 @@ func GitRemoteURL(dir, remote string) (string, error) {
 	if strings.TrimSpace(remote) == "" {
 		remote = "origin"
 	}
-	out, err := runGit(dir, "remote", "get-url", remote)
+	out, err := runGit(context.Background(), dir, "remote", "get-url", remote)
 	if err != nil {
 		return "", err
 	}

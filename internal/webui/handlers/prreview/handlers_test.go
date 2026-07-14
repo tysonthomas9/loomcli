@@ -367,6 +367,15 @@ func (h *prReviewHarness) addRepo(t *testing.T, name, remoteURL string) {
 	}
 }
 
+func (h *prReviewHarness) updateRepoRemote(t *testing.T, name, remoteURL string) {
+	t.Helper()
+	if _, err := h.store.Repos().Update(context.Background(), prReviewTestWorkspace, name, store.RepoUpdate{
+		RemoteURL: &remoteURL,
+	}); err != nil {
+		t.Fatalf("Update repo %s remote URL: %v", name, err)
+	}
+}
+
 func (h *prReviewHarness) rememberLocalPaths(t *testing.T, workspacePath, repoName, repoPath string) {
 	t.Helper()
 	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
@@ -684,13 +693,15 @@ func TestListPullRequestsConnector(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	h.github.setListPayload("octocat", "hello", []map[string]any{
 		{
-			"number": 11,
-			"state":  "open",
-			"title":  "First PR",
-			"draft":  false,
-			"merged": false,
-			"head":   map[string]any{"sha": "head-11", "ref": "feature/one"},
-			"base":   map[string]any{"sha": "base-11", "ref": "main"},
+			"number":     11,
+			"state":      "open",
+			"title":      "First PR",
+			"draft":      false,
+			"merged":     false,
+			"updated_at": "2026-07-13T13:00:00Z",
+			"user":       map[string]any{"login": "octocat"},
+			"head":       map[string]any{"sha": "head-11", "ref": "feature/one"},
+			"base":       map[string]any{"sha": "base-11", "ref": "main"},
 		},
 		{
 			"number": 12,
@@ -702,13 +713,13 @@ func TestListPullRequestsConnector(t *testing.T) {
 			"base":   map[string]any{"sha": "base-12", "ref": "main"},
 		},
 		{
-			"number": 13,
-			"state":  "closed",
-			"title":  "Closed PR",
-			"draft":  false,
-			"merged": false,
-			"head":   map[string]any{"sha": "head-13", "ref": "feature/three"},
-			"base":   map[string]any{"sha": "base-13", "ref": "main"},
+			"number":    13,
+			"state":     "closed",
+			"title":     "Merged PR",
+			"draft":     false,
+			"merged_at": "2026-07-13T12:00:00Z",
+			"head":      map[string]any{"sha": "head-13", "ref": "feature/three"},
+			"base":      map[string]any{"sha": "base-13", "ref": "main"},
 		},
 	})
 
@@ -742,11 +753,14 @@ func TestListPullRequestsConnector(t *testing.T) {
 	if first.State != "OPEN" {
 		t.Fatalf("first PR state = %q, want %q (frontend keys open rows off this)", first.State, "OPEN")
 	}
+	if first.AuthorLogin != "octocat" || first.UpdatedAt != "2026-07-13T13:00:00Z" {
+		t.Fatalf("first PR author/update = %q/%q, want connector list fields", first.AuthorLogin, first.UpdatedAt)
+	}
 	if got := decoded.Data.PullRequests[1]; !got.IsDraft || got.HeadRefName != "feature/two" || got.BaseRefName != "main" {
 		t.Fatalf("second PR = %+v, want draft/head/base mapped", got)
 	}
-	if got := decoded.Data.PullRequests[2]; got.State != "CLOSED" {
-		t.Fatalf("third PR state = %q, want %q", got.State, "CLOSED")
+	if got := decoded.Data.PullRequests[2]; got.State != "MERGED" {
+		t.Fatalf("third PR state = %q, want %q", got.State, "MERGED")
 	}
 	calls := h.github.snapshot()
 	if len(calls) != 1 || calls[0].path != "/repos/octocat/hello/pulls" {
@@ -758,6 +772,51 @@ func TestListPullRequestsConnector(t *testing.T) {
 		}
 	}
 	assertGrantActions(t, h, prReadActions)
+}
+
+func TestSSHRemoteAuthorizesAndListsPullRequests(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	h.updateRepoRemote(t, "hello", "ssh://git@github.com/octocat/hello.git")
+	h.github.setListPayload("octocat", "hello", []map[string]any{{
+		"number": 7,
+		"state":  "open",
+		"title":  "SSH remote PR",
+	}})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK || !bytes.Contains(raw, []byte(`"number":7`)) {
+		t.Fatalf("list status = %d, body = %s", status, raw)
+	}
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("detail status = %d, want authorized 200 (body %s)", status, raw)
+	}
+}
+
+func TestListPullRequestsWarnsForUnparseableRemote(t *testing.T) {
+	fallback := &fallbackAgentService{result: &ops.GitPullRequestList{}}
+	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	h.updateRepoRemote(t, "hello", "not a repository URL")
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	if !fallback.called {
+		t.Fatal("expected gh fallback when no remote is connector-eligible")
+	}
+	var decoded struct {
+		Data struct {
+			Warnings []string `json:"warnings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, raw)
+	}
+	if len(decoded.Data.Warnings) != 1 || !strings.Contains(decoded.Data.Warnings[0], "hello") ||
+		!strings.Contains(decoded.Data.Warnings[0], "not a supported GitHub URL") {
+		t.Fatalf("warnings = %v, want explicit unsupported-remote warning", decoded.Data.Warnings)
+	}
 }
 
 func TestListPullRequestsConnectorPaginatesWithDistinctCallSeq(t *testing.T) {
@@ -1603,7 +1662,7 @@ func TestEnsureReviewerRejectsChangedFetchedTip(t *testing.T) {
 	h.github.setHead("ABC123")
 
 	checkoutCalled := false
-	h.module.checkoutReviewerPRHead = func(_, _ string, _ string, _ int, headSHA string) (string, error) {
+	h.module.checkoutReviewerPRHead = func(_ context.Context, _, _ string, _ string, _ int, headSHA string) (string, error) {
 		checkoutCalled = true
 		if headSHA != "ABC123" {
 			t.Fatalf("checkout head sha = %q, want ABC123", headSHA)
@@ -1642,6 +1701,33 @@ func TestEnsureReviewerRejectsChangedFetchedTip(t *testing.T) {
 	}
 	if _, remembered := cache.Workspaces[prReviewTestWorkspace].Agents[agentName]; remembered {
 		t.Fatalf("reviewer worktree was remembered for stale agent %q", agentName)
+	}
+}
+
+func TestEnsureReviewerRejectsMissingRecordedCheckout(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	workspacePath := t.TempDir()
+	repoPath := filepath.Join(workspacePath, "missing-checkout")
+	h.rememberLocalPaths(t, workspacePath, "hello", repoPath)
+
+	checkoutCalled := false
+	h.module.checkoutReviewerPRHead = func(context.Context, string, string, string, int, string) (string, error) {
+		checkoutCalled = true
+		return "", nil
+	}
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "repo_not_checked_out" {
+		t.Fatalf("code = %q, want repo_not_checked_out", code)
+	}
+	if checkoutCalled {
+		t.Fatal("checkout ran for a recorded path that does not exist")
+	}
+	agentName := reviewerAgentName("octocat", "hello", 7)
+	if _, err := h.store.Agents().Get(context.Background(), prReviewTestWorkspace, agentName); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("reviewer agent lookup error = %v, want ErrNotFound", err)
 	}
 }
 
@@ -1807,8 +1893,11 @@ func TestParseGitHubOwnerRepo(t *testing.T) {
 		ok     bool
 	}{
 		{remote: "git@github.com:octocat/hello.git", owner: "octocat", repo: "hello", ok: true},
+		{remote: "ssh://git@github.com/octocat/hello.git", owner: "octocat", repo: "hello", ok: true},
+		{remote: "ssh://deploy@github.com/octocat/hello", owner: "octocat", repo: "hello", ok: true},
 		{remote: "https://github.com/octocat/hello", owner: "octocat", repo: "hello", ok: true},
 		{remote: "https://github.com/octocat/hello.git", owner: "octocat", repo: "hello", ok: true},
+		{remote: "ssh://git@gitlab.com/octocat/hello.git", ok: false},
 		{remote: "https://gitlab.com/octocat/hello.git", ok: false},
 	} {
 		owner, repo, ok := parseGitHubOwnerRepo(tc.remote)

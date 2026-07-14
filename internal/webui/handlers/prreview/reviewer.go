@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/connector"
@@ -30,6 +32,7 @@ const reviewerIdentityHashLen = 8
 const reviewerRoleName = "pr-reviewer"
 const reviewerPromptFile = "builtin:pr-review-checkout"
 const reviewerRoleDescription = "PR review checkout terminal agent"
+const reviewerGitTimeout = 60 * time.Second
 
 // terminalKindAgent mirrors the agent-terminal tab kind used by the terminal
 // handlers (internal/webui/handlers/terminal); tabs of this kind for the
@@ -143,6 +146,14 @@ func (m *Module) resolveRepoCheckout(ctx context.Context, ws, owner, repo string
 		if repoPath == "" || wsPath == "" {
 			return "", "", "", "", false, nil
 		}
+		if _, statErr := os.Stat(repoPath); statErr != nil {
+			slog.Warn("pr-review: recorded repository checkout is unavailable",
+				"ws", ws, "repo", workspaceRepo.Name, "path", repoPath, "err", statErr)
+			if os.IsNotExist(statErr) {
+				return "", "", "", "", false, nil
+			}
+			return "", "", "", "", false, fmt.Errorf("inspect recorded repository checkout: %w", statErr)
+		}
 		remote = strings.TrimSpace(workspaceRepo.Remote)
 		if remote == "" {
 			remote = "origin"
@@ -174,8 +185,10 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentName := reviewerAgentName(params.owner, params.repo, params.number)
+	gitCtx, cancelGit := reviewerGitContext(r.Context())
+	defer cancelGit()
 	checkedOutSHA, ok := prepareReviewerCheckout(w, reviewerCheckoutSpec{
-		ws: ws, agentName: agentName, params: params,
+		ctx: gitCtx, ws: ws, agentName: agentName, params: params,
 		repoPath: repoPath, remote: remote, repoName: repoName, wsPath: wsPath,
 		headSHA: headSHA, title: title, baseRef: baseRef,
 		checkoutPRHead: m.checkoutReviewerPRHead,
@@ -197,6 +210,13 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		CheckedOutSha: checkedOutSHA,
 		Seeded:        true,
 	})
+}
+
+func reviewerGitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, reviewerGitTimeout)
 }
 
 // fetchPullRequestHead seeds the connector grants and reads the PR's head
@@ -230,9 +250,15 @@ func (m *Module) fetchPullRequestHead(w http.ResponseWriter, r *http.Request, ws
 	return headSHA, stringValue(res.Body["title"]), stringValue(res.Body["baseRef"]), true
 }
 
-type reviewerCheckoutFunc func(repoPath, targetPath, remoteName string, prNumber int, headSHA string) (string, error)
+type reviewerCheckoutFunc func(
+	ctx context.Context,
+	repoPath, targetPath, remoteName string,
+	prNumber int,
+	headSHA string,
+) (string, error)
 
 type reviewerCheckoutSpec struct {
+	ctx            context.Context
 	ws             string
 	agentName      string
 	params         pullRequestPath
@@ -272,7 +298,9 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 	if checkoutPRHead == nil {
 		checkoutPRHead = localworkspace.EnsureDetachedGitWorktreeAtPRHead
 	}
-	checkedOutSHA, err := checkoutPRHead(spec.repoPath, target, spec.remote, spec.params.number, spec.headSHA)
+	checkedOutSHA, err := checkoutPRHead(
+		spec.ctx, spec.repoPath, target, spec.remote, spec.params.number, spec.headSHA,
+	)
 	var changed *localworkspace.PRHeadChangedError
 	if errors.As(err, &changed) {
 		return stale()
@@ -294,7 +322,7 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 	// is the backend CLI's positional first turn (codex and every harness
 	// backend alike), so the reviewer auto-reviews on boot — no delivered seed
 	// to dedupe (which is what broke re-opened reviewers on a fresh thread).
-	if _, err := localworkspace.RecordPRReviewContext(target, spec.remote, spec.baseRef, map[string]string{
+	if _, err := localworkspace.RecordPRReviewContext(spec.ctx, target, spec.remote, spec.baseRef, map[string]string{
 		"Pr":    strconv.Itoa(spec.params.number),
 		"Title": spec.title,
 		"Url":   fmt.Sprintf("https://github.com/%s/%s/pull/%d", spec.params.owner, spec.params.repo, spec.params.number),
