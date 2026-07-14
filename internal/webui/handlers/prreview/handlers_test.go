@@ -1009,6 +1009,40 @@ func TestListPullRequestsConnectorFailureSurfacesWarning(t *testing.T) {
 	}
 }
 
+func TestListPullRequestsOversizedConnectorPageSurfacesWarning(t *testing.T) {
+	fallback := &fallbackAgentService{
+		result: &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{{Number: 5, RepoName: "octocat/hello", State: "OPEN"}},
+		},
+	}
+	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	h.github.setListPayload("octocat", "hello", []map[string]any{{
+		"number":  7,
+		"state":   "open",
+		"title":   "Oversized PR",
+		"padding": strings.Repeat("x", 5<<20),
+	}})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=all")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 fallback response (body %s)", status, raw)
+	}
+	decoded := decodePullRequestsResponse(t, raw)
+	if !fallback.called || len(decoded.PullRequests) != 1 {
+		t.Fatalf("fallback = %v, pull_requests = %+v; want non-empty fallback", fallback.called, decoded.PullRequests)
+	}
+	warningFound := false
+	for _, warning := range decoded.Warnings {
+		if strings.Contains(warning, "octocat/hello") &&
+			strings.Contains(warning, "response exceeded 4194304 bytes") {
+			warningFound = true
+		}
+	}
+	if !warningFound {
+		t.Fatalf("warnings = %v, want per-repo oversized-response warning", decoded.Warnings)
+	}
+}
+
 func TestListPullRequestsPartialRepoErrorWarns(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	h.addRepo(t, "widgets", "https://github.com/acme/widgets")
