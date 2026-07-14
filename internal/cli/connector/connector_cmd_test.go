@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -199,7 +201,7 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 			params:  createParams{source: domain.ConnectorSourceGitHub, credStdin: true},
 			stdin:   testCredential + "\n",
 			noKey:   true,
-			wantErr: vault.ErrVaultKeyMissing,
+			wantMsg: "vault key",
 		},
 		{
 			name:    "duplicate connector",
@@ -210,9 +212,17 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.noKey {
+				// Since #152 LoomDir() always yields a writable per-process
+				// temp dir under `go test`, so "no vault source" can't be
+				// staged by clearing env alone: the key-file fallback would
+				// succeed. Point LOOM_CONFIG_DIR below a regular file so the
+				// key-file path cannot be created either.
 				t.Setenv(vault.VaultKeyEnvVar, "")
-				t.Setenv("LOOM_CONFIG_DIR", "")
-				t.Setenv("HOME", "")
+				blocker := filepath.Join(t.TempDir(), "blocker")
+				if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+					t.Fatalf("write blocker: %v", err)
+				}
+				t.Setenv("LOOM_CONFIG_DIR", filepath.Join(blocker, "loom"))
 			}
 			st := memstore.New()
 			if tt.params.connectorID == "dup" {
