@@ -111,19 +111,8 @@ func (m *Module) postReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req gen.PullRequestReviewRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review request body", false)
-		return
-	}
-	expectedHeadSha := strings.TrimSpace(req.ExpectedHeadSha)
-	if expectedHeadSha == "" {
-		writePRReviewErrorCode(w, http.StatusPreconditionRequired, "precondition_required", "expected_head_sha is required", false)
-		return
-	}
-	event, ok := githubReviewEvent(req.Event)
+	req, event, expectedHeadSha, ok := decodeReviewRequest(w, r)
 	if !ok {
-		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review event", false)
 		return
 	}
 
@@ -136,9 +125,14 @@ func (m *Module) postReview(w http.ResponseWriter, r *http.Request) {
 	if req.Body != nil {
 		args["body"] = *req.Body
 	}
+	runID, err := reviewSubmissionRunID(r, params)
+	if err != nil {
+		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to prepare the review request", false)
+		return
+	}
 	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
 		WorkspaceKey:  ws,
-		RunID:         syntheticRunID(r, params, providers.ActionGitHubReviewPost),
+		RunID:         runID,
 		BindingID:     bindingID,
 		ConnectorID:   connectorID,
 		Action:        providers.ActionGitHubReviewPost,
@@ -178,6 +172,41 @@ func pullRequestArgs(params pullRequestPath) map[string]any {
 		"repo":   params.repo,
 		"number": params.number,
 	}
+}
+
+// decodeReviewRequest parses and validates a review POST body, writing the
+// HTTP error itself and returning ok=false on failure.
+func decodeReviewRequest(w http.ResponseWriter, r *http.Request) (req gen.PullRequestReviewRequest, event, expectedHeadSha string, ok bool) {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review request body", false)
+		return req, "", "", false
+	}
+	expectedHeadSha = strings.TrimSpace(req.ExpectedHeadSha)
+	if expectedHeadSha == "" {
+		writePRReviewErrorCode(w, http.StatusPreconditionRequired, "precondition_required", "expected_head_sha is required", false)
+		return req, "", "", false
+	}
+	event, ok = githubReviewEvent(req.Event)
+	if !ok {
+		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid review event", false)
+		return req, "", "", false
+	}
+	return req, event, expectedHeadSha, true
+}
+
+// reviewSubmissionRunID builds the dispatch run id for a review POST. Unlike
+// the read paths — where a deterministic runID intentionally collapses the
+// audit trail of a polled endpoint — every review submission needs a UNIQUE
+// identity: CallID and the provider Idempotency-Key derive from
+// runID#action#seq, so a deterministic runID would make a retry after a
+// stale-head refresh, or a second decision on the same PR, collide with the
+// first submission.
+func reviewSubmissionRunID(r *http.Request, params pullRequestPath) (string, error) {
+	nonce, err := randomHex(8)
+	if err != nil {
+		return "", fmt.Errorf("review run id nonce: %w", err)
+	}
+	return syntheticRunID(r, params, providers.ActionGitHubReviewPost) + ":" + nonce, nil
 }
 
 func syntheticRunID(r *http.Request, params pullRequestPath, action string) string {

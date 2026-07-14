@@ -21,16 +21,19 @@ func TestServer_BuildModules_ZeroValue(t *testing.T) {
 	var app Server
 	app.buildModules()
 
-	if got := len(app.wsModules); got != 4 {
-		t.Fatalf("len(wsModules) = %d, want 4", got)
+	if got := len(app.wsModules); got != 5 {
+		t.Fatalf("len(wsModules) = %d, want 5", got)
 	}
 
-	// Verify concrete types in order.
+	// Verify concrete types in order. The gh-backed PR list fallback is
+	// registered whenever there is no store (its Register no-ops without an
+	// agent service).
 	wantTypes := []string{
 		"*handlermux.WorkspaceOpsModule",
 		"*issues.IssueModule",
 		"*issues.SessionModule",
 		"*log.Module",
+		"*git.PullRequestListModule",
 	}
 	for i, mod := range app.wsModules {
 		got := fmt.Sprintf("%T", mod)
@@ -60,9 +63,10 @@ func TestServer_BuildModules_AllDeps(t *testing.T) {
 	app.buildModules()
 
 	// 4 always + SSE(hub) + TerminalTab(termSvc) + IssueTab(issueTabStore) +
-	// Terminal(termSvc) + Fleet(fleetRegistry) + Git(diffSvc) + File(fileSvc) = 11
-	if got := len(app.wsModules); got != 11 {
-		t.Fatalf("len(wsModules) = %d, want 11", got)
+	// Terminal(termSvc) + Fleet(fleetRegistry) + Git(diffSvc) + File(fileSvc) +
+	// gh-backed PR list fallback (non-store) = 12
+	if got := len(app.wsModules); got != 12 {
+		t.Fatalf("len(wsModules) = %d, want 12", got)
 	}
 }
 

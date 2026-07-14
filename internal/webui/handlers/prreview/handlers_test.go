@@ -1974,3 +1974,24 @@ func TestTrimReviewerPreamble(t *testing.T) {
 		t.Fatal("no-preamble case must be unchanged")
 	}
 }
+
+func TestReviewSubmissionRunIDUniquePerSubmission(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/pull-requests/octocat/hello/7/review", nil)
+	params := pullRequestPath{owner: "octocat", repo: "hello", number: 7}
+
+	first, err := reviewSubmissionRunID(req, params)
+	if err != nil {
+		t.Fatalf("reviewSubmissionRunID: %v", err)
+	}
+	second, err := reviewSubmissionRunID(req, params)
+	if err != nil {
+		t.Fatalf("reviewSubmissionRunID: %v", err)
+	}
+	if first == second {
+		t.Fatalf("run ids identical across submissions: %s", first)
+	}
+	base := syntheticRunID(req, params, providers.ActionGitHubReviewPost) + ":"
+	if !strings.HasPrefix(first, base) || !strings.HasPrefix(second, base) {
+		t.Fatalf("run ids %q / %q missing deterministic prefix %q", first, second, base)
+	}
+}

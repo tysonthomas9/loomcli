@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
+	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/onboarding"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
@@ -143,7 +144,12 @@ func (app *Server) buildInfraModules() {
 			LocalSettingsDir: app.config.LocalSettingsDir,
 			Dispatcher:       app.connectorDispatcher,
 		}))
-	} else if app.config.AgentControlFn != nil {
-		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
+	} else {
+		// Without a store there is no connector-backed prreview module, so
+		// keep the gh-backed pull-request list route available.
+		app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
+		if app.config.AgentControlFn != nil {
+			app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
+		}
 	}
 }
