@@ -56,6 +56,7 @@ type PatchIssueRequest struct {
 	Assignee           *string  `json:"assignee,omitempty"`
 	Owner              *string  `json:"owner,omitempty"`
 	Design             *string  `json:"design,omitempty"`
+	DesignFormat       *string  `json:"design_format,omitempty"`
 	AcceptanceCriteria *string  `json:"acceptance_criteria,omitempty"`
 	Notes              *string  `json:"notes,omitempty"`
 	ExternalRef        *string  `json:"external_ref,omitempty"`

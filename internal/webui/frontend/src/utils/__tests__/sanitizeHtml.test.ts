@@ -65,4 +65,26 @@ describe("sanitizeHtml", () => {
     const result = sanitizeHtml(mxss);
     expect(result).not.toContain("onerror");
   });
+
+  it("preserves presentation SVG", () => {
+    const svg =
+      '<svg width="100" height="50" viewBox="0 0 100 50">' +
+      '<rect x="1" y="1" width="98" height="48" fill="none" stroke="black" stroke-width="2"/>' +
+      '<text x="10" y="30">Hi</text></svg>';
+    const out = sanitizeHtml(svg);
+    expect(out).toContain("<svg");
+    expect(out).toContain("<rect");
+    expect(out).toContain("<text");
+    expect(out).toContain('viewBox="0 0 100 50"');
+  });
+
+  it("strips script and event handlers nested in SVG", () => {
+    const out = sanitizeHtml(
+      '<svg><script>alert(1)</script><rect onload="alert(2)" onclick="x()"/></svg>',
+    );
+    expect(out.toLowerCase()).not.toContain("<script");
+    expect(out).not.toContain("onload");
+    expect(out).not.toContain("onclick");
+    expect(out.toLowerCase()).not.toContain("alert");
+  });
 });

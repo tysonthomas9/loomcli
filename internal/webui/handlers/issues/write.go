@@ -27,6 +27,7 @@ func HandlePatchIssue(svc service.IssueService) http.HandlerFunc {
 			Assignee:           req.Assignee,
 			Owner:              req.Owner,
 			Design:             req.Design,
+			DesignFormat:       req.DesignFormat,
 			AcceptanceCriteria: req.AcceptanceCriteria,
 			Notes:              req.Notes,
 			ExternalRef:        req.ExternalRef,

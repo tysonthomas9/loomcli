@@ -4321,6 +4321,17 @@ components:
           type: string
         design:
           type: string
+          description: Hydrated design body when available; collection responses may omit it.
+        design_artifact_id:
+          type: string
+          description: Managed FleetDB artifact reference for the design body.
+        design_format:
+          type: string
+          enum: [markdown, html]
+          description: Durable format of the hydrated design body.
+        has_design:
+          type: boolean
+          description: True for either a legacy inline or artifact-backed design.
         acceptance_criteria:
           type: string
         notes:
@@ -4425,6 +4436,16 @@ components:
           type: string
         design:
           type: string
+        design_artifact_id:
+          type: string
+          description: Managed FleetDB artifact reference for the design body.
+        design_format:
+          type: string
+          enum: [markdown, html]
+          description: Durable format of the hydrated design body.
+        has_design:
+          type: boolean
+          description: True for either a legacy inline or artifact-backed design.
         acceptance_criteria:
           type: string
         notes:
@@ -4757,6 +4778,9 @@ components:
           type: [string, "null"]
         design:
           type: [string, "null"]
+        design_format:
+          type: [string, "null"]
+          enum: [markdown, html, null]
         acceptance_criteria:
           type: [string, "null"]
         notes:
