@@ -114,3 +114,40 @@ func TestHandlePatch_SavesRuntimeSettingsWithoutReturningCredentials(t *testing.
 		t.Fatalf("unseal Daytona credential = %q, %v", got, err)
 	}
 }
+
+func TestHandlePatch_NotifiesOnlyActualGitHubCredentialChanges(t *testing.T) {
+	dir := t.TempDir()
+	notifications := 0
+	handler := HandlePatch(dir, PatchOptions{
+		OnGitHubRuntimeCredentialChanged: func() { notifications++ },
+	})
+	patch := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/api/local/settings", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	patch(`{"runtime_credentials":{"daytona":{"api_key":"dtn-secret"}}}`)
+	patch(`{"runtime_credentials":{"github":{}}}`)
+	patch(`{"runtime_credentials":{"github":{"clear":true}}}`)
+	if notifications != 0 {
+		t.Fatalf("notifications before GitHub change = %d, want 0", notifications)
+	}
+
+	patch(`{"runtime_credentials":{"github":{"token":"gh-secret"}}}`)
+	if notifications != 1 {
+		t.Fatalf("notifications after GitHub set = %d, want 1", notifications)
+	}
+	patch(`{"runtime_credentials":{"github":{"clear":true}}}`)
+	if notifications != 2 {
+		t.Fatalf("notifications after GitHub clear = %d, want 2", notifications)
+	}
+	patch(`{"runtime_credentials":{"github":{"clear":true}}}`)
+	if notifications != 2 {
+		t.Fatalf("notifications after no-op GitHub clear = %d, want 2", notifications)
+	}
+}

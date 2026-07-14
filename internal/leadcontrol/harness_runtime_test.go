@@ -47,16 +47,17 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 	runtimeErr := make(chan error, 1)
 	go func() {
 		runtimeErr <- RunHarnessLeadRuntime(ctx, HarnessLeadRuntimeConfig{
-			Store:     st,
-			Workspace: "WS",
-			LeadName:  "nova",
-			SessionID: "lead-session",
-			WorkDir:   "/repo",
-			Prompt:    "lead prompt",
-			Backend:   "claude",
-			Stdin:     strings.NewReader(""),
-			Stdout:    &out,
-			Stderr:    &out,
+			Store:            st,
+			Workspace:        "WS",
+			LeadName:         "nova",
+			SessionID:        "lead-session",
+			WorkDir:          "/repo",
+			Prompt:           "lead prompt",
+			Backend:          "claude",
+			HarnessSessionID: "11111111-2222-4333-8444-555555555555",
+			Stdin:            strings.NewReader(""),
+			Stdout:           &out,
+			Stderr:           &out,
 		})
 	}()
 
@@ -78,6 +79,11 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 	}
 	if got := session.Metadata[MetadataHarnessPID]; got != "42" {
 		t.Fatalf("harness pid = %q, want 42", got)
+	}
+	// A launch-assigned harness session id is persisted with the starting
+	// metadata — readers can locate the transcript before any TUI scrape.
+	if got := session.Metadata[MetadataHarnessSessionID]; got != "11111111-2222-4333-8444-555555555555" {
+		t.Fatalf("harness session id = %q, want the launch-assigned uuid", got)
 	}
 	if gotOpts.Harness != HarnessNameClaudeCode {
 		t.Fatalf("opened harness = %q, want claude-code", gotOpts.Harness)

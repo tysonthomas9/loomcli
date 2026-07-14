@@ -803,6 +803,27 @@ func (e PatchIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for PullRequestReviewRequestEvent.
+const (
+	PullRequestReviewRequestEventApprove        PullRequestReviewRequestEvent = "approve"
+	PullRequestReviewRequestEventComment        PullRequestReviewRequestEvent = "comment"
+	PullRequestReviewRequestEventRequestChanges PullRequestReviewRequestEvent = "request_changes"
+)
+
+// Valid indicates whether the value is a known member of the PullRequestReviewRequestEvent enum.
+func (e PullRequestReviewRequestEvent) Valid() bool {
+	switch e {
+	case PullRequestReviewRequestEventApprove:
+		return true
+	case PullRequestReviewRequestEventComment:
+		return true
+	case PullRequestReviewRequestEventRequestChanges:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RuntimeReadyResponseMode.
 const (
 	Daemon RuntimeReadyResponseMode = "daemon"
@@ -1745,10 +1766,11 @@ type EditorOpenRequest struct {
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
-	Code    *string                 `json:"code,omitempty"`
-	Details *map[string]interface{} `json:"details,omitempty"`
-	Error   string                  `json:"error"`
-	Success ErrorResponseSuccess    `json:"success"`
+	Code      *string                 `json:"code,omitempty"`
+	Details   *map[string]interface{} `json:"details,omitempty"`
+	Error     string                  `json:"error"`
+	Retryable *bool                   `json:"retryable,omitempty"`
+	Success   ErrorResponseSuccess    `json:"success"`
 }
 
 // ErrorResponseSuccess defines model for ErrorResponse.Success.
@@ -2496,6 +2518,88 @@ type PatchIssueRequestDesignFormat string
 
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
+
+// PullRequestDetail defines model for PullRequestDetail.
+type PullRequestDetail struct {
+	BaseRefName string `json:"base_ref_name"`
+	HeadRefName string `json:"head_ref_name"`
+	HeadSha     string `json:"head_sha"`
+	IsDraft     bool   `json:"is_draft"`
+	Merged      bool   `json:"merged"`
+	Number      int    `json:"number"`
+	State       string `json:"state"`
+	Title       string `json:"title"`
+}
+
+// PullRequestDiff defines model for PullRequestDiff.
+type PullRequestDiff struct {
+	Diff  string                `json:"diff"`
+	Files []PullRequestDiffFile `json:"files"`
+}
+
+// PullRequestDiffFile defines model for PullRequestDiffFile.
+type PullRequestDiffFile struct {
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+	Patch     string `json:"patch"`
+	Path      string `json:"path"`
+	Status    string `json:"status"`
+}
+
+// PullRequestReviewRequest defines model for PullRequestReviewRequest.
+type PullRequestReviewRequest struct {
+	Body            *string                       `json:"body,omitempty"`
+	Event           PullRequestReviewRequestEvent `json:"event"`
+	ExpectedHeadSha string                        `json:"expected_head_sha"`
+}
+
+// PullRequestReviewRequestEvent defines model for PullRequestReviewRequest.Event.
+type PullRequestReviewRequestEvent string
+
+// PullRequestReviewResult defines model for PullRequestReviewResult.
+type PullRequestReviewResult struct {
+	ReviewId *int    `json:"review_id,omitempty"`
+	State    *string `json:"state,omitempty"`
+}
+
+// ReviewerConversation defines model for ReviewerConversation.
+type ReviewerConversation struct {
+	// Detail Human-readable context for failed/unsupported states.
+	Detail   *string           `json:"detail,omitempty"`
+	Messages []ReviewerMessage `json:"messages"`
+
+	// State starting | reconnecting | idle | running | failed | unsupported. failed: the reviewer runtime died or its conversation is unreadable. unsupported: the reviewer's backend has no readable conversation (the terminal tab still works); detail says why.
+	State string `json:"state"`
+}
+
+// ReviewerEnsureResult defines model for ReviewerEnsureResult.
+type ReviewerEnsureResult struct {
+	AgentName     string `json:"agent_name"`
+	CheckedOutSha string `json:"checked_out_sha"`
+	Seeded        bool   `json:"seeded"`
+}
+
+// ReviewerMessage defines model for ReviewerMessage.
+type ReviewerMessage struct {
+	ItemId string  `json:"item_id"`
+	Phase  *string `json:"phase,omitempty"`
+
+	// Role user | assistant
+	Role   string `json:"role"`
+	Text   string `json:"text"`
+	TurnId string `json:"turn_id"`
+}
+
+// ReviewerMessageRequest defines model for ReviewerMessageRequest.
+type ReviewerMessageRequest struct {
+	Text string `json:"text"`
+}
+
+// ReviewerMessageResult defines model for ReviewerMessageResult.
+type ReviewerMessageResult struct {
+	Reason string `json:"reason"`
+	State  string `json:"state"`
+}
 
 // RuntimeReadyResponse defines model for RuntimeReadyResponse.
 type RuntimeReadyResponse struct {
@@ -3451,6 +3555,12 @@ type RenameWorkspaceJSONRequestBody = WorkspaceRenameRequest
 
 // RunOnboardingFirstTaskJSONRequestBody defines body for RunOnboardingFirstTask for application/json ContentType.
 type RunOnboardingFirstTaskJSONRequestBody RunOnboardingFirstTaskJSONBody
+
+// PostPullRequestReviewerMessageJSONRequestBody defines body for PostPullRequestReviewerMessage for application/json ContentType.
+type PostPullRequestReviewerMessageJSONRequestBody = ReviewerMessageRequest
+
+// PostPullRequestReviewJSONRequestBody defines body for PostPullRequestReview for application/json ContentType.
+type PostPullRequestReviewJSONRequestBody = PullRequestReviewRequest
 
 // SeedTerminalSessionJSONRequestBody defines body for SeedTerminalSession for application/json ContentType.
 type SeedTerminalSessionJSONRequestBody = SeedRequest

@@ -676,6 +676,24 @@ func TestCreate_HappyPath(t *testing.T) {
 	}
 }
 
+func TestCreateParentNotFoundIsValidation(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{
+				"message": "parent issue not found",
+			},
+		})
+	})
+	defer ts.Close()
+
+	_, err := fb.Create(context.Background(), backend.CreateParams{Title: "Child", Parent: "missing"})
+	if !backend.IsKind(err, backend.KindValidation) {
+		t.Fatalf("Create error = %v, want validation", err)
+	}
+}
+
 // --- Update tests ---
 
 func TestUpdate_HappyPath(t *testing.T) {

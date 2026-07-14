@@ -54,6 +54,8 @@ tags:
     description: Agent lifecycle (start/stop/restart/yield)
   - name: git
     description: Git operations (status, push, pull, sync, PR, reset)
+  - name: pull-requests
+    description: Pull request review read APIs
   - name: diff
     description: Diff and commit inspection
   - name: files
@@ -2597,6 +2599,422 @@ paths:
               schema:
                 type: object
 
+  # ── Pull Requests ───────────────────────────────────────────────────────
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}:
+    get:
+      operationId: getPullRequestDetail
+      tags: [pull-requests]
+      summary: Get pull request detail via the GitHub connector
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Pull request detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestDetail"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff:
+    get:
+      operationId: getPullRequestDiff
+      tags: [pull-requests]
+      summary: Get pull request diff via the GitHub connector
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Pull request diff
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestDiff"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review:
+    post:
+      operationId: postPullRequestReview
+      tags: [pull-requests]
+      summary: Post a pull request review via the GitHub connector
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PullRequestReviewRequest"
+      responses:
+        "200":
+          description: Pull request review result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/PullRequestReviewResult"
+        "400":
+          description: Invalid request body or path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Connector grant denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered in the workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Pull request head changed before review was posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "428":
+          description: Expected head SHA precondition is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer:
+    post:
+      operationId: ensurePullRequestReviewer
+      tags: [pull-requests]
+      summary: Ensure a per-PR terminal reviewer agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reviewer agent and checkout
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerEnsureResult"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or not checked out locally
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Pull request head changed while preparing the reviewer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Worktree or reviewer setup failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Upstream pull request metadata was incomplete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Connector egress unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/messages:
+    post:
+      operationId: postPullRequestReviewerMessage
+      tags: [pull-requests]
+      summary: Send a message to a per-PR terminal reviewer agent
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewerMessageRequest"
+      responses:
+        "200":
+          description: Reviewer message delivery result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerMessageResult"
+        "400":
+          description: Invalid request body or path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Reviewer message delivery failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/stream:
+    get:
+      operationId: streamPullRequestReviewer
+      tags: [pull-requests]
+      summary: Stream the per-PR reviewer conversation
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: SSE event stream of reviewer status and messages
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: Newline-delimited SSE status, message, and heartbeat events
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation:
+    get:
+      operationId: getPullRequestReviewerConversation
+      tags: [pull-requests]
+      summary: Snapshot of the per-PR reviewer conversation (poll target)
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Reviewer conversation snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                    const: true
+                  data:
+                    $ref: "#/components/schemas/ReviewerConversation"
+        "400":
+          description: Invalid path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Repository is not registered or reviewer was not started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/agents/{name}/git/diff-stat:
     get:
       operationId: getAgentDiffStat
@@ -3914,6 +4332,8 @@ components:
           type: string
         code:
           type: string
+        retryable:
+          type: boolean
         details:
           type: object
 
@@ -4329,6 +4749,147 @@ components:
           type: string
         reason:
           type: string
+
+    # ── Pull Request Schemas ────────────────────────────────────────────
+    PullRequestDetail:
+      type: object
+      required:
+        - number
+        - state
+        - title
+        - is_draft
+        - head_ref_name
+        - base_ref_name
+        - head_sha
+        - merged
+      properties:
+        number:
+          type: integer
+        state:
+          type: string
+        title:
+          type: string
+        is_draft:
+          type: boolean
+        head_ref_name:
+          type: string
+        base_ref_name:
+          type: string
+        head_sha:
+          type: string
+        merged:
+          type: boolean
+
+    PullRequestDiff:
+      type: object
+      required: [files, diff]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/PullRequestDiffFile"
+        diff:
+          type: string
+
+    PullRequestDiffFile:
+      type: object
+      required: [path, status, additions, deletions, patch]
+      properties:
+        path:
+          type: string
+        status:
+          type: string
+        additions:
+          type: integer
+        deletions:
+          type: integer
+        patch:
+          type: string
+
+    PullRequestReviewRequest:
+      type: object
+      required: [event, expected_head_sha]
+      properties:
+        event:
+          type: string
+          enum: [approve, request_changes, comment]
+        body:
+          type: string
+        expected_head_sha:
+          type: string
+
+    PullRequestReviewResult:
+      type: object
+      properties:
+        review_id:
+          type: integer
+        state:
+          type: string
+
+    ReviewerEnsureResult:
+      type: object
+      required: [agent_name, checked_out_sha, seeded]
+      properties:
+        agent_name:
+          type: string
+        checked_out_sha:
+          type: string
+        seeded:
+          type: boolean
+
+    ReviewerMessageRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+
+    ReviewerMessageResult:
+      type: object
+      required: [state, reason]
+      properties:
+        state:
+          type: string
+        reason:
+          type: string
+
+    ReviewerMessage:
+      type: object
+      required: [turn_id, item_id, role, text]
+      properties:
+        turn_id:
+          type: string
+        item_id:
+          type: string
+        role:
+          type: string
+          # user | assistant. Deliberately NOT an enum: oapi-codegen resolves
+          # enum value-name collisions globally, so an enum here renames the
+          # unrelated TranscriptEntryRole* constants in the generated package.
+          description: user | assistant
+        text:
+          type: string
+        phase:
+          type: string
+
+    ReviewerConversation:
+      type: object
+      required: [state, messages]
+      properties:
+        state:
+          type: string
+          description: >
+            starting | reconnecting | idle | running | failed | unsupported.
+            failed: the reviewer runtime died or its conversation is
+            unreadable. unsupported: the reviewer's backend has no readable
+            conversation (the terminal tab still works); detail says why.
+        detail:
+          type: string
+          description: Human-readable context for failed/unsupported states.
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewerMessage"
 
     # ── Issue Schemas ───────────────────────────────────────────────────
     Issue:

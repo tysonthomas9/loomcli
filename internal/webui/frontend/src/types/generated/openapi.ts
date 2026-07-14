@@ -1431,6 +1431,125 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get pull request detail via the GitHub connector */
+    get: operations["getPullRequestDetail"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get pull request diff via the GitHub connector */
+    get: operations["getPullRequestDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Post a pull request review via the GitHub connector */
+    post: operations["postPullRequestReview"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Ensure a per-PR terminal reviewer agent */
+    post: operations["ensurePullRequestReviewer"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/messages": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Send a message to a per-PR terminal reviewer agent */
+    post: operations["postPullRequestReviewerMessage"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Stream the per-PR reviewer conversation */
+    get: operations["streamPullRequestReviewer"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Snapshot of the per-PR reviewer conversation (poll target) */
+    get: operations["getPullRequestReviewerConversation"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/diff-stat": {
     parameters: {
       query?: never;
@@ -2175,6 +2294,7 @@ export interface components {
       success: false;
       error: string;
       code?: string;
+      retryable?: boolean;
       details?: Record<string, never>;
     };
     MessageResponse: {
@@ -2373,6 +2493,64 @@ export interface components {
       mode: "daemon" | "fleet";
       workspace: string;
       reason?: string;
+    };
+    PullRequestDetail: {
+      number: number;
+      state: string;
+      title: string;
+      is_draft: boolean;
+      head_ref_name: string;
+      base_ref_name: string;
+      head_sha: string;
+      merged: boolean;
+    };
+    PullRequestDiff: {
+      files: components["schemas"]["PullRequestDiffFile"][];
+      diff: string;
+    };
+    PullRequestDiffFile: {
+      path: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      patch: string;
+    };
+    PullRequestReviewRequest: {
+      /** @enum {string} */
+      event: "approve" | "request_changes" | "comment";
+      body?: string;
+      expected_head_sha: string;
+    };
+    PullRequestReviewResult: {
+      review_id?: number;
+      state?: string;
+    };
+    ReviewerEnsureResult: {
+      agent_name: string;
+      checked_out_sha: string;
+      seeded: boolean;
+    };
+    ReviewerMessageRequest: {
+      text: string;
+    };
+    ReviewerMessageResult: {
+      state: string;
+      reason: string;
+    };
+    ReviewerMessage: {
+      turn_id: string;
+      item_id: string;
+      /** @description user | assistant */
+      role: string;
+      text: string;
+      phase?: string;
+    };
+    ReviewerConversation: {
+      /** @description starting | reconnecting | idle | running | failed | unsupported. failed: the reviewer runtime died or its conversation is unreadable. unsupported: the reviewer's backend has no readable conversation (the terminal tab still works); detail says why. */
+      state: string;
+      /** @description Human-readable context for failed/unsupported states. */
+      detail?: string;
+      messages: components["schemas"]["ReviewerMessage"][];
     };
     /**
      * @description Core issue type used in list endpoints. Maps to `types.Issue` json
@@ -6237,6 +6415,445 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  getPullRequestDetail: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull request detail */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestDetail"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered in the workspace */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getPullRequestDiff: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull request diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestDiff"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered in the workspace */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  postPullRequestReview: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PullRequestReviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Pull request review result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestReviewResult"];
+          };
+        };
+      };
+      /** @description Invalid request body or path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector grant denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered in the workspace */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Pull request head changed before review was posted */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Expected head SHA precondition is required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  ensurePullRequestReviewer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reviewer agent and checkout */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["ReviewerEnsureResult"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or not checked out locally */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Pull request head changed while preparing the reviewer */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Worktree or reviewer setup failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Upstream pull request metadata was incomplete */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  postPullRequestReviewerMessage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReviewerMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Reviewer message delivery result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["ReviewerMessageResult"];
+          };
+        };
+      };
+      /** @description Invalid request body or path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or reviewer was not started */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Reviewer message delivery failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  streamPullRequestReviewer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SSE event stream of reviewer status and messages */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or reviewer was not started */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getPullRequestReviewerConversation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reviewer conversation snapshot */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["ReviewerConversation"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or reviewer was not started */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };

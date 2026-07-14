@@ -1,9 +1,6 @@
 package data
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -14,7 +11,7 @@ import (
 //
 // The hash input is the fleet-db body projection (CreateParams.FleetCreateBody),
 // NOT the full CreateParams: fields fleet-db drops (id, acceptance_criteria,
-// created_by, external_ref, estimated_minutes, dependencies) must not
+// created_by, estimated_minutes, dependencies) must not
 // differentiate keys, or two requests that persist identically would mint
 // duplicates. Using the same projection the wire request is built from also
 // keeps the key aligned byte-for-byte with the body fleet-db fingerprints,
@@ -24,15 +21,7 @@ import (
 // never collapse. Workspace and actor scoping happen server-side, where the
 // authenticated actor is actually known.
 func computeCreateKey(params backend.CreateParams) (string, error) {
-	body, err := json.Marshal(params.FleetCreateBody())
-	if err != nil {
-		return "", err
-	}
-	h := sha256.New()
-	h.Write([]byte(time.Now().UTC().Format("20060102")))
-	h.Write([]byte{0})
-	h.Write(body)
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return params.FleetCreateIdempotencyKey(time.Now())
 }
 
 // isAlreadyClosedConflict reports whether err is the "issue is already

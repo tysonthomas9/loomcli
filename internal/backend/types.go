@@ -11,6 +11,8 @@ package backend
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"time"
 )
@@ -364,6 +366,8 @@ type CreateParams struct {
 // fleet-db's CreateIssueRequest expects. fleet-db's strict JSON validation
 // rejects unknown fields, so loom-only fields are dropped rather than
 // shipped as-is.
+// FleetBackend.Create retries without external_ref for deployed fleet-dbs
+// whose create schema predates that field, then applies it via PATCH.
 //
 // Field renames vs CreateParams:
 //   - "issue_type"  → "type"
@@ -407,6 +411,20 @@ func (p CreateParams) FleetCreateBody() map[string]interface{} {
 	setNonEmptyMapStr(req, "defer_until", p.DeferUntil)
 	setNonEmptyMapStr(req, "due_at", p.DueAt)
 	return req
+}
+
+// FleetCreateIdempotencyKey derives the default create key from a UTC date
+// bucket and the exact fleet-db request body.
+func (p CreateParams) FleetCreateIdempotencyKey(now time.Time) (string, error) {
+	body, err := json.Marshal(p.FleetCreateBody())
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	h.Write([]byte(now.UTC().Format("20060102")))
+	h.Write([]byte{0})
+	h.Write(body)
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // setNonEmptyMapStr sets m[key] = val if val is non-empty.
