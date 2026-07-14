@@ -16,6 +16,7 @@ import {
   useBackendConfig,
   useBackends,
   useLocalSettings,
+  useWorkspaceDesignFormat,
   useWorkspaceContext,
 } from "@/hooks/workspace";
 import type { BackendInfo } from "@/utils/workspace";
@@ -61,7 +62,7 @@ export function SettingsView({
   className,
   onNavigate,
 }: SettingsViewProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
+  const { workspaceId, workspace } = useWorkspaceContext();
   const {
     config,
     isLoading,
@@ -98,6 +99,12 @@ export function SettingsView({
   const [daytonaApiKey, setDaytonaApiKey] = useState("");
   const [githubToken, setGithubToken] = useState("");
   const [opencodeModel, setOpencodeModel] = useState("");
+  const persistedDesignFormat = workspace?.design_format ?? "markdown";
+  const [designFormat, setDesignFormat] = useState<"markdown" | "html">(
+    persistedDesignFormat,
+  );
+  const { isSaving: isSavingDesignFormat, updateDesignFormat } =
+    useWorkspaceDesignFormat();
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -133,6 +140,10 @@ export function SettingsView({
   useEffect(() => {
     setOpencodeModel(localTaskRunnerSettings?.opencode_model ?? "");
   }, [localTaskRunnerSettings?.opencode_model]);
+
+  useEffect(() => {
+    setDesignFormat(persistedDesignFormat);
+  }, [persistedDesignFormat, workspaceId]);
 
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)
@@ -195,6 +206,23 @@ export function SettingsView({
     } else {
       showToast("Failed to update backend", { type: "error" });
     }
+  };
+
+  const handleDesignFormatSave = async () => {
+    if (
+      !workspaceId ||
+      designFormat === persistedDesignFormat ||
+      isSavingDesignFormat
+    ) {
+      return;
+    }
+    const ok = await updateDesignFormat(designFormat);
+    showToast(
+      ok
+        ? "Design format updated successfully"
+        : "Failed to update design format",
+      { type: ok ? "success" : "error" },
+    );
   };
 
   const handleRestartOnboarding = () => {
@@ -419,6 +447,51 @@ export function SettingsView({
               data-testid="save-button"
             >
               {isSaving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Planner Design Format */}
+      <div className={styles.panel} data-testid="design-format-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Planner Design Format</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="design-format-select">
+              Design format
+            </label>
+            <p className={styles.description}>
+              Markdown is portable and remains the default. HTML enables richer
+              layouts and sanitized inline SVG diagrams in issue designs.
+            </p>
+            <select
+              id="design-format-select"
+              className={styles.select}
+              value={designFormat}
+              onChange={(event) =>
+                setDesignFormat(event.target.value as "markdown" | "html")
+              }
+              data-testid="design-format-select"
+            >
+              <option value="markdown">Markdown</option>
+              <option value="html">HTML</option>
+            </select>
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={
+                !workspaceId ||
+                designFormat === persistedDesignFormat ||
+                isSavingDesignFormat
+              }
+              onClick={handleDesignFormatSave}
+              data-testid="design-format-save-button"
+            >
+              {isSavingDesignFormat ? "Saving..." : "Save Design Format"}
             </button>
           </div>
         </div>

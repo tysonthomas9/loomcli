@@ -34,6 +34,8 @@ vi.mock("@/hooks/workspace", async () => {
     useBackendConfig: vi.fn(),
     useBackends: vi.fn(),
     useLocalSettings: vi.fn(),
+    useWorkspaceDesignFormat: vi.fn(),
+    useWorkspaceContext: vi.fn(),
   };
 });
 
@@ -63,6 +65,8 @@ import {
   useBackendConfig,
   useBackends,
   useLocalSettings,
+  useWorkspaceDesignFormat,
+  useWorkspaceContext,
 } from "@/hooks/workspace";
 import { useTerminalFont } from "@/hooks/terminal";
 import { useToast } from "@/hooks/ui";
@@ -70,6 +74,8 @@ import { useToast } from "@/hooks/ui";
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
 const mockUseBackends = vi.mocked(useBackends);
 const mockUseLocalSettings = vi.mocked(useLocalSettings);
+const mockUseWorkspaceDesignFormat = vi.mocked(useWorkspaceDesignFormat);
+const mockUseWorkspaceContext = vi.mocked(useWorkspaceContext);
 const mockUseTerminalFont = vi.mocked(useTerminalFont);
 const mockUseToast = vi.mocked(useToast);
 
@@ -199,6 +205,26 @@ describe("SettingsView", () => {
     mockUseBackends.mockReturnValue(createMockBackendsReturn());
     mockUseTerminalFont.mockReturnValue(createMockFontReturn());
     mockUseLocalSettings.mockReturnValue(createMockLocalSettingsReturn());
+    mockUseWorkspaceContext.mockReturnValue({
+      workspaceId: "ALPHA",
+      workspace: {
+        id: "ALPHA",
+        name: "Alpha",
+        path: "/tmp/alpha",
+        repos: [],
+        groups: [],
+        agents: [],
+        workspaces: [],
+        default_workspace: "",
+        design_format: "markdown",
+      },
+      refetch: vi.fn(),
+    } as ReturnType<typeof useWorkspaceContext>);
+    mockUseWorkspaceDesignFormat.mockReturnValue({
+      isSaving: false,
+      error: null,
+      updateDesignFormat: vi.fn().mockResolvedValue(true),
+    });
   });
 
   describe("loading state", () => {
@@ -438,6 +464,68 @@ describe("SettingsView", () => {
       expect(
         screen.getByText("No per-agent overrides configured."),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("planner design format", () => {
+    it("resets an unsaved selection when the active workspace changes", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      const { rerender } = render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("design-format-select"), {
+        target: { value: "html" },
+      });
+      expect(screen.getByTestId("design-format-select")).toHaveValue("html");
+
+      mockUseWorkspaceContext.mockReturnValue({
+        workspaceId: "BETA",
+        workspace: {
+          id: "BETA",
+          name: "Beta",
+          path: "/tmp/beta",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [],
+          default_workspace: "",
+          design_format: "markdown",
+        },
+        refetch: vi.fn(),
+      } as ReturnType<typeof useWorkspaceContext>);
+      rerender(<SettingsView />);
+
+      expect(screen.getByTestId("design-format-select")).toHaveValue(
+        "markdown",
+      );
+      expect(screen.getByTestId("design-format-save-button")).toBeDisabled();
+    });
+
+    it("persists an HTML selection for the active workspace", async () => {
+      const updateDesignFormat = vi.fn().mockResolvedValue(true);
+      mockUseWorkspaceDesignFormat.mockReturnValue({
+        isSaving: false,
+        error: null,
+        updateDesignFormat,
+      });
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("design-format-select")).toHaveValue(
+        "markdown",
+      );
+      fireEvent.change(screen.getByTestId("design-format-select"), {
+        target: { value: "html" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("design-format-save-button"));
+      });
+
+      expect(updateDesignFormat).toHaveBeenCalledWith("html");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Design format updated successfully",
+        { type: "success" },
+      );
     });
   });
 

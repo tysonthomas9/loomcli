@@ -280,6 +280,23 @@ export interface paths {
     patch: operations["patchWorkspaceBackend"];
     trace?: never;
   };
+  "/api/workspaces/{ws}/config/design-format": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Set the workspace planner design format */
+    patch: operations["patchWorkspaceDesignFormat"];
+    trace?: never;
+  };
   "/api/workspaces/{ws}/readyz": {
     parameters: {
       query?: never;
@@ -2682,6 +2699,8 @@ export interface components {
       workspaces: components["schemas"]["WorkspaceSummary"][];
       workspace_order?: string[];
       default_workspace: string;
+      /** @enum {string} */
+      design_format?: "markdown" | "html";
     };
     WorkspaceSummary: {
       id: string;
@@ -2715,6 +2734,10 @@ export interface components {
     };
     WorkspaceBackendPatchRequest: {
       backend: string;
+    };
+    WorkspaceDesignFormatPatchRequest: {
+      /** @enum {string} */
+      design_format: "markdown" | "html";
     };
     BackendConfigResponse: {
       success: boolean;
@@ -3864,6 +3887,42 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+    };
+  };
+  patchWorkspaceDesignFormat: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WorkspaceDesignFormatPatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Invalid design format */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };

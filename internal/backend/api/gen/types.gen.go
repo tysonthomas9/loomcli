@@ -940,16 +940,16 @@ func (e TreeNodeAgentState) Valid() bool {
 
 // Defines values for TreeNodeDesignFormat.
 const (
-	Html     TreeNodeDesignFormat = "html"
-	Markdown TreeNodeDesignFormat = "markdown"
+	TreeNodeDesignFormatHtml     TreeNodeDesignFormat = "html"
+	TreeNodeDesignFormatMarkdown TreeNodeDesignFormat = "markdown"
 )
 
 // Valid indicates whether the value is a known member of the TreeNodeDesignFormat enum.
 func (e TreeNodeDesignFormat) Valid() bool {
 	switch e {
-	case Html:
+	case TreeNodeDesignFormatHtml:
 		return true
-	case Markdown:
+	case TreeNodeDesignFormatMarkdown:
 		return true
 	default:
 		return false
@@ -1007,6 +1007,42 @@ func (e TreeNodeStatus) Valid() bool {
 	case TreeNodeStatusOpen:
 		return true
 	case TreeNodeStatusReview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkspaceDesignFormatPatchRequestDesignFormat.
+const (
+	WorkspaceDesignFormatPatchRequestDesignFormatHtml     WorkspaceDesignFormatPatchRequestDesignFormat = "html"
+	WorkspaceDesignFormatPatchRequestDesignFormatMarkdown WorkspaceDesignFormatPatchRequestDesignFormat = "markdown"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceDesignFormatPatchRequestDesignFormat enum.
+func (e WorkspaceDesignFormatPatchRequestDesignFormat) Valid() bool {
+	switch e {
+	case WorkspaceDesignFormatPatchRequestDesignFormatHtml:
+		return true
+	case WorkspaceDesignFormatPatchRequestDesignFormatMarkdown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WorkspaceResponseDesignFormat.
+const (
+	Html     WorkspaceResponseDesignFormat = "html"
+	Markdown WorkspaceResponseDesignFormat = "markdown"
+)
+
+// Valid indicates whether the value is a known member of the WorkspaceResponseDesignFormat enum.
+func (e WorkspaceResponseDesignFormat) Valid() bool {
+	switch e {
+	case Html:
+		return true
+	case Markdown:
 		return true
 	default:
 		return false
@@ -2793,6 +2829,14 @@ type WorkspaceBackendPatchRequest struct {
 	Backend string `json:"backend"`
 }
 
+// WorkspaceDesignFormatPatchRequest defines model for WorkspaceDesignFormatPatchRequest.
+type WorkspaceDesignFormatPatchRequest struct {
+	DesignFormat WorkspaceDesignFormatPatchRequestDesignFormat `json:"design_format"`
+}
+
+// WorkspaceDesignFormatPatchRequestDesignFormat defines model for WorkspaceDesignFormatPatchRequest.DesignFormat.
+type WorkspaceDesignFormatPatchRequestDesignFormat string
+
 // WorkspaceRenameRequest defines model for WorkspaceRenameRequest.
 type WorkspaceRenameRequest struct {
 	NewName string `json:"new_name"`
@@ -2811,16 +2855,20 @@ type WorkspaceRepo struct {
 
 // WorkspaceResponse defines model for WorkspaceResponse.
 type WorkspaceResponse struct {
-	Agents           []WorkspaceAgentInfo `json:"agents"`
-	DefaultWorkspace string               `json:"default_workspace"`
-	Groups           []string             `json:"groups"`
-	Id               string               `json:"id"`
-	Name             string               `json:"name"`
-	Path             string               `json:"path"`
-	Repos            []WorkspaceRepo      `json:"repos"`
-	WorkspaceOrder   *[]string            `json:"workspace_order,omitempty"`
-	Workspaces       []WorkspaceSummary   `json:"workspaces"`
+	Agents           []WorkspaceAgentInfo           `json:"agents"`
+	DefaultWorkspace string                         `json:"default_workspace"`
+	DesignFormat     *WorkspaceResponseDesignFormat `json:"design_format,omitempty"`
+	Groups           []string                       `json:"groups"`
+	Id               string                         `json:"id"`
+	Name             string                         `json:"name"`
+	Path             string                         `json:"path"`
+	Repos            []WorkspaceRepo                `json:"repos"`
+	WorkspaceOrder   *[]string                      `json:"workspace_order,omitempty"`
+	Workspaces       []WorkspaceSummary             `json:"workspaces"`
 }
+
+// WorkspaceResponseDesignFormat defines model for WorkspaceResponse.DesignFormat.
+type WorkspaceResponseDesignFormat string
 
 // WorkspaceSummary defines model for WorkspaceSummary.
 type WorkspaceSummary struct {
@@ -3355,6 +3403,9 @@ type StopAgentJSONRequestBody StopAgentJSONBody
 
 // PatchWorkspaceBackendJSONRequestBody defines body for PatchWorkspaceBackend for application/json ContentType.
 type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
+
+// PatchWorkspaceDesignFormatJSONRequestBody defines body for PatchWorkspaceDesignFormat for application/json ContentType.
+type PatchWorkspaceDesignFormatJSONRequestBody = WorkspaceDesignFormatPatchRequest
 
 // WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
 type WriteScopedFileJSONRequestBody = FileWriteRequest

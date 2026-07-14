@@ -468,6 +468,33 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
 
+  /api/workspaces/{ws}/config/design-format:
+    patch:
+      operationId: patchWorkspaceDesignFormat
+      tags: [config]
+      summary: Set the workspace planner design format
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceDesignFormatPatchRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+        "400":
+          description: Invalid design format
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/workspaces/{ws}/readyz:
     get:
       operationId: getWorkspaceRuntimeReady
@@ -4900,6 +4927,9 @@ components:
             type: string
         default_workspace:
           type: string
+        design_format:
+          type: string
+          enum: [markdown, html]
 
     WorkspaceSummary:
       type: object
@@ -4974,6 +5004,14 @@ components:
       properties:
         backend:
           type: string
+
+    WorkspaceDesignFormatPatchRequest:
+      type: object
+      required: [design_format]
+      properties:
+        design_format:
+          type: string
+          enum: [markdown, html]
 
     # ── Config Schemas ──────────────────────────────────────────────────
     BackendConfigResponse:
