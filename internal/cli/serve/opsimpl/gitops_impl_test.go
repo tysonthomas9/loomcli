@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -81,6 +82,50 @@ func TestResolveWorkspaceConfigName_NilWorkspacesMap(t *testing.T) {
 	got := resolveWorkspaceConfigName(cfg, "dev")
 	if got != "" {
 		t.Errorf("resolveWorkspaceConfigName(cfg, 'dev') = %q, want empty", got)
+	}
+}
+
+func TestCollectRepoQueryPRsAddsWorkspaceSourceRepo(t *testing.T) {
+	queries := []*prRepoQuery{{
+		repo: ops.WorkspaceRepo{
+			Name:      "loomcli",
+			RemoteURL: "https://github.com/tysonthomas9/loomcli.git",
+		},
+		prs: []ops.GitPullRequest{{
+			Number: 205,
+			URL:    "https://github.com/tysonthomas9/loomcli/pull/205",
+		}},
+	}}
+
+	got := collectRepoQueryPRs(queries, &ops.GitPullRequestList{})
+	if len(got) != 1 {
+		t.Fatalf("pull requests = %+v, want one", got)
+	}
+	if got[0].RepoName != "tysonthomas9/loomcli" {
+		t.Fatalf("repo_name = %q, want GitHub owner/repo", got[0].RepoName)
+	}
+	if got[0].SourceRepo != "loomcli" {
+		t.Fatalf("source_repo = %q, want workspace repo name", got[0].SourceRepo)
+	}
+}
+
+func TestCollectRepoQueryPRsLeavesSourceRepoEmptyWhenWorkspaceRepoUnknown(t *testing.T) {
+	queries := []*prRepoQuery{{
+		prs: []ops.GitPullRequest{{
+			Number: 7,
+			URL:    "https://github.com/octocat/hello/pull/7",
+		}},
+	}}
+
+	got := collectRepoQueryPRs(queries, &ops.GitPullRequestList{})
+	if len(got) != 1 {
+		t.Fatalf("pull requests = %+v, want one", got)
+	}
+	if got[0].RepoName != "octocat/hello" {
+		t.Fatalf("repo_name = %q, want GitHub owner/repo derived from PR URL", got[0].RepoName)
+	}
+	if got[0].SourceRepo != "" {
+		t.Fatalf("source_repo = %q, want empty for unknown workspace repo", got[0].SourceRepo)
 	}
 }
 

@@ -297,10 +297,11 @@ export function PRReviewWorkspace({
     if (!pullRequest) return;
     setCreatingTicket(true);
     try {
+      const sourceRepo = pullRequest.source_repo?.trim();
       const created = await createIssue(workspaceId, {
         title: pullRequest.title,
         external_ref: pullRequest.url,
-        source_repo: pullRequest.repo_name,
+        ...(sourceRepo ? { source_repo: sourceRepo } : {}),
         issue_type: "task",
         priority: 3,
       });

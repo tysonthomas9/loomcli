@@ -109,6 +109,7 @@ type GitPullRequest struct {
 	UpdatedAt      string `json:"updated_at,omitempty"`
 	ReviewDecision string `json:"review_decision,omitempty"`
 	RepoName       string `json:"repo_name"`
+	SourceRepo     string `json:"source_repo,omitempty"`
 	Additions      int    `json:"additions,omitempty"`
 	Deletions      int    `json:"deletions,omitempty"`
 	ChangedFiles   int    `json:"changed_files,omitempty"`

@@ -91,7 +91,9 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 			warnings = append(warnings, repoWarning(owner, repo, err))
 			continue
 		}
-		repoPRs, truncated, err := m.connectorListPullRequestsForRepo(r, ws, state, owner, repo)
+		repoPRs, truncated, err := m.connectorListPullRequestsForRepo(
+			r, ws, state, owner, repo, workspaceRepo.Name,
+		)
 		prs = append(prs, repoPRs...)
 		if err != nil {
 			failed++
@@ -107,7 +109,7 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 
 func (m *Module) connectorListPullRequestsForRepo(
 	r *http.Request,
-	ws, state, owner, repo string,
+	ws, state, owner, repo, sourceRepo string,
 ) (prs []ops.GitPullRequest, truncated bool, err error) {
 	prs = []ops.GitPullRequest{}
 	for page := 1; page <= maxPullsListPages; page++ {
@@ -130,7 +132,7 @@ func (m *Module) connectorListPullRequestsForRepo(
 		if dispatchErr != nil {
 			return prs, false, dispatchErr
 		}
-		pagePRs := pullRequestsFromBody(owner, repo, res.Body)
+		pagePRs := pullRequestsFromBody(owner, repo, sourceRepo, res.Body)
 		prs = append(prs, pagePRs...)
 		if len(pagePRs) < pullsListPerPage {
 			return prs, false, nil
@@ -191,11 +193,11 @@ func listRunID(r *http.Request, owner, repo string) string {
 	return "webui-review:" + userID + ":" + owner + "/" + repo + ":list:" + providers.ActionGitHubPullsList
 }
 
-func pullRequestsFromBody(owner, repo string, body map[string]any) []ops.GitPullRequest {
+func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) []ops.GitPullRequest {
 	prs := []ops.GitPullRequest{}
 	if rawPulls, ok := body["pullRequests"].([]map[string]any); ok {
 		for _, raw := range rawPulls {
-			prs = append(prs, pullRequestFromSummary(owner, repo, raw))
+			prs = append(prs, pullRequestFromSummary(owner, repo, sourceRepo, raw))
 		}
 		return prs
 	}
@@ -205,13 +207,13 @@ func pullRequestsFromBody(owner, repo string, body map[string]any) []ops.GitPull
 			if !ok {
 				continue
 			}
-			prs = append(prs, pullRequestFromSummary(owner, repo, raw))
+			prs = append(prs, pullRequestFromSummary(owner, repo, sourceRepo, raw))
 		}
 	}
 	return prs
 }
 
-func pullRequestFromSummary(owner, repo string, body map[string]any) ops.GitPullRequest {
+func pullRequestFromSummary(owner, repo, sourceRepo string, body map[string]any) ops.GitPullRequest {
 	number := intValue(body["number"])
 	repoName := owner + "/" + repo
 	return ops.GitPullRequest{
@@ -223,6 +225,7 @@ func pullRequestFromSummary(owner, repo string, body map[string]any) ops.GitPull
 		HeadRefName: stringValue(body["headRef"]),
 		BaseRefName: stringValue(body["baseRef"]),
 		RepoName:    repoName,
+		SourceRepo:  sourceRepo,
 	}
 }
 

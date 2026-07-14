@@ -146,6 +146,7 @@ function makePullRequest(
     head_ref_name: "feature",
     base_ref_name: "main",
     repo_name: "octocat/hello",
+    source_repo: "hello",
     ...overrides,
   };
 }
@@ -283,7 +284,7 @@ describe("PRReviewWorkspace", () => {
         expect.objectContaining({
           title: "Review PR",
           external_ref: "https://github.com/octocat/hello/pull/7",
-          source_repo: "octocat/hello",
+          source_repo: "hello",
           issue_type: "task",
           priority: 3,
         }),
@@ -299,6 +300,29 @@ describe("PRReviewWorkspace", () => {
       "Created TASK-99 for this pull request",
     );
     expect(onLinkedTicket).toHaveBeenCalledWith("TASK-99");
+  });
+
+  it("omits source_repo when the pull request has no workspace repo mapping", async () => {
+    renderWorkspace({
+      issue: null,
+      pullRequest: makePullRequest({ source_repo: "" }),
+    });
+
+    fireEvent.click(screen.getByTestId("pr-create-ticket"));
+
+    await waitFor(() => {
+      expect(mocks.createIssue).toHaveBeenCalledTimes(1);
+    });
+    const request = mocks.createIssue.mock.calls[0]?.[1];
+    expect(request).toEqual(
+      expect.objectContaining({
+        title: "Review PR",
+        external_ref: "https://github.com/octocat/hello/pull/7",
+        issue_type: "task",
+        priority: 3,
+      }),
+    );
+    expect(request).not.toHaveProperty("source_repo");
   });
 });
 

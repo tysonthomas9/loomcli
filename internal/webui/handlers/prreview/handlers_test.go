@@ -731,7 +731,10 @@ func TestListPullRequestsConnector(t *testing.T) {
 	}
 	first := decoded.Data.PullRequests[0]
 	if first.Number != 11 || first.URL != "https://github.com/octocat/hello/pull/11" || first.RepoName != "octocat/hello" {
-		t.Fatalf("first PR = %+v, want URL and repo name populated", first)
+		t.Fatalf("first PR = %+v, want URL and GitHub repo name populated", first)
+	}
+	if first.SourceRepo != "hello" || first.SourceRepo == first.RepoName {
+		t.Fatalf("first PR source_repo = %q, want workspace repo name %q", first.SourceRepo, "hello")
 	}
 	// The frontend filters on the UPPERCASE state the gh path emits
 	// (isOpenPr: pr.state === "OPEN"). GitHub REST returns lowercase, so the
