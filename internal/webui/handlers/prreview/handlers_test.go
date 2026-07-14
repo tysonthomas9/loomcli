@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,12 +22,15 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	localsettingshandler "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -37,6 +43,7 @@ const (
 type fakeGitHubCall struct {
 	method        string
 	path          string
+	query         string
 	authorization string
 	body          map[string]any
 }
@@ -75,12 +82,16 @@ func (g *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 	g.calls = append(g.calls, fakeGitHubCall{
 		method:        r.Method,
 		path:          r.URL.Path,
+		query:         r.URL.RawQuery,
 		authorization: r.Header.Get("Authorization"),
 		body:          body,
 	})
 	headSha := g.headSha
 	state := g.state
-	list, hasList := g.lists[r.URL.Path]
+	list, hasList := g.lists[r.URL.Path+"?page="+r.URL.Query().Get("page")]
+	if !hasList {
+		list, hasList = g.lists[r.URL.Path]
+	}
 	g.mu.Unlock()
 
 	switch {
@@ -141,10 +152,31 @@ func (g *fakeGitHub) setListPayload(owner, repo string, pulls []map[string]any) 
 	g.lists["/repos/"+owner+"/"+repo+"/pulls"] = fakePullList{status: http.StatusOK, pulls: pulls}
 }
 
+func (g *fakeGitHub) setListPage(owner, repo string, page int, pulls []map[string]any) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	key := "/repos/" + owner + "/" + repo + "/pulls?page=" + strconv.Itoa(page)
+	g.lists[key] = fakePullList{status: http.StatusOK, pulls: pulls}
+}
+
 func (g *fakeGitHub) setListStatus(owner, repo string, status int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.lists["/repos/"+owner+"/"+repo+"/pulls"] = fakePullList{status: status}
+}
+
+func fakePullRequestPage(first, count int) []map[string]any {
+	pulls := make([]map[string]any, 0, count)
+	for number := first; number < first+count; number++ {
+		pulls = append(pulls, map[string]any{
+			"number": number,
+			"state":  "open",
+			"title":  "PR " + strconv.Itoa(number),
+			"head":   map[string]any{"sha": "head", "ref": "feature"},
+			"base":   map[string]any{"sha": "base", "ref": "main"},
+		})
+	}
+	return pulls
 }
 
 func (g *fakeGitHub) snapshot() []fakeGitHubCall {
@@ -159,12 +191,36 @@ func writeUpstreamJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-type prReviewHarness struct {
-	store  store.Store
-	github *fakeGitHub
-	mux    *http.ServeMux
-	module *Module
+func decodePullRequestsResponse(t *testing.T, raw []byte) pullRequestsData {
+	t.Helper()
+	var decoded struct {
+		Success bool             `json:"success"`
+		Data    pullRequestsData `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode pull request response: %v (body %s)", err, raw)
+	}
+	if !decoded.Success {
+		t.Fatalf("pull request response was not successful: %s", raw)
+	}
+	return decoded.Data
 }
+
+type prReviewHarness struct {
+	store   store.Store
+	github  *fakeGitHub
+	mux     *http.ServeMux
+	module  *Module
+	dataDir string
+}
+
+type testCredentialSource string
+
+const (
+	testCredentialEnv      testCredentialSource = "env"
+	testCredentialSettings testCredentialSource = "settings"
+	testCredentialNone     testCredentialSource = "none"
+)
 
 type fallbackAgentService struct {
 	service.AgentService
@@ -188,19 +244,46 @@ func newPRReviewHarness(t *testing.T, withDispatcher bool) *prReviewHarness {
 }
 
 func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc service.AgentService) *prReviewHarness {
+	return newPRReviewHarnessWithCredential(t, withDispatcher, agentSvc, testCredentialEnv, prReviewTestToken)
+}
+
+func newPRReviewHarnessWithCredential(
+	t *testing.T,
+	withDispatcher bool,
+	agentSvc service.AgentService,
+	source testCredentialSource,
+	token string,
+) *prReviewHarness {
 	t.Helper()
-	h := &prReviewHarness{store: memstore.New(), github: newFakeGitHub(t), mux: http.NewServeMux()}
+	h := &prReviewHarness{
+		store:   memstore.New(),
+		github:  newFakeGitHub(t),
+		mux:     http.NewServeMux(),
+		dataDir: t.TempDir(),
+	}
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
-	t.Setenv(connector.VaultKeyEnvVar, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32)))
 	t.Setenv(connector.GitHubBaseURLEnvVar, h.github.server.URL)
-	t.Setenv(webuiGitHubTokenEnv, prReviewTestToken)
+	switch source {
+	case testCredentialEnv:
+		t.Setenv(connector.VaultKeyEnvVar, base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32)))
+		t.Setenv(webuiGitHubTokenEnv, token)
+	case testCredentialSettings:
+		t.Setenv(connector.VaultKeyEnvVar, "")
+		t.Setenv(webuiGitHubTokenEnv, "")
+		h.setSettingsGitHubToken(t, token)
+	case testCredentialNone:
+		t.Setenv(connector.VaultKeyEnvVar, "")
+		t.Setenv(webuiGitHubTokenEnv, "")
+	default:
+		t.Fatalf("unknown test credential source %q", source)
+	}
 	h.seedWorkspace(t)
 
 	var dispatcher *connector.Dispatcher
 	if withDispatcher {
-		vault, err := connector.NewVaultFromEnv()
+		vault, err := connector.NewVaultFromEnvOrKeyFile(h.dataDir)
 		if err != nil {
-			t.Fatalf("NewVaultFromEnv: %v", err)
+			t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
 		}
 		dispatcher = &connector.Dispatcher{
 			Connectors: h.store.Connectors(),
@@ -210,9 +293,49 @@ func newPRReviewHarnessWithAgent(t *testing.T, withDispatcher bool, agentSvc ser
 			Providers:  connector.DefaultProviderRegistry(h.github.server.Client()),
 		}
 	}
-	h.module = NewModule(h.store, dispatcher, agentSvc, nil)
+	h.module = NewModule(h.store, dispatcher, agentSvc, nil, h.dataDir)
 	h.module.Register(h.mux)
 	return h
+}
+
+func (h *prReviewHarness) setSettingsGitHubToken(t *testing.T, token string) {
+	t.Helper()
+	settings, err := localsettings.Load(h.dataDir)
+	if err != nil {
+		t.Fatalf("Load local settings: %v", err)
+	}
+	credential, err := localsettings.SealRuntimeCredential(
+		h.dataDir,
+		localsettings.RuntimeCredentialProviderGitHub,
+		token,
+		time.Now(),
+	)
+	if err != nil {
+		t.Fatalf("SealRuntimeCredential: %v", err)
+	}
+	settings.RuntimeCredentials.GitHub = credential
+	if err := localsettings.Save(h.dataDir, settings); err != nil {
+		t.Fatalf("Save local settings: %v", err)
+	}
+}
+
+func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
+	t.Helper()
+	vault, err := connector.NewVaultFromEnvOrKeyFile(dataDir)
+	if err != nil {
+		t.Fatalf("NewVaultFromEnvOrKeyFile: %v", err)
+	}
+	dispatcher := &connector.Dispatcher{
+		Connectors: h.store.Connectors(),
+		Grants:     h.store.ConnectorGrants(),
+		Audit:      h.store.ConnectorCalls(),
+		Vault:      vault,
+		Providers:  connector.DefaultProviderRegistry(h.github.server.Client()),
+	}
+	h.dataDir = dataDir
+	h.module = NewModule(h.store, dispatcher, nil, nil, dataDir)
+	h.mux = http.NewServeMux()
+	h.module.Register(h.mux)
 }
 
 func (h *prReviewHarness) seedWorkspace(t *testing.T) {
@@ -241,6 +364,15 @@ func (h *prReviewHarness) addRepo(t *testing.T, name, remoteURL string) {
 		RemoteURL:    remoteURL,
 	}); err != nil {
 		t.Fatalf("Create repo %s: %v", name, err)
+	}
+}
+
+func (h *prReviewHarness) updateRepoRemote(t *testing.T, name, remoteURL string) {
+	t.Helper()
+	if _, err := h.store.Repos().Update(context.Background(), prReviewTestWorkspace, name, store.RepoUpdate{
+		RemoteURL: &remoteURL,
+	}); err != nil {
+		t.Fatalf("Update repo %s remote URL: %v", name, err)
 	}
 }
 
@@ -286,6 +418,34 @@ func (h *prReviewHarness) post(t *testing.T, path, body string) (int, []byte) {
 	return rec.Code, rec.Body.Bytes()
 }
 
+func (h *prReviewHarness) patchLocalSettings(t *testing.T, body string, onGitHubCredentialChanged func()) (int, []byte) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, "/api/local/settings", bytes.NewBufferString(body))
+	rec := httptest.NewRecorder()
+	localsettingshandler.HandlePatch(h.dataDir, localsettingshandler.PatchOptions{
+		OnGitHubRuntimeCredentialChanged: onGitHubCredentialChanged,
+	}).ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
+func assertGrantActions(t *testing.T, h *prReviewHarness, want []string) {
+	t.Helper()
+	grants, err := h.store.ConnectorGrants().ListByBinding(context.Background(), prReviewTestWorkspace, bindingID)
+	if err != nil {
+		t.Fatalf("ListByBinding: %v", err)
+	}
+	got := make([]string, 0, len(grants))
+	for _, grant := range grants {
+		got = append(got, grant.Action)
+	}
+	slices.Sort(got)
+	want = slices.Clone(want)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("grant actions = %v, want %v", got, want)
+	}
+}
+
 func TestGetPullRequestDetail(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
@@ -309,19 +469,239 @@ func TestGetPullRequestDetail(t *testing.T) {
 	if calls[0].authorization != "Bearer "+prReviewTestToken {
 		t.Fatalf("authorization = %q, want bearer token", calls[0].authorization)
 	}
+	assertGrantActions(t, h, prReadActions)
+}
+
+func TestGetPullRequestUsesSettingsGitHubCredential(t *testing.T) {
+	const settingsToken = "github-settings-token"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, settingsToken)
+	if !h.module.connectorListAvailable() {
+		t.Fatal("settings credential was not reflected in connector availability")
+	}
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 1 || calls[0].authorization != "Bearer "+settingsToken {
+		t.Fatalf("calls = %+v, want settings-token authorization", calls)
+	}
+	assertGrantActions(t, h, prReadActions)
+}
+
+func TestGetPullRequestEnvTokenOverridesSettings(t *testing.T) {
+	const settingsToken = "github-settings-token"
+	const envToken = "github-env-token"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, settingsToken)
+	t.Setenv(webuiGitHubTokenEnv, "  "+envToken+"  ")
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 1 || calls[0].authorization != "Bearer "+envToken {
+		t.Fatalf("calls = %+v, want trimmed env-token authorization", calls)
+	}
+}
+
+func TestPRReviewWithoutGitHubCredentialFailsAndWarns(t *testing.T) {
+	fallback := &fallbackAgentService{result: &ops.GitPullRequestList{}}
+	h := newPRReviewHarnessWithCredential(t, true, fallback, testCredentialNone, "")
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("detail status = %d, want 503 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "egress_unavailable" {
+		t.Fatalf("detail code = %q, want egress_unavailable", code)
+	}
+
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("list status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Data struct {
+			Warnings []string `json:"warnings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode list response: %v (body %s)", err, raw)
+	}
+	if !slices.Contains(decoded.Data.Warnings, connectorUnavailableWarning) {
+		t.Fatalf("list warnings = %v, want %q", decoded.Data.Warnings, connectorUnavailableWarning)
+	}
+}
+
+func TestSettingsGitHubCredentialPatchInvalidatesSeedAndRotates(t *testing.T) {
+	const oldToken = "github-settings-token-old"
+	const newToken = "github-settings-token-new"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, oldToken)
+	cacheKey := grantSeedCacheKey(prReviewTestWorkspace, prResource("octocat", "hello"), prReadActions)
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("initial status = %d, want 200 (body %s)", status, raw)
+	}
+	if _, seeded := h.module.seeded.Load(cacheKey); !seeded {
+		t.Fatal("read seed cache entry missing after initial request")
+	}
+	status, raw = h.patchLocalSettings(t,
+		`{"runtime_credentials":{"github":{"token":"github-settings-token-new"}}}`,
+		h.module.InvalidateCredentialSeeds,
+	)
+	if status != http.StatusOK {
+		t.Fatalf("settings PATCH status = %d, want 200 (body %s)", status, raw)
+	}
+	if _, seeded := h.module.seeded.Load(cacheKey); seeded {
+		t.Fatal("read seed cache entry survived GitHub credential PATCH")
+	}
+
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("rotation status = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %+v, want initial and post-PATCH reads", calls)
+	}
+	if calls[0].authorization != "Bearer "+oldToken {
+		t.Fatalf("initial authorization = %q, want old token", calls[0].authorization)
+	}
+	if calls[1].authorization != "Bearer "+newToken {
+		t.Fatalf("post-PATCH authorization = %q, want new token", calls[1].authorization)
+	}
+}
+
+func TestSettingsCredentialResealsAfterVaultKeyChanges(t *testing.T) {
+	const token = "github-settings-token"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, token)
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("initial status = %d, want 200 (body %s)", status, raw)
+	}
+
+	newDataDir := t.TempDir()
+	h.dataDir = newDataDir
+	h.setSettingsGitHubToken(t, token)
+	h.rebuildWithDataDir(t, newDataDir)
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("status after vault-key change = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 2 || calls[1].authorization != "Bearer "+token {
+		t.Fatalf("calls after vault-key change = %+v, want dispatch with current token", calls)
+	}
+	sealed, err := h.store.Connectors().ResolveOutboundCredentialSealed(
+		context.Background(), prReviewTestWorkspace, connectorID,
+	)
+	if err != nil {
+		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
+	}
+	if _, err := h.module.dispatcher.Vault.Unseal(
+		sealed, connector.CredentialAAD(prReviewTestWorkspace, connectorID),
+	); err != nil {
+		t.Fatalf("credential was not re-sealed under the replacement vault key: %v", err)
+	}
+}
+
+func TestCredentialInvalidationDuringEnsureUsesNewToken(t *testing.T) {
+	const oldToken = "github-settings-token-old"
+	const newToken = "github-settings-token-new"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, oldToken)
+	cacheKey := grantSeedCacheKey(prReviewTestWorkspace, prResource("octocat", "hello"), prReadActions)
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("initial status = %d, want 200 (body %s)", status, raw)
+	}
+	h.module.InvalidateCredentialSeeds()
+
+	var invalidate sync.Once
+	h.module.beforeCredentialSeedCommit = func() {
+		invalidate.Do(func() {
+			h.setSettingsGitHubToken(t, newToken)
+			h.module.InvalidateCredentialSeeds()
+		})
+	}
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("status after raced invalidation = %d, want 200 (body %s)", status, raw)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 2 || calls[1].authorization != "Bearer "+newToken {
+		t.Fatalf("calls after raced invalidation = %+v, want new-token dispatch", calls)
+	}
+	if _, seeded := h.module.seeded.Load(cacheKey); !seeded {
+		t.Fatal("new credential seed was not cached")
+	}
+	sealed, err := h.store.Connectors().ResolveOutboundCredentialSealed(
+		context.Background(), prReviewTestWorkspace, connectorID,
+	)
+	if err != nil {
+		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
+	}
+	plain, err := h.module.dispatcher.Vault.Unseal(
+		sealed, connector.CredentialAAD(prReviewTestWorkspace, connectorID),
+	)
+	if err != nil {
+		t.Fatalf("Unseal raced credential: %v", err)
+	}
+	if string(plain) != newToken {
+		t.Fatalf("stored credential = %q, want new token", plain)
+	}
+}
+
+func TestDaytonaCredentialPatchDoesNotInvalidatePRReviewSeeds(t *testing.T) {
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, "github-settings-token")
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("initial status = %d, want 200 (body %s)", status, raw)
+	}
+	cacheKey := grantSeedCacheKey(prReviewTestWorkspace, prResource("octocat", "hello"), prReadActions)
+	invalidations := 0
+	status, raw = h.patchLocalSettings(t,
+		`{"runtime_credentials":{"daytona":{"api_key":"dtn-new"}}}`,
+		func() {
+			invalidations++
+			h.module.InvalidateCredentialSeeds()
+		},
+	)
+	if status != http.StatusOK {
+		t.Fatalf("settings PATCH status = %d, want 200 (body %s)", status, raw)
+	}
+	if invalidations != 0 {
+		t.Fatalf("PR-review seed invalidations = %d, want 0", invalidations)
+	}
+	if _, seeded := h.module.seeded.Load(cacheKey); !seeded {
+		t.Fatal("Daytona-only PATCH cleared PR-review seed cache")
+	}
+	rotations, err := h.store.ConnectorCalls().ListByBinding(
+		context.Background(), prReviewTestWorkspace, connector.RotationAuditBindingID, store.ConnectorCallFilter{},
+	)
+	if err != nil {
+		t.Fatalf("list connector rotations: %v", err)
+	}
+	if len(rotations) != 0 {
+		t.Fatalf("connector rotations after Daytona-only PATCH = %d, want 0", len(rotations))
+	}
 }
 
 func TestListPullRequestsConnector(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	h.github.setListPayload("octocat", "hello", []map[string]any{
 		{
-			"number": 11,
-			"state":  "open",
-			"title":  "First PR",
-			"draft":  false,
-			"merged": false,
-			"head":   map[string]any{"sha": "head-11", "ref": "feature/one"},
-			"base":   map[string]any{"sha": "base-11", "ref": "main"},
+			"number":     11,
+			"state":      "open",
+			"title":      "First PR",
+			"draft":      false,
+			"merged":     false,
+			"updated_at": "2026-07-13T13:00:00Z",
+			"user":       map[string]any{"login": "octocat"},
+			"head":       map[string]any{"sha": "head-11", "ref": "feature/one"},
+			"base":       map[string]any{"sha": "base-11", "ref": "main"},
 		},
 		{
 			"number": 12,
@@ -333,13 +713,13 @@ func TestListPullRequestsConnector(t *testing.T) {
 			"base":   map[string]any{"sha": "base-12", "ref": "main"},
 		},
 		{
-			"number": 13,
-			"state":  "closed",
-			"title":  "Closed PR",
-			"draft":  false,
-			"merged": false,
-			"head":   map[string]any{"sha": "head-13", "ref": "feature/three"},
-			"base":   map[string]any{"sha": "base-13", "ref": "main"},
+			"number":    13,
+			"state":     "closed",
+			"title":     "Merged PR",
+			"draft":     false,
+			"merged_at": "2026-07-13T12:00:00Z",
+			"head":      map[string]any{"sha": "head-13", "ref": "feature/three"},
+			"base":      map[string]any{"sha": "base-13", "ref": "main"},
 		},
 	})
 
@@ -362,7 +742,10 @@ func TestListPullRequestsConnector(t *testing.T) {
 	}
 	first := decoded.Data.PullRequests[0]
 	if first.Number != 11 || first.URL != "https://github.com/octocat/hello/pull/11" || first.RepoName != "octocat/hello" {
-		t.Fatalf("first PR = %+v, want URL and repo name populated", first)
+		t.Fatalf("first PR = %+v, want URL and GitHub repo name populated", first)
+	}
+	if first.SourceRepo != "hello" || first.SourceRepo == first.RepoName {
+		t.Fatalf("first PR source_repo = %q, want workspace repo name %q", first.SourceRepo, "hello")
 	}
 	// The frontend filters on the UPPERCASE state the gh path emits
 	// (isOpenPr: pr.state === "OPEN"). GitHub REST returns lowercase, so the
@@ -370,15 +753,133 @@ func TestListPullRequestsConnector(t *testing.T) {
 	if first.State != "OPEN" {
 		t.Fatalf("first PR state = %q, want %q (frontend keys open rows off this)", first.State, "OPEN")
 	}
+	if first.AuthorLogin != "octocat" || first.UpdatedAt != "2026-07-13T13:00:00Z" {
+		t.Fatalf("first PR author/update = %q/%q, want connector list fields", first.AuthorLogin, first.UpdatedAt)
+	}
 	if got := decoded.Data.PullRequests[1]; !got.IsDraft || got.HeadRefName != "feature/two" || got.BaseRefName != "main" {
 		t.Fatalf("second PR = %+v, want draft/head/base mapped", got)
 	}
-	if got := decoded.Data.PullRequests[2]; got.State != "CLOSED" {
-		t.Fatalf("third PR state = %q, want %q", got.State, "CLOSED")
+	if got := decoded.Data.PullRequests[2]; got.State != "MERGED" {
+		t.Fatalf("third PR state = %q, want %q", got.State, "MERGED")
 	}
 	calls := h.github.snapshot()
 	if len(calls) != 1 || calls[0].path != "/repos/octocat/hello/pulls" {
-		t.Fatalf("calls = %+v, want one PR list", calls)
+		t.Fatalf("calls = %+v, want one short-page PR list", calls)
+	}
+	for _, want := range []string{"state=all", "per_page=100", "page=1"} {
+		if !strings.Contains(calls[0].query, want) {
+			t.Fatalf("short-page query %q missing %q", calls[0].query, want)
+		}
+	}
+	assertGrantActions(t, h, prReadActions)
+}
+
+func TestSSHRemoteAuthorizesAndListsPullRequests(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	h.updateRepoRemote(t, "hello", "ssh://git@github.com/octocat/hello.git")
+	h.github.setListPayload("octocat", "hello", []map[string]any{{
+		"number": 7,
+		"state":  "open",
+		"title":  "SSH remote PR",
+	}})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK || !bytes.Contains(raw, []byte(`"number":7`)) {
+		t.Fatalf("list status = %d, body = %s", status, raw)
+	}
+	status, raw = h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
+	if status != http.StatusOK {
+		t.Fatalf("detail status = %d, want authorized 200 (body %s)", status, raw)
+	}
+}
+
+func TestListPullRequestsWarnsForUnparseableRemote(t *testing.T) {
+	fallback := &fallbackAgentService{result: &ops.GitPullRequestList{}}
+	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	h.updateRepoRemote(t, "hello", "not a repository URL")
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	if !fallback.called {
+		t.Fatal("expected gh fallback when no remote is connector-eligible")
+	}
+	var decoded struct {
+		Data struct {
+			Warnings []string `json:"warnings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, raw)
+	}
+	if len(decoded.Data.Warnings) != 1 || !strings.Contains(decoded.Data.Warnings[0], "hello") ||
+		!strings.Contains(decoded.Data.Warnings[0], "not a supported GitHub URL") {
+		t.Fatalf("warnings = %v, want explicit unsupported-remote warning", decoded.Data.Warnings)
+	}
+}
+
+func TestListPullRequestsConnectorPaginatesWithDistinctCallSeq(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	h.github.setListPage("octocat", "hello", 1, fakePullRequestPage(1, 100))
+	h.github.setListPage("octocat", "hello", 2, fakePullRequestPage(101, 42))
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=all")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if len(data.PullRequests) != 142 {
+		t.Fatalf("pull request count = %d, want 142", len(data.PullRequests))
+	}
+
+	calls := h.github.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("GitHub calls = %d, want 2", len(calls))
+	}
+	for i, call := range calls {
+		for _, want := range []string{"state=all", "per_page=100", "page=" + strconv.Itoa(i+1)} {
+			if !strings.Contains(call.query, want) {
+				t.Fatalf("page %d query %q missing %q", i+1, call.query, want)
+			}
+		}
+	}
+
+	runID := "webui-review:user-1:octocat/hello:list:" + providers.ActionGitHubPullsList
+	records, err := h.store.ConnectorCalls().ListByRun(
+		context.Background(), prReviewTestWorkspace, runID, store.ConnectorCallFilter{},
+	)
+	if err != nil {
+		t.Fatalf("list connector call audit: %v", err)
+	}
+	if len(records) != 2 || records[0].Seq != 0 || records[1].Seq != 1 {
+		t.Fatalf("connector call records = %+v, want seq 0 and 1", records)
+	}
+	if records[0].CallID == records[1].CallID {
+		t.Fatalf("connector page calls reused audit id %q", records[0].CallID)
+	}
+}
+
+func TestListPullRequestsConnectorWarnsAtPageCap(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	for page := 1; page <= maxPullsListPages; page++ {
+		h.github.setListPage("octocat", "hello", page, fakePullRequestPage((page-1)*pullsListPerPage+1, pullsListPerPage))
+	}
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=all")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if len(data.PullRequests) != pullsListPerPage*maxPullsListPages {
+		t.Fatalf("pull request count = %d, want capped %d", len(data.PullRequests), pullsListPerPage*maxPullsListPages)
+	}
+	if len(data.Warnings) != 1 || !strings.Contains(data.Warnings[0], "octocat/hello") ||
+		!strings.Contains(data.Warnings[0], "truncated") {
+		t.Fatalf("warnings = %v, want repo-scoped truncation warning", data.Warnings)
+	}
+	if calls := h.github.snapshot(); len(calls) != maxPullsListPages {
+		t.Fatalf("GitHub calls = %d, want capped %d", len(calls), maxPullsListPages)
 	}
 }
 
@@ -508,6 +1009,40 @@ func TestListPullRequestsConnectorFailureSurfacesWarning(t *testing.T) {
 	}
 }
 
+func TestListPullRequestsOversizedConnectorPageSurfacesWarning(t *testing.T) {
+	fallback := &fallbackAgentService{
+		result: &ops.GitPullRequestList{
+			PullRequests: []ops.GitPullRequest{{Number: 5, RepoName: "octocat/hello", State: "OPEN"}},
+		},
+	}
+	h := newPRReviewHarnessWithAgent(t, true, fallback)
+	h.github.setListPayload("octocat", "hello", []map[string]any{{
+		"number":  7,
+		"state":   "open",
+		"title":   "Oversized PR",
+		"padding": strings.Repeat("x", 5<<20),
+	}})
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=all")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 fallback response (body %s)", status, raw)
+	}
+	decoded := decodePullRequestsResponse(t, raw)
+	if !fallback.called || len(decoded.PullRequests) != 1 {
+		t.Fatalf("fallback = %v, pull_requests = %+v; want non-empty fallback", fallback.called, decoded.PullRequests)
+	}
+	warningFound := false
+	for _, warning := range decoded.Warnings {
+		if strings.Contains(warning, "octocat/hello") &&
+			strings.Contains(warning, "response exceeded 4194304 bytes") {
+			warningFound = true
+		}
+	}
+	if !warningFound {
+		t.Fatalf("warnings = %v, want per-repo oversized-response warning", decoded.Warnings)
+	}
+}
+
 func TestListPullRequestsPartialRepoErrorWarns(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	h.addRepo(t, "widgets", "https://github.com/acme/widgets")
@@ -581,6 +1116,7 @@ func TestGetPullRequestDiff(t *testing.T) {
 	if calls[1].path != "/repos/octocat/hello/compare/main...headsha-123" {
 		t.Fatalf("second call path = %q, want compare pinned to head sha", calls[1].path)
 	}
+	assertGrantActions(t, h, prReadActions)
 }
 
 func TestGetPullRequestUnregisteredRepoDoesNotDispatch(t *testing.T) {
@@ -627,14 +1163,16 @@ func TestPostPullRequestReviewApprove(t *testing.T) {
 	if calls[1].body["event"] != "APPROVE" || calls[1].body["body"] != "LGTM" {
 		t.Fatalf("review payload = %+v, want APPROVE body", calls[1].body)
 	}
+	assertGrantActions(t, h, prReviewSubmissionActions)
 }
 
-func TestPostPullRequestReviewAfterReadUsesSeededReviewGrant(t *testing.T) {
+func TestPostPullRequestReviewSeedsWriteGrantAfterRead(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7")
 	if status != http.StatusOK {
 		t.Fatalf("read status = %d, want 200 (body %s)", status, raw)
 	}
+	assertGrantActions(t, h, prReadActions)
 
 	status, raw = h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/review",
 		`{"event":"approve","body":"LGTM","expected_head_sha":"headsha-123"}`)
@@ -644,6 +1182,45 @@ func TestPostPullRequestReviewAfterReadUsesSeededReviewGrant(t *testing.T) {
 	calls := h.github.snapshot()
 	if len(calls) != 3 || calls[2].method != http.MethodPost || calls[2].path != "/repos/octocat/hello/pulls/7/reviews" {
 		t.Fatalf("calls = %+v, want read GET, liveness GET, review POST", calls)
+	}
+	want := append(slices.Clone(prReadActions), prReviewWriteAction)
+	assertGrantActions(t, h, want)
+}
+
+func TestGrantSeedCacheKeyScopesCanonicalActionSet(t *testing.T) {
+	resource := prResource("octocat", "hello")
+	readKey := grantSeedCacheKey(prReviewTestWorkspace, resource, prReadActions)
+	reordered := []string{
+		providers.ActionGitHubCompareRead,
+		providers.ActionGitHubPullRequestRead,
+		providers.ActionGitHubPullsList,
+		providers.ActionGitHubPullRequestRead,
+	}
+	if got := grantSeedCacheKey(prReviewTestWorkspace, resource, reordered); got != readKey {
+		t.Fatalf("reordered/deduplicated read key = %q, want %q", got, readKey)
+	}
+	if writeKey := grantSeedCacheKey(prReviewTestWorkspace, resource, prReviewSubmissionActions); writeKey == readKey {
+		t.Fatalf("read and review-submission action sets share cache key %q", readKey)
+	}
+}
+
+func TestInvalidateCredentialSeedsClearsAllEntries(t *testing.T) {
+	module := &Module{}
+	module.seeded.Store("read", struct{}{})
+	module.seeded.Store("write", struct{}{})
+
+	module.InvalidateCredentialSeeds()
+
+	count := 0
+	module.seeded.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	if count != 0 {
+		t.Fatalf("seed cache entries after invalidation = %d, want 0", count)
+	}
+	if generation := module.credentialSeedGeneration.Load(); generation != 1 {
+		t.Fatalf("credential seed generation = %d, want 1", generation)
 	}
 }
 
@@ -719,18 +1296,84 @@ func TestGetPullRequestCanonicalizesCasing(t *testing.T) {
 	}
 }
 
-func TestReviewerAgentNameSanitizesRepo(t *testing.T) {
-	if got := reviewerAgentName("Hello.World_repo", 7); got != "review-hello-world-repo-pr-7" {
-		t.Fatalf("reviewerAgentName() = %q, want review-hello-world-repo-pr-7", got)
+func TestReviewerAgentNameSanitizesOwnerAndRepo(t *testing.T) {
+	if got := reviewerAgentName("OpenAI.Inc", "Hello.World_repo", 7); got != "review-openai-inc-hello-world-repo-14113012-pr-7" {
+		t.Fatalf("reviewerAgentName() = %q, want sanitized name with canonical identity hash", got)
 	}
-	if got := reviewerAgentName("...///", 7); got != "review-repo-pr-7" {
-		t.Fatalf("reviewerAgentName(empty segment) = %q, want review-repo-pr-7", got)
+	if got := reviewerAgentName("Octocat", "...///", 7); got != "review-octocat-repo-b990e831-pr-7" {
+		t.Fatalf("reviewerAgentName(empty segment) = %q, want fallback segment with identity hash", got)
+	}
+}
+
+func TestReviewerAgentNameIncludesOwnerIdentity(t *testing.T) {
+	orgA := reviewerAgentName("org-a", "api", 7)
+	orgB := reviewerAgentName("org-b", "api", 7)
+	if orgA == orgB {
+		t.Fatalf("reviewer names collide: %q", orgA)
+	}
+}
+
+func TestReviewerAgentNameSeparatesLossySanitizationCollisions(t *testing.T) {
+	dotted := reviewerAgentName("org-a", "api.v2", 7)
+	dashed := reviewerAgentName("org-a", "api-v2", 7)
+	if dotted == dashed {
+		t.Fatalf("reviewer names collide after sanitization: %q", dotted)
+	}
+	if !strings.Contains(dotted, "-a7549c10-pr-7") || !strings.Contains(dashed, "-6a12be2d-pr-7") {
+		t.Fatalf("reviewer names lack canonical identity hashes: %q, %q", dotted, dashed)
+	}
+}
+
+func TestReviewerAgentNameSeparatesTruncatedPrefixCollisions(t *testing.T) {
+	ownerA := strings.Repeat("owner", 30) + "a"
+	ownerB := strings.Repeat("owner", 30) + "b"
+	repo := strings.Repeat("repository", 20)
+	if oldA, oldB := intermediateReviewerAgentName(ownerA, repo, 7), intermediateReviewerAgentName(ownerB, repo, 7); oldA != oldB {
+		t.Fatalf("test inputs do not collide in the intermediate shape: %q, %q", oldA, oldB)
+	}
+	if nameA, nameB := reviewerAgentName(ownerA, repo, 7), reviewerAgentName(ownerB, repo, 7); nameA == nameB {
+		t.Fatalf("hashed reviewer names collide after truncation: %q", nameA)
+	}
+}
+
+func TestReviewerAgentNameTruncatesToStoredNameLimit(t *testing.T) {
+	owner := strings.Repeat("owner-", 40)
+	repo := strings.Repeat("repo-", 40)
+	name := reviewerAgentName(owner, repo, 123)
+	if len(name) > reviewerAgentNameMaxLen {
+		t.Fatalf("reviewerAgentName length = %d, want <= %d: %q", len(name), reviewerAgentNameMaxLen, name)
+	}
+	if !service.ValidStoredAgentName.MatchString(name) {
+		t.Fatalf("reviewerAgentName() = %q, want valid stored agent name", name)
+	}
+	if !strings.HasPrefix(name, "review-") || !strings.HasSuffix(name, "-pr-123") {
+		t.Fatalf("reviewerAgentName() = %q, want preserved prefix and suffix", name)
+	}
+	if !strings.HasSuffix(name, "-"+reviewerIdentityHash(owner, repo)+"-pr-123") {
+		t.Fatalf("reviewerAgentName() = %q, want hash segment before PR suffix", name)
+	}
+	if strings.Contains(name, "--") {
+		t.Fatalf("reviewerAgentName() = %q, want segments not ending in dashes", name)
+	}
+}
+
+func TestLegacyReviewerAgentNameUsesOldRepoOnlyShape(t *testing.T) {
+	if got := legacyReviewerAgentName("Hello.World_repo", 7); got != "review-hello-world-repo-pr-7" {
+		t.Fatalf("legacyReviewerAgentName() = %q, want review-hello-world-repo-pr-7", got)
+	}
+	longRepo := strings.Repeat("a", legacyReviewerRepoSegmentMaxLen-1) + ".tail"
+	want := "review-" + strings.Repeat("a", legacyReviewerRepoSegmentMaxLen-1) + "-pr-7"
+	if got := legacyReviewerAgentName(longRepo, 7); got != want {
+		t.Fatalf("legacyReviewerAgentName(truncated) = %q, want %q", got, want)
+	}
+	if got := intermediateReviewerAgentName("OpenAI.Inc", "Hello.World_repo", 7); got != "review-openai-inc-hello-world-repo-pr-7" {
+		t.Fatalf("intermediateReviewerAgentName() = %q, want owner-inclusive unhashed shape", got)
 	}
 }
 
 func TestPostReviewerMessageQueuesPending(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 
 	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/messages", `{"text":"hello"}`)
 	if status != http.StatusOK {
@@ -768,7 +1411,7 @@ func TestPostReviewerMessageRequiresStartedReviewer(t *testing.T) {
 
 func TestPostReviewerMessageRejectsEmptyText(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/messages", `{"text":"   "}`)
 	if status != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body %s)", status, raw)
@@ -780,7 +1423,7 @@ func TestPostReviewerMessageRejectsEmptyText(t *testing.T) {
 
 func TestPostReviewerMessageUnregisteredRepoDoesNotEnqueue(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/acme/widgets/7/messages", `{"text":"hello"}`)
 	if status != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (body %s)", status, raw)
@@ -788,14 +1431,14 @@ func TestPostReviewerMessageUnregisteredRepoDoesNotEnqueue(t *testing.T) {
 	if code := decodeErrorCode(t, raw); code != "repo_not_registered" {
 		t.Fatalf("code = %q, want repo_not_registered", code)
 	}
-	if queued := queuedReviewerMessagesForTest(t, h.store, reviewerAgentName("hello", 7)); len(queued) != 0 {
+	if queued := queuedReviewerMessagesForTest(t, h.store, reviewerAgentName("octocat", "hello", 7)); len(queued) != 0 {
 		t.Fatalf("queued messages = %d, want 0", len(queued))
 	}
 }
 
 func TestStreamReviewerStartingWhenNoSession(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(10*time.Millisecond, cancel)
@@ -811,7 +1454,7 @@ func TestStreamReviewerStartingWhenNoSession(t *testing.T) {
 
 func TestStreamReviewerEmitsMessages(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 		leadcontrol.MetadataCodexEndpoint: "ws://codex.test",
 		leadcontrol.MetadataCodexThreadID: "thread-1",
@@ -869,7 +1512,7 @@ func TestStreamReviewerEmitsMessages(t *testing.T) {
 
 func TestGetReviewerConversationStartingWhenNoSession(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	createReviewerAgentForTest(t, h, "hello", 7)
+	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/conversation")
 	if status != http.StatusOK {
@@ -891,7 +1534,7 @@ func TestGetReviewerConversationStartingWhenNoSession(t *testing.T) {
 
 func TestGetReviewerConversationSnapshot(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 		leadcontrol.MetadataCodexEndpoint: "ws://codex.test",
 		leadcontrol.MetadataCodexThreadID: "thread-1",
@@ -981,6 +1624,7 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
 	}
+	assertGrantActions(t, h, prReadActions)
 	var decoded struct {
 		Success bool                     `json:"success"`
 		Data    gen.ReviewerEnsureResult `json:"data"`
@@ -988,7 +1632,7 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		t.Fatalf("decode response: %v (body %s)", err, raw)
 	}
-	agentName := reviewerAgentName("hello", 7)
+	agentName := reviewerAgentName("octocat", "hello", 7)
 	if !decoded.Success || decoded.Data.AgentName != agentName || decoded.Data.CheckedOutSha != headSHA || !decoded.Data.Seeded {
 		t.Fatalf("response = %+v, want agent %s sha %s seeded", decoded, agentName, headSHA)
 	}
@@ -997,11 +1641,15 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get reviewer agent: %v", err)
 	}
-	if agent.Backend != "codex" || agent.RoleName != "lead" || agent.DesiredState != domain.AgentDesiredRunning {
-		t.Fatalf("agent = %+v, want codex lead running", agent)
+	if agent.Backend != "codex" || agent.RoleName != reviewerRoleName || agent.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("agent = %+v, want codex %s running", agent, reviewerRoleName)
 	}
-	if _, err := h.store.Roles().Get(context.Background(), prReviewTestWorkspace, "lead"); err != nil {
-		t.Fatalf("lead role missing: %v", err)
+	role, err := h.store.Roles().Get(context.Background(), prReviewTestWorkspace, reviewerRoleName)
+	if err != nil {
+		t.Fatalf("reviewer role missing: %v", err)
+	}
+	if role.Kind != domain.RoleKindInteractive || role.PromptFile != reviewerPromptFile || role.Prompt != "" {
+		t.Fatalf("reviewer role = kind:%q prompt_file:%q prompt:%q", role.Kind, role.PromptFile, role.Prompt)
 	}
 	worktreePath, err := localworkspace.PRReviewWorktreePath(workspacePath, "hello", 7)
 	if err != nil {
@@ -1037,6 +1685,86 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 	}
 }
 
+func TestEnsureReviewerRejectsChangedFetchedTip(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	workspacePath := t.TempDir()
+	repoPath := filepath.Join(workspacePath, "hello")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo path: %v", err)
+	}
+	h.rememberLocalPaths(t, workspacePath, "hello", repoPath)
+	h.github.setHead("ABC123")
+
+	checkoutCalled := false
+	h.module.checkoutReviewerPRHead = func(_ context.Context, _, _ string, _ string, _ int, headSHA string) (string, error) {
+		checkoutCalled = true
+		if headSHA != "ABC123" {
+			t.Fatalf("checkout head sha = %q, want ABC123", headSHA)
+		}
+		return "def456", &localworkspace.PRHeadChangedError{
+			ExpectedSHA: headSHA,
+			TipSHA:      "def456",
+		}
+	}
+
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode response: %v (body %s)", err, raw)
+	}
+	if decoded.Code != "stale_subject" || !decoded.Retryable {
+		t.Fatalf("response = %+v, want stale_subject retryable=true", decoded)
+	}
+	if !checkoutCalled {
+		t.Fatal("checkout seam was not called")
+	}
+
+	agentName := reviewerAgentName("octocat", "hello", 7)
+	if _, err := h.store.Agents().Get(context.Background(), prReviewTestWorkspace, agentName); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("reviewer agent lookup error = %v, want ErrNotFound", err)
+	}
+	cache, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("LoadStateCache: %v", err)
+	}
+	if _, remembered := cache.Workspaces[prReviewTestWorkspace].Agents[agentName]; remembered {
+		t.Fatalf("reviewer worktree was remembered for stale agent %q", agentName)
+	}
+}
+
+func TestEnsureReviewerRejectsMissingRecordedCheckout(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	workspacePath := t.TempDir()
+	repoPath := filepath.Join(workspacePath, "missing-checkout")
+	h.rememberLocalPaths(t, workspacePath, "hello", repoPath)
+
+	checkoutCalled := false
+	h.module.checkoutReviewerPRHead = func(context.Context, string, string, string, int, string) (string, error) {
+		checkoutCalled = true
+		return "", nil
+	}
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
+	if status != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "repo_not_checked_out" {
+		t.Fatalf("code = %q, want repo_not_checked_out", code)
+	}
+	if checkoutCalled {
+		t.Fatal("checkout ran for a recorded path that does not exist")
+	}
+	agentName := reviewerAgentName("octocat", "hello", 7)
+	if _, err := h.store.Agents().Get(context.Background(), prReviewTestWorkspace, agentName); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("reviewer agent lookup error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestGetPullRequestEgressUnavailable(t *testing.T) {
 	t.Run("nil dispatcher", func(t *testing.T) {
 		h := newPRReviewHarness(t, false)
@@ -1062,21 +1790,23 @@ func TestGetPullRequestEgressUnavailable(t *testing.T) {
 	})
 }
 
-func createReviewerAgentForTest(t *testing.T, h *prReviewHarness, repo string, number int) string {
+func createReviewerAgentForTest(t *testing.T, h *prReviewHarness, owner, repo string, number int) string {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := h.store.Roles().Create(ctx, store.RoleCreate{
 		WorkspaceKey: prReviewTestWorkspace,
-		Name:         "lead",
-		Description:  "Lead/orchestrator terminal",
+		Name:         reviewerRoleName,
+		Kind:         string(domain.RoleKindInteractive),
+		Description:  reviewerRoleDescription,
+		PromptFile:   reviewerPromptFile,
 	}); err != nil {
-		t.Fatalf("Create lead role: %v", err)
+		t.Fatalf("Create reviewer role: %v", err)
 	}
-	agentName := reviewerAgentName(repo, number)
+	agentName := reviewerAgentName(owner, repo, number)
 	if _, err := h.store.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: prReviewTestWorkspace,
 		Name:         agentName,
-		RoleName:     "lead",
+		RoleName:     reviewerRoleName,
 		Backend:      "codex",
 		DesiredState: domain.AgentDesiredRunning,
 	}); err != nil {
@@ -1197,8 +1927,11 @@ func TestParseGitHubOwnerRepo(t *testing.T) {
 		ok     bool
 	}{
 		{remote: "git@github.com:octocat/hello.git", owner: "octocat", repo: "hello", ok: true},
+		{remote: "ssh://git@github.com/octocat/hello.git", owner: "octocat", repo: "hello", ok: true},
+		{remote: "ssh://deploy@github.com/octocat/hello", owner: "octocat", repo: "hello", ok: true},
 		{remote: "https://github.com/octocat/hello", owner: "octocat", repo: "hello", ok: true},
 		{remote: "https://github.com/octocat/hello.git", owner: "octocat", repo: "hello", ok: true},
+		{remote: "ssh://git@gitlab.com/octocat/hello.git", ok: false},
 		{remote: "https://gitlab.com/octocat/hello.git", ok: false},
 	} {
 		owner, repo, ok := parseGitHubOwnerRepo(tc.remote)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
@@ -19,6 +18,11 @@ type pullRequestsData struct {
 	Warnings     []string             `json:"warnings,omitempty"`
 }
 
+const (
+	pullsListPerPage  = 100
+	maxPullsListPages = 5
+)
+
 func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("ws")
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
@@ -27,7 +31,11 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !m.connectorListAvailable() {
-		m.ghListFallback(w, r.Context(), ws, state)
+		var warnings []string
+		if m != nil && m.dispatcher != nil && !m.githubTokenConfigured() {
+			warnings = append(warnings, connectorUnavailableWarning)
+		}
+		m.ghListFallback(w, r.Context(), ws, state, warnings...)
 		return
 	}
 
@@ -48,16 +56,14 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 	prs, warnings, attempted, failed := m.connectorListPullRequests(r, ws, state, data.Repos)
 
 	// Fall back to gh when the connector learned nothing: either no repo was
-	// parseable (attempted == 0 — e.g. ssh-scheme remotes the parser rejects,
-	// which the old gh-only route would have listed) or every repo errored.
+	// parseable or every repo errored.
 	if len(prs) == 0 && (attempted == 0 || failed == attempted) {
 		// When the connector was configured and actually tried but failed for
 		// every repo, surface that (with the per-repo reasons) instead of
-		// silently pretending gh is the intended source. attempted == 0 means
-		// the repos simply aren't connector-eligible — stay quiet there.
-		var notice []string
+		// silently pretending gh is the intended source.
+		notice := append([]string(nil), warnings...)
 		if attempted > 0 {
-			notice = append([]string{connectorUnavailableWarning}, warnings...)
+			notice = append([]string{connectorUnavailableWarning}, notice...)
 		}
 		m.ghListFallback(w, r.Context(), ws, state, notice...)
 		return
@@ -75,15 +81,42 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 	for _, workspaceRepo := range repos {
 		owner, repo, ok := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
 		if !ok {
+			if strings.TrimSpace(workspaceRepo.RemoteURL) != "" {
+				warnings = append(warnings, fmt.Sprintf(
+					"%s: remote URL is not a supported GitHub URL", workspaceRepo.Name,
+				))
+			}
 			continue
 		}
 		attempted++
-		if err := m.ensureConnectorAndGrants(r.Context(), ws, owner, repo, prReviewActions); err != nil {
+		if err := m.ensureConnectorAndGrants(r.Context(), ws, owner, repo, prReadActions); err != nil {
 			failed++
 			warnings = append(warnings, repoWarning(owner, repo, err))
 			continue
 		}
-		res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+		repoPRs, truncated, err := m.connectorListPullRequestsForRepo(
+			r, ws, state, owner, repo, workspaceRepo.Name,
+		)
+		prs = append(prs, repoPRs...)
+		if err != nil {
+			failed++
+			warnings = append(warnings, repoWarning(owner, repo, err))
+			continue
+		}
+		if truncated {
+			warnings = append(warnings, pullsListTruncationWarning(owner, repo))
+		}
+	}
+	return prs, warnings, attempted, failed
+}
+
+func (m *Module) connectorListPullRequestsForRepo(
+	r *http.Request,
+	ws, state, owner, repo, sourceRepo string,
+) (prs []ops.GitPullRequest, truncated bool, err error) {
+	prs = []ops.GitPullRequest{}
+	for page := 1; page <= maxPullsListPages; page++ {
+		res, dispatchErr := m.dispatcher.Dispatch(r.Context(), connector.Request{
 			WorkspaceKey: ws,
 			RunID:        listRunID(r, owner, repo),
 			BindingID:    bindingID,
@@ -91,31 +124,35 @@ func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, re
 			Action:       providers.ActionGitHubPullsList,
 			Resource:     prResource(owner, repo),
 			Args: map[string]any{
-				"owner": owner,
-				"repo":  repo,
-				"state": connectorListState(state),
+				"owner":   owner,
+				"repo":    repo,
+				"state":   connectorListState(state),
+				"perPage": pullsListPerPage,
+				"page":    page,
 			},
-			CallSeq: 0,
+			CallSeq: page - 1,
 		})
-		if err != nil {
-			failed++
-			warnings = append(warnings, repoWarning(owner, repo, err))
-			continue
+		if dispatchErr != nil {
+			return prs, false, dispatchErr
 		}
-		prs = append(prs, pullRequestsFromBody(owner, repo, res.Body)...)
+		pagePRs := pullRequestsFromBody(owner, repo, sourceRepo, res.Body)
+		prs = append(prs, pagePRs...)
+		if len(pagePRs) < pullsListPerPage {
+			return prs, false, nil
+		}
 	}
-	return prs, warnings, attempted, failed
+	return prs, true, nil
+}
+
+func pullsListTruncationWarning(owner, repo string) string {
+	return fmt.Sprintf("%s/%s: pull request list truncated after %d entries", owner, repo, pullsListPerPage*maxPullsListPages)
 }
 
 func (m *Module) connectorListAvailable() bool {
 	if m == nil || m.dispatcher == nil {
 		return false
 	}
-	if strings.TrimSpace(os.Getenv(webuiGitHubTokenEnv)) == "" {
-		return false
-	}
-	_, err := connector.NewVaultFromEnv()
-	return err == nil
+	return m.githubTokenConfigured()
 }
 
 // connectorUnavailableWarning is surfaced (via the response warnings the PR
@@ -159,11 +196,11 @@ func listRunID(r *http.Request, owner, repo string) string {
 	return "webui-review:" + userID + ":" + owner + "/" + repo + ":list:" + providers.ActionGitHubPullsList
 }
 
-func pullRequestsFromBody(owner, repo string, body map[string]any) []ops.GitPullRequest {
+func pullRequestsFromBody(owner, repo, sourceRepo string, body map[string]any) []ops.GitPullRequest {
 	prs := []ops.GitPullRequest{}
 	if rawPulls, ok := body["pullRequests"].([]map[string]any); ok {
 		for _, raw := range rawPulls {
-			prs = append(prs, pullRequestFromSummary(owner, repo, raw))
+			prs = append(prs, pullRequestFromSummary(owner, repo, sourceRepo, raw))
 		}
 		return prs
 	}
@@ -173,15 +210,17 @@ func pullRequestsFromBody(owner, repo string, body map[string]any) []ops.GitPull
 			if !ok {
 				continue
 			}
-			prs = append(prs, pullRequestFromSummary(owner, repo, raw))
+			prs = append(prs, pullRequestFromSummary(owner, repo, sourceRepo, raw))
 		}
 	}
 	return prs
 }
 
-func pullRequestFromSummary(owner, repo string, body map[string]any) ops.GitPullRequest {
+func pullRequestFromSummary(owner, repo, sourceRepo string, body map[string]any) ops.GitPullRequest {
 	number := intValue(body["number"])
 	repoName := owner + "/" + repo
+	// GitHub's REST list payload does not expose aggregate review decision,
+	// so ReviewDecision intentionally remains empty on the connector path.
 	return ops.GitPullRequest{
 		Number:      number,
 		Title:       stringValue(body["title"]),
@@ -190,7 +229,10 @@ func pullRequestFromSummary(owner, repo string, body map[string]any) ops.GitPull
 		IsDraft:     boolValue(body["draft"]),
 		HeadRefName: stringValue(body["headRef"]),
 		BaseRefName: stringValue(body["baseRef"]),
+		AuthorLogin: stringValue(body["authorLogin"]),
+		UpdatedAt:   stringValue(body["updatedAt"]),
 		RepoName:    repoName,
+		SourceRepo:  sourceRepo,
 	}
 }
 

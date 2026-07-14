@@ -72,7 +72,7 @@ func newBackendTestEnv(t *testing.T, workspaceBackend string) *backendTestEnv {
 	}
 }
 
-func (e *backendTestEnv) seedReviewer(t *testing.T, agentName, backend string) {
+func (e *backendTestEnv) seedLegacyReviewer(t *testing.T, agentName, backend string) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := e.store.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: prReviewTestWorkspace, Name: "lead"}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
@@ -89,13 +89,35 @@ func (e *backendTestEnv) seedReviewer(t *testing.T, agentName, backend string) {
 	}
 }
 
-func (e *backendTestEnv) agentBackend(t *testing.T, agentName string) string {
+func (e *backendTestEnv) seedCurrentReviewer(t *testing.T, agentName, backend string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := e.module.ensureReviewerRole(ctx, prReviewTestWorkspace); err != nil {
+		t.Fatalf("ensure reviewer role: %v", err)
+	}
+	if _, err := e.store.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: prReviewTestWorkspace,
+		Name:         agentName,
+		RoleName:     reviewerRoleName,
+		Backend:      backend,
+		DesiredState: domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("create reviewer agent: %v", err)
+	}
+}
+
+func (e *backendTestEnv) agent(t *testing.T, agentName string) *domain.Agent {
 	t.Helper()
 	agent, err := e.store.Agents().Get(context.Background(), prReviewTestWorkspace, agentName)
 	if err != nil {
 		t.Fatalf("get agent: %v", err)
 	}
-	return agent.Backend
+	return agent
+}
+
+func (e *backendTestEnv) agentBackend(t *testing.T, agentName string) string {
+	t.Helper()
+	return e.agent(t, agentName).Backend
 }
 
 func TestEnsureReviewerAgentUsesWorkspaceBackend(t *testing.T) {
@@ -105,6 +127,16 @@ func TestEnsureReviewerAgentUsesWorkspaceBackend(t *testing.T) {
 	}
 	if got := env.agentBackend(t, "review-hello-pr-7"); got != "claude" {
 		t.Fatalf("backend = %q, want claude", got)
+	}
+	if got := env.agent(t, "review-hello-pr-7").RoleName; got != reviewerRoleName {
+		t.Fatalf("role = %q, want %s", got, reviewerRoleName)
+	}
+	role, err := env.store.Roles().Get(context.Background(), prReviewTestWorkspace, reviewerRoleName)
+	if err != nil {
+		t.Fatalf("load reviewer role: %v", err)
+	}
+	if role.Kind != domain.RoleKindInteractive || role.PromptFile != reviewerPromptFile || role.Prompt != "" {
+		t.Fatalf("reviewer role = kind:%q prompt_file:%q prompt:%q", role.Kind, role.PromptFile, role.Prompt)
 	}
 }
 
@@ -123,7 +155,7 @@ func TestEnsureReviewerAgentDefaultsToCodex(t *testing.T) {
 func TestEnsureReviewerAgentMigratesExistingBackend(t *testing.T) {
 	const agentName = "review-hello-pr-7"
 	env := newBackendTestEnv(t, "claude")
-	env.seedReviewer(t, agentName, "codex")
+	env.seedLegacyReviewer(t, agentName, "codex")
 	ctx := context.Background()
 
 	// A live orchestration session carrying runtime identity from the codex
@@ -159,6 +191,9 @@ func TestEnsureReviewerAgentMigratesExistingBackend(t *testing.T) {
 	if got := env.agentBackend(t, agentName); got != "claude" {
 		t.Fatalf("backend = %q, want claude", got)
 	}
+	if got := env.agent(t, agentName).RoleName; got != reviewerRoleName {
+		t.Fatalf("role = %q, want %s", got, reviewerRoleName)
+	}
 	if len(env.term.deleted) != 1 || env.term.deleted[0] != "agent-review-hello-pr-7" {
 		t.Fatalf("deleted tabs = %v, want only the reviewer's tab", env.term.deleted)
 	}
@@ -178,10 +213,156 @@ func TestEnsureReviewerAgentMigratesExistingBackend(t *testing.T) {
 	}
 }
 
+func TestEnsureReviewerAgentMigratesExistingLeadRole(t *testing.T) {
+	const agentName = "review-hello-pr-7"
+	env := newBackendTestEnv(t, "claude")
+	env.seedLegacyReviewer(t, agentName, "claude")
+	ctx := context.Background()
+	if _, err := env.store.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: prReviewTestWorkspace,
+		SessionID:    "orch-1",
+		AgentID:      agentName,
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+		Metadata: map[string]string{
+			"lead_runtime_provider": "claude",
+			"source":                "web-terminal",
+		},
+	}); err != nil {
+		t.Fatalf("create orchestration session: %v", err)
+	}
+	env.term.tabs = []tabmeta.TabMetadata{
+		{SessionName: "agent-review-hello-pr-7", Kind: terminalKindAgent, AgentID: agentName, PTYAlive: true},
+	}
+
+	if err := env.module.ensureReviewerAgent(ctx, prReviewTestWorkspace, agentName); err != nil {
+		t.Fatalf("ensureReviewerAgent: %v", err)
+	}
+
+	agent := env.agent(t, agentName)
+	if agent.Backend != "claude" || agent.RoleName != reviewerRoleName {
+		t.Fatalf("agent = backend:%q role:%q, want claude/%s", agent.Backend, agent.RoleName, reviewerRoleName)
+	}
+	if len(env.term.deleted) != 1 || env.term.deleted[0] != "agent-review-hello-pr-7" {
+		t.Fatalf("deleted tabs = %v, want reviewer tab killed", env.term.deleted)
+	}
+	sess, err := env.store.AgentSessions().Get(ctx, prReviewTestWorkspace, "orch-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if _, ok := sess.Metadata["lead_runtime_provider"]; ok {
+		t.Fatalf("runtime metadata survived role migration: %v", sess.Metadata)
+	}
+	if _, ok := sess.Metadata["source"]; !ok {
+		t.Fatalf("source metadata was cleared: %v", sess.Metadata)
+	}
+}
+
+func TestEnsureReviewerAgentRetiresBothLegacyNamedAgents(t *testing.T) {
+	const owner = "octocat"
+	const repo = "hello"
+	const number = 7
+	ctx := context.Background()
+	env := newBackendTestEnv(t, "claude")
+	legacyNames := []string{
+		legacyReviewerAgentName(repo, number),
+		intermediateReviewerAgentName(owner, repo, number),
+	}
+	legacySessionIDs := []string{"legacy-orch-1", "legacy-orch-2"}
+	currentName := reviewerAgentName(owner, repo, number)
+	for i, legacyName := range legacyNames {
+		env.seedLegacyReviewer(t, legacyName, "codex")
+		if _, err := env.store.AgentSessions().Create(ctx, store.AgentSessionCreate{
+			WorkspaceKey: prReviewTestWorkspace,
+			SessionID:    legacySessionIDs[i],
+			AgentID:      legacyName,
+			Kind:         domain.AgentSessionKindOrchestration,
+			Status:       domain.AgentSessionRunning,
+			Metadata: map[string]string{
+				"lead_runtime_provider":     "codex",
+				"codex_app_server_endpoint": "unix:///tmp/legacy.sock",
+				"source":                    "web-terminal",
+			},
+		}); err != nil {
+			t.Fatalf("create legacy orchestration session: %v", err)
+		}
+	}
+	env.term.tabs = []tabmeta.TabMetadata{
+		{SessionName: "agent-repo-only-reviewer", Kind: terminalKindAgent, AgentID: legacyNames[0], PTYAlive: true},
+		{SessionName: "agent-unhashed-reviewer", Kind: terminalKindAgent, AgentID: legacyNames[1], PTYAlive: true},
+		{SessionName: "agent-current-reviewer", Kind: terminalKindAgent, AgentID: currentName, PTYAlive: true},
+	}
+
+	if err := env.module.ensureReviewerAgentAndRetireLegacy(
+		ctx, prReviewTestWorkspace, currentName, owner, repo, number,
+	); err != nil {
+		t.Fatalf("ensureReviewerAgentAndRetireLegacy: %v", err)
+	}
+
+	current := env.agent(t, currentName)
+	if current.Backend != "claude" || current.RoleName != reviewerRoleName {
+		t.Fatalf("current agent = backend:%q role:%q, want claude/%s", current.Backend, current.RoleName, reviewerRoleName)
+	}
+	for _, legacyName := range legacyNames {
+		if _, err := env.store.Agents().Get(ctx, prReviewTestWorkspace, legacyName); !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("legacy agent %q lookup error = %v, want ErrNotFound", legacyName, err)
+		}
+	}
+	deleted := make(map[string]bool, len(env.term.deleted))
+	for _, sessionName := range env.term.deleted {
+		deleted[sessionName] = true
+	}
+	if len(env.term.deleted) != 2 || !deleted["agent-repo-only-reviewer"] || !deleted["agent-unhashed-reviewer"] {
+		t.Fatalf("deleted tabs = %v, want both legacy reviewer tabs", env.term.deleted)
+	}
+	for i := range legacyNames {
+		sess, err := env.store.AgentSessions().Get(ctx, prReviewTestWorkspace, legacySessionIDs[i])
+		if err != nil {
+			t.Fatalf("get legacy session: %v", err)
+		}
+		if _, ok := sess.Metadata["lead_runtime_provider"]; ok {
+			t.Fatalf("legacy runtime metadata survived retirement: %v", sess.Metadata)
+		}
+		if _, ok := sess.Metadata["codex_app_server_endpoint"]; ok {
+			t.Fatalf("legacy codex metadata survived retirement: %v", sess.Metadata)
+		}
+		if _, ok := sess.Metadata["source"]; !ok {
+			t.Fatalf("non-runtime metadata was cleared: %v", sess.Metadata)
+		}
+	}
+}
+
+func TestEnsureReviewerAgentWithoutLegacyNameIsNoop(t *testing.T) {
+	const repo = "hello"
+	const number = 7
+	env := newBackendTestEnv(t, "codex")
+	currentName := reviewerAgentName("octocat", repo, number)
+
+	if err := env.module.ensureReviewerAgentAndRetireLegacy(
+		context.Background(), prReviewTestWorkspace, currentName, "octocat", repo, number,
+	); err != nil {
+		t.Fatalf("ensureReviewerAgentAndRetireLegacy: %v", err)
+	}
+
+	if got := env.agent(t, currentName).RoleName; got != reviewerRoleName {
+		t.Fatalf("current role = %q, want %s", got, reviewerRoleName)
+	}
+	if env.term.listCalled || env.term.deleteCalls != 0 {
+		t.Fatalf("terminal service touched without a legacy agent (list=%v deletes=%d)", env.term.listCalled, env.term.deleteCalls)
+	}
+}
+
+func TestRetireLegacyReviewerSkipsLookupWhenNamesCoincide(t *testing.T) {
+	module := &Module{}
+	if err := module.retireLegacyReviewer(context.Background(), prReviewTestWorkspace, "same", "same", "same"); err != nil {
+		t.Fatalf("retireLegacyReviewer: %v", err)
+	}
+}
+
 func TestEnsureReviewerAgentSameBackendIsNoop(t *testing.T) {
 	const agentName = "review-hello-pr-7"
 	env := newBackendTestEnv(t, "claude")
-	env.seedReviewer(t, agentName, "claude")
+	env.seedCurrentReviewer(t, agentName, "claude")
 
 	if err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, agentName); err != nil {
 		t.Fatalf("ensureReviewerAgent: %v", err)
@@ -194,7 +375,7 @@ func TestEnsureReviewerAgentSameBackendIsNoop(t *testing.T) {
 func TestMigrateReviewerBackendRefusesWhenTabsUnknown(t *testing.T) {
 	const agentName = "review-hello-pr-7"
 	env := newBackendTestEnv(t, "claude")
-	env.seedReviewer(t, agentName, "codex")
+	env.seedLegacyReviewer(t, agentName, "codex")
 	env.term.listErr = errors.New("redis down")
 
 	err := env.module.ensureReviewerAgent(context.Background(), prReviewTestWorkspace, agentName)
@@ -203,5 +384,34 @@ func TestMigrateReviewerBackendRefusesWhenTabsUnknown(t *testing.T) {
 	}
 	if got := env.agentBackend(t, agentName); got != "codex" {
 		t.Fatalf("backend changed to %q despite refused migration", got)
+	}
+	if got := env.agent(t, agentName).RoleName; got != "lead" {
+		t.Fatalf("role changed to %q despite refused migration", got)
+	}
+}
+
+func TestEnsureReviewerAgentReconcilesDriftedRole(t *testing.T) {
+	env := newBackendTestEnv(t, "codex")
+	ctx := context.Background()
+	if _, err := env.store.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: prReviewTestWorkspace,
+		Name:         reviewerRoleName,
+		Kind:         string(domain.RoleKindWorker),
+		Prompt:       "old inline prompt",
+		PromptFile:   "prompts/wrong.md",
+	}); err != nil {
+		t.Fatalf("create drifted reviewer role: %v", err)
+	}
+
+	if err := env.module.ensureReviewerAgent(ctx, prReviewTestWorkspace, "review-hello-pr-7"); err != nil {
+		t.Fatalf("ensureReviewerAgent: %v", err)
+	}
+
+	role, err := env.store.Roles().Get(ctx, prReviewTestWorkspace, reviewerRoleName)
+	if err != nil {
+		t.Fatalf("load reviewer role: %v", err)
+	}
+	if role.Kind != domain.RoleKindInteractive || role.PromptFile != reviewerPromptFile || role.Prompt != "" {
+		t.Fatalf("reviewer role = kind:%q prompt_file:%q prompt:%q", role.Kind, role.PromptFile, role.Prompt)
 	}
 }

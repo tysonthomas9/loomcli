@@ -6,6 +6,7 @@ import {
   sendReviewerMessage,
   type ReviewerMessage,
 } from "@/api/workspace/prReview";
+import { ApiError } from "@/types/common/errors";
 
 const POLL_INTERVAL = 1_500;
 
@@ -15,6 +16,7 @@ export interface UsePRReviewConversationParams {
   repo: string;
   number: number;
   enabled: boolean;
+  onStaleSubject?: () => void | Promise<void>;
 }
 
 export interface UsePRReviewConversationResult {
@@ -35,12 +37,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isStaleSubjectError(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 409) return false;
+  if (!error.body || typeof error.body !== "object") return false;
+  return (error.body as { code?: unknown }).code === "stale_subject";
+}
+
 export function usePRReviewConversation({
   workspaceId,
   owner,
   repo,
   number,
   enabled,
+  onStaleSubject,
 }: UsePRReviewConversationParams): UsePRReviewConversationResult {
   const [agentName, setAgentName] = useState<string | null>(null);
   const [messages, setMessages] = useState<ReviewerMessage[]>([]);
@@ -59,6 +68,7 @@ export function usePRReviewConversation({
   const ensureKeyRef = useRef<string | null>(null);
   const pollInFlightRef = useRef(false);
   const mountedRef = useRef(false);
+  const onStaleSubjectRef = useRef(onStaleSubject);
   const key = `${workspaceId}|${owner}|${repo}|${number}`;
 
   const invalidateRequests = useCallback(() => {
@@ -111,6 +121,10 @@ export function usePRReviewConversation({
   }, [invalidateRequests]);
 
   useEffect(() => {
+    onStaleSubjectRef.current = onStaleSubject;
+  }, [onStaleSubject]);
+
+  useEffect(() => {
     setAgentName(null);
     setMessages([]);
     setState("starting");
@@ -127,6 +141,7 @@ export function usePRReviewConversation({
     if (ensureKeyRef.current === key) return;
 
     let ignore = false;
+    let completed = false;
     ensureKeyRef.current = key;
     setState("starting");
     setError(null);
@@ -141,17 +156,25 @@ export function usePRReviewConversation({
       } catch (err) {
         if (!ignore && mountedRef.current) {
           ensureKeyRef.current = null;
+          if (isStaleSubjectError(err)) {
+            void onStaleSubjectRef.current?.();
+          }
           setError(errorMessage(err));
         }
+      } finally {
+        completed = true;
       }
     })();
 
     return () => {
       ignore = true;
+      if (!completed && ensureKeyRef.current === key) {
+        ensureKeyRef.current = null;
+      }
     };
     // retryNonce lets retry() re-run ensure after a failure (the catch above
     // clears ensureKeyRef, so this effect proceeds instead of short-circuiting).
-  }, [enabled, key, number, owner, repo, workspaceId, retryNonce]);
+  }, [enabled, key, number, owner, repo, retryNonce, workspaceId]);
 
   useEffect(() => {
     if (!enabled || !agentName) return;

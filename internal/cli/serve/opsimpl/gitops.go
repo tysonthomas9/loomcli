@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -361,10 +362,7 @@ func dedupeRepoPRQueries(repos []ops.WorkspaceRepo) []*prRepoQuery {
 		if repo.Path == "" {
 			continue
 		}
-		key := repo.Remote
-		if key == "" {
-			key = repo.Name
-		}
+		key := repoPRQueryKey(repo)
 		if _, ok := seenRepo[key]; ok {
 			continue
 		}
@@ -372,6 +370,20 @@ func dedupeRepoPRQueries(repos []ops.WorkspaceRepo) []*prRepoQuery {
 		queries = append(queries, &prRepoQuery{repo: repo})
 	}
 	return queries
+}
+
+func repoPRQueryKey(repo ops.WorkspaceRepo) string {
+	remoteURL := strings.TrimSpace(repo.RemoteURL)
+	if githubName := githubRepoName(remoteURL); githubName != "" {
+		return "github:" + strings.ToLower(githubName)
+	}
+	if remoteURL != "" {
+		return "remote:" + strings.TrimSuffix(strings.TrimSuffix(remoteURL, "/"), ".git")
+	}
+	if name := strings.TrimSpace(repo.Name); name != "" {
+		return "name:" + strings.ToLower(name)
+	}
+	return "path:" + filepath.Clean(repo.Path)
 }
 
 // collectRepoQueryPRs merges per-repo results into one list, deduping by PR
@@ -394,11 +406,52 @@ func collectRepoQueryPRs(queries []*prRepoQuery, result *ops.GitPullRequestList)
 				continue
 			}
 			seen[pr.URL] = struct{}{}
-			pr.RepoName = q.repo.Name
+			pr = applyWorkspaceRepoIdentity(pr, q.repo)
 			all = append(all, pr)
 		}
 	}
 	return all
+}
+
+func applyWorkspaceRepoIdentity(pr ops.GitPullRequest, repo ops.WorkspaceRepo) ops.GitPullRequest {
+	pr.SourceRepo = strings.TrimSpace(repo.Name)
+	pr.RepoName = resolveGitHubRepoName(pr, repo)
+	return pr
+}
+
+func resolveGitHubRepoName(pr ops.GitPullRequest, repo ops.WorkspaceRepo) string {
+	for _, candidate := range []string{pr.RepoName, repo.RemoteURL, pr.URL, repo.Name} {
+		if name := githubRepoName(candidate); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func githubRepoName(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "git@github.com:") {
+		return githubRepoNameFromPath(strings.TrimPrefix(raw, "git@github.com:"))
+	}
+	if !strings.Contains(raw, "://") {
+		return githubRepoNameFromPath(raw)
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(parsed.Hostname(), "github.com") {
+		return ""
+	}
+	return githubRepoNameFromPath(parsed.Path)
+}
+
+func githubRepoNameFromPath(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return ""
+	}
+	return strings.TrimSpace(parts[0]) + "/" + strings.TrimSuffix(strings.TrimSpace(parts[1]), ".git")
 }
 
 func filterPullRequestsByState(all []ops.GitPullRequest, state string) []ops.GitPullRequest {

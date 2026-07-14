@@ -80,11 +80,11 @@ func (m *Module) prepareReviewerStream(w http.ResponseWriter, r *http.Request) (
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
 		return reviewerStreamSession{}, false
 	}
-	_, canonRepo, ok := m.authorizeRepo(w, r, ws, params.owner, params.repo)
+	canonOwner, canonRepo, ok := m.authorizeRepo(w, r, ws, params.owner, params.repo)
 	if !ok {
 		return reviewerStreamSession{}, false
 	}
-	agentName := reviewerAgentName(canonRepo, params.number)
+	agentName := reviewerAgentName(canonOwner, canonRepo, params.number)
 	if _, err := m.store.Agents().Get(r.Context(), ws, agentName); err != nil {
 		writePRReviewErrorCode(w, http.StatusNotFound, "reviewer_not_started", "reviewer has not been started for this pull request", false)
 		return reviewerStreamSession{}, false

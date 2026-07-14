@@ -4,6 +4,7 @@ import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
 import {
   buildPullRequestRows,
+  groupKeyFor,
   prReviewRef,
   prStateFromGithub,
   rowState,
@@ -121,6 +122,30 @@ describe("buildPullRequestRows (loom-first queue)", () => {
     expect(rows).toHaveLength(2);
     const unlinked = rows.find((r) => !r.issue);
     expect(unlinked?.pr?.number).toBe(3);
+  });
+
+  it("deduplicates registry duplicates for the same unlinked PR URL", () => {
+    const duplicate = ghPr(3, { title: "Duplicate registry row" });
+    const rows = buildPullRequestRows([], [ghPr(3), duplicate]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.pr?.number).toBe(3);
+  });
+
+  it("groups loom-only and enriched rows by the workspace repo name", () => {
+    const loomOnly: Parameters<typeof groupKeyFor>[0] = {
+      issue: makeIssue({ repo: "loomcli" }),
+    };
+    const enriched: Parameters<typeof groupKeyFor>[0] = {
+      issue: makeIssue({ repo: "loomcli" }),
+      pr: ghPr(7, {
+        repo_name: "tysonthomas9/loomcli",
+        source_repo: "loomcli",
+      }),
+    };
+
+    expect(groupKeyFor(loomOnly, "repo")).toBe("loomcli");
+    expect(groupKeyFor(enriched, "repo")).toBe("loomcli");
   });
 
   it("excludes issues that are neither in review nor PR-linked", () => {

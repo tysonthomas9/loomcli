@@ -122,7 +122,11 @@ func (app *Server) buildInfraModules() {
 		app.wsModules = append(app.wsModules, onboarding.NewModule(app.issueSvc, app.agentSvc))
 		app.wsModules = append(app.wsModules, workflows.NewModule(app.config.Store))
 		app.wsModules = append(app.wsModules, webhooks.NewModule(app.config.Store))
-		app.wsModules = append(app.wsModules, modbuilder.NewPRReviewModule(app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc))
+		prReviewModule := modbuilder.NewPRReviewModule(
+			app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
+		)
+		app.prReviewCredentialSeeds = prReviewModule
+		app.wsModules = append(app.wsModules, prReviewModule)
 		app.wsModules = append(app.wsModules, modbuilder.NewApprovalsModule(app.config.Store))
 		app.wsModules = append(app.wsModules, modbuilder.NewTaskRunAPIModule(app.config.Store, app.config.FleetDBBaseURL, app.config.LocalSettingsDir))
 		app.wsModules = append(app.wsModules, driverapi.NewModule(driverapi.Config{

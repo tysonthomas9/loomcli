@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -75,17 +74,10 @@ func init() {
 	leadCmd.Flags().StringVar(&leadPromptFile, "prompt", "", "Path to terminal-agent prompt template")
 }
 
-// leadStartupPrompt picks the lead's boot prompt. Per-PR review agents
-// (created by the web UI's pr-review module) get the read-only reviewer
-// persona instead of the terminal-agent prompt flow, so they boot straight
-// into review mode with no backlog/startup preamble — the checkout itself
-// carries the PR specifics (per-worktree git config), not the prompt, and no
-// assignment or --message context applies. Everyone else goes through the
-// role/prompt-file terminal-agent flow with assignment context appended.
+// leadStartupPrompt picks the lead runtime's boot prompt. A role prompt_file
+// supplied via --prompt wins, otherwise inline role prompt and default lead
+// prompt resolution happen in that order.
 func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
-	if isReviewerAgentID(resolveLeadAgentID()) {
-		return agent.GenerateReviewPrompt(), nil
-	}
 	prompt, err := generateLeadTerminalPrompt(ctx, registration)
 	if err != nil {
 		return "", err
@@ -407,19 +399,6 @@ func resolveLeadAgentID() string {
 		return agentID
 	}
 	return "lead"
-}
-
-// reviewerAgentIDPattern matches the per-PR review agent name the web UI's
-// pr-review module creates (review-<repo>-pr-<N>). Detection is name-based for
-// now; with interactive roles / prompt_file plumbing available, this should
-// migrate to a role/prompt_file signal on the reviewer's agent record (kept in
-// sync with prreview.reviewerAgentName).
-var reviewerAgentIDPattern = regexp.MustCompile(`^review-.+-pr-\d+$`)
-
-// isReviewerAgentID reports whether this lead process is a per-PR review agent,
-// which gets the read-only reviewer persona instead of the lead bootstrap.
-func isReviewerAgentID(agentID string) bool {
-	return reviewerAgentIDPattern.MatchString(strings.TrimSpace(agentID))
 }
 
 // heartbeatLeadSession periodically refreshes the lead session's last_heartbeat

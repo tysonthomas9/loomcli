@@ -30,6 +30,9 @@ func TestHandleInteractivePromptsListsBuiltins(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
+	if bytes.Contains(rr.Body.Bytes(), []byte("hidden")) {
+		t.Fatalf("interactive prompt wire response leaked hidden field: %s", rr.Body.String())
+	}
 	if len(got.Prompts) < 2 {
 		t.Fatalf("prompts = %#v, want built-ins", got.Prompts)
 	}
@@ -39,6 +42,12 @@ func TestHandleInteractivePromptsListsBuiltins(t *testing.T) {
 	}
 	if seen["lead"] != "Lead" || seen["pr-review"] != "PR Review" {
 		t.Fatalf("prompts = %#v, want lead and pr-review", got.Prompts)
+	}
+	if _, ok := seen["pr-review-checkout"]; ok {
+		t.Fatalf("hidden prompt pr-review-checkout was returned: %#v", got.Prompts)
+	}
+	if !domain.IsBuiltinInteractivePrompt("pr-review-checkout") {
+		t.Fatal("pr-review-checkout must remain registered as a launchable builtin prompt")
 	}
 }
 

@@ -55,8 +55,11 @@ const DefaultGitHubBaseURL = "https://api.github.com"
 // githubAPIVersion pins the REST API version header.
 const githubAPIVersion = "2022-11-28"
 
-// maxResponseBytes caps how much of an upstream response body is read.
-const maxResponseBytes = 1 << 20
+// maxResponseBytes accommodates GitHub list pages of 100 full PR objects,
+// which measure about 21 KiB per PR (roughly 2.1 MiB/page). The 4 MiB cap
+// leaves headroom; successful bodies are immediately slimmed by pullSummary,
+// so the additional peak memory is transient.
+const maxResponseBytes = 4 << 20
 
 // GitHub is the Provider adapter for the GitHub REST API. The base URL is
 // injectable for tests; the zero values fall back to the public API and
@@ -133,7 +136,10 @@ func (g *GitHub) merge(ctx context.Context, spec CallSpec) (CallResult, error) {
 	}
 	switch {
 	case res.status == http.StatusOK:
-		obj := decodeObject(res.body)
+		obj, decodeErr := decodeResponseObject(spec, res.status, res.body)
+		if decodeErr != nil {
+			return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, decodeErr
+		}
 		return CallResult{
 			Status:   res.status,
 			Body:     map[string]any{"merged": obj["merged"], "sha": obj["sha"]},
@@ -195,7 +201,10 @@ func (g *GitHub) reviewPost(ctx context.Context, spec CallSpec) (CallResult, err
 		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
 			g.upstreamError(spec, res)
 	}
-	obj := decodeObject(res.body)
+	obj, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	return CallResult{
 		Status:   res.status,
 		Body:     map[string]any{"id": obj["id"], "state": obj["state"]},
@@ -216,7 +225,10 @@ func (g *GitHub) reviewLivenessCheck(ctx context.Context, spec CallSpec, owner, 
 		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
 			g.upstreamError(spec, res)
 	}
-	pr := decodeObject(res.body)
+	pr, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	if state, _ := pr["state"].(string); state != "open" {
 		return CallResult{Decision: domain.ConnectorCallStaleSubject},
 			&StaleSubject{
@@ -253,15 +265,19 @@ func (g *GitHub) pullRequestRead(ctx context.Context, spec CallSpec) (CallResult
 		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
 			g.upstreamError(spec, res)
 	}
+	obj, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	return CallResult{
 		Status:   res.status,
-		Body:     pullSummary(decodeObject(res.body)),
+		Body:     pullSummary(obj),
 		Decision: domain.ConnectorCallGranted,
 	}, nil
 }
 
 // pullsList lists pull requests; optional camelCase args state, base, head,
-// perPage map to GitHub's query parameters.
+// perPage, and page map to GitHub's query parameters.
 func (g *GitHub) pullsList(ctx context.Context, spec CallSpec) (CallResult, error) {
 	owner, repo, err := repoArgs(spec.Args)
 	if err != nil {
@@ -282,6 +298,11 @@ func (g *GitHub) pullsList(ctx context.Context, spec CallSpec) (CallResult, erro
 	} else if ok {
 		query.Set("per_page", strconv.Itoa(v))
 	}
+	if v, ok, err := intArg(spec.Args, "page"); err != nil {
+		return CallResult{Decision: domain.ConnectorCallUpstreamError}, err
+	} else if ok {
+		query.Set("page", strconv.Itoa(v))
+	}
 	res, err := g.do(ctx, spec, http.MethodGet,
 		fmt.Sprintf("/repos/%s/%s/pulls", owner, repo), query, nil)
 	if err != nil {
@@ -292,7 +313,9 @@ func (g *GitHub) pullsList(ctx context.Context, spec CallSpec) (CallResult, erro
 			g.upstreamError(spec, res)
 	}
 	var raw []map[string]any
-	_ = json.Unmarshal(res.body, &raw)
+	if err := decodeResponseJSON(spec, res.status, res.body, &raw); err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	pulls := make([]map[string]any, 0, len(raw))
 	for _, pr := range raw {
 		pulls = append(pulls, pullSummary(pr))
@@ -326,7 +349,10 @@ func (g *GitHub) compareRead(ctx context.Context, spec CallSpec) (CallResult, er
 		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
 			g.upstreamError(spec, res)
 	}
-	obj := decodeObject(res.body)
+	obj, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	files, diff := compareFiles(obj["files"])
 	return CallResult{
 		Status: res.status,
@@ -410,7 +436,10 @@ func (g *GitHub) issueCommentPost(ctx context.Context, spec CallSpec) (CallResul
 		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError},
 			g.upstreamError(spec, res)
 	}
-	obj := decodeObject(res.body)
+	obj, err := decodeResponseObject(spec, res.status, res.body)
+	if err != nil {
+		return CallResult{Status: res.status, Decision: domain.ConnectorCallUpstreamError}, err
+	}
 	return CallResult{
 		Status:   res.status,
 		Body:     map[string]any{"id": obj["id"]},
@@ -418,11 +447,45 @@ func (g *GitHub) issueCommentPost(ctx context.Context, spec CallSpec) (CallResul
 	}, nil
 }
 
-// httpResult is one upstream HTTP exchange, body capped at maxResponseBytes.
+// httpResult is one upstream HTTP exchange whose body passed the shared size
+// limit without truncation.
 type httpResult struct {
 	status int
 	header http.Header
 	body   []byte
+}
+
+func readHTTPResult(spec CallSpec, resp *http.Response, sanitize func(string) string) (httpResult, error) {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxResponseBytes)+1))
+	if err != nil {
+		return httpResult{}, &UpstreamError{
+			Action:  spec.Action,
+			Class:   ClassNetwork,
+			Status:  resp.StatusCode,
+			Summary: sanitize(err.Error()),
+		}
+	}
+	if len(raw) > maxResponseBytes {
+		return httpResult{}, &UpstreamError{
+			Action:  spec.Action,
+			Class:   ClassServerError,
+			Status:  resp.StatusCode,
+			Summary: fmt.Sprintf("response exceeded %d bytes", maxResponseBytes),
+		}
+	}
+	return httpResult{status: resp.StatusCode, header: resp.Header, body: raw}, nil
+}
+
+func decodeResponseJSON(spec CallSpec, status int, body []byte, dst any) error {
+	if err := json.Unmarshal(body, dst); err != nil {
+		return &UpstreamError{
+			Action:  spec.Action,
+			Class:   ClassServerError,
+			Status:  status,
+			Summary: fmt.Sprintf("invalid JSON response: %v", err),
+		}
+	}
+	return nil
 }
 
 // do issues one HTTP request. The credential rides in the Authorization
@@ -464,16 +527,9 @@ func (g *GitHub) do(ctx context.Context, spec CallSpec, method, path string, que
 		}
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return httpResult{}, &UpstreamError{
-			Action:  spec.Action,
-			Class:   ClassNetwork,
-			Status:  resp.StatusCode,
-			Summary: sanitizeUpstreamMessage(err.Error(), spec.Credential),
-		}
-	}
-	return httpResult{status: resp.StatusCode, header: resp.Header, body: raw}, nil
+	return readHTTPResult(spec, resp, func(message string) string {
+		return sanitizeUpstreamMessage(message, spec.Credential)
+	})
 }
 
 // upstreamError maps a non-success upstream response to the structured
@@ -532,14 +588,12 @@ func extractMessage(body []byte) string {
 	return obj.Message
 }
 
-// decodeObject decodes a JSON object, returning an empty map on any failure
-// so field plucking stays nil-safe.
-func decodeObject(body []byte) map[string]any {
+func decodeResponseObject(spec CallSpec, status int, body []byte) (map[string]any, error) {
 	var obj map[string]any
-	if err := json.Unmarshal(body, &obj); err != nil {
-		return map[string]any{}
+	if err := decodeResponseJSON(spec, status, body, &obj); err != nil {
+		return nil, err
 	}
-	return obj
+	return obj, nil
 }
 
 // nestedString plucks a nested string field (e.g. head.sha).
@@ -559,16 +613,25 @@ func nestedString(obj map[string]any, keys ...string) string {
 // pullSummary whitelists the camelCase PR fields exposed in CallResult.Body.
 func pullSummary(pr map[string]any) map[string]any {
 	return map[string]any{
-		"number":  pr["number"],
-		"state":   pr["state"],
-		"title":   pr["title"],
-		"draft":   pr["draft"],
-		"merged":  pr["merged"],
-		"headSha": nestedString(pr, "head", "sha"),
-		"headRef": nestedString(pr, "head", "ref"),
-		"baseSha": nestedString(pr, "base", "sha"),
-		"baseRef": nestedString(pr, "base", "ref"),
+		"number":      pr["number"],
+		"state":       pr["state"],
+		"title":       pr["title"],
+		"draft":       pr["draft"],
+		"merged":      pullMerged(pr),
+		"authorLogin": nestedString(pr, "user", "login"),
+		"updatedAt":   pr["updated_at"],
+		"headSha":     nestedString(pr, "head", "sha"),
+		"headRef":     nestedString(pr, "head", "ref"),
+		"baseSha":     nestedString(pr, "base", "sha"),
+		"baseRef":     nestedString(pr, "base", "ref"),
 	}
+}
+
+func pullMerged(pr map[string]any) bool {
+	if merged, ok := pr["merged"].(bool); ok {
+		return merged
+	}
+	return pr["merged_at"] != nil
 }
 
 // requireIdempotencyKey enforces the §9.3 fencing contract on write actions:

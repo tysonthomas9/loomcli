@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { GitPullRequest } from "@/api/workspace";
 import type { Issue, LoomAgentStatus } from "@/types";
-import { ApiError } from "@/types/common/errors";
 
 import {
   PRReviewWorkspace,
@@ -22,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   updateIssue: vi.fn(),
   startAgent: vi.fn(),
   getPullRequestDetail: vi.fn(),
-  postPullRequestReview: vi.fn(),
+  diffRefreshKeys: [] as Array<number | undefined>,
   data: {
     agents: [] as unknown[],
     issues: [] as unknown[],
@@ -54,7 +53,6 @@ vi.mock("@/api", () => ({
 
 vi.mock("@/api/workspace/prReview", () => ({
   getPullRequestDetail: mocks.getPullRequestDetail,
-  postPullRequestReview: mocks.postPullRequestReview,
 }));
 
 vi.mock("@/hooks/api", () => ({
@@ -75,11 +73,28 @@ vi.mock("@/components/CreateAgentModal/CreateAgentModal", () => ({
 }));
 
 vi.mock("@/components/PRDiscussionPanel", () => ({
-  PRDiscussionPanel: () => <div data-testid="pr-discussion-panel" />,
+  PRDiscussionPanel: ({
+    onStaleSubject,
+  }: {
+    onStaleSubject?: () => void | Promise<void>;
+  }) => (
+    <div data-testid="pr-discussion-panel">
+      <button
+        type="button"
+        data-testid="pr-discussion-stale-subject"
+        onClick={() => void onStaleSubject?.()}
+      >
+        Stale subject
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/IssueDetailPanel", () => ({
-  PRCompareDiffPane: () => <div data-testid="pr-compare-diff-pane" />,
+  PRCompareDiffPane: ({ refreshKey }: { refreshKey?: number }) => {
+    mocks.diffRefreshKeys.push(refreshKey);
+    return <div data-testid="pr-compare-diff-pane" />;
+  },
   PRFilesTab: () => <div data-testid="pr-files-tab" />,
 }));
 
@@ -131,6 +146,7 @@ function makePullRequest(
     head_ref_name: "feature",
     base_ref_name: "main",
     repo_name: "octocat/hello",
+    source_repo: "hello",
     ...overrides,
   };
 }
@@ -147,28 +163,33 @@ function makePullRequestIssue(overrides: Partial<Issue> = {}): Issue {
 function renderWorkspace(
   props: Partial<{
     issue: Issue | null;
-    pullRequest: GitPullRequest;
+    pullRequest: GitPullRequest | null;
     onBack: () => void;
     onLinkedTicket: (issueId: string) => void;
   }> = {},
 ) {
   const issue =
     props.issue === null ? undefined : (props.issue ?? makePullRequestIssue());
+  const pullRequest =
+    props.pullRequest === null
+      ? undefined
+      : (props.pullRequest ?? makePullRequest());
   return render(
     <PRReviewWorkspace
       {...(issue ? { issue } : {})}
-      pullRequest={props.pullRequest ?? makePullRequest()}
+      {...(pullRequest ? { pullRequest } : {})}
       onBack={props.onBack ?? mocks.onBack}
       onLinkedTicket={props.onLinkedTicket ?? mocks.onLinkedTicket}
     />,
   );
 }
 
-describe("PRReviewWorkspace decisions", () => {
+describe("PRReviewWorkspace", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.data.agents = [];
     mocks.data.issues = [];
+    mocks.diffRefreshKeys.length = 0;
     mocks.workspaceContext.workspaceId = "WS";
     mocks.getPullRequestDetail.mockResolvedValue({
       number: 7,
@@ -179,10 +200,6 @@ describe("PRReviewWorkspace decisions", () => {
       base_ref_name: "main",
       head_sha: "sha-old",
       merged: false,
-    });
-    mocks.postPullRequestReview.mockResolvedValue({
-      review_id: 123,
-      state: "APPROVED",
     });
     mocks.createIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
     mocks.updateIssue.mockResolvedValue(makeIssue({ id: "TASK-99" }));
@@ -211,78 +228,69 @@ describe("PRReviewWorkspace decisions", () => {
     expect(screen.queryByTestId("pr-discussion-panel")).not.toBeInTheDocument();
   });
 
-  it("approves on GitHub before closing the ticket", async () => {
+  it("exposes Discuss for an issue-only PR URL", async () => {
+    renderWorkspace({
+      issue: makePullRequestIssue(),
+      pullRequest: null,
+    });
+
+    await waitFor(() => {
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
+        "WS",
+        "octocat",
+        "hello",
+        7,
+      );
+    });
+    fireEvent.click(screen.getByTestId("pr-discuss-button"));
+    expect(screen.getByTestId("pr-discussion-panel")).toBeInTheDocument();
+  });
+
+  it("shows the stale banner and refreshes the PR after reviewer ensure reports stale", async () => {
     renderWorkspace();
 
     await waitFor(() => {
-      expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
-        "WS",
-        "octocat",
-        "hello",
-        7,
-      );
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledTimes(1);
     });
+    fireEvent.click(screen.getByTestId("pr-discuss-button"));
+    fireEvent.click(screen.getByTestId("pr-discussion-stale-subject"));
 
-    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
-
+    expect(
+      await screen.findByTestId("pr-review-stale-banner"),
+    ).toHaveTextContent("This PR was updated after you opened it.");
     await waitFor(() => {
-      expect(mocks.postPullRequestReview).toHaveBeenCalledWith(
-        "WS",
-        "octocat",
-        "hello",
-        7,
-        {
-          event: "approve",
-          expected_head_sha: "sha-old",
-        },
-      );
+      expect(mocks.getPullRequestDetail).toHaveBeenCalledTimes(2);
+      expect(mocks.diffRefreshKeys).toContain(1);
     });
-    expect(mocks.actions.updateIssueStatus).toHaveBeenCalledWith(
-      "TASK-1",
-      "closed",
-    );
     expect(mocks.actions.showToast).toHaveBeenCalledWith(
-      "Approved on GitHub — ticket closed",
+      "The PR changed since you loaded it — refreshed. Continue reviewing the latest head.",
+      { type: "warning" },
     );
-    expect(mocks.onBack).toHaveBeenCalledTimes(1);
   });
 
-  it("reviews a ticketless pull request without ticket controls or ticket status updates", async () => {
-    const onBack = vi.fn();
-    renderWorkspace({ issue: null, onBack });
+  it.each([{ issue: makePullRequestIssue() }, { issue: null }])(
+    "does not render deferred decision controls",
+    async ({ issue }) => {
+      renderWorkspace({ issue });
 
-    expect(screen.getByTestId("pr-compare-diff-pane")).toBeInTheDocument();
-    expect(screen.queryByText("TASK-1")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("review-agent-button")).not.toBeInTheDocument();
-    expect(screen.getByTestId("pr-create-ticket")).toBeInTheDocument();
+      await waitFor(() => {
+        expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
+          "WS",
+          "octocat",
+          "hello",
+          7,
+        );
+      });
 
-    await waitFor(() => {
-      expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
-        "WS",
-        "octocat",
-        "hello",
-        7,
-      );
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
-
-    await waitFor(() => {
-      expect(mocks.postPullRequestReview).toHaveBeenCalledWith(
-        "WS",
-        "octocat",
-        "hello",
-        7,
-        {
-          event: "approve",
-          expected_head_sha: "sha-old",
-        },
-      );
-    });
-    expect(mocks.actions.updateIssueStatus).not.toHaveBeenCalled();
-    expect(mocks.actions.showToast).toHaveBeenCalledWith("Approved on GitHub");
-    expect(onBack).toHaveBeenCalledTimes(1);
-  });
+      expect(screen.queryByTestId("pr-review-comment")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /request changes/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /^approve$/i }),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it("creates and links a ticket for a ticketless pull request", async () => {
     const onLinkedTicket = vi.fn();
@@ -298,7 +306,7 @@ describe("PRReviewWorkspace decisions", () => {
         expect.objectContaining({
           title: "Review PR",
           external_ref: "https://github.com/octocat/hello/pull/7",
-          source_repo: "octocat/hello",
+          source_repo: "hello",
           issue_type: "task",
           priority: 3,
         }),
@@ -316,145 +324,45 @@ describe("PRReviewWorkspace decisions", () => {
     expect(onLinkedTicket).toHaveBeenCalledWith("TASK-99");
   });
 
-  it("shows stale banner on stale GitHub review and does not flip the ticket", async () => {
-    mocks.getPullRequestDetail
-      .mockResolvedValueOnce({
-        number: 7,
-        state: "OPEN",
-        title: "Review PR",
-        is_draft: false,
-        head_ref_name: "feature",
-        base_ref_name: "main",
-        head_sha: "sha-old",
-        merged: false,
-      })
-      .mockResolvedValueOnce({
-        number: 7,
-        state: "OPEN",
-        title: "Review PR",
-        is_draft: false,
-        head_ref_name: "feature",
-        base_ref_name: "main",
-        head_sha: "sha-new",
-        merged: false,
-      });
-    mocks.postPullRequestReview.mockRejectedValueOnce(
-      new ApiError(409, "Conflict", { error: "stale subject" }),
-    );
+  it("warns when the created ticket cannot move to Review", async () => {
+    mocks.updateIssue.mockRejectedValueOnce(new Error("status update failed"));
 
-    renderWorkspace();
-
-    await waitFor(() => {
-      expect(mocks.getPullRequestDetail).toHaveBeenCalledTimes(1);
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
-
-    expect(
-      await screen.findByTestId("pr-review-stale-banner"),
-    ).toHaveTextContent("This PR was updated after you opened it.");
-    expect(mocks.actions.updateIssueStatus).not.toHaveBeenCalled();
-    expect(mocks.onBack).not.toHaveBeenCalled();
-    expect(mocks.getPullRequestDetail).toHaveBeenLastCalledWith(
-      "WS",
-      "octocat",
-      "hello",
-      7,
-    );
-    expect(mocks.actions.showToast).toHaveBeenCalledWith(
-      "The PR changed since you loaded it — refreshed. Review again.",
-      { type: "warning" },
-    );
-  });
-
-  it("requires a comment before requesting changes", async () => {
-    renderWorkspace();
-
-    await waitFor(() => {
-      expect(mocks.getPullRequestDetail).toHaveBeenCalledWith(
-        "WS",
-        "octocat",
-        "hello",
-        7,
-      );
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /request changes/i }));
-
-    expect(mocks.actions.showToast).toHaveBeenCalledWith(
-      "Add a comment to request changes",
-      { type: "warning" },
-    );
-    expect(mocks.postPullRequestReview).not.toHaveBeenCalled();
-    expect(mocks.actions.updateIssueStatus).not.toHaveBeenCalled();
-    expect(mocks.onBack).not.toHaveBeenCalled();
-  });
-
-  it("does not silently flip the ticket when the PR head can't be verified", async () => {
-    // A real PR is present but its head sha never loads (detail fetch fails).
-    // The decision must hard-fail rather than fall back to a local-only flip.
-    mocks.getPullRequestDetail.mockRejectedValue(new Error("boom"));
-
-    renderWorkspace();
-
-    await waitFor(() => {
-      expect(mocks.getPullRequestDetail).toHaveBeenCalled();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+    renderWorkspace({ issue: null });
+    fireEvent.click(screen.getByTestId("pr-create-ticket"));
 
     await waitFor(() => {
       expect(mocks.actions.showToast).toHaveBeenCalledWith(
-        "Couldn't verify the PR's current head — try again.",
-        { type: "error" },
+        "Ticket TASK-99 created, but moving it to Review failed — set it manually",
+        { type: "warning" },
       );
     });
-    expect(mocks.postPullRequestReview).not.toHaveBeenCalled();
-    expect(mocks.actions.updateIssueStatus).not.toHaveBeenCalled();
-    expect(mocks.onBack).not.toHaveBeenCalled();
+    expect(mocks.actions.showToast).toHaveBeenCalledWith(
+      "Created TASK-99 for this pull request",
+    );
+    expect(mocks.onLinkedTicket).toHaveBeenCalledWith("TASK-99");
   });
 
-  it("fetches the head sha on demand when the initial load hasn't resolved", async () => {
-    // Effect's fetch fails (headSha still null), but the click resolves the
-    // sha on demand and posts a REAL review — never a local-only flip.
-    mocks.getPullRequestDetail
-      .mockRejectedValueOnce(new Error("slow"))
-      .mockResolvedValueOnce({
-        number: 7,
-        state: "OPEN",
+  it("omits source_repo when the pull request has no workspace repo mapping", async () => {
+    renderWorkspace({
+      issue: null,
+      pullRequest: makePullRequest({ source_repo: "" }),
+    });
+
+    fireEvent.click(screen.getByTestId("pr-create-ticket"));
+
+    await waitFor(() => {
+      expect(mocks.createIssue).toHaveBeenCalledTimes(1);
+    });
+    const request = mocks.createIssue.mock.calls[0]?.[1];
+    expect(request).toEqual(
+      expect.objectContaining({
         title: "Review PR",
-        is_draft: false,
-        head_ref_name: "feature",
-        base_ref_name: "main",
-        head_sha: "sha-fresh",
-        merged: false,
-      });
-
-    renderWorkspace();
-
-    await waitFor(() => {
-      expect(mocks.getPullRequestDetail).toHaveBeenCalledTimes(1);
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
-
-    await waitFor(() => {
-      expect(mocks.postPullRequestReview).toHaveBeenCalledWith(
-        "WS",
-        "octocat",
-        "hello",
-        7,
-        {
-          event: "approve",
-          expected_head_sha: "sha-fresh",
-        },
-      );
-    });
-    expect(mocks.actions.updateIssueStatus).toHaveBeenCalledWith(
-      "TASK-1",
-      "closed",
+        external_ref: "https://github.com/octocat/hello/pull/7",
+        issue_type: "task",
+        priority: 3,
+      }),
     );
-    expect(mocks.onBack).toHaveBeenCalledTimes(1);
+    expect(request).not.toHaveProperty("source_repo");
   });
 });
 

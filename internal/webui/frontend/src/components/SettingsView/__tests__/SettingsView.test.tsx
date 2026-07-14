@@ -299,6 +299,132 @@ describe("SettingsView", () => {
     });
   });
 
+  describe("credential sections", () => {
+    it("groups GitHub separately from remote runtime credentials", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      const githubPanel = screen.getByTestId("github-settings-panel");
+      const remoteRuntimesPanel = screen.getByTestId("remote-runtimes-panel");
+
+      expect(
+        within(githubPanel).getByRole("heading", { name: "GitHub" }),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).getByLabelText(
+          "GitHub Token for Runtimes and PR Review",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).getByText(
+          "Used for GitHub PR review and remote runtime provisioning.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).queryByTestId("daytona-api-key-input"),
+      ).not.toBeInTheDocument();
+
+      expect(
+        within(remoteRuntimesPanel).getByRole("heading", {
+          name: "Remote runtimes",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).getByTestId("daytona-api-key-input"),
+      ).toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).queryByTestId("github-token-input"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).queryByText(/GitHub/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("saves the GitHub token with the existing runtime credential shape", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRuntimeCredentials }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("github-token-input"), {
+        target: { value: " github_pat_new " },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("github-credential-save-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        github: { token: "github_pat_new" },
+      });
+    });
+
+    it("clears the configured GitHub token with the existing PATCH shape", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          settings: {
+            version: 1,
+            fleetdb_redis: {
+              enabled: false,
+              db: 0,
+              tls: false,
+              password_set: false,
+            },
+            agent_runtime: { default: "local" },
+            local_task_runner: {},
+            runtime_credentials: {
+              daytona: { configured: false },
+              github: {
+                configured: true,
+                updated_at: "2026-07-13T12:00:00Z",
+              },
+            },
+          },
+          updateRuntimeCredentials,
+        }),
+      );
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("github-settings-panel")).toHaveTextContent(
+        "Credential saved.",
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("github-credential-clear-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        github: { clear: true },
+      });
+    });
+
+    it("keeps Daytona saves scoped to the remote runtime credential", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRuntimeCredentials }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("daytona-api-key-input"), {
+        target: { value: " dtn_new " },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("daytona-credential-save-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        daytona: { api_key: "dtn_new" },
+      });
+    });
+  });
+
   describe("save button", () => {
     it("save button disabled when no changes", () => {
       mockUseBackendConfig.mockReturnValue(createMockHookReturn());

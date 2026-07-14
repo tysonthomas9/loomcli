@@ -7,6 +7,7 @@ export interface UsePullRequestDiffParams {
   owner: string;
   repo: string;
   number: number;
+  refreshKey?: number;
 }
 
 export interface UsePullRequestDiffResult {
@@ -26,6 +27,7 @@ export function usePullRequestDiff({
   owner,
   repo,
   number: pullNumber,
+  refreshKey,
 }: UsePullRequestDiffParams): UsePullRequestDiffResult {
   const [diff, setDiff] = useState<PullRequestDiff | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -53,7 +55,7 @@ export function usePullRequestDiff({
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, owner, repo, pullNumber]);
+  }, [workspaceId, owner, repo, pullNumber, refreshKey]);
 
   return { diff, isLoading, error };
 }

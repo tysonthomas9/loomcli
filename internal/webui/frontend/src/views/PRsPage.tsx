@@ -77,8 +77,15 @@ function matchesFilter(row: PullRequestRow, filter: PRFilter): boolean {
   }
 }
 
-function groupKeyFor(row: PullRequestRow, mode: GroupMode): string {
-  if (mode === "repo") return row.pr?.repo_name || row.issue?.repo || "No repo";
+export function groupKeyFor(row: PullRequestRow, mode: GroupMode): string {
+  if (mode === "repo") {
+    if (row.pr) {
+      return (
+        row.pr.source_repo || row.pr.repo_name || row.issue?.repo || "No repo"
+      );
+    }
+    return row.issue?.repo || "No repo";
+  }
   if (mode === "epic") return row.issue?.parent_title || "No epic";
   return "";
 }
@@ -141,9 +148,11 @@ export function buildPullRequestRows(
     rows.push(pr ? { issue, pr } : { issue });
   }
 
+  const emittedKeys = new Set(linkedKeys);
   for (const pr of pullRequests) {
     const key = prKeyFromRef(pr.url);
-    if (key && linkedKeys.has(key)) continue;
+    if (key && emittedKeys.has(key)) continue;
+    if (key) emittedKeys.add(key);
     rows.push({ pr });
   }
 

@@ -43,10 +43,14 @@ func parseGitHubOwnerRepo(remoteURL string) (owner, repo string, ok bool) {
 		return splitGitHubPath(path)
 	}
 	parsed, err := url.Parse(raw)
-	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Host, "github.com") {
+	if err != nil || !supportedGitHubURLScheme(parsed.Scheme) || !strings.EqualFold(parsed.Hostname(), "github.com") {
 		return "", "", false
 	}
 	return splitGitHubPath(parsed.Path)
+}
+
+func supportedGitHubURLScheme(scheme string) bool {
+	return strings.EqualFold(scheme, "https") || strings.EqualFold(scheme, "ssh")
 }
 
 func splitGitHubPath(path string) (owner, repo string, ok bool) {

@@ -11,6 +11,7 @@ interface PRDiscussionPanelProps {
   repo: string;
   number: number;
   onClose: () => void;
+  onStaleSubject?: () => void | Promise<void>;
 }
 
 type Tab = "chat" | "terminal";
@@ -21,6 +22,7 @@ export function PRDiscussionPanel({
   repo,
   number,
   onClose,
+  onStaleSubject,
 }: PRDiscussionPanelProps): JSX.Element {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [text, setText] = useState("");
@@ -31,6 +33,7 @@ export function PRDiscussionPanel({
       repo,
       number,
       enabled: true,
+      ...(onStaleSubject ? { onStaleSubject } : {}),
     });
   // unsupported: this backend has no readable chat (terminal still works).
   // failed: the reviewer runtime died — a sent message would only queue

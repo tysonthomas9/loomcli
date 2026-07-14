@@ -2072,6 +2072,7 @@ export interface components {
       success: false;
       error: string;
       code?: string;
+      retryable?: boolean;
       details?: Record<string, never>;
     };
     MessageResponse: {
@@ -6189,6 +6190,15 @@ export interface operations {
       };
       /** @description Repository is not registered or not checked out locally */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Pull request head changed while preparing the reviewer */
+      409: {
         headers: {
           [name: string]: unknown;
         };

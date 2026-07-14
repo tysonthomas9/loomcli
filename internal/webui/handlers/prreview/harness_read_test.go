@@ -49,7 +49,7 @@ func overrideHarnessReader(t *testing.T, provider string, reader harnessTranscri
 // Returns the worktree and the projects root for fixture writes.
 func setupClaudeReviewer(t *testing.T, h *prReviewHarness, status string) (worktree, projectsRoot string) {
 	t.Helper()
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 		leadcontrol.MetadataRuntimeProvider:  "claude",
 		leadcontrol.MetadataRuntimeStatus:    status,
@@ -158,7 +158,7 @@ func TestGetReviewerConversationClaudeTranscriptNotYetWritten(t *testing.T) {
 
 func TestGetReviewerConversationClaudeMissingWorktree(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 		leadcontrol.MetadataRuntimeProvider:  "claude",
 		leadcontrol.MetadataRuntimeStatus:    leadcontrol.RuntimeStatusIdle,
@@ -179,7 +179,7 @@ func TestGetReviewerConversationClaudeMissingWorktree(t *testing.T) {
 func TestGetReviewerConversationUnsupportedBackend(t *testing.T) {
 	for _, provider := range []string{"opencode", "cursor"} {
 		h := newPRReviewHarness(t, false)
-		agentName := createReviewerAgentForTest(t, h, "hello", 7)
+		agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 		createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 			leadcontrol.MetadataRuntimeProvider: provider,
 			leadcontrol.MetadataRuntimeStatus:   leadcontrol.RuntimeStatusActive,
@@ -198,7 +198,7 @@ func TestGetReviewerConversationUnsupportedBackend(t *testing.T) {
 
 func TestGetReviewerConversationGeminiWithoutSessionID(t *testing.T) {
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 		leadcontrol.MetadataRuntimeProvider: "gemini",
 		leadcontrol.MetadataRuntimeStatus:   leadcontrol.RuntimeStatusActive,
@@ -223,7 +223,7 @@ func TestGetReviewerConversationClaudeRotatedSessionID(t *testing.T) {
 	// transcript from an older session (mtime before the runtime start) must
 	// never be picked.
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	startedAt := time.Now().Add(-time.Minute)
 	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 		leadcontrol.MetadataRuntimeProvider:  "claude",
@@ -273,7 +273,7 @@ func TestGetReviewerConversationClaudeNoRotationWithoutStartedAt(t *testing.T) {
 	// transcript — the read must stay empty rather than risk showing a stale
 	// session's conversation.
 	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "hello", 7)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
 	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
 		leadcontrol.MetadataRuntimeProvider:  "claude",
 		leadcontrol.MetadataRuntimeStatus:    leadcontrol.RuntimeStatusIdle,

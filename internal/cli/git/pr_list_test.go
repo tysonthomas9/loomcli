@@ -26,6 +26,24 @@ func TestMapPRListGhState(t *testing.T) {
 	}
 }
 
+func TestNormalizePRListLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{name: "absent", limit: 0, want: defaultPRListLimit},
+		{name: "legacy gh default", limit: 30, want: defaultPRListLimit},
+		{name: "explicit", limit: 75, want: 75},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizePRListLimit(tc.limit); got != tc.want {
+				t.Fatalf("normalizePRListLimit(%d) = %d, want %d", tc.limit, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFilterPullRequestsForReview(t *testing.T) {
 	prs := []ops.GitPullRequest{
 		{Number: 1, State: "OPEN", ReviewDecision: ""},

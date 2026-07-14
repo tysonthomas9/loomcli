@@ -139,6 +139,37 @@ func TestCreateThenList_RedactsAndNeverEchoesSecrets(t *testing.T) {
 	}
 }
 
+func TestCreateConnectorUsesServeVaultFallback(t *testing.T) {
+	t.Setenv(vault.VaultKeyEnvVar, "")
+	dataDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", dataDir)
+	st := memstore.New()
+	var out bytes.Buffer
+	if err := createConnector(context.Background(), st, testWS, createParams{
+		connectorID: "github",
+		source:      domain.ConnectorSourceGitHub,
+		credStdin:   true,
+	}, strings.NewReader(testCredential+"\n"), &out); err != nil {
+		t.Fatalf("createConnector: %v", err)
+	}
+
+	sealed, err := st.Connectors().ResolveOutboundCredentialSealed(context.Background(), testWS, "github")
+	if err != nil {
+		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
+	}
+	serveVault, err := vault.NewVaultFromEnvOrKeyFile(dataDir)
+	if err != nil {
+		t.Fatalf("serve-style vault: %v", err)
+	}
+	plain, err := serveVault.Unseal(sealed, vault.CredentialAAD(testWS, "github"))
+	if err != nil {
+		t.Fatalf("serve-style vault could not unseal CLI credential: %v", err)
+	}
+	if string(plain) != testCredential {
+		t.Fatalf("unsealed credential = %q, want %q", plain, testCredential)
+	}
+}
+
 func TestCreateConnector_ErrorPaths(t *testing.T) {
 	setVaultKey(t)
 	ctx := context.Background()
@@ -164,7 +195,7 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 			wantMsg: "outbound credential from stdin is empty",
 		},
 		{
-			name:    "vault key missing fails closed before any store write",
+			name:    "vault source missing fails closed before any store write",
 			params:  createParams{source: domain.ConnectorSourceGitHub, credStdin: true},
 			stdin:   testCredential + "\n",
 			noKey:   true,
@@ -180,6 +211,8 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.noKey {
 				t.Setenv(vault.VaultKeyEnvVar, "")
+				t.Setenv("LOOM_CONFIG_DIR", "")
+				t.Setenv("HOME", "")
 			}
 			st := memstore.New()
 			if tt.params.connectorID == "dup" {
