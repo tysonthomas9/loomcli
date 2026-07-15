@@ -297,11 +297,19 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 	if r == nil {
 		return RoleConfig{}
 	}
+	promptFile := r.PromptFile
+	if domain.IsBuiltinRole(r.Name) && domain.ResolveRoleKind(r, r.Name) == domain.RoleKindWorker {
+		// plan/task prompt files belong to the shared workflow role record. The
+		// Go daemon runs those built-ins with its embedded command prompts, so do
+		// not project the workflow-only prompt file into daemon configuration.
+		// The stored role remains unchanged for prompt-agent and API consumers.
+		promptFile = ""
+	}
 	return RoleConfig{
 		Kind:           string(r.Kind),
 		Description:    r.Description,
 		Prompt:         r.Prompt,
-		PromptFile:     r.PromptFile,
+		PromptFile:     promptFile,
 		Model:          r.Model,
 		TaskFilter:     r.TaskFilter,
 		Backend:        r.Backend,
