@@ -89,6 +89,7 @@ mirror_codex_rw() {
     for dir in rules skills plugins memories vendor_imports; do
         [ -d "$src/$dir" ] && cp -R "$src/$dir" "$dst/$dir"
     done
+    return 0  # don't let a missing trailing optional dir fail the function under `set -e`
 }
 
 mirror_codex_rw /root/.codex    /root/.codex-rw

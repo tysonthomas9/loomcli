@@ -50,6 +50,7 @@ type ServerConfig struct {
 	BindAddress         string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
 	SocketPath          string
 	FrontendDir         string // Optional built SPA directory served for non-API routes
+	Build               string // Optional server build fingerprint surfaced via /api/build-info
 	PoolSize            int
 	CORSEnabled         bool
 	CORSOrigins         []string
@@ -57,7 +58,8 @@ type ServerConfig struct {
 	ShutdownTimeout     time.Duration
 	MaxPortAttempts     int
 	TerminalCmd         string
-	MaxTerminalSessions int  // Maximum concurrent terminal connections (0 = default 40)
+	MaxTerminalSessions int // Maximum concurrent terminal connections (0 = default 40)
+	TerminalHostSocket  string
 	FleetEnabled        bool // Register fleet API routes (requires Redis coordination)
 	// FleetClient is true when this loom server is a fleet-db CLIENT (not a
 	// fleet API server itself). In this mode there is no local issue daemon to

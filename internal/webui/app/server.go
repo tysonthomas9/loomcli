@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -74,7 +75,7 @@ type Server struct {
 	initialWorkspaceID string
 
 	// Terminal
-	ptyMgr       *terminal.MultiPTYManager  // main web terminal (per-workspace dispatch)
+	ptyMgr       terminal.PTYSource         // main web terminal (local or terminal-host backed)
 	agentTmuxMgr *terminal.AgentTmuxManager // agent-view only; nil if tmux unavailable
 	termAuth     *appstores.TerminalAuth    // one-time token issuer (nil disables auth)
 
@@ -150,14 +151,18 @@ func (app *Server) buildHandlers() {
 	var graceMS, idleMS int64
 	var maxSess int
 	if app.ptyMgr != nil {
-		graceMS = app.ptyMgr.GracePeriod().Milliseconds()
-		idleMS = app.ptyMgr.IdleTimeout().Milliseconds()
 		maxSess = app.ptyMgr.MaxSessions()
+		if lifetime, ok := app.ptyMgr.(terminal.PTYLifetime); ok {
+			graceMS = lifetime.GracePeriod().Milliseconds()
+			idleMS = lifetime.IdleTimeout().Milliseconds()
+		}
 	}
 	app.handlers = handlermux.BuildHandlers(handlermux.HandlerDeps{
 		Pool:               app.pool,
 		Hub:                app.hub,
 		ExtAuthURL:         app.config.ExtAuthURL,
+		FrontendDir:        app.config.FrontendDir,
+		Build:              app.config.Build,
 		BackendsHealthH:    backendsHealthH,
 		NotifyToken:        app.notifyToken,
 		DaemonSupervisor:   daemonSupervisorH,
@@ -342,10 +347,12 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 
 	// Stop terminal managers (close PTYs; detach agent-view tmux attaches)
 	if app.ptyMgr != nil {
-		if err := app.ptyMgr.Close(); err != nil {
-			logger.Warn("error closing pty manager", "component", "terminal", "err", err)
-		} else {
-			logger.Info("pty manager stopped", "component", "terminal")
+		if closer, ok := app.ptyMgr.(io.Closer); ok {
+			if err := closer.Close(); err != nil {
+				logger.Warn("error closing pty manager", "component", "terminal", "err", err)
+			} else {
+				logger.Info("pty manager stopped", "component", "terminal")
+			}
 		}
 	}
 	if app.agentTmuxMgr != nil {

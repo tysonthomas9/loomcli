@@ -22,10 +22,12 @@ import (
 )
 
 var (
-	dataDirFlag string
-	portFlag    int
-	bindFlag    string
-	jsonFlag    bool
+	dataDirFlag          string
+	portFlag             int
+	bindFlag             string
+	jsonFlag             bool
+	socketFlag           string
+	includeTerminalsFlag bool
 
 	readRuntimeStatusFn = ReadRuntimeStatus
 	restartRuntimeFn    = RestartRuntime
@@ -65,6 +67,12 @@ var stopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the local runtime service",
 	RunE:  runStop,
+}
+
+var terminalHostCmd = &cobra.Command{
+	Use:   "terminal-host",
+	Short: "Run the local persistent terminal host",
+	RunE:  runTerminalHost,
 }
 
 var restartCmd = &cobra.Command{
@@ -119,8 +127,10 @@ func init() {
 	serviceCmd.Flags().StringVar(&bindFlag, "bind", "127.0.0.1", "Local web/API bind address")
 	startCmd.Flags().IntVar(&portFlag, "port", 0, "Local web/API port (0 picks a free port)")
 	statusCmd.Flags().BoolVar(&jsonFlag, "json", false, "Print JSON status")
+	stopCmd.Flags().BoolVar(&includeTerminalsFlag, "include-terminals", false, "Also stop the persistent terminal host and kill live terminal sessions")
 	installServiceCmd.Flags().IntVar(&portFlag, "port", 0, "Local web/API port (0 picks a free port)")
-	localCmd.AddCommand(serviceCmd, startCmd, statusCmd, stopCmd, restartCmd, installServiceCmd, uninstallServiceCmd, drainCmd, resumeCmd, logsCmd)
+	terminalHostCmd.Flags().StringVar(&socketFlag, "socket", "", "Terminal host Unix socket path")
+	localCmd.AddCommand(serviceCmd, startCmd, statusCmd, stopCmd, restartCmd, installServiceCmd, uninstallServiceCmd, drainCmd, resumeCmd, logsCmd, terminalHostCmd)
 	cli.RegisterCommand(localCmd)
 }
 
@@ -141,6 +151,10 @@ func runService(cmd *cobra.Command, _ []string) error {
 	info := newRuntimeInfo(cfg)
 	if err := writeRuntime(cfg.dataDir, info); err != nil {
 		return err
+	}
+
+	if _, err := ensureTerminalHostRunning(cfg); err != nil {
+		return fmt.Errorf("start terminal host: %w", err)
 	}
 
 	serveCmd, err := startServeProcess(serviceCtx, cfg, logFile, info)
@@ -248,11 +262,7 @@ func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile *os
 		_ = writeRuntime(cfg.dataDir, info)
 		return nil, fmt.Errorf("start loom serve: %w", err)
 	}
-	serveCmd.Env = localEnv(cfg.dataDir, cfg.port)
-	serveCmd.Dir = cfg.dataDir
-	serveCmd.Stdout = logFile
-	serveCmd.Stderr = logFile
-	serveCmd.SysProcAttr = newDetachedSysProcAttr()
+	configureDetachedCmd(serveCmd, cfg, logFile)
 	if err := serveCmd.Start(); err != nil {
 		info.Status = "failed"
 		info.Error = err.Error()
@@ -265,6 +275,17 @@ func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile *os
 		return nil, err
 	}
 	return serveCmd, nil
+}
+
+// configureDetachedCmd wires a re-exec'd child to run detached: inheriting the
+// local service environment and data dir, logging to logFile, and surviving the
+// parent via newDetachedSysProcAttr.
+func configureDetachedCmd(cmd *exec.Cmd, cfg *localServiceConfig, logFile *os.File) {
+	cmd.Env = localEnv(cfg.dataDir, cfg.port)
+	cmd.Dir = cfg.dataDir
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = newDetachedSysProcAttr()
 }
 
 // serveStartupLogTailBytes caps how much of loom-serve.log we splice into
@@ -581,16 +602,20 @@ func runStop(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("read runtime: %w", err)
 	}
+	msg := "Loom local runtime stopped."
 	if !runtimeProcessRunning(info) {
 		info.Status = "stopped"
 		_ = writeRuntime(dataDir, info)
-		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime is not running.")
-		return nil
-	}
-	if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
+		msg = "Loom local runtime is not running."
+	} else if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime stopped.")
+	if includeTerminalsFlag {
+		if err := stopTerminalHost(dataDir, 15*time.Second); err != nil {
+			return err
+		}
+	}
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), msg)
 	return nil
 }
 
@@ -717,7 +742,7 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 	if err := ensureRuntimeDirs(dataDir); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "service: %s\nserve:   %s\n", serviceLogPath(dataDir), serveLogPath(dataDir))
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "service:       %s\nserve:         %s\nterminal-host: %s\n", serviceLogPath(dataDir), serveLogPath(dataDir), terminalHostLogPath(dataDir))
 	return nil
 }
 

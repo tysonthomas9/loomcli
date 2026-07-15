@@ -14,6 +14,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
@@ -67,12 +69,23 @@ func (m *agentTmuxMonitor) CapturePaneRaw(name string, lines int) string {
 	return m.mgr.CapturePane(name, lines)
 }
 
-// HandleGetAgentTerminalInfo reports whether an agent has a live tmux session
-// suitable for terminal streaming, or should fall back to archive logs.
-func HandleGetAgentTerminalInfo(svc service.AgentService) http.HandlerFunc {
+// HandleGetAgentTerminalInfo reports whether an agent should use the
+// PTY-backed terminal tab path, the legacy tmux stream, or archive logs.
+func HandleGetAgentTerminalInfo(svc service.AgentService, termSvc service.TerminalService, st store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
 		wsID := middleware.WorkspaceFromContext(r.Context())
+
+		if agentPTYTerminalAvailable(r.Context(), termSvc, st, wsID, agentName) {
+			handler.WriteJSON(w, http.StatusOK, agentTerminalInfoResponse{
+				Success: true,
+				Data: &agentTerminalInfoData{
+					Agent: agentName,
+					Mode:  service.AgentTerminalModePTY,
+				},
+			})
+			return
+		}
 
 		result, err := svc.GetTerminalInfo(r.Context(), wsID, agentName)
 		if err != nil {
@@ -98,6 +111,31 @@ func HandleGetAgentTerminalInfo(svc service.AgentService) http.HandlerFunc {
 			},
 		})
 	}
+}
+
+func agentPTYTerminalAvailable(ctx context.Context, termSvc service.TerminalService, st store.Store, workspace, agentName string) bool {
+	if termSvc == nil || st == nil || !service.ValidAgentName.MatchString(agentName) {
+		return false
+	}
+	tabs, err := termSvc.ListTabs(ctx, workspace)
+	if err == nil {
+		if existing := selectAgentTerminalTab(tabs, agentName); existing != nil && existing.PTYAlive {
+			return true
+		}
+	}
+	agent, err := loadTerminalAgent(ctx, st, workspace, agentName)
+	if err != nil {
+		return false
+	}
+	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+	if err != nil {
+		return false
+	}
+	roleKind := domain.ResolveRoleKind(role, agent.RoleName)
+	if isDaemonOwnedEphemeralWorker(agent, roleKind) {
+		return false
+	}
+	return agentTerminalLaunchAllowed(agent, roleKind)
 }
 
 // HandleGetAgentTerminalToken generates a one-time token scoped to an agent logs stream.

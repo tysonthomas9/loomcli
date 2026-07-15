@@ -19,10 +19,13 @@ import { AgentLogsTab } from "./AgentLogsTab";
 
 const getAgentTerminalInfo = vi.fn();
 const getAgentLogArchive = vi.fn();
+const ensureAgentTerminalSession = vi.fn();
 
 vi.mock("@/hooks/api", () => ({
   getAgentTerminalInfo: (...args: unknown[]) => getAgentTerminalInfo(...args),
   getAgentLogArchive: (...args: unknown[]) => getAgentLogArchive(...args),
+  ensureAgentTerminalSession: (...args: unknown[]) =>
+    ensureAgentTerminalSession(...args),
 }));
 
 vi.mock("@/hooks/workspace", () => ({
@@ -41,6 +44,7 @@ describe("AgentLogsTab", () => {
   beforeEach(() => {
     getAgentTerminalInfo.mockReset();
     getAgentLogArchive.mockReset();
+    ensureAgentTerminalSession.mockReset();
   });
 
   it("shows an explicit empty state (not 'connected') when the archive is empty", async () => {
@@ -87,5 +91,20 @@ describe("AgentLogsTab", () => {
       expect(statusEl()).toHaveAttribute("data-state", "disconnected");
     });
     expect(screen.queryByTestId("archive-empty")).toBeNull();
+  });
+
+  it("renders an embedded terminal for pty-backed agent sessions", async () => {
+    getAgentTerminalInfo.mockResolvedValue("pty");
+    ensureAgentTerminalSession.mockResolvedValue({
+      session_name: "term_123",
+      backend: "codex",
+      agent_id: "ember",
+    });
+
+    render(<AgentLogsTab agentName="ember" isActive />);
+
+    expect(await screen.findByTestId("embedded-terminal")).toBeInTheDocument();
+    expect(getAgentLogArchive).not.toHaveBeenCalled();
+    expect(ensureAgentTerminalSession).toHaveBeenCalledWith("default", "ember");
   });
 });

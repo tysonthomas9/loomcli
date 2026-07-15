@@ -8,28 +8,29 @@ import (
 )
 
 // PTYHook implements coordinator.LifecycleHook for per-workspace web-terminal
-// PTY manager lifecycle. On workspace registration it registers the workspace
-// with MultiPTYManager so subsequent AttachSession calls dispatch to a
-// per-workspace *PTYManager whose shell cwd == workspace.Path. On
-// deregistration or rollback it tears the entry (and any live sessions) down.
+// PTY manager lifecycle. On workspace registration it ensures the workspace
+// is known to the configured PTY source so subsequent AttachSession calls
+// dispatch to a manager whose shell cwd == workspace.Path. Same-path
+// re-registration is non-destructive so serve restarts do not kill sessions
+// owned by a persistent terminal host.
 //
 // Non-critical by design (decision F-1): a bad workspace path downgrades the
 // workspace to "no terminal available" rather than failing registration.
 type PTYHook struct {
-	multi  *terminal.MultiPTYManager
+	mgr    terminal.WorkspaceRegistrar
 	logger *slog.Logger
 }
 
-// NewPTYHook creates a PTYHook. multi must not be nil (panics).
+// NewPTYHook creates a PTYHook. mgr must not be nil (panics).
 // A nil logger defaults to slog.Default().
-func NewPTYHook(multi *terminal.MultiPTYManager, logger *slog.Logger) *PTYHook {
-	if multi == nil {
-		panic("NewPTYHook: multi must not be nil")
+func NewPTYHook(mgr terminal.WorkspaceRegistrar, logger *slog.Logger) *PTYHook {
+	if mgr == nil {
+		panic("NewPTYHook: manager must not be nil")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &PTYHook{multi: multi, logger: logger}
+	return &PTYHook{mgr: mgr, logger: logger}
 }
 
 // Name returns "pty-manager".
@@ -47,7 +48,7 @@ func (h *PTYHook) Critical() bool { return false }
 func (h *PTYHook) OnRegister(ctx *coordinator.RegistrationContext) error {
 	wsID := ctx.WorkspaceID
 	path := ctx.WorkspacePath
-	if err := h.multi.Register(wsID, path); err != nil {
+	if err := h.mgr.EnsureRegistered(wsID, path); err != nil {
 		h.logger.Warn("pty manager register failed; terminal disabled for workspace",
 			"workspace", wsID, "path", path, "err", err)
 		return nil
@@ -59,7 +60,7 @@ func (h *PTYHook) OnRegister(ctx *coordinator.RegistrationContext) error {
 // OnDeregister removes the workspace entry and kills any live PTY sessions.
 // MultiPTYManager.Deregister is idempotent on unknown IDs.
 func (h *PTYHook) OnDeregister(ctx coordinator.DeregistrationContext) {
-	h.multi.Deregister(ctx.WorkspaceID)
+	h.mgr.Deregister(ctx.WorkspaceID)
 }
 
 // OnRollback undoes OnRegister — same as OnDeregister.

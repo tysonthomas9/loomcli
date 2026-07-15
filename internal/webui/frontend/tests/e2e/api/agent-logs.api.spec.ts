@@ -120,7 +120,7 @@ test.describe('Agent Logs and Terminal Transport', () => {
     if (response.status() === 200) {
       expect(body.success).toBe(true);
       expect(body.data?.agent).toBe(validAgentName);
-      expect(['tmux', 'archive']).toContain(body.data?.mode);
+      expect(['pty', 'tmux', 'archive']).toContain(body.data?.mode);
       return;
     }
 

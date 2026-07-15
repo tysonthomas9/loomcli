@@ -1,6 +1,8 @@
 package terminal
 
 import (
+	"time"
+
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
@@ -74,6 +76,24 @@ type PTYCommandRunner interface {
 	WriteToSession(key SessionKey, p []byte) error
 }
 
+// PTYLifetime is implemented by PTY sources that expose their detached-session
+// grace and idle windows. The app surfaces these to the UI as the terminal
+// reconnect/idle timeouts. Sources without configurable lifetimes (and the
+// remote terminal host, which reports 0) still satisfy it.
+type PTYLifetime interface {
+	GracePeriod() time.Duration
+	IdleTimeout() time.Duration
+}
+
+// WorkspaceRegistrar is implemented by PTY sources that need workspace ID →
+// filesystem path registration before sessions can be created. The web app
+// lifecycle hook uses EnsureRegistered so a restarted serve process does not
+// tear down already-running sessions owned by an external terminal host.
+type WorkspaceRegistrar interface {
+	EnsureRegistered(wsID, path string) error
+	Deregister(wsID string)
+}
+
 // Attachment is the handle returned by PTYSource.AttachSession. The WS
 // handler reads output frames from Output() and writes user input via
 // WriteInput(). Callers release the attachment by invoking
@@ -109,10 +129,13 @@ type Attachment interface {
 
 // Compile-time assertions.
 var (
-	_ PTYSource        = (*PTYManager)(nil)
-	_ PTYSource        = (*MultiPTYManager)(nil)
-	_ PTYCommandRunner = (*PTYManager)(nil)
-	_ PTYCommandRunner = (*MultiPTYManager)(nil)
-	_ Attachment       = (*localAttachment)(nil)
-	_ realtime.Resizer = (*localAttachment)(nil)
+	_ PTYSource          = (*PTYManager)(nil)
+	_ PTYSource          = (*MultiPTYManager)(nil)
+	_ PTYLifetime        = (*PTYManager)(nil)
+	_ PTYLifetime        = (*MultiPTYManager)(nil)
+	_ PTYCommandRunner   = (*PTYManager)(nil)
+	_ PTYCommandRunner   = (*MultiPTYManager)(nil)
+	_ WorkspaceRegistrar = (*MultiPTYManager)(nil)
+	_ Attachment         = (*localAttachment)(nil)
+	_ realtime.Resizer   = (*localAttachment)(nil)
 )

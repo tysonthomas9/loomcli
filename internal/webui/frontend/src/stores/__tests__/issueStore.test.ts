@@ -1362,6 +1362,7 @@ describe("issueStore", () => {
       store.getState().setConnectionState("reconnecting");
       vi.advanceTimersByTime(5000);
       expect(store.getState().showStaleBanner).toBe(true);
+      expect(store.getState().disconnectedSince).not.toBeNull();
 
       store.getState().setConnectionState("connecting");
       expect(store.getState().showStaleBanner).toBe(true);

@@ -28,7 +28,7 @@ export function AgentLogsTab({
   isActive,
 }: AgentLogsTabProps): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
-  const [mode, setMode] = useState<"tmux" | "archive" | null>(null);
+  const [mode, setMode] = useState<"pty" | "tmux" | "archive" | null>(null);
   const [terminalSession, setTerminalSession] = useState<{
     sessionName: string;
     backend: string;
@@ -42,16 +42,16 @@ export function AgentLogsTab({
     setTerminalSession(null);
     try {
       const nextMode = await getAgentTerminalInfo(workspaceId, agentName);
-      if (nextMode === "tmux") {
+      if (nextMode === "pty" || nextMode === "tmux") {
         const meta = await ensureAgentTerminalSession(workspaceId, agentName);
         setTerminalSession({
           sessionName: meta.session_name,
           backend: meta.backend ?? "agent",
           agentName: meta.agent_id ?? agentName,
         });
-        setMode("tmux");
+        setMode("pty");
         setLines([]);
-        // tmux connection state is driven by EmbeddedTerminal below.
+        // Live PTY connection state is driven by EmbeddedTerminal below.
       } else {
         const archive = await getAgentLogArchive(workspaceId, agentName);
         setMode("archive");
@@ -77,14 +77,14 @@ export function AgentLogsTab({
     <div className={styles.scrollableContent}>
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
-          {mode === "tmux" ? "Live terminal" : "Archive snapshot"}
+          {mode === "pty" ? "Live terminal" : "Archive snapshot"}
         </h3>
         <button type="button" onClick={load}>
           Refresh
         </button>
         <div data-testid="log-viewer">
           <span data-state={state}>{stateLabel}</span>
-          {mode === "tmux" && terminalSession ? (
+          {mode === "pty" && terminalSession ? (
             <EmbeddedTerminal
               sessionName={terminalSession.sessionName}
               backend={terminalSession.backend}

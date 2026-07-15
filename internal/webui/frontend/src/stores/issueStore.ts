@@ -524,7 +524,14 @@ export function createIssueStore(
         }, STALE_BANNER_DELAY_MS);
       }
 
-      if (newState === "connected" && reconnectRecoveryPending) {
+      const hadStaleConnectionState =
+        reconnectRecoveryPending ||
+        prev === "reconnecting" ||
+        get().disconnectedSince !== null ||
+        get().showStaleBanner ||
+        get().connectionLost;
+
+      if (newState === "connected" && hadStaleConnectionState) {
         if (staleBannerTimeout) {
           clearTimeout(staleBannerTimeout);
           staleBannerTimeout = null;

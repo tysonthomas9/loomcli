@@ -85,6 +85,7 @@ import {
   useAgentStoreInstance,
 } from "@/hooks/common/useStoreContext";
 import { useRouteView } from "@/hooks/common/useRouteView";
+import { useBuildInfoReloader } from "@/hooks/common/useBuildInfoReloader";
 import { useDebounce } from "@/hooks/common/useDebounce";
 import {
   useFilterState,
@@ -265,6 +266,7 @@ function App() {
   const pendingIds = useStore(issueStore, (s) => s.pendingIds);
 
   const connectionState = useStore(issueStore, (s) => s.connectionState);
+  useBuildInfoReloader({ connectionState });
   const reconnectAttempts = useStore(issueStore, (s) => s.reconnectAttempts);
   const sseShowStaleBanner = useStore(issueStore, (s) => s.showStaleBanner);
   const sseConnectionLost = useStore(issueStore, (s) => s.connectionLost);

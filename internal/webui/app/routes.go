@@ -43,6 +43,7 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	app.mux.HandleFunc("GET /api/health", h.APIHealth)
 	app.mux.HandleFunc("POST /api/client-errors", h.ClientErrors)
 	app.mux.HandleFunc("GET /api/config", h.AuthConfig)
+	app.mux.HandleFunc("GET /api/build-info", h.BuildInfo)
 	app.mux.HandleFunc("GET /api/metrics", h.Metrics)
 	app.mux.HandleFunc("GET /api/config/terminal", h.GetTerminalConfig)
 	if app.config.LocalSettingsDir != "" {

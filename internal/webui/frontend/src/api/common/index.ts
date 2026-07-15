@@ -1,5 +1,6 @@
 export * from "./appConfig";
 export * from "./authClient";
+export * from "./buildInfo";
 export * from "./client";
 export * from "./config";
 export * from "./desktop";
