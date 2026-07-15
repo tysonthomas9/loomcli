@@ -3,6 +3,7 @@
 - **Status:** Complete
 - **Date:** 2026-07-15
 - **Phase 0 source:** Loom `122d4d79cc12c6a14116429e6c9ce04483c24198`; FleetDB `8120c788ccc78477a61cfba591fe0445c580ab77`
+- **Phase 1 implementation source:** Loom `0e8d1caa6737e15c16fa395c54fb62bd32f5b8ad`
 - **Phase 1 measurement source:** Loom `b64b5256ba206d482037a5dee2703fdecbb3c497`
 - **Scope:** Architecture decisions, enforceable guardrails, characterization, inventory closure, and bounded execution-reliability fixes
 
@@ -38,7 +39,7 @@ The canonical decision records are `internal/archtest/testdata/capability-graph.
 | `test/modular-monolith/characterization-matrix.yaml` and `test/modular-monolith/characterization/` | Five pinned behavior rows covering workflow approval, trigger admission, agent provisioning, execution recovery, and supervisor restart policy. |
 | `test/modular-monolith/supervisor-disabled-matrix.yaml` and `scripts/supervisordisabled/` | Strict executable contract with argv/timeouts/teardown/assertions and one intentionally RED, owned execution row. |
 
-The reliability lane also aligns the stale-task default in `internal/driver/stale_task_sweeper.go` and `internal/cli/serve/serve_loops.go`, bounds the recovery cutoff by both a monotonic projection and the live wall clock, covers standalone lead and serve-hosted task session heartbeats, adds the supervisor AgentSession/AgentLease heartbeat, drains in-flight heartbeats before terminal session updates, and implements caller-declared startup checks in `internal/infra/fleetdb/capabilities.go`, `internal/bootstrap/openstore.go`, and `internal/cli/cmdstore/cmdstore.go`.
+The reliability lane also aligns the stale-task default in `internal/driver/stale_task_sweeper.go` and `internal/cli/serve/serve_loops.go`, bounds the recovery cutoff by both a monotonic projection and the live wall clock, covers standalone lead and serve-hosted task session heartbeats, adds the supervisor AgentSession/AgentLease heartbeat, serializes full-record heartbeats against starting-to-running and terminal lifecycle transitions, makes heartbeat barrier waits deadline-aware, and implements caller-declared startup checks in `internal/infra/fleetdb/capabilities.go`, `internal/bootstrap/openstore.go`, and `internal/cli/cmdstore/cmdstore.go`.
 
 ## Performance and operability baseline
 

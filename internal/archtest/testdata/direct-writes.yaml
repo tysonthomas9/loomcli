@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 122d4d79cc12c6a14116429e6c9ce04483c24198
+source_head: 0e8d1caa6737e15c16fa395c54fb62bd32f5b8ad
 adapter_roots:
   - internal/app
   - internal/cli

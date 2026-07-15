@@ -162,7 +162,7 @@ production_background_loops:
       variants such as testbackend, and the fake-harness helper; it is not a
       simultaneous product-runtime instance count.
     evidence:
-      source_sha: b64b5256ba206d482037a5dee2703fdecbb3c497
+      source_sha: 0e8d1caa6737e15c16fa395c54fb62bd32f5b8ad
       measured_at: 2026-07-15T17:33:00Z
       evidence_source: internal/archtest/testdata/runtime-components.yaml with exact AST parity enforced by internal/archtest/runtime_inventory_test.go
       command:
