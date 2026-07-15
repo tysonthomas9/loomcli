@@ -2,7 +2,6 @@ package prreview
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -11,39 +10,93 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/sessions/redact"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
-const (
-	reviewerStreamPollInterval      = time.Second
-	reviewerStreamHeartbeatInterval = 15 * time.Second
-	// reviewerPollTimeout bounds a single dial+read so a hung codex can't wedge
-	// the SSE loop (blocking the heartbeat) or stall the first byte.
-	reviewerPollTimeout = 10 * time.Second
-)
+// reviewerPollTimeout bounds a single live codex read so a hung app-server
+// can't stall the conversation snapshot handler.
+const reviewerPollTimeout = 10 * time.Second
 
-// readReviewerThread dials the codex app-server, reads the thread WITH turns,
-// and always closes the connection — under a per-call timeout. Shared by the
-// SSE stream and the snapshot handler so both bound their codex calls.
+func (m *Module) reviewerReaderEntry(endpoint string) *reviewerReaderPoolEntry {
+	m.reviewerReadersMu.Lock()
+	defer m.reviewerReadersMu.Unlock()
+	if m.reviewerReaders == nil {
+		m.reviewerReaders = make(map[string]*reviewerReaderPoolEntry)
+	}
+	if entry := m.reviewerReaders[endpoint]; entry != nil {
+		return entry
+	}
+	entry := &reviewerReaderPoolEntry{}
+	m.reviewerReaders[endpoint] = entry
+	return entry
+}
+
+// dropReviewerReaderEntry is called while entry.mu is held.
+func (m *Module) dropReviewerReaderEntry(endpoint string, entry *reviewerReaderPoolEntry, reason string) {
+	client := entry.client
+	entry.client = nil
+	entry.dropped = true
+
+	m.reviewerReadersMu.Lock()
+	if m.reviewerReaders != nil && m.reviewerReaders[endpoint] == entry {
+		delete(m.reviewerReaders, endpoint)
+	}
+	m.reviewerReadersMu.Unlock()
+
+	if client != nil {
+		_ = client.Close(reason)
+	}
+}
+
+// readReviewerThread reuses one codex app-server connection per endpoint.
+// CodexClient has no response demux or internal call lock, so every use of a
+// pooled client is serialized by the endpoint entry mutex.
 func (m *Module) readReviewerThread(ctx context.Context, rt leadcontrol.CodexRuntimeMetadata) (*leadcontrol.CodexThread, error) {
-	pollCtx, cancel := context.WithTimeout(ctx, reviewerPollTimeout)
-	defer cancel()
-	client, err := m.dialCodex(pollCtx, rt.Endpoint)
-	if err != nil {
+	endpoint := strings.TrimSpace(rt.Endpoint)
+	for {
+		entry := m.reviewerReaderEntry(endpoint)
+		entry.mu.Lock()
+		if entry.dropped {
+			entry.mu.Unlock()
+			continue
+		}
+		thread, err := m.readReviewerThreadLocked(ctx, endpoint, strings.TrimSpace(rt.ThreadID), entry)
+		entry.mu.Unlock()
+		return thread, err
+	}
+}
+
+func (m *Module) readReviewerThreadLocked(ctx context.Context, endpoint, threadID string, entry *reviewerReaderPoolEntry) (*leadcontrol.CodexThread, error) {
+	if entry.client == nil {
+		if err := ctx.Err(); err != nil {
+			m.dropReviewerReaderEntry(endpoint, entry, "poll canceled")
+			return nil, err
+		}
+		dialCtx, cancelDial := context.WithTimeout(context.WithoutCancel(ctx), reviewerPollTimeout)
+		client, err := m.dialCodex(dialCtx, endpoint)
+		cancelDial()
+		if err != nil {
+			m.dropReviewerReaderEntry(endpoint, entry, "dial failed")
+			return nil, err
+		}
+		entry.client = client
+	}
+
+	pollCtx, cancelPoll := context.WithTimeout(ctx, reviewerPollTimeout)
+	defer cancelPoll()
+	if err := pollCtx.Err(); err != nil {
 		return nil, err
 	}
-	defer func() { _ = client.Close("poll") }()
-	return client.ReadThreadWithTurns(pollCtx, rt.ThreadID)
+	thread, err := entry.client.ReadThreadWithTurns(pollCtx, threadID)
+	if err != nil {
+		m.dropReviewerReaderEntry(endpoint, entry, "poll error")
+		return nil, err
+	}
+	return thread, nil
 }
 
 type reviewerStreamSession struct {
 	ws        string
 	agentName string
-}
-
-type reviewerStreamStatus struct {
-	State  string `json:"state"`
-	Detail string `json:"detail,omitempty"`
 }
 
 type reviewerStreamMessage struct {
@@ -52,25 +105,6 @@ type reviewerStreamMessage struct {
 	Role   string `json:"role"`
 	Text   string `json:"text"`
 	Phase  string `json:"phase,omitempty"`
-}
-
-func (m *Module) streamReviewer(w http.ResponseWriter, r *http.Request) {
-	session, ok := m.prepareReviewerStream(w, r)
-	if !ok {
-		return
-	}
-	sw, err := realtime.NewWriter(w)
-	if err != nil {
-		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "streaming unsupported", false)
-		return
-	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
-
-	m.runReviewerStream(r.Context(), sw, session)
 }
 
 func (m *Module) prepareReviewerStream(w http.ResponseWriter, r *http.Request) (reviewerStreamSession, bool) {
@@ -92,46 +126,12 @@ func (m *Module) prepareReviewerStream(w http.ResponseWriter, r *http.Request) (
 	return reviewerStreamSession{ws: ws, agentName: agentName}, true
 }
 
-func (m *Module) runReviewerStream(ctx context.Context, sw *realtime.Writer, session reviewerStreamSession) {
-	seen := make(map[string]struct{})
-	lastStatus := ""
-	if !m.pollReviewerStream(ctx, sw, session, seen, &lastStatus) {
-		return
-	}
-	pollInterval := m.streamPollInterval
-	if pollInterval <= 0 {
-		pollInterval = reviewerStreamPollInterval
-	}
-	heartbeatInterval := m.streamHeartbeatInterval
-	if heartbeatInterval <= 0 {
-		heartbeatInterval = reviewerStreamHeartbeatInterval
-	}
-	poll := time.NewTicker(pollInterval)
-	defer poll.Stop()
-	heartbeat := time.NewTicker(heartbeatInterval)
-	defer heartbeat.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-poll.C:
-			if !m.pollReviewerStream(ctx, sw, session, seen, &lastStatus) {
-				return
-			}
-		case <-heartbeat.C:
-			if sw.WriteComment("hb") != nil {
-				return
-			}
-		}
-	}
-}
-
 // readReviewerSnapshot resolves the reviewer's orchestration session and
 // dispatches on its runtime provider: codex conversations are read live over
 // the app-server socket; harness backends (claude, gemini) are read from the
 // harness's own transcript on disk; backends with no readable conversation
 // report "unsupported". Message text is redacted before it leaves this
-// function — every serving path (snapshot and SSE) goes through here.
+// function — the snapshot handler goes through here.
 func (m *Module) readReviewerSnapshot(ctx context.Context, session reviewerStreamSession) (reviewerSnapshot, error) {
 	sess, err := store.OrchestrationSessionFor(ctx, m.store, session.ws, session.agentName)
 	if err != nil {
@@ -171,41 +171,23 @@ func (m *Module) readCodexReviewerSnapshot(ctx context.Context, sess *domain.Age
 	}
 }
 
-func (m *Module) pollReviewerStream(ctx context.Context, sw *realtime.Writer, session reviewerStreamSession, seen map[string]struct{}, lastStatus *string) bool {
-	snap, err := m.readReviewerSnapshot(ctx, session)
-	if err != nil {
-		return false
-	}
-	if !writeReviewerStatus(sw, lastStatus, snap) {
-		return false
-	}
-	for _, msg := range snap.messages {
-		cursor := msg.TurnID + "/" + msg.ItemID
-		if _, ok := seen[cursor]; ok {
-			continue
-		}
-		data, err := json.Marshal(msg)
-		if err != nil {
-			return false
-		}
-		if sw.WriteEventID(msg.ItemID, "message", string(data)) != nil {
-			return false
-		}
-		seen[cursor] = struct{}{}
-	}
-	return true
-}
-
 type reviewerConversation struct {
 	State    string                  `json:"state"`
 	Detail   string                  `json:"detail,omitempty"`
 	Messages []reviewerStreamMessage `json:"messages"`
+	// Cursor is the opaque identity of the LAST message in the underlying list
+	// (empty when the list is empty). Reset tells the client whether Messages
+	// is a full snapshot to replace (true) or an incremental tail to append
+	// (false). See buildReviewerConversation for the cursor contract.
+	Cursor string `json:"cursor"`
+	Reset  bool   `json:"reset"`
 }
 
-// getReviewerConversation is the POLL target: a single snapshot of the whole
-// reviewer conversation. The frontend polls this (the SSE stream above only
-// works over loopback — EventSource can't send the auth Bearer header, so under
-// auth the UI must poll).
+// getReviewerConversation is the POLL target: a snapshot of the reviewer
+// conversation. Clients may pass an opaque `after` cursor (the identity of the
+// last message they already hold) to receive only newer messages; omitting it
+// returns the full snapshot. The frontend polls this because EventSource can't
+// send the auth Bearer header, so under auth the UI can't open a raw SSE stream.
 func (m *Module) getReviewerConversation(w http.ResponseWriter, r *http.Request) {
 	session, ok := m.prepareReviewerStream(w, r)
 	if !ok {
@@ -216,28 +198,60 @@ func (m *Module) getReviewerConversation(w http.ResponseWriter, r *http.Request)
 		writePRReviewErrorCode(w, http.StatusBadGateway, "upstream_error", "failed to resolve reviewer session", true)
 		return
 	}
-	msgs := snap.messages
-	if msgs == nil {
-		msgs = []reviewerStreamMessage{}
-	}
-	writeJSON(w, reviewerConversation{State: snap.state, Detail: snap.detail, Messages: msgs})
+	after := strings.TrimSpace(r.URL.Query().Get("after"))
+	writeJSON(w, buildReviewerConversation(snap, after))
 }
 
-func writeReviewerStatus(sw *realtime.Writer, lastStatus *string, snap reviewerSnapshot) bool {
-	if lastStatus != nil && *lastStatus == snap.state {
-		return true
+// reviewerMessageCursor is the opaque per-message cursor identity — the same
+// turnID/itemID pair the old SSE stream deduped on.
+func reviewerMessageCursor(msg reviewerStreamMessage) string {
+	return msg.TurnID + "/" + msg.ItemID
+}
+
+// buildReviewerConversation applies the incremental-cursor contract to a
+// snapshot. `after` is the cursor of the last message the client already holds
+// (empty on a first poll):
+//   - empty `after` → full snapshot, reset=true.
+//   - `after` matches a message → only the messages after it, reset=false
+//     (an empty tail means "no new messages").
+//   - `after` matches nothing (session rotated, IDs reconstructed, truncation)
+//     → the full list, reset=true; the client must replace, not append.
+func buildReviewerConversation(snap reviewerSnapshot, after string) reviewerConversation {
+	resp := reviewerConversation{
+		State:    snap.state,
+		Detail:   snap.detail,
+		Messages: []reviewerStreamMessage{},
 	}
-	data, err := json.Marshal(reviewerStreamStatus{State: snap.state, Detail: snap.detail})
-	if err != nil {
-		return false
+	// A reconnecting snapshot carries no messages by construction (the read
+	// failed transiently). Don't signal a reset — that would blank the client;
+	// echo its cursor back so it keeps its last-good conversation.
+	if snap.state == "reconnecting" && len(snap.messages) == 0 {
+		resp.Cursor = after
+		return resp
 	}
-	if sw.WriteEventID(snap.state, "status", string(data)) != nil {
-		return false
+	if len(snap.messages) > 0 {
+		resp.Cursor = reviewerMessageCursor(snap.messages[len(snap.messages)-1])
 	}
-	if lastStatus != nil {
-		*lastStatus = snap.state
+	if after != "" {
+		if idx := indexReviewerCursor(snap.messages, after); idx >= 0 {
+			resp.Messages = append(resp.Messages, snap.messages[idx+1:]...)
+			return resp
+		}
 	}
-	return true
+	resp.Messages = append(resp.Messages, snap.messages...)
+	resp.Reset = true
+	return resp
+}
+
+// indexReviewerCursor returns the position of the message whose cursor equals
+// the given value, or -1 if no message matches.
+func indexReviewerCursor(msgs []reviewerStreamMessage, cursor string) int {
+	for i := range msgs {
+		if reviewerMessageCursor(msgs[i]) == cursor {
+			return i
+		}
+	}
+	return -1
 }
 
 func reviewerThreadState(thread *leadcontrol.CodexThread) string {

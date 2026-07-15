@@ -23,7 +23,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 const reviewerAgentNameMaxLen = 100
@@ -125,46 +124,30 @@ func safeAgentSegment(value string) string {
 	return out
 }
 
-func (m *Module) resolveRepoCheckout(ctx context.Context, ws, owner, repo string) (repoPath, remote, repoName, wsPath string, ok bool, err error) {
-	data, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, m.store, ws)
-	if buildErr != nil {
-		return "", "", "", "", false, buildErr
-	}
-	if data == nil {
+func (m *Module) resolveRepoCheckout(ws string, repoInfo authorizedRepo) (repoPath, remote, repoName, wsPath string, ok bool, err error) {
+	workspaceRepo := repoInfo.workspaceRepo
+	repoPath = strings.TrimSpace(workspaceRepo.Path)
+	wsPath = strings.TrimSpace(repoInfo.workspacePath)
+	if repoPath == "" || wsPath == "" {
 		return "", "", "", "", false, nil
 	}
-	for _, workspaceRepo := range data.Repos {
-		gotOwner, gotRepo, parsed := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
-		if !parsed {
-			continue
-		}
-		if !strings.EqualFold(gotOwner, owner) || !strings.EqualFold(gotRepo, repo) {
-			continue
-		}
-		repoPath = strings.TrimSpace(workspaceRepo.Path)
-		wsPath = strings.TrimSpace(data.Path)
-		if repoPath == "" || wsPath == "" {
+	if _, statErr := os.Stat(repoPath); statErr != nil {
+		slog.Warn("pr-review: recorded repository checkout is unavailable",
+			"ws", ws, "repo", workspaceRepo.Name, "path", repoPath, "err", statErr)
+		if os.IsNotExist(statErr) {
 			return "", "", "", "", false, nil
 		}
-		if _, statErr := os.Stat(repoPath); statErr != nil {
-			slog.Warn("pr-review: recorded repository checkout is unavailable",
-				"ws", ws, "repo", workspaceRepo.Name, "path", repoPath, "err", statErr)
-			if os.IsNotExist(statErr) {
-				return "", "", "", "", false, nil
-			}
-			return "", "", "", "", false, fmt.Errorf("inspect recorded repository checkout: %w", statErr)
-		}
-		remote = strings.TrimSpace(workspaceRepo.Remote)
-		if remote == "" {
-			remote = "origin"
-		}
-		return repoPath, remote, workspaceRepo.Name, wsPath, true, nil
+		return "", "", "", "", false, fmt.Errorf("inspect recorded repository checkout: %w", statErr)
 	}
-	return "", "", "", "", false, nil
+	remote = strings.TrimSpace(workspaceRepo.Remote)
+	if remote == "" {
+		remote = "origin"
+	}
+	return repoPath, remote, workspaceRepo.Name, wsPath, true, nil
 }
 
 func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
-	ws, params, ok := m.resolveAuthorizedPR(w, r)
+	ws, params, repoInfo, ok := m.resolveAuthorizedPRWithRepo(w, r)
 	if !ok {
 		return
 	}
@@ -174,7 +157,7 @@ func (m *Module) ensureReviewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	repoPath, remote, repoName, wsPath, ok, err := m.resolveRepoCheckout(r.Context(), ws, params.owner, params.repo)
+	repoPath, remote, repoName, wsPath, ok, err := m.resolveRepoCheckout(ws, repoInfo)
 	if err != nil {
 		writePRReviewError(w, err)
 		return

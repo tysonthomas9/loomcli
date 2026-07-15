@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -319,6 +320,18 @@ func (h *prReviewHarness) setSettingsGitHubToken(t *testing.T, token string) {
 	}
 }
 
+func (h *prReviewHarness) clearSettingsGitHubToken(t *testing.T) {
+	t.Helper()
+	settings, err := localsettings.Load(h.dataDir)
+	if err != nil {
+		t.Fatalf("Load local settings: %v", err)
+	}
+	settings.RuntimeCredentials.GitHub = localsettings.RuntimeCredentialConfig{}
+	if err := localsettings.Save(h.dataDir, settings); err != nil {
+		t.Fatalf("Save local settings: %v", err)
+	}
+}
+
 func (h *prReviewHarness) rebuildWithDataDir(t *testing.T, dataDir string) {
 	t.Helper()
 	vault, err := connector.NewVaultFromEnvOrKeyFile(dataDir)
@@ -395,15 +408,6 @@ func (h *prReviewHarness) rememberLocalPaths(t *testing.T, workspacePath, repoNa
 func (h *prReviewHarness) get(t *testing.T, path string) (int, []byte) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
-	req = req.WithContext(middleware.WithUserIdentity(req.Context(), middleware.UserIdentity{UserID: "user-1"}))
-	rec := httptest.NewRecorder()
-	h.mux.ServeHTTP(rec, req)
-	return rec.Code, rec.Body.Bytes()
-}
-
-func (h *prReviewHarness) streamWithContext(t *testing.T, ctx context.Context, path string) (int, []byte) {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx)
 	req = req.WithContext(middleware.WithUserIdentity(req.Context(), middleware.UserIdentity{UserID: "user-1"}))
 	rec := httptest.NewRecorder()
 	h.mux.ServeHTTP(rec, req)
@@ -1086,6 +1090,50 @@ func TestListPullRequestsPartialRepoErrorWarns(t *testing.T) {
 	}
 }
 
+func TestListPullRequestsReusesPreparedCredentialSeedPerRequest(t *testing.T) {
+	const token = "github-settings-token"
+	h := newPRReviewHarnessWithCredential(t, true, nil, testCredentialSettings, token)
+	h.addRepo(t, "widgets", "https://github.com/acme/widgets")
+	h.github.setListPayload("octocat", "hello", []map[string]any{{
+		"number": 31,
+		"state":  "open",
+		"title":  "First repo",
+	}})
+	h.github.setListPayload("acme", "widgets", []map[string]any{{
+		"number": 41,
+		"state":  "open",
+		"title":  "Second repo",
+	}})
+
+	var clearOnce sync.Once
+	h.module.beforeCredentialSeedCommit = func() {
+		clearOnce.Do(func() {
+			h.clearSettingsGitHubToken(t)
+		})
+	}
+
+	status, raw := h.get(t, "/api/workspaces/WS/pull-requests?state=open")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	data := decodePullRequestsResponse(t, raw)
+	if len(data.Warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", data.Warnings)
+	}
+	if len(data.PullRequests) != 2 {
+		t.Fatalf("pull_requests = %+v, want both repos", data.PullRequests)
+	}
+	calls := h.github.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("GitHub calls = %+v, want one list call per repo", calls)
+	}
+	for _, call := range calls {
+		if call.authorization != "Bearer "+token {
+			t.Fatalf("authorization = %q, want settings token", call.authorization)
+		}
+	}
+}
+
 func TestGetPullRequestDiff(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	status, raw := h.get(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/diff")
@@ -1438,80 +1486,6 @@ func TestPostReviewerMessageUnregisteredRepoDoesNotEnqueue(t *testing.T) {
 	}
 }
 
-func TestStreamReviewerStartingWhenNoSession(t *testing.T) {
-	h := newPRReviewHarness(t, false)
-	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(10*time.Millisecond, cancel)
-	status, raw := h.streamWithContext(t, ctx, "/api/workspaces/WS/pull-requests/octocat/hello/7/stream")
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
-	}
-	body := string(raw)
-	if !strings.Contains(body, "event: status") || !strings.Contains(body, `"state":"starting"`) {
-		t.Fatalf("stream body = %q, want starting status event", body)
-	}
-}
-
-func TestStreamReviewerEmitsMessages(t *testing.T) {
-	h := newPRReviewHarness(t, false)
-	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
-	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
-		leadcontrol.MetadataCodexEndpoint: "ws://codex.test",
-		leadcontrol.MetadataCodexThreadID: "thread-1",
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	h.module.streamPollInterval = time.Millisecond
-	onRead := cancelAfterReads(2, cancel)
-	h.module.dialCodex = func(ctx context.Context, endpoint string) (codexThreadReader, error) {
-		if endpoint != "ws://codex.test" {
-			t.Fatalf("endpoint = %q, want ws://codex.test", endpoint)
-		}
-		return &fakeReviewerCodexReader{
-			onRead: onRead,
-			thread: &leadcontrol.CodexThread{
-				ID:     "thread-1",
-				Status: leadcontrol.CodexThreadStatus{Type: "idle"},
-				Turns: []leadcontrol.CodexTurn{{
-					ID:     "turn-1",
-					Status: "completed",
-					Items: []leadcontrol.CodexTurnItem{
-						{
-							Type:    "userMessage",
-							ID:      "item-user",
-							Content: []leadcontrol.CodexContentBlock{{Type: "text", Text: "hello"}},
-						},
-						{
-							Type:  "agentMessage",
-							ID:    "item-agent",
-							Text:  "hi there",
-							Phase: "final_answer",
-						},
-					},
-				}},
-			},
-		}, nil
-	}
-
-	status, raw := h.streamWithContext(t, ctx, "/api/workspaces/WS/pull-requests/octocat/hello/7/stream")
-	if status != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
-	}
-	body := string(raw)
-	if strings.Count(body, `"role":"user"`) != 1 || strings.Count(body, `"text":"hello"`) != 1 {
-		t.Fatalf("stream body = %q, want one user hello message", body)
-	}
-	if strings.Count(body, `"role":"assistant"`) != 1 || strings.Count(body, `"text":"hi there"`) != 1 {
-		t.Fatalf("stream body = %q, want one assistant hi there message", body)
-	}
-	if strings.Count(body, "event: message") != 2 {
-		t.Fatalf("stream body = %q, want exactly two message events", body)
-	}
-}
-
 func TestGetReviewerConversationStartingWhenNoSession(t *testing.T) {
 	h := newPRReviewHarness(t, false)
 	createReviewerAgentForTest(t, h, "octocat", "hello", 7)
@@ -1582,6 +1556,276 @@ func TestGetReviewerConversationSnapshot(t *testing.T) {
 	}
 	if decoded.Data.Messages[1].Role != "assistant" || decoded.Data.Messages[1].Text != "hi there" {
 		t.Fatalf("message[1] = %+v, want assistant/hi there", decoded.Data.Messages[1])
+	}
+}
+
+// getConversationWithAfter fetches the poll snapshot with an optional `after`
+// cursor and decodes the incremental-cursor response fields.
+func getConversationWithAfter(t *testing.T, h *prReviewHarness, after string) (state string, messages []reviewerStreamMessage, cursor string, reset bool) {
+	t.Helper()
+	path := "/api/workspaces/WS/pull-requests/octocat/hello/7/conversation"
+	if after != "" {
+		path += "?after=" + url.QueryEscape(after)
+	}
+	status, raw := h.get(t, path)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", status, raw)
+	}
+	var decoded struct {
+		Data struct {
+			State    string                  `json:"state"`
+			Messages []reviewerStreamMessage `json:"messages"`
+			Cursor   string                  `json:"cursor"`
+			Reset    bool                    `json:"reset"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("decode: %v (body %s)", err, raw)
+	}
+	return decoded.Data.State, decoded.Data.Messages, decoded.Data.Cursor, decoded.Data.Reset
+}
+
+// twoBubbleCodexThread is an idle thread with one user + one assistant bubble;
+// its last message cursor is "turn-1/item-agent".
+func twoBubbleCodexThread() *leadcontrol.CodexThread {
+	return &leadcontrol.CodexThread{
+		ID:     "thread-1",
+		Status: leadcontrol.CodexThreadStatus{Type: "idle"},
+		Turns: []leadcontrol.CodexTurn{{
+			ID:     "turn-1",
+			Status: "completed",
+			Items: []leadcontrol.CodexTurnItem{
+				{Type: "userMessage", ID: "item-user", Content: []leadcontrol.CodexContentBlock{{Type: "text", Text: "hello"}}},
+				{Type: "agentMessage", ID: "item-agent", Text: "hi there", Phase: "final_answer"},
+			},
+		}},
+	}
+}
+
+// setupCodexReviewerWithThread stands up a codex-backed reviewer whose app-server
+// read returns *threadRef on every poll (reassign *threadRef to grow the thread).
+func setupCodexReviewerWithThread(t *testing.T, h *prReviewHarness, threadRef **leadcontrol.CodexThread) {
+	t.Helper()
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
+	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
+		leadcontrol.MetadataCodexEndpoint: "ws://codex.test",
+		leadcontrol.MetadataCodexThreadID: "thread-1",
+	})
+	h.module.dialCodex = func(context.Context, string) (codexThreadReader, error) {
+		return &fakeReviewerCodexReader{threadRef: threadRef}, nil
+	}
+}
+
+func TestReadReviewerThreadReusesEndpointConnection(t *testing.T) {
+	module := NewModule(nil, nil, nil, nil, "")
+	reader := &fakeReviewerCodexReader{thread: twoBubbleCodexThread()}
+	dials := 0
+	module.dialCodex = func(_ context.Context, endpoint string) (codexThreadReader, error) {
+		if endpoint != "ws://codex.test" {
+			t.Fatalf("endpoint = %q, want ws://codex.test", endpoint)
+		}
+		dials++
+		return reader, nil
+	}
+	runtime := leadcontrol.CodexRuntimeMetadata{
+		Endpoint: "ws://codex.test",
+		ThreadID: "thread-1",
+	}
+
+	for i := 0; i < 2; i++ {
+		thread, err := module.readReviewerThread(context.Background(), runtime)
+		if err != nil {
+			t.Fatalf("read %d: %v", i+1, err)
+		}
+		if thread == nil || thread.ID != "thread-1" {
+			t.Fatalf("read %d thread = %+v, want thread-1", i+1, thread)
+		}
+	}
+	if dials != 1 {
+		t.Fatalf("dials = %d, want 1", dials)
+	}
+	if closes := reader.closedCount(); closes != 0 {
+		t.Fatalf("reader closes = %d, want 0 while pooled", closes)
+	}
+}
+
+func TestReadReviewerThreadDropsEntryAfterReadError(t *testing.T) {
+	module := NewModule(nil, nil, nil, nil, "")
+	first := &fakeReviewerCodexReader{err: errors.New("read failed")}
+	second := &fakeReviewerCodexReader{thread: twoBubbleCodexThread()}
+	dials := 0
+	module.dialCodex = func(context.Context, string) (codexThreadReader, error) {
+		dials++
+		if dials == 1 {
+			return first, nil
+		}
+		return second, nil
+	}
+	runtime := leadcontrol.CodexRuntimeMetadata{
+		Endpoint: "ws://codex.test",
+		ThreadID: "thread-1",
+	}
+
+	if _, err := module.readReviewerThread(context.Background(), runtime); err == nil || !strings.Contains(err.Error(), "read failed") {
+		t.Fatalf("first read error = %v, want read failed", err)
+	}
+	if closes := first.closedCount(); closes != 1 {
+		t.Fatalf("first reader closes = %d, want 1 after read error", closes)
+	}
+	thread, err := module.readReviewerThread(context.Background(), runtime)
+	if err != nil {
+		t.Fatalf("second read: %v", err)
+	}
+	if thread == nil || thread.ID != "thread-1" {
+		t.Fatalf("second thread = %+v, want thread-1", thread)
+	}
+	if dials != 2 {
+		t.Fatalf("dials = %d, want 2 after dropped entry", dials)
+	}
+	if closes := second.closedCount(); closes != 0 {
+		t.Fatalf("second reader closes = %d, want 0 while pooled", closes)
+	}
+}
+
+func TestReadReviewerThreadSerializesSameEndpointReads(t *testing.T) {
+	module := NewModule(nil, nil, nil, nil, "")
+	reader := &serialCheckingReviewerCodexReader{thread: twoBubbleCodexThread()}
+	var dialMu sync.Mutex
+	dials := 0
+	module.dialCodex = func(context.Context, string) (codexThreadReader, error) {
+		dialMu.Lock()
+		defer dialMu.Unlock()
+		dials++
+		return reader, nil
+	}
+	runtime := leadcontrol.CodexRuntimeMetadata{
+		Endpoint: "ws://codex.test",
+		ThreadID: "thread-1",
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			thread, err := module.readReviewerThread(context.Background(), runtime)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if thread == nil || thread.ID != "thread-1" {
+				errs <- errors.New("read returned wrong thread")
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	dialMu.Lock()
+	gotDials := dials
+	dialMu.Unlock()
+	if gotDials != 1 {
+		t.Fatalf("dials = %d, want 1", gotDials)
+	}
+	if reads := reader.readCount(); reads != 2 {
+		t.Fatalf("reads = %d, want 2", reads)
+	}
+	if max := reader.maxInFlightReads(); max != 1 {
+		t.Fatalf("max concurrent reads = %d, want serialized reads", max)
+	}
+}
+
+func TestGetReviewerConversationCursorIncremental(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	thread := twoBubbleCodexThread()
+	setupCodexReviewerWithThread(t, h, &thread)
+
+	// First poll (no cursor): a full snapshot the client must replace with.
+	state, msgs, cursor, reset := getConversationWithAfter(t, h, "")
+	if state != "idle" || !reset || len(msgs) != 2 {
+		t.Fatalf("first poll = state %q reset %v msgs %+v, want idle full snapshot of 2", state, reset, msgs)
+	}
+	if cursor != "turn-1/item-agent" {
+		t.Fatalf("cursor = %q, want turn-1/item-agent", cursor)
+	}
+
+	// The reviewer answers again: only the new bubble comes back next poll,
+	// keyed off the cursor the client already holds.
+	thread = twoBubbleCodexThread()
+	thread.Turns[0].Items = append(thread.Turns[0].Items, leadcontrol.CodexTurnItem{
+		Type: "agentMessage", ID: "item-agent-2", Text: "one more thing", Phase: "final_answer",
+	})
+	state, msgs, cursor, reset = getConversationWithAfter(t, h, cursor)
+	if state != "idle" || reset {
+		t.Fatalf("incremental poll = state %q reset %v, want idle append (reset=false)", state, reset)
+	}
+	if len(msgs) != 1 || msgs[0].Role != "assistant" || msgs[0].Text != "one more thing" {
+		t.Fatalf("incremental msgs = %+v, want only the new assistant bubble", msgs)
+	}
+	if cursor != "turn-1/item-agent-2" {
+		t.Fatalf("cursor = %q, want turn-1/item-agent-2", cursor)
+	}
+}
+
+func TestGetReviewerConversationCursorNoNewMessages(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	thread := twoBubbleCodexThread()
+	setupCodexReviewerWithThread(t, h, &thread)
+
+	// Poll with the cursor of the last message and an unchanged thread: no
+	// newer messages, no reset, cursor unchanged.
+	state, msgs, cursor, reset := getConversationWithAfter(t, h, "turn-1/item-agent")
+	if state != "idle" || reset || len(msgs) != 0 {
+		t.Fatalf("poll = state %q reset %v msgs %+v, want idle with no new messages", state, reset, msgs)
+	}
+	if cursor != "turn-1/item-agent" {
+		t.Fatalf("cursor = %q, want it unchanged", cursor)
+	}
+}
+
+func TestGetReviewerConversationCursorUnknownResets(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	thread := twoBubbleCodexThread()
+	setupCodexReviewerWithThread(t, h, &thread)
+
+	// A cursor no message matches (session rotated / IDs reconstructed) forces
+	// a full re-sync snapshot the client must replace with.
+	state, msgs, cursor, reset := getConversationWithAfter(t, h, "stale-turn/stale-item")
+	if state != "idle" || !reset || len(msgs) != 2 {
+		t.Fatalf("poll = state %q reset %v msgs %+v, want a full re-sync snapshot", state, reset, msgs)
+	}
+	if cursor != "turn-1/item-agent" {
+		t.Fatalf("cursor = %q, want turn-1/item-agent", cursor)
+	}
+}
+
+func TestGetReviewerConversationCursorReconnectingKeepsClient(t *testing.T) {
+	h := newPRReviewHarness(t, false)
+	agentName := createReviewerAgentForTest(t, h, "octocat", "hello", 7)
+	createReviewerOrchestrationSessionForTest(t, h, agentName, map[string]string{
+		leadcontrol.MetadataCodexEndpoint: "ws://codex.test",
+		leadcontrol.MetadataCodexThreadID: "thread-1",
+	})
+	// A failed read yields a reconnecting snapshot with no messages: it must
+	// NOT signal a reset (which would blank the client) and must echo the
+	// client's cursor back so it keeps its last-good conversation.
+	h.module.dialCodex = func(context.Context, string) (codexThreadReader, error) {
+		return nil, errors.New("dial failed")
+	}
+	state, msgs, cursor, reset := getConversationWithAfter(t, h, "turn-1/item-agent")
+	if state != "reconnecting" || reset || len(msgs) != 0 {
+		t.Fatalf("poll = state %q reset %v msgs %+v, want reconnecting with no reset and no messages", state, reset, msgs)
+	}
+	if cursor != "turn-1/item-agent" {
+		t.Fatalf("cursor = %q, want the client cursor echoed back", cursor)
 	}
 }
 
@@ -1740,6 +1984,50 @@ func TestEnsureReviewerRejectsChangedFetchedTip(t *testing.T) {
 	}
 }
 
+func TestEnsureReviewerUsesAuthorizedRepoCheckoutSnapshot(t *testing.T) {
+	h := newPRReviewHarness(t, true)
+	workspacePath := t.TempDir()
+	repoPath := filepath.Join(workspacePath, "hello")
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo path: %v", err)
+	}
+	h.rememberLocalPaths(t, workspacePath, "hello", repoPath)
+	h.github.setHead("ABC123")
+
+	var deleteOnce sync.Once
+	var deleteErr error
+	h.module.beforeCredentialSeedCommit = func() {
+		deleteOnce.Do(func() {
+			deleteErr = h.store.Repos().Delete(context.Background(), prReviewTestWorkspace, "hello")
+		})
+	}
+	checkoutCalled := false
+	h.module.checkoutReviewerPRHead = func(_ context.Context, gotRepoPath, _ string, _ string, _ int, headSHA string) (string, error) {
+		checkoutCalled = true
+		if gotRepoPath != repoPath {
+			t.Fatalf("checkout repo path = %q, want %q", gotRepoPath, repoPath)
+		}
+		return "DEF456", &localworkspace.PRHeadChangedError{
+			ExpectedSHA: headSHA,
+			TipSHA:      "DEF456",
+		}
+	}
+
+	status, raw := h.post(t, "/api/workspaces/WS/pull-requests/octocat/hello/7/reviewer", `{}`)
+	if deleteErr != nil {
+		t.Fatalf("delete repo during seed: %v", deleteErr)
+	}
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 from checkout seam (body %s)", status, raw)
+	}
+	if code := decodeErrorCode(t, raw); code != "stale_subject" {
+		t.Fatalf("code = %q, want stale_subject", code)
+	}
+	if !checkoutCalled {
+		t.Fatal("checkout seam was not called")
+	}
+}
+
 func TestEnsureReviewerRejectsMissingRecordedCheckout(t *testing.T) {
 	h := newPRReviewHarness(t, true)
 	workspacePath := t.TempDir()
@@ -1832,29 +2120,81 @@ func createReviewerOrchestrationSessionForTest(t *testing.T, h *prReviewHarness,
 }
 
 type fakeReviewerCodexReader struct {
-	thread *leadcontrol.CodexThread
-	onRead func()
+	thread    *leadcontrol.CodexThread
+	threadRef **leadcontrol.CodexThread
+	err       error
+	mu        sync.Mutex
+	closes    []string
 }
 
 func (r *fakeReviewerCodexReader) ReadThreadWithTurns(context.Context, string) (*leadcontrol.CodexThread, error) {
-	if r.onRead != nil {
-		r.onRead()
+	if r.err != nil {
+		return nil, r.err
+	}
+	if r.threadRef != nil {
+		return *r.threadRef, nil
 	}
 	return r.thread, nil
 }
 
-func (r *fakeReviewerCodexReader) Close(string) error {
+func (r *fakeReviewerCodexReader) Close(reason string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closes = append(r.closes, reason)
 	return nil
 }
 
-func cancelAfterReads(want int, cancel context.CancelFunc) func() {
-	count := 0
-	return func() {
-		count++
-		if count >= want {
-			cancel()
-		}
+func (r *fakeReviewerCodexReader) closedCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.closes)
+}
+
+type serialCheckingReviewerCodexReader struct {
+	thread *leadcontrol.CodexThread
+	mu     sync.Mutex
+
+	inFlight    int
+	maxInFlight int
+	reads       int
+}
+
+func (r *serialCheckingReviewerCodexReader) ReadThreadWithTurns(ctx context.Context, _ string) (*leadcontrol.CodexThread, error) {
+	r.mu.Lock()
+	r.inFlight++
+	r.reads++
+	if r.inFlight > r.maxInFlight {
+		r.maxInFlight = r.inFlight
 	}
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.inFlight--
+		r.mu.Unlock()
+	}()
+
+	select {
+	case <-time.After(50 * time.Millisecond):
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return r.thread, nil
+}
+
+func (r *serialCheckingReviewerCodexReader) Close(string) error {
+	return nil
+}
+
+func (r *serialCheckingReviewerCodexReader) readCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.reads
+}
+
+func (r *serialCheckingReviewerCodexReader) maxInFlightReads() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.maxInFlight
 }
 
 func queuedReviewerMessagesForTest(t *testing.T, st store.Store, agentName string) []*domain.AgentInboxMessage {

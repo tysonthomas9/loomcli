@@ -1516,23 +1516,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/stream": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Stream the per-PR reviewer conversation */
-    get: operations["streamPullRequestReviewer"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation": {
     parameters: {
       query?: never;
@@ -2550,7 +2533,12 @@ export interface components {
       state: string;
       /** @description Human-readable context for failed/unsupported states. */
       detail?: string;
+      /** @description When reset=true, the full message list to replace with. When reset=false, only the messages after the requested cursor to append. */
       messages: components["schemas"]["ReviewerMessage"][];
+      /** @description Opaque identity of the LAST message in the underlying list (empty when the list is empty). Pass it back as `after` on the next poll. */
+      cursor: string;
+      /** @description true when messages is a full snapshot the client must replace with; false when it is an incremental tail the client should append. */
+      reset: boolean;
     };
     /**
      * @description Core issue type used in list endpoints. Maps to `types.Issue` json
@@ -6766,53 +6754,12 @@ export interface operations {
       };
     };
   };
-  streamPullRequestReviewer: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        owner: string;
-        repo: string;
-        number: number;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description SSE event stream of reviewer status and messages */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "text/event-stream": string;
-        };
-      };
-      /** @description Invalid path parameter */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      /** @description Repository is not registered or reviewer was not started */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-    };
-  };
   getPullRequestReviewerConversation: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque cursor of the last message the client already holds. Omit for a full snapshot; supply it to receive only newer messages. A cursor that no longer matches any message (session rotated) returns the full list with reset=true. */
+        after?: string;
+      };
       header?: never;
       path: {
         /** @description Workspace identifier */

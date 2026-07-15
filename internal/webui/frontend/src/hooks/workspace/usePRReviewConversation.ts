@@ -43,6 +43,23 @@ function isStaleSubjectError(error: unknown): boolean {
   return (error.body as { code?: unknown }).code === "stale_subject";
 }
 
+function messageCursor(message: ReviewerMessage): string {
+  return `${message.turn_id}/${message.item_id}`;
+}
+
+/**
+ * Append `incoming` to `prev`, dropping any message whose turn_id/item_id the
+ * client already holds — defensive against the cursor overlapping the tail.
+ */
+function appendMessages(
+  prev: ReviewerMessage[],
+  incoming: ReviewerMessage[],
+): ReviewerMessage[] {
+  const seen = new Set(prev.map(messageCursor));
+  const additions = incoming.filter((m) => !seen.has(messageCursor(m)));
+  return additions.length > 0 ? [...prev, ...additions] : prev;
+}
+
 export function usePRReviewConversation({
   workspaceId,
   owner,
@@ -69,6 +86,9 @@ export function usePRReviewConversation({
   const pollInFlightRef = useRef(false);
   const mountedRef = useRef(false);
   const onStaleSubjectRef = useRef(onStaleSubject);
+  // The opaque cursor of the last message we hold; sent as `after` so the poll
+  // returns only newer messages. Empty means "no cursor yet" → full snapshot.
+  const cursorRef = useRef("");
   const key = `${workspaceId}|${owner}|${repo}|${number}`;
 
   const invalidateRequests = useCallback(() => {
@@ -88,16 +108,27 @@ export function usePRReviewConversation({
         owner,
         repo,
         number,
+        cursorRef.current || undefined,
       );
       if (mountedRef.current && seq === requestSeqRef.current) {
         // A reconnecting snapshot has no messages by construction (the read
         // failed transiently, e.g. a torn transcript append) — keep showing
-        // the last good conversation instead of blanking the chat.
+        // the last good conversation, and our cursor, instead of blanking the
+        // chat.
         if (
           conversation.state !== "reconnecting" ||
           conversation.messages.length > 0
         ) {
-          setMessages(conversation.messages);
+          if (conversation.reset === false) {
+            // Incremental tail: append only what's new, deduping any overlap.
+            if (conversation.messages.length > 0) {
+              setMessages((prev) => appendMessages(prev, conversation.messages));
+            }
+          } else {
+            // Full snapshot (reset, or a legacy response without the flag).
+            setMessages(conversation.messages);
+          }
+          cursorRef.current = conversation.cursor ?? "";
         }
         setState(conversation.state);
         setDetail(conversation.detail ?? null);
@@ -134,6 +165,7 @@ export function usePRReviewConversation({
     ensureKeyRef.current = null;
     requestSeqRef.current++;
     pollInFlightRef.current = false;
+    cursorRef.current = "";
   }, [key]);
 
   useEffect(() => {

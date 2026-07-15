@@ -104,16 +104,24 @@ export async function sendReviewerMessage(
   return unwrapResponse(data, response);
 }
 
+/**
+ * Fetch the reviewer conversation snapshot. Pass `after` — the opaque cursor of
+ * the last message the client already holds — to receive only newer messages
+ * (`reset: false`); omit it for a full snapshot (`reset: true`).
+ */
 export async function getReviewerConversation(
   ws: string,
   owner: string,
   repo: string,
   number: number,
+  after?: string,
 ): Promise<ReviewerConversation> {
   const { data, error, response } = await api.GET(
     "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation",
     {
-      params: { path: { ws, owner, repo, number } },
+      params: after
+        ? { path: { ws, owner, repo, number }, query: { after } }
+        : { path: { ws, owner, repo, number } },
     },
   );
   if (error) throw apiErrorFromResponse(error, response);

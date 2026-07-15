@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -17,6 +18,13 @@ type pullRequestPath struct {
 	owner  string
 	repo   string
 	number int
+}
+
+type authorizedRepo struct {
+	owner         string
+	repo          string
+	workspaceRepo ops.WorkspaceRepo
+	workspacePath string
 }
 
 func parsePullRequestPath(owner, repo, number string) (pullRequestPath, bool) {
@@ -70,14 +78,17 @@ func splitGitHubPath(path string) (owner, repo string, ok bool) {
 
 // workspaceHasRepo checks the requested owner/repo against the workspace's
 // registered repos case-insensitively and, on a match, returns the CANONICAL
-// owner/repo exactly as registered. Callers must use the canonical pair for
-// the grant resource/pattern and the dispatch resource so a non-canonical-cased
-// request can never seed a grant whose (case-sensitive) pattern fails to match
-// the later canonical dispatch.
-func (m *Module) workspaceHasRepo(ctx context.Context, ws, owner, repo string) (canonOwner, canonRepo string, ok bool, err error) {
+// owner/repo exactly as registered plus the matched workspace repo snapshot.
+// Callers must use the canonical pair for the grant resource/pattern and the
+// dispatch resource so a non-canonical-cased request can never seed a grant
+// whose (case-sensitive) pattern fails to match the later canonical dispatch.
+func (m *Module) workspaceHasRepo(ctx context.Context, ws, owner, repo string) (authorizedRepo, bool, error) {
 	data, buildErr := storeadapter.BuildWorkspaceDataForKey(ctx, m.store, ws)
 	if buildErr != nil {
-		return "", "", false, buildErr
+		return authorizedRepo{}, false, buildErr
+	}
+	if data == nil {
+		return authorizedRepo{}, false, nil
 	}
 	for _, workspaceRepo := range data.Repos {
 		gotOwner, gotRepo, parsed := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)
@@ -85,8 +96,13 @@ func (m *Module) workspaceHasRepo(ctx context.Context, ws, owner, repo string) (
 			continue
 		}
 		if strings.EqualFold(gotOwner, owner) && strings.EqualFold(gotRepo, repo) {
-			return gotOwner, gotRepo, true, nil
+			return authorizedRepo{
+				owner:         gotOwner,
+				repo:          gotRepo,
+				workspaceRepo: workspaceRepo,
+				workspacePath: data.Path,
+			}, true, nil
 		}
 	}
-	return "", "", false, nil
+	return authorizedRepo{}, false, nil
 }
