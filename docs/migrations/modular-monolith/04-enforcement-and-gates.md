@@ -4,6 +4,8 @@
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
+**Bootstrap status:** Phase 1 checks in the three source manifests, strict schema validation, semantic composite-Store and plural-handler per-file ratchets, proposed-graph package-move blocking, synchronous graph-cycle validation, and default-deny checks for future module roots and internal/import edges. Analyzer `0.1.0` rejects graph approval until app/platform restrictions, owned legacy paths, and bounded durable-cycle metadata are enforced. The declared build profiles, legacy import/cycle graph, direct-write analyzer, signature-leak checks, and mutation ledger remain explicitly deferred in `migration-baseline.json`; this bootstrap is not the completed analyzer described below.
+
 ## Architecture source of truth
 
 The implementation should check in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml` and `migration-baseline.json` beside it. The graph must declare:

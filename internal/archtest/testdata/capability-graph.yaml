@@ -1,0 +1,91 @@
+schema_version: 1
+status: proposed
+decision_dependencies:
+  - MM-1
+  - MM-2
+  - MM-3
+  - MM-4
+  - MM-5
+  - MM-6
+  - MM-7
+module_root: internal/modules
+capabilities:
+  - name: workspace
+    root: workspace
+    status: planned
+  - name: workitems
+    root: workitems
+    status: planned
+  - name: agents
+    root: agents
+    status: planned
+  - name: workflowcatalog
+    root: workflowcatalog
+    status: planned
+  - name: automation
+    root: automation
+    status: planned
+  - name: execution
+    root: execution
+    status: planned
+  - name: interaction
+    root: interaction
+    status: planned
+  - name: sourcecontrol
+    root: sourcecontrol
+    status: planned
+  - name: connectors
+    root: connectors
+    status: planned
+  - name: artifacts
+    root: artifacts
+    status: planned
+edges:
+  - from: sourcecontrol
+    to: workspace
+    kinds: [import, query]
+  - from: sourcecontrol
+    to: connectors
+    kinds: [import, command]
+  - from: execution
+    to: agents
+    kinds: [import, query]
+  - from: execution
+    to: workitems
+    kinds: [import, command, query]
+  - from: execution
+    to: workflowcatalog
+    kinds: [import, query]
+  - from: execution
+    to: sourcecontrol
+    kinds: [import, command]
+  - from: execution
+    to: connectors
+    kinds: [import, command]
+  - from: execution
+    to: artifacts
+    kinds: [import, command]
+  - from: automation
+    to: workflowcatalog
+    kinds: [import, query]
+  - from: automation
+    to: execution
+    kinds: [import, command]
+  - from: execution
+    to: automation
+    kinds: [durable_event]
+  - from: interaction
+    to: agents
+    kinds: [import, query]
+  - from: interaction
+    to: workitems
+    kinds: [import, command, query]
+  - from: interaction
+    to: sourcecontrol
+    kinds: [import, command]
+  - from: interaction
+    to: connectors
+    kinds: [import, command]
+  - from: interaction
+    to: artifacts
+    kinds: [import, command]

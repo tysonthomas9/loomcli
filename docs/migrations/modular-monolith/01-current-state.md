@@ -1,18 +1,18 @@
 # Current-State Evidence
 
 - **Status:** Proposed migration input
-- **Snapshot:** 2026-07-14, validated Loom code head `09f071d0a` after integrating `origin/v5`
+- **Snapshot:** 2026-07-15, pre-guardrail Loom code head `122d4d79` after refreshing `origin/v5`
 - **Migration:** [Modular Monolith Migration](README.md)
 
 ## What the measurements say
 
 | Measure | Snapshot value | Interpretation |
 |---|---:|---|
-| Go packages from `go list ./...` | 163 total; 159 under `internal/...` | Loom is already highly packaged |
+| Go packages from `go list ./...` | 165 total; 159 under `internal/...` | Loom is already highly packaged |
 | Largest non-generated production package / configured internal fanout ceiling | 25 files / 18 imports | Existing size and fanout gates pass at their ceilings |
-| Production files referring to `store.Store` | 95 | The broad dependency is semantic, not a large-package problem |
-| `store.Store` references outside `cli/serve`, `infra`, and `store` | 85 | Composite persistence reaches capability code |
-| Frontend production TS/TSX files | 602 | The frontend needs ownership boundaries |
+| Production files using the composite Store interface | 93 semantic uses; the old text scan reports 96 | The broad dependency is semantic, not a large-package problem |
+| Composite Store uses outside `cli/serve`, `infra`, and `store` | 82 semantic uses; the old text scan reports 86 | Composite persistence reaches capability code |
+| Frontend production TS/TSX files | 604 | The frontend needs ownership boundaries |
 | Frontend top-level component directories | 94 | Component folders do not currently provide those boundaries |
 | `internal/webui/frontend/src/App.tsx` | 1,569 lines | The application shell directly composes many capabilities |
 
@@ -39,7 +39,7 @@ This spreads one use case across transport, services, domain records, persistenc
 
 The `.golangci.yml` `depguard.rules` entries, including `handler-layer-isolation`, `sdk-leaf`, and the technical-layer rules below them, establish a useful horizontal DAG and special restrictions for handlers and `cli/data`. They do not establish capability ownership for the large middle tier: `domain`, `store`, `infra`, `driver`, `trigger`, `workflows`, `connector`, `leadcontrol`, `sessions`, and related packages.
 
-One handler rule currently targets singular `**/handler/**`, while production code lives under `internal/webui/handlers/**`. Correcting that pattern without a legacy baseline would expose existing violations. Its eventual remediation must direct adapters toward capability public APIs, not permanently bless `internal/webui/service`, which this migration retires as a business-logic bucket.
+The pre-guardrail handler rule targeted singular `**/handler/**`, while production code lives under `internal/webui/handlers/**`. The Phase 1 bootstrap corrects the plural path, keeps zero-baseline imports in depguard, and checks the existing backend, Store, daemon, and `webui/store` imports against a per-file machine baseline. Remediation must remove those exceptions and direct adapters toward capability public APIs, not permanently bless `internal/webui/service`, which this migration retires as a business-logic bucket.
 
 The frontend ESLint graph in `internal/webui/frontend/eslint.config.js` enforces horizontal folders (`views`, `components`, `hooks`, `stores`, `api`, `types`). Same-layer imports remain broad, type-only imports cross every edge, and tests are outside the graph. `WorkspaceViewContext` spans issue, agent, terminal, navigation, filtering, and review behavior.
 
@@ -79,14 +79,16 @@ The target is one lifecycle framework coordinating isolated capability reconcile
 
 ## Reproducible snapshot commands
 
-These commands reproduce the recorded measurements at `09f071d0a`:
+These commands reproduce the pre-guardrail measurements at `122d4d79`:
 
 ```sh
 GOCACHE=/tmp/go-build-cache go list ./... | wc -l
 GOCACHE=/tmp/go-build-cache go list ./internal/... | wc -l
 scripts/check-package-size.sh 25
 GOCACHE=/tmp/go-build-cache scripts/check-import-fanout.sh 18
+GOCACHE=/tmp/go-build-cache make check-architecture
 
+# Historical exact-spelling diagnostic; the architecture guard is the semantic ratchet.
 rg -l 'store\.Store' internal -g '*.go' -g '!*_test.go' | wc -l
 rg -l 'store\.Store' internal -g '*.go' -g '!*_test.go' \
   | rg -v '^internal/(cli/serve|infra|store)/' | wc -l

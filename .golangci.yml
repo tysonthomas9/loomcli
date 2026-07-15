@@ -62,18 +62,28 @@ linters:
         handler-layer-isolation:
           list-mode: lax
           files:
-            - "**/handler/**"
+            - "**/handlers/**"
           deny:
-            - pkg: github.com/tysonthomas9/loomcli/internal/webui/daemon
-              desc: "Handlers must not import daemon directly; use the service layer (internal/webui/service)"
-            - pkg: github.com/tysonthomas9/loomcli/internal/backend
-              desc: "Handlers must not import backend directly; use the service layer (internal/webui/service)"
             - pkg: github.com/tysonthomas9/loomcli/internal/notify
               desc: "Handlers must not import notify directly; use the service layer (internal/webui/service)"
-            - pkg: github.com/tysonthomas9/loomcli/internal/webui/store
-              desc: "Handlers must not import store directly; use the service layer (internal/webui/service)"
+          # Existing backend, Store, daemon, and webui/store imports are
+          # grandfathered per file by make check-architecture. Keeping them in
+          # depguard would turn this path correction into a big-bang rewrite.
+        capability-httpapi-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/modules/*/httpapi/**"
+          deny:
             - pkg: github.com/tysonthomas9/loomcli/internal/store
-              desc: "Handlers must not import store directly; use the service layer (internal/webui/service)"
+              desc: "Capability HTTP adapters must use their capability public API, not the composite Store"
+            - pkg: github.com/tysonthomas9/loomcli/internal/domain
+              desc: "Capability HTTP adapters must not leak the legacy global domain model"
+            - pkg: github.com/tysonthomas9/loomcli/internal/infra
+              desc: "Capability HTTP adapters must not import infrastructure implementations"
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui/service
+              desc: "Capability HTTP adapters must use their capability public API, not the legacy service layer"
+            - pkg: github.com/tysonthomas9/loomcli/internal/webui/svcimpl
+              desc: "Capability HTTP adapters must not import legacy service implementations"
         # Module boundary rules — dependency direction: sdk → infra → web → cli
         # When adding new internal packages, add them to the appropriate rule below.
         # See /Users/tyson/.claude/plans/purrfect-weaving-stream.md for layer definitions.

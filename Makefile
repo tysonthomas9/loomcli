@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -389,6 +389,9 @@ check-loc:
 check-control-plane-paths:
 	@./scripts/check-control-plane-paths.sh
 
+check-architecture:
+	@go run ./scripts/archcheck check
+
 # Check for stale LOC allowlist entries
 check-loc-stale:
 	@./scripts/check-loc-stale.sh --check-stale 1000
@@ -563,33 +566,35 @@ frontend: build-frontend
 
 # Go-only quality gate (no Node, no frontend dist)
 check-go:
-	@echo "=== [1/13] Go: format check ==="
+	@echo "=== [1/14] Go: format check ==="
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
-	@echo "=== [2/13] Go: vet ==="
+	@echo "=== [2/14] Go: vet ==="
 	@go vet ./...
-	@echo "=== [3/13] Go: build ==="
+	@echo "=== [3/14] Go: build ==="
 	@go build -buildvcs=false ./...
-	@echo "=== [4/13] Go: lint (golangci-lint + depguard + control-plane path guard) ==="
+	@echo "=== [4/14] Go: lint (golangci-lint + depguard + control-plane path guard) ==="
 	@golangci-lint run --timeout=5m --allow-parallel-runners
 	@./scripts/check-control-plane-paths.sh
-	@echo "=== [5/13] Go: LOC check ==="
+	@echo "=== [5/14] Go: LOC check ==="
 	@./scripts/check-loc.sh 1000 2500
-	@echo "=== [6/13] Go: package size check ==="
+	@echo "=== [6/14] Go: package size check ==="
 	@./scripts/check-package-size.sh 25
-	@echo "=== [7/13] Go: import fanout check ==="
+	@echo "=== [7/14] Go: import fanout check ==="
 	@./scripts/check-import-fanout.sh 18
-	@echo "=== [8/13] Go: exec.Command guard ==="
+	@echo "=== [8/14] Go: modular-monolith architecture guard ==="
+	@$(MAKE) check-architecture
+	@echo "=== [9/14] Go: exec.Command guard ==="
 	@./scripts/check-no-raw-exec.sh
-	@echo "=== [9/13] Go: log.Printf guard ==="
+	@echo "=== [10/14] Go: log.Printf guard ==="
 	@./scripts/check-no-log-printf.sh
-	@echo "=== [10/13] Go: no new production beads/bd references ==="
+	@echo "=== [11/14] Go: no new production beads/bd references ==="
 	@./scripts/check-no-beads-prod.sh
-	@echo "=== [11/13] Go: generated API staleness ==="
+	@echo "=== [12/14] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
-	@echo "=== [12/13] Go: test with race detector ==="
+	@echo "=== [13/14] Go: test with race detector ==="
 	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [13/13] Go: coverage threshold ==="
+	@echo "=== [14/14] Go: coverage threshold ==="
 	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 
@@ -702,6 +707,7 @@ help:
 	@echo "  make test-forkwatch    - Run tests under a fork-bomb/process-leak watchdog (PKG=./path/...)"
 	@echo "  make check-no-raw-exec - Check for raw exec.Command in unit tests"
 	@echo "  make check-control-plane-paths - Check local/cloud fleet-db runtime path invariants"
+	@echo "  make check-architecture - Check modular-monolith manifests and coupling ratchets"
 	@echo "  make check-loc-stale   - Check for stale LOC allowlist entries"
 	@echo "  make lint              - Run Go linter (golangci-lint)"
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"

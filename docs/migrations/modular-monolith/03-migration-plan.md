@@ -44,7 +44,7 @@ After Phase 0, these are dependency lanes rather than one serial queue:
 
 This phase is a hard gate.
 
-**Recorded status:** In progress. Steps 1 through 6 are complete at Loom `09f071d0a` and FleetDB `7f7104b9`, including matching OpenAPI snapshots, both repository gates, the supervisor control-plane suite, and deterministic local-mode/browser proof. Step 7 remains open for the direct-write, authority, transaction, named-loop, and performance inventories; step 8 is complete only for the reproducible structural measures already recorded. See the [Phase 0 integration baseline](00-phase-0-baseline.md) for immutable revisions, conflict resolutions, commands, evidence, and known gaps.
+**Recorded status:** In progress. Steps 1 through 6 remain proven by the immutable integration record and were refreshed for the Phase 1 source at Loom `122d4d79` and FleetDB `8120c788`, with matching OpenAPI snapshots and current gates. Step 7 remains open for the direct-write, authority, transaction, named-loop, and performance inventories; the initial machine baseline records explicit owners and acceptance criteria for anything not yet inventoried. Step 8 is refreshed for the reproducible structural measures at the new source head. See the [Phase 0 integration baseline](00-phase-0-baseline.md) for revisions, conflict resolutions, commands, evidence, and known gaps.
 
 1. Fetch and record the exact fleet-db base, Loom `v5`, and both branch-head SHAs.
 2. Merge `origin/main` into the companion fleet-db branch; resolve migrations and `api/openapi.yaml` there first.
@@ -64,6 +64,8 @@ Documentation and test design were refined before this phase. The first committe
 ## Phase 1 — parallel guardrail and reliability lanes
 
 After Phase 0, these two lanes run independently. Catalog work does not wait for Execution reliability fixes.
+
+**Started:** The `modular-monolith-phase1` branch begins with behavior-neutral manifests, schema validation, and no-new-coupling ratchets. The capability graph remains proposed and package moves remain blocked until MM-1 through MM-7 and the remaining Phase 0 inventories are resolved.
 
 ### Architecture guardrail lane
 

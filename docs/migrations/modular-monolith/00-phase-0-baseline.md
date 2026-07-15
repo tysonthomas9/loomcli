@@ -1,12 +1,21 @@
 # Phase 0 Integration Baseline
 
 - **Status:** In progress — base integration and validation are complete; architecture, authority, transaction, loop, and performance inventories remain open
-- **Recorded:** 2026-07-14
-- **Validated Loom code head:** `09f071d0af6c3493eff724f32dab656c05f10cdf`
-- **Validated FleetDB head:** `7f7104b9441e81976da6d88bb32496f92c5aab38`
+- **Original validation:** 2026-07-14
+- **Original validated Loom code head:** `09f071d0af6c3493eff724f32dab656c05f10cdf`
+- **Original validated FleetDB head:** `7f7104b9441e81976da6d88bb32496f92c5aab38`
+- **Phase 1 source refresh:** 2026-07-15 at Loom `122d4d79cc12c6a14116429e6c9ce04483c24198` and FleetDB `8120c788ccc78477a61cfba591fe0445c580ab77`
 - **Migration status:** Proposed; this baseline does not approve MM-1 through MM-7
 
 This record freezes the first executable migration step: integrate the live base branches, reconcile the cross-repository contract, prove the current application, and identify the remaining work before capability extraction. Documentation commits after the validated Loom code head do not change the measured product tree.
+
+## Phase 1 source refresh
+
+The behavior-neutral Phase 1 guardrail branch starts from Loom `122d4d79`, whose parents include the prior `unified-agents` head and current `origin/v5` `95e97289`. That source is 45 commits ahead and 0 behind `origin/v5`. Companion FleetDB `8120c788` is 41 commits ahead and 0 behind `origin/main`; both ancestry checks pass. The refreshed FleetDB contract and Loom vendored snapshot match at SHA-256 `81ecb22b61bdb8fe15d5828f7695b9112ebe58fc825026dc644d22dd9a8c8e11`.
+
+The pre-guardrail source measures 165 Go packages, including 159 under `internal`. The original text scan finds 96 files containing the spelling `store.Store`; the AST guard resolves two aliased composite-Store imports and excludes five lookalikes such as `stackstore.Store` and `eventstore.Store`, producing a semantic ratchet of 93 files. Of those, 82 are outside `cli/serve`, `infra`, and `store`. The frontend has 604 production TS/TSX files, 94 top-level component directories, and a 1,569-line `App.tsx`. Package size and import fanout still pass at 25 and 18. The checked-in machine baseline records these values as characterization and coupling ratchets; package and frontend file counts remain diagnostic only.
+
+The refresh passed focused and race-tested supervisor packages, frontend unit/build checks, the deterministic task-quarantine playground scenario, `make test-fleetdb-supervisor`, and the full repository gate. It extends the immutable evidence below; it does not approve MM-1 through MM-7 or authorize capability package moves.
 
 ## Immutable revisions
 
@@ -117,12 +126,12 @@ Current `check:dir-size` violations are `src/utils` (29), `src/hooks/workspace` 
 ## Open Phase 0 work and known gaps
 
 - MM-1 through MM-7 remain unresolved; all architecture documents remain `Proposed`.
-- The machine-readable capability graph and refreshed cycle inventory are not checked in. The old four-edge/two-cycle plane scan remains historical evidence only.
-- Direct persistence-write, mutation-owner, authority, transaction/process-manager, long-lived-loop, startup, latency, round-trip, and route-chunk inventories remain to be generated.
+- The machine-readable baseline, proposed capability graph, and analysis matrix are checked in with the Phase 1 guardrail bootstrap. The graph deliberately remains `proposed`, and execution of the declared build-profile matrix plus the refreshed legacy cycle inventory remain deferred with acceptance criteria.
+- Direct persistence-write, mutation-owner, authority, transaction/process-manager, long-lived-loop, startup, latency, round-trip, and route-chunk inventories remain deferred with owners and acceptance criteria in the machine baseline.
 - `test/modular-monolith/supervisor-disabled-matrix.yaml` and `make test-supervisor-disabled` do not exist. Record this as **RED / harness absent**.
 - The five frontend directory-size violations need a ratcheted baseline or remediation before `check:dir-size` joins `check:arch`.
 - FleetDB's `design_format` contract has Redis coverage but lacks a dedicated real-Postgres create/get/update/get integration proof.
-- FleetDB commit `7f7104b9` is pushed but has no open companion PR; branch publication and PR creation are separate operational steps.
+- Refreshed FleetDB head `8120c788` is pushed; branch publication and PR creation remain separate operational steps.
 - The browser screenshot is local evidence, not a committed artifact.
 
 Phase 0 can be marked complete only after the remaining inventories are generated or explicitly deferred with owners and acceptance criteria. No capability package move should be interpreted as approval of an unresolved decision.
