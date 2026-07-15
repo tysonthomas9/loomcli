@@ -179,6 +179,12 @@ func (d *Daemon) AgentCount() int {
 	return d.sup.AgentCount()
 }
 
+// QuarantinedTasks returns the supervisor's quarantined-task snapshot for
+// state-file and status surfacing.
+func (d *Daemon) QuarantinedTasks() []supervisor.QuarantinedTaskInfo {
+	return d.sup.QuarantinedTasks()
+}
+
 // isAgentStopped returns true if the named agent was stopped via the control socket.
 func (d *Daemon) isAgentStopped(name string) bool {
 	d.sup.AgentsMu.RLock()

@@ -623,6 +623,53 @@ describe("IssueCard", () => {
     });
   });
 
+  describe("quarantined badge", () => {
+    it("renders when status is blocked AND loom:quarantined label is present", () => {
+      const issue = createTestIssue({
+        status: "blocked",
+        labels: ["loom:quarantined"],
+      });
+      render(<IssueCard issue={issue} />);
+
+      const badge = screen.getByLabelText("Task quarantined");
+      expect(badge).toBeInTheDocument();
+      expect(badge).toHaveTextContent("Quarantined");
+    });
+
+    it("does not render for a blocked issue without the label (dependency-blocked)", () => {
+      const issue = createTestIssue({
+        status: "blocked",
+        labels: ["some-other-label"],
+      });
+      render(<IssueCard issue={issue} />);
+
+      expect(
+        screen.queryByLabelText("Task quarantined"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render for a labeled issue that is not blocked (released task)", () => {
+      const issue = createTestIssue({
+        status: "open",
+        labels: ["loom:quarantined"],
+      });
+      render(<IssueCard issue={issue} />);
+
+      expect(
+        screen.queryByLabelText("Task quarantined"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not render when labels are absent entirely", () => {
+      const issue = createTestIssue({ status: "blocked" });
+      render(<IssueCard issue={issue} />);
+
+      expect(
+        screen.queryByLabelText("Task quarantined"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   describe("review type badge", () => {
     describe("getReviewType logic", () => {
       it("does not show Plan badge when status is review with no PR external_ref", () => {
