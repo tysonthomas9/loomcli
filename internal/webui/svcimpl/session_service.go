@@ -292,7 +292,7 @@ func fillControlPlaneArtifactFlags(item *service.SessionListItem, stores []*sess
 	}
 	if rec.Metadata != nil {
 		item.HasTranscript = rec.Metadata["transcript_path"] != "" || rec.Metadata["transcript_ref"] != ""
-		item.HasDiff = rec.Metadata["diff_path"] != "" || rec.Metadata["diff_artifact_id"] != ""
+		item.HasDiff = rec.Metadata["diff_path"] != "" || controlPlaneDiffArtifactRef(rec.Metadata) != ""
 	}
 }
 
@@ -372,7 +372,7 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 		// Control-plane (flue task-run) sessions live in the agent-session store, not a file
 		// store. ListTaskSessions and GetSessionTranscript already resolve them; GetSession must
 		// too, else the single-session GET 404s on a session the list endpoint returned.
-		if serviceErrorKind(err, service.KindNotFound) {
+		if serviceErrorNotFound(err) {
 			return s.controlPlaneSession(ctx, wsID, taskID, sessionID)
 		}
 		return nil, err
@@ -398,11 +398,7 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 	}, nil
 }
 
-// controlPlaneSession resolves a session detail from the agent-session (control-plane) store,
-// the fallback for flue task-run sessions that have no file-store metadata. Mirrors
-// controlPlaneSessionTranscript's record lookup + task-ownership check, and reuses the same
-// AgentSession->SessionRecord mapping ListTaskSessions uses, so list/get/transcript agree.
-func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, taskID, sessionID string) (*service.SessionDetailData, error) {
+func (s *sessionServiceImpl) controlPlaneSessionRecord(ctx context.Context, wsID, taskID, sessionID string) (*domain.AgentSession, error) {
 	if s.store == nil {
 		return nil, service.ErrNotFound("session not found")
 	}
@@ -416,6 +412,17 @@ func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, task
 	if rec.TaskID != taskID && (rec.Metadata == nil || rec.Metadata["task_id"] != taskID) {
 		return nil, service.ErrNotFound("session not found")
 	}
+	return rec, nil
+}
+
+// controlPlaneSession resolves a session detail from the agent-session (control-plane) store,
+// the fallback for flue task-run sessions that have no file-store metadata. It reuses the
+// AgentSession->SessionRecord mapping ListTaskSessions uses, so list/get/transcript agree.
+func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, taskID, sessionID string) (*service.SessionDetailData, error) {
+	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	return &service.SessionDetailData{
 		SessionMetadata: sessions.SessionMetadata{SessionRecord: sessionRecordFromAgentSession(rec)},
 		IsActive:        isActiveAgentSession(rec.Status),
@@ -425,7 +432,7 @@ func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, task
 func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
 	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
-		if !serviceErrorKind(err, service.KindNotFound) {
+		if !serviceErrorNotFound(err) {
 			return nil, err
 		}
 		return s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID)
@@ -458,18 +465,9 @@ func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, tas
 }
 
 func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
-	if s.store == nil {
-		return nil, service.ErrNotFound("session not found")
-	}
-	rec, err := s.store.AgentSessions().Get(ctx, wsID, sessionID)
+	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, service.ErrNotFound("session not found")
-		}
-		return nil, service.ErrInternal("failed to load session", err)
-	}
-	if rec.TaskID != taskID && (rec.Metadata == nil || rec.Metadata["task_id"] != taskID) {
-		return nil, service.ErrNotFound("session not found")
+		return nil, err
 	}
 	transcriptRef := ""
 	if rec.Metadata != nil {
@@ -603,9 +601,9 @@ func parseCanonicalTranscriptBytes(data []byte) ([]transcript.Event, error) {
 	return events, nil
 }
 
-func serviceErrorKind(err error, kind service.ErrorKind) bool {
+func serviceErrorNotFound(err error) bool {
 	var svcErr *service.ServiceError
-	return errors.As(err, &svcErr) && svcErr.Kind == kind
+	return errors.As(err, &svcErr) && svcErr.Kind == service.KindNotFound
 }
 
 func (s *sessionServiceImpl) ListSessionSubagents(ctx context.Context, wsID, taskID, sessionID string) ([]string, error) {
@@ -702,39 +700,148 @@ func (s *sessionServiceImpl) authorizedSessionStore(ctx context.Context, wsID, t
 }
 
 func (s *sessionServiceImpl) GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
-	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return "", service.ErrValidation("invalid task ID")
-	}
-	if sessionID == "" || !validSessionID.MatchString(sessionID) {
-		return "", service.ErrValidation("invalid session ID")
-	}
-	store, err := s.findStoreForSession(ctx, wsID, sessionID)
+	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
-		return "", err
-	}
-
-	// Enforce task ownership
-	meta, err := store.LoadMetadata(sessionID)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", service.ErrNotFound("session not found")
+		if !serviceErrorNotFound(err) {
+			return "", err
 		}
-		logger.Error("failed to load session metadata", "session_id", sessionID, "err", err)
-		return "", service.ErrInternal("failed to load session", err)
-	}
-	if meta.TaskID != taskID {
-		return "", service.ErrNotFound("session not found")
+		return s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)
 	}
 
 	diff, diffErr := store.ReadDiff(sessionID)
 	if diffErr != nil {
 		if errors.Is(diffErr, os.ErrNotExist) {
-			return "", service.ErrNotFound("diff not found")
+			cpDiff, cpErr := s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)
+			if cpErr == nil {
+				return cpDiff, nil
+			}
+			if serviceErrorNotFound(cpErr) {
+				return "", service.ErrNotFound("diff not found")
+			}
+			return "", cpErr
 		}
 		logger.Error("failed to read diff", "session_id", sessionID, "err", diffErr)
 		return "", service.ErrInternal("failed to read diff", diffErr)
 	}
+	if diff == "" {
+		if cpDiff, cpErr := s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID); cpErr == nil {
+			return cpDiff, nil
+		}
+	}
 	return diff, nil
+}
+
+func (s *sessionServiceImpl) controlPlaneSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
+	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	artifactID := ""
+	if rec.Metadata != nil {
+		artifactID = controlPlaneDiffArtifactRef(rec.Metadata)
+	}
+	if artifactID == "" && rec.Metadata != nil {
+		artifactID, err = s.diffArtifactIDForTaskRun(ctx, wsID, rec.Metadata["task_run_id"])
+		if err != nil {
+			return "", err
+		}
+	}
+	if artifactID == "" {
+		return "", service.ErrNotFound("diff not found")
+	}
+	diff, err := s.readControlPlaneArtifactText(ctx, wsID, artifactID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", service.ErrNotFound("diff not found")
+		}
+		return "", service.ErrInternal("failed to read diff", err)
+	}
+	return diff, nil
+}
+
+func controlPlaneDiffArtifactRef(metadata map[string]string) string {
+	if metadata == nil {
+		return ""
+	}
+	return normalizeArtifactRef(firstNonEmptySessionValue(
+		metadata["patch_artifact_id"],
+		metadata["diff_artifact_id"],
+		metadata["patch_ref"],
+		metadata["diff_ref"],
+	))
+}
+
+func normalizeArtifactRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "artifact://") {
+		ref = strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
+	}
+	return ref
+}
+
+func (s *sessionServiceImpl) diffArtifactIDForTaskRun(ctx context.Context, wsID, taskRunID string) (string, error) {
+	taskRunID = strings.TrimSpace(taskRunID)
+	if taskRunID == "" || s.store == nil {
+		return "", nil
+	}
+	artifacts, err := s.store.Artifacts().List(ctx, wsID, store.ArtifactFilter{
+		OwnerType: "task_run",
+		OwnerID:   taskRunID,
+		Type:      "patch",
+		Status:    "finalized",
+		Limit:     1,
+	})
+	if err != nil {
+		return "", service.ErrInternal("failed to list patch artifacts", err)
+	}
+	for _, artifact := range artifacts {
+		if artifact != nil && strings.TrimSpace(artifact.ArtifactID) != "" {
+			return artifact.ArtifactID, nil
+		}
+	}
+	return "", nil
+}
+
+func (s *sessionServiceImpl) readControlPlaneArtifactText(ctx context.Context, wsID, artifactID string) (string, error) {
+	artifactID = normalizeArtifactRef(artifactID)
+	if artifactID == "" {
+		return "", errors.New("empty artifact ref")
+	}
+	if isSupportedControlPlaneURI(artifactID) {
+		data, err := readTranscriptURI(ctx, artifactID)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+	if s.store == nil {
+		return "", errors.New("artifact store unavailable")
+	}
+	if reader, ok := s.store.Artifacts().(store.ArtifactContentReader); ok {
+		data, err := reader.ReadContent(ctx, wsID, artifactID)
+		if err == nil {
+			return string(data), nil
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return "", err
+		}
+	}
+	artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(artifact.URI) == "" {
+		return "", domain.ErrNotFound
+	}
+	data, err := readTranscriptURI(ctx, artifact.URI)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func isSupportedControlPlaneURI(ref string) bool {
+	return strings.HasPrefix(ref, "file://") || strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://")
 }
 
 func (s *sessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {

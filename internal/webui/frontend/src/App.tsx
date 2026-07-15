@@ -921,7 +921,6 @@ function App() {
     refetch,
     refetchWorkspace,
     showToast,
-    workspace?.agents,
     onboardingPlannerName,
     workspaceId,
     workspaceRepos,
@@ -1387,7 +1386,7 @@ function App() {
               onAddWorkspace={() => setShowCreateWorkspace(true)}
             />
           }
-          sidebar={sidebarContent}
+          sidebar={activeView === "files" ? null : sidebarContent}
         >
           <div
             className={
@@ -1519,7 +1518,7 @@ function App() {
         {...(shouldPrefillOnboardingAgent
           ? {
               defaultName: ONBOARDING_AGENT_NAME,
-              defaultRole: ONBOARDING_AGENT_ROLE,
+              supervisedRole: ONBOARDING_AGENT_ROLE,
             }
           : {})}
         onClose={() => setShowCreateAgent(false)}

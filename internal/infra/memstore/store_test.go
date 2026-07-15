@@ -75,6 +75,59 @@ func TestWorkspaceCRUD(t *testing.T) {
 	}
 }
 
+// TestWorkspaceDesignFormatRoundTrip verifies design_format survives the
+// Create/Get/Update cycle, including clearing it via a pointer to "".
+func TestWorkspaceDesignFormatRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+
+	created, err := s.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "MYWS", Name: "My Workspace", DesignFormat: "html"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.DesignFormat != "html" {
+		t.Errorf("Create DesignFormat = %q, want html", created.DesignFormat)
+	}
+
+	got, err := s.Workspaces().Get(ctx, "MYWS")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.DesignFormat != "html" {
+		t.Errorf("Get DesignFormat = %q, want html", got.DesignFormat)
+	}
+
+	// Update to markdown.
+	markdown := "markdown"
+	if _, err := s.Workspaces().Update(ctx, "MYWS", store.WorkspaceUpdate{DesignFormat: &markdown}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, _ = s.Workspaces().Get(ctx, "MYWS")
+	if got.DesignFormat != "markdown" {
+		t.Errorf("after Update DesignFormat = %q, want markdown", got.DesignFormat)
+	}
+
+	// Update with nil pointer leaves the value untouched.
+	newName := "Renamed"
+	if _, err := s.Workspaces().Update(ctx, "MYWS", store.WorkspaceUpdate{Name: &newName}); err != nil {
+		t.Fatalf("Update name: %v", err)
+	}
+	got, _ = s.Workspaces().Get(ctx, "MYWS")
+	if got.DesignFormat != "markdown" {
+		t.Errorf("DesignFormat after unrelated update = %q, want markdown", got.DesignFormat)
+	}
+
+	// Clear via pointer-to-"".
+	empty := ""
+	if _, err := s.Workspaces().Update(ctx, "MYWS", store.WorkspaceUpdate{DesignFormat: &empty}); err != nil {
+		t.Fatalf("Update clear: %v", err)
+	}
+	got, _ = s.Workspaces().Get(ctx, "MYWS")
+	if got.DesignFormat != "" {
+		t.Errorf("cleared DesignFormat = %q, want empty", got.DesignFormat)
+	}
+}
+
 // TestRepoCRUD smoke-tests the workspace-scoped repo store. Most of the
 // interesting bugs live in the workspace+name compound key — make sure
 // repos under different workspaces don't collide.
@@ -111,6 +164,54 @@ func TestRepoCRUD(t *testing.T) {
 	wsb, _ := s.Repos().List(ctx, "WSB")
 	if len(wsa) != 1 || len(wsb) != 1 {
 		t.Errorf("List scoping broken: WSA=%d, WSB=%d", len(wsa), len(wsb))
+	}
+}
+
+func TestRoleStoreKindCreatePatchClear(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+
+	role, err := s.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "WS",
+		Name:         "operator",
+		Kind:         string(domain.RoleKindInteractive),
+		Prompt:       "literal inline prompt",
+	})
+	if err != nil {
+		t.Fatalf("Create role: %v", err)
+	}
+	if role.Kind != domain.RoleKindInteractive {
+		t.Fatalf("created kind = %q, want interactive", role.Kind)
+	}
+	if role.Prompt != "literal inline prompt" {
+		t.Fatalf("created prompt = %q, want literal inline prompt", role.Prompt)
+	}
+
+	nextPrompt := "updated inline prompt"
+	role, err = s.Roles().Update(ctx, "WS", "operator", store.RoleUpdate{Prompt: &nextPrompt})
+	if err != nil {
+		t.Fatalf("Update role prompt: %v", err)
+	}
+	if role.Prompt != nextPrompt {
+		t.Fatalf("updated prompt = %q, want %q", role.Prompt, nextPrompt)
+	}
+
+	worker := string(domain.RoleKindWorker)
+	role, err = s.Roles().Update(ctx, "WS", "operator", store.RoleUpdate{Kind: &worker})
+	if err != nil {
+		t.Fatalf("Update role kind: %v", err)
+	}
+	if role.Kind != domain.RoleKindWorker {
+		t.Fatalf("updated kind = %q, want worker", role.Kind)
+	}
+
+	clear := ""
+	role, err = s.Roles().Update(ctx, "WS", "operator", store.RoleUpdate{Kind: &clear})
+	if err != nil {
+		t.Fatalf("Clear role kind: %v", err)
+	}
+	if role.Kind != "" {
+		t.Fatalf("cleared kind = %q, want empty", role.Kind)
 	}
 }
 

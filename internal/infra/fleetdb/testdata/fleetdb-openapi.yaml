@@ -32,6 +32,8 @@ tags:
     description: Issue dependency management
   - name: Labels
     description: Issue label management
+  - name: Metadata
+    description: Issue key/value metadata management
   - name: Ready & Blocked
     description: Work queue queries
   - name: Comments
@@ -1071,6 +1073,41 @@ paths:
           $ref: "#/components/responses/InternalError"
 
   # ---------------------------------------------------------------------------
+  # Issue agent sessions
+  # ---------------------------------------------------------------------------
+  /api/v1/{workspace}/issues/{id}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/IssueID"
+
+    get:
+      tags: [ControlPlane]
+      summary: List agent sessions for an issue
+      description: |
+        Returns canonical AgentSession records whose `task_id` matches the
+        issue ID, newest first. This is an issue-centric read adapter over the
+        AgentSession store; it does not create a separate issue-session record.
+
+        Harness-specific identity belongs in AgentSession metadata. Transcript
+        content should be referenced by `metadata.transcript_ref`, normally as
+        an `artifact://{artifact_id}` URI readable through the Artifact API.
+      operationId: listIssueAgentSessions
+      x-pagination: none
+      responses:
+        "200":
+          description: Agent sessions associated with the issue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssueAgentSessionListResponse"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
   # Dependencies
   # ---------------------------------------------------------------------------
   /api/v1/{workspace}/issues/{id}/deps:
@@ -1236,6 +1273,75 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ---------------------------------------------------------------------------
+  # Metadata (key/value)
+  # ---------------------------------------------------------------------------
+  /api/v1/{workspace}/issues/{id}/metadata/{key}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/IssueID"
+      - name: key
+        in: path
+        required: true
+        description: Metadata key. Must match `^[A-Za-z0-9._-]+$` (URL-path-safe).
+        schema:
+          type: string
+          maxLength: 128
+          pattern: '^[A-Za-z0-9._-]+$'
+
+    put:
+      tags: [Metadata]
+      summary: Set issue metadata key
+      description: |
+        Sets (upserts) a key/value metadata pair on the issue. Idempotent: if
+        the key already holds the given value, returns 200 OK with the issue
+        unchanged (no event emitted).
+      operationId: setMetadata
+      parameters:
+        - $ref: "#/components/parameters/XActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value:
+                  type: string
+      responses:
+        "200":
+          description: Metadata set (or already at that value — idempotent no-op)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issue"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags: [Metadata]
+      summary: Remove issue metadata key
+      description: |
+        Removes the given metadata key from the issue. Idempotent: if the key
+        is absent, returns 204 No Content (no event emitted).
+      operationId: removeMetadata
+      parameters:
+        - $ref: "#/components/parameters/XActor"
+      responses:
+        "204":
+          description: Metadata key removed (or already absent — idempotent no-op)
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/{workspace}/labels:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -1297,14 +1403,28 @@ paths:
             type: string
         - name: label
           in: query
-          description: All labels required (AND)
+          description: |
+            Filter to issues carrying ALL specified labels (AND semantics).
+            Repeatable (`?label=plan&label=review`); comma-separated values
+            are also accepted (`?label=plan,review`).
+          style: form
+          explode: true
           schema:
-            type: string
+            type: array
+            items:
+              type: string
         - name: label_any
           in: query
-          description: Any label matches (OR)
+          description: |
+            Filter to issues carrying ANY specified label (OR semantics).
+            Repeatable (`?label_any=p0&label_any=urgent`); comma-separated
+            values are also accepted (`?label_any=p0,urgent`).
+          style: form
+          explode: true
           schema:
-            type: string
+            type: array
+            items:
+              type: string
         - name: parent_id
           in: query
           schema:
@@ -5068,10 +5188,14 @@ paths:
     get:
       tags: [ControlPlane]
       summary: Download artifact bytes
-      operationId: downloadArtifactContent
+      description: |
+        Streams FleetDB-managed artifact content as an inert binary attachment.
+        External or otherwise unmanaged artifact URIs are not fetched and return
+        `404`, allowing clients to fall back to the URI stored in artifact metadata.
+      operationId: getArtifactContent
       responses:
         "200":
-          description: Artifact content
+          description: Raw artifact content
           content:
             application/octet-stream:
               schema:
@@ -5079,6 +5203,8 @@ paths:
                 format: binary
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
         "503":
           description: Artifact content store is not configured
     put:
@@ -5925,6 +6051,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/BlockedListResponse"
 
+  /api/v1/{workspace}/workspace:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    get:
+      tags: [Workspaces]
+      summary: Get this workspace's metadata (workspace-scoped)
+      description: >-
+        Read-only workspace metadata authorized by a workspace-scoped role
+        (e.g. developer), unlike the global /admin/workspaces routes. Lets a
+        sandboxed/remote agent resolve its active workspace under least privilege.
+      operationId: getScopedWorkspace
+      responses:
+        "200":
+          description: Workspace details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 # =============================================================================
 # Components
 # =============================================================================
@@ -6288,6 +6437,15 @@ components:
           type: array
           items:
             type: string
+        metadata:
+          type: object
+          description: |
+            Free-form key/value metadata. Always present ({} when empty). New
+            keys are subject to a best-effort 64-entry command-time limit;
+            concurrent sets validated against the same snapshot can briefly
+            exceed it.
+          additionalProperties:
+            type: string
         external_ref:
           type: string
         defer_until:
@@ -6406,6 +6564,9 @@ components:
             type: string
             pattern: "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
           example: ["tysonthomas9/fleet-db"]
+        design_format:
+          type: string
+          enum: ["", markdown, html]
         created_at:
           type: string
           format: date-time
@@ -6534,6 +6695,15 @@ components:
         labels:
           type: array
           items:
+            type: string
+        metadata:
+          type: object
+          description: |
+            Free-form key/value metadata. Keys must match
+            `^[A-Za-z0-9._-]+$`. New keys are subject to a best-effort 64-entry
+            command-time limit; concurrent sets validated against the same
+            snapshot can briefly exceed it.
+          additionalProperties:
             type: string
         parent_id:
           type: string
@@ -6679,6 +6849,9 @@ components:
           items:
             type: string
             pattern: "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+        design_format:
+          type: string
+          enum: ["", markdown, html]
 
     UpdateWorkspaceRequest:
       type: object
@@ -6694,6 +6867,9 @@ components:
           type: array
           items:
             type: string
+        design_format:
+          type: string
+          enum: ["", markdown, html]
 
     # --- Response Wrappers ---
 
@@ -7039,6 +7215,13 @@ components:
           type: integer
           description: Time-to-live in seconds. 0 means permanent. Minimum 60, maximum 31536000 (365 days).
           default: 0
+        workspace:
+          type: string
+          description: Optional. Grant the new actor a workspace-scoped ACL role atomically with the key (set together with `role`). Co-expires with the key's TTL.
+        role:
+          type: string
+          enum: [admin, maintainer, developer, viewer]
+          description: Optional. ACL role to grant in `workspace` for least-privilege provisioning. Both `workspace` and `role` must be set together, or neither.
 
     CreateAPIKeyResponse:
       type: object
@@ -7056,6 +7239,12 @@ components:
           format: date-time
           nullable: true
           description: Expiration timestamp, null if permanent
+        workspace:
+          type: string
+          description: Workspace the actor was granted a scoped role in, if provisioning was requested.
+        role:
+          type: string
+          description: ACL role granted in `workspace`, if provisioning was requested.
 
     APIKeyInfo:
       type: object
@@ -8144,7 +8333,13 @@ components:
         source_ref: { type: string }
         epic_id: { type: string }
         parent_run_id: { type: string }
-        trigger_binding_id: { type: string }
+        trigger_binding_id:
+          type: string
+          description: >-
+            Existing binding to run manually. The server verifies that the
+            binding pins the requested driver version and derives
+            agent_service_id from its target; callers cannot assert agent
+            provenance directly.
         idempotency_key: { type: string }
         input:
           $ref: "#/components/schemas/StringMap"
@@ -9069,7 +9264,9 @@ components:
           type: array
           items: { type: string }
         cross_repo: { type: boolean }
-        parent:     { type: string }
+        parent:
+          type: string
+          description: Parent agent name (lowercase) or an existing epic/task issue ID in this workspace (e.g. PROJ-123) scoping this agent to an issue subtree.
         state:
           type: string
           enum: [idle, active, stopped]
@@ -9116,7 +9313,9 @@ components:
           type: array
           items: { type: string }
         cross_repo: { type: boolean }
-        parent:     { type: string }
+        parent:
+          type: string
+          description: Parent agent name (lowercase) or an existing epic/task issue ID in this workspace (e.g. PROJ-123) scoping this agent to an issue subtree.
         state:
           type: string
           enum: [idle, active, stopped]
@@ -9148,7 +9347,9 @@ components:
           type: array
           items: { type: string }
         cross_repo: { type: boolean }
-        parent:     { type: string }
+        parent:
+          type: string
+          description: Parent agent name (lowercase) or an existing epic/task issue ID in this workspace (e.g. PROJ-123) scoping this agent to an issue subtree.
         state:
           type: string
           enum: [idle, active, stopped]
@@ -9275,6 +9476,31 @@ components:
       type: string
       enum: [task, orchestration, terminal, maintenance, ad_hoc]
 
+    AgentSessionMetadata:
+      type: object
+      description: |
+        Extensible session metadata. Conventional keys are:
+        - `harness`: free-form harness identifier such as `codex`,
+          `claude-code`, or `pi`; new harnesses require no FleetDB change.
+        - `external_session_id`: the harness provider's session identifier.
+        - `label`: a short human-readable title for the run.
+        - `transcript_ref`: transcript location, preferably an
+          `artifact://{artifact_id}` reference. Raw transcript content does not
+          belong in metadata.
+      properties:
+        harness:
+          type: string
+          example: codex
+        external_session_id:
+          type: string
+        label:
+          type: string
+        transcript_ref:
+          type: string
+          example: artifact://transcript-session-123
+      additionalProperties:
+        type: string
+
     AgentSession:
       type: object
       required: [workspace_key, session_id, agent_id, kind, status, created_at, updated_at]
@@ -9306,8 +9532,7 @@ components:
           type: integer
           nullable: true
         metadata:
-          type: object
-          additionalProperties: { type: string }
+          $ref: "#/components/schemas/AgentSessionMetadata"
         created_at:         { type: string, format: date-time }
         updated_at:         { type: string, format: date-time }
 
@@ -9330,8 +9555,7 @@ components:
           type: integer
           minimum: 0
         metadata:
-          type: object
-          additionalProperties: { type: string }
+          $ref: "#/components/schemas/AgentSessionMetadata"
 
     UpdateAgentSessionRequest:
       type: object
@@ -9351,8 +9575,7 @@ components:
           type: integer
           nullable: true
         metadata:
-          type: object
-          additionalProperties: { type: string }
+          $ref: "#/components/schemas/AgentSessionMetadata"
 
     ListAgentSessionsResponse:
       type: object
@@ -9362,6 +9585,17 @@ components:
           type: array
           items: { $ref: "#/components/schemas/AgentSession" }
         count: { type: integer }
+
+    IssueAgentSessionListResponse:
+      type: object
+      required: [sessions, count]
+      properties:
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/AgentSession" }
+        count:
+          type: integer
+          description: Number of sessions in the response.
 
     TerminalSession:
       type: object
@@ -9792,6 +10026,10 @@ components:
         payload:
           type: object
           additionalProperties: { type: string }
+        status:
+          type: string
+          enum: [queued]
+          description: 'Optional; only "queued" is accepted on create. Server-assigned regardless.'
 
     CompleteAgentCommandRequest:
       type: object
@@ -9901,6 +10139,10 @@ components:
         workspace_key: { type: string }
         name:          { type: string }
         description:   { type: string }
+        kind:
+          type: string
+          enum: [interactive, worker]
+        prompt:        { type: string }
         prompt_file:   { type: string }
         model:         { type: string }
         task_filter:   { type: string }
@@ -9933,6 +10175,10 @@ components:
       properties:
         name:        { type: string }
         description: { type: string }
+        kind:
+          type: string
+          enum: [interactive, worker]
+        prompt:      { type: string }
         prompt_file: { type: string }
         model:       { type: string }
         task_filter: { type: string }
@@ -9961,6 +10207,10 @@ components:
       type: object
       properties:
         description: { type: string }
+        kind:
+          type: string
+          enum: ["", interactive, worker]
+        prompt:      { type: string }
         prompt_file: { type: string }
         model:       { type: string }
         task_filter: { type: string }

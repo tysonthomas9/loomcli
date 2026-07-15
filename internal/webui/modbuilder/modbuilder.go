@@ -7,20 +7,43 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
+	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/prreview"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
+
+// PRReviewModule is the route module plus its credential-cache invalidation
+// surface used by local settings wiring.
+type PRReviewModule interface {
+	Register(*http.ServeMux)
+	InvalidateCredentialSeeds()
+}
+
+// CredentialSeedInvalidator is the cross-module notification surface needed
+// when a persisted GitHub runtime credential changes.
+type CredentialSeedInvalidator interface {
+	InvalidateCredentialSeeds()
+}
+
+// LocalSettingsHandlers contains the non-workspace local settings routes.
+type LocalSettingsHandlers struct {
+	Get   http.HandlerFunc
+	Patch http.HandlerFunc
+}
 
 // NewIssueModules creates the issue and session modules.
 func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
@@ -75,8 +98,8 @@ func NewDiffModule(agentSvc service.AgentService, diffSvc service.DiffService) i
 }
 
 // NewFileModule creates the file operations module.
-func NewFileModule(fileSvc service.FileService) interface{ Register(*http.ServeMux) } {
-	return misc.NewModule(fileSvc)
+func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
+	return misc.NewModule(fileSvc, accessCfg...)
 }
 
 // NewApprovalsModule creates the await approval-resolution module
@@ -84,6 +107,27 @@ func NewFileModule(fileSvc service.FileService) interface{ Register(*http.ServeM
 // session identity, never request data).
 func NewApprovalsModule(st store.Store) interface{ Register(*http.ServeMux) } {
 	return approvals.NewModule(st)
+}
+
+// NewPRReviewModule creates the connector-backed pull request review module.
+// terminalSvc may be nil (no PTY manager); reviewer backend migration then
+// skips killing live reviewer terminals. localSettingsDir supplies the shared
+// GitHub credential and connector vault key location.
+func NewPRReviewModule(st store.Store, dispatcher *connector.Dispatcher, agentSvc service.AgentService, terminalSvc service.TerminalService, localSettingsDir string) PRReviewModule {
+	return prreview.NewModule(st, dispatcher, agentSvc, terminalSvc, localSettingsDir)
+}
+
+// NewLocalSettingsHandlers wires GitHub credential changes to the PR-review
+// seed cache without coupling either handler package to the other.
+func NewLocalSettingsHandlers(dataDir string, invalidator CredentialSeedInvalidator) LocalSettingsHandlers {
+	options := locsettings.PatchOptions{}
+	if invalidator != nil {
+		options.OnGitHubRuntimeCredentialChanged = invalidator.InvalidateCredentialSeeds
+	}
+	return LocalSettingsHandlers{
+		Get:   locsettings.HandleGet(dataDir),
+		Patch: locsettings.HandlePatch(dataDir, options),
+	}
 }
 
 // NewTaskRunAPIModule creates the task-runner HTTP API module

@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
+	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -108,17 +109,33 @@ func (app *Server) buildInfraModules() {
 	}
 
 	if app.fileSvc != nil {
-		app.wsModules = append(app.wsModules, modbuilder.NewFileModule(app.fileSvc))
+		app.wsModules = append(app.wsModules, modbuilder.NewFileModule(app.fileSvc, middleware.FileAccessConfig{
+			RemoteAuth:      app.config.ExtAuthURL != "",
+			ResolveRole:     app.config.WorkspaceRoleResolver,
+			FrontendOrigins: app.config.FrontendOrigins,
+			Logger:          app.config.Logger,
+		}))
 	}
 
 	if storeBacked {
+		app.connectorDispatcher = app.buildConnectorDispatcher()
 		app.wsModules = append(app.wsModules, modbuilder.NewUnifiedAgentModules(modbuilder.UnifiedAgentModuleDeps{
 			Store: app.config.Store, AgentSvc: app.agentSvc, IssueSvc: app.issueSvc, Hub: app.hub,
 			FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
 			DriverAPIToken: app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
-			LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.buildConnectorDispatcher(),
+			LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
 		})...)
-	} else if app.config.AgentControlFn != nil {
-		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
+		prReviewModule := modbuilder.NewPRReviewModule(
+			app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
+		)
+		app.prReviewCredentialSeeds = prReviewModule
+		app.wsModules = append(app.wsModules, prReviewModule)
+	} else {
+		// Without a store there is no connector-backed prreview module, so
+		// keep the gh-backed pull-request list route available.
+		app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
+		if app.config.AgentControlFn != nil {
+			app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
+		}
 	}
 }

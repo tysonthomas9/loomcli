@@ -339,28 +339,24 @@ ensure_fleet_db() {
   )
 }
 
-# The loomcli source rev this build captures, scoped to the image-relevant paths (cmd, internal,
-# go.mod, go.sum, Dockerfile.dev) and suffixed -dirty when they carry uncommitted changes. Stamped
-# as the image label `loom.source.rev` so callers (e.g. aether's loomImageNeedsRebuild) can detect
-# a stale image instead of rebuilding every run or silently reusing an old binary/frontend.
+# Print the canonical identity for the Loom source baked into Dockerfile.dev.
+# Dirty identities include a content fingerprint, so separate dirty worktrees at
+# the same HEAD cannot be mistaken for one another. Consumers should invoke this
+# helper rather than duplicate its build-path or hashing rules.
 loom_source_rev() {
-  local rev
-  rev="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || true)"
-  if [[ -z "$rev" ]]; then
-    printf 'unknown'
-    return 0
-  fi
-  if [[ -n "$(git -C "$ROOT_DIR" status --porcelain -- cmd internal go.mod go.sum Dockerfile.dev 2>/dev/null)" ]]; then
-    printf '%s-dirty' "$rev"
-  else
-    printf '%s' "$rev"
-  fi
+  "${ROOT_DIR}/scripts/loom-image-source-rev.sh" "$ROOT_DIR"
+}
+
+build_image() {
+  local source_rev
+  source_rev="$(loom_source_rev)"
+  log "building ${IMAGE} from Dockerfile.dev (loom.source.rev=${source_rev})"
+  podman build -f "${ROOT_DIR}/Dockerfile.dev" --label "loom.source.rev=${source_rev}" -t "$IMAGE" "$ROOT_DIR"
 }
 
 ensure_image() {
   if truthy "$BUILD_IMAGE"; then
-    log "building ${IMAGE} from Dockerfile.dev"
-    podman build -f "${ROOT_DIR}/Dockerfile.dev" --label "loom.source.rev=$(loom_source_rev)" -t "$IMAGE" "$ROOT_DIR"
+    build_image
     return 0
   fi
 
@@ -369,8 +365,8 @@ ensure_image() {
   fi
 
   if [[ "$BUILD_IMAGE" == "auto" ]]; then
-    log "building missing ${IMAGE} from Dockerfile.dev"
-    podman build -f "${ROOT_DIR}/Dockerfile.dev" --label "loom.source.rev=$(loom_source_rev)" -t "$IMAGE" "$ROOT_DIR"
+    log "building missing ${IMAGE}"
+    build_image
     return 0
   fi
 
@@ -462,27 +458,6 @@ seed_loom() {
     return
   fi
   seed_loom_default
-}
-
-source_digest() {
-  node -e '
-const crypto = require("node:crypto");
-const fs = require("node:fs");
-const hash = crypto.createHash("sha256");
-for (const pair of process.argv.slice(1)) {
-  const [name, file] = pair.split("=", 2);
-  hash.update(name);
-  hash.update(Buffer.from([0]));
-  hash.update(fs.readFileSync(file));
-  hash.update(Buffer.from([0]));
-}
-console.log("sha256:" + hash.digest("hex"));
-' \
-    "workflows/epic-runner.ts=${EPIC_RUNNER_SOURCE}" \
-    "workflows/local-task-runner.ts=${LOCAL_TASK_RUNNER_SOURCE}" \
-    "workflows/daytona-task-runner.ts=${DAYTONA_TASK_RUNNER_SOURCE}" \
-    "workflows/openshell-task-runner.ts=${OPENSHELL_TASK_RUNNER_SOURCE}" \
-    "sdk/runtime-adapters.js=${LOOM_SDK_DIR}/runtime-adapters.js"
 }
 
 write_epic_runner_dist() {
@@ -639,12 +614,24 @@ register_epic_runner_workflow() {
   local build_dir digest
   build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-epic-runner-dist.XXXXXX")"
   write_epic_runner_dist "$build_dir"
-  digest="$(source_digest)"
 
   log "registering builtin epic-runner workflow"
   podman exec "$CONTAINER" rm -rf "$CONTAINER_EPIC_RUNNER_DIST"
   podman exec "$CONTAINER" mkdir -p "$CONTAINER_EPIC_RUNNER_DIST"
   podman cp "${build_dir}/." "${CONTAINER}:${CONTAINER_EPIC_RUNNER_DIST}/"
+  # Canonical source digest over the STAGED sources, via the container's loom
+  # binary — the SAME workflows.SourceDigest recipe serve's builtin self-heal
+  # compares against. --file hashes the bytes just copied into the container,
+  # so the recorded digest attests what this registration actually ships:
+  # identical to the binary's embedded sources -> exact-match fast path;
+  # modified sources -> an honestly different digest (serve logs drift instead
+  # of silently mislabeling the version). (The old hand-rolled node hash used a
+  # different recipe — extra sdk file, unsorted — so it could never match.)
+  digest="$(podman exec "$CONTAINER" loom workflow digest epic-runner \
+    --file "workflows/epic-runner.ts=${CONTAINER_EPIC_RUNNER_DIST}/workflows/epic-runner.mjs" \
+    --file "workflows/local-task-runner.ts=${CONTAINER_EPIC_RUNNER_DIST}/workflows/local-task-runner.mjs" \
+    --file "workflows/daytona-task-runner.ts=${CONTAINER_EPIC_RUNNER_DIST}/workflows/daytona-task-runner.mjs" \
+    --file "workflows/openshell-task-runner.ts=${CONTAINER_EPIC_RUNNER_DIST}/workflows/openshell-task-runner.mjs")"
   podman exec \
     -w "$CONTAINER_DRIVER_WORKDIR" \
     -e LOOM_CONFIG_DIR=/root/.loom-config \

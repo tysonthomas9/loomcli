@@ -912,8 +912,10 @@ function mockHelloWorldWorkspaceContext({
 vi.mock("@/components/WorkspaceTree/AgentSection", () => ({
   AgentSection: ({
     onAgentClick,
+    onAddClick,
   }: {
     onAgentClick?: (name: string) => void;
+    onAddClick?: () => void;
   }) => (
     <>
       {(
@@ -927,6 +929,11 @@ vi.mock("@/components/WorkspaceTree/AgentSection", () => ({
           {agent.name}
         </button>
       ))}
+      {onAddClick ? (
+        <button type="button" onClick={onAddClick}>
+          + Add agent
+        </button>
+      ) : null}
     </>
   ),
 }));
@@ -2557,13 +2564,20 @@ describe("App", () => {
       mockStoreState = createMockUseIssuesReturn({
         issues: [createMockIssue({ id: "T-1" })],
       });
-      mockHelloWorldWorkspaceContext({ agents: [] });
+      // Keep this on the normal creation path; an empty Hello-World workspace
+      // intentionally opens the constrained onboarding-planner flow.
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "existing-planner", role_name: "plan" }],
+      });
 
       render(<App />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
       const dialog = await screen.findByRole("dialog", { name: "New Agent" });
       fireEvent.click(within(dialog).getByTestId("create-agent-template-lead"));
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "lead-nova" },
+      });
       // Isolate the post-create navigation from any render-time routing.
       mockNavigate.mockClear();
       fireEvent.click(
@@ -2589,15 +2603,21 @@ describe("App", () => {
       mockStoreState = createMockUseIssuesReturn({
         issues: [createMockIssue({ id: "T-1" })],
       });
-      mockHelloWorldWorkspaceContext({ agents: [] });
+      // Keep this on the normal creation path rather than onboarding setup.
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "existing-planner", role_name: "plan" }],
+      });
 
       render(<App />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Create Agent" }));
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
       const dialog = await screen.findByRole("dialog", { name: "New Agent" });
       fireEvent.click(
         within(dialog).getByTestId("create-agent-template-legacy-planner"),
       );
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "planner-two" },
+      });
       mockNavigate.mockClear();
       fireEvent.click(
         within(dialog).getByRole("button", { name: "Create Agent" }),
@@ -2630,9 +2650,15 @@ describe("App", () => {
       const agentDialog = await screen.findByRole("dialog", {
         name: "New Agent",
       });
-      fireEvent.click(
+      expect(
+        within(agentDialog).getByTestId("create-agent-supervised-mode"),
+      ).toBeInTheDocument();
+      expect(
         within(agentDialog).getByTestId("create-agent-template-legacy-planner"),
-      );
+      ).toHaveAttribute("aria-pressed", "true");
+      expect(
+        within(agentDialog).queryByTestId("create-agent-template-planner"),
+      ).not.toBeInTheDocument();
       fireEvent.click(
         within(agentDialog).getByRole("button", { name: "Create Agent" }),
       );

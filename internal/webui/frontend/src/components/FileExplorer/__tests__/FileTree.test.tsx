@@ -173,7 +173,9 @@ describe("FileTree", () => {
         filterText="nonexistent"
       />,
     );
-    expect(screen.getByText(/No matches for/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/No matches in loaded folders for/),
+    ).toBeInTheDocument();
   });
 
   it("shows directory if a child matches the filter", () => {
@@ -218,6 +220,28 @@ describe("FileTree", () => {
     expect(screen.getByLabelText("file.txt")).not.toHaveAttribute("data-dir");
   });
 
+  it("renders conflict badges and bubbles folder git status", () => {
+    const treeData = new Map<string, FileEntry[]>([
+      ["", [makeFileEntry("src", true)]],
+      ["src", [makeFileEntry("conflict.go")]],
+    ]);
+    render(
+      <FileTree
+        {...defaultProps}
+        treeData={treeData}
+        expanded={new Set(["src"])}
+        gitStatus={{ "src/conflict.go": "UU" }}
+      />,
+    );
+
+    expect(screen.getByLabelText("conflict.go")).toHaveAttribute(
+      "data-git-status-kind",
+      "conflict",
+    );
+    expect(screen.getByLabelText("src")).toHaveAttribute("data-conflict");
+    expect(screen.getAllByTitle("Merge conflict").length).toBeGreaterThan(0);
+  });
+
   it("case-insensitive filter matching", () => {
     const treeData = new Map<string, FileEntry[]>([
       ["", [makeFileEntry("Handler.go")]],
@@ -226,5 +250,69 @@ describe("FileTree", () => {
       <FileTree {...defaultProps} treeData={treeData} filterText="handler" />,
     );
     expect(screen.getByLabelText("Handler.go")).toBeInTheDocument();
+  });
+
+  describe("keyboard navigation", () => {
+    const rootTree = new Map<string, FileEntry[]>([
+      [
+        "",
+        [
+          makeFileEntry("alpha.go"),
+          makeFileEntry("beta.go"),
+          makeFileEntry("gamma.go"),
+        ],
+      ],
+    ]);
+
+    it("defaults the active descendant to the first node", () => {
+      render(<FileTree {...defaultProps} treeData={rootTree} />);
+      expect(screen.getByRole("tree")).toHaveAttribute(
+        "aria-activedescendant",
+        "ft-alpha.go",
+      );
+    });
+
+    it("ArrowDown / ArrowUp move the active node", () => {
+      render(<FileTree {...defaultProps} treeData={rootTree} />);
+      const tree = screen.getByRole("tree");
+      fireEvent.keyDown(tree, { key: "ArrowDown" });
+      expect(tree).toHaveAttribute("aria-activedescendant", "ft-beta.go");
+      fireEvent.keyDown(tree, { key: "ArrowUp" });
+      expect(tree).toHaveAttribute("aria-activedescendant", "ft-alpha.go");
+    });
+
+    it("Enter activates the focused file", () => {
+      const onSelectFile = vi.fn();
+      render(
+        <FileTree
+          {...defaultProps}
+          treeData={rootTree}
+          onSelectFile={onSelectFile}
+        />,
+      );
+      const tree = screen.getByRole("tree");
+      fireEvent.keyDown(tree, { key: "ArrowDown" }); // → beta.go
+      fireEvent.keyDown(tree, { key: "Enter" });
+      expect(onSelectFile).toHaveBeenCalledWith("beta.go");
+    });
+
+    it("ArrowRight expands a collapsed directory", () => {
+      const onToggle = vi.fn();
+      const treeData = new Map<string, FileEntry[]>([
+        ["", [makeFileEntry("pkg", true)]],
+      ]);
+      render(
+        <FileTree {...defaultProps} treeData={treeData} onToggle={onToggle} />,
+      );
+      fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowRight" });
+      expect(onToggle).toHaveBeenCalledWith("pkg");
+    });
+
+    it("type-ahead jumps to the next matching node", () => {
+      render(<FileTree {...defaultProps} treeData={rootTree} />);
+      const tree = screen.getByRole("tree");
+      fireEvent.keyDown(tree, { key: "g" });
+      expect(tree).toHaveAttribute("aria-activedescendant", "ft-gamma.go");
+    });
   });
 });

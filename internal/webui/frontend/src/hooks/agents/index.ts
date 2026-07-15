@@ -15,6 +15,9 @@ export { useEnsureWorkspaceRole } from "./useEnsureWorkspaceRole";
 export { useRoleConfig } from "./useRoleConfig";
 export type { UseRoleConfigReturn } from "./useRoleConfig";
 
+export { useInteractivePrompts } from "./useInteractivePrompts";
+export type { UseInteractivePromptsReturn } from "./useInteractivePrompts";
+
 export { useIssueSessionMap } from "./useIssueSessionMap";
 export type { UseIssueSessionMapReturn } from "./useIssueSessionMap";
 

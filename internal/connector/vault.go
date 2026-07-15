@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
@@ -24,6 +26,8 @@ import (
 // key: the standard base64 encoding of exactly 32 random bytes. Only the
 // control plane (loomcli serve) ever reads it; stores hold ciphertext only.
 const VaultKeyEnvVar = "LOOM_CONNECTOR_VAULT_KEY"
+
+const vaultKeyFileName = "connector-vault-key" //nolint:gosec // fixed filename, not credential material
 
 // vaultKeySize is the AES-256 key length in bytes.
 const vaultKeySize = 32
@@ -113,6 +117,90 @@ func NewVaultFromEnv() (*Vault, error) {
 		return nil, fmt.Errorf("%s is not standard base64: %w", VaultKeyEnvVar, ErrVaultKeyInvalid)
 	}
 	return NewVault(key)
+}
+
+// NewVaultFromEnvOrKeyFile builds the connector vault from the explicit env
+// override when present. Otherwise it loads or generates a separate persisted
+// key under dataDir so every serve component uses stable sealing material.
+func NewVaultFromEnvOrKeyFile(dataDir string) (*Vault, error) {
+	if os.Getenv(VaultKeyEnvVar) != "" {
+		return NewVaultFromEnv()
+	}
+	key, err := loadOrGenerateVaultKey(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	return NewVault(key)
+}
+
+func loadOrGenerateVaultKey(dataDir string) ([]byte, error) {
+	if strings.TrimSpace(dataDir) == "" {
+		return nil, ErrVaultKeyMissing
+	}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return nil, fmt.Errorf("connector: mkdir vault key dir: %w", err)
+	}
+	_ = os.Chmod(dataDir, 0700) //nolint:gosec // private directory needs owner execute permission
+	path := filepath.Join(dataDir, vaultKeyFileName)
+	if key, err := readVaultKeyFile(path); err == nil {
+		return key, nil
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	key := make([]byte, vaultKeySize)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("connector: generate vault key: %w", err)
+	}
+	return publishVaultKey(path, key)
+}
+
+func publishVaultKey(path string, key []byte) ([]byte, error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".connector-vault-key-*")
+	if err != nil {
+		return nil, fmt.Errorf("connector: create vault key temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+	if err := tmp.Chmod(0600); err != nil {
+		return nil, fmt.Errorf("connector: chmod vault key temp file: %w", err)
+	}
+	encoded := []byte(base64.StdEncoding.EncodeToString(key) + "\n")
+	if _, err := tmp.Write(encoded); err != nil {
+		return nil, fmt.Errorf("connector: write vault key: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return nil, fmt.Errorf("connector: close vault key temp file: %w", err)
+	}
+	if err := os.Link(tmpPath, path); err != nil {
+		if os.IsExist(err) {
+			winner, readErr := readVaultKeyFile(path)
+			if readErr != nil {
+				return nil, fmt.Errorf("connector: read winning vault key: %w", readErr)
+			}
+			return winner, nil
+		}
+		return nil, fmt.Errorf("connector: publish vault key: %w", err)
+	}
+	return key, nil
+}
+
+func readVaultKeyFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // path is dataDir plus a fixed private key filename
+	if err != nil {
+		return nil, err
+	}
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(data)))
+	if err != nil {
+		return nil, fmt.Errorf("connector: decode vault key file: %w", ErrVaultKeyInvalid)
+	}
+	if len(key) != vaultKeySize {
+		return nil, fmt.Errorf("connector: vault key file is %d bytes, want %d: %w", len(key), vaultKeySize, ErrVaultKeyInvalid)
+	}
+	return key, nil
 }
 
 // CredentialAAD builds the additional authenticated data binding a sealed

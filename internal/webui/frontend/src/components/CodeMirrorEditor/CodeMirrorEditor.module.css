@@ -6,6 +6,37 @@
   border-radius: var(--radius-md);
   font-family: var(--font-family-mono);
   font-size: var(--font-size-sm);
+
+  /* Syntax-highlight token colors (One Light), consumed by the editor's
+     HighlightStyle. The dark overrides are below. */
+  --cm-keyword: #a626a4;
+  --cm-string: #50a14f;
+  --cm-number: #986801;
+  --cm-comment: #a0a1a7;
+  --cm-function: #4078f2;
+  --cm-type: #c18401;
+  --cm-property: #e45649;
+  --cm-tag: #e45649;
+  --cm-heading: #4078f2;
+  --cm-link: #0184bc;
+  --cm-meta: #a0a1a7;
+  --cm-invalid: #e45649;
+}
+
+/* Dark theme token colors (One Dark). */
+:global([data-theme="dark"]) .container {
+  --cm-keyword: #c678dd;
+  --cm-string: #98c379;
+  --cm-number: #d19a66;
+  --cm-comment: #7f848e;
+  --cm-function: #61afef;
+  --cm-type: #e5c07b;
+  --cm-property: #e06c75;
+  --cm-tag: #e06c75;
+  --cm-heading: #61afef;
+  --cm-link: #56b6c2;
+  --cm-meta: #7f848e;
+  --cm-invalid: #e06c75;
 }
 
 .container :global(.cm-editor) {

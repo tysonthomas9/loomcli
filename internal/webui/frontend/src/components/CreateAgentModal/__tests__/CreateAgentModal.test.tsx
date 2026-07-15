@@ -31,10 +31,12 @@ const mockListWorkspaceRoles = vi.fn();
 const mockCreateBinding = vi.fn();
 const mockEnsureConnector = vi.fn();
 const mockAddGrant = vi.fn();
+const mockUseInteractivePrompts = vi.fn();
 
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
   useEnsureWorkspaceRole: () => mockEnsureRole,
+  useInteractivePrompts: () => mockUseInteractivePrompts(),
 }));
 vi.mock("@/api/agents", () => ({
   createPromptAgentRecord: (...args: unknown[]) =>
@@ -130,6 +132,15 @@ beforeEach(() => {
     name: "bug-triage",
     workspace_key: "ws-1",
   });
+  mockUseInteractivePrompts.mockReset();
+  mockUseInteractivePrompts.mockReturnValue({
+    prompts: [
+      { id: "lead", label: "Lead" },
+      { id: "pr-review", label: "PR Review" },
+    ],
+    isLoading: false,
+    error: null,
+  });
 });
 
 // ---------- isOpen gate ----------
@@ -195,6 +206,66 @@ describe("CreateAgentModal: default prop seeding", () => {
   it("falls back to 'codex' backend when defaultBackend is empty", () => {
     renderModal({ defaultBackend: "   " });
     expect(screen.getByTestId("create-agent-backend")).toHaveValue("codex");
+  });
+
+  it("renders built-in interactive prompts as cards without a standalone Lead section", () => {
+    renderModal();
+    expect(
+      screen.getByTestId("create-agent-template-lead"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("create-agent-template-interactive-pr-review"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("create-agent-template-custom-prompt"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^Lead agent$/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("create-agent-interactive-builtin"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("constrains supervised creation to the requested daemon role", () => {
+    renderModal({ supervisedRole: "task", defaultName: "review-worker" });
+
+    expect(
+      screen.getByTestId("create-agent-supervised-mode"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("create-agent-template-legacy-task"),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.queryByTestId("create-agent-template-task"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("create-agent-template-interactive-pr-review"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("create-agent-template-legacy-planner"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not expose persisted interactive roles as background behaviors", async () => {
+    mockListWorkspaceRoles.mockResolvedValueOnce([
+      { workspace_key: "ws-1", name: "pr-review", kind: "interactive" },
+      { workspace_key: "ws-1", name: "orchestrator" },
+      { workspace_key: "ws-1", name: "docs-worker", kind: "worker" },
+    ]);
+
+    renderModal();
+
+    expect(
+      await screen.findByTestId("create-agent-template-role-docs-worker"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("create-agent-template-role-pr-review"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("create-agent-template-role-orchestrator"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("create-agent-template-interactive-pr-review"),
+    ).toBeInTheDocument();
   });
 });
 
@@ -329,6 +400,24 @@ describe("CreateAgentModal: client-side validation", () => {
 // ---------- happy-path submission ----------
 
 describe("CreateAgentModal: submission", () => {
+  it("returns a supervised agent through onSuccess", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    const { onSuccess } = renderModal({
+      supervisedRole: "task",
+      defaultName: "review-worker",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalledTimes(1));
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      name: "review-worker",
+      role_name: "task",
+    });
+    expect(mockCreatePromptAgentRecord).not.toHaveBeenCalled();
+    expect(onSuccess).toHaveBeenCalledWith(sampleAgent);
+  });
+
   it("submits mixed-case names as lowercase", async () => {
     renderModal();
     fireEvent.change(screen.getByTestId("create-agent-name"), {
@@ -410,6 +499,52 @@ describe("CreateAgentModal: submission", () => {
       name: "lead-nova",
       role_name: "lead",
     });
+    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("kind");
+    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
+  });
+
+  it("submits interactive agent with a built-in prompt", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "review-nova" });
+
+    fireEvent.click(
+      screen.getByTestId("create-agent-template-interactive-pr-review"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      name: "review-nova",
+      role_name: "pr-review",
+      kind: "interactive",
+      prompt_file: "builtin:pr-review",
+      cross_repo: false,
+      repos: ["alpha"],
+    });
+  });
+
+  it("reveals a textarea and submits a custom inline prompt", async () => {
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+    renderModal({ defaultName: "custom-review" });
+
+    fireEvent.click(screen.getByTestId("create-agent-template-custom-prompt"));
+    const textarea = screen.getByTestId("create-agent-interactive-prompt");
+    expect(textarea).toBeInTheDocument();
+    fireEvent.change(textarea, {
+      target: { value: "  Review literally: {{ marker }}  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
+    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+      name: "custom-review",
+      role_name: "custom-review",
+      kind: "interactive",
+      prompt: "Review literally: {{ marker }}",
+      cross_repo: false,
+      repos: ["alpha"],
+    });
+    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
   });
 
   it("ensures the custom role before creating a custom-role agent", async () => {

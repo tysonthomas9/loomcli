@@ -12,6 +12,7 @@ import (
 // ---------------------------------------------------------------------------
 
 var handleWorkspaceBackendPatch = HandleWorkspaceBackendPatch
+var handleWorkspaceDesignFormatPatch = HandleWorkspaceDesignFormatPatch
 var handleWorkspaceCreate = HandleWorkspaceCreate
 var handleWorkspaceDelete = HandleWorkspaceDelete
 var handleWorkspaceRename = HandleWorkspaceRename
@@ -28,20 +29,21 @@ var handleClearDefaultWorkspace = HandleClearDefaultWorkspace
 // ---------------------------------------------------------------------------
 
 type mockWorkspaceService struct {
-	getActiveWorkspaceFn    func(ctx context.Context) (*ops.WorkspaceData, error)
-	listWorkspacesFn        func(ctx context.Context) ([]service.WorkspaceListItem, error)
-	getWorkspaceFn          func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
-	createWorkspaceFn       func(ctx context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
-	addWorkspaceReposFn     func(ctx context.Context, req service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
-	startAsyncCreateFn      func(ctx context.Context, req service.WorkspaceCreateRequest) (string, error)
-	getWorkspaceJobFn       func(ctx context.Context, jobID string) (*service.WorkspaceJob, error)
-	deleteWorkspaceFn       func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
-	renameWorkspaceFn       func(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error)
-	reorderWorkspacesFn     func(ctx context.Context, order []string) (*ops.WorkspaceData, error)
-	setDefaultWorkspaceFn   func(ctx context.Context, name string) (*ops.WorkspaceData, error)
-	clearDefaultWorkspaceFn func(ctx context.Context) (*ops.WorkspaceData, error)
-	getWorkspaceBackendFn   func(ctx context.Context, wsID string) (*service.BackendConfigData, error)
-	patchWorkspaceBackendFn func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
+	getActiveWorkspaceFn         func(ctx context.Context) (*ops.WorkspaceData, error)
+	listWorkspacesFn             func(ctx context.Context) ([]service.WorkspaceListItem, error)
+	getWorkspaceFn               func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
+	createWorkspaceFn            func(ctx context.Context, req service.WorkspaceCreateRequest) (*ops.WorkspaceData, []string, error)
+	addWorkspaceReposFn          func(ctx context.Context, req service.WorkspaceAddReposRequest) (*ops.WorkspaceData, error)
+	startAsyncCreateFn           func(ctx context.Context, req service.WorkspaceCreateRequest) (string, error)
+	getWorkspaceJobFn            func(ctx context.Context, jobID string) (*service.WorkspaceJob, error)
+	deleteWorkspaceFn            func(ctx context.Context, wsID string) (*ops.WorkspaceData, error)
+	renameWorkspaceFn            func(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error)
+	reorderWorkspacesFn          func(ctx context.Context, order []string) (*ops.WorkspaceData, error)
+	setDefaultWorkspaceFn        func(ctx context.Context, name string) (*ops.WorkspaceData, error)
+	clearDefaultWorkspaceFn      func(ctx context.Context) (*ops.WorkspaceData, error)
+	getWorkspaceBackendFn        func(ctx context.Context, wsID string) (*service.BackendConfigData, error)
+	patchWorkspaceBackendFn      func(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
+	patchWorkspaceDesignFormatFn func(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error)
 }
 
 func (m *mockWorkspaceService) GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
@@ -125,6 +127,12 @@ func (m *mockWorkspaceService) GetWorkspaceBackend(ctx context.Context, wsID str
 func (m *mockWorkspaceService) PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error) {
 	if m.patchWorkspaceBackendFn != nil {
 		return m.patchWorkspaceBackendFn(ctx, wsID, backend)
+	}
+	return nil, service.ErrUnavailable("not available")
+}
+func (m *mockWorkspaceService) PatchWorkspaceDesignFormat(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error) {
+	if m.patchWorkspaceDesignFormatFn != nil {
+		return m.patchWorkspaceDesignFormatFn(ctx, wsID, designFormat)
 	}
 	return nil, service.ErrUnavailable("not available")
 }

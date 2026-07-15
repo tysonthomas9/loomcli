@@ -19,6 +19,14 @@ const mockAddGrant = vi.fn();
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
   useEnsureWorkspaceRole: () => mockEnsureRole,
+  useInteractivePrompts: () => ({
+    prompts: [
+      { id: "lead", label: "Lead" },
+      { id: "pr-review", label: "PR Review" },
+    ],
+    isLoading: false,
+    error: null,
+  }),
 }));
 vi.mock("@/api/workspace", () => ({
   listWorkspaceRoles: (...args: unknown[]) => mockListWorkspaceRoles(...args),
@@ -61,7 +69,7 @@ describe("CreateAgentModal", () => {
     });
   });
 
-  it("creates a lead agent with workspace scope when no repo chip is selected", async () => {
+  it("creates the Lead interactive card with the legacy lead payload", async () => {
     const onSuccess = vi.fn();
 
     render(
@@ -81,6 +89,7 @@ describe("CreateAgentModal", () => {
       target: { value: "lead-nova" },
     });
     fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+    expect(screen.queryByText(/^Lead agent$/i)).not.toBeInTheDocument();
     // The first repo chip is pre-selected; deselect it so the lead gets
     // workspace-wide scope (empty selection = cross_repo).
     fireEvent.click(screen.getByRole("button", { name: /hello-world/ }));
@@ -97,6 +106,8 @@ describe("CreateAgentModal", () => {
         backend: "codex",
       });
     });
+    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("kind");
+    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
     expect(onSuccess).toHaveBeenCalledWith({
       name: "lead-nova",
       repos: [],

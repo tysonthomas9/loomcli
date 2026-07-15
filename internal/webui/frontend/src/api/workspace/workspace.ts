@@ -43,11 +43,23 @@ export interface WorkspaceAgentInfo {
 export interface CreateAgentRequest {
   name: string;
   role_name: string;
+  kind?: string;
+  prompt?: string;
+  prompt_file?: string;
   auto?: boolean;
   backend?: string;
   repos?: string[];
   repo_groups?: string[];
   cross_repo?: boolean;
+}
+
+export interface InteractivePromptInfo {
+  id: string;
+  label: string;
+}
+
+interface InteractivePromptsResponse {
+  prompts: InteractivePromptInfo[];
 }
 
 export interface RunOnboardingFirstTaskRequest {
@@ -96,6 +108,7 @@ export interface WorkspaceData {
   workspaces: WorkspaceSummary[];
   workspace_order?: string[];
   default_workspace: string;
+  design_format?: "markdown" | "html";
 }
 
 // ============= Response Types =============
@@ -321,7 +334,9 @@ export async function createWorkspaceAgent(
 export interface WorkspaceRole {
   workspace_key: string;
   name: string;
+  kind?: "interactive" | "worker";
   description?: string;
+  prompt?: string;
   prompt_file?: string;
   model?: string;
   task_filter?: string;
@@ -472,6 +487,15 @@ export async function deleteWorkspaceRole(
   name: string,
 ): Promise<void> {
   await del<void>(wsUrl(workspaceId, `/roles/${encodeURIComponent(name)}`));
+}
+
+export async function fetchInteractivePrompts(
+  workspaceId: string,
+): Promise<InteractivePromptInfo[]> {
+  const response = await get<InteractivePromptsResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/interactive-prompts`,
+  );
+  return Array.isArray(response.prompts) ? response.prompts : [];
 }
 
 export async function deleteWorkspaceAgent(

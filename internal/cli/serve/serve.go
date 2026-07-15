@@ -795,6 +795,7 @@ func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {
 
 func applyCORSConfig(cfg *webui.ServerConfig) {
 	origins := cfg.CORSOrigins
+	frontendOrigins := cfg.FrontendOrigins
 	if serveCorsOrigin != "" {
 		origins = append(origins, serveCorsOrigin)
 	}
@@ -806,8 +807,10 @@ func applyCORSConfig(cfg *webui.ServerConfig) {
 		u = strings.TrimSuffix(u, "/")
 		if u != "" {
 			origins = append(origins, u)
+			frontendOrigins = append(frontendOrigins, u)
 		}
 	}
+	cfg.FrontendOrigins = frontendOrigins
 	if len(origins) > 0 {
 		cfg.CORSEnabled = true
 		cfg.CORSOrigins = origins

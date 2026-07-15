@@ -362,6 +362,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
 ];
 
 export type DefaultRole = "lead" | "plan" | "task";
+export type SupervisedRole = "plan" | "task";
 
 /**
  * Resolve the template a `defaultRole` prop should pre-select. plan/task select
@@ -371,6 +372,16 @@ export function templateForRole(role: DefaultRole | undefined): AgentTemplate {
   if (role === "plan") return PLANNER_ROLE_TEMPLATE;
   if (role === "lead") return LEGACY_LEAD_TEMPLATE;
   return CODER_ROLE_TEMPLATE;
+}
+
+/**
+ * Resolve a daemon-supervised template for flows that must receive an agent
+ * row through CreateAgentModal.onSuccess (for example onboarding and PR
+ * reviewer assignment). These callers cannot accept role-backed prompt-agent
+ * bindings, so the modal constrains selection to this one template.
+ */
+export function supervisedTemplateForRole(role: SupervisedRole): AgentTemplate {
+  return role === "plan" ? LEGACY_PLANNER_TEMPLATE : LEGACY_TASK_TEMPLATE;
 }
 
 export function templatesForSection(section: TemplateSection): AgentTemplate[] {

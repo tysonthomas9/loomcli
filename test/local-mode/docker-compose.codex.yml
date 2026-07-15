@@ -9,14 +9,14 @@ services:
     build:
       args:
         INSTALL_CODEX: "true"
-        CODEX_CLI_VERSION: "${LOCAL_MODE_CODEX_CLI_VERSION:-0.128.0}"
+        CODEX_CLI_VERSION: "${LOCAL_MODE_CODEX_CLI_VERSION:-latest}"
     environment:
       LOOM_BACKEND: codex
       LOOM_LOCAL_MODE_BACKEND: codex
       LOOM_LOCAL_MODE_PLAN_AGENT: codex-planner
       LOOM_LOCAL_MODE_CODE_AGENT: codex-coder
-      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-1
-      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-2
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
+      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
       # Phase U (opt-in): route the daemon execution leaf through the bundled TS
       # runner. Default empty = the Go path. Enable with:
       #   LOOM_DAEMON_LEAF=ts make local-mode-codex-up

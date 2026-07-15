@@ -23,6 +23,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	if m.agentSvc == nil && m.store == nil {
 		return
 	}
+	mux.HandleFunc("GET /api/workspaces/{ws}/interactive-prompts", HandleInteractivePrompts())
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents", m.listAgents)
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents", m.createAgent)
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}", m.getAgent)

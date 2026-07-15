@@ -233,20 +233,23 @@ func issueDataToTypesIssue(d *backend.IssueData) *types.Issue {
 		return nil
 	}
 	issue := &types.Issue{
-		ID:         d.ID,
-		Title:      d.Title,
-		Status:     types.Status(d.Status),
-		Priority:   d.Priority,
-		IssueType:  types.IssueType(d.IssueType),
-		Assignee:   d.Assignee,
-		Owner:      d.Owner,
-		Labels:     d.Labels,
-		SourceRepo: d.SourceRepo,
-		Design:     d.Design,
-		CreatedAt:  d.CreatedAt,
-		UpdatedAt:  d.UpdatedAt,
-		DueAt:      d.DueAt,
-		DeferUntil: d.DeferUntil,
+		ID:               d.ID,
+		Title:            d.Title,
+		Status:           types.Status(d.Status),
+		Priority:         d.Priority,
+		IssueType:        types.IssueType(d.IssueType),
+		Assignee:         d.Assignee,
+		Owner:            d.Owner,
+		Labels:           d.Labels,
+		SourceRepo:       d.SourceRepo,
+		Design:           d.Design,
+		DesignArtifactID: d.DesignArtifactID,
+		DesignFormat:     d.DesignFormat,
+		HasDesign:        d.HasDesign || d.Design != "",
+		CreatedAt:        d.CreatedAt,
+		UpdatedAt:        d.UpdatedAt,
+		DueAt:            d.DueAt,
+		DeferUntil:       d.DeferUntil,
 	}
 	return issue
 }

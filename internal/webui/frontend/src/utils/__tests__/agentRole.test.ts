@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { LoomAgentStatus } from "@/types";
 
 import {
+  agentRailRank,
+  buildEpicLeadClaims,
   isBackgroundAgent,
+  isInteractiveAgent,
   isLeadRole,
   isWorkerRole,
   splitAgentsByRuntime,
@@ -39,6 +42,34 @@ describe("isWorkerRole", () => {
   });
 });
 
+describe("isInteractiveAgent", () => {
+  it("uses role_kind when present", () => {
+    expect(
+      isInteractiveAgent(
+        makeAgent({
+          name: "operator-a",
+          role: "operator",
+          role_kind: "interactive",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isInteractiveAgent(
+        makeAgent({ name: "lead-a", role: "lead", role_kind: "worker" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("falls back to lead role names when role_kind is absent", () => {
+    expect(
+      isInteractiveAgent(makeAgent({ name: "lead-a", role: "lead" })),
+    ).toBe(true);
+    expect(
+      isInteractiveAgent(makeAgent({ name: "task-a", role: "task" })),
+    ).toBe(false);
+  });
+});
+
 describe("isBackgroundAgent", () => {
   it("treats lead agents as regular even when daemon-managed", () => {
     expect(
@@ -64,6 +95,19 @@ describe("isBackgroundAgent", () => {
       true,
     );
   });
+
+  it("treats interactive-kind custom agents as regular", () => {
+    expect(
+      isBackgroundAgent(
+        makeAgent({
+          name: "operator-a",
+          role: "operator",
+          role_kind: "interactive",
+          daemon_managed: true,
+        }),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("splitAgentsByRuntime", () => {
@@ -76,5 +120,41 @@ describe("splitAgentsByRuntime", () => {
       regular: [lead],
       background: [planner, task],
     });
+  });
+});
+
+describe("agentRailRank", () => {
+  it("ranks interactive-kind agents first", () => {
+    expect(
+      agentRailRank(
+        makeAgent({
+          name: "operator-a",
+          role: "operator",
+          role_kind: "interactive",
+        }),
+      ),
+    ).toBe(0);
+    expect(agentRailRank(makeAgent({ name: "worker-a", role: "task" }))).toBe(
+      2,
+    );
+  });
+});
+
+describe("buildEpicLeadClaims", () => {
+  it("claims epics only for lead-capable role names", () => {
+    const claims = buildEpicLeadClaims([
+      makeAgent({
+        name: "operator-a",
+        role: "operator",
+        role_kind: "interactive",
+        parent: "EPIC-1",
+      }),
+      makeAgent({ name: "lead-a", role: "lead", parent: "EPIC-2" }),
+      makeAgent({ name: "task-a", role: "task", parent: "EPIC-3" }),
+    ]);
+
+    expect(claims.has("EPIC-1")).toBe(false);
+    expect(claims.get("EPIC-2")).toBe("lead-a");
+    expect(claims.has("EPIC-3")).toBe(false);
   });
 });

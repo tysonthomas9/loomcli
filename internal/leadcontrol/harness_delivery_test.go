@@ -2,6 +2,7 @@ package leadcontrol
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -234,11 +235,71 @@ func TestHarnessRuntimeStatusMapping(t *testing.T) {
 	}
 }
 
+// TestSendHarnessTurnBoundedWhenNotReady locks the anti-wedge contract: the
+// wrapper's Send readiness heuristic only matches claude's boot screen, so
+// once output scrolls it away Send blocks forever. The send must (a) be
+// bounded by the send timeout instead of parking the drain goroutine
+// indefinitely, and (b) fall back to submitting the staged text directly with
+// the Enter key event — delivery was already quiet-window-gated, so the
+// composer is live.
+func TestSendHarnessTurnBoundedWhenNotReady(t *testing.T) {
+	origTimeout := harnessSendTimeout
+	harnessSendTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { harnessSendTimeout = origTimeout })
+
+	fake := newFakeHarnessConversation()
+	fake.setSendBlocksUntilCancel(true)
+	handle := &leadConversationHandle{conv: fake}
+
+	start := time.Now()
+	if err := sendHarnessTurn(context.Background(), handle, "hello reviewer"); err != nil {
+		t.Fatalf("sendHarnessTurn error = %v, want fallback delivery", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("send attempt took %v — the timeout is not bounding the wrapper wait", elapsed)
+	}
+	// Staged exactly once, submitted via the direct Enter keystroke.
+	if got := string(fake.stdinBytes()); got != "hello reviewer"+harnessEnterKeystroke {
+		t.Fatalf("staged stdin = %q, want message + direct Enter", got)
+	}
+	if handle.staged() != "" {
+		t.Fatalf("staged bookkeeping not cleared after fallback delivery: %q", handle.staged())
+	}
+
+	// A non-timeout Send failure must NOT trigger the fallback and must keep
+	// the staged text remembered so the retry does not duplicate it.
+	fake2 := newFakeHarnessConversation()
+	fake2.sendErr = chat.ErrTurnInFlight
+	handle2 := &leadConversationHandle{conv: fake2}
+	if err := sendHarnessTurn(context.Background(), handle2, "hello again"); !errors.Is(err, chat.ErrTurnInFlight) {
+		t.Fatalf("sendHarnessTurn error = %v, want ErrTurnInFlight", err)
+	}
+	if got := string(fake2.stdinBytes()); got != "hello again" {
+		t.Fatalf("stdin = %q, want staged text without a submit keystroke", got)
+	}
+	if handle2.staged() != "hello again" {
+		t.Fatalf("staged bookkeeping = %q, want the pending message", handle2.staged())
+	}
+	// Retry after the turn clears: submit without re-staging.
+	fake2.mu.Lock()
+	fake2.sendErr = nil
+	fake2.mu.Unlock()
+	if err := sendHarnessTurn(context.Background(), handle2, "hello again"); err != nil {
+		t.Fatalf("retry error = %v", err)
+	}
+	if got := string(fake2.stdinBytes()); got != "hello again" {
+		t.Fatalf("stdin after retry = %q, want no duplicate staging", got)
+	}
+	if got := fake2.sentTexts(); len(got) != 1 || got[0] != "" {
+		t.Fatalf("sends = %#v, want exactly one wrapper submit", got)
+	}
+}
+
 func TestSendHarnessTurnFraming(t *testing.T) {
 	ctx := context.Background()
 
 	single := newFakeHarnessConversation()
-	if err := sendHarnessTurn(ctx, single, "one line"); err != nil {
+	if err := sendHarnessTurn(ctx, &leadConversationHandle{conv: single}, "one line"); err != nil {
 		t.Fatalf("sendHarnessTurn(single) error = %v", err)
 	}
 	if got := string(single.stdinBytes()); got != "one line" {
@@ -249,7 +310,7 @@ func TestSendHarnessTurnFraming(t *testing.T) {
 	}
 
 	multi := newFakeHarnessConversation()
-	if err := sendHarnessTurn(ctx, multi, "line one\nline two"); err != nil {
+	if err := sendHarnessTurn(ctx, &leadConversationHandle{conv: multi}, "line one\nline two"); err != nil {
 		t.Fatalf("sendHarnessTurn(multi) error = %v", err)
 	}
 	if got := string(multi.stdinBytes()); got != "\x1b[200~line one\nline two\x1b[201~" {
@@ -332,16 +393,17 @@ func installFakeHarnessConversation(t *testing.T, sessionID string, fake *fakeHa
 }
 
 type fakeHarnessConversation struct {
-	mu               sync.Mutex
-	sends            []string
-	stdin            []byte
-	snapshot         wrapper.Snapshot
-	sendErr          error
-	harnessSessionID string
-	events           chan chat.TurnEvent
-	waitCh           chan struct{}
-	waitResult       wrapper.Result
-	closed           bool
+	mu                    sync.Mutex
+	sends                 []string
+	stdin                 []byte
+	snapshot              wrapper.Snapshot
+	sendErr               error
+	sendBlocksUntilCancel bool
+	harnessSessionID      string
+	events                chan chat.TurnEvent
+	waitCh                chan struct{}
+	waitResult            wrapper.Result
+	closed                bool
 }
 
 func newFakeHarnessConversation() *fakeHarnessConversation {
@@ -375,7 +437,16 @@ func (f *fakeHarnessConversation) AcquireControl(context.Context) (func(), error
 	return func() {}, nil
 }
 
-func (f *fakeHarnessConversation) Send(_ context.Context, text string) (string, error) {
+func (f *fakeHarnessConversation) Send(ctx context.Context, text string) (string, error) {
+	f.mu.Lock()
+	blocked := f.sendBlocksUntilCancel
+	f.mu.Unlock()
+	if blocked {
+		// Models the wrapper's waitReadyForSend never matching the screen:
+		// Send parks until the caller's context expires.
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.sendErr != nil {
@@ -383,6 +454,12 @@ func (f *fakeHarnessConversation) Send(_ context.Context, text string) (string, 
 	}
 	f.sends = append(f.sends, text)
 	return "turn-1", nil
+}
+
+func (f *fakeHarnessConversation) setSendBlocksUntilCancel(v bool) {
+	f.mu.Lock()
+	f.sendBlocksUntilCancel = v
+	f.mu.Unlock()
 }
 
 func (f *fakeHarnessConversation) WriteStdin(p []byte) (int, error) {

@@ -118,6 +118,7 @@ type PatchIssueParams struct {
 	Assignee           *string
 	Owner              *string
 	Design             *string
+	DesignFormat       *string
 	AcceptanceCriteria *string
 	Notes              *string
 	ExternalRef        *string

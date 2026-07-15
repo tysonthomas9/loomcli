@@ -10,7 +10,10 @@
 import { useMemo, useState } from "react";
 
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
-import { sessionTabStyles as styles } from "@/components/IssueDetailPanel";
+import {
+  MarkdownRenderer,
+  sessionTabStyles as styles,
+} from "@/components/IssueDetailPanel";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 import { formatStatusLabel } from "@/utils/issue";
@@ -373,7 +376,10 @@ export function SessionRunDetail({
         {grouped.prompt && (
           <div className={styles.promptBlock}>
             <div className={styles.promptLabel}>Prompt</div>
-            <div className={styles.promptBody}>{grouped.prompt.text}</div>
+            <MarkdownRenderer
+              content={grouped.prompt.text}
+              className={styles.promptBody}
+            />
           </div>
         )}
 
@@ -510,7 +516,10 @@ export function SessionRunDetail({
                       </span>
                     )}
                   </div>
-                  <div className={styles.msg}>{block.text}</div>
+                  <MarkdownRenderer
+                    content={block.text}
+                    className={styles.msg}
+                  />
                 </article>
               );
             }
@@ -541,9 +550,11 @@ export function SessionRunDetail({
                 </div>
                 {block.items.map((item) =>
                   item.kind === "text" ? (
-                    <div key={item.seq} className={styles.msg}>
-                      {item.text}
-                    </div>
+                    <MarkdownRenderer
+                      key={item.seq}
+                      content={item.text}
+                      className={styles.msg}
+                    />
                   ) : (
                     <ToolBlock
                       key={item.seq}

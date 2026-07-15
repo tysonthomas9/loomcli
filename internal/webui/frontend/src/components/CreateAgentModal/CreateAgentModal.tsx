@@ -14,6 +14,7 @@ import {
 } from "@/api/agents"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import type {
+  InteractivePromptInfo,
   RepoInfo,
   WorkspaceAgentInfo,
   WorkspaceRole,
@@ -22,6 +23,7 @@ import { listWorkspaceRoles } from "@/api/workspace"; // eslint-disable-line bou
 import {
   useCreateWorkspaceAgent,
   useEnsureWorkspaceRole,
+  useInteractivePrompts,
 } from "@/hooks/agents";
 import {
   GITHUB_CONNECTOR_ID,
@@ -46,10 +48,12 @@ import {
   customRoleTemplate,
   grantsForRepo,
   rolePromptFilename,
+  supervisedTemplateForRole,
   templateForRole,
   TEMPLATE_SECTIONS,
   type AgentTemplate,
   type DefaultRole,
+  type SupervisedRole,
 } from "./agentTemplates";
 import styles from "./CreateAgentModal.module.css";
 
@@ -63,6 +67,64 @@ const CADENCE_OPTIONS = [
 const DEFAULT_CADENCE = CADENCE_OPTIONS[0].value;
 
 const BUILTIN_ROLE_NAMES = new Set(["lead", "plan", "task"]);
+
+const CUSTOM_PROMPT_ID = "custom";
+
+const INTERACTIVE_ACCENTS = {
+  lead: "#db2777",
+  prompt: "#2563eb",
+  custom: "#7c3aed",
+} as const;
+
+const DEFAULT_INTERACTIVE_PROMPTS: InteractivePromptInfo[] = [
+  { id: "lead", label: "Lead" },
+  { id: "pr-review", label: "PR Review" },
+];
+
+const CUSTOM_PROMPT_TEMPLATE = {
+  title: "Custom prompt",
+  description: "Define a terminal teammate with your own inline instructions.",
+  glyph: "✦",
+  placeholder: "reviewer",
+  testId: "create-agent-template-custom-prompt",
+  accentColor: INTERACTIVE_ACCENTS.custom,
+};
+
+function interactivePromptCard(prompt: InteractivePromptInfo) {
+  if (prompt.id === "lead") {
+    return {
+      description: "Orchestrates work interactively in a terminal.",
+      glyph: "L",
+      placeholder: "lead",
+      testId: "create-agent-template-lead",
+      accentColor: INTERACTIVE_ACCENTS.lead,
+    };
+  }
+  if (prompt.id === "pr-review") {
+    return {
+      description: "Reviews pull requests with focused terminal guidance.",
+      glyph: "R",
+      placeholder: "reviewer",
+      testId: "create-agent-template-interactive-pr-review",
+      accentColor: INTERACTIVE_ACCENTS.prompt,
+    };
+  }
+  return {
+    description:
+      "Starts an interactive terminal agent with this built-in prompt.",
+    glyph: prompt.label.trim().charAt(0).toUpperCase() || "I",
+    placeholder: prompt.id,
+    testId: `create-agent-template-interactive-${prompt.id}`,
+    accentColor: INTERACTIVE_ACCENTS.prompt,
+  };
+}
+
+function isInteractiveWorkspaceRole(role: WorkspaceRole): boolean {
+  const explicitKind = role.kind?.trim().toLowerCase();
+  if (explicitKind) return explicitKind === "interactive";
+  const roleName = role.name.trim().toLowerCase();
+  return roleName === "lead" || roleName === "orchestrator";
+}
 
 /** Details of a workflow activation, surfaced to the caller on success. */
 export interface WorkflowActivationResult {
@@ -98,6 +160,13 @@ export interface CreateAgentModalProps {
    */
   defaultRole?: DefaultRole;
   /**
+   * Constrain creation to one daemon-supervised role. This is intentionally
+   * stronger than a default selection: onboarding and PR assignment require a
+   * workspace-agent result through `onSuccess` and cannot accept a role-backed
+   * prompt-agent binding or an interactive terminal agent.
+   */
+  supervisedRole?: SupervisedRole;
+  /**
    * Deep-link to Settings, used by the review-loop template when the GitHub
    * runtime credential it reuses is not configured yet.
    */
@@ -119,6 +188,7 @@ export function CreateAgentModal({
   defaultBackend,
   defaultName,
   defaultRole,
+  supervisedRole,
   onOpenSettings,
   onClose,
   onSuccess,
@@ -127,7 +197,9 @@ export function CreateAgentModal({
   const navigate = useNavigate();
   const resolvedDefaultBackend = defaultBackend?.trim() || "codex";
   const resolvedDefaultName = defaultName?.trim() ?? "";
-  const initialTemplate = templateForRole(defaultRole);
+  const initialTemplate = supervisedRole
+    ? supervisedTemplateForRole(supervisedRole)
+    : templateForRole(defaultRole);
 
   const [name, setName] = useState(resolvedDefaultName);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
@@ -139,6 +211,10 @@ export function CreateAgentModal({
   const [newRoleName, setNewRoleName] = useState<string>("");
   const [rolePrompt, setRolePrompt] = useState<string>("");
   const [existingRoles, setExistingRoles] = useState<WorkspaceRole[]>([]);
+  const [selectedBuiltinPromptID, setSelectedBuiltinPromptID] = useState<
+    string | null
+  >(supervisedRole ? null : defaultRole === "lead" ? "lead" : null);
+  const [customPrompt, setCustomPrompt] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
@@ -153,6 +229,8 @@ export function CreateAgentModal({
   const { settings: localSettings } = useLocalSettings(isOpen);
   const githubConfigured =
     localSettings?.runtime_credentials?.github?.configured ?? false;
+  const { prompts: fetchedInteractivePrompts, error: promptLoadError } =
+    useInteractivePrompts(workspaceId);
 
   const customRoleTemplates = useMemo(
     () =>
@@ -160,7 +238,9 @@ export function CreateAgentModal({
         .filter((role) => {
           const roleName = role.name.trim();
           return (
-            roleName !== "" && !BUILTIN_ROLE_NAMES.has(roleName.toLowerCase())
+            roleName !== "" &&
+            !BUILTIN_ROLE_NAMES.has(roleName.toLowerCase()) &&
+            !isInteractiveWorkspaceRole(role)
           );
         })
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -168,34 +248,51 @@ export function CreateAgentModal({
     [existingRoles],
   );
   const behaviorTemplates = useMemo(
-    () => [
-      ...BUILTIN_ROLE_TEMPLATES,
-      ...customRoleTemplates,
-      NEW_ROLE_TEMPLATE,
-      ...SCRIPTED_WORKFLOW_TEMPLATES,
-    ],
-    [customRoleTemplates],
+    () =>
+      supervisedRole
+        ? []
+        : [
+            ...BUILTIN_ROLE_TEMPLATES,
+            ...customRoleTemplates,
+            NEW_ROLE_TEMPLATE,
+            ...SCRIPTED_WORKFLOW_TEMPLATES,
+          ],
+    [customRoleTemplates, supervisedRole],
   );
+  // Lead is rendered with the v5 interactive prompts. Its payload remains the
+  // legacy lead payload, so keeping the old advanced card would be a duplicate.
+  const legacyDaemonTemplates = useMemo(() => {
+    if (supervisedRole) return [supervisedTemplateForRole(supervisedRole)];
+    return LEGACY_DAEMON_TEMPLATES.filter(
+      (template) => template.kind !== "lead",
+    );
+  }, [supervisedRole]);
   const allTemplates = useMemo(
-    () => [...behaviorTemplates, ...LEGACY_DAEMON_TEMPLATES],
-    [behaviorTemplates],
+    () => [...behaviorTemplates, ...legacyDaemonTemplates],
+    [behaviorTemplates, legacyDaemonTemplates],
   );
   const selectedTemplate: AgentTemplate =
     allTemplates.find((t) => t.id === selectedTemplateId) ?? initialTemplate;
 
+  const isInteractive =
+    supervisedRole === undefined && selectedBuiltinPromptID !== null;
   const isRoleBehavior =
-    selectedTemplate.kind === "role" || selectedTemplate.kind === "role-create";
-  const isRoleCreate = selectedTemplate.kind === "role-create";
+    !isInteractive &&
+    (selectedTemplate.kind === "role" ||
+      selectedTemplate.kind === "role-create");
+  const isRoleCreate =
+    !isInteractive && selectedTemplate.kind === "role-create";
   const isLegacyDaemon =
-    selectedTemplate.kind === "lead" ||
-    selectedTemplate.kind === "builtin-role" ||
-    selectedTemplate.kind === "custom-role";
-  const isWorkflow = selectedTemplate.kind === "workflow";
-  const workflowSpec = selectedTemplate.workflow;
+    !isInteractive &&
+    (selectedTemplate.kind === "lead" ||
+      selectedTemplate.kind === "builtin-role" ||
+      selectedTemplate.kind === "custom-role");
+  const isWorkflow = !isInteractive && selectedTemplate.kind === "workflow";
+  const workflowSpec = isWorkflow ? selectedTemplate.workflow : undefined;
   const needsConnector = (workflowSpec?.grants?.length ?? 0) > 0;
   const showCadence = isWorkflow;
   const isActivation = isWorkflow || isRoleBehavior;
-  const showBackend = isRoleBehavior || isLegacyDaemon;
+  const showBackend = isInteractive || isRoleBehavior || isLegacyDaemon;
   const showRepos = !isRoleBehavior;
   const selectedRoleName = isRoleCreate
     ? normalizeStoredAgentName(newRoleName)
@@ -203,7 +300,45 @@ export function CreateAgentModal({
   const behaviorSection = TEMPLATE_SECTIONS[0]!;
   const advancedSection = TEMPLATE_SECTIONS[1]!;
 
-  const namePlaceholder = selectedTemplate.defaultName;
+  const interactivePrompts = useMemo(
+    () =>
+      fetchedInteractivePrompts.length > 0
+        ? fetchedInteractivePrompts
+        : DEFAULT_INTERACTIVE_PROMPTS,
+    [fetchedInteractivePrompts],
+  );
+
+  const namePlaceholder = useMemo(() => {
+    if (isInteractive) {
+      if (selectedBuiltinPromptID === CUSTOM_PROMPT_ID) {
+        return CUSTOM_PROMPT_TEMPLATE.placeholder;
+      }
+      const selectedPrompt = interactivePrompts.find(
+        (prompt) => prompt.id === selectedBuiltinPromptID,
+      );
+      return selectedPrompt
+        ? interactivePromptCard(selectedPrompt).placeholder
+        : "reviewer";
+    }
+    return selectedTemplate.defaultName;
+  }, [
+    isInteractive,
+    interactivePrompts,
+    selectedBuiltinPromptID,
+    selectedTemplate,
+  ]);
+
+  useEffect(() => {
+    if (!isInteractive || selectedBuiltinPromptID === CUSTOM_PROMPT_ID) {
+      return;
+    }
+    if (
+      interactivePrompts.some((prompt) => prompt.id === selectedBuiltinPromptID)
+    ) {
+      return;
+    }
+    setSelectedBuiltinPromptID(interactivePrompts[0]?.id ?? "lead");
+  }, [isInteractive, interactivePrompts, selectedBuiltinPromptID]);
 
   const repoOptions = useMemo(
     () =>
@@ -237,18 +372,32 @@ export function CreateAgentModal({
 
   const resetToDefaults = useCallback((): void => {
     setName(resolvedDefaultName);
-    setSelectedTemplateId(templateForRole(defaultRole).id);
+    setSelectedTemplateId(
+      supervisedRole
+        ? supervisedTemplateForRole(supervisedRole).id
+        : templateForRole(defaultRole).id,
+    );
     setBackend(resolvedDefaultBackend);
     setSelectedRepos(defaultRepos);
     setCadence(DEFAULT_CADENCE);
     setNewRoleName("");
     setRolePrompt("");
-  }, [resolvedDefaultName, resolvedDefaultBackend, defaultRepos, defaultRole]);
+    setSelectedBuiltinPromptID(
+      supervisedRole ? null : defaultRole === "lead" ? "lead" : null,
+    );
+    setCustomPrompt("");
+  }, [
+    resolvedDefaultName,
+    resolvedDefaultBackend,
+    defaultRepos,
+    defaultRole,
+    supervisedRole,
+  ]);
 
   // Fetch roles while the modal is open so the behavior grid can show every
   // custom role in the workspace. Failure still leaves builtin cards usable.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || supervisedRole) return;
     let cancelled = false;
     listWorkspaceRoles(workspaceId)
       .then((roles) => {
@@ -260,7 +409,7 @@ export function CreateAgentModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, workspaceId]);
+  }, [isOpen, supervisedRole, workspaceId]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -291,7 +440,25 @@ export function CreateAgentModal({
     isRoleCreate && rolePrompt.trim() === "" ? "Role prompt is required" : null;
   const roleCreateReady =
     !isRoleCreate || (roleNameError === null && rolePromptError === null);
-  const canSubmit = nameError === null && roleCreateReady && !isSubmitting;
+  const hasPromptSelection =
+    !isInteractive ||
+    (selectedBuiltinPromptID === CUSTOM_PROMPT_ID
+      ? customPrompt.trim() !== ""
+      : (selectedBuiltinPromptID?.trim() ?? "") !== "");
+  const canSubmit =
+    nameError === null &&
+    roleCreateReady &&
+    hasPromptSelection &&
+    !isSubmitting;
+
+  const selectTemplate = (templateID: string): void => {
+    setSelectedBuiltinPromptID(null);
+    setSelectedTemplateId(templateID);
+  };
+
+  const selectInteractive = (promptID: string): void => {
+    setSelectedBuiltinPromptID(promptID);
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -441,6 +608,7 @@ export function CreateAgentModal({
       // on first use, before the agent that references the role is created.
       // The endpoint is idempotent, so re-creating the same template is safe.
       if (
+        !isInteractive &&
         selectedTemplate.kind === "custom-role" &&
         selectedTemplate.customRole
       ) {
@@ -456,14 +624,40 @@ export function CreateAgentModal({
           ...(cr.deniedTools ? { denied_tools: cr.deniedTools } : {}),
         });
       }
+      let roleName = selectedTemplate.roleName;
+      let interactiveFields: {
+        kind?: "interactive";
+        prompt?: string;
+        prompt_file?: string;
+      } = {};
+      if (isInteractive) {
+        const promptID = selectedBuiltinPromptID ?? "lead";
+        if (promptID === CUSTOM_PROMPT_ID) {
+          roleName = trimmedName;
+          interactiveFields = {
+            kind: "interactive",
+            prompt: customPrompt.trim(),
+          };
+        } else if (promptID === "lead") {
+          roleName = "lead";
+        } else {
+          roleName = promptID;
+          interactiveFields = {
+            kind: "interactive",
+            prompt_file: `builtin:${promptID}`,
+          };
+        }
+      }
+
       const request = {
         name: trimmedName,
-        // roleName is the canonical role ("lead" | "plan" | "task" | a custom
-        // role name) — never a display alias.
-        role_name: selectedTemplate.roleName,
+        // Non-interactive templates keep their canonical role name. Interactive
+        // prompts use the built-in prompt id (or the agent name for inline text).
+        role_name: roleName,
         auto: false,
         cross_repo: crossRepo,
         repos: crossRepo ? [] : selectedRepos,
+        ...interactiveFields,
       };
       const agent = await createAgent({
         ...request,
@@ -535,62 +729,167 @@ export function CreateAgentModal({
         <div className={styles.panel}>
           <h3 className={styles.panelHeader}>Agent type</h3>
 
-          <div
-            className={styles.group}
-            role="group"
-            aria-labelledby={behaviorSection.labelId}
-          >
-            <span className={styles.groupLabel} id={behaviorSection.labelId}>
-              {behaviorSection.label}
-            </span>
-            <p className={styles.groupHint}>{behaviorSection.hint}</p>
-            <div className={styles.templateList}>
-              {behaviorTemplates.map((template) => (
-                <AgentTemplateCard
-                  key={template.id}
-                  title={template.title}
-                  description={template.description}
-                  glyph={template.glyph}
-                  accentColor={template.accentColor}
-                  tag={template.tag}
-                  selected={selectedTemplateId === template.id}
-                  disabled={isSubmitting}
-                  ariaLabel={`${template.title}, ${behaviorSection.label}`}
-                  testId={template.testId}
-                  onSelect={() => setSelectedTemplateId(template.id)}
-                />
-              ))}
-            </div>
-          </div>
-
-          <details className={styles.advancedGroup} open={isLegacyDaemon}>
-            <summary className={styles.advancedSummary}>
-              <span className={styles.groupLabel} id={advancedSection.labelId}>
-                {advancedSection.label}
-              </span>
-              <span className={styles.groupHint}>{advancedSection.hint}</span>
-            </summary>
+          {supervisedRole ? (
             <div
-              className={styles.templateList}
+              className={styles.group}
               role="group"
-              aria-labelledby={advancedSection.labelId}
+              aria-labelledby="create-agent-supervised-label"
+              data-testid="create-agent-supervised-mode"
             >
-              {LEGACY_DAEMON_TEMPLATES.map((template) => (
-                <AgentTemplateCard
-                  key={template.id}
-                  title={template.title}
-                  description={template.description}
-                  glyph={template.glyph}
-                  accentColor={template.accentColor}
-                  selected={selectedTemplateId === template.id}
-                  disabled={isSubmitting}
-                  ariaLabel={`${template.title}, ${advancedSection.label}`}
-                  testId={template.testId}
-                  onSelect={() => setSelectedTemplateId(template.id)}
-                />
-              ))}
+              <span
+                className={styles.groupLabel}
+                id="create-agent-supervised-label"
+              >
+                Supervised agent
+              </span>
+              <p className={styles.groupHint}>
+                This flow requires a daemon-supervised {supervisedRole} agent.
+              </p>
+              <div className={styles.templateList}>
+                {legacyDaemonTemplates.map((template) => (
+                  <AgentTemplateCard
+                    key={template.id}
+                    title={template.title}
+                    description={template.description}
+                    glyph={template.glyph}
+                    accentColor={template.accentColor}
+                    selected={selectedTemplateId === template.id}
+                    disabled={isSubmitting}
+                    ariaLabel={`${template.title}, supervised agent`}
+                    testId={template.testId}
+                    onSelect={() => selectTemplate(template.id)}
+                  />
+                ))}
+              </div>
             </div>
-          </details>
+          ) : (
+            <>
+              <div
+                className={styles.group}
+                role="group"
+                aria-labelledby={behaviorSection.labelId}
+              >
+                <span
+                  className={styles.groupLabel}
+                  id={behaviorSection.labelId}
+                >
+                  {behaviorSection.label}
+                </span>
+                <p className={styles.groupHint}>{behaviorSection.hint}</p>
+                <div className={styles.templateList}>
+                  {behaviorTemplates.map((template) => (
+                    <AgentTemplateCard
+                      key={template.id}
+                      title={template.title}
+                      description={template.description}
+                      glyph={template.glyph}
+                      accentColor={template.accentColor}
+                      tag={template.tag}
+                      selected={
+                        !isInteractive && selectedTemplateId === template.id
+                      }
+                      disabled={isSubmitting}
+                      ariaLabel={`${template.title}, ${behaviorSection.label}`}
+                      testId={template.testId}
+                      onSelect={() => selectTemplate(template.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div
+                className={styles.group}
+                role="group"
+                aria-labelledby="create-agent-interactive-label"
+              >
+                <span
+                  className={styles.groupLabel}
+                  id="create-agent-interactive-label"
+                >
+                  Interactive agents
+                </span>
+                <p className={styles.groupHint}>
+                  Terminal teammates you talk to directly
+                </p>
+                <div className={styles.templateList}>
+                  {interactivePrompts.map((prompt) => {
+                    const card = interactivePromptCard(prompt);
+                    return (
+                      <AgentTemplateCard
+                        key={prompt.id}
+                        title={prompt.label}
+                        description={card.description}
+                        glyph={card.glyph}
+                        accentColor={card.accentColor}
+                        selected={
+                          isInteractive && selectedBuiltinPromptID === prompt.id
+                        }
+                        disabled={isSubmitting}
+                        ariaLabel={`${prompt.label}, built-in interactive prompt`}
+                        testId={card.testId}
+                        onSelect={() => selectInteractive(prompt.id)}
+                      />
+                    );
+                  })}
+                  <AgentTemplateCard
+                    title={CUSTOM_PROMPT_TEMPLATE.title}
+                    description={CUSTOM_PROMPT_TEMPLATE.description}
+                    glyph={CUSTOM_PROMPT_TEMPLATE.glyph}
+                    accentColor={CUSTOM_PROMPT_TEMPLATE.accentColor}
+                    selected={
+                      isInteractive &&
+                      selectedBuiltinPromptID === CUSTOM_PROMPT_ID
+                    }
+                    disabled={isSubmitting}
+                    ariaLabel="Custom prompt, interactive agent"
+                    testId={CUSTOM_PROMPT_TEMPLATE.testId}
+                    onSelect={() => selectInteractive(CUSTOM_PROMPT_ID)}
+                  />
+                </div>
+                {promptLoadError && (
+                  <p className={styles.hint}>
+                    Prompt list unavailable; showing built-in defaults.
+                  </p>
+                )}
+              </div>
+
+              <details className={styles.advancedGroup} open={isLegacyDaemon}>
+                <summary className={styles.advancedSummary}>
+                  <span
+                    className={styles.groupLabel}
+                    id={advancedSection.labelId}
+                  >
+                    {advancedSection.label}
+                  </span>
+                  <span className={styles.groupHint}>
+                    {advancedSection.hint}
+                  </span>
+                </summary>
+                <div
+                  className={styles.templateList}
+                  role="group"
+                  aria-labelledby={advancedSection.labelId}
+                >
+                  {legacyDaemonTemplates.map((template) => (
+                    <AgentTemplateCard
+                      key={template.id}
+                      title={template.title}
+                      description={template.description}
+                      glyph={template.glyph}
+                      accentColor={template.accentColor}
+                      selected={
+                        !isInteractive && selectedTemplateId === template.id
+                      }
+                      disabled={isSubmitting}
+                      ariaLabel={`${template.title}, ${advancedSection.label}`}
+                      testId={template.testId}
+                      onSelect={() => selectTemplate(template.id)}
+                    />
+                  ))}
+                </div>
+              </details>
+            </>
+          )}
         </div>
 
         <div className={styles.panel}>
@@ -668,6 +967,23 @@ export function CreateAgentModal({
               </div>
             ) : null}
           </div>
+
+          {isInteractive && selectedBuiltinPromptID === CUSTOM_PROMPT_ID && (
+            <div className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}>
+              <label className={styles.label} htmlFor="agent-custom-prompt">
+                Custom prompt
+              </label>
+              <textarea
+                id="agent-custom-prompt"
+                className={styles.textarea}
+                value={customPrompt}
+                onChange={(event) => setCustomPrompt(event.target.value)}
+                placeholder="Describe how this interactive agent should help..."
+                disabled={isSubmitting}
+                data-testid="create-agent-interactive-prompt"
+              />
+            </div>
+          )}
 
           {isRoleBehavior && (
             <div

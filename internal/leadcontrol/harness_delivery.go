@@ -45,6 +45,23 @@ type leadConversationHandle struct {
 	mu            sync.Mutex
 	inFlight      bool
 	inFlightSince time.Time
+	// stagedText is the message body already typed into the TUI composer by
+	// a send attempt whose submit never fired (the harness wasn't accepting
+	// input before the send timeout). A retry of the SAME message must skip
+	// re-staging or the composer accumulates duplicate copies.
+	stagedText string
+}
+
+func (h *leadConversationHandle) staged() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.stagedText
+}
+
+func (h *leadConversationHandle) setStaged(text string) {
+	h.mu.Lock()
+	h.stagedText = text
+	h.mu.Unlock()
 }
 
 func (h *leadConversationHandle) markTurnStarted() {
@@ -214,7 +231,7 @@ func (d *harnessTurnDeliverer) deliverTurn(
 	}
 	defer release()
 
-	if err := sendHarnessTurn(ctx, handle.conv, message); err != nil {
+	if err := sendHarnessTurn(ctx, handle, message); err != nil {
 		if errors.Is(err, chat.ErrTurnInFlight) {
 			result.Reason = "lead harness assistant turn is in flight"
 		} else {
@@ -257,24 +274,67 @@ func (d *harnessTurnDeliverer) turnBlockReason(handle *leadConversationHandle, s
 // the CR must land as its own key event after the TUI has ingested the text.
 const harnessSubmitDelay = 300 * time.Millisecond
 
+// harnessSendTimeout bounds one stage+submit attempt. Generous enough for a
+// slow TUI redraw, short enough that a not-ready harness fails the attempt
+// and the 2s drain ticker retries instead of wedging forever. A var so tests
+// can exercise the timeout without a 10s wait.
+var harnessSendTimeout = 10 * time.Second
+
 // sendHarnessTurn stages the message into the TUI input and submits it.
 // Multi-line bodies are framed as a bracketed paste so embedded newlines are
 // content rather than per-line submits. The final empty Send writes a bare
 // carriage return in a separate chunk (the submit keystroke) and registers
 // the assistant turn with the chat layer.
-func sendHarnessTurn(ctx context.Context, conv harnessConversation, message string) error {
-	payload := message
-	if strings.ContainsAny(message, "\r\n") {
-		payload = "\x1b[200~" + message + "\x1b[201~"
+//
+// The whole call is bounded by harnessSendTimeout: the wrapper's Send blocks
+// until its prompt-readiness heuristic matches the screen, and for a busy
+// harness that can be indefinitely (claude's boot banner scrolls away and the
+// heuristic never re-matches mid-run). An unbounded Send here permanently
+// wedges the single drain goroutine — the exact live failure this guards
+// against. On timeout the already-staged text is remembered on the handle so
+// the retry submits it without typing a duplicate copy into the composer.
+func sendHarnessTurn(ctx context.Context, handle *leadConversationHandle, message string) error {
+	if handle.staged() != message {
+		payload := message
+		if strings.ContainsAny(message, "\r\n") {
+			payload = "\x1b[200~" + message + "\x1b[201~"
+		}
+		if _, err := handle.conv.WriteStdin([]byte(payload)); err != nil {
+			return err
+		}
+		handle.setStaged(message)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(harnessSubmitDelay):
+		}
 	}
-	if _, err := conv.WriteStdin([]byte(payload)); err != nil {
-		return err
+	// The timeout bounds only the submit: Send blocks in the wrapper's
+	// prompt-readiness wait, which is the piece that can hang indefinitely.
+	sendCtx, cancel := context.WithTimeout(ctx, harnessSendTimeout)
+	defer cancel()
+	if _, err := handle.conv.Send(sendCtx, ""); err != nil {
+		if !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		// The wrapper's claude readiness heuristic only matches the boot
+		// screen ("Claude Code" banner + composer prompt); once real output
+		// scrolls the banner away it never re-matches, and Send times out
+		// even at a live, idle composer. Delivery was already gated on the
+		// PTY quiet window before this call, so the composer is not
+		// mid-stream — submit the staged text directly. CSI 13u is the
+		// unmodified Enter in claude's enhanced-keyboard mode, which is
+		// always active under --dangerously-skip-permissions (the only mode
+		// loom launches harness leads in).
+		if _, werr := handle.conv.WriteStdin([]byte(harnessEnterKeystroke)); werr != nil {
+			return err
+		}
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(harnessSubmitDelay):
-	}
-	_, err := conv.Send(ctx, "")
-	return err
+	handle.setStaged("")
+	return nil
 }
+
+// harnessEnterKeystroke is CSI 13 u — the unmodified Enter key event in the
+// kitty keyboard protocol claude's TUI enables. A bare \r would be swallowed
+// as a paste fragment in that mode.
+const harnessEnterKeystroke = "\x1b[13u"

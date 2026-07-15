@@ -49,6 +49,7 @@ type apiResponse struct {
 	Success bool              `json:"success"`
 	Data    json.RawMessage   `json:"data,omitempty"`
 	Error   string            `json:"error,omitempty"`
+	Code    string            `json:"code,omitempty"`
 	Meta    map[string]string `json:"-"` // populated from native dialect error.meta
 }
 
@@ -196,7 +197,7 @@ func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 	// Try envelope first.
 	var env apiResponse
 	envErr := json.Unmarshal(body, &env)
-	hasEnvelopeFields := envErr == nil && (env.Success || env.Error != "" || env.Data != nil)
+	hasEnvelopeFields := envErr == nil && (env.Success || env.Error != "" || env.Code != "" || env.Data != nil)
 	if hasEnvelopeFields {
 		return &env, nil
 	}
@@ -221,7 +222,12 @@ func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 		} `json:"error"`
 	}
 	if json.Unmarshal(body, &errEnv) == nil && errEnv.Error.Message != "" {
-		return &apiResponse{Success: false, Error: errEnv.Error.Message, Meta: errEnv.Error.Meta}, nil
+		return &apiResponse{
+			Success: false,
+			Error:   errEnv.Error.Message,
+			Code:    errEnv.Error.Code,
+			Meta:    errEnv.Error.Meta,
+		}, nil
 	}
 
 	// Last resort: surface the raw body as the error string. If even THAT
@@ -525,6 +531,22 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 // --- Mutation operations ---
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+	result, err := b.createIssueOnce(ctx, params)
+	if err != nil && params.ExternalRef != "" && isCreateExternalRefUnsupported(err) {
+		result, err = b.createWithoutExternalRef(ctx, params)
+	}
+	if err != nil {
+		return result, err
+	}
+	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
+		// The issue itself was created; return it alongside the error so
+		// callers that inspect the partial result can still see the ID.
+		return result, err
+	}
+	return result, nil
+}
+
+func (b *FleetBackend) createIssueOnce(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	body := createParamsToBody(params)
 	apiResp, statusCode, respHeaders, err := b.doRequestHeaders(ctx, "POST", "/issues", body, params.IdempotencyHeaders())
 	if err != nil {
@@ -542,11 +564,6 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 	}
 	logIdempotencyResponse(respHeaders, issue.ID)
 	result := issueToData(&issue)
-	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
-		// The issue itself was created; return it alongside the error so
-		// callers that inspect the partial result can still see the ID.
-		return &result, err
-	}
 	return &result, nil
 }
 

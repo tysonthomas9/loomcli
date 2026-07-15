@@ -66,3 +66,30 @@ export async function updateWorkspaceBackend(
   const { fetchWorkspaceApi } = await import("./workspace");
   return fetchWorkspaceApi(workspaceId);
 }
+
+/** Update the design format used by planners and the issue design renderer. */
+export async function updateWorkspaceDesignFormat(
+  workspaceId: string,
+  designFormat: "markdown" | "html",
+): Promise<WorkspaceData> {
+  const { data, error, response } = await api.PATCH(
+    "/api/workspaces/{ws}/config/design-format",
+    {
+      params: { path: { ws: workspaceId } },
+      body: { design_format: designFormat },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  if (data && typeof data === "object" && "success" in data) {
+    const msg = data as { success: boolean; message?: string };
+    if (!msg.success) {
+      throw new ApiError(
+        response?.status ?? 0,
+        response?.statusText || msg.message || "Unknown error",
+        msg.message,
+      );
+    }
+  }
+  const { fetchWorkspaceApi } = await import("./workspace");
+  return fetchWorkspaceApi(workspaceId);
+}

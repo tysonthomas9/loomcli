@@ -81,7 +81,7 @@ import {
   epicRunnerRuntimePayload,
   issueRepoName,
 } from "@/utils/epicRunnerPayload";
-import { isCustomRole } from "@/utils/agentRole";
+import { isCustomRole, isInteractiveAgent } from "@/utils/agentRole";
 import { formatStatusLabel } from "@/utils/issue";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
@@ -102,9 +102,9 @@ import styles from "./AgentsPage.module.css";
 const DiffTab = lazy(() =>
   import("@/components/AgentDetailPanel").then((m) => ({ default: m.DiffTab })),
 );
-const FileEditorPanel = lazy(() =>
-  import("@/components/FileEditorPanel").then((m) => ({
-    default: m.FileEditorPanel,
+const WorkspaceFileBrowser = lazy(() =>
+  import("@/components/FileExplorer").then((m) => ({
+    default: m.WorkspaceFileBrowser,
   })),
 );
 
@@ -439,14 +439,19 @@ function AgentsPageInner(): JSX.Element {
       },
       { id: "queued", label: "Queued", value: counts.queued, tone: "info" },
     ],
-    [counts],
+    [counts.blocked, counts.done, counts.inProgress, counts.queued],
   );
 
   const statusType = parseLoomStatus(selected?.status ?? "").type;
   const roleName = selected?.role ?? statusType;
   // The agent's actual role (no status fallback) — gates the Phase B edit surface.
   const selectedRole = (selected?.role ?? "").trim();
-  const canEditConfig = isCustomRole(selectedRole);
+  // The current Role editor only mutates file-backed worker prompts. Inline
+  // interactive roles require kind/prompt-aware CRUD before they can use it.
+  const canEditConfig =
+    selected !== undefined &&
+    !isInteractiveAgent(selected) &&
+    isCustomRole(selectedRole);
   const selColor = getAvatarColor(selected?.name ?? "agent");
   const selText = shouldUseWhiteText(selColor) ? "#fff" : "#171717";
 
@@ -635,10 +640,9 @@ function AgentsPageInner(): JSX.Element {
                   <div className={styles.tabFallback}>Loading files…</div>
                 }
               >
-                <FileEditorPanel
+                <WorkspaceFileBrowser
+                  mode="agent"
                   agentName={selected.name}
-                  agentRole={selected.role}
-                  agentRepo={selected.repo}
                   isActive={isActive}
                 />
               </Suspense>

@@ -16,6 +16,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
+type interactivePromptsResponse struct {
+	Prompts []domain.BuiltinInteractivePrompt `json:"prompts"`
+}
+
 func HandleList(agentSvc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agents, err := agentSvc.ListAgents(r.Context(), requestWorkspaceID(r))
@@ -25,6 +29,26 @@ func HandleList(agentSvc service.AgentService) http.HandlerFunc {
 		}
 		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(agents, len(agents)))
 	}
+}
+
+func HandleInteractivePrompts() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		handler.WriteJSON(w, http.StatusOK, interactivePromptsResponse{
+			Prompts: visibleInteractivePrompts(),
+		})
+	}
+}
+
+func visibleInteractivePrompts() []domain.BuiltinInteractivePrompt {
+	prompts := domain.BuiltinInteractivePrompts()
+	out := make([]domain.BuiltinInteractivePrompt, 0, len(prompts))
+	for _, prompt := range prompts {
+		if prompt.Hidden {
+			continue
+		}
+		out = append(out, prompt)
+	}
+	return out
 }
 
 func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
