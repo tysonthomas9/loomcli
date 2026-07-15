@@ -1,6 +1,6 @@
 # Migration Plan
 
-- **Status:** Proposed
+- **Status:** Reviewed — Phase 1 complete; Phase 2 is the next implementation phase
 - **Strategy:** Incremental vertical extraction aligned with active product work; no standalone big-bang reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -44,7 +44,7 @@ After Phase 0, these are dependency lanes rather than one serial queue:
 
 This phase is a hard gate.
 
-**Recorded status:** In progress. Steps 1 through 6 remain proven by the immutable integration record and were refreshed for the Phase 1 source at Loom `122d4d79` and FleetDB `8120c788`, with matching OpenAPI snapshots and current gates. Step 7 remains open for the direct-write, authority, transaction, named-loop, and performance inventories; the initial machine baseline records explicit owners and acceptance criteria for anything not yet inventoried. Step 8 is refreshed for the reproducible structural measures at the new source head. See the [Phase 0 integration baseline](00-phase-0-baseline.md) for revisions, conflict resolutions, commands, evidence, and known gaps.
+**Recorded status:** Complete. Steps 1 through 6 remain proven by the immutable integration record and were refreshed for the Phase 1 source at Loom `122d4d79` and FleetDB `8120c788`, with matching OpenAPI snapshots and current gates. Phase 1 completed step 7 with type-resolved direct-write, authority/transaction, named-runtime, and performance inventories and completed step 8 across this migration folder. See the [Phase 0 integration baseline](00-phase-0-baseline.md) for revisions, conflict resolutions, commands, evidence, and the explicit not-yet-migrated performance values.
 
 1. Fetch and record the exact fleet-db base, Loom `v5`, and both branch-head SHAs.
 2. Merge `origin/main` into the companion fleet-db branch; resolve migrations and `api/openapi.yaml` there first.
@@ -57,7 +57,7 @@ This phase is a hard gate.
 
 Store the commands, environment, expected skips, commit SHAs, spec checksum, results, and artifact paths in a checked-in baseline manifest. The historical `docs/design/2026-07-03-unified-agent-ui-test-matrix.tsv` is evidence, not an executable gate.
 
-This snapshot has no clean-checkout supervisor-disabled matrix. Record that row as **RED / harness absent**, not as baseline proof. After the base merge and before an Execution extraction, Phase 1 checks in `test/modular-monolith/supervisor-disabled-matrix.yaml` plus one `make test-supervisor-disabled` entrypoint. The manifest must define setup/verify commands and assert, at minimum: `LOOM_LOCAL_MODE_PLANE=ts`, `LOOM_TASK_READY_EVENTS=1`, no auto `agentdef` rows, no daemon process/socket, public-API seeding of plan/task AgentService + bindings, deterministic plan/coder completion, and transcript/diff evidence. Later phases add interactive, custom-driver, cron/webhook, and per-PR reviewer rows. Any skipped/disabled row has an owner and cannot count as proof.
+The Phase 0 snapshot had no clean-checkout supervisor-disabled matrix and correctly recorded **RED / harness absent**. Phase 1 now checks in `test/modular-monolith/supervisor-disabled-matrix.yaml` plus `make test-supervisor-disabled`. Its stable `deterministic-plan-coder` row defines setup, verification, teardown, and the required positive/negative assertions, but remains intentionally **RED** under `execution-reliability-lane` because the deterministic TS leaf, ordered public-API seeding, and daemon-free local-mode path do not yet exist. The target reports that blocker and exits nonzero without provisioning; it cannot count as proof. Later phases add interactive, custom-driver, cron/webhook, and per-PR reviewer rows.
 
 Documentation and test design were refined before this phase. The first committed code change was the base integration, followed only by the compatibility fix required to make the merged runtime pass; no pre-merge “mechanical” package move was made.
 
@@ -65,9 +65,9 @@ Documentation and test design were refined before this phase. The first committe
 
 After Phase 0, these two lanes run independently. Catalog work does not wait for Execution reliability fixes.
 
-**Started:** The `modular-monolith-phase1` branch begins with behavior-neutral manifests, schema validation, and no-new-coupling ratchets. The capability graph remains proposed and package moves remain blocked until MM-1 through MM-7 and the remaining Phase 0 inventories are resolved.
+**Completed:** The `modular-monolith-phase1` branch contains the behavior-neutral guardrails, approved MM-1 through MM-7 outcomes, completed Phase 0 inventories, characterization gate, productized RED supervisor-disabled contract, and the bounded reliability fixes below. No `internal/modules/*` capability root was introduced, so this milestone does not claim the Phase 2 pilot.
 
-### Architecture guardrail lane
+### Architecture guardrail lane — complete
 
 Establish the migration controls without moving product behavior:
 
@@ -79,14 +79,16 @@ Establish the migration controls without moving product behavior:
 6. Add post-merge characterization tests around workflow approval, trigger admission, agent provisioning, execution recovery, and supervisor policy.
 7. Productize `test/modular-monolith/supervisor-disabled-matrix.yaml` and `make test-supervisor-disabled`; its execution rows may remain red until Phase 4, but setup and failure reporting must be deterministic.
 
-### Execution reliability lane
+### Execution reliability lane — complete
 
-Resolve these defects before restructuring the runtime path that contains them:
+Phase 1 closed the reliability prerequisites without restructuring their capability ownership:
 
-- stale-task sweeper five-minute versus twenty-minute default mismatch;
-- missing session/lease heartbeat coverage for standalone or serve-only agents;
-- clock-jump behavior for stale detection;
-- explicit startup/readiness behavior for unsupported Redis/Postgres capabilities.
+- `serve` now sources the stale-task sweeper's twenty-minute default instead of overriding it with five minutes;
+- stale recovery uses the earlier of a monotonic projection and the live wall clock, so forward jumps cannot mass-age records and backward jumps conservatively protect fresh post-jump heartbeats until the new clock advances;
+- standalone leads, serve-hosted task sessions, and supervisor-owned AgentSession/AgentLease records have explicit heartbeat tests; and
+- caller-declared FleetDB capability requirements are checked during store startup with typed failures for an old 404 endpoint, an unsupported manifest revision, or missing keys; empty requirements preserve legacy startup.
+
+MM-3 still requires Redis/Postgres parity before a Phase 2 capability key is advertised. Phase 1 supplies the fail-fast Loom readiness seam; it does not implement or publish the Workflow Catalog capability on FleetDB.
 
 The four upward edges found by the legacy plane scan can be fixed when their owners are touched. They are not prerequisites for the capability pilot unless they obstruct its graph.
 
@@ -98,14 +100,14 @@ The pilot is intentionally narrower than the entire driver subsystem and must pr
 
 - Introduce Workflow Catalog public queries such as `GetVersion` and `ResolveEffectiveVersion`.
 - Wrap the existing persistence implementation behind catalog-owned ports.
-- Route HTTP readers through the catalog API. Convert standalone CLI readers only after MM-7, in a compatibility slice that removes direct Store reads and proves discovery/unavailable-host behavior.
+- Route HTTP readers through the catalog API. Convert standalone CLI readers under MM-7 in a compatibility slice that removes direct Store reads and proves explicit discovery and unavailable-host behavior.
 - Keep wire responses and observable behavior unchanged.
 
 This is a useful structural checkpoint, not a completed pilot.
 
 ### 2B — prove mutation, authority, and atomicity
 
-After the operator/open-mode authority decision:
+Under the approved MM-2 operator/open-mode authority model:
 
 1. Add fleet-db intent commands for `ApproveVersion`, `UnapproveVersion`, and `ActivateVersion`.
 2. Atomically validate driver/version ownership and validation status, preserve unrelated `Driver.Metadata`, and use an expected revision or equivalent CAS.
@@ -114,7 +116,7 @@ After the operator/open-mode authority decision:
 5. Add the Loom handwritten client method and capability adapter; update `clientRoutes`, `expectedClientCallSites`, the vendored spec snapshot, and `internal/infra/fleetdb/contract_guard_test.go`. Composition creates one low-level fleet-db client and injects a narrow Workflow Catalog adapter rather than constructing another client. Named application workflows use the same client only through an injected app-local implementation of their own atomic-command/coordination port.
 6. Make Loom derive required capability keys from enabled slices, negotiate them during readiness, and report explicitly when the endpoint is absent or a key/version is unsupported. Test Redis/Postgres and enabled/disabled route/configuration profiles so a static binary-level key cannot pass falsely.
 7. Route HTTP mutations through one Workflow Catalog command API; keep the existing Workflow UI wire behavior unchanged and prove its approval journey with targeted route-level E2E.
-8. After MM-7, convert the standalone workflow CLI in a separate contract/behavior slice; remove its direct Store mutation path rather than letting CLI code construct `OperatorAuthority`, and test endpoint discovery, optional host startup if approved, unavailable-host behavior, authentication, and existing script output/exit-code compatibility.
+8. Under MM-7, convert the standalone workflow CLI in a separate contract/behavior slice; remove its direct Store mutation path rather than letting CLI code construct `OperatorAuthority`, and test explicit endpoint discovery, the prohibition on implicit host startup, unavailable-host failure, local authentication, and existing script output/exit-code compatibility.
 9. Add negative HTTP and CLI tests for execution, session, webhook, unauthenticated, and wrong-workspace callers.
 10. Remove any temporary legacy-authority adapter.
 
@@ -218,7 +220,7 @@ Every facade or alias records:
 - replacement API and removal issue;
 - last permitted milestone/PR.
 
-Proposed limit: remove it within two subsequent migration waves. The graph-gate fixture fails when the declared milestone completes while callers remain. A facade that needs longer requires an explicit decision; aliases and legacy imports ratchet alongside Store references.
+Approved limit: remove it within two subsequent migration waves. The graph-gate fixture fails when the declared milestone completes while callers remain. A facade that needs longer requires an explicit reviewed extension with an owner; aliases and legacy imports ratchet alongside Store references.
 
 ### Commit and review shape
 
@@ -250,4 +252,4 @@ The migration completes when:
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Target architecture](02-target-architecture.md) · Next: [Enforcement and gates](04-enforcement-and-gates.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Target architecture](02-target-architecture.md) · Next: [Enforcement and gates](04-enforcement-and-gates.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)

@@ -1,0 +1,1208 @@
+schema_version: 2
+production_roots:
+  - cmd
+  - internal
+  - sdk
+exclusions:
+  test_files: true
+  generated_files: true
+  directories:
+    - .git
+    - node_modules
+    - third_party
+    - vendor
+    - worktrees
+goroutine_disposition_policy: default-deny
+goroutine_launches:
+  - {file: "internal/archtest/direct_writes.go", function: "snapshotDirectWriteProfiles", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "profile workers are concurrency-limited and WaitGroup-joined before return"}
+  - {file: "internal/archtest/profiles.go", function: "analyzeProfiles", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "profile workers are concurrency-limited and WaitGroup-joined before return"}
+  - {file: "internal/bootstrap/embedded.go", function: "StartEmbedded", site: "go#1", callee: "emb.reapAndPublish", disposition: component, component_ids: [embedded-fleetdb-process-reaper]}
+  - {file: "internal/cli/agent/lead/lead.go", function: "startLeadSessionHeartbeat", site: "go#1", callee: "heartbeatLeadSession", disposition: component, component_ids: [lead-session-heartbeat]}
+  - {file: "internal/cli/agent/tsruntime/tsruntime.go", function: "contextFromShutdown", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges the daemon-leaf shutdown channel to one invocation context and exits with either side"}
+  - {file: "internal/cli/automode/automode.go", function: "SetupSignalHandler", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot operating-system signal relay owned by the foreground automode command"}
+  - {file: "internal/cli/automode/automode_task.go", function: "createAutoSession", site: "go#1", callee: "sessions.NotifyWebUI", disposition: bounded, reason: "best-effort Web UI notification carries its own two-second timeout"}
+  - {file: "internal/cli/automode/automode_task.go", function: "finalizeAutoSession", site: "go#1", callee: "sessions.NotifyWebUI", disposition: bounded, reason: "best-effort Web UI notification carries its own two-second timeout"}
+  - {file: "internal/cli/automode/automode_tmux.go", function: "RunAutoModeTmux", site: "go#1", callee: "listenForAttachKey", disposition: component, component_ids: [automode-attach-input]}
+  - {file: "internal/cli/automode/automode_tmux_util.go", function: "listenForAttachKey", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [automode-attach-input]}
+  - {file: "internal/cli/backend_echo_testbackend.go", function: "EchoBackend.InvokeNonInteractive", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "testbackend pipe writer is drained and joined before the invocation returns"}
+  - {file: "internal/cli/backend_echo_testbackend.go", function: "EchoBackend.InvokeStreaming", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "testbackend-only pipe writer is owned by the returned reader and excluded from product runtime counts"}
+  - {file: "internal/cli/backends/backend_wrapper.go", function: "contextFromShutdown", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges one legacy shutdown channel to one invocation context and exits with either side"}
+  - {file: "internal/cli/backends/backend_wrapper.go", function: "runHarness", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "the harness output scanner is explicitly awaited through scanDone"}
+  - {file: "internal/cli/daemon/daemon_cmd.go", function: "runDaemonMainLoop", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "shutdown worker is awaited with a thirty-second process-exit bound"}
+  - {file: "internal/cli/daemon/daemon_cmd.go", function: "setupSignalHandler", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-signal-runtime]}
+  - {file: "internal/cli/daemon/daemon_cmd.go", function: "setupSignalHandler", site: "go#2", callee: "<anonymous>", disposition: component, component_ids: [daemon-signal-runtime]}
+  - {file: "internal/cli/daemon/daemon_command_poller.go", function: "Daemon.startAgentCommandPoller", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-agent-command-poller]}
+  - {file: "internal/cli/daemon/daemon_control.go", function: "Daemon.startControlServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-control-socket-listener]}
+  - {file: "internal/cli/daemon/daemon_control.go", function: "Daemon.startControlServer", site: "go#2", callee: "d.handleControlConnection", disposition: request, reason: "one control request per accepted connection with socket read deadlines"}
+  - {file: "internal/cli/daemon/daemon_ipc.go", function: "Daemon.startIPCServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-agent-ipc-listener]}
+  - {file: "internal/cli/daemon/daemon_ipc.go", function: "Daemon.startIPCServer", site: "go#2", callee: "d.handleIPCConnection", disposition: request, reason: "one agent IPC request per accepted connection with socket read deadlines"}
+  - {file: "internal/cli/daemon/daemon_mutations.go", function: "MutationBuffer.Start", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-mutation-subscription-drain]}
+  - {file: "internal/cli/daemon/daemon_run_helpers.go", function: "startStateUpdater", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-state-file-updater]}
+  - {file: "internal/cli/daemon/supervisor/claim.go", function: "Supervisor.operationContext", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges supervisor shutdown into a timeout-bounded operation context"}
+  - {file: "internal/cli/daemon/supervisor/critical.go", function: "Supervisor.RunCritical", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [daemon-config-reconciler, supervisor-agent-health-checker, supervisor-liveness-watchdog, supervisor-node-heartbeat, supervisor-session-lease-heartbeat]}
+  - {file: "internal/cli/daemon/supervisor/drain.go", function: "Supervisor.AddAgentForTask", site: "go#1", callee: "s.supervisedAgentBody", disposition: component, component_ids: [supervisor-per-agent-loop]}
+  - {file: "internal/cli/daemon/supervisor/drain.go", function: "Supervisor.drainAllWithGrace", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "agent drain fan-out is WaitGroup-joined under the caller's grace deadline"}
+  - {file: "internal/cli/daemon/supervisor/liveness.go", function: "Supervisor.runAgentSessionHeartbeatJobs", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "fixed-size heartbeat worker pool is deadline-bound and joined before the batch returns"}
+  - {file: "internal/cli/daemon/supervisor/liveness.go", function: "Supervisor.startAgentWaitHeartbeatEvery", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [supervisor-agent-wait-heartbeat]}
+  - {file: "internal/cli/daemon/supervisor/liveness.go", function: "Supervisor.startWorkerHeartbeatEvery", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [supervisor-worker-lease-heartbeat]}
+  - {file: "internal/cli/daemon/supervisor/liveness.go", function: "contextUntilShutdown", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "bridges supervisor shutdown into one operation context and is joined by its stop function"}
+  - {file: "internal/cli/daemon/supervisor/ownership.go", function: "Supervisor.startOwnershipHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [supervisor-agent-ownership-heartbeat]}
+  - {file: "internal/cli/daemon/supervisor/supervisor.go", function: "Supervisor.startAgentSupervisor", site: "go#1", callee: "s.supervisedAgentBody", disposition: component, component_ids: [supervisor-per-agent-loop]}
+  - {file: "internal/cli/epic/run.go", function: "signalContext", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot signal-to-context relay owned by the foreground epic command"}
+  - {file: "internal/cli/local/daemon.go", function: "runLocalDaemonOnce", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [local-daemon-supervisor]}
+  - {file: "internal/cli/local/daemon.go", function: "startLocalDaemonSupervisor", site: "go#1", callee: "superviseLocalDaemon", disposition: component, component_ids: [local-daemon-supervisor]}
+  - {file: "internal/cli/monitor/monitor_collect.go", function: "collectMonitorDataDeps", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "monitor dependency fan-out is channel-joined before collection returns"}
+  - {file: "internal/cli/monitor/monitor_collect.go", function: "collectMonitorDataDeps", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "monitor dependency fan-out is channel-joined before collection returns"}
+  - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
+  - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
+  - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#3", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
+  - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#4", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
+  - {file: "internal/cli/monitor/monitor_collect.go", function: "runParallelTaskQueries", site: "go#5", callee: "<anonymous>", disposition: bounded, reason: "task-query fan-out is channel-joined before monitor collection returns"}
+  - {file: "internal/cli/root.go", function: "Execute", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot trace-flush signal relay owned by the foreground CLI invocation"}
+  - {file: "internal/cli/serve/daemonwire/stale.go", function: "InitStaleDetectorHandler", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [redis-stale-worker-detector]}
+  - {file: "internal/cli/serve/logroutercmd/logrouter_cmd.go", function: "runLogRouter", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot signal-to-context relay owned by the foreground log-router command"}
+  - {file: "internal/cli/serve/logroutercmd/logrouter_cmd.go", function: "runLogRouter", site: "go#2", callee: "watcher.Watch", disposition: component, component_ids: [logrouter-lock-watcher]}
+  - {file: "internal/cli/serve/metricscmd/collector.go", function: "cachedCollector.startBackground", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-metrics-cache-refresh]}
+  - {file: "internal/cli/serve/serve.go", function: "runServe", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [web-http-server]}
+  - {file: "internal/cli/serve/serve.go", function: "startDriverExecutorIfEnabled", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-driver-executor]}
+  - {file: "internal/cli/serve/serve.go", function: "startDriverTaskWorkers", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-task-workers]}
+  - {file: "internal/cli/serve/serve_cache.go", function: "cachedValue.startBackground", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-generic-cache-refresh]}
+  - {file: "internal/cli/serve/serve_loops.go", function: "startAwaitTimeoutSweeper", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-await-timeout-sweeper]}
+  - {file: "internal/cli/serve/serve_loops.go", function: "startIssueJournalBridge", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-issue-journal-bridge]}
+  - {file: "internal/cli/serve/serve_loops.go", function: "startOutboxDispatcher", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-outbox-dispatcher]}
+  - {file: "internal/cli/serve/serve_loops.go", function: "startStaleTaskSweeper", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-stale-task-sweeper]}
+  - {file: "internal/cli/serve/serve_loops.go", function: "startTriggerCronScheduler", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-trigger-cron-scheduler]}
+  - {file: "internal/cli/serve/serve_loops.go", function: "startTriggerDeliverySweeper", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [serve-trigger-delivery-sweeper]}
+  - {file: "internal/cli/serve/worker/log_forwarder.go", function: "NewLogForwarder", site: "go#1", callee: "lf.periodicFlush", disposition: component, component_ids: [serve-worker-log-forwarder]}
+  - {file: "internal/cli/serve/worker/worker_cmd.go", function: "setupWorkerShutdown", site: "go#1", callee: "<anonymous>", disposition: command, reason: "one-shot operating-system signal relay owned by the foreground worker command"}
+  - {file: "internal/cli/workspace/status.go", function: "runStatus", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace status fan-out is channel-joined before command return"}
+  - {file: "internal/cli/workspace/status.go", function: "runStatus", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "workspace status fan-out is channel-joined before command return"}
+  - {file: "internal/cli/worktree_resolve.go", function: "Resolver.agentWorktreeInfos", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "worktree inspection fan-out is WaitGroup-joined before resolution returns"}
+  - {file: "internal/driver/executor.go", function: "Executor.RunOnce", site: "go#1", callee: "heartbeatDriverRun", disposition: component, component_ids: [driver-run-heartbeat]}
+  - {file: "internal/driver/executor.go", function: "Executor.RunOnce", site: "go#2", callee: "heartbeatExecutorNode", disposition: component, component_ids: [executor-node-heartbeat]}
+  - {file: "internal/driver/sandbox/egress.go", function: "serveSocketRelay.acceptLoop", site: "go#1", callee: "r.forward", disposition: request, reason: "one forwarder is scoped to each accepted per-run relay connection"}
+  - {file: "internal/driver/sandbox/egress.go", function: "serveSocketRelay.forward", site: "go#1", callee: "relayCopy", disposition: request, reason: "copy pump is scoped to one relay connection and joined when either direction finishes"}
+  - {file: "internal/driver/sandbox/egress.go", function: "serveSocketRelay.forward", site: "go#2", callee: "relayCopy", disposition: request, reason: "copy pump is scoped to one relay connection and joined when either direction finishes"}
+  - {file: "internal/driver/sandbox/egress.go", function: "startServeSocketRelay", site: "go#1", callee: "relay.acceptLoop", disposition: component, component_ids: [sandbox-serve-relay-accept]}
+  - {file: "internal/driver/task_bridge_session.go", function: "startFlueTaskSessionHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [flue-task-session-heartbeat]}
+  - {file: "internal/driver/task_request.go", function: "startClaimedTaskRunHeartbeat", site: "go#1", callee: "heartbeatTaskRun", disposition: component, component_ids: [task-run-heartbeat]}
+  - {file: "internal/harness/fakeharness/mock/main.go", function: "installSignalCleanup", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "explicitly test-only fake-harness signal helper included by the all-source scan"}
+  - {file: "internal/leadcontrol/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#1", callee: "discoverCodexLeadThread", disposition: component, component_ids: [codex-lead-thread-discovery]}
+  - {file: "internal/leadcontrol/codex_runtime.go", function: "RunCodexLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
+  - {file: "internal/leadcontrol/codex_runtime.go", function: "startCodexAppServer", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [codex-app-server-process-reaper]}
+  - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#1", callee: "watchHarnessLeadRuntime", disposition: component, component_ids: [harness-lead-runtime-watch]}
+  - {file: "internal/leadcontrol/harness_runtime.go", function: "RunHarnessLeadRuntime", site: "go#2", callee: "drainLeadMessageQueue", disposition: component, component_ids: [lead-message-delivery-drain]}
+  - {file: "internal/leadcontrol/harness_runtime.go", function: "forwardHarnessStdin", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [harness-stdin-forwarder]}
+  - {file: "internal/webui/app/server.go", function: "Server.run", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [web-http-server]}
+  - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#1", callee: "app.hub.Run", disposition: component, component_ids: [realtime-hub-retry-drain]}
+  - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#2", callee: "config.DaemonStartupFn", disposition: component, component_ids: [web-secondary-daemon-startup]}
+  - {file: "internal/webui/app/server_app.go", function: "NewServer", site: "go#3", callee: "doctor.Run", disposition: component, component_ids: [daemon-health-doctor]}
+  - {file: "internal/webui/appinfra/appinfra.go", function: "StartPeriodicWorkspaceReconcile", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-registry-reconcile]}
+  - {file: "internal/webui/editor/launch_darwin.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-darwin]}
+  - {file: "internal/webui/editor/launch_linux.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-linux]}
+  - {file: "internal/webui/editor/launch_windows.go", function: "LaunchEditor", site: "go#1", callee: "cmd.Wait", disposition: component, component_ids: [editor-process-reaper-windows]}
+  - {file: "internal/webui/fleet/timeout.go", function: "TimeoutEnforcer.Start", site: "go#1", callee: "t.run", disposition: component, component_ids: [fleet-task-timeout-enforcer]}
+  - {file: "internal/webui/handlers/misc/auth_config.go", function: "NewAuthConfigLimiter", site: "go#1", callee: "l.CleanupLoop", disposition: component, component_ids: [auth-config-rate-limit-cleanup]}
+  - {file: "internal/webui/handlers/misc/client_errors.go", function: "NewClientErrorLimiter", site: "go#1", callee: "l.CleanupLoop", disposition: component, component_ids: [client-error-rate-limit-cleanup]}
+  - {file: "internal/webui/handlers/terminal/agent.go", function: "runAgentTerminalRelay", site: "go#1", callee: "<anonymous>", disposition: request, reason: "terminal kill watcher is canceled with the owning request context"}
+  - {file: "internal/webui/handlers/terminal/agent.go", function: "runAgentTerminalRelay", site: "go#2", callee: "<anonymous>", disposition: request, reason: "terminal output pump is canceled and awaited by the owning request"}
+  - {file: "internal/webui/handlers/terminal/ws.go", function: "runTerminalRelay", site: "go#1", callee: "<anonymous>", disposition: request, reason: "terminal WebSocket output pump is canceled and awaited by the owning request"}
+  - {file: "internal/webui/localredis/manager.go", function: "Manager.Start", site: "go#1", callee: "m.run", disposition: component, component_ids: [local-redis-health-monitor]}
+  - {file: "internal/webui/server/middleware/jwks.go", function: "NewJWKSCache", site: "go#1", callee: "c.refreshLoop", disposition: component, component_ids: [jwks-background-refresh]}
+  - {file: "internal/webui/server/middleware/ratelimit.go", function: "RateLimit", site: "go#1", callee: "rl.cleanupLoop", disposition: component, component_ids: [http-rate-limit-cleanup]}
+  - {file: "internal/webui/server/realtime/sse_token.go", function: "NewTokenStore", site: "go#1", callee: "s.cleanupLoop", disposition: component, component_ids: [sse-token-nonce-cleanup]}
+  - {file: "internal/webui/server/realtime/terminal_auth.go", function: "NewTerminalAuth", site: "go#1", callee: "ta.cleanupLoop", disposition: component, component_ids: [terminal-token-nonce-cleanup]}
+  - {file: "internal/webui/subscription/backend_subscriber.go", function: "BackendMutationSubscriber.Start", site: "go#1", callee: "s.loop", disposition: component, component_ids: [backend-mutation-long-poll]}
+  - {file: "internal/webui/subscription/multi.go", function: "MultiWorkspaceSubscriber.Start", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [workspace-subscriber-idle-deactivation]}
+  - {file: "internal/webui/svcimpl/file_git_status.go", function: "fileServiceImpl.inspectWorkspaceCheckouts", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "checkout inspection uses a ten-second context and joins its fan-out before return"}
+  - {file: "internal/webui/svcimpl/file_history.go", function: "fileServiceImpl.startLegacyHistoryCleanup", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [legacy-file-history-boot-cleanup]}
+  - {file: "internal/webui/svcimpl/workspace_job_store.go", function: "NewWorkspaceJobStore", site: "go#1", callee: "s.cleanupLoop", disposition: component, component_ids: [workspace-job-cleanup]}
+  - {file: "internal/webui/svcimpl/workspace_job_store.go", function: "WorkspaceJobStore.Start", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace creation job carries a five-minute context and persists terminal completion"}
+  - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
+  - {file: "internal/webui/terminal/agent_tmux.go", function: "AgentTmuxManager.KillWorkspaceSessions", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "tmux cleanup fan-out is WaitGroup-joined before return"}
+  - {file: "internal/webui/terminal/pty_manager.go", function: "NewPTYManager", site: "go#1", callee: "m.reapLoop", disposition: component, component_ids: [terminal-idle-reaper]}
+  - {file: "internal/webui/terminal/pty_manager.go", function: "PTYManager.spawnSession", site: "go#1", callee: "sess.drain", disposition: component, component_ids: [terminal-pty-drain]}
+components:
+  # Bounded command and startup polling.
+  - id: fleet-dependency-state-wait
+    kind: ticker
+    file: internal/backend/fleet/fleet_dependencies.go
+    function: FleetBackend.waitForDependencyState
+    site: "time.NewTicker#1"
+    capability: work-items
+    owner: fleet backend compatibility
+    cadence: "25ms, bounded by a 2s timer"
+    cancellation: "caller context or the 2s operation timer"
+    readiness_health: "success requires the requested dependency state to become observable"
+    retry_backoff: "fixed 25ms read retry; the last backend error is returned at timeout"
+    classification: command-poll
+
+  - id: fleet-label-state-wait
+    kind: ticker
+    file: internal/backend/fleet/fleet_labels.go
+    function: FleetBackend.waitForLabelState
+    site: "time.NewTicker#1"
+    capability: work-items
+    owner: fleet backend compatibility
+    cadence: "25ms, bounded by a 2s timer"
+    cancellation: "caller context or the 2s operation timer"
+    readiness_health: "success requires the requested label state to become observable"
+    retry_backoff: "fixed 25ms read retry; the last backend error is returned at timeout"
+    classification: command-poll
+
+  - id: embedded-fleetdb-startup-wait
+    kind: ticker
+    file: internal/bootstrap/embedded.go
+    function: waitForEmbeddedRuntime
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: embedded fleet-db bootstrap
+    cadence: "100ms until the configured startup timeout"
+    cancellation: "derived timeout context or caller cancellation"
+    readiness_health: "gates startup on reusable runtime metadata and a successful healthz probe"
+    retry_backoff: "fixed 100ms probe; returns the last runtime error on timeout"
+    classification: startup-wait
+
+  - id: local-runtime-startup-wait
+    kind: ticker
+    file: internal/cli/local/local_cmd.go
+    function: EnsureRuntimeStarted
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: local runtime CLI
+    cadence: "250ms while the spawned runtime initializes"
+    cancellation: "startup context cancellation or bounded startup deadline"
+    readiness_health: "returns only after the runtime status endpoint reports ready"
+    retry_backoff: "fixed 250ms status probe until deadline"
+    classification: startup-wait
+
+  - id: local-runtime-health-wait
+    kind: ticker
+    file: internal/cli/local/runtime.go
+    function: waitForRuntime
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: local runtime CLI
+    cadence: "200ms health probe"
+    cancellation: "caller context cancellation"
+    readiness_health: "gates the command on a successful runtime health response"
+    retry_backoff: "fixed 200ms retry"
+    classification: startup-wait
+
+  - id: local-workspace-readiness-wait
+    kind: ticker
+    file: internal/cli/local/runtime.go
+    function: WaitForWorkspaceReady
+    site: "time.NewTicker#1"
+    capability: workspace
+    owner: local runtime CLI
+    cadence: "200ms workspace readiness probe"
+    cancellation: "caller context cancellation"
+    readiness_health: "gates the command on the workspace readiness endpoint"
+    retry_backoff: "fixed 200ms retry"
+    classification: startup-wait
+
+  - id: workspace-ops-daemon-wait
+    kind: ticker
+    file: internal/cli/workspace/ops_cmd.go
+    function: waitForWorkspaceOpsDaemon
+    site: "time.NewTicker#1"
+    capability: workspace
+    owner: workspace operations CLI
+    cadence: "500ms daemon status probe"
+    cancellation: "caller context or command timeout"
+    readiness_health: "gates workspace operations on a reachable daemon"
+    retry_backoff: "fixed 500ms retry"
+    classification: startup-wait
+
+  - id: codex-app-server-startup-wait
+    kind: ticker
+    file: internal/leadcontrol/codex_runtime.go
+    function: waitForCodexAppServer
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: lead control runtime
+    cadence: "100ms endpoint probe"
+    cancellation: "lead runtime context, app-server exit, or startup timeout"
+    readiness_health: "gates lead discovery on a reachable Codex app-server endpoint"
+    retry_backoff: "fixed 100ms retry with terminal process error propagation"
+    classification: startup-wait
+
+  - id: codex-lead-thread-discovery
+    kind: component
+    file: internal/leadcontrol/codex_runtime.go
+    function: discoverCodexLeadThread
+    site: component:bounded-thread-discovery
+    capability: interaction
+    owner: lead control runtime
+    cadence: "500ms initial probe with exponential backoff capped at 5s, bounded by 45s"
+    cancellation: "lead runtime context, successful discovery, or the 45s discovery deadline"
+    readiness_health: "persists the discovered Codex thread identity or records a terminal delivery-attempt timeout"
+    retry_backoff: "exponential from 500ms to a 5s cap"
+    classification: startup-wait
+
+  - id: automode-tmux-stream-poll
+    kind: ticker
+    file: internal/cli/automode/automode_tmux_session.go
+    function: streamUntilExit
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: automode tmux runtime
+    cadence: "200ms when fixed polling is selected"
+    cancellation: "shutdown channel, tmux session exit, or terminal signal"
+    readiness_health: "stream progress and session exit are surfaced to the foreground command"
+    retry_backoff: "fixed polling mode; adaptive poller is the alternative path"
+    classification: command-poll
+
+  # Daemon and supervisor managed loops.
+  - id: lead-session-heartbeat
+    kind: ticker
+    file: internal/cli/agent/lead/lead.go
+    function: heartbeatLeadSessionEvery
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: standalone lead runtime
+    cadence: "30s by default"
+    cancellation: "lead stop channel with WaitGroup join"
+    readiness_health: "advances AgentSession last_heartbeat; failures are debug logged"
+    retry_backoff: "best effort; retry on the next cadence"
+    classification: managed
+
+  - id: daemon-agent-command-poller
+    kind: ticker
+    file: internal/cli/daemon/daemon_command_poller.go
+    function: Daemon.startAgentCommandPoller
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: daemon runtime
+    cadence: "1s"
+    cancellation: "supervisor shutdown channel with WaitGroup join"
+    readiness_health: "each poll records duration and command outcomes through daemon telemetry"
+    retry_backoff: "next fixed cadence after poll or command failure"
+    classification: managed
+
+  - id: daemon-config-reconciler
+    kind: ticker
+    file: internal/cli/daemon/daemon_reconciler.go
+    function: Daemon.configPollingLoop
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: daemon runtime
+    cadence: "30s"
+    cancellation: "supervisor shutdown through the critical-goroutine wrapper"
+    readiness_health: "records the config_reconciler liveness tick after each pass"
+    retry_backoff: "next fixed cadence after load or reconcile failure"
+    classification: managed
+
+  - id: daemon-state-file-updater
+    kind: ticker
+    file: internal/cli/daemon/daemon_run_helpers.go
+    function: startStateUpdater
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: daemon runtime
+    cadence: "5s"
+    cancellation: "daemon shutdown channel; closes the returned done channel"
+    readiness_health: "writes the daemon state snapshot and records a critical liveness tick"
+    retry_backoff: "logs write failures and retries on the next fixed cadence"
+    classification: managed
+
+  - id: supervisor-node-heartbeat
+    kind: ticker
+    file: internal/cli/daemon/supervisor/control_plane.go
+    function: Supervisor.runNodeHeartbeat
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: daemon supervisor
+    cadence: "30s by default for a 2m node TTL"
+    cancellation: "supervisor shutdown through the critical-goroutine wrapper"
+    readiness_health: "renews the control-plane node and records node-heartbeat liveness"
+    retry_backoff: "warns and retries on the next cadence"
+    classification: managed
+
+  - id: supervisor-agent-health-checker
+    kind: ticker
+    file: internal/cli/daemon/supervisor/health.go
+    function: Supervisor.healthChecker
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: daemon supervisor
+    cadence: "30s"
+    cancellation: "supervisor shutdown through the critical-goroutine wrapper"
+    readiness_health: "checks supervised process health and records health-checker liveness"
+    retry_backoff: "each agent is isolated; the next scan retries failed observations"
+    classification: managed
+
+  - id: supervisor-liveness-watchdog
+    kind: ticker
+    file: internal/cli/daemon/supervisor/liveness.go
+    function: Supervisor.livenessWatchdog
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: daemon supervisor
+    cadence: "10s"
+    cancellation: "supervisor shutdown through the critical-goroutine wrapper"
+    readiness_health: "turns repeated stale critical ticks into a fatal supervisor signal"
+    retry_backoff: "requires consecutive stale scans and tolerates process suspension"
+    classification: managed
+
+  - id: supervisor-agent-wait-heartbeat
+    kind: ticker
+    file: internal/cli/daemon/supervisor/liveness.go
+    function: Supervisor.startAgentWaitHeartbeatEvery
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: daemon supervisor
+    cadence: "15s by default"
+    cancellation: "per-agent stop function or supervisor shutdown"
+    readiness_health: "keeps per-agent wait liveness fresh while a child process is running or backing off"
+    retry_backoff: "fixed cadence until stopped"
+    classification: managed
+
+  - id: supervisor-worker-lease-heartbeat
+    kind: ticker
+    file: internal/cli/daemon/supervisor/liveness.go
+    function: Supervisor.startWorkerHeartbeatEvery
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: daemon supervisor
+    cadence: "30s by default"
+    cancellation: "per-agent stop function or supervisor shutdown"
+    readiness_health: "renews worker registration and records the last successful heartbeat"
+    retry_backoff: "warns and retries on the next cadence"
+    classification: managed
+
+  - id: supervisor-session-lease-heartbeat
+    kind: ticker
+    file: internal/cli/daemon/supervisor/liveness.go
+    function: Supervisor.runAgentSessionHeartbeat
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: daemon supervisor
+    cadence: "30s by default; configured intervals are capped at half the watchdog threshold"
+    cancellation: "supervisor shutdown cancels the bounded pass and in-flight calls; each pass is capped at 30s"
+    readiness_health: "renews mirrored AgentSession and AgentLease records, with ticks around each bounded pass and operation"
+    retry_backoff: "eight-worker rotating windows prevent tail starvation; failures retry on the next cadence"
+    classification: managed
+
+  # Serve-hosted caches, execution workers, and automation reconcilers.
+  - id: serve-metrics-cache-refresh
+    kind: ticker
+    file: internal/cli/serve/metricscmd/collector.go
+    function: cachedCollector.startBackground
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: serve metrics adapter
+    cadence: "constructor-supplied refresh interval"
+    cancellation: "serve context cancellation"
+    readiness_health: "warms the monitor snapshot cache; foreground reads retain their own fallback"
+    retry_backoff: "fixed refresh cadence"
+    classification: managed
+
+  - id: serve-driver-executor
+    kind: ticker
+    file: internal/cli/serve/serve.go
+    function: startDriverExecutorIfEnabled
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: serve execution runtime
+    cadence: "2s after an immediate recovery and execution pass"
+    cancellation: "serve context cancellation"
+    readiness_health: "startup logs enablement; recovery and execution failures are error logged"
+    retry_backoff: "fixed 2s cadence; queue and recovery operations remain idempotent"
+    classification: managed
+
+  - id: serve-task-workers
+    kind: ticker
+    file: internal/cli/serve/serve.go
+    function: startDriverTaskWorkers
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: serve execution runtime
+    cadence: "1s per configured task-worker slot"
+    cancellation: "serve context cancellation"
+    readiness_health: "one named runner identity per slot; non-empty execution errors are logged"
+    retry_backoff: "fixed 1s queue retry"
+    classification: managed
+
+  - id: serve-generic-cache-refresh
+    kind: ticker
+    file: internal/cli/serve/serve_cache.go
+    function: cachedValue.startBackground
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: serve cache runtime
+    cadence: "constructor-supplied refresh interval"
+    cancellation: "serve context cancellation"
+    readiness_health: "performs an initial load before periodic refresh and logs refresh failures"
+    retry_backoff: "fixed refresh cadence"
+    classification: managed
+
+  - id: serve-stale-task-sweeper
+    kind: ticker
+    file: internal/cli/serve/serve_loops.go
+    function: startStaleTaskSweeper
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: serve execution runtime
+    cadence: "2s after an immediate sweep"
+    cancellation: "serve context cancellation"
+    readiness_health: "logs recovered task-run IDs and sweep failures"
+    retry_backoff: "fixed 2s cadence; fenced recovery is safe to repeat"
+    classification: managed
+
+  - id: serve-outbox-dispatcher
+    kind: ticker
+    file: internal/cli/serve/serve_loops.go
+    function: startOutboxDispatcher
+    site: "time.NewTicker#1"
+    capability: automation
+    owner: serve automation runtime
+    cadence: "2s after an immediate dispatch pass"
+    cancellation: "serve context cancellation"
+    readiness_health: "logs delivered counts and dispatch failures"
+    retry_backoff: "fixed 2s cadence over durable outbox state"
+    classification: managed
+
+  - id: serve-trigger-cron-scheduler
+    kind: ticker
+    file: internal/cli/serve/serve_loops.go
+    function: startTriggerCronScheduler
+    site: "time.NewTicker#1"
+    capability: automation
+    owner: serve automation runtime
+    cadence: "30s default, environment bounded to 1..3600s"
+    cancellation: "serve context cancellation"
+    readiness_health: "logs scheduler enablement, fired counts, and pass failures"
+    retry_backoff: "fixed configured cadence; durable tick identity deduplicates repeats"
+    classification: managed
+
+  - id: serve-trigger-delivery-sweeper
+    kind: ticker
+    file: internal/cli/serve/serve_loops.go
+    function: startTriggerDeliverySweeper
+    site: "time.NewTicker#1"
+    capability: automation
+    owner: serve automation runtime
+    cadence: "15s default, environment bounded to 1..3600s"
+    cancellation: "serve context cancellation"
+    readiness_health: "logs dispatched, rescheduled, exhausted, and failure counts"
+    retry_backoff: "configured scan cadence over each delivery's durable retry schedule"
+    classification: managed
+
+  - id: serve-await-timeout-sweeper
+    kind: ticker
+    file: internal/cli/serve/serve_loops.go
+    function: startAwaitTimeoutSweeper
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: serve execution runtime
+    cadence: "30s default, environment bounded to 1..3600s"
+    cancellation: "serve context cancellation"
+    readiness_health: "logs timed-out and deferred-resume instance keys plus failures"
+    retry_backoff: "fixed configured cadence over durable await state"
+    classification: managed
+
+  - id: serve-issue-journal-bridge
+    kind: ticker
+    file: internal/cli/serve/serve_loops.go
+    function: startIssueJournalBridge
+    site: "time.NewTicker#1"
+    capability: automation
+    owner: serve automation runtime
+    cadence: "2s default, environment bounded to 1..3600s"
+    cancellation: "serve context cancellation"
+    readiness_health: "logs cursor path, emitted and fast-forwarded counts, backoff, and failures"
+    retry_backoff: "fixed scan cadence with durable cursor and per-record backoff"
+    classification: managed
+
+  - id: serve-worker-log-forwarder
+    kind: ticker
+    file: internal/cli/serve/worker/log_forwarder.go
+    function: LogForwarder.periodicFlush
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: serve worker adapter
+    cadence: "2s"
+    cancellation: "LogForwarder close channel and WaitGroup join"
+    readiness_health: "best-effort buffered log forwarding; final close performs a flush"
+    retry_backoff: "retry buffered output on the next flush cadence"
+    classification: managed
+
+  - id: driver-run-heartbeat
+    kind: ticker
+    file: internal/driver/executor.go
+    function: heartbeatDriverRun
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: driver executor
+    cadence: "executor-supplied lease heartbeat interval"
+    cancellation: "claimed-run context cancellation"
+    readiness_health: "renews the fenced driver-run lease and observes cancel requests"
+    retry_backoff: "next cadence; stale ownership is enforced by the backend fence"
+    classification: managed
+
+  - id: executor-node-heartbeat
+    kind: ticker
+    file: internal/driver/executor.go
+    function: heartbeatExecutorNode
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: driver executor
+    cadence: "one third of the executor node TTL"
+    cancellation: "executor context cancellation"
+    readiness_health: "renews executor node liveness"
+    retry_backoff: "best effort on the next TTL-third cadence"
+    classification: managed
+
+  - id: task-run-heartbeat
+    kind: ticker
+    file: internal/driver/task_worker.go
+    function: heartbeatTaskRun
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: task worker
+    cadence: "worker-supplied lease heartbeat interval"
+    cancellation: "task-run context cancellation"
+    readiness_health: "advances TaskRun last_heartbeat and logs renewal failures"
+    retry_backoff: "next cadence; stale-task recovery handles prolonged loss"
+    classification: managed
+
+  - id: redis-stale-worker-detector
+    kind: ticker
+    file: internal/kv/stale.go
+    function: StaleDetector.Run
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: Redis worker runtime
+    cadence: "15s default, configurable"
+    cancellation: "caller context cancellation"
+    readiness_health: "leader election bounds the active detector; cycle errors are returned"
+    retry_backoff: "fixed configured cadence while leadership is held"
+    classification: managed
+
+  - id: lead-message-delivery-drain
+    kind: ticker
+    file: internal/leadcontrol/delivery.go
+    function: drainLeadMessageQueue
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: lead control runtime
+    cadence: "2s"
+    cancellation: "lead runtime context cancellation"
+    readiness_health: "logs message delivery failures and successful durable acknowledgements"
+    retry_backoff: "fixed 2s queue retry"
+    classification: managed
+
+  - id: harness-lead-runtime-watch
+    kind: ticker
+    file: internal/leadcontrol/harness_runtime.go
+    function: watchHarnessLeadRuntime
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: lead control runtime
+    cadence: "2s"
+    cancellation: "lead watch context or harness process completion"
+    readiness_health: "publishes harness conversation and terminal runtime state"
+    retry_backoff: "fixed 2s status poll"
+    classification: managed
+
+  # Web application and request-scoped stream loops.
+  - id: workspace-registry-reconcile
+    kind: ticker
+    file: internal/webui/appinfra/appinfra.go
+    function: StartPeriodicWorkspaceReconcile
+    site: "time.NewTicker#1"
+    capability: workspace
+    owner: web application runtime
+    cadence: "15s from server composition"
+    cancellation: "server context cancellation"
+    readiness_health: "initial reconciliation occurs before the loop; later failures are logged"
+    retry_backoff: "fixed cadence"
+    classification: managed
+
+  - id: fleet-task-timeout-enforcer
+    kind: ticker
+    file: internal/webui/fleet/timeout.go
+    function: TimeoutEnforcer.run
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: Redis fleet runtime
+    cadence: "1m default, configurable"
+    cancellation: "TimeoutEnforcer done channel with WaitGroup join"
+    readiness_health: "timeout count is observable and check failures are warning logged"
+    retry_backoff: "fixed configured cadence"
+    classification: managed
+
+  - id: driver-watch-poll
+    kind: ticker
+    file: internal/webui/handlers/driverapi/watch.go
+    function: Module.runWatchLoop
+    site: "time.NewTicker#1"
+    capability: execution
+    owner: driver API adapter
+    cadence: "1s default"
+    cancellation: "HTTP request context or stream write failure"
+    readiness_health: "emits run state changes and terminal state to the client"
+    retry_backoff: "fixed request-local poll cadence"
+    classification: request-scoped
+
+  - id: driver-watch-heartbeat
+    kind: ticker
+    file: internal/webui/handlers/driverapi/watch.go
+    function: Module.runWatchLoop
+    site: "time.NewTicker#2"
+    capability: execution
+    owner: driver API adapter
+    cadence: "15s default"
+    cancellation: "HTTP request context or stream write failure"
+    readiness_health: "keeps the SSE connection observable through heartbeat comments"
+    retry_backoff: "no retry beyond the next heartbeat; write failure closes the request"
+    classification: request-scoped
+
+  - id: driver-watch-reconcile
+    kind: ticker
+    file: internal/webui/handlers/driverapi/watch.go
+    function: Module.runWatchLoop
+    site: "time.NewTicker#3"
+    capability: execution
+    owner: driver API adapter
+    cadence: "60s default"
+    cancellation: "HTTP request context or stream write failure"
+    readiness_health: "reconciles missed events against durable run state"
+    retry_backoff: "fixed request-local reconciliation cadence"
+    classification: request-scoped
+
+  - id: auth-config-rate-limit-cleanup
+    kind: ticker
+    file: internal/webui/handlers/misc/auth_config.go
+    function: AuthConfigLimiter.CleanupLoop
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: web security middleware
+    cadence: "limiter-configured cleanup interval"
+    cancellation: "AuthConfigLimiter stop channel"
+    readiness_health: "not readiness-bearing; bounds stale per-IP limiter state"
+    retry_backoff: "fixed cleanup cadence"
+    classification: managed
+
+  - id: client-error-rate-limit-cleanup
+    kind: ticker
+    file: internal/webui/handlers/misc/client_errors.go
+    function: ClientErrorLimiter.CleanupLoop
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: web security middleware
+    cadence: "limiter-configured cleanup interval"
+    cancellation: "ClientErrorLimiter stop channel"
+    readiness_health: "not readiness-bearing; bounds stale per-IP limiter state"
+    retry_backoff: "fixed cleanup cadence"
+    classification: managed
+
+  - id: pr-review-stream-poll
+    kind: ticker
+    file: internal/webui/handlers/prreview/stream.go
+    function: Module.runReviewerStream
+    site: "time.NewTicker#1"
+    capability: source-control
+    owner: PR review HTTP adapter
+    cadence: "1s default"
+    cancellation: "HTTP request context or terminal reviewer state"
+    readiness_health: "emits new reviewer messages and status transitions"
+    retry_backoff: "fixed request-local poll cadence"
+    classification: request-scoped
+
+  - id: pr-review-stream-heartbeat
+    kind: ticker
+    file: internal/webui/handlers/prreview/stream.go
+    function: Module.runReviewerStream
+    site: "time.NewTicker#2"
+    capability: source-control
+    owner: PR review HTTP adapter
+    cadence: "15s default"
+    cancellation: "HTTP request context or stream write failure"
+    readiness_health: "keeps the reviewer SSE stream alive"
+    retry_backoff: "no retry beyond the next heartbeat; write failure closes the request"
+    classification: request-scoped
+
+  - id: workflow-run-event-stream
+    kind: ticker
+    file: internal/webui/handlers/workflows/module.go
+    function: Module.streamRunEvents
+    site: "time.NewTicker#1"
+    capability: workflow-catalog
+    owner: workflow HTTP adapter
+    cadence: "1s"
+    cancellation: "HTTP request context or terminal run state"
+    readiness_health: "polls and emits durable workflow run events"
+    retry_backoff: "fixed request-local poll cadence"
+    classification: request-scoped
+
+  - id: daemon-health-doctor
+    kind: ticker
+    file: internal/webui/health_doctor.go
+    function: HealthDoctor.Run
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: web application runtime
+    cadence: "15s default"
+    cancellation: "server context cancellation"
+    readiness_health: "tracks unhealthy circuit-breaker duration and logs restart decisions"
+    retry_backoff: "90s stuck threshold and per-workspace recovery tracking"
+    classification: managed
+
+  - id: local-redis-health-monitor
+    kind: ticker
+    file: internal/webui/localredis/manager.go
+    function: Manager.run
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: local Redis runtime
+    cadence: "30s"
+    cancellation: "manager context cancellation"
+    readiness_health: "checks the managed Redis process and publishes health state"
+    retry_backoff: "fixed 30s health retry"
+    classification: managed
+
+  - id: log-stream-heartbeat
+    kind: ticker
+    file: internal/webui/log/streamer.go
+    function: LogStreamer.streamEventLoop
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: log streaming adapter
+    cadence: "30s"
+    cancellation: "HTTP request context, watcher closure, or write failure"
+    readiness_health: "heartbeat comments distinguish an idle live stream from a dead connection"
+    retry_backoff: "no reconnect inside the request; client reconnect policy owns retry"
+    classification: request-scoped
+
+  - id: jwks-background-refresh
+    kind: ticker
+    file: internal/webui/server/middleware/jwks.go
+    function: JWKSCache.refreshLoop
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: authentication middleware
+    cadence: "configured JWKS refresh interval"
+    cancellation: "JWKSCache done channel"
+    readiness_health: "successful refresh replaces keys and clears the negative cache; failures are logged"
+    retry_backoff: "fixed refresh cadence"
+    classification: managed
+
+  - id: http-rate-limit-cleanup
+    kind: ticker
+    file: internal/webui/server/middleware/ratelimit.go
+    function: RateLimiter.cleanupLoop
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: web security middleware
+    cadence: "5m default, configurable"
+    cancellation: "RateLimiter stop channel"
+    readiness_health: "not readiness-bearing; evicts stale per-IP buckets"
+    retry_backoff: "fixed cleanup cadence"
+    classification: managed
+
+  - id: realtime-sse-heartbeat
+    kind: ticker
+    file: internal/webui/server/realtime/handler.go
+    function: Handler.streamLoop
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: realtime HTTP adapter
+    cadence: "30s default"
+    cancellation: "request context, hub eviction, or stream write failure"
+    readiness_health: "heartbeat comments and disconnect reasons are recorded on stream spans"
+    retry_backoff: "no server-side reconnect; client reconnect policy owns retry"
+    classification: request-scoped
+
+  - id: realtime-hub-retry-drain
+    kind: ticker
+    file: internal/webui/server/realtime/hub.go
+    function: Hub.Run
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: realtime hub
+    cadence: "100ms"
+    cancellation: "Hub done channel; closes all registered clients"
+    readiness_health: "hub metrics expose clients, drops, broadcasts, and retry queue activity"
+    retry_backoff: "fixed 100ms retry-queue drain"
+    classification: managed
+
+  - id: sse-token-nonce-cleanup
+    kind: ticker
+    file: internal/webui/server/realtime/sse_token.go
+    function: TokenStore.cleanupLoop
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: realtime authentication
+    cadence: "5m"
+    cancellation: "TokenStore done channel"
+    readiness_health: "not readiness-bearing; removes expired one-time-token nonces"
+    retry_backoff: "fixed cleanup cadence"
+    classification: managed
+
+  - id: terminal-token-nonce-cleanup
+    kind: ticker
+    file: internal/webui/server/realtime/terminal_auth.go
+    function: TerminalAuth.cleanupLoop
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: terminal authentication
+    cadence: "5m"
+    cancellation: "TerminalAuth done channel"
+    readiness_health: "not readiness-bearing; removes expired one-time-token nonces"
+    retry_backoff: "fixed cleanup cadence"
+    classification: managed
+
+  - id: workspace-subscriber-idle-deactivation
+    kind: ticker
+    file: internal/webui/subscription/multi.go
+    function: MultiWorkspaceSubscriber.idleDeactivationLoop
+    site: "time.NewTicker#1"
+    capability: workspace
+    owner: web subscription runtime
+    cadence: "15s"
+    cancellation: "multi-workspace subscriber context cancellation"
+    readiness_health: "deactivates subscribers after 60s without SSE clients and logs lifecycle changes"
+    retry_backoff: "fixed scan cadence"
+    classification: managed
+
+  - id: workspace-job-cleanup
+    kind: ticker
+    file: internal/webui/svcimpl/workspace_job_store.go
+    function: WorkspaceJobStore.cleanupLoop
+    site: "time.NewTicker#1"
+    capability: workspace
+    owner: workspace service adapter
+    cadence: "1m"
+    cancellation: "WorkspaceJobStore done channel"
+    readiness_health: "not readiness-bearing; evicts terminal jobs after the 5m retention window"
+    retry_backoff: "fixed cleanup cadence"
+    classification: managed
+
+  - id: terminal-idle-reaper
+    kind: ticker
+    file: internal/webui/terminal/pty_manager.go
+    function: PTYManager.reapLoop
+    site: "time.NewTicker#1"
+    capability: interaction
+    owner: terminal runtime
+    cadence: "60s"
+    cancellation: "PTYManager reaper stop channel with WaitGroup join"
+    readiness_health: "bounds abandoned PTY sessions and records exit reasons"
+    retry_backoff: "fixed reaper cadence"
+    classification: managed
+
+  # Boot-only repairs and long-lived components that do not use time.NewTicker.
+  - id: builtin-role-prompt-boot-repair
+    kind: component
+    file: internal/cli/serve/workspacemgr/workspace_store.go
+    function: EnsureBuiltinRolePrompts
+    site: component:boot-repair
+    capability: agents
+    owner: serve workspace bootstrap
+    cadence: "once during serve startup"
+    cancellation: "serve startup context"
+    readiness_health: "serve startup fails if builtin role prompts cannot be reconciled"
+    retry_backoff: "none in-process; the idempotent repair reruns on the next serve start"
+    classification: startup-wait
+
+  - id: prompt-agent-identity-boot-repair
+    kind: component
+    file: internal/cli/serve/workspacemgr/agent_identity_migration.go
+    function: EnsurePromptAgentIdentityRecords
+    site: component:boot-repair
+    capability: agents
+    owner: serve workspace bootstrap
+    cadence: "once during serve startup"
+    cancellation: "serve startup context"
+    readiness_health: "serve startup fails if prompt-agent identity reconciliation fails"
+    retry_backoff: "none in-process; the idempotent repair reruns on the next serve start"
+    classification: startup-wait
+
+  - id: embedded-fleetdb-process-reaper
+    kind: component
+    file: internal/bootstrap/embedded.go
+    function: EmbeddedFleetDB.reapAndPublish
+    site: component:process-wait
+    capability: platform
+    owner: embedded fleet-db bootstrap
+    cadence: "blocks once on the owned child process"
+    cancellation: "EmbeddedFleetDB Stop signals the process and waits for done"
+    readiness_health: "publishes the child exit result and logs unexpected termination"
+    retry_backoff: "no restart in the reaper; bootstrap policy owns replacement"
+    classification: managed
+
+  - id: codex-app-server-process-reaper
+    kind: component
+    file: internal/leadcontrol/codex_runtime.go
+    function: startCodexAppServer
+    site: component:process-wait
+    capability: interaction
+    owner: lead control runtime
+    cadence: "blocks once on the owned Codex app-server child process"
+    cancellation: "app-server context cancellation signals the child; shutdown waits for the buffered exit result"
+    readiness_health: "publishes child exit through appErr so startup and shutdown can distinguish process failure"
+    retry_backoff: "no restart in the reaper; the lead runtime owns replacement"
+    classification: managed
+
+  - id: web-http-server
+    kind: component
+    file: internal/webui/app/server.go
+    function: Server.run
+    site: component:http-serve
+    capability: platform
+    owner: web application runtime
+    cadence: "event driven on the HTTP listener"
+    cancellation: "server context cancellation followed by bounded graceful shutdown"
+    readiness_health: "listener acquisition and server errors are surfaced to the serve caller"
+    retry_backoff: "no in-process listener restart"
+    classification: managed
+
+  - id: local-daemon-supervisor
+    kind: component
+    file: internal/cli/local/daemon.go
+    function: superviseLocalDaemon
+    site: component:daemon-supervision
+    capability: agents
+    owner: local runtime
+    cadence: "configuration poll while idle; child lifetime while runnable"
+    cancellation: "local runtime context cancellation"
+    readiness_health: "daemon exit and missing configuration are appended to the local daemon log"
+    retry_backoff: "1s exponential restart backoff capped by localDaemonMaxBackoff"
+    classification: managed
+
+  - id: daemon-control-socket-listener
+    kind: component
+    file: internal/cli/daemon/daemon_control.go
+    function: Daemon.startControlServer
+    site: component:unix-accept-loop
+    capability: agents
+    owner: daemon runtime
+    cadence: "event driven on the control Unix socket"
+    cancellation: "listener close during supervisor shutdown"
+    readiness_health: "socket bind failure blocks startup; later accept failure is warning logged"
+    retry_backoff: "no listener rebind after an unexpected accept failure"
+    classification: managed
+
+  - id: daemon-agent-ipc-listener
+    kind: component
+    file: internal/cli/daemon/daemon_ipc.go
+    function: Daemon.startIPCServer
+    site: component:unix-accept-loop
+    capability: interaction
+    owner: daemon runtime
+    cadence: "event driven on the owner-only agent IPC Unix socket"
+    cancellation: "listener close during supervisor shutdown"
+    readiness_health: "socket bind and chmod failures block startup; later accept failure is warning logged"
+    retry_backoff: "no listener rebind after an unexpected accept failure"
+    classification: managed
+
+  - id: supervisor-per-agent-loop
+    kind: component
+    file: internal/cli/daemon/supervisor/critical.go
+    function: Supervisor.supervisedAgentBody
+    site: component:agent-supervision
+    capability: agents
+    owner: daemon supervisor
+    cadence: "event driven across spawn, wait, classification, and backoff states"
+    cancellation: "per-agent cancel or supervisor shutdown; completion closes AgentProcess done"
+    readiness_health: "panic recovery signals fatal and agent status exposes stop reason, retries, and block count"
+    retry_backoff: "class-based retry, failover, block, and fast-fail policy"
+    classification: managed
+
+  - id: supervisor-agent-ownership-heartbeat
+    kind: component
+    file: internal/cli/daemon/supervisor/ownership.go
+    function: Supervisor.startOwnershipHeartbeat
+    site: component:jittered-timer-loop
+    capability: agents
+    owner: daemon supervisor
+    cadence: "jittered timer derived from ownership TTL, capped at 30s base"
+    cancellation: "per-agent stop function or supervisor shutdown"
+    readiness_health: "loss of fenced ownership terminates the heartbeat and blocks unsafe spawn"
+    retry_backoff: "next jittered timer only after a successful ownership renewal"
+    classification: managed
+
+  - id: flue-task-session-heartbeat
+    kind: component
+    file: internal/driver/task_bridge_session.go
+    function: heartbeatFlueTaskSession
+    site: component:resettable-timer-loop
+    capability: execution
+    owner: task bridge session lifecycle
+    cadence: "30s while a Flue-backed task execution is active"
+    cancellation: "derived task context canceled when the task session finishes"
+    readiness_health: "best-effort AgentSession heartbeat preserves task-session liveness"
+    retry_backoff: "failure is retried on the next reset timer interval"
+    classification: managed
+
+  - id: backend-mutation-long-poll
+    kind: component
+    file: internal/webui/subscription/backend_subscriber.go
+    function: BackendMutationSubscriber.loop
+    site: component:mutation-long-poll
+    capability: workspace
+    owner: web subscription runtime
+    cadence: "backend long-poll, normally bounded by backendWaitTimeout"
+    cancellation: "subscriber context cancellation with WaitGroup join"
+    readiness_health: "durable cursor advances before broadcast; errors are workspace-scoped in logs"
+    retry_backoff: "backendRetryDelay after errors and backendEmptyPollDelay after early empty responses"
+    classification: managed
+
+  - id: logrouter-lock-watcher
+    kind: component
+    file: internal/logrouter/watcher.go
+    function: LockWatcher.Watch
+    site: component:filesystem-watch
+    capability: execution
+    owner: log router runtime
+    cadence: "event driven by fsnotify"
+    cancellation: "log-router context cancellation or watcher channel closure"
+    readiness_health: "initial lock read occurs before watch; read and watcher errors are written to stderr"
+    retry_backoff: "continues after per-event read errors; exits if watcher channels close"
+    classification: managed
+
+  - id: terminal-pty-drain
+    kind: component
+    file: internal/webui/terminal/pty_session.go
+    function: ptySession.drain
+    site: component:pty-read-loop
+    capability: interaction
+    owner: terminal runtime
+    cadence: "event driven by PTY output"
+    cancellation: "PTY close or child exit; manager shutdown closes every session"
+    readiness_health: "updates scrollback and last-output time; exit is reported to the manager"
+    retry_backoff: "no read retry after terminal error; session lifecycle owns replacement"
+    classification: request-scoped
+
+  - id: sandbox-serve-relay-accept
+    kind: component
+    file: internal/driver/sandbox/egress.go
+    function: serveSocketRelay.acceptLoop
+    site: component:unix-relay-accept
+    capability: execution
+    owner: execution sandbox
+    cadence: "event driven on the per-run Unix relay socket"
+    cancellation: "relay listener close during run cleanup"
+    readiness_health: "relay construction must bind before the sandbox starts; accept errors terminate the loop"
+    retry_backoff: "no accept-loop restart; per-connection forwarding failures remain isolated"
+    classification: request-scoped
+
+  - id: daemon-mutation-subscription-drain
+    kind: component
+    file: internal/cli/daemon/daemon_mutations.go
+    function: MutationBuffer.run
+    site: component:subscription-drain
+    capability: work-items
+    owner: daemon mutation projection
+    cadence: "event driven by the workspace issue-mutation subscription"
+    cancellation: "MutationBuffer.Stop closes done and the subscription, then joins the goroutine"
+    readiness_health: "not readiness-bearing; feeds the bounded control-socket mutation replay buffer"
+    retry_backoff: "no resubscribe loop; subscription closure terminates the component"
+    classification: managed
+
+  - id: legacy-file-history-boot-cleanup
+    kind: component
+    file: internal/webui/svcimpl/file_history.go
+    function: fileServiceImpl.startLegacyHistoryCleanup
+    site: component:boot-cleanup
+    capability: artifacts
+    owner: file service adapter
+    cadence: "once asynchronously when the file service is constructed"
+    cancellation: "not cancellable after launch; historyCleanupDone closes on completion"
+    readiness_health: "does not gate readiness; records and warning-logs the cleanup result"
+    retry_backoff: "none in-process; a later file-service construction retries the idempotent cleanup"
+    classification: managed
+
+  - id: editor-process-reaper-darwin
+    kind: component
+    file: internal/webui/editor/launch_darwin.go
+    function: LaunchEditor
+    site: component:process-wait
+    capability: source-control
+    owner: editor launch adapter
+    cadence: "one detached child wait per successful editor launch on Darwin"
+    cancellation: "the detached editor process lifetime; no request-context cancellation"
+    readiness_health: "launch readiness is cmd.Start success; Wait only prevents a zombie child"
+    retry_backoff: "no retry; the caller may issue another launch request"
+    classification: request-scoped
+
+  - id: editor-process-reaper-linux
+    kind: component
+    file: internal/webui/editor/launch_linux.go
+    function: LaunchEditor
+    site: component:process-wait
+    capability: source-control
+    owner: editor launch adapter
+    cadence: "one detached child wait per successful editor launch on Linux"
+    cancellation: "the detached editor process lifetime; no request-context cancellation"
+    readiness_health: "launch readiness is cmd.Start success; Wait only prevents a zombie child"
+    retry_backoff: "no retry; the caller may issue another launch request"
+    classification: request-scoped
+
+  - id: editor-process-reaper-windows
+    kind: component
+    file: internal/webui/editor/launch_windows.go
+    function: LaunchEditor
+    site: component:process-wait
+    capability: source-control
+    owner: editor launch adapter
+    cadence: "one detached child wait per successful editor launch on Windows"
+    cancellation: "the detached editor process lifetime; no request-context cancellation"
+    readiness_health: "launch readiness is cmd.Start success; Wait only prevents a zombie child"
+    retry_backoff: "no retry; the caller may issue another launch request"
+    classification: request-scoped
+
+  - id: daemon-signal-runtime
+    kind: component
+    file: internal/cli/daemon/daemon_cmd.go
+    function: setupSignalHandler
+    site: component:signal-handlers
+    capability: platform
+    owner: daemon runtime
+    cadence: "event driven by termination signals and process-lifetime SIGUSR1 diagnostics"
+    cancellation: "termination waiter stops after the first signal; SIGUSR1 diagnostics end with the process"
+    readiness_health: "not readiness-bearing; termination initiates graceful shutdown and SIGUSR1 emits goroutine diagnostics"
+    retry_backoff: "none; signal delivery is provided by the operating system"
+    classification: managed
+
+  - id: automode-attach-input
+    kind: component
+    file: internal/cli/automode/automode_tmux_util.go
+    function: listenForAttachKey
+    site: component:stdin-listener
+    capability: interaction
+    owner: automode tmux command
+    cadence: "event driven by command-lifetime stdin reads"
+    cancellation: "outer dispatcher observes shutdown; a blocked stdin read ends only when stdin or the process closes"
+    readiness_health: "not readiness-bearing; Enter requests attachment to the active tmux session"
+    retry_backoff: "continues after ignored keys; read errors terminate the input component"
+    classification: request-scoped
+
+  - id: harness-stdin-forwarder
+    kind: component
+    file: internal/leadcontrol/harness_runtime.go
+    function: forwardHarnessStdin
+    site: component:stdin-forwarder
+    capability: interaction
+    owner: controlled harness lead runtime
+    cadence: "event driven by session-lifetime human stdin"
+    cancellation: "session context is checked after reads; blocked reads end when stdin or the process closes"
+    readiness_health: "not readiness-bearing; write failure or stdin closure terminates forwarding"
+    retry_backoff: "continues after successful writes; no retry after read or PTY write failure"
+    classification: request-scoped
+
+  - id: web-secondary-daemon-startup
+    kind: component
+    file: internal/webui/app/server_app.go
+    function: NewServer
+    site: component:secondary-daemon-startup
+    capability: agents
+    owner: web application runtime
+    cadence: "once during server construction when the compatibility hook is configured"
+    cancellation: "server context cancellation"
+    readiness_health: "the hook reports each reachable secondary workspace through onReady; currently dormant in production composition"
+    retry_backoff: "owned by the injected compatibility hook"
+    classification: managed

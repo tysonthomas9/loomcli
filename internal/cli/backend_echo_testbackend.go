@@ -11,11 +11,19 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backendapi"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
-// EchoInvocation records the parameters of a single backend call.
+type StreamingBackend = backendapi.StreamingBackend
+type HealthCheckableBackend = backendapi.HealthCheckableBackend
+type MetadataProvider = backendapi.MetadataProvider
+type HealthStatus = backendapi.HealthStatus
+type BackendMeta = backendapi.BackendMeta
+type StreamEvent = backendapi.StreamEvent
+type StreamUsage = backendapi.StreamUsage
+
+// EchoInvocation records the parameters of a single test-backend call.
 type EchoInvocation struct {
 	WorkDir   string
 	Prompt    string
@@ -303,5 +311,5 @@ func collectEchoStreamUsage(line string, collector *usage.Collector) {
 var defaultEchoBackend = &EchoBackend{handler: DefaultEchoHandler}
 
 func init() {
-	cli.RegisterBackend(defaultEchoBackend)
+	RegisterBackend(defaultEchoBackend)
 }

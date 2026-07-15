@@ -1,80 +1,46 @@
 package backends
 
 import (
-	"context"
-	"io"
 	"os/exec"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/backendapi"
 )
 
 // StreamingBackend is an optional interface that backends can implement to
 // support streaming responses. Use type assertion or InspectCapabilities to
 // check whether a Backend supports this.
-type StreamingBackend interface {
-	InvokeStreaming(ctx context.Context, workDir, prompt, agentName string) (io.ReadCloser, error)
-}
+type StreamingBackend = backendapi.StreamingBackend
 
 // SessionAwareBackend is an optional interface for backends that support
 // resuming or continuing a previous agent session.
-type SessionAwareBackend interface {
-	ContinueSession(workDir, sessionID, agentName string) error
-	LastSessionID(workDir string) string
-}
+type SessionAwareBackend = backendapi.SessionAwareBackend
 
 // ToolAwareBackend is an optional interface for backends that support
 // restricting which tools the agent may or may not use.
-type ToolAwareBackend interface {
-	SetAllowedTools(tools []string)
-	SetDeniedTools(tools []string)
-}
+type ToolAwareBackend = backendapi.ToolAwareBackend
 
 // HealthCheckableBackend is an optional interface for backends that can
 // report their installation and readiness status.
-type HealthCheckableBackend interface {
-	HealthCheck() HealthStatus
-}
+type HealthCheckableBackend = backendapi.HealthCheckableBackend
 
 // ConfigurableBackend is an optional interface for backends that expose
 // runtime-configurable options.
-type ConfigurableBackend interface {
-	Options() []BackendOption
-	SetOption(key, value string) error
-	GetOption(key string) (string, error)
-}
+type ConfigurableBackend = backendapi.ConfigurableBackend
 
 // MetadataProvider is an optional interface for backends that can report
 // descriptive metadata about themselves.
-type MetadataProvider interface {
-	Meta() BackendMeta
-}
+type MetadataProvider = backendapi.MetadataProvider
 
 // HealthStatus describes the health and readiness of a backend.
-type HealthStatus struct {
-	Healthy   bool   `json:"healthy"`
-	Installed bool   `json:"installed"`
-	Version   string `json:"version"`
-	APIKeySet bool   `json:"api_key_set"`
-	Message   string `json:"message"`
-}
+type HealthStatus = backendapi.HealthStatus
 
 // BackendOption describes a single configurable option for a backend.
-type BackendOption struct {
-	Key          string `json:"key"`
-	Description  string `json:"description"`
-	Default      string `json:"default"`
-	CurrentValue string `json:"current_value"`
-}
+type BackendOption = backendapi.BackendOption
 
 // BackendMeta contains descriptive metadata about a backend.
-type BackendMeta struct {
-	DisplayName string `json:"display_name"`
-	Version     string `json:"version"`
-	Description string `json:"description"`
-	URL         string `json:"url"`
-	BinaryName  string `json:"binary_name"`
-}
+type BackendMeta = backendapi.BackendMeta
 
 // BackendCapabilities reports which optional interfaces a Backend implements.
 // Check the boolean flags (HasStreaming, HasSessions, etc.) or the typed

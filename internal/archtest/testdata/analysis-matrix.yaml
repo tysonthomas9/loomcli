@@ -1,32 +1,32 @@
 schema_version: 1
-status: bootstrap
+status: enforced
 release_targets:
   - name: linux-amd64
     goos: linux
     goarch: amd64
     tags: []
-    enforced: false
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Analyze the untagged package graph and report profile-specific violations.
   - name: linux-arm64
     goos: linux
     goarch: arm64
     tags: []
-    enforced: false
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Analyze the untagged package graph and report profile-specific violations.
   - name: darwin-amd64
     goos: darwin
     goarch: amd64
     tags: []
-    enforced: false
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Analyze the untagged package graph and report profile-specific violations.
   - name: darwin-arm64
     goos: darwin
     goarch: arm64
     tags: []
-    enforced: false
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Analyze the untagged package graph and report profile-specific violations.
 tag_profiles:
@@ -34,42 +34,48 @@ tag_profiles:
     goos: linux
     goarch: amd64
     tags: [integration]
-    enforced: false
+    required_files: [internal/archtest/profiles_integration_test.go]
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Load the tagged package graph and report the exact profile for each violation.
   - name: e2e
     goos: linux
     goarch: amd64
     tags: [e2e]
-    enforced: false
+    required_files: [internal/cli/automode/automode_e2e_test.go]
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Load the tagged package graph and report the exact profile for each violation.
   - name: testbackend
     goos: linux
     goarch: amd64
     tags: [testbackend]
-    enforced: false
+    required_files: [internal/cli/backend_echo_testbackend.go]
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Load the tagged package graph and report the exact profile for each violation.
   - name: issuebackend-e2e
     goos: linux
     goarch: amd64
     tags: [issuebackend_e2e]
-    enforced: false
+    required_files: [internal/cli/issue_backend_conformance_e2e_test.go]
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Load the tagged package graph and report the exact profile for each violation.
   - name: container
     goos: linux
     goarch: amd64
     tags: [container]
-    enforced: false
+    required_files: [e2e/container_test.go]
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Load the tagged package graph and report the exact profile for each violation.
   - name: playground
     goos: linux
     goarch: amd64
     tags: [playground]
-    enforced: false
+    required_files: [test/playground/playground_test.go]
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Load the tagged package graph and report the exact profile for each violation.
   - name: race
@@ -77,10 +83,19 @@ tag_profiles:
     goarch: amd64
     tags: []
     race: true
-    enforced: false
+    required_files: [internal/cli/automode/race_enabled.go]
+    enforced: true
     owner: modular-monolith
     acceptance_criteria: Load packages with the race detector source selection and report profile-specific violations.
 ast_all_files:
   include_tests: true
   exclude_generated: true
-  ignore: []
+  ignore:
+    - path: internal/cli/daemon/daemon_yield_test.go
+      reason: Historical yield-file tests are deliberately excluded until the daemon retirement path either restores or deletes them.
+      owner: execution-reliability-lane
+      expiry: "2026-12-31"
+    - path: internal/webui/app/sse_push_test.go
+      reason: Historical SSE mutation tests require server-side RPC packages that are not present in this module.
+      owner: web-runtime-lane
+      expiry: "2026-12-31"

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -104,6 +103,20 @@ type Supervisor struct {
 	NodeID       string
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
+	// SessionHeartbeatInterval controls the shared control-plane session/lease
+	// heartbeat loop. Zero uses the package default. AgentLeaseTTL controls the
+	// renewed lease duration and likewise defaults when zero.
+	// SessionHeartbeatPassTimeout is capped below the liveness threshold so an
+	// unreachable control plane cannot make the heartbeat loop appear wedged.
+	// Zero uses the package default; tests may use a shorter value.
+	SessionHeartbeatInterval    time.Duration
+	SessionHeartbeatPassTimeout time.Duration
+	AgentLeaseTTL               time.Duration
+	// sessionHeartbeatCursor rotates the first job in each bounded pass so a
+	// persistently slow backend cannot starve agents at the tail of the stable
+	// snapshot. The mutex also makes direct/concurrent test passes race-free.
+	sessionHeartbeatCursorMu sync.Mutex
+	sessionHeartbeatCursor   int
 
 	// ownershipOwnerID is the durable identity of this local supervisor
 	// installation. Unlike NodeID (which intentionally identifies one daemon
@@ -193,6 +206,7 @@ func (s *Supervisor) Start() error {
 		slog.Info("agent supervision suppressed (fleet mode — agents managed by fleet server)")
 		return nil
 	}
+	s.startAgentSessionHeartbeat()
 
 	// Initialize stop/done channels and start superviseAgent goroutine for each agent
 	s.AgentsMu.RLock()
@@ -225,14 +239,10 @@ func (s *Supervisor) startAgentSupervisor(ap *AgentProcess) {
 }
 
 const (
-	defaultNodeTTL      = 2 * time.Minute
-	defaultNodeInterval = 30 * time.Second
-	// defaultLeaseTTL must outlive a typical real-codex turn (often 5+
-	// minutes) so the lease is still Active when the worker calls
-	// loom data close. There is no periodic heartbeat loop on the agent
-	// lease today (only IPC mutations renew it), so a short TTL silently
-	// fails task completion after a long codex session.
-	defaultLeaseTTL = 30 * time.Minute
+	defaultNodeTTL                  = 2 * time.Minute
+	defaultNodeInterval             = 30 * time.Second
+	defaultLeaseTTL                 = 30 * time.Minute
+	defaultSessionHeartbeatInterval = 30 * time.Second
 )
 
 var controlPlaneOperationTimeout = 2 * time.Second
@@ -359,6 +369,8 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 // clearAgentSessionState resets session state between supervision cycles.
 func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
+	ap.SessionHeartbeatMu.Lock()
+	defer ap.SessionHeartbeatMu.Unlock()
 	ap.Mu.Lock()
 	ap.Session = nil
 	ap.AgentSessionID = ""
@@ -788,23 +800,15 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 			return
 		}
 		slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
-		ap.Mu.Lock()
-		orphanSess := ap.Session
-		ap.Session = nil
-		orphanSessionID := ap.AgentSessionID
-		ap.AgentSessionID = ""
-		orphanLeaseID := ap.AgentLeaseID
-		orphanLeaseToken := ap.AgentLeaseToken
-		ap.AgentLeaseID = ""
-		ap.AgentLeaseToken = ""
-		ap.Mu.Unlock()
-		if orphanSess != nil {
-			_ = orphanSess.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
+		orphan, releaseHeartbeatBarrier := takeAgentSessionForFinalize(ap)
+		defer releaseHeartbeatBarrier()
+		if orphan.session != nil {
+			_ = orphan.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
 		}
 		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
-			sessionID:  orphanSessionID,
-			leaseID:    orphanLeaseID,
-			leaseToken: orphanLeaseToken,
+			sessionID:  orphan.sessionID,
+			leaseID:    orphan.leaseID,
+			leaseToken: orphan.leaseToken,
 			exitCode:   -1,
 			errClass:   "spawn_failure",
 			taskID:     s.taskIDForLifecycle(ap, nil),
@@ -986,12 +990,4 @@ func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (config.
 		return config.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
 	}
 	return rc, nil
-}
-
-// ResolveDaemonPath resolves a path relative to projectDir, or returns as-is if absolute.
-func ResolveDaemonPath(projectDir, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(projectDir, path)
 }

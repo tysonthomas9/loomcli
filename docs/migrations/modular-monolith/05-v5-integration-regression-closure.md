@@ -205,12 +205,13 @@ covered by component tests but was not available in the seeded live dataset.
 
 ## Exit decision
 
-The bounded integration closure is validated. Package moves must begin on a
-follow-up branch and remain subject to the unresolved modular-monolith decisions
-and overlap checks in the migration index. Future defects outside this ledger
-become normal backlog work; a failure in one of these restored invariants
-reopens this closure slice.
+The bounded integration closure is validated. Phase 1 subsequently approved
+MM-1 through MM-7 and completed the guardrails without adding a capability
+module root. Package moves begin in Phase 2 and remain subject to the approved
+graph, characterization gate, overlap checks, and per-slice proof in the
+migration index. Future defects outside this ledger become normal backlog work;
+a failure in one of these restored invariants reopens this closure slice.
 
 ---
 
-[Previous: Enforcement and gates](04-enforcement-and-gates.md) · [Migration index](README.md)
+[Previous: Enforcement and gates](04-enforcement-and-gates.md) · [Migration index](README.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)

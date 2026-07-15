@@ -1,6 +1,6 @@
 # Current-State Evidence
 
-- **Status:** Proposed migration input
+- **Status:** Reviewed baseline — Phase 1 inventories complete
 - **Snapshot:** 2026-07-15, pre-guardrail Loom code head `122d4d79` after refreshing `origin/v5`
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -12,6 +12,8 @@
 | Largest non-generated production package / configured internal fanout ceiling | 25 files / 18 imports | Existing size and fanout gates pass at their ceilings |
 | Production files using the composite Store interface | 93 semantic uses; the old text scan reports 96 | The broad dependency is semantic, not a large-package problem |
 | Composite Store uses outside `cli/serve`, `infra`, and `store` | 82 semantic uses; the old text scan reports 86 | Composite persistence reaches capability code |
+| Direct persistence-write rows from declared adapter roots | 233 type-resolved rows | Existing writes are owned and ratcheted, not yet migrated |
+| Architecture analysis profiles | 11 of 11 enforced plus all-files AST checks | Build tags and release targets cannot silently hide forbidden edges |
 | Frontend production TS/TSX files | 604 | The frontend needs ownership boundaries |
 | Frontend top-level component directories | 94 | Component folders do not currently provide those boundaries |
 | `internal/webui/frontend/src/App.tsx` | 1,569 lines | The application shell directly composes many capabilities |
@@ -45,7 +47,7 @@ The frontend ESLint graph in `internal/webui/frontend/eslint.config.js` enforces
 
 ## The prior plane model is useful but insufficient
 
-A pre-integration exploratory scan grouped the tree into kernel, platform, state, execution, orchestration, HTTP transport, and composition levels. It reported four upward tree edges and two tree-level cycles. That historical result was never an ownership model or checked-in enforcement source; the post-integration graph inventory remains pending. The four cleanup candidates still exist:
+A pre-integration exploratory scan grouped the tree into kernel, platform, state, execution, orchestration, HTTP transport, and composition levels. It reported four upward tree edges and two tree-level cycles. That historical result was never an ownership model or checked-in enforcement source. Phase 1 replaced it as the authority source with the approved capability graph, 11 enforced build profiles, all-files AST checks, and default-deny validation for new module roots and edges. The four legacy cleanup candidates still exist:
 
 | Edge | Likely mechanical correction |
 |---|---|
@@ -73,7 +75,9 @@ Two fleet-db mechanisms also defeat a simplistic “one table equals one module�
 
 ## Runtime ownership is also distributed
 
-At this snapshot, `serve_loops.go` has six explicit store-backed launchers. The default-on driver-run executor and two default task workers bring the stable `loom serve` automation subset to nine loops, excluding web-server and infrastructure loops. `EnsureBuiltinRolePrompts` and `EnsurePromptAgentIdentityRecords` are boot-only repairs. Daemon and per-agent loops are configuration-dependent, so the old scalar “fourteen long-lived loops” is not retained as a baseline. A named component inventory must define the counting rule before setting a runtime threshold. Retry intervals and policy can be owned by packages or overridden in `serve`; the stale-task package default is twenty minutes while `serve_loops.go` supplies a five-minute fallback.
+The Phase 1 runtime inventory replaces the old scalar loop estimates. It names 83 lifecycle component definitions across `cmd`, `internal`, and `sdk`: 58 exact `time.NewTicker` AST sites plus 25 additional boot or long-lived components. A separate default-deny AST ledger ratchets all 108 in-scope non-test source goroutine launch definitions, including each callee and either resolving lifecycle-component links or an explicit bounded, request, command, or helper disposition with a reason. The all-source ledger intentionally includes architecture tooling, mutually exclusive build-tag variants such as `testbackend`, and the fake harness, so 108 is a source-definition ratchet rather than a reachable or simultaneous product-runtime count. The lifecycle classification is 56 managed components, 3 bounded command polls, 15 request-scoped components, and 9 startup waits. The performance baseline therefore uses 56 as the production background-component count; this counts definitions, not simultaneous instances, which remain configuration-dependent.
+
+Phase 1 also removed the stale-task policy mismatch: `serve` now sources the same twenty-minute default as `StaleTaskSweeper`. The sweeper uses the earlier of a monotonic projection and the current wall clock: forward jumps cannot mass-age persisted heartbeats, while a backward jump conservatively protects fresh post-jump heartbeats and recovery resumes as the new clock advances. Standalone lead sessions, serve-hosted task sessions, and supervisor-owned AgentSession/AgentLease records have explicit heartbeat coverage; terminal finalization drains in-flight session heartbeats before writing completion.
 
 The target is one lifecycle framework coordinating isolated capability reconcilers—not one giant loop. Supervisor code should be characterized, replaced in its target owners, and deleted rather than moved into a polished legacy module.
 
@@ -116,8 +120,8 @@ git merge-base --is-ancestor origin/main HEAD
 shasum -a 256 api/openapi.yaml
 ```
 
-The eventual architecture tooling should generate capability edges, Store consumers, direct adapter writes, and authority coverage automatically rather than relying on hand-run inventories.
+The Phase 1 architecture tooling now generates or validates capability edges, Store consumers, direct adapter writes, runtime components, performance records, and authority/transaction specifications. The current figures remain pre-extraction ratchets: zero capability module roots, 93 composite-Store files, 82 outside composition, and 233 direct persistence-write rows.
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Next: [Target architecture](02-target-architecture.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Next: [Target architecture](02-target-architecture.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)

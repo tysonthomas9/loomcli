@@ -36,9 +36,14 @@ func NewMockIssueBackend() *clitest.MockIssueBackend { return clitest.NewMockIss
 func installExecMock(t *testing.T, m *clitest.MockExecRunner) {
 	t.Helper()
 	dd := cli.TestingGetDefaultDeps()
-	orig := dd.Exec
+	origExec := dd.Exec
+	origGit := dd.Git
 	dd.Exec = m
-	t.Cleanup(func() { dd.Exec = orig })
+	dd.Git = &clitest.ExecBridgeGitRunner{Exec: m}
+	t.Cleanup(func() {
+		dd.Exec = origExec
+		dd.Git = origGit
+	})
 }
 
 func setupMonitorWorkspaceConfig(t *testing.T, workspaceDir string, agentNames ...string) {

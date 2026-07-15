@@ -17,6 +17,22 @@ import (
 	"time"
 )
 
+// serveHealthResponse mirrors the /health response consumed by these
+// subprocess tests.
+type serveHealthResponse struct {
+	Status    string    `json:"status"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// skipIfNoTmux keeps the serve E2E tests independent of automode's private
+// tmux lifecycle helpers after the CLI package split.
+func skipIfNoTmux(t *testing.T) {
+	t.Helper()
+	if err := exec.Command("tmux", "-V").Run(); err != nil {
+		t.Skip("tmux not available")
+	}
+}
+
 // serveURL returns the full URL for a given port and path.
 func serveURL(port int, path string) string {
 	return fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
@@ -83,7 +99,7 @@ func waitForServeReady(t *testing.T, port int, timeout time.Duration) {
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(serveURL(port, "/health"))
 		if err == nil {
-			var health HealthResponse
+			var health serveHealthResponse
 			if decErr := json.NewDecoder(resp.Body).Decode(&health); decErr == nil && health.Status == "ok" {
 				resp.Body.Close()
 				t.Logf("Server ready on port %d (timestamp: %s)", port, health.Timestamp)
@@ -151,7 +167,7 @@ func TestE2E_ServeStartupAndHealthCheck(t *testing.T) {
 		t.Errorf("Expected Content-Type application/json, got %q", ct)
 	}
 
-	var health HealthResponse
+	var health serveHealthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		t.Fatalf("Failed to decode health response: %v", err)
 	}

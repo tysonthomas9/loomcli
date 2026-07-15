@@ -1,12 +1,113 @@
 {
   "schema_version": 1,
-  "analyzer_version": "0.1.0",
+  "analyzer_version": "1.0.0",
   "source": {
     "loom_head": "122d4d79cc12c6a14116429e6c9ce04483c24198",
     "loom_v5_head": "95e97289d7a6e86a984dc394f8188be51e24edc7",
     "fleetdb_head": "8120c788ccc78477a61cfba591fe0445c580ab77",
     "fleetdb_main_head": "2a336c0b1e228ceba849a3b0d1a71c6ec4a75ccc",
     "fleetdb_openapi_sha256": "81ecb22b61bdb8fe15d5828f7695b9112ebe58fc825026dc644d22dd9a8c8e11"
+  },
+  "validation": {
+    "snapshots": [
+      {
+        "id": "phase0-refresh-122d4d79",
+        "loom_head": "122d4d79cc12c6a14116429e6c9ce04483c24198",
+        "fleetdb_head": "8120c788ccc78477a61cfba591fe0445c580ab77",
+        "openapi_sha256": "81ecb22b61bdb8fe15d5828f7695b9112ebe58fc825026dc644d22dd9a8c8e11",
+        "recorded_at": "2026-07-15",
+        "runs": [
+          {
+            "id": "fleetdb-gate",
+            "repository": "fleetdb",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache"],
+              "unset": [],
+              "notes": "Companion unified-agents checkout with Redis, Postgres, API, E2E, coverage, and harness evaluation enabled."
+            },
+            "expected_skips": [],
+            "result": {
+              "status": "pass",
+              "summary": "Companion FleetDB gate passed at the recorded source; the refreshed contract was then vendored into Loom."
+            },
+            "artifact_paths": ["docs/migrations/modular-monolith/00-phase-0-baseline.md"]
+          },
+          {
+            "id": "fleetdb-main-ancestry",
+            "repository": "fleetdb",
+            "command": ["git", "merge-base", "--is-ancestor", "2a336c0b1e228ceba849a3b0d1a71c6ec4a75ccc", "8120c788ccc78477a61cfba591fe0445c580ab77"],
+            "environment": {"set": [], "unset": []},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "FleetDB refresh is 41 commits ahead and zero behind its recorded main base."},
+            "artifact_paths": ["docs/migrations/modular-monolith/00-phase-0-baseline.md"]
+          },
+          {
+            "id": "fleetdb-supervisor",
+            "repository": "loom",
+            "command": ["make", "test-fleetdb-supervisor"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "HOME=<isolated-temporary-home>"],
+              "unset": ["LOOM_AGENT_NAME", "LOOM_AGENT_ROLE", "LOOM_AGENT_TERMINAL_ID", "LOOM_CONFIG_DIR", "LOOM_DESKTOP_DATA_DIR", "LOOM_FRONTEND_DIR", "LOOM_LOCAL_RUNTIME", "LOOM_NOTIFY_TOKEN", "LOOM_SESSION_ID", "LOOM_WEBUI_URL", "LOOM_WORKSPACE", "LOOM_WORKSPACE_RUNTIME_DIR"],
+              "notes": "Clean Loom runtime environment with normal host socket and process permissions."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The current FleetDB-backed supervisor control-plane path completed successfully."},
+            "artifact_paths": ["docs/migrations/modular-monolith/00-phase-0-baseline.md"]
+          },
+          {
+            "id": "local-mode-codex-verify",
+            "repository": "cross-repo",
+            "command": ["make", "local-mode-codex-verify"],
+            "environment": {
+              "set": ["LOCAL_MODE_API_PORT=8582", "LOCAL_MODE_API_URL=http://127.0.0.1:8582", "LOCAL_MODE_COMPOSE_PROJECT=loomcli-rc2-v5-fresh", "LOCAL_MODE_FLEETDB_PORT=8580", "LOCAL_MODE_UI_PORT=8583"],
+              "unset": [],
+              "notes": "Checkout-scoped Podman Compose project; deterministic orchestration using the local Codex CLI, exact run-manifest IDs, and container-minted freshness thresholds."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Planner design/review and coder completion, transcript, and diff assertions passed before and after same-container restart."},
+            "artifact_paths": ["docs/migrations/modular-monolith/05-v5-integration-regression-closure.md"]
+          },
+          {
+            "id": "loom-gate",
+            "repository": "loom",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "HOME=<isolated-temporary-home>"],
+              "unset": ["LOOM_AGENT_NAME", "LOOM_AGENT_ROLE", "LOOM_AGENT_TERMINAL_ID", "LOOM_CONFIG_DIR", "LOOM_DESKTOP_DATA_DIR", "LOOM_FRONTEND_DIR", "LOOM_LOCAL_RUNTIME", "LOOM_NOTIFY_TOKEN", "LOOM_SESSION_ID", "LOOM_WEBUI_URL", "LOOM_WORKSPACE", "LOOM_WORKSPACE_RUNTIME_DIR"],
+              "notes": "Complete Go and frontend gate with inherited desktop/runtime state removed."
+            },
+            "expected_skips": [
+              {
+                "name": "frontend-suite-existing-skip",
+                "owner": "frontend-test-suite",
+                "reason": "The refreshed gate reported 8551 passing frontend tests and one pre-existing intentional skip."
+              }
+            ],
+            "result": {"status": "pass", "summary": "Go race, coverage, architecture, generated-code, frontend unit, lint, and production-build gates passed."},
+            "artifact_paths": ["docs/migrations/modular-monolith/05-v5-integration-regression-closure.md"]
+          },
+          {
+            "id": "loom-v5-ancestry",
+            "repository": "loom",
+            "command": ["git", "merge-base", "--is-ancestor", "95e97289d7a6e86a984dc394f8188be51e24edc7", "122d4d79cc12c6a14116429e6c9ce04483c24198"],
+            "environment": {"set": [], "unset": []},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Loom refresh is 45 commits ahead and zero behind its recorded v5 base."},
+            "artifact_paths": ["docs/migrations/modular-monolith/00-phase-0-baseline.md"]
+          },
+          {
+            "id": "openapi-snapshot-match",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "fleet-db/api/openapi.yaml", "loomcli/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"],
+            "environment": {"set": [], "unset": [], "notes": "Run from the rc-2 multi-repository workspace root."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "FleetDB source contract and Loom vendored snapshot were byte-identical at the recorded SHA-256."},
+            "artifact_paths": ["docs/migrations/modular-monolith/00-phase-0-baseline.md"]
+          }
+        ]
+      }
+    ]
   },
   "structural": {
     "go_packages": 165,
@@ -243,72 +344,72 @@
     },
     {
       "id": "graph-approval-contract",
-      "status": "deferred",
+      "status": "complete",
       "owner": "architecture-review",
       "acceptance_criteria": "Add app and platform restrictions, owned expiring legacy paths, and bounded idempotent durable-cycle declarations before this analyzer accepts graph status approved."
     },
     {
       "id": "package-import-graph",
-      "status": "deferred",
+      "status": "complete",
       "owner": "architecture-guardrail-lane",
-      "acceptance_criteria": "Execute every declared build profile and check in the refreshed legacy import and cycle inventory with exact profile attribution."
+      "acceptance_criteria": "Execute every declared build profile, attribute package-load/import-cycle failures to the exact profile, ratchet legacy handler imports, and default-deny undeclared module roots and edges."
     },
     {
       "id": "direct-persistence-writes",
-      "status": "deferred",
+      "status": "complete",
       "owner": "architecture-guardrail-lane",
       "acceptance_criteria": "Type-resolve and list every mutating fleet-db or repository call from HTTP and CLI adapters, with a per-file no-growth ratchet."
     },
     {
       "id": "generic-lease-action-ledger",
-      "status": "deferred",
+      "status": "complete",
       "owner": "architecture-guardrail-lane",
       "acceptance_criteria": "List every direct generic Lease and ActionLedger call site and assign its mechanism discriminator to a capability owner."
     },
     {
       "id": "mutation-owner",
-      "status": "deferred",
+      "status": "complete",
       "owner": "architecture-review",
       "acceptance_criteria": "Record one aggregate owner and any coordinating owner for every product mutation selected for migration."
     },
     {
       "id": "authority",
-      "status": "deferred",
+      "status": "complete",
       "owner": "architecture-review",
-      "acceptance_criteria": "Classify every mutation entry surface by accepted authority and add wrong-workspace, unauthenticated, expired, and stale-fence coverage."
+      "acceptance_criteria": "Record the accepted authority classes and mandatory wrong-workspace, unauthenticated, expired, and stale-fence tests for every selected migration command without claiming the Phase 2 tests already exist."
     },
     {
       "id": "transaction-process-manager",
-      "status": "deferred",
+      "status": "complete",
       "owner": "architecture-review",
-      "acceptance_criteria": "Declare an atomic fleet-db command or recoverable process manager, idempotency key, retry behavior, and fault-injection proof for every cross-aggregate mutation."
+      "acceptance_criteria": "Declare the future atomic fleet-db command or recoverable process manager, idempotency key, retry behavior, and mandatory fault-injection tests for every selected cross-aggregate migration command."
     },
     {
       "id": "named-runtime-loops",
-      "status": "deferred",
+      "status": "complete",
       "owner": "execution-reliability-lane",
       "acceptance_criteria": "Name every boot and long-lived component and record cadence, cancellation, readiness, retry, and owner."
     },
     {
       "id": "startup-performance",
-      "status": "deferred",
+      "status": "complete",
       "owner": "architecture-guardrail-lane",
-      "acceptance_criteria": "Measure startup, readiness, p50 and p95 latency, fleet-db round trips, and frontend route chunks before approving the first complete pilot."
+      "acceptance_criteria": "Record reproducible startup, readiness, full-gate, runtime-loop, and frontend-chunk measurements; retain explicit nulls and procedures for pilot-only latency and round-trip metrics until Phase 2 makes them executable."
     },
     {
       "id": "supervisor-disabled-matrix",
-      "status": "deferred",
+      "status": "complete",
       "owner": "execution-reliability-lane",
       "acceptance_criteria": "Check in the deterministic matrix and make target with explicit red rows, owners, setup commands, verification commands, and failure reporting."
     }
   ],
   "decisions": [
-    {"id": "MM-1", "status": "pending", "owner": "architecture-review"},
-    {"id": "MM-2", "status": "pending", "owner": "architecture-review"},
-    {"id": "MM-3", "status": "pending", "owner": "architecture-review"},
-    {"id": "MM-4", "status": "pending", "owner": "architecture-review"},
-    {"id": "MM-5", "status": "pending", "owner": "architecture-review"},
-    {"id": "MM-6", "status": "pending", "owner": "architecture-review"},
-    {"id": "MM-7", "status": "pending", "owner": "architecture-review"}
+    {"id": "MM-1", "status": "approved", "owner": "architecture-review", "rationale": "Adopt the ten coarse capability owners and the documented Workspace versus Source Control and Artifacts boundaries.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
+    {"id": "MM-2", "status": "approved", "owner": "architecture-review", "rationale": "Local operator mutations require a server-issued 256-bit credential stored in a mode-0600 runtime file; loopback location alone grants no authority.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
+    {"id": "MM-3", "status": "approved", "owner": "architecture-review", "rationale": "A capability key is advertised only with Redis and Postgres parity for the active deployment; missing support fails readiness without fallback.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
+    {"id": "MM-4", "status": "approved", "owner": "architecture-review", "rationale": "Workflow Catalog approve, unapprove, and activate is the first complete backend pilot after a behavior-neutral read seam.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
+    {"id": "MM-5", "status": "approved", "owner": "architecture-review", "rationale": "Capability public roots live at internal/modules/<capability>; optional subpackages remain owner-private.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
+    {"id": "MM-6", "status": "approved", "owner": "architecture-review", "rationale": "Compatibility facades expire after at most two migration waves unless an explicit reviewed owner and extension decision is recorded.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"},
+    {"id": "MM-7", "status": "approved", "owner": "architecture-review", "rationale": "Mutating CLI commands discover an explicit configured management endpoint, never start a host implicitly, fail closed when unavailable, authenticate locally, and migrate family by family with output and exit-code compatibility.", "reviewed_by": "phase-1-completion-directive", "reviewed_at": "2026-07-15"}
   ]
 }

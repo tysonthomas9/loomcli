@@ -28,6 +28,13 @@ type Report struct {
 	LegacyHandlerImportMaximum   int
 	AnalysisProfileTotal         int
 	AnalysisProfilesEnforced     int
+	MutationCommands             int
+	DirectPersistenceWrites      int
+	RuntimeComponents            int
+	RuntimeGoroutineLaunches     int
+	PerformanceMetrics           int
+	PerformanceMetricsMeasured   int
+	PerformanceMetricsDeferred   int
 }
 
 type ObservedEdge struct {
@@ -45,37 +52,130 @@ func (e *ViolationsError) Error() string {
 }
 
 func CheckRepository(root, manifestsDir string) (Report, error) {
-	baseline, err := LoadBaseline(filepath.Join(manifestsDir, "migration-baseline.json"))
+	manifests, err := loadRepositoryManifests(manifestsDir)
 	if err != nil {
 		return Report{}, err
 	}
-	graph, err := LoadCapabilityGraph(filepath.Join(manifestsDir, "capability-graph.yaml"))
+	violations := validateGraphDecisions(manifests.graph, manifests.baseline)
+	report, scanViolations, err := scanRepository(root, manifests.baseline, manifests.graph)
 	if err != nil {
 		return Report{}, err
 	}
-	matrix, err := LoadAnalysisMatrix(filepath.Join(manifestsDir, "analysis-matrix.yaml"))
-	if err != nil {
-		return Report{}, err
+	report.AnalysisProfileTotal = len(manifests.matrix.Release) + len(manifests.matrix.Tagged)
+	report.MutationCommands = len(manifests.ledger.Commands)
+	report.RuntimeComponents = len(manifests.runtime.Components)
+	report.RuntimeGoroutineLaunches = len(manifests.runtime.GoroutineLaunches)
+	report.PerformanceMetrics = 6
+	for _, status := range []string{
+		manifests.performance.LoomServeStartupReadiness.Record.Status,
+		manifests.performance.WorkflowApprovalLatency.Record.Status,
+		manifests.performance.FleetDBRoundTrips.Record.Status,
+		manifests.performance.ProductionBackgroundLoops.Record.Status,
+		manifests.performance.FullBuildGateDuration.Record.Status,
+		manifests.performance.FrontendRouteChunkSizes.Record.Status,
+	} {
+		if status == performanceMeasured {
+			report.PerformanceMetricsMeasured++
+		} else {
+			report.PerformanceMetricsDeferred++
+		}
 	}
-
-	violations := validateGraphDecisions(graph, baseline)
-	report, scanViolations, err := scanRepository(root, baseline, graph)
-	if err != nil {
-		return Report{}, err
-	}
-	report.AnalysisProfileTotal = len(matrix.Release) + len(matrix.Tagged)
-	profiles := append(append([]AnalysisProfile{}, matrix.Release...), matrix.Tagged...)
+	profiles := append(append([]AnalysisProfile{}, manifests.matrix.Release...), manifests.matrix.Tagged...)
 	for _, profile := range profiles {
 		if profile.Enforced {
 			report.AnalysisProfilesEnforced++
 		}
 	}
 	violations = append(violations, scanViolations...)
+	extended, err := runPhase1Analyses(root, manifests, &report)
+	if err != nil {
+		return report, err
+	}
+	violations = append(violations, extended...)
 	slices.Sort(violations)
 	if len(violations) > 0 {
 		return report, &ViolationsError{Violations: violations}
 	}
 	return report, nil
+}
+
+type repositoryManifests struct {
+	baseline     Baseline
+	graph        CapabilityGraph
+	matrix       AnalysisMatrix
+	ledger       MutationLedger
+	directWrites DirectWriteInventory
+	runtime      RuntimeInventory
+	performance  PerformanceInventory
+}
+
+func loadRepositoryManifests(directory string) (repositoryManifests, error) {
+	var result repositoryManifests
+	loaders := []func() error{
+		func() (err error) {
+			result.baseline, err = LoadBaseline(filepath.Join(directory, "migration-baseline.json"))
+			return err
+		},
+		func() (err error) {
+			result.graph, err = LoadCapabilityGraph(filepath.Join(directory, "capability-graph.yaml"))
+			return err
+		},
+		func() (err error) {
+			result.matrix, err = LoadAnalysisMatrix(filepath.Join(directory, "analysis-matrix.yaml"))
+			return err
+		},
+		func() (err error) {
+			result.ledger, err = LoadMutationLedger(filepath.Join(directory, "mutation-ledger.yaml"))
+			return err
+		},
+		func() (err error) {
+			result.directWrites, err = LoadDirectWriteInventory(filepath.Join(directory, "direct-writes.yaml"))
+			return err
+		},
+		func() (err error) {
+			result.runtime, err = LoadRuntimeInventory(filepath.Join(directory, "runtime-components.yaml"))
+			return err
+		},
+		func() (err error) {
+			result.performance, err = LoadPerformanceInventory(filepath.Join(directory, "performance-baseline.yaml"))
+			return err
+		},
+	}
+	for _, load := range loaders {
+		if err := load(); err != nil {
+			return repositoryManifests{}, err
+		}
+	}
+	if err := result.directWrites.ValidateCompletedPhase(result.graph.CompletedPhase); err != nil {
+		return repositoryManifests{}, err
+	}
+	return result, nil
+}
+
+func runPhase1Analyses(root string, manifests repositoryManifests, report *Report) ([]string, error) {
+	profileViolations, err := analyzeProfiles(root, manifests.matrix, manifests.graph, manifests.directWrites.GenericMechanisms)
+	if err != nil {
+		return nil, err
+	}
+	astViolations, err := analyzeAllGoFiles(root, manifests.matrix, manifests.graph, manifests.directWrites.GenericMechanisms)
+	if err != nil {
+		return nil, err
+	}
+	observedWrites, directWriteViolations, err := CheckDirectWrites(root, manifests.matrix, manifests.directWrites)
+	if err != nil {
+		return nil, err
+	}
+	report.DirectPersistenceWrites = len(observedWrites)
+	violations := append([]string{}, profileViolations...)
+	violations = append(violations, astViolations...)
+	violations = append(violations, directWriteViolations...)
+	if err := CompareRuntimeTickerInventory(root, manifests.runtime); err != nil {
+		violations = append(violations, err.Error())
+	}
+	if err := ComparePerformanceRuntimeInventory(manifests.performance, manifests.runtime); err != nil {
+		violations = append(violations, err.Error())
+	}
+	return violations, nil
 }
 
 func validateGraphDecisions(graph CapabilityGraph, baseline Baseline) []string {
@@ -160,6 +260,18 @@ func compositeStoreViolations(storeFiles, outside []string, ratchet CompositeSto
 			violations = append(violations, fmt.Sprintf("new composite Store use in %s", path))
 		}
 	}
+	observed := append([]string(nil), storeFiles...)
+	expected := append([]string(nil), ratchet.AllowedProductionFileUses...)
+	slices.Sort(observed)
+	slices.Sort(expected)
+	if !slices.Equal(observed, expected) {
+		observedSet := sliceSet(observed)
+		for _, path := range expected {
+			if _, ok := observedSet[path]; !ok {
+				violations = append(violations, fmt.Sprintf("stale composite Store baseline entry %s; remove it so the debt cannot be reintroduced", path))
+			}
+		}
+	}
 	if len(storeFiles) > ratchet.MaxProductionFiles {
 		violations = append(violations, fmt.Sprintf("composite Store production files increased to %d (maximum %d)", len(storeFiles), ratchet.MaxProductionFiles))
 	}
@@ -183,7 +295,27 @@ func legacyImportViolations(observed []LegacyImportUse, ratchet LegacyImportRatc
 			violations = append(violations, fmt.Sprintf("new forbidden handler import %s in %s", use.Import, use.File))
 		}
 	}
+	observedKeys := map[string]struct{}{}
+	for _, use := range observed {
+		if matchesImportPrefix(use.Import, ratchet.DeniedPrefixes) {
+			observedKeys[use.File+"\x00"+use.Import] = struct{}{}
+		}
+	}
+	for key := range allowedHandlerImports {
+		if _, ok := observedKeys[key]; !ok {
+			parts := strings.SplitN(key, "\x00", 2)
+			violations = append(violations, fmt.Sprintf("stale forbidden-import baseline entry %s in %s; remove it so the debt cannot be reintroduced", parts[1], parts[0]))
+		}
+	}
 	return violations
+}
+
+func sliceSet(values []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		result[value] = struct{}{}
+	}
+	return result
 }
 
 func findCompositeStoreFiles(root string) ([]string, error) {

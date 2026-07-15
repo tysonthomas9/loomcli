@@ -115,7 +115,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
-	agentForLaunch, orchestratorID, err := ensureTerminalOrchestratorLink(ctx, st, workspace, sessionName, agent, roleKind)
+	agentForLaunch, orchestratorID, err := ensureTerminalOrchestratorLink(ctx, st, workspace, agent, roleKind)
 	if err != nil {
 		return nil, err
 	}
@@ -192,12 +192,11 @@ func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.
 	return sessionName, label, sortOrder
 }
 
-// ensureTerminalOrchestratorLink resolves (or creates) the terminal agent's
-// orchestration session and returns its session id alongside the agent copy. The id is
-// carried as a separate return value rather than on the domain.Agent struct
-// — AgentSession is the single source of truth, accessed via this function
-// and store.OrchestrationSessionIDFor.
-func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspace, sessionName string, agent *domain.Agent, kind domain.RoleKind) (domain.Agent, string, error) {
+// ensureTerminalOrchestratorLink resolves an active orchestration session or
+// reserves an ID for the launch environment. It deliberately does not persist
+// a running record: loom lead creates and heartbeats that record only after the
+// PTY child actually starts, so an unlaunched tab cannot become a stale session.
+func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspace string, agent *domain.Agent, kind domain.RoleKind) (domain.Agent, string, error) {
 	agentForLaunch := *agent
 	if kind != domain.RoleKindInteractive {
 		return agentForLaunch, "", nil
@@ -207,11 +206,7 @@ func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspa
 		return agentForLaunch, existingID, nil
 	}
 
-	orchestratorID := "lead-" + uuid.NewString()
-	if err := createLeadOrchestratorSession(ctx, st, workspace, sessionName, agentForLaunch.Name, orchestratorID); err != nil {
-		return agentForLaunch, "", err
-	}
-	return agentForLaunch, orchestratorID, nil
+	return agentForLaunch, "lead-" + uuid.NewString(), nil
 }
 
 func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder int, agent *domain.Agent, backend string, launch *tabmeta.LaunchSpec, existing *tabmeta.TabMetadata) *tabmeta.TabMetadata {
@@ -441,24 +436,4 @@ func agentLaunchEnv(workspace, sessionName, backend, orchestratorID string, agen
 		env["LOOM_ORCHESTRATOR_SESSION_ID"] = orchID
 	}
 	return env
-}
-
-func createLeadOrchestratorSession(ctx context.Context, st store.Store, workspace, terminalID, agentName, sessionID string) error {
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: workspace,
-		SessionID:    sessionID,
-		AgentID:      agentName,
-		Kind:         domain.AgentSessionKindOrchestration,
-		TerminalID:   terminalID,
-		Status:       domain.AgentSessionRunning,
-		Metadata: map[string]string{
-			"source": "web-terminal",
-		},
-	}); err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) {
-			return nil
-		}
-		return service.ErrInternal("failed to create lead orchestrator session", err)
-	}
-	return nil
 }

@@ -24,12 +24,21 @@ import (
 // OpenStore opens a fleet-db-backed Store appropriate for the current
 // Mode. Returns the handle so callers can `defer h.Close()`.
 func OpenStore(ctx context.Context) (*bootstrap.StoreHandle, error) {
+	return OpenStoreWithCapabilities(ctx, nil)
+}
+
+// OpenStoreWithCapabilities opens the shared FleetDB-backed Store after
+// verifying the capability keys required by the caller's enabled slices. The
+// caller owns this set; passing no keys preserves the pre-negotiation path.
+func OpenStoreWithCapabilities(ctx context.Context, required []string) (*bootstrap.StoreHandle, error) {
 	ensureFleetDBEnvFromFleetEnv()
 	dataDir := bootstrap.LoomDir()
 	if dataDir == "" {
 		return nil, errors.New("cannot resolve loom directory (set HOME or LOOM_CONFIG_DIR)")
 	}
-	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	handle, err := bootstrap.OpenStoreWithOptions(ctx, dataDir, nil, bootstrap.OpenStoreOptions{
+		RequiredFleetDBCapabilities: required,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}

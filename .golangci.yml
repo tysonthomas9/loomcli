@@ -65,7 +65,7 @@ linters:
             - "**/handlers/**"
           deny:
             - pkg: github.com/tysonthomas9/loomcli/internal/notify
-              desc: "Handlers must not import notify directly; use the service layer (internal/webui/service)"
+              desc: "Handlers must not import notify directly; call the owning capability public API"
           # Existing backend, Store, daemon, and webui/store imports are
           # grandfathered per file by make check-architecture. Keeping them in
           # depguard would turn this path correction into a big-bang rewrite.

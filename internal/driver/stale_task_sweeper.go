@@ -3,19 +3,22 @@ package driver
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// defaultStaleTaskRunMaxAge is how old a running TaskRun's heartbeat may be
+// DefaultStaleTaskRunMaxAge is how old a running TaskRun's heartbeat may be
 // before the sweeper fails it, when no MaxAge is configured. Sized for the
 // longest legitimate task runs — a daytona sandbox provision + git clone +
 // agent run is routinely 10-15 minutes, and the old 5-minute default swept
 // live runs (observed: a real daytona run killed at 11.3m). Deployments that
 // only run fast local tasks can tighten this via LOOM_DRIVER_STALE_TASK_MAX_AGE.
-const defaultStaleTaskRunMaxAge = 20 * time.Minute
+const DefaultStaleTaskRunMaxAge = 20 * time.Minute
+
+var staleTaskClockOrigin = time.Now()
 
 const (
 	staleTaskRunErrorClass   = "stale_task_run"
@@ -36,8 +39,24 @@ type StaleTaskSweeper struct {
 	// back to defaultStaleTaskRunMaxAge (1200s); override via the
 	// LOOM_DRIVER_STALE_TASK_MAX_AGE env knob wired in loom serve.
 	MaxAge time.Duration
-	// Now is a clock seam for tests; nil uses time.Now.
+	// Now is the wall-clock seam used to keep recovery cutoffs in the same clock
+	// domain as persisted heartbeat timestamps. MonotonicNow limits forward
+	// progress, while the live wall clock limits backward-clock false positives.
+	// Nil uses time.Now.
 	Now func() time.Time
+	// MonotonicNow returns elapsed process time. Nil uses time.Since against a
+	// process-local monotonic anchor. Tests inject it together with Now to prove
+	// forward and backward wall-clock jump behavior.
+	MonotonicNow func() time.Duration
+	// ClockOrigin is the wall time corresponding to MonotonicNow()==0. Production
+	// uses the package's process-start anchor. Tests that begin after a simulated
+	// jump set this explicitly so the first sweep is protected too.
+	ClockOrigin time.Time
+
+	clockMu          sync.Mutex
+	clockInitialized bool
+	lastMonotonic    time.Duration
+	logicalNow       time.Time
 }
 
 // StaleTaskSweepResult aggregates the per-driver-run recovery results of one
@@ -54,7 +73,7 @@ func (s *StaleTaskSweeper) RunOnce(ctx context.Context) (*StaleTaskSweepResult, 
 	if s == nil || s.Store == nil {
 		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
 	}
-	staleBefore := s.now().Add(-s.maxAge())
+	staleBefore := s.recoveryNow().Add(-s.maxAge())
 	workspaces, err := s.workspaceKeys(ctx)
 	if err != nil {
 		return nil, err
@@ -125,12 +144,66 @@ func (s *StaleTaskSweeper) maxAge() time.Duration {
 	if s.MaxAge > 0 {
 		return s.MaxAge
 	}
-	return defaultStaleTaskRunMaxAge
+	return DefaultStaleTaskRunMaxAge
 }
 
-func (s *StaleTaskSweeper) now() time.Time {
+func (s *StaleTaskSweeper) wallNow() time.Time {
 	if s.Now != nil {
-		return s.Now()
+		return s.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func (s *StaleTaskSweeper) monotonicNow() time.Duration {
+	if s.MonotonicNow != nil {
+		return s.MonotonicNow()
+	}
+	return time.Since(staleTaskClockOrigin)
+}
+
+// recoveryNow returns the earlier of a process-local monotonic projection and
+// the current wall clock. The projection prevents a forward wall-clock jump
+// from aging every persisted heartbeat at once. The wall-clock floor keeps a
+// fresh heartbeat written after a backward jump in the same timestamp domain
+// as the recovery cutoff. A backward jump is therefore conservative: records
+// from the old epoch may wait for wall time to catch up, but fresh records are
+// never sacrificed to preserve immediate recovery.
+func (s *StaleTaskSweeper) recoveryNow() time.Time {
+	s.clockMu.Lock()
+	defer s.clockMu.Unlock()
+
+	monotonic := s.monotonicNow()
+	wall := s.wallNow()
+	if !s.clockInitialized {
+		s.clockInitialized = true
+		s.lastMonotonic = monotonic
+		s.logicalNow = s.initialLogicalNow(wall, monotonic)
+		if wall.Before(s.logicalNow) {
+			return wall
+		}
+		return s.logicalNow
+	}
+
+	elapsed := monotonic - s.lastMonotonic
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	s.lastMonotonic = monotonic
+	s.logicalNow = s.logicalNow.Add(elapsed)
+	if wall.Before(s.logicalNow) {
+		return wall
+	}
+	return s.logicalNow
+}
+
+func (s *StaleTaskSweeper) initialLogicalNow(wall time.Time, monotonic time.Duration) time.Time {
+	if !s.ClockOrigin.IsZero() {
+		return s.ClockOrigin.UTC().Add(monotonic)
+	}
+	if s.Now == nil && s.MonotonicNow == nil {
+		return staleTaskClockOrigin.Add(monotonic).UTC()
+	}
+	// A custom clock without an explicit origin retains the conventional test
+	// behavior that its first wall/monotonic pair establishes the anchor.
+	return wall
 }

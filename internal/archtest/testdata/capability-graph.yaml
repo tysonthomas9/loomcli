@@ -1,5 +1,6 @@
 schema_version: 1
-status: proposed
+status: approved
+completed_phase: 1
 decision_dependencies:
   - MM-1
   - MM-2
@@ -9,6 +10,25 @@ decision_dependencies:
   - MM-6
   - MM-7
 module_root: internal/modules
+app_root: internal/app
+platform_root: internal/platform
+restrictions:
+  platform_imports_capabilities: false
+  serve_composition_only: true
+  named_apps_public_roots_only: true
+  named_apps_own_ports_only: true
+  modules_reject_legacy_types: true
+external_import_policy:
+  core_allowed_prefixes: []
+  adapter_allowed_prefixes: []
+  platform_allowed_prefixes: []
+  core_denied_standard_prefixes:
+    - database/sql
+    - net/http
+    - net/rpc
+    - os
+    - plugin
+    - syscall
 capabilities:
   - name: workspace
     root: workspace
@@ -40,52 +60,144 @@ capabilities:
   - name: artifacts
     root: artifacts
     status: planned
+aggregate_ownership:
+  - record: ActionLedger
+    owner: execution
+    cross_capability_rule: Records run-side-effect intent and outcomes; product mutations still go through the owning capability.
+  - record: Activity, history, usage
+    owner: read_projection
+    cross_capability_rule: Combines immutable DTOs and never owns or mutates a product aggregate.
+  - record: Agent, Role, desired state, AgentOwnershipLease
+    owner: agents
+    cross_capability_rule: Other capabilities retain IDs or immutable projections only.
+  - record: AgentCommand
+    owner: interaction
+    cross_capability_rule: Transitional only and removed after lead and session daemon dependencies retire.
+  - record: AgentSession, TerminalSession, AgentLease, inbox, lead-delivery Outbox
+    owner: interaction
+    cross_capability_rule: Session records remain distinct from batch execution; NodeID is an opaque reference.
+  - record: Artifact
+    owner: artifacts
+    cross_capability_rule: Producers request create and finalize and retain durable references.
+  - record: Connector, Grant, secret and audit state
+    owner: connectors
+    cross_capability_rule: Callers request granted actions and never receive plaintext credentials.
+  - record: DaemonProfile
+    owner: legacy_tombstone
+    cross_capability_rule: No target module; delete with the daemon after parity proof.
+  - record: Driver, DriverVersion, trust state
+    owner: workflowcatalog
+    cross_capability_rule: Automation resolves only activated versions through the catalog API.
+  - record: DriverRun, DriverStep, TaskRun, TaskRunEvent, Node, Worker, WorkerProfile, Await
+    owner: execution
+    cross_capability_rule: Automation requests execution and consumes durable outcomes; Execution never imports Automation.
+  - record: Generic fleet-db Lease
+    owner: fleet-db
+    mechanism: true
+    discriminator: agent_service=agents;driver_run|task_run=execution;terminal=interaction;artifact_upload=artifacts
+    cross_capability_rule: Loom exposes owner-scoped ports and fleet-db validates workspace, discriminator, resource, holder, token, and fence.
+  - record: Issue, dependency, status, comment
+    owner: workitems
+    cross_capability_rule: Execution requests claim and finish through explicit atomic commands.
+  - record: PlatformEvent and general mutation journal
+    owner: fleet-db
+    mechanism: true
+    discriminator: mechanism_and_read_projection_only
+    cross_capability_rule: Loom consumes the projection and no Loom capability writes it as a product aggregate.
+  - record: TriggerBinding, Event, Delivery
+    owner: automation
+    cross_capability_rule: Webhooks enter only through Automation ingestion.
+  - record: WorkflowProcessState
+    owner: named_application_workflow
+    mechanism: true
+    discriminator: app_workflow_name
+    cross_capability_rule: Owns coordination progress only and never mirrors participating aggregates.
+  - record: Workspace, Repository
+    owner: workspace
+    cross_capability_rule: Source Control receives references and never rewrites catalog records.
+  - record: Worktree, stack lineage, publication state
+    owner: sourcecontrol
+    cross_capability_rule: Workspace owns catalog configuration while Source Control owns materialization.
+legacy_paths:
+  - path: internal/domain
+    owner: architecture-guardrail-lane
+    removal_issue: MM-LEGACY-DOMAIN
+    expires_after_phase: 7
+  - path: internal/driver
+    owner: execution-reliability-lane
+    removal_issue: MM-LEGACY-DRIVER
+    expires_after_phase: 6
+  - path: internal/store
+    owner: architecture-guardrail-lane
+    removal_issue: MM-LEGACY-STORE
+    expires_after_phase: 7
+  - path: internal/webui/handlers
+    owner: frontend-and-http-lane
+    removal_issue: MM-LEGACY-HANDLERS
+    expires_after_phase: 7
+  - path: internal/webui/service
+    owner: frontend-and-http-lane
+    removal_issue: MM-LEGACY-SERVICE
+    expires_after_phase: 7
+  - path: internal/webui/svcimpl
+    owner: frontend-and-http-lane
+    removal_issue: MM-LEGACY-SVCIMPL
+    expires_after_phase: 7
+  - path: internal/workflows
+    owner: workflow-catalog-lane
+    removal_issue: MM-LEGACY-WORKFLOWS
+    expires_after_phase: 3
 edges:
   - from: sourcecontrol
     to: workspace
     kinds: [import, query]
   - from: sourcecontrol
     to: connectors
-    kinds: [import, command]
+    kinds: [command, import]
   - from: execution
     to: agents
     kinds: [import, query]
   - from: execution
     to: workitems
-    kinds: [import, command, query]
+    kinds: [command, import, query]
   - from: execution
     to: workflowcatalog
     kinds: [import, query]
   - from: execution
     to: sourcecontrol
-    kinds: [import, command]
+    kinds: [command, import]
   - from: execution
     to: connectors
-    kinds: [import, command]
+    kinds: [command, import]
   - from: execution
     to: artifacts
-    kinds: [import, command]
+    kinds: [command, import]
   - from: automation
     to: workflowcatalog
     kinds: [import, query]
   - from: automation
     to: execution
-    kinds: [import, command]
+    kinds: [command, import]
   - from: execution
     to: automation
     kinds: [durable_event]
+    durable:
+      idempotency_key: workspace_id:event_id:consumer
+      actor_scope: execution_outcome_actor
+      max_hops: 8
+      reentry_policy: reject_same_actor_and_event_pair
   - from: interaction
     to: agents
     kinds: [import, query]
   - from: interaction
     to: workitems
-    kinds: [import, command, query]
+    kinds: [command, import, query]
   - from: interaction
     to: sourcecontrol
-    kinds: [import, command]
+    kinds: [command, import]
   - from: interaction
     to: connectors
-    kinds: [import, command]
+    kinds: [command, import]
   - from: interaction
     to: artifacts
-    kinds: [import, command]
+    kinds: [command, import]

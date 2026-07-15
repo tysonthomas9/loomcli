@@ -1,13 +1,13 @@
 # Phase 0 Integration Baseline
 
-- **Status:** In progress — base integration and validation are complete; architecture, authority, transaction, loop, and performance inventories remain open
+- **Status:** Complete — base integration, refresh, and Phase 0 inventory closure are recorded
 - **Original validation:** 2026-07-14
 - **Original validated Loom code head:** `09f071d0af6c3493eff724f32dab656c05f10cdf`
 - **Original validated FleetDB head:** `7f7104b9441e81976da6d88bb32496f92c5aab38`
 - **Phase 1 source refresh:** 2026-07-15 at Loom `122d4d79cc12c6a14116429e6c9ce04483c24198` and FleetDB `8120c788ccc78477a61cfba591fe0445c580ab77`
-- **Migration status:** Proposed; this baseline does not approve MM-1 through MM-7
+- **Migration status:** Reviewed; MM-1 through MM-7 were approved in Phase 1
 
-This record freezes the first executable migration step: integrate the live base branches, reconcile the cross-repository contract, prove the current application, and identify the remaining work before capability extraction. Documentation commits after the validated Loom code head do not change the measured product tree.
+This record freezes the first executable migration step: integrate the live base branches, reconcile the cross-repository contract, prove the current application, and establish the source snapshot for the inventories completed in Phase 1. Documentation commits after the validated Loom code head do not change the measured product tree.
 
 ## Phase 1 source refresh
 
@@ -15,7 +15,7 @@ The behavior-neutral Phase 1 guardrail branch starts from Loom `122d4d79`, whose
 
 The pre-guardrail source measures 165 Go packages, including 159 under `internal`. The original text scan finds 96 files containing the spelling `store.Store`; the AST guard resolves two aliased composite-Store imports and excludes five lookalikes such as `stackstore.Store` and `eventstore.Store`, producing a semantic ratchet of 93 files. Of those, 82 are outside `cli/serve`, `infra`, and `store`. The frontend has 604 production TS/TSX files, 94 top-level component directories, and a 1,569-line `App.tsx`. Package size and import fanout still pass at 25 and 18. The checked-in machine baseline records these values as characterization and coupling ratchets; package and frontend file counts remain diagnostic only.
 
-The refresh passed focused and race-tested supervisor packages, frontend unit/build checks, the deterministic task-quarantine playground scenario, `make test-fleetdb-supervisor`, and the full repository gate. It extends the immutable evidence below; it does not approve MM-1 through MM-7 or authorize capability package moves.
+The refresh passed focused and race-tested supervisor packages, frontend unit/build checks, the deterministic task-quarantine playground scenario, `make test-fleetdb-supervisor`, and the full repository gate. It extends the immutable evidence below. MM-1 through MM-7 were later approved by the Phase 1 review, but that approval does not itself authorize an unproved package move.
 
 ## Immutable revisions
 
@@ -123,19 +123,24 @@ This proves the current supervisor-backed product path. It does not prove superv
 
 Current `check:dir-size` violations are `src/utils` (29), `src/hooks/workspace` (23), `src/components/FileExplorer` (22), `src/components/AgentDetailPanel` (18), and `src/hooks/ui` (17).
 
-## Open Phase 0 work and known gaps
+## Phase 0 inventory closure and known gaps
 
-- MM-1 through MM-7 remain unresolved; all architecture documents remain `Proposed`.
-- The machine-readable baseline, proposed capability graph, and analysis matrix are checked in with the Phase 1 guardrail bootstrap. The graph deliberately remains `proposed`, and execution of the declared build-profile matrix plus the refreshed legacy cycle inventory remain deferred with acceptance criteria.
-- Direct persistence-write, mutation-owner, authority, transaction/process-manager, long-lived-loop, startup, latency, round-trip, and route-chunk inventories remain deferred with owners and acceptance criteria in the machine baseline.
-- `test/modular-monolith/supervisor-disabled-matrix.yaml` and `make test-supervisor-disabled` do not exist. Record this as **RED / harness absent**.
-- The five frontend directory-size violations need a ratcheted baseline or remediation before `check:dir-size` joins `check:arch`.
-- FleetDB's `design_format` contract has Redis coverage but lacks a dedicated real-Postgres create/get/update/get integration proof.
-- Refreshed FleetDB head `8120c788` is pushed; branch publication and PR creation remain separate operational steps.
-- The browser screenshot is local evidence, not a committed artifact.
+Phase 1 closed the remaining Phase 0 inventory work with machine-checked artifacts:
 
-Phase 0 can be marked complete only after the remaining inventories are generated or explicitly deferred with owners and acceptance criteria. No capability package move should be interpreted as approval of an unresolved decision.
+- `migration-baseline.json` binds the refreshed Loom, FleetDB, and OpenAPI revisions to exact gate/ancestry/contract commands, declared environment set/unset inputs, expected skips, pass results, and evidence paths;
+- `capability-graph.yaml` is approved, carries the ten owners and MM-1 through MM-7 dependencies, and default-denies undeclared module roots and edges;
+- `analysis-matrix.yaml` enforces four release targets, seven tag/race profiles, and an all-files AST pass;
+- `direct-writes.yaml` type-resolves and ratchets 233 adapter write rows across declared persistence receiver and package-function surfaces, while the generic Lease and ActionLedger direct-use baselines remain zero;
+- `mutation-ledger.yaml` records the three reviewed Phase 2B Workflow Catalog command specifications without claiming their implementation;
+- `runtime-components.yaml` names 83 lifecycle definitions (56 managed, 3 bounded command polls, 15 request-scoped, and 9 startup waits) and default-deny ratchets all 108 in-scope non-test source goroutine launch definitions with their callees and reviewed component links or bounded dispositions; and
+- `performance-baseline.yaml` records four measured metrics and keeps workflow-approval latency and FleetDB round trips `not-yet-migrated` with null values and reproducible future procedures.
+
+`test/modular-monolith/supervisor-disabled-matrix.yaml` and `make test-supervisor-disabled` now exist. The stable `deterministic-plan-coder` row is intentionally **RED**, owned by `execution-reliability-lane`, and exits nonzero without provisioning. This is a productized failure contract, not supervisor-disabled proof.
+
+The five frontend directory-size violations still need a ratcheted baseline or remediation before `check:dir-size` joins `check:arch`. FleetDB's `design_format` contract still lacks a dedicated real-Postgres create/get/update/get integration proof. Refreshed FleetDB head `8120c788` is pushed, while branch publication/PR creation remains separate operational work. The browser screenshot remains local evidence rather than a committed artifact.
+
+Phase 0 is complete because every required inventory is now measured or, for metrics that depend on Phase 2 behavior, explicitly recorded as not yet migrated with an owner and acceptance procedure. No capability extraction or supervisor retirement is implied.
 
 ---
 
-[Migration overview](README.md) · Next: [Current-state evidence](01-current-state.md)
+[Migration overview](README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)

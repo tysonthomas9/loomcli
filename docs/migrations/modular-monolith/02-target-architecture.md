@@ -1,6 +1,6 @@
 # Target Architecture and Capability Boundaries
 
-- **Status:** Proposed
+- **Status:** Reviewed and approved — implementation begins in Phase 2
 - **Scope:** In-process ownership and dependencies inside `loom serve`, operator CLI transport behavior, and corresponding frontend feature boundaries
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -103,7 +103,7 @@ Private Git materialization uses a similarly bounded broker seam. Source Control
 
 Cross-capability user flows belong in specifically named application packages such as `agentprovisioning`, not in handlers, `serve`, or a generic service locator.
 
-## Proposed package shape
+## Approved package shape
 
 ```text
 internal/
@@ -156,7 +156,7 @@ The non-capability roots have explicit restrictions:
 
 Standalone mutating CLI commands call the authenticated `loom serve` management API. They do not import capability implementations or construct an authority object locally. Commands that must work without `serve` are limited to local bootstrap/config/file operations and cannot mutate fleet-db product aggregates.
 
-That target is a product/contract change, not an incidental package move. MM-7 must specify how the CLI discovers an endpoint, whether it may start an ephemeral local management host, what happens when no host is available, how local/open mode authenticates, and how scripts and agent child processes migrate. Each command family converts in a separate compatibility slice with explicit old/new behavior and rollback.
+That target is a product/contract change, not an incidental package move. MM-7 requires an explicitly configured management endpoint, forbids implicit host startup, fails closed when the host is unavailable, and requires local authentication. Scripts and agent child processes migrate command family by command family, with explicit old/new behavior, output and exit-code compatibility, and rollback.
 
 Avoid new `common`, `shared`, `models`, `services`, or global repository buckets. Stable primitives such as authority, clock, IDs, and telemetry may be shared only when their semantics are capability-independent.
 
@@ -193,11 +193,11 @@ Polymorphic persistence mechanisms do not erase ownership. For the generic Lease
 
 `app/serve` constructs one low-level, concurrency-safe fleet-db transport client with shared authentication, retry, tracing, and connection pooling. Capability-local adapters wrap that client and expose only their owner's narrow ports. Modules never receive the low-level client or the composite Store, and the migration does not create ten independent HTTP clients.
 
-New required backend behavior is negotiated before adapters become ready. The proposed fleet-db endpoint is `GET /api/v1/capabilities`, returning an API revision and versioned capability keys such as `workflow_catalog.version_lifecycle.v1`. Advertised keys describe the **running deployment**, not merely compiled code: the active Redis/Postgres backend, registered routes, feature configuration, and required storage implementation must make the operation usable. Loom derives its required key set from the capability slices enabled in its own configuration, checks those keys during readiness, and reports the exact missing keys. A 404 from an older fleet-db is an explicit incompatibility for a new Loom that requires the key; failure is not deferred until the first mutation. Old Loom continues to work against new fleet-db, and no generic mutation fallback is allowed.
+New required backend behavior is negotiated before adapters become ready. The required fleet-db endpoint is `GET /api/v1/capabilities`, returning an API revision and versioned capability keys such as `workflow_catalog.version_lifecycle.v1`. Advertised keys describe the **running deployment**, not merely compiled code: the active Redis/Postgres backend, registered routes, feature configuration, and required storage implementation must make the operation usable. Loom derives its required key set from the capability slices enabled in its own configuration, checks those keys during readiness, and reports the exact missing keys. A 404 from an older fleet-db is an explicit incompatibility for a new Loom that requires the key; failure is not deferred until the first mutation. Old Loom continues to work against new fleet-db, and no generic mutation fallback is allowed. Phase 1 implements the Loom-side negotiation seam and typed incompatibility errors; publication of `workflow_catalog.version_lifecycle.v1` and its Redis/Postgres implementations remain Phase 2B work.
 
 ## Authority boundary
 
-Authorization is not solely an HTTP concern. The proposed pipeline applies to HTTP, CLI, webhook, and internal runtime callers:
+Authorization is not solely an HTTP concern. The approved pipeline applies to HTTP, CLI, webhook, and internal runtime callers:
 
 ```text
 transport verifies credential
@@ -206,7 +206,7 @@ transport verifies credential
     → owning capability enforces its mutation invariant
 ```
 
-Proposed authority classes:
+Approved authority classes:
 
 - `OperatorAuthority` for operator-only management actions;
 - `ExecutionAuthority` for one fenced driver-run or task-run envelope;
@@ -218,7 +218,7 @@ Authority is server-derived. Request DTOs never supply audit actor, workspace sc
 
 `SystemAuthority` is not an ambient superuser. It must be action/capability scoped, constructible only by a registered runtime component, audited with a reason, and rejected by operator-only commands. Execution and session authority cannot be converted into one another or into operator authority. Webhook authority cannot call arbitrary platform APIs.
 
-The local/open-mode operator model remains a migration decision. Until it is resolved, a structural slice may use an explicitly named legacy-authority adapter only with a removal issue and may not claim security completion.
+MM-2 settles the local/open-mode operator model: a server issues a 256-bit operator credential and stores it in a mode-0600 runtime file; loopback location alone grants no authority. Until a command family is converted to that path, any explicitly named legacy-authority adapter needs a removal issue and the slice may not claim security completion.
 
 Standalone operator CLI commands cannot construct `OperatorAuthority` merely because they run on the same host. The target CLI calls the authenticated management API; credential verification and authority derivation happen in `loom serve`. Completion of a migrated CLI surface requires removal of its direct Store/FleetDB mutation path.
 
@@ -289,4 +289,4 @@ Do not create feature npm packages or microfrontends. Package distribution does 
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Current-state evidence](01-current-state.md) · Next: [Migration plan](03-migration-plan.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Current-state evidence](01-current-state.md) · Next: [Migration plan](03-migration-plan.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)

@@ -86,7 +86,8 @@ func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
 // completePreSpawnCleanup unwinds task/session/worker state created by
 // preFlightSetup when the subprocess cannot safely be started.
 func (s *Supervisor) completePreSpawnCleanup(ap *AgentProcess, errClass string) {
-	state := takeAgentSessionForFinalize(ap)
+	state, releaseHeartbeatBarrier := takeAgentSessionForFinalize(ap)
+	defer releaseHeartbeatBarrier()
 	taskID := s.taskIDForLifecycle(ap, nil)
 	if state.session != nil {
 		_ = state.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: errClass})
@@ -119,7 +120,8 @@ type agentSessionFinalizeState struct {
 
 // finalizeAgentSession finalizes the daemon-created session after agent exit.
 func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
-	state := takeAgentSessionForFinalize(ap)
+	state, releaseHeartbeatBarrier := takeAgentSessionForFinalize(ap)
+	defer releaseHeartbeatBarrier()
 	if state.session == nil && state.sessionID == "" {
 		return
 	}
@@ -143,7 +145,8 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	})
 }
 
-func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
+func takeAgentSessionForFinalize(ap *AgentProcess) (agentSessionFinalizeState, func()) {
+	ap.SessionHeartbeatMu.Lock()
 	ap.Mu.Lock()
 	state := agentSessionFinalizeState{
 		session:    ap.Session,
@@ -157,7 +160,7 @@ func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
 	ap.AgentLeaseID = ""
 	ap.AgentLeaseToken = ""
 	ap.Mu.Unlock()
-	return state
+	return state, ap.SessionHeartbeatMu.Unlock
 }
 
 func (s *Supervisor) taskIDForFinalize(ap *AgentProcess) string {

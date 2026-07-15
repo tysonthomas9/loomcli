@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -959,4 +960,183 @@ func TestLastJSONLine(t *testing.T) {
 	if !bytes.Equal(line, []byte(`{"ok":true}`)) {
 		t.Fatalf("line = %s, want JSON object", line)
 	}
+}
+
+func TestServeHostedTaskSessionHeartbeatAdvancesUntilCanceled(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "task-session",
+		AgentID:      "task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	before, err := st.AgentSessions().Get(ctx, "WS", "task-session")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+
+	hbCtx, cancel := context.WithCancel(context.Background())
+	go heartbeatFlueTaskSession(hbCtx, st, "WS", "task-session", time.Millisecond)
+	t.Cleanup(cancel)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		after, getErr := st.AgentSessions().Get(ctx, "WS", "task-session")
+		if getErr != nil {
+			t.Fatalf("get heartbeat session: %v", getErr)
+		}
+		if after.LastHeartbeat.After(before.LastHeartbeat) {
+			cancel()
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("serve-hosted task heartbeat did not advance the session")
+}
+
+func TestFinishFlueTaskSessionDrainsInFlightStaleHeartbeat(t *testing.T) {
+	ctx := t.Context()
+	base := memstore.New()
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := base.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "task-session-race",
+		AgentID:      "task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	staleSessions := &staleTaskHeartbeatAgentSessionStore{
+		AgentSessionStore: base.AgentSessions(),
+		read:              make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	controlStore := &taskHeartbeatTestStore{Store: base, sessions: staleSessions}
+	hbCtx, cancel := context.WithCancel(context.Background())
+	session := &flueTaskSession{
+		SessionID:     "task-session-race",
+		Metadata:      map[string]string{},
+		cancel:        cancel,
+		heartbeatDone: startFlueTaskSessionHeartbeat(hbCtx, controlStore, "WS", "task-session-race", time.Millisecond),
+	}
+	select {
+	case <-staleSessions.read:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not capture the running task session")
+	}
+
+	finishDone := make(chan error, 1)
+	go func() {
+		finishDone <- (HostBridgeTaskExecutor{Store: controlStore}).finishFlueTaskSession(
+			context.Background(),
+			TaskExecRequest{WorkspaceKey: "WS"},
+			session,
+			TaskExecResult{Status: domain.TaskRunCompleted},
+			nil,
+			nil,
+		)
+	}()
+	select {
+	case err := <-finishDone:
+		t.Fatalf("finish returned before heartbeat drain: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(staleSessions.release)
+	select {
+	case err := <-finishDone:
+		if err != nil {
+			t.Fatalf("finish task session: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("finish did not resume after heartbeat drain")
+	}
+	final, err := base.AgentSessions().Get(ctx, "WS", "task-session-race")
+	if err != nil {
+		t.Fatalf("get finalized task session: %v", err)
+	}
+	if final.Status != domain.AgentSessionCompleted || final.FinishedAt == nil {
+		t.Fatalf("final session = status %q finished_at %v, want completed terminal record", final.Status, final.FinishedAt)
+	}
+}
+
+func TestFinishFlueTaskSessionFinalizesAfterCallerCancellation(t *testing.T) {
+	base := memstore.New()
+	ctx := context.Background()
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := base.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "task-session-canceled",
+		AgentID:      "task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := (HostBridgeTaskExecutor{Store: base}).finishFlueTaskSession(
+		canceledCtx,
+		TaskExecRequest{WorkspaceKey: "WS"},
+		&flueTaskSession{SessionID: "task-session-canceled", Metadata: map[string]string{}},
+		TaskExecResult{Status: domain.TaskRunCancelled},
+		nil,
+		context.Canceled,
+	)
+	if err != nil {
+		t.Fatalf("finish task session with canceled caller: %v", err)
+	}
+	final, err := base.AgentSessions().Get(ctx, "WS", "task-session-canceled")
+	if err != nil {
+		t.Fatalf("get finalized task session: %v", err)
+	}
+	if final.Status != domain.AgentSessionFailed || final.FinishedAt == nil {
+		t.Fatalf("final session = status %q finished_at %v, want failed terminal record", final.Status, final.FinishedAt)
+	}
+}
+
+type taskHeartbeatTestStore struct {
+	store.Store
+	sessions store.AgentSessionStore
+}
+
+func (s *taskHeartbeatTestStore) AgentSessions() store.AgentSessionStore { return s.sessions }
+
+type staleTaskHeartbeatAgentSessionStore struct {
+	store.AgentSessionStore
+	read    chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *staleTaskHeartbeatAgentSessionStore) Heartbeat(
+	ctx context.Context,
+	workspaceKey string,
+	sessionID string,
+) (*domain.AgentSession, error) {
+	captured, err := s.AgentSessionStore.Get(ctx, workspaceKey, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	s.once.Do(func() { close(s.read) })
+	// Deliberately ignore cancellation after the read. This models a Redis
+	// transaction that has already begun and can still commit its stale record.
+	<-s.release
+	now := time.Now().UTC()
+	return s.AgentSessionStore.Update(context.Background(), workspaceKey, sessionID, store.AgentSessionUpdate{
+		Status:        &captured.Status,
+		LastHeartbeat: &now,
+	})
 }

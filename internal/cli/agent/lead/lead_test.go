@@ -5,9 +5,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
@@ -19,6 +22,55 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
+
+func TestStandaloneLeadSessionHeartbeatAdvancesUntilStopped(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "lead-session",
+		AgentID:      "lead",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	before, err := st.AgentSessions().Get(ctx, "WS", "lead-session")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go heartbeatLeadSessionEvery(&bootstrap.StoreHandle{Store: st}, "WS", "lead-session", stop, &wg, time.Millisecond)
+	t.Cleanup(func() {
+		select {
+		case <-stop:
+		default:
+			close(stop)
+		}
+		wg.Wait()
+	})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		after, getErr := st.AgentSessions().Get(ctx, "WS", "lead-session")
+		if getErr != nil {
+			t.Fatalf("get heartbeat session: %v", getErr)
+		}
+		if after.LastHeartbeat.After(before.LastHeartbeat) {
+			close(stop)
+			wg.Wait()
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("standalone lead heartbeat did not advance the session")
+}
 
 // mockBackend is a minimal cli.Backend for the registry path that runLead falls
 // back to when LOOM_LEAD_CONTROLLED=0. Self-contained here because the agent
@@ -109,6 +161,69 @@ func TestRunLead_InvokesClaude(t *testing.T) {
 	// AgentName should be empty for lead mode (not claiming tasks)
 	if inv.agentName != "" {
 		t.Errorf("expected empty agentName for lead mode, got %q", inv.agentName)
+	}
+}
+
+func TestRunLeadShellFallbackPreservesLifecycleUntilShellExit(t *testing.T) {
+	t.Setenv("LOOM_LEAD_CONTROLLED", "0")
+	t.Setenv("SHELL", "/bin/test-shell")
+
+	tmpDir := t.TempDir()
+	tmpDir, _ = filepath.EvalSymlinks(tmpDir)
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	promptFile := filepath.Join(tmpDir, "lead.md")
+	if err := os.WriteFile(promptFile, []byte("Lead recovery prompt"), 0644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	originalPromptFile := leadPromptFile
+	originalMessage := leadMessage
+	leadPromptFile = promptFile
+	leadMessage = ""
+	t.Cleanup(func() {
+		leadPromptFile = originalPromptFile
+		leadMessage = originalMessage
+	})
+
+	cli.TestingResetBackendState(t)
+	mock := &mockBackend{name: "claude", interactiveErr: errors.New("backend failed")}
+	cli.RegisterBackend(mock)
+	if err := cli.SetBackend("claude"); err != nil {
+		t.Fatalf("set backend: %v", err)
+	}
+
+	originalRegistrar := registerLeadSession
+	originalShellRunner := runLeadShellCommand
+	var events []string
+	registerLeadSession = func(context.Context, string) leadSessionRegistration {
+		return leadSessionRegistration{finalize: func() { events = append(events, "finalize") }}
+	}
+	runLeadShellCommand = func(cmd *exec.Cmd) error {
+		if len(events) != 0 {
+			t.Fatalf("session finalized before recovery shell started: %v", events)
+		}
+		if cmd.Path != "/bin/test-shell" {
+			t.Fatalf("shell path = %q, want /bin/test-shell", cmd.Path)
+		}
+		if cmd.Dir != tmpDir {
+			t.Fatalf("shell dir = %q, want %q", cmd.Dir, tmpDir)
+		}
+		events = append(events, "shell")
+		return nil
+	}
+	t.Cleanup(func() {
+		registerLeadSession = originalRegistrar
+		runLeadShellCommand = originalShellRunner
+	})
+
+	runLead(nil, nil)
+
+	if got, want := strings.Join(events, ","), "shell,finalize"; got != want {
+		t.Fatalf("lifecycle events = %q, want %q", got, want)
 	}
 }
 

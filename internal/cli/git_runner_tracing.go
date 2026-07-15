@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -105,6 +106,25 @@ func (t *tracedGitRunner) Run(dir string, args ...string) CommandResult {
 	_ = ctx
 	start := time.Now()
 	res := t.inner.Run(dir, args...)
+	recordGitSpanResult(span, start, exitCodeFor(res.Err), res.Err)
+	return res
+}
+
+func (t *tracedGitRunner) RunContext(ctx context.Context, dir string, args ...string) CommandResult {
+	tracer := tracing.Tracer(gitRunnerTracerName)
+	ctx, span := tracer.Start(ctx,
+		gitSpanName(args),
+		trace.WithAttributes(gitSpanAttrs(args)...),
+	)
+	defer span.End()
+	start := time.Now()
+	inner, ok := t.inner.(ContextGitRunner)
+	if !ok {
+		err := context.Canceled
+		recordGitSpanResult(span, start, exitCodeFor(err), err)
+		return CommandResult{Err: err}
+	}
+	res := inner.RunContext(ctx, dir, args...)
 	recordGitSpanResult(span, start, exitCodeFor(res.Err), res.Err)
 	return res
 }

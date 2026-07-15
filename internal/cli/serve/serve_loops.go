@@ -291,10 +291,12 @@ func triggerCronInterval() time.Duration {
 }
 
 // driverStaleTaskMaxAge reads the stale TaskRun heartbeat threshold in
-// seconds from LOOM_DRIVER_STALE_TASK_MAX_AGE (default 300s, capped at one
-// day).
+// seconds from LOOM_DRIVER_STALE_TASK_MAX_AGE (default 1200s, capped at one
+// day). The default is sourced from driver.StaleTaskSweeper so serve cannot
+// silently override the recovery policy with a shorter threshold.
 func driverStaleTaskMaxAge() time.Duration {
-	return time.Duration(boundedIntEnv(envLoomDriverStaleTaskMaxAge, 300, 86400)) * time.Second
+	defaultSeconds := int(driverexecutor.DefaultStaleTaskRunMaxAge / time.Second)
+	return time.Duration(boundedIntEnv(envLoomDriverStaleTaskMaxAge, defaultSeconds, 86400)) * time.Second
 }
 
 // issueBridgeInterval reads the issue-journal bridge poll cadence in seconds
