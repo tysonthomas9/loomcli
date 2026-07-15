@@ -3,7 +3,7 @@
 - **Status:** Complete
 - **Date:** 2026-07-15
 - **Phase 0 source:** Loom `122d4d79cc12c6a14116429e6c9ce04483c24198`; FleetDB `8120c788ccc78477a61cfba591fe0445c580ab77`
-- **Phase 1 implementation source:** Loom `0e8d1caa6737e15c16fa395c54fb62bd32f5b8ad`
+- **Phase 1 implementation source:** Loom `9a5b30516f88e74d315cf54c7ed693cc93f8e5b5`
 - **Phase 1 measurement source:** Loom `b64b5256ba206d482037a5dee2703fdecbb3c497`
 - **Scope:** Architecture decisions, enforceable guardrails, characterization, inventory closure, and bounded execution-reliability fixes
 
