@@ -568,8 +568,14 @@ func (s *agentOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentOwne
 		s.items[in.WorkspaceKey] = make(map[string]*domain.AgentOwnershipLease)
 	}
 	now := time.Now().UTC()
+	var token string
 	if existing := s.items[in.WorkspaceKey][in.AgentID]; existing != nil && existing.Status == domain.AgentLeaseActive && existing.ExpiresAt.After(now) {
-		return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", in.AgentID, in.WorkspaceKey, domain.ErrAlreadyExists)
+		if existing.OwnerID != in.OwnerID {
+			return nil, fmt.Errorf("agent ownership lease %q in workspace %q: %w", in.AgentID, in.WorkspaceKey, domain.ErrAlreadyClaimed)
+		}
+		// FleetDB treats a live same-owner acquire as an idempotent refresh.
+		// Keep the bearer token valid while advancing the fencing token below.
+		token = existing.Token
 	}
 	s.next++
 	ttl := in.TTL
@@ -584,6 +590,9 @@ func (s *agentOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentOwne
 	if provider == "" {
 		provider = domain.RuntimeProviderLocal
 	}
+	if token == "" {
+		token = fmt.Sprintf("ownership-token-%d", s.next)
+	}
 	lease := &domain.AgentOwnershipLease{
 		WorkspaceKey:    in.WorkspaceKey,
 		AgentID:         in.AgentID,
@@ -591,7 +600,7 @@ func (s *agentOwnershipLeaseStore) Acquire(_ context.Context, in store.AgentOwne
 		OwnerID:         in.OwnerID,
 		RuntimeProvider: provider,
 		NodeID:          in.NodeID,
-		Token:           fmt.Sprintf("ownership-token-%d", s.next),
+		Token:           token,
 		FencingToken:    s.next,
 		Status:          domain.AgentLeaseActive,
 		ExpiresAt:       now.Add(ttl),

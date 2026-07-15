@@ -13,14 +13,17 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { LoomTaskLists } from "@/types";
 
-import { ApiError, api, get, post } from "@/api/common";
+import { ApiError, api, del, get, patch, post } from "@/api/common";
 
 import {
   fetchAgents,
   fetchStatus,
   fetchTasks,
   checkLoomHealth,
+  deleteAgentRecord,
   startAgent,
+  listAgentRecords,
+  updateAgentRecord,
   type FetchStatusResult,
 } from "../agents";
 
@@ -37,13 +40,77 @@ vi.mock("@/api/common", async (importOriginal) => {
       DELETE: vi.fn(),
       use: vi.fn(),
     },
+    del: vi.fn(),
     post: vi.fn(),
+    patch: vi.fn(),
   };
 });
 
 const mockApiGet = vi.mocked(api.GET);
 const mockGet = vi.mocked(get);
 const mockPost = vi.mocked(post);
+const mockPatch = vi.mocked(patch);
+const mockDel = vi.mocked(del);
+
+describe("durable agent record lifecycle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("lists only prompt/scripted AgentService identities from the unified collection", async () => {
+    mockGet.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: "prompt-1", name: "Prompt agent", kind: "prompt" },
+        { id: "scripted-1", name: "Scripted agent", kind: "scripted" },
+        { id: "lead", name: "lead", kind: "supervised" },
+        { id: "legacy", name: "Legacy binding", kind: "binding" },
+      ],
+      total: 4,
+    });
+
+    await expect(listAgentRecords("TEAM A")).resolves.toEqual([
+      { id: "prompt-1", name: "Prompt agent", kind: "prompt" },
+      { id: "scripted-1", name: "Scripted agent", kind: "scripted" },
+    ]);
+    expect(mockGet).toHaveBeenCalledWith("/api/workspaces/TEAM%20A/agents");
+  });
+
+  it("patches the record id rather than an attached binding id", async () => {
+    mockPatch.mockResolvedValueOnce({
+      id: "agent/one",
+      name: "Renamed agent",
+      kind: "prompt",
+      enabled: true,
+      behavior: { role_name: "reviewer" },
+      workspace_key: "TEAM A",
+    });
+
+    await updateAgentRecord("TEAM A", "agent/one", {
+      name: "Renamed agent",
+    });
+
+    expect(mockPatch).toHaveBeenCalledWith(
+      "/api/workspaces/TEAM%20A/agents/agent%2Fone",
+      { name: "Renamed agent" },
+    );
+  });
+
+  it("deletes through the record id so the server archives and cleans children", async () => {
+    mockDel.mockResolvedValueOnce({
+      agent: { id: "agent/one" },
+      archived: true,
+      bindings_deleted: 1,
+      grants_revoked: 2,
+    });
+
+    await deleteAgentRecord("TEAM A", "agent/one");
+
+    expect(mockDel).toHaveBeenCalledWith(
+      "/api/workspaces/TEAM%20A/agents/agent%2Fone",
+    );
+  });
+});
 
 describe("fetchAgents", () => {
   beforeEach(() => {

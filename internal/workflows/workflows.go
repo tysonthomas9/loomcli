@@ -30,6 +30,12 @@ const (
 	BuiltinPromptAgentWorkflowName       = "prompt-agent"
 )
 
+// ErrBuildToolchainUnavailable distinguishes a deployment/profile that cannot
+// materialize a workflow bundle from a malformed workflow or a store failure.
+// Callers such as the unified agent API can map this operator-fixable condition
+// to 503 instead of reporting an opaque internal error.
+var ErrBuildToolchainUnavailable = errors.New("workflow build toolchain unavailable")
+
 //go:embed builtin/epic-runner.ts
 var builtinEpicRunnerWorkflowSource string
 
@@ -380,7 +386,7 @@ func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, stri
 	output = RedactBuildDiagnostics(output)
 	if err != nil {
 		if output != "" {
-			return "", output, fmt.Errorf("flue build failed: %s", output)
+			return "", output, redactedFlueBuildError(err, output)
 		}
 		return "", "", err
 	}
@@ -438,7 +444,7 @@ func BuildAndRegister(ctx context.Context, st store.Store, opts BuildAndRegister
 	if err != nil {
 		redacted := RedactBuildDiagnostics(output)
 		if redacted != "" {
-			return nil, redacted, fmt.Errorf("flue build failed: %s", redacted)
+			return nil, redacted, redactedFlueBuildError(err, redacted)
 		}
 		return nil, "", err
 	}
@@ -753,7 +759,7 @@ func linkFlueBuildDependencies(root string) error {
 	}
 	for rel, target := range links {
 		if _, err := os.Stat(target); err != nil {
-			return fmt.Errorf("resolve Flue build dependency %s: %w", target, err)
+			return fmt.Errorf("%w: resolve Flue build dependency %s: %v", ErrBuildToolchainUnavailable, target, err)
 		}
 		link := filepath.Join(root, rel)
 		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
@@ -768,7 +774,10 @@ func linkFlueBuildDependencies(root string) error {
 
 func loomSDKRoot() (string, error) {
 	if root := strings.TrimSpace(os.Getenv("LOOM_SDK_ROOT")); root != "" {
-		return root, nil
+		if _, err := os.Stat(filepath.Join(root, "package.json")); err == nil {
+			return root, nil
+		}
+		return "", fmt.Errorf("%w: local @loom/sdk package not found at LOOM_SDK_ROOT=%s", ErrBuildToolchainUnavailable, root)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -778,7 +787,7 @@ func loomSDKRoot() (string, error) {
 	if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
 		return candidate, nil
 	}
-	return "", fmt.Errorf("local @loom/sdk package not found; set LOOM_SDK_ROOT")
+	return "", fmt.Errorf("%w: local @loom/sdk package not found; set LOOM_SDK_ROOT", ErrBuildToolchainUnavailable)
 }
 
 func flueRuntimeRoot() (string, error) {
@@ -801,7 +810,7 @@ func flueRuntimeRoot() (string, error) {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("local @flue/runtime package not found; set LOOM_FLUE_RUNTIME_ROOT, FLUE_RUNTIME_ROOT, or FLUE_REPO")
+	return "", fmt.Errorf("%w: local @flue/runtime package not found; set LOOM_FLUE_RUNTIME_ROOT, FLUE_RUNTIME_ROOT, or FLUE_REPO", ErrBuildToolchainUnavailable)
 }
 
 func daytonaSDKRoot() (string, error) {
@@ -838,12 +847,50 @@ func runFlueBuild(ctx context.Context, root, outputDir string) (string, error) {
 		if output == "" {
 			output = err.Error()
 		}
-		return output, fmt.Errorf("flue build failed: %s", output)
+		return output, classifyFlueBuildError(err, output)
 	}
 	if _, err := os.Stat(filepath.Join(outputDir, "server.mjs")); err != nil {
 		return output, fmt.Errorf("flue build missing dist/server.mjs: %w", err)
 	}
 	return output, nil
+}
+
+// classifyFlueBuildError keeps malformed workflow source failures distinct
+// from deployment profiles whose Flue installation cannot start its bundler.
+// Rolldown ships its native executable as a platform-specific optional
+// dependency, so a host-installed node_modules mounted into another platform
+// can have a working Flue CLI while still being unable to build anything.
+func classifyFlueBuildError(cause error, output string) error {
+	if errors.Is(cause, exec.ErrNotFound) || errors.Is(cause, os.ErrNotExist) || isMissingRolldownNativeBinding(output) {
+		return fmt.Errorf("%w: flue build failed: %s", ErrBuildToolchainUnavailable, output)
+	}
+	return fmt.Errorf("flue build failed: %s", output)
+}
+
+// redactedFlueBuildError preserves the typed operator-facing classification
+// after replacing raw build output with diagnostics safe for API callers and
+// persisted build records.
+func redactedFlueBuildError(err error, redacted string) error {
+	if errors.Is(err, ErrBuildToolchainUnavailable) {
+		return fmt.Errorf("%w: flue build failed: %s", ErrBuildToolchainUnavailable, redacted)
+	}
+	return fmt.Errorf("flue build failed: %s", redacted)
+}
+
+func isMissingRolldownNativeBinding(output string) bool {
+	normalized := strings.ToLower(output)
+	if !strings.Contains(normalized, "rolldown") {
+		return false
+	}
+	bindingReference := strings.Contains(normalized, "@rolldown/binding-") ||
+		strings.Contains(normalized, "rolldown-binding.") ||
+		strings.Contains(normalized, "native binding")
+	missingOrUnloadable := strings.Contains(normalized, "cannot find module") ||
+		strings.Contains(normalized, "module not found") ||
+		strings.Contains(normalized, "failed to load native binding") ||
+		strings.Contains(normalized, "could not load native binding") ||
+		strings.Contains(normalized, "native binding not found")
+	return bindingReference && missingOrUnloadable
 }
 
 func flueCommand() ([]string, error) {
@@ -862,7 +909,7 @@ func flueCommand() ([]string, error) {
 	}
 	path, err := exec.LookPath("flue")
 	if err != nil {
-		return nil, fmt.Errorf("flue not found on PATH; set LOOM_REAL_FLUE_CMD_JSON or LOOM_REAL_FLUE_CMD")
+		return nil, fmt.Errorf("%w: flue not found on PATH; set LOOM_REAL_FLUE_CMD_JSON or LOOM_REAL_FLUE_CMD", ErrBuildToolchainUnavailable)
 	}
 	return []string{path}, nil
 }

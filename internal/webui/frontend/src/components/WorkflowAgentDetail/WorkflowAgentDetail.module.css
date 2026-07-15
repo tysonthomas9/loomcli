@@ -381,6 +381,44 @@
   white-space: pre-wrap;
 }
 
+.detailLoadError {
+  margin-top: var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
+  border-radius: var(--radius-sm, 8px);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+}
+
+.sessionSelector {
+  display: flex;
+  gap: 2px;
+  margin-top: var(--space-4);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sessionTab {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sessionTab[aria-selected="true"] {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-text-primary);
+}
+
 .runTranscript {
   margin-top: var(--space-4);
   min-height: 420px;
@@ -390,6 +428,13 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-panel-bg, var(--color-bg-secondary));
+}
+
+.sessionSelector + .runTranscript {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 0;
 }
 
 .transcriptEmpty {

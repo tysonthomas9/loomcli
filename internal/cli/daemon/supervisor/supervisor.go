@@ -99,6 +99,13 @@ type Supervisor struct {
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
 
+	// ownershipOwnerID is the durable identity of this local supervisor
+	// installation. Unlike NodeID (which intentionally identifies one daemon
+	// process), it survives daemon and container restarts so a replacement
+	// process can atomically re-acquire its own agent-ownership leases.
+	ownershipOwnerMu sync.Mutex
+	ownershipOwnerID string
+
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
 	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
 	// means use the package default (backendUnavailableRecheckInterval). Tests set a
@@ -265,7 +272,20 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 
 		s.clearAgentSessionState(ap)
 
+		// A role slot is local to this daemon, while ownership is the
+		// cross-daemon spawn fence. Take the potentially blocking local slot
+		// first so the ownership lease we acquire below is current immediately
+		// before preflight/spawn. Acquiring ownership before this wait lets its
+		// heartbeat fail and stop silently while no process exists, after which
+		// the queued agent could still launch alongside the new owner.
+		if !s.Concurrency.Acquire(ap.Entry.Role) {
+			slog.Info("concurrency tracker closed, exiting", "worktree", ap.Entry.Worktree)
+			s.setShutdownStopReason(ap)
+			return
+		}
+
 		if s.acquireAgentOwnership(ap) != ownershipAcquired {
+			s.Concurrency.Release(ap.Entry.Role)
 			if !s.sleepBeforeOwnershipRetry(ap) {
 				return
 			}
@@ -275,13 +295,6 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 		releaseOwnership := func() {
 			stopOwnershipHeartbeat()
 			s.releaseAgentOwnership(ap)
-		}
-
-		if !s.Concurrency.Acquire(ap.Entry.Role) {
-			releaseOwnership()
-			slog.Info("concurrency tracker closed, exiting", "worktree", ap.Entry.Worktree)
-			s.setShutdownStopReason(ap)
-			return
 		}
 
 		if !s.preFlightSetup(ap) {
@@ -295,6 +308,17 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 				return
 			}
 			continue
+		}
+
+		var keepRunning bool
+		stopOwnershipHeartbeat, keepRunning = s.refreshAgentOwnershipBeforeSpawn(ap, stopOwnershipHeartbeat)
+		switch {
+		case stopOwnershipHeartbeat != nil:
+			// Ownership is current and its replacement heartbeat is live.
+		case keepRunning:
+			continue
+		default:
+			return
 		}
 
 		s.spawnAndWait(ap)
@@ -325,41 +349,6 @@ func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 			return
 		}
 	}
-}
-
-// checkAgentStopSignals checks shutdown and per-agent stop signals.
-func (s *Supervisor) checkAgentStopSignals(ap *AgentProcess) bool {
-	select {
-	case <-s.Shutdown:
-		slog.Info("shutdown signal received", "worktree", ap.Entry.Worktree)
-		s.setShutdownStopReason(ap)
-		return true
-	case <-ap.StopCh:
-		slog.Info("stop signal received", "worktree", ap.Entry.Worktree)
-		s.setStopReasonDefault(ap, StopReasonConfigRemoved)
-		return true
-	default:
-		return false
-	}
-}
-
-// setShutdownStopReason unconditionally records that this agent stopped
-// because of supervisor shutdown. Every caller (drain, signal handler,
-// ownership transfer) uses the same reason; if a new code path ever needs
-// a different reason, reintroduce the explicit parameter.
-func (s *Supervisor) setShutdownStopReason(ap *AgentProcess) {
-	ap.Mu.Lock()
-	ap.StopReason = StopReasonShutdown
-	ap.Mu.Unlock()
-}
-
-// SetStopReasonDefault sets the agent's stop reason only if not already set.
-func (s *Supervisor) setStopReasonDefault(ap *AgentProcess, reason StopReason) {
-	ap.Mu.Lock()
-	if ap.StopReason == "" {
-		ap.StopReason = reason
-	}
-	ap.Mu.Unlock()
 }
 
 // clearAgentSessionState resets session state between supervision cycles.
@@ -409,14 +398,13 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 // assigns epic, creates session, and clears yield file.
 //
 // Resume-first / checkpoint-fallback: when the worktree carries a genuine crash
-// remnant (a dead agent PID with a carried Claude session + task within TTL),
-// RESUME the interrupted task — preserve the lock, the in-progress worktree
-// files, and the fleet claim so the agent can `--resume` — instead of the
-// destructive recoverAgent path, which deletes the lock (discarding the session
-// id) and orphans the task. After repeated resume failures it escalates to a
-// CHECKPOINT retry of the same task (re-claim, but cold-start with the prior
-// attempt's diff injected) before finally cold-starting a fresh task. See
-// detectRecovery.
+// remnant (a dead agent PID with a task within TTL), re-claim the interrupted
+// task while preserving the lock, in-progress worktree files, and fleet claim.
+// A carried Claude session resumes directly; backends without one (including
+// Codex) cold-start the same task through the checkpoint path. This avoids the
+// destructive recoverAgent path, which deletes the lock and would otherwise
+// leave an interrupted in_progress task absent from the ready queue. Repeated
+// recovery failures eventually cold-start a fresh task. See detectRecovery.
 func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.gateBackendAvailable(ap); err != nil {
 		return false
@@ -429,12 +417,29 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	case recoverCheckpoint:
 		s.prepareCheckpointRetry(ap, taskID)
 	default: // recoverCold
-		ap.Mu.Lock()
-		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
-		ap.Mu.Unlock()
-		if err := s.recoverAgent(ap, 0); err != nil {
-			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
+		// A cold decision can still carry the task from a stale, live-orphaned,
+		// or recovery-exhausted lock. Treat that task as failed so destructive
+		// recovery resets it before Ready selects fresh work. With exit code 0,
+		// RecoverWorktree trusts the old in_progress status and then excludes the
+		// same lock task from its orphan scan, stranding it permanently.
+		recoveryExitCode := 0
+		if taskID != "" {
+			recoveryExitCode = -1
 		}
+		if err := s.recoverAgent(ap, recoveryExitCode); err != nil {
+			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
+			// Keep this lock on the destructive cold path across retries. In
+			// particular, a release conflict means another actor now owns its task;
+			// falling back to resume/checkpoint on the next loop would target that
+			// other actor's work.
+			ap.Mu.Lock()
+			ap.ResumeFailures = maxResumeFailures + 1
+			ap.Mu.Unlock()
+			return false
+		}
+		ap.Mu.Lock()
+		ap.ResumeFailures = 0 // successful cold cleanup lets a future interruption recover again
+		ap.Mu.Unlock()
 	}
 	ap.Mu.Lock()
 	ap.RecoveryMode = mode // consumed by recordResumeOutcome after the run
@@ -820,6 +825,12 @@ func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
 	}
 	if err := s.recoverAgent(ap, exitCode); err != nil {
 		slog.Warn("post-mortem recovery failed", "worktree", ap.Entry.Worktree, "err", err)
+		// RecoverWorktree deliberately preserves the local lock when a destructive
+		// backend release/reset cannot be proven safe. Keep the next loop on cold
+		// cleanup rather than interpreting that lock as resumable work.
+		ap.Mu.Lock()
+		ap.ResumeFailures = maxResumeFailures + 1
+		ap.Mu.Unlock()
 	}
 }
 

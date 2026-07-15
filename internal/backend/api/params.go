@@ -193,6 +193,9 @@ func setCreateStringFields(req *gen.CreateIssueRequest, params backend.CreatePar
 	if params.ExternalRef != "" {
 		req.ExternalRef = &params.ExternalRef
 	}
+	if params.SourceRepo != "" {
+		req.SourceRepo = &params.SourceRepo
+	}
 	if params.DueAt != "" {
 		req.DueAt = &params.DueAt
 	}

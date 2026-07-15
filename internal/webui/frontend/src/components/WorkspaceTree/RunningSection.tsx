@@ -9,6 +9,7 @@ import { useMemo } from "react";
 import { useStore } from "zustand";
 
 import {
+  useActiveIssueLookups,
   useAgentStoreInstance,
   useWorkspaceContext,
   useWorkspaceTree,
@@ -26,6 +27,7 @@ interface RunningTask {
   task: Issue;
   agentName: string;
   duration: string;
+  issueAvailability: "available" | "missing" | "unknown";
 }
 
 interface EpicGroup {
@@ -83,7 +85,7 @@ function RunningSectionContent({
   agentTasks,
   onSelect,
 }: RunningSectionContentProps): JSX.Element | null {
-  const { workspace } = useWorkspaceContext();
+  const { workspace, workspaceId } = useWorkspaceContext();
 
   // Fetch all workspace issues only when there is an active task to place.
   const { epics: allEpics, orphanTasks: allOrphans } = useWorkspaceTree(
@@ -107,22 +109,55 @@ function RunningSectionContent({
     return map;
   }, [allEpics, allOrphans]);
 
+  // The workspace tree is a presentation projection: it excludes non-task
+  // issue types and its list endpoint is capped. Resolve every active ID that
+  // is absent from that projection through the authoritative single-issue
+  // endpoint before deciding whether the issue was deleted.
+  const missingTaskIDs = useMemo(
+    () =>
+      [...activeTaskMap.keys()]
+        .filter((taskId) => !taskById.has(taskId))
+        .sort(),
+    [activeTaskMap, taskById],
+  );
+  const { results: directLookups } = useActiveIssueLookups(
+    workspaceId,
+    missingTaskIDs,
+  );
+
   // Group running tasks under parent epics; collect orphans separately.
   const { epicGroups, orphanRunning } = useMemo(() => {
     const epicMap = new Map<string, EpicGroup>();
     const orphans: RunningTask[] = [];
 
     for (const [taskId, agentInfo] of activeTaskMap) {
-      const task = taskById.get(taskId);
-      const runningTask: RunningTask = {
-        task:
-          task ??
-          ({
+      let task = taskById.get(taskId);
+      const directLookup = directLookups.get(taskId);
+      if (!task && directLookup?.status === "found") {
+        task = directLookup.issue;
+      }
+
+      // Agent status can outlive its issue while execution winds down. Keep the
+      // execution visible, but only label it deleted after an authoritative
+      // direct 404. Loading and transport failures stay explicitly unknown.
+      if (!task) {
+        orphans.push({
+          task: {
             id: taskId,
             title: agentTasks[agentInfo.agentName]?.title ?? taskId,
-          } as Issue),
+          } as Issue,
+          agentName: agentInfo.agentName,
+          duration: agentInfo.duration,
+          issueAvailability:
+            directLookup?.status === "missing" ? "missing" : "unknown",
+        });
+        continue;
+      }
+      const runningTask: RunningTask = {
+        task,
         agentName: agentInfo.agentName,
         duration: agentInfo.duration,
+        issueAvailability: "available",
       };
 
       // Find parent epic
@@ -153,7 +188,7 @@ function RunningSectionContent({
       epicGroups: [...epicMap.values()],
       orphanRunning: orphans,
     };
-  }, [activeTaskMap, taskById, allEpics, agentTasks]);
+  }, [activeTaskMap, taskById, allEpics, agentTasks, directLookups]);
 
   if (epicGroups.length === 0 && orphanRunning.length === 0) return null;
 
@@ -193,10 +228,32 @@ function RunningSectionContent({
             <button
               type="button"
               className={styles.taskRowOrphan}
-              onClick={() => onSelect?.(rt.task.id)}
+              disabled={rt.issueAvailability !== "available"}
+              title={
+                rt.issueAvailability === "missing"
+                  ? "Issue no longer exists; the agent may still be running"
+                  : rt.issueAvailability === "unknown"
+                    ? "Issue lookup is still pending or unavailable"
+                    : undefined
+              }
+              onClick={() => {
+                if (rt.issueAvailability === "available") {
+                  onSelect?.(rt.task.id);
+                }
+              }}
             >
               <span className={styles.taskIcon}>&#x25D0;</span>
               <span className={styles.taskTitle}>{rt.task.title}</span>
+              {rt.issueAvailability === "missing" && (
+                <span className={styles.taskUnavailable}>
+                  issue unavailable
+                </span>
+              )}
+              {rt.issueAvailability === "unknown" && (
+                <span className={styles.taskUnavailable}>
+                  issue status unknown
+                </span>
+              )}
               {rt.duration && (
                 <span className={styles.taskElapsed}>{rt.duration}</span>
               )}

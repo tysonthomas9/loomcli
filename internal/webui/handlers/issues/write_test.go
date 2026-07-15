@@ -940,6 +940,29 @@ func TestHandleDeleteIssueW_NotFound(t *testing.T) {
 	}
 }
 
+func TestHandleDeleteIssueW_ActiveClaimConflict(t *testing.T) {
+	svc := &mockIssueService{
+		deleteIssueFunc: func(context.Context, string) (json.RawMessage, error) {
+			return nil, service.ErrConflict("issue is already claimed")
+		},
+	}
+	handler := handleDeleteIssue(svc)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/issues/active-del", nil)
+	req.SetPathValue("id", "active-del")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+	result := assertJSONResponse(t, w)
+	if result["kind"] != string(service.KindConflict) {
+		t.Errorf("kind = %v, want %q", result["kind"], service.KindConflict)
+	}
+}
+
 func TestHandleDeleteIssueW_ServiceUnavailable(t *testing.T) {
 	svc := &mockIssueService{
 		deleteIssueFunc: func(ctx context.Context, issueID string) (json.RawMessage, error) {

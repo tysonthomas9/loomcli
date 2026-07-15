@@ -87,6 +87,15 @@
   background: var(--color-bg-hover);
 }
 
+.taskRowOrphan:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.taskRowOrphan:disabled:hover {
+  background: transparent;
+}
+
 .taskRow:focus-visible,
 .taskRowOrphan:focus-visible {
   outline: 2px solid var(--color-focus);
@@ -112,4 +121,10 @@
   font-variant-numeric: tabular-nums;
   min-width: 2em;
   text-align: right;
+}
+
+.taskUnavailable {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  font-size: 0.625rem;
 }

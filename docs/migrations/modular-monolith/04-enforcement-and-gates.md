@@ -189,7 +189,12 @@ Frontend proof per extracted route:
 - Targeted Vitest tests, the targeted Playwright journey, and `npm run build` pass when frontend code changes.
 - Relevant fleet-db storage and API contract suites pass.
 - Cross-repo fleet-db OpenAPI and Loom vendored-spec guard pass together.
-- `make local-mode-verify` passes when the slice affects composition, persistence, runtime, or UI integration.
+- `make local-mode-verify` passes when the slice affects composition,
+  persistence, runtime, or UI integration. The proof counts only when the
+  container run manifest matches the physical checkout and Compose project,
+  names the exact FleetDB-created task IDs, and every accepted session starts
+  at or after that manifest's `started_at`; preserved volume data is context,
+  never proof for a new run.
 - The smallest relevant E2E journey proves the changed capability through a real entry surface.
 
 ### Per contract, policy, or security slice

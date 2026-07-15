@@ -168,6 +168,61 @@ func TestResetTask_GetIssueFails(t *testing.T) {
 	}
 }
 
+func TestResetTaskOwnedByAgent_RequiresExactCurrentState(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		detail     *backend.IssueDetailData
+		getErr     error
+		wantUpdate bool
+		wantErr    bool
+	}{
+		{
+			name:       "current agent still owns in progress task",
+			detail:     &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1", Status: "in_progress", Assignee: "agent-a"}},
+			wantUpdate: true,
+		},
+		{
+			name:   "task was reassigned",
+			detail: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1", Status: "in_progress", Assignee: "agent-b"}},
+		},
+		{
+			name:   "task is already open",
+			detail: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1", Status: "open", Assignee: "agent-a"}},
+		},
+		{
+			name:   "task reached review",
+			detail: &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1", Status: "review", Assignee: "agent-a"}},
+		},
+		{
+			name:   "deleted task is an idempotent no-op",
+			getErr: backend.ErrNotFound("Get", "task not found"),
+		},
+		{
+			name:    "unknown read failure aborts",
+			getErr:  errors.New("backend unavailable"),
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			deps, _, _, _, tracker := NewTestDeps(t)
+			tracker.GetResult = tc.detail
+			tracker.GetErr = tc.getErr
+
+			err := resetTaskOwnedByAgent(deps, "task-1", "agent-a")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("resetTaskOwnedByAgent error = %v, wantErr=%v", err, tc.wantErr)
+			}
+			if got := tracker.Called("Update"); got != tc.wantUpdate {
+				t.Fatalf("Update called = %v, want %v; calls=%#v", got, tc.wantUpdate, tracker.Calls)
+			}
+		})
+	}
+}
+
 func TestAnalyzeTaskCompletion_Completed(t *testing.T) {
 	t.Parallel()
 	deps, _, _, _, tracker := NewTestDeps(t)
@@ -636,7 +691,7 @@ func TestResetOrphanedAgentTasks_FindsAndResetsMultiple(t *testing.T) {
 		{ID: "task-1", Title: "First task"},
 		{ID: "task-2", Title: "Second task"},
 	}
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Status: "in_progress"}}
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Status: "in_progress", Assignee: "falcon"}}
 
 	resetOrphanedAgentTasks(deps, "/test/worktree", "falcon", "", false)
 
@@ -659,7 +714,7 @@ func TestResetOrphanedAgentTasks_SkipsAlreadyHandled(t *testing.T) {
 		{ID: "task-1", Title: "Already handled"},
 		{ID: "task-2", Title: "Orphaned task"},
 	}
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Status: "in_progress"}}
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{Status: "in_progress", Assignee: "ember"}}
 
 	resetOrphanedAgentTasks(deps, "/test/worktree", "ember", "task-1", false)
 
@@ -748,9 +803,8 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 	}
 
 	tracker := NewMockIssueBackend()
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-123", Status: "in_progress"}}
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-123", Status: "in_progress", Assignee: "test-agent"}}
 	tracker.ListResult = []backend.IssueData{}
-	setDefaultIssueBackend(tracker)
 
 	// RecoverWorktree should:
 	// 1. CheckLock -> lock exists, not running
@@ -768,6 +822,9 @@ func TestRecoverWorktree_StaleLock(t *testing.T) {
 		},
 	})
 	mock.Install()
+	// CommandMock.Install resets the package backend override while installing
+	// its Exec/Git fakes, so install the recovery backend afterwards.
+	setDefaultIssueBackend(tracker)
 
 	err := RecoverWorktree(tmpDir, "test-agent", -1)
 	if err != nil {
@@ -1246,9 +1303,8 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 	}
 
 	tracker := NewMockIssueBackend()
-	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-ws", Status: "in_progress"}}
+	tracker.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-ws", Status: "in_progress", Assignee: "test-agent"}}
 	tracker.ListResult = []backend.IssueData{}
-	setDefaultIssueBackend(tracker)
 
 	mock := NewCommandMock(t, []CommandStub{
 		// cleanUntrackedFiles: DiscoverWorktrees calls GetCurrentBranch
@@ -1257,6 +1313,9 @@ func TestRecoverWorktree_WorkspaceStaleLock(t *testing.T) {
 		{Dir: repoDir, Name: "git", Args: []string{"clean", "-fdn", "--exclude=.loom", "--exclude=sessions", "--exclude=AGENTS.md"}, Stdout: ""},
 	})
 	mock.Install()
+	// CommandMock.Install resets the package backend override while installing
+	// its Exec/Git fakes, so install the recovery backend afterwards.
+	setDefaultIssueBackend(tracker)
 
 	// Pass repoDir as worktreePath -- lock is at repoDir (per-worktree)
 	err := RecoverWorktree(repoDir, "test-agent", -1)

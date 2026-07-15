@@ -728,7 +728,9 @@ paths:
     delete:
       tags: [Issues]
       summary: Delete issue
-      description: Deletes the issue and all associated data (indexes, dependencies, comments).
+      description: |
+        Deletes the issue and all associated data (indexes, dependencies, comments).
+        Returns 409 `already_claimed` while a live worker holds the issue claim.
       operationId: deleteIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -737,6 +739,8 @@ paths:
           description: Issue deleted
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -6396,7 +6400,7 @@ components:
 
     Issue:
       type: object
-      required: [id, workspace, title, status, priority, type, created_at, created_by, updated_at]
+      required: [id, workspace, title, has_design, status, priority, type, created_at, created_by, updated_at]
       properties:
         id:
           type: string
@@ -6411,6 +6415,20 @@ components:
           type: string
         design:
           type: string
+          description: |
+            Hydrated design body on single-issue responses. Collection
+            responses omit the body; use has_design and design_artifact_id to
+            detect an available design without loading large content.
+        design_format:
+          type: string
+          enum: [markdown, html]
+          description: Format of the hydrated design body, derived from artifact MIME metadata.
+        design_artifact_id:
+          type: string
+          description: Managed artifact reference for newly written designs.
+        has_design:
+          type: boolean
+          description: True for either a legacy inline design or an artifact-backed design.
         acceptance_criteria:
           type: string
         notes:
@@ -6714,6 +6732,10 @@ components:
           description: Alias for `repo` emitted for legacy Loom clients. Same value.
         design:
           type: string
+        design_format:
+          type: string
+          enum: [markdown, html]
+          description: Format of the supplied design body; defaults to markdown.
         notes:
           type: string
         defer_until:
@@ -6740,6 +6762,13 @@ components:
           $ref: "#/components/schemas/IssueType"
         design:
           type: string
+        design_format:
+          type: string
+          enum: [markdown, html]
+          description: |
+            Format of the supplied design body; defaults to markdown. When
+            design is omitted, the existing design body is re-persisted in
+            this format. The issue must already have a design.
         notes:
           type: string
         owner:
@@ -9735,7 +9764,7 @@ components:
 
     ArtifactOwnerType:
       type: string
-      enum: [task_run, driver_run, agent_service, session]
+      enum: [task_run, driver_run, agent_service, session, issue]
 
     ArtifactDurableStatus:
       type: string

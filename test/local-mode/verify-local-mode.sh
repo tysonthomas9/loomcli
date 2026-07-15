@@ -2,11 +2,8 @@
 set -euo pipefail
 
 API_URL="${LOCAL_MODE_API_URL:-http://localhost:${LOCAL_MODE_API_PORT:-8282}}"
-WORKSPACE="${LOOM_WORKSPACE:-LOCALMODE}"
-PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-2}"
-CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-3}"
-PLAN_TASK_TITLE="${LOOM_LOCAL_MODE_PLAN_TASK_TITLE:-Local mode planner dogfood}"
-CODE_TASK_TITLE="${LOOM_LOCAL_MODE_CODE_TASK_TITLE:-Local mode coder dogfood}"
+RUN_MANIFEST_JSON="${LOCAL_MODE_RUN_MANIFEST_JSON:-}"
+EXPECTED_BACKEND="${LOCAL_MODE_EXPECTED_BACKEND:-}"
 TIMEOUT_SECONDS="${LOCAL_MODE_VERIFY_TIMEOUT:-240}"
 POLL_SECONDS="${LOCAL_MODE_VERIFY_POLL_SECONDS:-2}"
 
@@ -25,6 +22,61 @@ curl_json() {
 
 api_get() {
   curl_json "${API_URL}/$1"
+}
+
+manifest_field() {
+  field="$1"
+  printf '%s' "$RUN_MANIFEST_JSON" | jq -er --arg field "$field" '.[$field] | select(type == "string" and length > 0)'
+}
+
+positive_utc_epoch() {
+  printf '%s' "$1" | jq -Rer '
+    def utc_epoch:
+      if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then
+        (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch -1)
+      else -1 end;
+    utc_epoch | select(. > 0)
+  '
+}
+
+load_run_manifest() {
+  if [ -z "$RUN_MANIFEST_JSON" ]; then
+    echo "[local-mode-verify] FATAL: LOCAL_MODE_RUN_MANIFEST_JSON is required; use make local-mode-verify to read it from the running stack" >&2
+    return 1
+  fi
+  CHECKOUT_ID="$(manifest_field checkout_id)"
+  SOURCE_ROOT="$(manifest_field source_root)"
+  COMPOSE_PROJECT="$(manifest_field compose_project)"
+  RUN_ID="$(manifest_field run_id)"
+  RUN_STARTED_AT="$(manifest_field started_at)"
+  BACKEND="$(manifest_field backend)"
+  WORKSPACE="$(manifest_field workspace)"
+  PLAN_TASK_ID="$(manifest_field plan_task_id)"
+  CODE_TASK_ID="$(manifest_field code_task_id)"
+  PLAN_TASK_TITLE="$(manifest_field plan_task_title)"
+  CODE_TASK_TITLE="$(manifest_field code_task_title)"
+
+  if ! RUN_STARTED_EPOCH="$(positive_utc_epoch "$RUN_STARTED_AT")"; then
+    echo "[local-mode-verify] FATAL: manifest started_at must be a valid positive UTC timestamp, got ${RUN_STARTED_AT}" >&2
+    return 1
+  fi
+
+  if [ -n "${LOCAL_MODE_CHECKOUT_ID:-}" ] && [ "$CHECKOUT_ID" != "$LOCAL_MODE_CHECKOUT_ID" ]; then
+    echo "[local-mode-verify] FATAL: manifest checkout ${CHECKOUT_ID} does not match requested checkout ${LOCAL_MODE_CHECKOUT_ID}" >&2
+    return 1
+  fi
+  if [ -n "${LOCAL_MODE_SOURCE_ROOT:-}" ] && [ "$SOURCE_ROOT" != "$LOCAL_MODE_SOURCE_ROOT" ]; then
+    echo "[local-mode-verify] FATAL: manifest source root ${SOURCE_ROOT} does not match requested root ${LOCAL_MODE_SOURCE_ROOT}" >&2
+    return 1
+  fi
+  if [ -n "${LOCAL_MODE_COMPOSE_PROJECT:-}" ] && [ "$COMPOSE_PROJECT" != "$LOCAL_MODE_COMPOSE_PROJECT" ]; then
+    echo "[local-mode-verify] FATAL: manifest project ${COMPOSE_PROJECT} does not match requested project ${LOCAL_MODE_COMPOSE_PROJECT}" >&2
+    return 1
+  fi
+  if [ -n "$EXPECTED_BACKEND" ] && [ "$BACKEND" != "$EXPECTED_BACKEND" ]; then
+    echo "[local-mode-verify] FATAL: manifest backend ${BACKEND} does not match expected backend ${EXPECTED_BACKEND}" >&2
+    return 1
+  fi
 }
 
 wait_for() {
@@ -55,29 +107,23 @@ issue_json() {
   api_get "api/workspaces/${WORKSPACE}/issues/${task_id}"
 }
 
-resolve_task_id() {
-  task_id="$1"
-  title="$2"
-  if issue_json "$task_id" >/dev/null 2>&1; then
-    printf '%s\n' "$task_id"
-    return 0
-  fi
-  api_get "api/workspaces/${WORKSPACE}/issues" | jq -r --arg title "$title" '
-    (.data // .issues // []) |
-    map(select(.title == $title)) |
-    sort_by(.created_at // "") |
-    reverse |
-    .[0].id // empty
-  '
+manifest_tasks_exist() {
+  issue_json "$PLAN_TASK_ID" >/dev/null
+  issue_json "$CODE_TASK_ID" >/dev/null
 }
 
-resolve_configured_task_ids() {
-  resolved_plan="$(resolve_task_id "$PLAN_TASK_ID" "$PLAN_TASK_TITLE")"
-  [ "$resolved_plan" != "" ]
-  resolved_code="$(resolve_task_id "$CODE_TASK_ID" "$CODE_TASK_TITLE")"
-  [ "$resolved_code" != "" ]
-  PLAN_TASK_ID="$resolved_plan"
-  CODE_TASK_ID="$resolved_code"
+issue_matches_run() {
+  task_id="$1"
+  expected_title="$2"
+  issue_json "$task_id" | jq -e --arg title "$expected_title" --argjson started_epoch "$RUN_STARTED_EPOCH" '
+    def utc_epoch:
+      if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then
+        (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch -1)
+      else -1 end;
+    (.data // .) as $issue |
+    $issue.title == $title and
+    (($issue.created_at | utc_epoch) >= $started_epoch)
+  ' >/dev/null
 }
 
 issue_status_is() {
@@ -109,18 +155,28 @@ sessions_json() {
 
 first_session_id() {
   task_id="$1"
-  sessions_json "$task_id" | jq -r \
-    '(.data.sessions // .sessions // []) |
-    map(select(.status == "completed" and .is_active == false)) |
+  sessions_json "$task_id" | jq -r --argjson started_epoch "$RUN_STARTED_EPOCH" \
+    'def utc_epoch:
+      if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then
+        (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch -1)
+      else -1 end;
+    (.data.sessions // .sessions // []) |
+    map(select(.status == "completed" and .is_active == false and
+      ((.started_at | utc_epoch) >= $started_epoch))) |
     sort_by(.ended_at // .started_at // "") |
     reverse |
     .[0].session_id // empty'
 }
 
 code_diff_session_id() {
-  sessions_json "$CODE_TASK_ID" | jq -r \
-    '(.data.sessions // .sessions // []) |
-    map(select(.status == "completed" and (.has_diff == true or ((.files_changed // 0) > 0)))) |
+  sessions_json "$CODE_TASK_ID" | jq -r --argjson started_epoch "$RUN_STARTED_EPOCH" \
+    'def utc_epoch:
+      if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then
+        (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch -1)
+      else -1 end;
+    (.data.sessions // .sessions // []) |
+    map(select(.status == "completed" and (.has_diff == true or ((.files_changed // 0) > 0)) and
+      ((.started_at | utc_epoch) >= $started_epoch))) |
     sort_by(.ended_at // .started_at // "") |
     reverse |
     .[0].session_id // empty'
@@ -128,25 +184,40 @@ code_diff_session_id() {
 
 task_has_completed_session() {
   task_id="$1"
-  sessions_json "$task_id" | jq -e '
+  sessions_json "$task_id" | jq -e --argjson started_epoch "$RUN_STARTED_EPOCH" '
+    def utc_epoch:
+      if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then
+        (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch -1)
+      else -1 end;
     (.data.sessions // .sessions // []) |
-    any(.status == "completed" and .is_active == false)
+    any(.status == "completed" and .is_active == false and
+      ((.started_at | utc_epoch) >= $started_epoch))
   ' >/dev/null
 }
 
 task_has_transcript_flag() {
   task_id="$1"
-  sessions_json "$task_id" | jq -e '
+  sessions_json "$task_id" | jq -e --argjson started_epoch "$RUN_STARTED_EPOCH" '
+    def utc_epoch:
+      if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then
+        (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch -1)
+      else -1 end;
     (.data.sessions // .sessions // []) |
-    any(.has_transcript == true)
+    any(.has_transcript == true and
+      ((.started_at | utc_epoch) >= $started_epoch))
   ' >/dev/null
 }
 
 task_has_diff_flag() {
   task_id="$1"
-  sessions_json "$task_id" | jq -e '
+  sessions_json "$task_id" | jq -e --argjson started_epoch "$RUN_STARTED_EPOCH" '
+    def utc_epoch:
+      if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then
+        (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch -1)
+      else -1 end;
     (.data.sessions // .sessions // []) |
-    any(.has_diff == true or ((.files_changed // 0) > 0))
+    any((.has_diff == true or ((.files_changed // 0) > 0)) and
+      ((.started_at | utc_epoch) >= $started_epoch))
   ' >/dev/null
 }
 
@@ -172,13 +243,15 @@ api_reachable() {
 
 require_cmd curl
 require_cmd jq
+load_run_manifest
 
-echo "[local-mode-verify] api=${API_URL} workspace=${WORKSPACE}"
+echo "[local-mode-verify] api=${API_URL} workspace=${WORKSPACE} backend=${BACKEND} project=${COMPOSE_PROJECT} root=${SOURCE_ROOT} checkout=${CHECKOUT_ID} run=${RUN_ID} started=${RUN_STARTED_AT}"
 echo "[local-mode-verify] planner=${PLAN_TASK_ID} coder=${CODE_TASK_ID}"
 
 wait_for "Loom API is reachable" api_reachable
-wait_for "local-mode tasks exist" resolve_configured_task_ids
-echo "[local-mode-verify] resolved planner=${PLAN_TASK_ID} coder=${CODE_TASK_ID}"
+wait_for "manifest-owned local-mode tasks exist" manifest_tasks_exist
+wait_for "planner task belongs to this run" issue_matches_run "$PLAN_TASK_ID" "$PLAN_TASK_TITLE"
+wait_for "coder task belongs to this run" issue_matches_run "$CODE_TASK_ID" "$CODE_TASK_TITLE"
 
 wait_for "planner task moved to review" issue_status_is "$PLAN_TASK_ID" review
 wait_for "planner task has design" issue_has_design "$PLAN_TASK_ID"

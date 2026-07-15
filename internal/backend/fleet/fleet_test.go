@@ -503,11 +503,11 @@ func TestSearchIssues_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchIssues: %v", err)
 	}
-	if !strings.HasSuffix(gotPath, "/issues") {
-		t.Errorf("path = %q, want suffix /issues", gotPath)
+	if !strings.HasSuffix(gotPath, "/issues/search") {
+		t.Errorf("path = %q, want suffix /issues/search", gotPath)
 	}
-	if !strings.Contains(gotQuery, "query=auth+bug") {
-		t.Errorf("query = %q, want to contain query=auth+bug", gotQuery)
+	if !strings.Contains(gotQuery, "q=auth+bug") {
+		t.Errorf("query = %q, want to contain q=auth+bug", gotQuery)
 	}
 	if !strings.Contains(gotQuery, "limit=10") {
 		t.Errorf("query = %q, want to contain limit=10", gotQuery)
@@ -1305,6 +1305,18 @@ func TestDelete_ForceSkipsNotFound(t *testing.T) {
 	err := fb.Delete(context.Background(), backend.DeleteParams{IDs: []string{"gone"}, Force: true})
 	if err != nil {
 		t.Fatalf("expected nil with Force, got %v", err)
+	}
+}
+
+func TestDelete_ActiveClaimConflict(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		respondErr(w, http.StatusConflict, "issue is already claimed")
+	})
+	defer ts.Close()
+
+	err := fb.Delete(context.Background(), backend.DeleteParams{IDs: []string{"active"}})
+	if !backend.IsKind(err, backend.KindConflict) {
+		t.Fatalf("Delete() error = %v, want KindConflict", err)
 	}
 }
 

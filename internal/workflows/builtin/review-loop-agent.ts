@@ -60,7 +60,7 @@ export async function run(ctx) {
       continue;
     }
 
-    const outcome = await reviewPullRequest(loom, connectorId, subject, cycles + 1);
+    const outcome = await reviewPullRequest(loom, connectorId, subject, cycles + 1, issueId);
     if (!outcome.ok) {
       skipped.push({ issueId, pr: subject.slug, reason: outcome.reason });
       continue;
@@ -86,7 +86,7 @@ export async function run(ctx) {
 // reviewPullRequest performs one full review under THIS workflow's binding: read
 // the live PR (for headSha/baseRef), fetch the diff, run a codex review task-run,
 // and post a COMMENT review. Mirrors github-review-agent's steps.
-async function reviewPullRequest(loom, connectorId, subject, cycle) {
+export async function reviewPullRequest(loom, connectorId, subject, cycle, issueId) {
   const github = loom.connectors[connectorId];
   if (!github) return { ok: false, reason: "no connector " + connectorId };
   const resource = "repo:" + subject.repo;
@@ -121,7 +121,10 @@ async function reviewPullRequest(loom, connectorId, subject, cycle) {
   let findings = { summary: "", comments: [] };
   try {
     await loom.taskRuns.request({
-      taskId: subject.slug,
+      // Session/transcript routes are task-scoped and accept Loom issue IDs,
+      // not external PR slugs such as "owner/repo#123" (which contain route-
+      // invalid '/' and '#' characters). Keep the PR identity in run input.
+      taskId: issueId,
       taskRunId,
       runner: "github-review-task-runner",
       input: { kind: "github_pr_review", repo: subject.repo, prNumber: subject.prNumber, headSha, baseRef, diff, rubric: reviewRubric() },

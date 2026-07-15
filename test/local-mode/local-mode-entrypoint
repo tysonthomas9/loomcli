@@ -8,6 +8,16 @@ SOURCE_REPO="${LOOM_LOCAL_MODE_SOURCE_REPO:-/workspace/source-repo}"
 ORIGIN_REPO="${LOOM_LOCAL_MODE_ORIGIN_REPO:-/workspace/source-repo-origin.git}"
 WORKSPACE_ROOT="${LOOM_LOCAL_MODE_WORKSPACE_ROOT:-/root/.loom/workspaces/${WORKSPACE}}"
 WORKSPACE_REPO="${WORKSPACE_ROOT}/source-repo"
+CHECKOUT_ID="${LOCAL_MODE_CHECKOUT_ID:?LOCAL_MODE_CHECKOUT_ID is required}"
+SOURCE_ROOT="${LOCAL_MODE_SOURCE_ROOT:?LOCAL_MODE_SOURCE_ROOT is required}"
+COMPOSE_PROJECT="${LOCAL_MODE_COMPOSE_PROJECT:?LOCAL_MODE_COMPOSE_PROJECT is required}"
+RUN_ID="${LOCAL_MODE_RUN_ID:?LOCAL_MODE_RUN_ID is required}"
+RUN_STARTED_AT=""
+RUN_MANIFEST="${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"
+RUN_MANIFEST_RECOVERY="${RUN_MANIFEST}.recovery"
+RUN_MANIFEST_RESUMED=0
+PREVIOUS_PLAN_TASK_ID=""
+PREVIOUS_CODE_TASK_ID=""
 AGENT_BACKEND="${LOOM_LOCAL_MODE_BACKEND:-${LOOM_BACKEND:-localdogfood}}"
 case "$AGENT_BACKEND" in
   codex)
@@ -25,8 +35,10 @@ case "$AGENT_BACKEND" in
 esac
 PLAN_AGENT="${LOOM_LOCAL_MODE_PLAN_AGENT:-$DEFAULT_PLAN_AGENT}"
 CODE_AGENT="${LOOM_LOCAL_MODE_CODE_AGENT:-$DEFAULT_CODE_AGENT}"
-PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-2}"
-CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-3}"
+PLAN_TASK_ID=""
+CODE_TASK_ID=""
+PLAN_TASK_TITLE="${LOOM_LOCAL_MODE_PLAN_TASK_TITLE:-Local mode planner dogfood} [run:${RUN_ID}]"
+CODE_TASK_TITLE="${LOOM_LOCAL_MODE_CODE_TASK_TITLE:-Local mode coder dogfood} [run:${RUN_ID}]"
 LOOM_BIND="${LOOM_LOCAL_MODE_BIND:-0.0.0.0}"
 LOOM_PORT="${LOOM_LOCAL_MODE_API_PORT:-8080}"
 DAEMON_SCAN_INTERVAL="${LOOM_LOCAL_MODE_DAEMON_SCAN_INTERVAL:-5}"
@@ -46,6 +58,115 @@ LOCAL_MODE_PLANE="${LOOM_LOCAL_MODE_PLANE:-}"
 plane_is_ts() {
   [ "$LOCAL_MODE_PLANE" = "ts" ]
 }
+
+ensure_stack_provenance() {
+  config_dir="${LOOM_CONFIG_DIR:-/root/.loom}"
+  marker="${config_dir}/.local-mode-provenance.json"
+  mkdir -p "$config_dir"
+
+  if [ ! -f "$marker" ]; then
+    if find "$config_dir" -mindepth 1 -maxdepth 1 ! -name '.local-mode-provenance.json' -print -quit | grep -q .; then
+      echo "[local-mode] FATAL: existing local-mode data has no checkout provenance marker" >&2
+      echo "[local-mode] Refusing to adopt it for checkout ${CHECKOUT_ID}; use a new project or run local-mode-down for the old project." >&2
+      return 1
+    fi
+    jq -n \
+      --arg checkout_id "$CHECKOUT_ID" \
+      --arg source_root "$SOURCE_ROOT" \
+      --arg project "$COMPOSE_PROJECT" \
+      '{checkout_id:$checkout_id, source_root:$source_root, compose_project:$project}' > "$marker"
+    chmod 600 "$marker"
+    return 0
+  fi
+
+  stored_checkout="$(jq -r '.checkout_id // empty' "$marker" 2>/dev/null || true)"
+  stored_root="$(jq -r '.source_root // empty' "$marker" 2>/dev/null || true)"
+  stored_project="$(jq -r '.compose_project // empty' "$marker" 2>/dev/null || true)"
+  if [ "$stored_checkout" != "$CHECKOUT_ID" ] || [ "$stored_root" != "$SOURCE_ROOT" ] || [ "$stored_project" != "$COMPOSE_PROJECT" ]; then
+    echo "[local-mode] FATAL: local-mode volume provenance mismatch" >&2
+    echo "[local-mode] stored root/checkout/project=${stored_root}/${stored_checkout}/${stored_project}" >&2
+    echo "[local-mode] current root/checkout/project=${SOURCE_ROOT}/${CHECKOUT_ID}/${COMPOSE_PROJECT}" >&2
+    return 1
+  fi
+}
+
+# prepare_run_manifest_epoch makes the manifest unavailable while a restarted
+# container is rebuilding its live evidence. A valid manifest for this exact
+# run preserves the original container-clock threshold and exact task IDs;
+# without that preservation, reusing the run-tagged tasks would make their
+# creation timestamps older than a newly minted threshold. A valid manifest
+# from an older run in this same checkout/project starts a fresh proof epoch;
+# same-run corruption and cross-checkout state fail closed after invalidation.
+prepare_run_manifest_epoch() {
+  if [ -e "$RUN_MANIFEST" ]; then
+    # Atomic rename hides the prior proof from the verifier without destroying
+    # the only recovery record. If startup is interrupted, the next entrypoint
+    # resumes from this verifier-invisible journal.
+    mv -f "$RUN_MANIFEST" "$RUN_MANIFEST_RECOVERY"
+  elif [ ! -e "$RUN_MANIFEST_RECOVERY" ]; then
+    return 0
+  fi
+
+  previous_manifest="$(cat "$RUN_MANIFEST_RECOVERY" 2>/dev/null || true)"
+  previous_checkout="$(printf '%s' "$previous_manifest" | jq -r '.checkout_id // empty' 2>/dev/null || true)"
+  previous_root="$(printf '%s' "$previous_manifest" | jq -r '.source_root // empty' 2>/dev/null || true)"
+  previous_project="$(printf '%s' "$previous_manifest" | jq -r '.compose_project // empty' 2>/dev/null || true)"
+  previous_run_id="$(printf '%s' "$previous_manifest" | jq -r '.run_id // empty' 2>/dev/null || true)"
+  if [ "$previous_checkout" = "$CHECKOUT_ID" ] &&
+    [ "$previous_root" = "$SOURCE_ROOT" ] &&
+    [ "$previous_project" = "$COMPOSE_PROJECT" ] &&
+    [ -n "$previous_run_id" ] && [ "$previous_run_id" != "$RUN_ID" ]; then
+    rm -f "$RUN_MANIFEST_RECOVERY"
+    echo "[local-mode] starting fresh proof epoch ${RUN_ID} after ${previous_run_id}" >&2
+    return 0
+  fi
+
+  if ! printf '%s' "$previous_manifest" | jq -e \
+    --arg checkout_id "$CHECKOUT_ID" \
+    --arg source_root "$SOURCE_ROOT" \
+    --arg compose_project "$COMPOSE_PROJECT" \
+    --arg run_id "$RUN_ID" \
+    --arg workspace "$WORKSPACE" \
+    --arg backend "$AGENT_BACKEND" \
+    --arg plan_task_title "$PLAN_TASK_TITLE" \
+    --arg code_task_title "$CODE_TASK_TITLE" '
+      .checkout_id == $checkout_id and
+      .source_root == $source_root and
+      .compose_project == $compose_project and
+      .run_id == $run_id and
+      .workspace == $workspace and
+      .backend == $backend and
+      .plan_task_title == $plan_task_title and
+      .code_task_title == $code_task_title and
+      ((.started_at | fromdateiso8601?) != null) and
+      ((.plan_task_id // "") | length > 0) and
+      ((.code_task_id // "") | length > 0)
+    ' >/dev/null; then
+    rm -f "$RUN_MANIFEST_RECOVERY"
+    echo "[local-mode] FATAL: existing run manifest does not match this container proof epoch" >&2
+    echo "[local-mode] Recreate loom-local with a new LOCAL_MODE_RUN_ID; stale proof has been invalidated." >&2
+    return 1
+  fi
+
+  RUN_STARTED_AT="$(printf '%s' "$previous_manifest" | jq -r '.started_at')"
+  PREVIOUS_PLAN_TASK_ID="$(printf '%s' "$previous_manifest" | jq -r '.plan_task_id')"
+  PREVIOUS_CODE_TASK_ID="$(printf '%s' "$previous_manifest" | jq -r '.code_task_id')"
+  RUN_MANIFEST_RESUMED=1
+}
+
+# This narrow mode lets the host-side unit test exercise volume ownership
+# without starting FleetDB, loom serve, or a daemon. It is also useful for
+# diagnosing a volume that startup refuses to adopt.
+if [ "${1:-}" = "--check-provenance-only" ]; then
+  ensure_stack_provenance
+  exit 0
+fi
+
+if [ "${1:-}" = "--prepare-run-manifest-only" ]; then
+  prepare_run_manifest_epoch
+  printf '%s\n' "$RUN_STARTED_AT"
+  exit 0
+fi
 
 http_get() {
   url="$1"
@@ -279,11 +400,31 @@ issue_json_field() {
     jq -r ".data.${field} // .${field} // empty" 2>/dev/null
 }
 
-find_epic_id() {
-  http_get "$(issues_api)/issues" |
-    jq -r '.data[] | select(.issue_type == "epic") | .id' 2>/dev/null |
-    head -1
+find_issue_id_by_title() {
+  title="$1"
+  issue_type="${2:-}"
+  encoded_title="$(jq -nr --arg value "$title" '$value | @uri')"
+  # FleetDB's ordinary list endpoint has no title filter. Route through Loom's
+  # real search service (which delegates to FleetDB /issues/search), then keep
+  # the identity check exact so relevance/prefix matches cannot satisfy it.
+  http_get "$(issues_api)/issues/search?q=${encoded_title}&limit=200" |
+    jq -r --arg title "$title" --arg issue_type "$issue_type" '
+      [(.data // .issues // [])[] |
+        select(.title == $title and ($issue_type == "" or .issue_type == $issue_type))] |
+      .[0].id // empty
+    ' 2>/dev/null
 }
+
+find_epic_id() {
+  find_issue_id_by_title "Local mode dogfood epic" "epic"
+}
+
+# Narrow diagnostic/test mode for proving title lookup against a populated
+# workspace without starting the full local-mode process tree.
+if [ "${1:-}" = "--find-issue-title-only" ]; then
+  find_issue_id_by_title "${2:?issue title is required}" "${3:-}"
+  exit 0
+fi
 
 ensure_epic_id() {
   existing="$(find_epic_id)"
@@ -338,8 +479,7 @@ seed_issue_by_title_if_missing() {
   title="$1"
   body="$2"
   api="$(issues_api)"
-  if http_get "${api}/issues" |
-    jq -e --arg title "$title" '.data[] | select(.title == $title)' >/dev/null 2>&1; then
+  if [ -n "$(find_issue_id_by_title "$title")" ]; then
     echo "[local-mode] issue \"${title}\" already exists"
     return 0
   fi
@@ -353,6 +493,55 @@ seed_issue_by_title_if_missing() {
   return 0
 }
 
+ensure_run_issue() {
+  title="$1"
+  body="$2"
+  expected_id="${3:-}"
+  api="$(issues_api)"
+  if [ -n "$expected_id" ]; then
+    existing_issue="$(http_get "${api}/issues/${expected_id}" 2>/dev/null || true)"
+    existing_title="$(printf '%s' "$existing_issue" | jq -r '.data.title // .title // empty' 2>/dev/null)"
+    if [ "$existing_title" = "" ]; then
+      echo "[local-mode] FATAL: manifest-owned run issue \"${title}\" (${expected_id}) is missing" >&2
+      return 1
+    fi
+    if [ "$existing_title" != "$title" ]; then
+      echo "[local-mode] FATAL: manifest-owned issue ${expected_id} has title \"${existing_title}\", expected \"${title}\"" >&2
+      return 1
+    fi
+    RUN_ISSUE_ID="$expected_id"
+    echo "[local-mode] run issue \"${title}\" already exists (${RUN_ISSUE_ID})"
+    return 0
+  fi
+
+  # First-start collision detection uses the supported full-text search route
+  # and then requires an exact title match. The ordinary Loom list route has no
+  # title filter, and its adapter does not expose FleetDB's offset pagination.
+  RUN_ISSUE_ID="$(find_issue_id_by_title "$title")"
+  if [ -n "$RUN_ISSUE_ID" ]; then
+    echo "[local-mode] FATAL: run issue \"${title}\" exists without a valid prior run manifest" >&2
+    echo "[local-mode] Use a new LOCAL_MODE_RUN_ID so preserved data cannot satisfy a fresh proof." >&2
+    return 1
+  fi
+
+  if [ "$RUN_MANIFEST_RESUMED" -eq 1 ]; then
+    echo "[local-mode] FATAL: resumed proof epoch did not provide an expected task id for \"${title}\"" >&2
+    return 1
+  fi
+
+  response="$(http_post_json "${api}/issues" "$body")" || {
+    echo "[local-mode] FATAL: failed to seed run issue \"${title}\"" >&2
+    return 1
+  }
+  RUN_ISSUE_ID="$(printf '%s' "$response" | jq -r '.data.id // .id // empty' 2>/dev/null)"
+  if [ -z "$RUN_ISSUE_ID" ]; then
+    echo "[local-mode] FATAL: seed response for \"${title}\" did not include an issue id" >&2
+    printf '%s\n' "$response" >&2
+    return 1
+  fi
+  echo "[local-mode] seeded run issue \"${title}\" (${RUN_ISSUE_ID})"
+}
+
 seed_tasks() {
   epic_id="$(ensure_epic_id)" || {
     echo "[local-mode] FATAL: could not create epic lane" >&2
@@ -360,10 +549,12 @@ seed_tasks() {
   }
   echo "[local-mode] epic lane: ${epic_id}"
 
-  plan_body="$(printf '{"id":"%s","title":"Local mode planner dogfood","issue_type":"task","priority":0,"parent":"%s","source_repo":"source-repo","description":"Planner agent should claim this task and write an approved implementation design.","acceptance_criteria":"Design field is populated and the task moves to review."}' "$PLAN_TASK_ID" "$epic_id")"
-  code_body="$(printf '{"id":"%s","title":"Local mode coder dogfood","issue_type":"task","priority":0,"parent":"%s","source_repo":"source-repo","description":"Coder agent should claim this task and make a small committed fixture change.","design":"Approved design: append a short local-mode dogfood result to local-mode-agent-output.txt, commit it, then close the task.","acceptance_criteria":"A commit exists in the coder worktree and the task is closed."}' "$CODE_TASK_ID" "$epic_id")"
-  seed_issue_if_missing "$PLAN_TASK_ID" "$plan_body"
-  seed_issue_if_missing "$CODE_TASK_ID" "$code_body"
+  plan_body="$(jq -cn --arg title "$PLAN_TASK_TITLE" --arg parent "$epic_id" '{title:$title,issue_type:"task",priority:0,parent:$parent,source_repo:"source-repo",description:"Planner agent should claim this task and write an approved implementation design.",acceptance_criteria:"Design field is populated and the task moves to review."}')"
+  code_body="$(jq -cn --arg title "$CODE_TASK_TITLE" --arg parent "$epic_id" '{title:$title,issue_type:"task",priority:0,parent:$parent,source_repo:"source-repo",description:"Coder agent should claim this task and make a small committed fixture change.",design:"Approved design: append a short local-mode dogfood result to local-mode-agent-output.txt, commit it, then close the task.",acceptance_criteria:"A commit exists in the coder worktree and the task is closed."}')"
+  ensure_run_issue "$PLAN_TASK_TITLE" "$plan_body" "$PREVIOUS_PLAN_TASK_ID"
+  PLAN_TASK_ID="$RUN_ISSUE_ID"
+  ensure_run_issue "$CODE_TASK_TITLE" "$code_body" "$PREVIOUS_CODE_TASK_ID"
+  CODE_TASK_ID="$RUN_ISSUE_ID"
   link_parent_child "$PLAN_TASK_ID" "$epic_id"
   link_parent_child "$CODE_TASK_ID" "$epic_id"
 
@@ -375,15 +566,45 @@ seed_tasks() {
   seed_issue_by_title_if_missing "Backlog grooming placeholder" \
     "$(printf '{"title":"Backlog grooming placeholder","issue_type":"task","priority":4,"parent":"%s","status":"deferred","source_repo":"source-repo","owner":"local-mode","description":"Deferred task for backlog column demo."}' "$epic_id")"
 
-  swim_id="$(http_get "$(issues_api)/issues" |
-    jq -r --arg title "Exercise epic swimlane UI" '.data[] | select(.title == $title) | .id' 2>/dev/null |
-    head -1)"
+  swim_id="$(find_issue_id_by_title "Exercise epic swimlane UI" "task")"
   if [ -n "$swim_id" ] && [ "$(issue_json_field "$swim_id" status)" = "open" ]; then
     if command -v curl >/dev/null 2>&1; then
       curl -fsS --max-time 5 -X PATCH -H "Content-Type: application/json" \
         --data '{"status":"in_progress"}' "$(issues_api)/issues/${swim_id}" >/dev/null 2>&1 || true
     fi
   fi
+}
+
+capture_run_started_at() {
+  if [ -n "$RUN_STARTED_AT" ]; then
+    echo "[local-mode] resuming proof epoch ${RUN_ID} from ${RUN_STARTED_AT}"
+    return 0
+  fi
+  # FleetDB timestamps are produced inside the container VM. Capture the
+  # verifier threshold here, immediately before task creation, so freshness
+  # never compares FleetDB evidence against the macOS host clock.
+  RUN_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+
+write_run_manifest() {
+  manifest_tmp="${RUN_MANIFEST}.tmp.$$"
+  jq -n \
+    --arg checkout_id "$CHECKOUT_ID" \
+    --arg source_root "$SOURCE_ROOT" \
+    --arg compose_project "$COMPOSE_PROJECT" \
+    --arg run_id "$RUN_ID" \
+    --arg started_at "$RUN_STARTED_AT" \
+    --arg workspace "$WORKSPACE" \
+    --arg backend "$AGENT_BACKEND" \
+    --arg plan_task_id "$PLAN_TASK_ID" \
+    --arg code_task_id "$CODE_TASK_ID" \
+    --arg plan_task_title "$PLAN_TASK_TITLE" \
+    --arg code_task_title "$CODE_TASK_TITLE" \
+    '{checkout_id:$checkout_id,source_root:$source_root,compose_project:$compose_project,run_id:$run_id,started_at:$started_at,workspace:$workspace,backend:$backend,plan_task_id:$plan_task_id,code_task_id:$code_task_id,plan_task_title:$plan_task_title,code_task_title:$code_task_title}' \
+    > "$manifest_tmp"
+  chmod 600 "$manifest_tmp"
+  mv "$manifest_tmp" "$RUN_MANIFEST"
+  rm -f "$RUN_MANIFEST_RECOVERY"
 }
 
 start_serve() {
@@ -502,6 +723,8 @@ trap 'cleanup; exit 0' INT TERM
 trap cleanup EXIT
 
 mkdir -p "${HOME:-/root}" "${LOOM_CONFIG_DIR:-/root/.loom}"
+ensure_stack_provenance
+prepare_run_manifest_epoch
 git config --global user.email "local-mode@fixture.local"
 git config --global user.name "local-mode"
 git config --global --add safe.directory "*" >/dev/null 2>&1 || true
@@ -521,7 +744,9 @@ fi
 trust_codex_local_mode_paths
 plane_is_ts || register_agents
 start_serve
+capture_run_started_at
 seed_tasks
+write_run_manifest
 
 echo "[local-mode] ready"
 echo "[local-mode] UI:  ${LOCAL_MODE_UI_URL:-http://localhost:8283}/ws/${WORKSPACE}/kanban"

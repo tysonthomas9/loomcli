@@ -330,6 +330,22 @@ describe("issues API", () => {
       );
     });
 
+    it("passes an optional abort signal to the request", async () => {
+      mockApiGet.mockResolvedValue(
+        okResponse({ success: true, data: mockIssueDetails }),
+      );
+      const controller = new AbortController();
+
+      await getIssue("test-ws-id", "issue-123", {
+        signal: controller.signal,
+      });
+
+      expect(mockApiGet).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues/{id}",
+        expect.objectContaining({ signal: controller.signal }),
+      );
+    });
+
     it("throws ApiError on failure response", async () => {
       mockApiGet.mockResolvedValue(
         okResponse({ success: false, error: "Issue not found" }),

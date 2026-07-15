@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,331 @@ func runMake(t *testing.T, args ...string) string {
 		t.Fatalf("make %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+func TestMakefileLocalModeProjectIsCheckoutScoped(t *testing.T) {
+	t.Parallel()
+
+	first := runLocalModeInfo(t, repoRoot(t), nil)
+	second := runLocalModeInfo(t, repoRoot(t), nil)
+	if first["checkout_id"] == "" || first["compose_project"] == "" {
+		t.Fatalf("local-mode-info missing checkout identity: %+v", first)
+	}
+	if first["checkout_id"] != second["checkout_id"] || first["compose_project"] != second["compose_project"] {
+		t.Fatalf("same checkout produced unstable identity: first=%+v second=%+v", first, second)
+	}
+	if !strings.HasSuffix(first["compose_project"], first["checkout_id"]) {
+		t.Fatalf("compose project %q is not scoped by checkout %q", first["compose_project"], first["checkout_id"])
+	}
+
+	other := runLocalModeInfo(t, t.TempDir(), nil)
+	if other["checkout_id"] == first["checkout_id"] || other["compose_project"] == first["compose_project"] {
+		t.Fatalf("different roots shared local-mode identity: first=%+v other=%+v", first, other)
+	}
+
+	overridden := runLocalModeInfo(t, t.TempDir(), map[string]string{"LOCAL_MODE_COMPOSE_PROJECT": "explicit-review-stack"})
+	if overridden["compose_project"] != "explicit-review-stack" {
+		t.Fatalf("explicit project override lost: %+v", overridden)
+	}
+
+	quotedRoot := filepath.Join(t.TempDir(), "reviewer's checkout")
+	if err := os.MkdirAll(quotedRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	quoted := runLocalModeInfo(t, quotedRoot, nil)
+	if quoted["checkout_id"] == "" || !strings.HasSuffix(quoted["compose_project"], quoted["checkout_id"]) {
+		t.Fatalf("quoted checkout path produced invalid identity: %+v", quoted)
+	}
+	explicitQuoted := runLocalModeInfo(t, repoRoot(t), map[string]string{"LOCAL_MODE_SOURCE_ROOT": quotedRoot})
+	if explicitQuoted["source_root"] != quotedRoot || explicitQuoted["checkout_id"] != expectedCheckoutID(t, quotedRoot) {
+		t.Fatalf("explicit quoted source root did not determine checkout identity: %+v", explicitQuoted)
+	}
+}
+
+func TestMakefileLocalModeExplicitProjectPropagatesToLifecycleTargets(t *testing.T) {
+	t.Parallel()
+
+	const project = "explicit-review-stack"
+	for _, target := range []string{"local-mode-up", "local-mode-verify", "local-mode-logs", "local-mode-down"} {
+		target := target
+		t.Run(target, func(t *testing.T) {
+			out := runMake(t,
+				"-n",
+				"LOCAL_MODE_COMPOSE=fake-compose",
+				"LOCAL_MODE_COMPOSE_PROJECT="+project,
+				target,
+			)
+			if !strings.Contains(out, `compose="fake-compose"`) {
+				t.Fatalf("%s did not select the fake Compose provider:\n%s", target, out)
+			}
+			if !strings.Contains(out, "-p "+project+" ") {
+				t.Fatalf("%s did not propagate explicit project %q:\n%s", target, project, out)
+			}
+		})
+	}
+}
+
+func TestMakefileLocalModeCommandLineSourceRootRequiresPairedIdentity(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "reviewer's checkout")
+	cmd := exec.Command("make", "-s", "LOCAL_MODE_SOURCE_ROOT="+root, "local-mode-info") //nolint:norawexec -- verify fail-closed Make override handling
+	cmd.Dir = repoRoot(t)
+	// A parent `make gate` exports its resolved identity. That inherited value
+	// must not count as the explicit pair for a different command-line root.
+	cmd.Env = environmentWithOverrides(map[string]string{
+		"LOCAL_MODE_CHECKOUT_ID": "inherited-parent-checkout",
+	})
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("unpaired command-line source root unexpectedly succeeded:\n%s", out)
+	}
+	if !strings.Contains(string(out), "requires LOCAL_MODE_CHECKOUT_ID") {
+		t.Fatalf("unpaired source-root failure was not explicit:\n%s", out)
+	}
+
+	paired := runMake(t,
+		"-s",
+		"LOCAL_MODE_SOURCE_ROOT="+root,
+		"LOCAL_MODE_CHECKOUT_ID=paired-checkout",
+		"local-mode-info",
+	)
+	if !strings.Contains(paired, "source_root="+root) || !strings.Contains(paired, "checkout_id=paired-checkout") {
+		t.Fatalf("paired command-line identity override was not preserved:\n%s", paired)
+	}
+}
+
+func environmentWithOverrides(overrides map[string]string) []string {
+	env := make([]string, 0, len(os.Environ())+len(overrides))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, replaced := overrides[key]; !replaced {
+			env = append(env, entry)
+		}
+	}
+	for key, value := range overrides {
+		env = append(env, key+"="+value)
+	}
+	return env
+}
+
+func TestMakefileLocalModeVerifyAlwaysReadsLiveManifest(t *testing.T) {
+	t.Parallel()
+
+	dryRun := runMake(t,
+		"-n",
+		"LOCAL_MODE_COMPOSE=fake-compose",
+		"LOCAL_MODE_RUN_MANIFEST_JSON=caller-injected",
+		"local-mode-verify",
+	)
+	for _, want := range []string{
+		"exec -T loom-local sh -c",
+		`cat "${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"`,
+	} {
+		if !strings.Contains(dryRun, want) {
+			t.Fatalf("local-mode-verify did not read the container-selected manifest path; missing %q:\n%s", want, dryRun)
+		}
+	}
+
+	fakeCompose := filepath.Join(t.TempDir(), "fake-compose")
+	customManifest := filepath.Join(t.TempDir(), "custom-run-manifest.json")
+	liveManifest := `{"checkout_id":"live-container","source_root":"/live/container","compose_project":"manifest-proof-stack","run_id":"live-run","started_at":"2026-07-15T03:00:00Z","backend":"localdogfood","workspace":"LOCALMODE","plan_task_id":"LM-1","code_task_id":"LM-2","plan_task_title":"plan","code_task_title":"code"}`
+	if err := os.WriteFile(customManifest, []byte(liveManifest+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fakeComposeScript := `#!/bin/sh
+last=""
+for arg do last="$arg"; done
+want='cat "${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"'
+if [ "$last" != "$want" ]; then
+  echo "unexpected container manifest command: $last" >&2
+  exit 42
+fi
+LOCAL_MODE_RUN_MANIFEST="${FAKE_CUSTOM_MANIFEST:?}" sh -c "$last"
+`
+	if err := os.WriteFile(fakeCompose, []byte(fakeComposeScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command( //nolint:norawexec -- fake Compose proves Make ignores caller-supplied manifests
+		"make", "-s",
+		"LOCAL_MODE_COMPOSE="+fakeCompose,
+		"LOCAL_MODE_CHECKOUT_ID=requested-checkout",
+		"LOCAL_MODE_COMPOSE_PROJECT=manifest-proof-stack",
+		"local-mode-verify",
+	)
+	cmd.Dir = repoRoot(t)
+	cmd.Env = make([]string, 0, len(os.Environ())+2)
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if key != "LOCAL_MODE_RUN_MANIFEST_JSON" {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	cmd.Env = append(cmd.Env,
+		"LOCAL_MODE_RUN_MANIFEST_JSON=caller-injected",
+		"FAKE_CUSTOM_MANIFEST="+customManifest,
+	)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("fake live-manifest mismatch unexpectedly verified:\n%s", out)
+	}
+	if !strings.Contains(string(out), "manifest checkout live-container does not match requested checkout requested-checkout") {
+		t.Fatalf("caller manifest bypassed the live Compose manifest:\n%s", out)
+	}
+}
+
+func TestMakefileLocalModeCodexVerifySetsExpectedBackend(t *testing.T) {
+	t.Parallel()
+
+	const project = "explicit-codex-review-stack"
+	out := runMake(t,
+		"-n",
+		"LOCAL_MODE_COMPOSE=fake-compose",
+		"LOCAL_MODE_COMPOSE_PROJECT="+project,
+		"local-mode-codex-verify",
+	)
+	if !strings.Contains(out, "LOCAL_MODE_EXPECTED_BACKEND=codex") {
+		t.Fatalf("local-mode-codex-verify did not require the Codex backend:\n%s", out)
+	}
+	if !strings.Contains(out, "-p "+project+" ") {
+		t.Fatalf("local-mode-codex-verify did not propagate explicit project %q:\n%s", project, out)
+	}
+}
+
+func TestMakefileLocalModeCodexWorkflowsUsesToolchainOverlay(t *testing.T) {
+	t.Parallel()
+
+	const project = "explicit-codex-workflow-stack"
+	out := runMake(t,
+		"-n",
+		"LOCAL_MODE_COMPOSE=fake-compose",
+		"LOCAL_MODE_COMPOSE_PROJECT="+project,
+		"FLUE_SRC=/tmp/fake-flue",
+		"local-mode-codex-workflows-up",
+	)
+	for _, want := range []string{
+		"packages/cli/bin/flue.mjs",
+		"-p " + project + " ",
+		"-f test/local-mode/docker-compose.yml",
+		"-f test/local-mode/docker-compose.codex.yml",
+		"-f test/local-mode/docker-compose.workflow-build.yml",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("local-mode-codex-workflows-up output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestMakefileLocalModeWorkflowBuildCheckFailsBeforeCompose(t *testing.T) {
+	t.Parallel()
+
+	cmd := exec.Command("make", "-s", "FLUE_SRC="+t.TempDir(), "local-mode-workflow-build-check") //nolint:norawexec -- exercises the Make preflight boundary
+	cmd.Dir = repoRoot(t)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("incomplete Flue checkout unexpectedly passed preflight:\n%s", out)
+	}
+	if !strings.Contains(string(out), "Flue workflow build toolchain is incomplete") ||
+		!strings.Contains(string(out), "pnpm install --frozen-lockfile") ||
+		!strings.Contains(string(out), "set FLUE_SRC=/path/to/flue") {
+		t.Fatalf("workflow build preflight was not actionable:\n%s", out)
+	}
+}
+
+func TestMakefileLocalModeWorkflowBuildCheckRequiresContainerRolldownBinding(t *testing.T) {
+	t.Parallel()
+
+	flueRoot := t.TempDir()
+	for _, rel := range []string{
+		"packages/cli/bin/flue.mjs",
+		"packages/cli/dist/flue.js",
+		"packages/runtime/package.json",
+		"packages/runtime/dist/node/index.mjs",
+		"packages/runtime/node_modules/@hono/node-server/package.json",
+		"packages/runtime/node_modules/hono/package.json",
+		"node_modules/.pnpm/rolldown@1.0.3/node_modules/rolldown/package.json",
+	} {
+		path := filepath.Join(flueRoot, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cmd := exec.Command( //nolint:norawexec -- exercises the Make preflight boundary
+		"make", "-s",
+		"FLUE_SRC="+flueRoot,
+		"LOCAL_MODE_CONTAINER_ARCH=arm64",
+		"local-mode-workflow-build-check",
+	)
+	cmd.Dir = repoRoot(t)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("host-only Rolldown install unexpectedly passed the Linux-container preflight:\n%s", out)
+	}
+	for _, want := range []string{
+		"Flue cannot load Rolldown inside the Linux/arm64/glibc local-mode container",
+		"@rolldown/binding-linux-arm64-gnu",
+		`"os":["current","linux"]`,
+		`"cpu":["current","arm64"]`,
+		"pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime...",
+		"Then rerun make local-mode-codex-workflows-up",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("workflow build preflight output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func expectedCheckoutID(t *testing.T, sourceRoot string) string {
+	t.Helper()
+	cmd := exec.Command("git", "hash-object", "--stdin") //nolint:norawexec -- mirrors the Makefile's stable checkout identity contract
+	cmd.Stdin = strings.NewReader(sourceRoot + "\n")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git hash-object: %v", err)
+	}
+	hash := strings.TrimSpace(string(out))
+	if len(hash) < 12 {
+		t.Fatalf("short git hash-object output %q", hash)
+	}
+	return hash[:12]
+}
+
+func runLocalModeInfo(t *testing.T, dir string, overrides map[string]string) map[string]string {
+	t.Helper()
+	cmd := exec.Command("make", "-s", "-f", repoRoot(t)+"/Makefile", "local-mode-info") //nolint:norawexec
+	cmd.Dir = dir
+	blocked := map[string]struct{}{
+		"LOCAL_MODE_SOURCE_ROOT":     {},
+		"LOCAL_MODE_CHECKOUT_ID":     {},
+		"LOCAL_MODE_COMPOSE_PROJECT": {},
+		"LOCAL_MODE_RUN_ID":          {},
+	}
+	cmd.Env = make([]string, 0, len(os.Environ())+len(overrides))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, skip := blocked[key]; !skip {
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
+	for key, value := range overrides {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("local-mode-info failed in %s: %v\n%s", dir, err, out)
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(string(out), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	return values
 }
 
 // TestMakefileRemovedBeadsTargets verifies vendored beads maintenance targets

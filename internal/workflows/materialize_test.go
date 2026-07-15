@@ -3,8 +3,10 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -32,6 +34,38 @@ func TestBuildBuiltinBundle(t *testing.T) {
 
 	if _, _, err := BuildBuiltinBundle(context.Background(), "does-not-exist", filepath.Join(t.TempDir(), "x")); err == nil {
 		t.Error("expected an error building an unknown bundle")
+	}
+}
+
+func TestBuildBuiltinBundleClassifiesMissingRolldownNativeBinding(t *testing.T) {
+	configureFakeBuiltinBundleBuild(t)
+
+	root := t.TempDir()
+	flue := filepath.Join(root, "missing-native-flue.sh")
+	script := `#!/bin/sh
+echo "Error: Cannot find module '@rolldown/binding-linux-arm64-gnu'" >&2
+exit 1
+`
+	if err := os.WriteFile(flue, []byte(script), 0o755); err != nil {
+		t.Fatalf("write failing fake flue: %v", err)
+	}
+	cmd, err := json.Marshal([]string{flue})
+	if err != nil {
+		t.Fatalf("encode failing fake flue command: %v", err)
+	}
+	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", string(cmd))
+
+	_, diagnostics, err := BuildBuiltinBundle(context.Background(), BuiltinPromptAgentWorkflowName, filepath.Join(t.TempDir(), "dist"))
+	if !errors.Is(err, ErrBuildToolchainUnavailable) {
+		t.Fatalf("BuildBuiltinBundle error = %v, want ErrBuildToolchainUnavailable", err)
+	}
+	if !strings.Contains(diagnostics, "@rolldown/binding-linux-arm64-gnu") {
+		t.Fatalf("diagnostics = %q, want missing native binding", diagnostics)
+	}
+
+	compileErr := classifyFlueBuildError(errors.New("exit status 1"), "RolldownError: Expected '}' in workflows/prompt-agent.ts")
+	if errors.Is(compileErr, ErrBuildToolchainUnavailable) {
+		t.Fatalf("workflow compile error was misclassified as missing toolchain: %v", compileErr)
 	}
 }
 

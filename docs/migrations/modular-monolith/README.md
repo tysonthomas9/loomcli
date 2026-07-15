@@ -29,6 +29,7 @@ This is not a package-count project. Loom already has 163 Go packages; the migra
 | [02-target-architecture.md](02-target-architecture.md) | Which capabilities own which records, and what dependencies are allowed? |
 | [03-migration-plan.md](03-migration-plan.md) | In what order do we extract modules without blocking active work? |
 | [04-enforcement-and-gates.md](04-enforcement-and-gates.md) | What automated rules, tests, metrics, and stop conditions make the boundary real? |
+| [05-v5-integration-regression-closure.md](05-v5-integration-regression-closure.md) | Which integration regressions were closed, and what evidence is required before extraction starts? |
 
 ## Scope boundaries
 

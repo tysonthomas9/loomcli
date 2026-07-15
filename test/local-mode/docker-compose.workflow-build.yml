@@ -5,6 +5,8 @@
 # real LLM spend); only the flue BUILD path needs node.
 #
 # Usage:
+#   make local-mode-codex-workflows-up
+# or, for the deterministic backend:
 #   LOCAL_MODE_COMPOSE_FILES=test/local-mode/docker-compose.workflow-build.yml \
 #   LOCAL_MODE_COMPOSE_UP_FLAGS='--build -d' make local-mode-up
 

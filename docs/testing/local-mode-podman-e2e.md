@@ -36,12 +36,11 @@ Loom API: http://localhost:8282
 FleetDB:  http://localhost:8280
 Config:   http://localhost:8282/api/config
 Agents:   http://localhost:8282/api/monitor/agents?workspace=LOCALMODE
-Task 1 sessions: http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-1/sessions
-Task 2 sessions: http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-2/sessions
 ```
 
-The deterministic `make local-mode-up` path uses the same services, but its
-seeded task IDs are `LM-PLAN-1` and `LM-CODE-1`.
+Planner and coder task IDs are minted by FleetDB for each run. The container's
+`/tmp/loom-local-mode-run.json` records the exact IDs, run start time, backend,
+checkout, and Compose project. `make local-mode-verify` reads it automatically.
 
 Stop and remove the stack volumes:
 
@@ -68,10 +67,13 @@ task IDs:
 make local-mode-verify
 ```
 
-The verifier polls the running stack until the planner task is in review with
-a design, the coder task is closed, both tasks have completed sessions and
-transcript entries, and the coder session exposes a diff containing
-`local-mode-agent-output.txt`.
+The verifier polls the running stack until the manifest-owned planner task is
+in review with a design, the manifest-owned coder task is closed, both tasks
+have completed sessions and transcript entries created after this run began,
+and the coder session exposes a diff containing
+`local-mode-agent-output.txt`. The container captures the threshold immediately
+before seeding on the same VM clock FleetDB uses; malformed or historical
+timestamps fail closed. Historical volume data cannot satisfy a new run.
 
 ## Prerequisites
 
@@ -96,7 +98,17 @@ data.
 
 ## Containers
 
-The Compose project is `loomcli-local-mode`.
+The default Compose project is `loomcli-local-mode-<checkout-id>`, where the
+checkout ID is a stable hash of the physical repo path. Run
+`make local-mode-info` to print the resolved values. A provenance marker in the
+`loom-data` volume must match both the source root and project; startup refuses
+unmarked legacy data and cross-checkout reuse.
+
+Teardown remains project-name based because Compose cannot portably inspect
+provenance in every stopped or unmarked legacy volume before `down -v`. An
+explicit `LOCAL_MODE_COMPOSE_PROJECT` selects the volumes to destroy. Confirm
+the exact project with `make local-mode-info` and repeat it on verify, logs,
+and teardown.
 
 | Service      | Responsibility                                                                                                                                                                                        | Host port |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
@@ -116,8 +128,6 @@ but the override file installs Codex CLI and sets:
 LOOM_BACKEND=codex
 LOOM_LOCAL_MODE_PLAN_AGENT=codex-planner
 LOOM_LOCAL_MODE_CODE_AGENT=codex-coder
-LOOM_LOCAL_MODE_PLAN_TASK_ID=LOCALMODE-1
-LOOM_LOCAL_MODE_CODE_TASK_ID=LOCALMODE-2
 ```
 
 ## Commands
@@ -161,6 +171,10 @@ LOCAL_MODE_UI_PORT=8383 \
 make local-mode-codex-up
 ```
 
+Different checkouts already receive distinct default projects and volumes,
+but they still compete for the default host ports. Override all three ports
+when running stacks concurrently.
+
 Run a second stack in parallel by changing both the Compose project and ports:
 
 ```sh
@@ -175,8 +189,12 @@ make local-mode-codex-up
 Verify the second stack through its API port:
 
 ```sh
-LOCAL_MODE_API_PORT=8382 make local-mode-codex-verify
+LOCAL_MODE_COMPOSE_PROJECT=loomcli-local-mode-b \
+LOCAL_MODE_API_PORT=8382 \
+make local-mode-codex-verify
 ```
+
+The Codex verifier also rejects a live manifest whose backend is not `codex`.
 
 Use the same project name for logs and teardown:
 
@@ -199,15 +217,27 @@ Image tags default to the Compose project name for parallel builds. Override
 `LOCAL_MODE_FLEETDB_IMAGE`, `LOCAL_MODE_LOOM_IMAGE`, or
 `LOCAL_MODE_LOOM_CODEX_IMAGE` only when a run needs explicit image tags.
 
-Verify the container has bash:
+Verify the resolved checkout and project identity:
 
 ```sh
-podman exec loomcli-local-mode-loom-local-1 bash -lc 'echo "$SHELL"; command -v bash'
+make local-mode-info
 ```
 
-Some Compose implementations use underscores in generated container names. If
-the command above cannot find the container, run `podman ps` and substitute
-the actual `loom-local` container name.
+Run ID and `started_at` identify a proof epoch minted by a fresh container
+start. A same-container restart resumes that epoch from its recovery journal;
+a recreated container must mint a new run ID. `make local-mode-verify` reads the
+live manifest, while `local-mode-info` does not mint or report candidate run
+metadata.
+
+Verify the container has bash through the resolved Compose project. Set
+`project=loomcli-local-mode-b` instead when inspecting an explicit parallel
+stack:
+
+```sh
+project="$(make -s local-mode-info | sed -n 's/^compose_project=//p')"
+podman compose -p "$project" -f test/local-mode/docker-compose.yml \
+  exec -T loom-local bash -lc 'echo "$SHELL"; command -v bash'
+```
 
 ## Expected E2E Flow
 
@@ -216,8 +246,8 @@ the actual `loom-local` container name.
 - Workspace: `LOCALMODE`
 - Planner agent: `codex-planner`
 - Coder agent: `codex-coder`
-- Planning task: `LOCALMODE-1`
-- Approved coding task: `LOCALMODE-2`
+- Planning task: FleetDB ID recorded as `plan_task_id` in the run manifest
+- Approved coding task: FleetDB ID recorded as `code_task_id` in the run manifest
 - Source repo: `/workspace/source-repo`
 - Workspace repo: `/root/.loom/workspaces/LOCALMODE/source-repo`
 - Agent worktrees under
@@ -226,12 +256,12 @@ the actual `loom-local` container name.
 The expected run is:
 
 1. `codex-planner` starts through `loom daemon`.
-2. It claims `LOCALMODE-1`.
+2. It claims the manifest's planner task.
 3. It runs Codex CLI through the supervised backend path.
-4. Loom records an agent session in FleetDB with `task_id=LOCALMODE-1`.
+4. Loom records an agent session in FleetDB with the manifest planner task ID.
 5. The planner writes a design and moves the task to review.
 6. `codex-coder` starts through the same daemon path.
-7. It claims `LOCALMODE-2`, which already has an approved design.
+7. It claims the manifest's coder task, which already has an approved design.
 8. It writes `local-mode-agent-output.txt`, commits in its worktree, and
    closes the task.
 9. Loom finalizes the FleetDB agent session with transcript, log, diff, and
@@ -243,16 +273,18 @@ Use the UI to validate the product behavior, not just process exit codes.
 
 In the Kanban board:
 
-- `LOCALMODE-1` should leave planning evidence and move to review.
-- `LOCALMODE-2` should close after the coder completes.
+- The task titled `Local mode planner dogfood [run:<id>]` should leave
+  planning evidence and move to review.
+- The task titled `Local mode coder dogfood [run:<id>]` should close after the
+  coder completes.
 
 In the left agent panel:
 
 - Active agents show while the daemon process is running them.
 - Completed agents may show `Idle`. That is availability, not run history.
-- Historical evidence belongs in the task Sessions tab.
+- Historical evidence belongs in the task Runs tab.
 
-In a task Sessions tab:
+In a task Runs tab:
 
 - A session row should exist for the agent that claimed the task.
 - Status should be terminal after the process exits.
@@ -268,9 +300,11 @@ Check the Loom API:
 ```sh
 curl -sS http://localhost:8282/api/config
 curl -sS 'http://localhost:8282/api/monitor/agents?workspace=LOCALMODE'
-curl -sS http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-1/sessions
-curl -sS http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-2/sessions
+make local-mode-verify
 ```
+
+The verifier prints the manifest task IDs before polling. Use those IDs for
+additional manual session API calls; do not substitute old fixed IDs.
 
 Check the container logs:
 
@@ -281,7 +315,9 @@ make local-mode-logs
 Check the worktree inside the container:
 
 ```sh
-podman exec loomcli-local-mode-loom-local-1 bash -lc \
+project="$(make -s local-mode-info | sed -n 's/^compose_project=//p')"
+podman compose -p "$project" -f test/local-mode/docker-compose.yml \
+  exec -T loom-local bash -lc \
   'cd /root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder && git log --oneline -5 && git status --short'
 ```
 
@@ -290,16 +326,16 @@ podman exec loomcli-local-mode-loom-local-1 bash -lc \
 ### UI Shows Agents As Idle
 
 The left panel shows current agent availability from the monitor API. After
-the planner or coder exits, `Idle` can be correct. Open the task Sessions tab
+the planner or coder exits, `Idle` can be correct. Open the task Runs tab
 to inspect the completed run, transcript, logs, diff, and files.
 
-### Sessions Tab Is Empty
+### Runs Tab Is Empty
 
 This means the daemon did not publish a FleetDB `agent-sessions` record with
 the claimed task ID, or the UI/API could not query it. Check:
 
 ```sh
-curl -sS http://localhost:8282/api/workspaces/LOCALMODE/tasks/LOCALMODE-2/sessions
+make local-mode-verify
 make local-mode-logs
 ```
 

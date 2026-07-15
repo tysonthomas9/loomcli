@@ -14,7 +14,15 @@ import type {
   LoomStats,
   LoomStatusResponse,
 } from "@/types";
-import { api, apiErrorFromResponse, get, post, wsUrl } from "@/api/common";
+import {
+  api,
+  apiErrorFromResponse,
+  del,
+  get,
+  patch,
+  post,
+  wsUrl,
+} from "@/api/common";
 
 function monitorPath(path: string, workspaceId?: string): string {
   if (!workspaceId) return path;
@@ -140,6 +148,9 @@ export interface AgentRecord {
   updated_at?: string;
 }
 
+/** Identity fields shared by prompt/scripted records in the unified list. */
+export type AgentRecordSummary = Pick<AgentRecord, "id" | "name" | "kind">;
+
 export interface PromptRoleCreateInput {
   prompt?: string;
   prompt_filename?: string;
@@ -170,6 +181,29 @@ export interface CreatePromptAgentRecordRequest {
     schedule_timezone?: string;
   };
   enabled?: boolean;
+}
+
+/** Mutable fields on a durable prompt/scripted AgentService record. */
+export interface UpdateAgentRecordRequest {
+  name?: string;
+  behavior?: {
+    role_name?: string;
+  };
+  budget_policy?: string;
+}
+
+/** Result of archiving an AgentService and deleting all attached bindings. */
+export interface DeleteAgentRecordResult {
+  agent: AgentRecord;
+  archived: boolean;
+  bindings_deleted: number;
+  grants_revoked: number;
+}
+
+interface UnifiedAgentListResponse {
+  success: boolean;
+  data: AgentRecordSummary[];
+  total: number;
 }
 
 /**
@@ -274,6 +308,53 @@ export async function setAgentRecordEnabled(
       `/agents/${encodeURIComponent(agentId)}/${enabled ? "enable" : "disable"}`,
     ),
     undefined,
+  );
+}
+
+/**
+ * List durable prompt/scripted identities from the unified agent collection.
+ * The collection also contains supervised and legacy binding entries, which
+ * are deliberately excluded: only AgentService records can own the display
+ * name of an attached binding.
+ */
+export async function listAgentRecords(
+  workspaceId: string,
+): Promise<AgentRecordSummary[]> {
+  const response = await get<UnifiedAgentListResponse>(
+    wsUrl(workspaceId, "/agents"),
+  );
+  return (response.data ?? []).filter(
+    (item) => item.kind === "prompt" || item.kind === "scripted",
+  );
+}
+
+/**
+ * Update the durable AgentService identity behind an attached prompt/scripted
+ * binding. Identity fields such as name belong to the agent record, not to one
+ * of its trigger bindings.
+ */
+export async function updateAgentRecord(
+  workspaceId: string,
+  agentId: string,
+  req: UpdateAgentRecordRequest,
+): Promise<AgentRecord> {
+  return patch<AgentRecord>(
+    wsUrl(workspaceId, `/agents/${encodeURIComponent(agentId)}`),
+    req,
+  );
+}
+
+/**
+ * Archive a durable AgentService. The unified agent endpoint owns cleanup of
+ * every attached binding and connector grant, so callers must not delete only
+ * the currently displayed binding.
+ */
+export async function deleteAgentRecord(
+  workspaceId: string,
+  agentId: string,
+): Promise<DeleteAgentRecordResult> {
+  return del<DeleteAgentRecordResult>(
+    wsUrl(workspaceId, `/agents/${encodeURIComponent(agentId)}`),
   );
 }
 

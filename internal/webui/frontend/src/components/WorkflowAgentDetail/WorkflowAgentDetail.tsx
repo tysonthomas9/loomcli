@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { SessionRunDetail } from "@/components/SessionRunDetail";
+import { SessionRunDetail } from "@/components/SessionRunDetail/SessionRunDetail";
 import { WorkflowSourceModal } from "@/components/WorkflowSourceModal";
 import { useTaskSessions } from "@/hooks/terminal";
 import {
@@ -43,6 +43,12 @@ import {
   describeCronSchedule,
   formatFireTime,
 } from "@/utils/bindingDisplay";
+import {
+  linkedRunSessionKey,
+  linkedSessionsForRun,
+  mergeWorkflowRun,
+  type LinkedRunSession,
+} from "@/utils/workflowRunDetail";
 
 import styles from "./WorkflowAgentDetail.module.css";
 
@@ -516,13 +522,7 @@ function RunsTab({
   );
 }
 
-interface LinkedRunSession {
-  taskRunId: string;
-  taskId: string;
-  sessionId: string;
-}
-
-function RunDetailCard({
+export function RunDetailCard({
   workspaceId,
   run,
 }: {
@@ -530,32 +530,65 @@ function RunDetailCard({
   run: WorkflowRun;
 }): JSX.Element {
   const [detailRun, setDetailRun] = useState(run);
+  const [detailLoadError, setDetailLoadError] = useState<string | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailReload, setDetailReload] = useState(0);
+  const [selectedLinkKey, setSelectedLinkKey] = useState("");
 
   useEffect(() => {
-    setDetailRun(run);
+    setDetailRun((previous) => mergeWorkflowRun(previous, run));
   }, [run]);
 
   useEffect(() => {
     if (!workspaceId || !run.run_id) return;
     let cancelled = false;
+    setDetailLoading(true);
+    setDetailLoadError(null);
     void getWorkflowRun(workspaceId, run.run_id)
       .then((fresh) => {
-        if (!cancelled) setDetailRun(fresh);
+        if (!cancelled) {
+          setDetailRun((previous) => mergeWorkflowRun(previous, fresh));
+        }
       })
-      .catch(() => {
-        // The history row is still useful if the detail enrichment fetch races a
-        // deleted run or a transient backend error.
+      .catch((err) => {
+        if (!cancelled) {
+          setDetailLoadError(
+            err instanceof Error ? err.message : "Failed to load run detail",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, run.run_id, run.status]);
+  }, [workspaceId, run.run_id, run.status, run.updated_at, detailReload]);
 
-  const live = !isTerminalWorkflowRunStatus(detailRun.status);
-  const linkedSession = useMemo(
-    () => linkedSessionForRun(detailRun),
-    [detailRun],
+  // Avoid one stale render when navigating directly between run ids: the
+  // detail state catches up in the effect above, while this frame uses the new
+  // history row as its safe baseline.
+  const displayedRun = detailRun.run_id === run.run_id ? detailRun : run;
+  const live = !isTerminalWorkflowRunStatus(displayedRun.status);
+  const linkedSessions = useMemo(
+    () => linkedSessionsForRun(displayedRun),
+    [displayedRun],
   );
+  const linkedSession = useMemo(
+    () =>
+      linkedSessions.find(
+        (candidate) => linkedRunSessionKey(candidate) === selectedLinkKey,
+      ) ??
+      linkedSessions[0] ??
+      null,
+    [linkedSessions, selectedLinkKey],
+  );
+  const activeLinkKey = linkedSession ? linkedRunSessionKey(linkedSession) : "";
+  useEffect(() => {
+    if (activeLinkKey !== selectedLinkKey) {
+      setSelectedLinkKey(activeLinkKey);
+    }
+  }, [activeLinkKey, selectedLinkKey]);
   const {
     sessions,
     isLoading: sessionsLoading,
@@ -565,27 +598,27 @@ function RunDetailCard({
     if (!linkedSession?.taskId || !linkedSession.sessionId) return null;
     return (
       sessions.find((s) => s.session_id === linkedSession.sessionId) ??
-      fallbackSessionFromRun(detailRun, linkedSession)
+      fallbackSessionFromRun(displayedRun, linkedSession)
     );
-  }, [detailRun, linkedSession, sessions]);
+  }, [displayedRun, linkedSession, sessions]);
 
   // Zero-time (unset) instants format to "" and render as "—" / are omitted.
-  const started = formatFireTime(detailRun.started_at);
-  const heartbeat = formatFireTime(detailRun.last_heartbeat);
+  const started = formatFireTime(displayedRun.started_at);
+  const heartbeat = formatFireTime(displayedRun.last_heartbeat);
   return (
     <section className={styles.card} data-testid="workflow-agent-run-detail">
       <div className={styles.runDetailHead}>
         <span
           className={styles.runDot}
-          style={{ background: RUN_STATUS_COLOR[detailRun.status] }}
+          style={{ background: RUN_STATUS_COLOR[displayedRun.status] }}
           data-live={live || undefined}
           aria-hidden="true"
         />
         <span className={styles.runDetailStatus}>
-          {runStatusLabel(detailRun.status)}
+          {runStatusLabel(displayedRun.status)}
         </span>
         {live ? <span className={styles.liveTag}>live</span> : null}
-        <code className={styles.runId}>{detailRun.run_id}</code>
+        <code className={styles.runId}>{displayedRun.run_id}</code>
       </div>
       <dl className={styles.detailGrid}>
         {started ? (
@@ -596,12 +629,12 @@ function RunDetailCard({
         ) : (
           <div>
             <dt>Created</dt>
-            <dd>{formatRunTime(detailRun.created_at)}</dd>
+            <dd>{formatRunTime(displayedRun.created_at)}</dd>
           </div>
         )}
         <div>
           <dt>Finished</dt>
-          <dd>{formatRunTime(detailRun.finished_at)}</dd>
+          <dd>{formatRunTime(displayedRun.finished_at)}</dd>
         </div>
         {heartbeat && live ? (
           <div>
@@ -609,15 +642,61 @@ function RunDetailCard({
             <dd>{heartbeat}</dd>
           </div>
         ) : null}
-        {detailRun.error_class ? (
+        {displayedRun.error_class ? (
           <div>
             <dt>Error</dt>
-            <dd className={styles.runErr}>{detailRun.error_class}</dd>
+            <dd className={styles.runErr}>{displayedRun.error_class}</dd>
           </div>
         ) : null}
       </dl>
-      {detailRun.summary ? (
-        <p className={styles.detailSummary}>{detailRun.summary}</p>
+      {displayedRun.summary ? (
+        <p className={styles.detailSummary}>{displayedRun.summary}</p>
+      ) : null}
+
+      {detailLoadError ? (
+        <div
+          className={styles.detailLoadError}
+          role="alert"
+          data-testid="workflow-agent-run-detail-error"
+        >
+          <span>Full run detail unavailable: {detailLoadError}</span>
+          <button
+            type="button"
+            className={styles.btn}
+            disabled={detailLoading}
+            onClick={() => setDetailReload((attempt) => attempt + 1)}
+            data-testid="workflow-agent-run-detail-retry"
+          >
+            {detailLoading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      ) : null}
+
+      {linkedSessions.length > 1 ? (
+        <div
+          className={styles.sessionSelector}
+          role="tablist"
+          aria-label="Task sessions"
+          data-testid="workflow-agent-session-selector"
+        >
+          {linkedSessions.map((link, index) => {
+            const key = linkedRunSessionKey(link);
+            const selected = key === activeLinkKey;
+            return (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                className={styles.sessionTab}
+                key={key}
+                onClick={() => setSelectedLinkKey(key)}
+                data-testid={`workflow-agent-session-${key}`}
+              >
+                {link.taskId || link.taskRunId || `Session ${index + 1}`}
+              </button>
+            );
+          })}
+        </div>
       ) : null}
 
       <div className={styles.runTranscript}>
@@ -642,70 +721,6 @@ function RunDetailCard({
       </div>
     </section>
   );
-}
-
-function linkedSessionForRun(run: WorkflowRun): LinkedRunSession | null {
-  const output = run.output ?? {};
-  const step = (run.steps ?? []).find((s) => firstString(s.task_run_id) !== "");
-  const taskRunId = firstString(
-    output.taskRunId,
-    output.task_run_id,
-    step?.task_run_id,
-  );
-  const sessionId = firstString(
-    output.sessionId,
-    output.session_id,
-    taskRunId ? `flue-${taskRunId}` : "",
-  );
-  if (!taskRunId && !sessionId) return null;
-  return {
-    taskRunId,
-    taskId: firstString(
-      output.issueId,
-      output.issue_id,
-      output.taskId,
-      output.task_id,
-      step?.task_id,
-      taskIdFromPayload(run.payload),
-    ),
-    sessionId,
-  };
-}
-
-function taskIdFromPayload(payload: unknown): string {
-  const root = asRecord(payload);
-  if (!root) return "";
-  return firstString(
-    root.taskId,
-    root.task_id,
-    root.issueId,
-    root.issue_id,
-    asRecord(root.event)?.taskId,
-    asRecord(root.event)?.task_id,
-    asRecord(root.event)?.issueId,
-    asRecord(root.event)?.issue_id,
-    asRecord(root.input)?.taskId,
-    asRecord(root.input)?.task_id,
-    asRecord(root.input)?.issueId,
-    asRecord(root.input)?.issue_id,
-  );
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (value == null || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
-
-function firstString(...values: unknown[]): string {
-  for (const value of values) {
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (trimmed) return trimmed;
-    }
-  }
-  return "";
 }
 
 function fallbackSessionFromRun(

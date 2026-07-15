@@ -122,7 +122,7 @@ func newCatalogGraph() (*driverStore, *driverVersionStore, *workerProfileStore, 
 	versions := newDriverVersionStore(drivers)
 	profiles := newWorkerProfileStore()
 	roles := newRoleStore()
-	services := newAgentServiceStore(roles, profiles)
+	services := newAgentServiceStore(roles, profiles, drivers, versions)
 	bindings := newTriggerBindingStore(versions, services)
 	services.bindings = bindings
 	roles.services = services

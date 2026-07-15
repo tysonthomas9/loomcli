@@ -37,6 +37,10 @@ func ensurePromptAgentIdentityRecordsForWorkspace(ctx context.Context, s storepk
 	if err != nil {
 		return err
 	}
+	existingRecords, err := existingAgentServiceRecords(ctx, s, ws)
+	if err != nil {
+		return err
+	}
 	bindings, err := s.TriggerBindings().List(ctx, ws, storepkg.TriggerBindingFilter{
 		DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
 	})
@@ -64,10 +68,15 @@ func ensurePromptAgentIdentityRecordsForWorkspace(ctx context.Context, s storepk
 				"workspace", ws, "binding_id", binding.BindingID)
 			continue
 		}
-		serviceID := migratedAgentServiceID(binding.BindingID, agentNames)
+		serviceID := migratedAgentServiceID(binding.BindingID, agentNames, existingRecords, roleName, binding)
 		if err := ensurePromptAgentRecordForBinding(ctx, s, ws, serviceID, roleName, binding); err != nil {
 			return err
 		}
+		record, err := s.AgentServices().Get(ctx, ws, serviceID)
+		if err != nil {
+			return fmt.Errorf("get ensured agent service %q in workspace %q: %w", serviceID, ws, err)
+		}
+		existingRecords[serviceID] = record
 		target := serviceID
 		if _, err := s.TriggerBindings().Update(ctx, ws, binding.BindingID, storepkg.TriggerBindingUpdate{
 			TargetAgentServiceID: &target,
@@ -128,9 +137,27 @@ func existingAgentNames(ctx context.Context, s storepkg.Store, ws string) (map[s
 	return names, nil
 }
 
+func existingAgentServiceRecords(ctx context.Context, s storepkg.Store, ws string) (map[string]*domain.AgentService, error) {
+	records, err := s.AgentServices().List(ctx, ws, storepkg.AgentServiceFilter{IncludeDeleted: true})
+	if err != nil {
+		return nil, fmt.Errorf("list agent services in workspace %q: %w", ws, err)
+	}
+	byID := make(map[string]*domain.AgentService, len(records))
+	for _, record := range records {
+		if record == nil || strings.TrimSpace(record.ServiceID) == "" {
+			continue
+		}
+		byID[record.ServiceID] = record
+	}
+	return byID, nil
+}
+
 func ensurePromptAgentRecordForBinding(ctx context.Context, s storepkg.Store, ws, serviceID, roleName string, binding *domain.TriggerBinding) error {
 	if existing, err := s.AgentServices().Get(ctx, ws, serviceID); err == nil && existing != nil {
-		return nil
+		if promptAgentRecordMatchesBinding(existing, roleName, binding) {
+			return nil
+		}
+		return fmt.Errorf("agent service %q in workspace %q belongs to a different identity: %w", serviceID, ws, domain.ErrConflict)
 	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return fmt.Errorf("get agent service %q in workspace %q: %w", serviceID, ws, err)
 	}
@@ -147,6 +174,17 @@ func ensurePromptAgentRecordForBinding(ctx context.Context, s storepkg.Store, ws
 		RoleName:     roleName,
 	}); err != nil {
 		if errors.Is(err, domain.ErrAlreadyExists) {
+			// Another serve instance may have won the create after our initial
+			// lookup. Only adopt that winner when it is the exact record this
+			// binding would have created; otherwise attaching the binding would
+			// silently merge unrelated identities.
+			winner, getErr := s.AgentServices().Get(ctx, ws, serviceID)
+			if getErr != nil {
+				return fmt.Errorf("get concurrently created agent service %q in workspace %q: %w", serviceID, ws, getErr)
+			}
+			if !promptAgentRecordMatchesBinding(winner, roleName, binding) {
+				return fmt.Errorf("concurrently created agent service %q in workspace %q belongs to a different identity: %w", serviceID, ws, domain.ErrConflict)
+			}
 			return nil
 		}
 		return fmt.Errorf("create agent service %q in workspace %q: %w", serviceID, ws, err)
@@ -154,17 +192,44 @@ func ensurePromptAgentRecordForBinding(ctx context.Context, s storepkg.Store, ws
 	return nil
 }
 
-func migratedAgentServiceID(seed string, agentNames map[string]struct{}) string {
+func migratedAgentServiceID(
+	seed string,
+	agentNames map[string]struct{},
+	existingRecords map[string]*domain.AgentService,
+	roleName string,
+	binding *domain.TriggerBinding,
+) string {
 	id := strings.TrimSpace(seed)
 	if id == "" {
 		id = "agent"
 	}
 	for {
-		if _, conflict := agentNames[id]; !conflict {
-			return id
+		if _, conflict := agentNames[id]; conflict {
+			id = "agt-" + id
+			continue
 		}
-		id = "agt-" + id
+		if existing, conflict := existingRecords[id]; conflict && !promptAgentRecordMatchesBinding(existing, roleName, binding) {
+			id = "agt-" + id
+			continue
+		}
+		return id
 	}
+}
+
+func promptAgentRecordMatchesBinding(record *domain.AgentService, roleName string, binding *domain.TriggerBinding) bool {
+	if record == nil || binding == nil || record.DeletedAt != nil || strings.TrimSpace(record.Metadata["archived_at"]) != "" {
+		return false
+	}
+	desired := domain.AgentServiceDesiredPaused
+	if binding.Enabled {
+		desired = domain.AgentServiceDesiredRunning
+	}
+	return strings.TrimSpace(record.RoleName) == strings.TrimSpace(roleName) &&
+		strings.TrimSpace(record.DriverID) == "" &&
+		strings.TrimSpace(record.DriverVersionID) == "" &&
+		record.Name == firstNonEmpty(strings.TrimSpace(binding.Name), binding.BindingID) &&
+		record.Kind == agentServiceKindForBinding(binding) &&
+		record.DesiredState == desired
 }
 
 func agentServiceKindForBinding(binding *domain.TriggerBinding) domain.AgentServiceKind {

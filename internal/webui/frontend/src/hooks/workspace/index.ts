@@ -104,5 +104,15 @@ export type {
 export { useWorkspaceTree } from "./useWorkspaceTree";
 export type { EpicWithTasks, UseWorkspaceTreeReturn } from "./useWorkspaceTree";
 
+export {
+  ACTIVE_ISSUE_LOOKUP_RETRY_MS,
+  ACTIVE_ISSUE_LOOKUP_TIMEOUT_MS,
+  useActiveIssueLookups,
+} from "./useActiveIssueLookups";
+export type {
+  ActiveIssueLookup,
+  UseActiveIssueLookupsReturn,
+} from "./useActiveIssueLookups";
+
 export { useRunEpicWorkflow } from "./useRunEpicWorkflow";
 export type { UseRunEpicWorkflowOptions } from "./useRunEpicWorkflow";

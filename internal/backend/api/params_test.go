@@ -338,6 +338,7 @@ func TestCreateParamsToCreateRequest_AllFields(t *testing.T) {
 		Owner:              "bob",
 		CreatedBy:          "charlie",
 		ExternalRef:        "JIRA-1",
+		SourceRepo:         "loomcli",
 		EstimatedMinutes:   &est,
 		Labels:             []string{"a", "b"},
 		Dependencies:       []string{"loom-1", "loom-2"},
@@ -387,6 +388,9 @@ func TestCreateParamsToCreateRequest_AllFields(t *testing.T) {
 	if req.ExternalRef == nil || *req.ExternalRef != "JIRA-1" {
 		t.Errorf("ExternalRef = %v", req.ExternalRef)
 	}
+	if req.SourceRepo == nil || *req.SourceRepo != "loomcli" {
+		t.Errorf("SourceRepo = %v", req.SourceRepo)
+	}
 	if req.EstimatedMinutes == nil || *req.EstimatedMinutes != 30 {
 		t.Errorf("EstimatedMinutes = %v", req.EstimatedMinutes)
 	}
@@ -428,6 +432,9 @@ func TestCreateParamsToCreateRequest_MinimalFields(t *testing.T) {
 	}
 	if req.EstimatedMinutes != nil {
 		t.Errorf("EstimatedMinutes should be nil")
+	}
+	if req.SourceRepo != nil {
+		t.Errorf("SourceRepo should be nil")
 	}
 }
 

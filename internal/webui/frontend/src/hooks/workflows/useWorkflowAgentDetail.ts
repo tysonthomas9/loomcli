@@ -18,6 +18,10 @@ import {
   type WorkflowRun,
 } from "@/api";
 import { useWorkflowRunStreams } from "@/hooks/workflows/useWorkflowRunStreams";
+import {
+  mergeWorkflowRun,
+  mergeWorkflowRunPage,
+} from "@/utils/workflowRunDetail";
 
 export interface WorkflowAgentRunStats {
   total: number;
@@ -54,7 +58,7 @@ export function useWorkflowAgentDetail(
       const res = await listTriggerBindingRuns(workspaceId, bindingId, {
         limit,
       });
-      setRuns(res.runs ?? []);
+      setRuns((previous) => mergeWorkflowRunPage(previous, res.runs ?? []));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load runs");
     } finally {
@@ -83,7 +87,7 @@ export function useWorkflowAgentDetail(
         const idx = prev.findIndex((r) => r.run_id === run.run_id);
         if (idx === -1) return [run, ...prev];
         const next = [...prev];
-        next[idx] = run;
+        next[idx] = mergeWorkflowRun(prev[idx]!, run);
         return next;
       });
       // A terminal transition carries fields the stream patch cannot (final

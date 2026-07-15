@@ -4,7 +4,11 @@
 package gen
 
 import (
+	"encoding/json"
+	"errors"
 	"time"
+
+	"github.com/oapi-codegen/runtime"
 )
 
 const (
@@ -200,6 +204,60 @@ func (e CreateIssueRequestStatus) Valid() bool {
 	case CreateIssueRequestStatusDeferred:
 		return true
 	case CreateIssueRequestStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreatePromptAgentRequestKind.
+const (
+	CreatePromptAgentRequestKindPrompt CreatePromptAgentRequestKind = "prompt"
+)
+
+// Valid indicates whether the value is a known member of the CreatePromptAgentRequestKind enum.
+func (e CreatePromptAgentRequestKind) Valid() bool {
+	switch e {
+	case CreatePromptAgentRequestKindPrompt:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreatePromptAgentTriggerSourceKind.
+const (
+	Cron     CreatePromptAgentTriggerSourceKind = "cron"
+	Internal CreatePromptAgentTriggerSourceKind = "internal"
+)
+
+// Valid indicates whether the value is a known member of the CreatePromptAgentTriggerSourceKind enum.
+func (e CreatePromptAgentTriggerSourceKind) Valid() bool {
+	switch e {
+	case Cron:
+		return true
+	case Internal:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateSupervisedAgentRequestKind.
+const (
+	CreateSupervisedAgentRequestKindInteractive CreateSupervisedAgentRequestKind = "interactive"
+	CreateSupervisedAgentRequestKindSupervised  CreateSupervisedAgentRequestKind = "supervised"
+	CreateSupervisedAgentRequestKindWorker      CreateSupervisedAgentRequestKind = "worker"
+)
+
+// Valid indicates whether the value is a known member of the CreateSupervisedAgentRequestKind enum.
+func (e CreateSupervisedAgentRequestKind) Valid() bool {
+	switch e {
+	case CreateSupervisedAgentRequestKindInteractive:
+		return true
+	case CreateSupervisedAgentRequestKindSupervised:
+		return true
+	case CreateSupervisedAgentRequestKindWorker:
 		return true
 	default:
 		return false
@@ -554,6 +612,21 @@ func (e IssueTabType) Valid() bool {
 	}
 }
 
+// Defines values for LegacyBindingAgentKind.
+const (
+	Binding LegacyBindingAgentKind = "binding"
+)
+
+// Valid indicates whether the value is a known member of the LegacyBindingAgentKind enum.
+func (e LegacyBindingAgentKind) Valid() bool {
+	switch e {
+	case Binding:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for MessageResponseSuccess.
 const (
 	True MessageResponseSuccess = true
@@ -571,16 +644,16 @@ func (e MessageResponseSuccess) Valid() bool {
 
 // Defines values for MonitorAgentStatusRoleKind.
 const (
-	Interactive MonitorAgentStatusRoleKind = "interactive"
-	Worker      MonitorAgentStatusRoleKind = "worker"
+	MonitorAgentStatusRoleKindInteractive MonitorAgentStatusRoleKind = "interactive"
+	MonitorAgentStatusRoleKindWorker      MonitorAgentStatusRoleKind = "worker"
 )
 
 // Valid indicates whether the value is a known member of the MonitorAgentStatusRoleKind enum.
 func (e MonitorAgentStatusRoleKind) Valid() bool {
 	switch e {
-	case Interactive:
+	case MonitorAgentStatusRoleKindInteractive:
 		return true
-	case Worker:
+	case MonitorAgentStatusRoleKindWorker:
 		return true
 	default:
 		return false
@@ -803,6 +876,21 @@ func (e PatchIssueRequestStatus) Valid() bool {
 	}
 }
 
+// Defines values for PromptAgentRecordKind.
+const (
+	PromptAgentRecordKindPrompt PromptAgentRecordKind = "prompt"
+)
+
+// Valid indicates whether the value is a known member of the PromptAgentRecordKind enum.
+func (e PromptAgentRecordKind) Valid() bool {
+	switch e {
+	case PromptAgentRecordKindPrompt:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PullRequestReviewRequestEvent.
 const (
 	PullRequestReviewRequestEventApprove        PullRequestReviewRequestEvent = "approve"
@@ -842,6 +930,21 @@ func (e RuntimeReadyResponseMode) Valid() bool {
 	}
 }
 
+// Defines values for ScriptedAgentRecordKind.
+const (
+	Scripted ScriptedAgentRecordKind = "scripted"
+)
+
+// Valid indicates whether the value is a known member of the ScriptedAgentRecordKind enum.
+func (e ScriptedAgentRecordKind) Valid() bool {
+	switch e {
+	case Scripted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SessionHistoryRecordLauncher.
 const (
 	SessionHistoryRecordLauncherStartWork SessionHistoryRecordLauncher = "start-work"
@@ -872,6 +975,21 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 	case Active:
 		return true
 	case Completed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SupervisedAgentKind.
+const (
+	Supervised SupervisedAgentKind = "supervised"
+)
+
+// Valid indicates whether the value is a known member of the SupervisedAgentKind enum.
+func (e SupervisedAgentKind) Valid() bool {
+	switch e {
+	case Supervised:
 		return true
 	default:
 		return false
@@ -1064,6 +1182,21 @@ func (e WorkspaceResponseDesignFormat) Valid() bool {
 	case Html:
 		return true
 	case Markdown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListAgentsParamsInclude.
+const (
+	Archived ListAgentsParamsInclude = "archived"
+)
+
+// Valid indicates whether the value is a known member of the ListAgentsParamsInclude enum.
+func (e ListAgentsParamsInclude) Valid() bool {
+	switch e {
+	case Archived:
 		return true
 	default:
 		return false
@@ -1561,6 +1694,81 @@ type AgentControlEntry struct {
 	Status string `json:"status"`
 }
 
+// AgentErrorResponse Error envelope emitted by the unified agent handlers. Store-direct
+// errors contain only `error`; service-layer errors also include `kind`.
+type AgentErrorResponse struct {
+	Error string  `json:"error"`
+	Kind  *string `json:"kind,omitempty"`
+}
+
+// AgentLifecycleRequest defines model for AgentLifecycleRequest.
+type AgentLifecycleRequest struct {
+	Payload *map[string]string `json:"payload,omitempty"`
+	TaskId  *string            `json:"task_id,omitempty"`
+}
+
+// AgentRecordBase defines model for AgentRecordBase.
+type AgentRecordBase struct {
+	Bindings            *[]AgentRecordBinding `json:"bindings,omitempty"`
+	BudgetPolicy        *string               `json:"budget_policy,omitempty"`
+	ConsecutiveFailures *int                  `json:"consecutive_failures,omitempty"`
+	CreatedAt           time.Time             `json:"created_at"`
+
+	// Enabled True when the record desired state is `running`.
+	Enabled bool `json:"enabled"`
+
+	// Id Durable AgentService identifier.
+	Id            string             `json:"id"`
+	LastRunStatus *string            `json:"last_run_status,omitempty"`
+	Metadata      *map[string]string `json:"metadata,omitempty"`
+	Name          string             `json:"name"`
+	NextFireAt    *time.Time         `json:"next_fire_at,omitempty"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+	WorkspaceKey  string             `json:"workspace_key"`
+}
+
+// AgentRecordBinding defines model for AgentRecordBinding.
+type AgentRecordBinding struct {
+	ActorFilter          *TriggerActorFilter `json:"actor_filter,omitempty"`
+	AuthPolicy           *string             `json:"auth_policy,omitempty"`
+	BindingId            string              `json:"binding_id"`
+	ConcurrencyPolicy    string              `json:"concurrency_policy"`
+	ConsecutiveFailures  *int                `json:"consecutive_failures,omitempty"`
+	CreatedAt            time.Time           `json:"created_at"`
+	DriverId             string              `json:"driver_id"`
+	DriverVersionId      string              `json:"driver_version_id"`
+	Enabled              bool                `json:"enabled"`
+	EventTypePatterns    *[]string           `json:"event_type_patterns,omitempty"`
+	FilterRef            *string             `json:"filter_ref,omitempty"`
+	IdempotencyPolicy    *string             `json:"idempotency_policy,omitempty"`
+	LastRunStatus        *string             `json:"last_run_status,omitempty"`
+	Method               *string             `json:"method,omitempty"`
+	Name                 string              `json:"name"`
+	NextFireAt           *time.Time          `json:"next_fire_at,omitempty"`
+	PathTemplate         *string             `json:"path_template,omitempty"`
+	Permissions          *[]string           `json:"permissions,omitempty"`
+	RetryBackoffSeconds  *int                `json:"retry_backoff_seconds,omitempty"`
+	RetryMaxAttempts     *int                `json:"retry_max_attempts,omitempty"`
+	RouteKey             *string             `json:"route_key,omitempty"`
+	Schedule             *string             `json:"schedule,omitempty"`
+	ScheduleTimezone     *string             `json:"schedule_timezone,omitempty"`
+	SourceConfigRef      *string             `json:"source_config_ref,omitempty"`
+	SourceKind           string              `json:"source_kind"`
+	SourceRef            *string             `json:"source_ref,omitempty"`
+	SubjectKeyTemplate   *string             `json:"subject_key_template,omitempty"`
+	TargetAgentServiceId *string             `json:"target_agent_service_id,omitempty"`
+	TargetEntrypoint     *string             `json:"target_entrypoint,omitempty"`
+	Topic                *string             `json:"topic,omitempty"`
+	UpdatedAt            time.Time           `json:"updated_at"`
+	WorkspaceKey         string              `json:"workspace_key"`
+}
+
+// AgentRunsResponse defines model for AgentRunsResponse.
+type AgentRunsResponse struct {
+	AgentId string      `json:"agent_id"`
+	Runs    []DriverRun `json:"runs"`
+}
+
 // AgentStatusResponse Agent entity from dto.AgentStatusResponse
 type AgentStatusResponse struct {
 	AgentState   *AgentStatusResponseAgentState `json:"agent_state,omitempty"`
@@ -1717,8 +1925,11 @@ type CreateIssueRequest struct {
 	Owner              *string                     `json:"owner,omitempty"`
 	Parent             *string                     `json:"parent,omitempty"`
 	Priority           int                         `json:"priority"`
-	Status             *CreateIssueRequestStatus   `json:"status,omitempty"`
-	Title              string                      `json:"title"`
+
+	// SourceRepo Stable source repository identifier for multi-repo workspaces
+	SourceRepo *string                   `json:"source_repo,omitempty"`
+	Status     *CreateIssueRequestStatus `json:"status,omitempty"`
+	Title      string                    `json:"title"`
 }
 
 // CreateIssueRequestIssueType defines model for CreateIssueRequest.IssueType.
@@ -1726,6 +1937,135 @@ type CreateIssueRequestIssueType string
 
 // CreateIssueRequestStatus defines model for CreateIssueRequest.Status.
 type CreateIssueRequestStatus string
+
+// CreatePromptAgentBehavior defines model for CreatePromptAgentBehavior.
+type CreatePromptAgentBehavior struct {
+	RoleCreate *CreatePromptRole `json:"role_create,omitempty"`
+	RoleName   string            `json:"role_name"`
+}
+
+// CreatePromptAgentGrant defines model for CreatePromptAgentGrant.
+type CreatePromptAgentGrant struct {
+	Action          string  `json:"action"`
+	ConnectorId     string  `json:"connector_id"`
+	GrantId         *string `json:"grant_id,omitempty"`
+	ResourcePattern string  `json:"resource_pattern"`
+}
+
+// CreatePromptAgentRequest defines model for CreatePromptAgentRequest.
+type CreatePromptAgentRequest struct {
+	Backend      *string                   `json:"backend,omitempty"`
+	Behavior     CreatePromptAgentBehavior `json:"behavior"`
+	BudgetPolicy *string                   `json:"budget_policy,omitempty"`
+
+	// Enabled Defaults to true when omitted.
+	Enabled *bool                        `json:"enabled,omitempty"`
+	Grants  *[]CreatePromptAgentGrant    `json:"grants,omitempty"`
+	Kind    CreatePromptAgentRequestKind `json:"kind"`
+
+	// Name Defaults to `behavior.role_name` when omitted.
+	Name    *string                   `json:"name,omitempty"`
+	Trigger *CreatePromptAgentTrigger `json:"trigger,omitempty"`
+}
+
+// CreatePromptAgentRequestKind defines model for CreatePromptAgentRequest.Kind.
+type CreatePromptAgentRequestKind string
+
+// CreatePromptAgentTrigger defines model for CreatePromptAgentTrigger.
+type CreatePromptAgentTrigger struct {
+	BindingId         *string   `json:"binding_id,omitempty"`
+	Entrypoint        *string   `json:"entrypoint,omitempty"`
+	EventTypePatterns *[]string `json:"event_type_patterns,omitempty"`
+	RouteKey          *string   `json:"route_key,omitempty"`
+	Schedule          *string   `json:"schedule,omitempty"`
+	ScheduleTimezone  *string   `json:"schedule_timezone,omitempty"`
+
+	// SourceKind Defaults to `internal` when omitted.
+	SourceKind *CreatePromptAgentTriggerSourceKind `json:"source_kind,omitempty"`
+}
+
+// CreatePromptAgentTriggerSourceKind Defaults to `internal` when omitted.
+type CreatePromptAgentTriggerSourceKind string
+
+// CreatePromptRole defines model for CreatePromptRole.
+type CreatePromptRole struct {
+	AllowedTools   *[]string `json:"allowed_tools,omitempty"`
+	Backend        *string   `json:"backend,omitempty"`
+	DeniedTools    *[]string `json:"denied_tools,omitempty"`
+	Description    *string   `json:"description,omitempty"`
+	Effort         *string   `json:"effort,omitempty"`
+	Model          *string   `json:"model,omitempty"`
+	Prompt         *string   `json:"prompt,omitempty"`
+	PromptFilename *string   `json:"prompt_filename,omitempty"`
+	ReadOnly       *bool     `json:"read_only,omitempty"`
+	Skills         *[]string `json:"skills,omitempty"`
+	TaskFilter     *string   `json:"task_filter,omitempty"`
+}
+
+// CreateSupervisedAgentRequest defines model for CreateSupervisedAgentRequest.
+type CreateSupervisedAgentRequest struct {
+	Auto             *bool     `json:"auto,omitempty"`
+	Backend          *string   `json:"backend,omitempty"`
+	CrossRepo        *bool     `json:"cross_repo,omitempty"`
+	DesiredState     *string   `json:"desired_state,omitempty"`
+	FallbackBackends *[]string `json:"fallback_backends,omitempty"`
+
+	// Kind `interactive` and `worker` select a role kind. `supervised` is the
+	// unified collection discriminator and leaves role-kind inference to
+	// the referenced role. The field may be omitted for legacy clients.
+	Kind   *CreateSupervisedAgentRequestKind `json:"kind,omitempty"`
+	Name   string                            `json:"name"`
+	Parent *string                           `json:"parent,omitempty"`
+
+	// Prompt Literal inline prompt text for an interactive role.
+	Prompt *string `json:"prompt,omitempty"`
+
+	// PromptFile Custom path or `builtin:<id>` selector for an interactive role.
+	PromptFile   *string   `json:"prompt_file,omitempty"`
+	RepoGroups   *[]string `json:"repo_groups,omitempty"`
+	Repos        *[]string `json:"repos,omitempty"`
+	RoleName     string    `json:"role_name"`
+	WorkspaceKey *string   `json:"workspace_key,omitempty"`
+}
+
+// CreateSupervisedAgentRequestKind `interactive` and `worker` select a role kind. `supervised` is the
+// unified collection discriminator and leaves role-kind inference to
+// the referenced role. The field may be omitted for legacy clients.
+type CreateSupervisedAgentRequestKind string
+
+// CreateUnifiedAgentRequest Create either a supervised assignment or a prompt-backed record.
+// This request union intentionally has no discriminator because legacy
+// supervised clients omit `kind`; the supervised branch constrains every
+// supported non-prompt kind so the two branches remain exclusive.
+type CreateUnifiedAgentRequest struct {
+	union json.RawMessage
+}
+
+// CreatedUnifiedAgent Agent kinds accepted by the collection create route.
+type CreatedUnifiedAgent struct {
+	union json.RawMessage
+}
+
+// DeleteAgentRecordResponse defines model for DeleteAgentRecordResponse.
+type DeleteAgentRecordResponse struct {
+	// Agent Durable prompt-backed or scripted AgentService identity.
+	Agent           DurableAgentRecord `json:"agent"`
+	Archived        bool               `json:"archived"`
+	BindingsDeleted int                `json:"bindings_deleted"`
+	GrantsRevoked   int                `json:"grants_revoked"`
+}
+
+// DeleteLegacyBindingResponse defines model for DeleteLegacyBindingResponse.
+type DeleteLegacyBindingResponse struct {
+	BindingId     string `json:"binding_id"`
+	Deleted       bool   `json:"deleted"`
+	GrantsRevoked int    `json:"grants_revoked"`
+}
+
+// DeleteUnifiedAgentResponse defines model for DeleteUnifiedAgentResponse.
+type DeleteUnifiedAgentResponse struct {
+	union json.RawMessage
+}
 
 // Dependency Full dependency relation from types.Dependency
 type Dependency struct {
@@ -1748,6 +2088,44 @@ type DependencyRef struct {
 
 	// Type Dependency type (e.g. "blocks")
 	Type string `json:"type"`
+}
+
+// DriverRun defines model for DriverRun.
+type DriverRun struct {
+	AgentServiceId        *string            `json:"agent_service_id,omitempty"`
+	CancelRequestedAt     *time.Time         `json:"cancel_requested_at,omitempty"`
+	CancelRequestedReason *string            `json:"cancel_requested_reason,omitempty"`
+	CreatedAt             time.Time          `json:"created_at"`
+	DriverId              string             `json:"driver_id"`
+	DriverVersionId       string             `json:"driver_version_id"`
+	Entrypoint            *string            `json:"entrypoint,omitempty"`
+	EpicId                *string            `json:"epic_id,omitempty"`
+	ErrorClass            *string            `json:"error_class,omitempty"`
+	FencingToken          *int64             `json:"fencing_token,omitempty"`
+	FinishedAt            *time.Time         `json:"finished_at,omitempty"`
+	IdempotencyKey        *string            `json:"idempotency_key,omitempty"`
+	LastHeartbeat         *time.Time         `json:"last_heartbeat,omitempty"`
+	LeaseId               *string            `json:"lease_id,omitempty"`
+	NodeId                *string            `json:"node_id,omitempty"`
+	Output                *map[string]string `json:"output,omitempty"`
+	ParentRunId           *string            `json:"parent_run_id,omitempty"`
+	Payload               interface{}        `json:"payload,omitempty"`
+	ResumeSourceEventId   *string            `json:"resume_source_event_id,omitempty"`
+	RunId                 string             `json:"run_id"`
+	SourceKind            *string            `json:"source_kind,omitempty"`
+	SourceRef             *string            `json:"source_ref,omitempty"`
+	StartedAt             *time.Time         `json:"started_at,omitempty"`
+	Status                string             `json:"status"`
+	Summary               *string            `json:"summary,omitempty"`
+	SuspendedAt           *time.Time         `json:"suspended_at,omitempty"`
+	TriggerBindingId      *string            `json:"trigger_binding_id,omitempty"`
+	UpdatedAt             time.Time          `json:"updated_at"`
+	WorkspaceKey          string             `json:"workspace_key"`
+}
+
+// DurableAgentRecord Durable prompt-backed or scripted AgentService identity.
+type DurableAgentRecord struct {
+	union json.RawMessage
 }
 
 // EditorInfo defines model for EditorInfo.
@@ -2174,6 +2552,49 @@ type IssueTabState struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// LegacyBindingAgent defines model for LegacyBindingAgent.
+type LegacyBindingAgent struct {
+	ActorFilter         *TriggerActorFilter `json:"actor_filter,omitempty"`
+	AuthPolicy          *string             `json:"auth_policy,omitempty"`
+	BindingId           string              `json:"binding_id"`
+	ConcurrencyPolicy   string              `json:"concurrency_policy"`
+	ConsecutiveFailures *int                `json:"consecutive_failures,omitempty"`
+	CreatedAt           time.Time           `json:"created_at"`
+	DriverId            string              `json:"driver_id"`
+	DriverVersionId     string              `json:"driver_version_id"`
+	Enabled             bool                `json:"enabled"`
+	EventTypePatterns   *[]string           `json:"event_type_patterns,omitempty"`
+	FilterRef           *string             `json:"filter_ref,omitempty"`
+
+	// Id Stable collection identifier; equal to `binding_id`.
+	Id                   string                 `json:"id"`
+	IdempotencyPolicy    *string                `json:"idempotency_policy,omitempty"`
+	Kind                 LegacyBindingAgentKind `json:"kind"`
+	LastRunStatus        *string                `json:"last_run_status,omitempty"`
+	Method               *string                `json:"method,omitempty"`
+	Name                 string                 `json:"name"`
+	NextFireAt           *time.Time             `json:"next_fire_at,omitempty"`
+	PathTemplate         *string                `json:"path_template,omitempty"`
+	Permissions          *[]string              `json:"permissions,omitempty"`
+	RetryBackoffSeconds  *int                   `json:"retry_backoff_seconds,omitempty"`
+	RetryMaxAttempts     *int                   `json:"retry_max_attempts,omitempty"`
+	RouteKey             *string                `json:"route_key,omitempty"`
+	Schedule             *string                `json:"schedule,omitempty"`
+	ScheduleTimezone     *string                `json:"schedule_timezone,omitempty"`
+	SourceConfigRef      *string                `json:"source_config_ref,omitempty"`
+	SourceKind           string                 `json:"source_kind"`
+	SourceRef            *string                `json:"source_ref,omitempty"`
+	SubjectKeyTemplate   *string                `json:"subject_key_template,omitempty"`
+	TargetAgentServiceId *string                `json:"target_agent_service_id,omitempty"`
+	TargetEntrypoint     *string                `json:"target_entrypoint,omitempty"`
+	Topic                *string                `json:"topic,omitempty"`
+	UpdatedAt            time.Time              `json:"updated_at"`
+	WorkspaceKey         string                 `json:"workspace_key"`
+}
+
+// LegacyBindingAgentKind defines model for LegacyBindingAgent.Kind.
+type LegacyBindingAgentKind string
+
 // MessageResponse defines model for MessageResponse.
 type MessageResponse struct {
 	Message string                 `json:"message"`
@@ -2519,6 +2940,57 @@ type PatchIssueRequestDesignFormat string
 // PatchIssueRequestStatus defines model for PatchIssueRequest.Status.
 type PatchIssueRequestStatus string
 
+// PatchUnifiedAgentRequest Kind-sensitive partial update. Durable records accept `name`,
+// `behavior`, and `budget_policy`; legacy binding entries accept only
+// `name`; supervised assignments accept the remaining assignment fields.
+type PatchUnifiedAgentRequest struct {
+	Auto     *bool   `json:"auto,omitempty"`
+	Backend  *string `json:"backend,omitempty"`
+	Behavior *struct {
+		RoleName *string `json:"role_name,omitempty"`
+	} `json:"behavior,omitempty"`
+	BudgetPolicy     *string   `json:"budget_policy,omitempty"`
+	CrossRepo        *bool     `json:"cross_repo,omitempty"`
+	DesiredState     *string   `json:"desired_state,omitempty"`
+	FallbackBackends *[]string `json:"fallback_backends,omitempty"`
+	Name             *string   `json:"name,omitempty"`
+	Parent           *string   `json:"parent,omitempty"`
+	RepoGroups       *[]string `json:"repo_groups,omitempty"`
+	Repos            *[]string `json:"repos,omitempty"`
+	RoleName         *string   `json:"role_name,omitempty"`
+	State            *string   `json:"state,omitempty"`
+}
+
+// PromptAgentBehavior defines model for PromptAgentBehavior.
+type PromptAgentBehavior struct {
+	RoleName string `json:"role_name"`
+}
+
+// PromptAgentRecord defines model for PromptAgentRecord.
+type PromptAgentRecord struct {
+	Behavior            PromptAgentBehavior   `json:"behavior"`
+	Bindings            *[]AgentRecordBinding `json:"bindings,omitempty"`
+	BudgetPolicy        *string               `json:"budget_policy,omitempty"`
+	ConsecutiveFailures *int                  `json:"consecutive_failures,omitempty"`
+	CreatedAt           time.Time             `json:"created_at"`
+
+	// Enabled True when the record desired state is `running`.
+	Enabled bool `json:"enabled"`
+
+	// Id Durable AgentService identifier.
+	Id            string                `json:"id"`
+	Kind          PromptAgentRecordKind `json:"kind"`
+	LastRunStatus *string               `json:"last_run_status,omitempty"`
+	Metadata      *map[string]string    `json:"metadata,omitempty"`
+	Name          string                `json:"name"`
+	NextFireAt    *time.Time            `json:"next_fire_at,omitempty"`
+	UpdatedAt     time.Time             `json:"updated_at"`
+	WorkspaceKey  string                `json:"workspace_key"`
+}
+
+// PromptAgentRecordKind defines model for PromptAgentRecord.Kind.
+type PromptAgentRecordKind string
+
 // PullRequestDetail defines model for PullRequestDetail.
 type PullRequestDetail struct {
 	BaseRefName string `json:"base_ref_name"`
@@ -2612,6 +3084,37 @@ type RuntimeReadyResponse struct {
 // RuntimeReadyResponseMode defines model for RuntimeReadyResponse.Mode.
 type RuntimeReadyResponseMode string
 
+// ScriptedAgentBehavior defines model for ScriptedAgentBehavior.
+type ScriptedAgentBehavior struct {
+	DriverId        string `json:"driver_id"`
+	DriverVersionId string `json:"driver_version_id"`
+}
+
+// ScriptedAgentRecord defines model for ScriptedAgentRecord.
+type ScriptedAgentRecord struct {
+	Behavior            ScriptedAgentBehavior `json:"behavior"`
+	Bindings            *[]AgentRecordBinding `json:"bindings,omitempty"`
+	BudgetPolicy        *string               `json:"budget_policy,omitempty"`
+	ConsecutiveFailures *int                  `json:"consecutive_failures,omitempty"`
+	CreatedAt           time.Time             `json:"created_at"`
+
+	// Enabled True when the record desired state is `running`.
+	Enabled bool `json:"enabled"`
+
+	// Id Durable AgentService identifier.
+	Id            string                  `json:"id"`
+	Kind          ScriptedAgentRecordKind `json:"kind"`
+	LastRunStatus *string                 `json:"last_run_status,omitempty"`
+	Metadata      *map[string]string      `json:"metadata,omitempty"`
+	Name          string                  `json:"name"`
+	NextFireAt    *time.Time              `json:"next_fire_at,omitempty"`
+	UpdatedAt     time.Time               `json:"updated_at"`
+	WorkspaceKey  string                  `json:"workspace_key"`
+}
+
+// ScriptedAgentRecordKind defines model for ScriptedAgentRecord.Kind.
+type ScriptedAgentRecordKind string
+
 // SeedRequest defines model for SeedRequest.
 type SeedRequest struct {
 	Blockers *[]struct {
@@ -2697,6 +3200,46 @@ type Statistics struct {
 	TombstoneIssues         int     `json:"tombstone_issues"`
 	TotalIssues             int     `json:"total_issues"`
 }
+
+// StopAgentRequest defines model for StopAgentRequest.
+type StopAgentRequest struct {
+	Force   *bool              `json:"force,omitempty"`
+	Payload *map[string]string `json:"payload,omitempty"`
+	TaskId  *string            `json:"task_id,omitempty"`
+}
+
+// SupervisedAgent Long-lived role assignment supervised by the Loom daemon.
+type SupervisedAgent struct {
+	ActivePhase      *string   `json:"active_phase,omitempty"`
+	ActiveTaskId     *string   `json:"active_task_id,omitempty"`
+	Auto             *bool     `json:"auto,omitempty"`
+	Backend          *string   `json:"backend,omitempty"`
+	BudgetPolicy     *string   `json:"budget_policy,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	CrossRepo        *bool     `json:"cross_repo,omitempty"`
+	DesiredState     *string   `json:"desired_state,omitempty"`
+	FallbackBackends *[]string `json:"fallback_backends,omitempty"`
+
+	// Id Stable collection identifier; equal to `name` for supervised assignments.
+	Id             string              `json:"id"`
+	Kind           SupervisedAgentKind `json:"kind"`
+	LastErrorClass *string             `json:"last_error_class,omitempty"`
+	LiveStatus     *string             `json:"live_status,omitempty"`
+	MaxConcurrency *int                `json:"max_concurrency,omitempty"`
+	Mode           *string             `json:"mode,omitempty"`
+	Name           string              `json:"name"`
+	Parent         *string             `json:"parent,omitempty"`
+	RepoGroups     *[]string           `json:"repo_groups,omitempty"`
+	Repos          *[]string           `json:"repos,omitempty"`
+	RoleName       string              `json:"role_name"`
+	State          *string             `json:"state,omitempty"`
+	TaskFilter     *string             `json:"task_filter,omitempty"`
+	UpdatedAt      time.Time           `json:"updated_at"`
+	WorkspaceKey   string              `json:"workspace_key"`
+}
+
+// SupervisedAgentKind defines model for SupervisedAgent.Kind.
+type SupervisedAgentKind string
 
 // TabMetadata Terminal tab metadata (Redis-backed)
 type TabMetadata struct {
@@ -2848,6 +3391,57 @@ type TreeNodeIssueType string
 // are not settable via the API and excluded from this enum.
 type TreeNodeStatus string
 
+// TriggerActorFilter defines model for TriggerActorFilter.
+type TriggerActorFilter struct {
+	AllowActors       *[]string `json:"allow_actors,omitempty"`
+	ExcludeActorKinds *[]string `json:"exclude_actor_kinds,omitempty"`
+}
+
+// TriggerBinding defines model for TriggerBinding.
+type TriggerBinding struct {
+	ActorFilter          *TriggerActorFilter `json:"actor_filter,omitempty"`
+	AuthPolicy           *string             `json:"auth_policy,omitempty"`
+	BindingId            string              `json:"binding_id"`
+	ConcurrencyPolicy    string              `json:"concurrency_policy"`
+	CreatedAt            time.Time           `json:"created_at"`
+	DriverId             string              `json:"driver_id"`
+	DriverVersionId      string              `json:"driver_version_id"`
+	Enabled              bool                `json:"enabled"`
+	EventTypePatterns    *[]string           `json:"event_type_patterns,omitempty"`
+	FilterRef            *string             `json:"filter_ref,omitempty"`
+	IdempotencyPolicy    *string             `json:"idempotency_policy,omitempty"`
+	Method               *string             `json:"method,omitempty"`
+	Name                 string              `json:"name"`
+	PathTemplate         *string             `json:"path_template,omitempty"`
+	Permissions          *[]string           `json:"permissions,omitempty"`
+	RetryBackoffSeconds  *int                `json:"retry_backoff_seconds,omitempty"`
+	RetryMaxAttempts     *int                `json:"retry_max_attempts,omitempty"`
+	RouteKey             *string             `json:"route_key,omitempty"`
+	Schedule             *string             `json:"schedule,omitempty"`
+	ScheduleTimezone     *string             `json:"schedule_timezone,omitempty"`
+	SourceConfigRef      *string             `json:"source_config_ref,omitempty"`
+	SourceKind           string              `json:"source_kind"`
+	SourceRef            *string             `json:"source_ref,omitempty"`
+	SubjectKeyTemplate   *string             `json:"subject_key_template,omitempty"`
+	TargetAgentServiceId *string             `json:"target_agent_service_id,omitempty"`
+	TargetEntrypoint     *string             `json:"target_entrypoint,omitempty"`
+	Topic                *string             `json:"topic,omitempty"`
+	UpdatedAt            time.Time           `json:"updated_at"`
+	WorkspaceKey         string              `json:"workspace_key"`
+}
+
+// UnifiedAgent defines model for UnifiedAgent.
+type UnifiedAgent struct {
+	union json.RawMessage
+}
+
+// UnifiedAgentListResponse defines model for UnifiedAgentListResponse.
+type UnifiedAgentListResponse struct {
+	Data    []UnifiedAgent `json:"data"`
+	Success bool           `json:"success"`
+	Total   int            `json:"total"`
+}
+
 // UsageAgentSummary defines model for UsageAgentSummary.
 type UsageAgentSummary struct {
 	InputTokens  int64   `json:"input_tokens"`
@@ -2985,6 +3579,9 @@ type WorkspaceSummary struct {
 	RepoCount int     `json:"repo_count"`
 }
 
+// AgentId defines model for AgentId.
+type AgentId = string
+
 // AgentName defines model for AgentName.
 type AgentName = string
 
@@ -3055,28 +3652,18 @@ type ReorderWorkspacesJSONBody struct {
 	Order []string `json:"order"`
 }
 
-// CreateAgentJSONBody defines parameters for CreateAgent.
-type CreateAgentJSONBody struct {
-	Auto             *bool     `json:"auto,omitempty"`
-	Backend          *string   `json:"backend,omitempty"`
-	CrossRepo        *bool     `json:"cross_repo,omitempty"`
-	DesiredState     *string   `json:"desired_state,omitempty"`
-	FallbackBackends *[]string `json:"fallback_backends,omitempty"`
+// ListAgentsParams defines parameters for ListAgents.
+type ListAgentsParams struct {
+	// Include Set to `archived` to include archived durable agent records.
+	Include *ListAgentsParamsInclude `form:"include,omitempty" json:"include,omitempty"`
+}
 
-	// Kind Optional role kind for creating an interactive role.
-	Kind   *string `json:"kind,omitempty"`
-	Name   string  `json:"name"`
-	Parent *string `json:"parent,omitempty"`
+// ListAgentsParamsInclude defines parameters for ListAgents.
+type ListAgentsParamsInclude string
 
-	// Prompt Literal inline prompt text for interactive roles.
-	Prompt *string `json:"prompt,omitempty"`
-
-	// PromptFile Custom or builtin prompt selector for interactive roles.
-	PromptFile   *string   `json:"prompt_file,omitempty"`
-	RepoGroups   *[]string `json:"repo_groups,omitempty"`
-	Repos        *[]string `json:"repos,omitempty"`
-	RoleName     string    `json:"role_name"`
-	WorkspaceKey *string   `json:"workspace_key,omitempty"`
+// ListAgentRunsParams defines parameters for ListAgentRuns.
+type ListAgentRunsParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetDiffFileParams defines parameters for GetDiffFile.
@@ -3108,11 +3695,6 @@ type GetAgentLogParams struct {
 
 	// BeforeLine Read lines before this line number (for pagination)
 	BeforeLine *int64 `form:"before_line,omitempty" json:"before_line,omitempty"`
-}
-
-// StopAgentJSONBody defines parameters for StopAgent.
-type StopAgentJSONBody struct {
-	Force *bool `json:"force,omitempty"`
 }
 
 // ConnectAgentTerminalWSParams defines parameters for ConnectAgentTerminalWS.
@@ -3491,7 +4073,10 @@ type SetDefaultWorkspaceJSONRequestBody SetDefaultWorkspaceJSONBody
 type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
-type CreateAgentJSONRequestBody CreateAgentJSONBody
+type CreateAgentJSONRequestBody = CreateUnifiedAgentRequest
+
+// PatchAgentJSONRequestBody defines body for PatchAgent for application/json ContentType.
+type PatchAgentJSONRequestBody = PatchUnifiedAgentRequest
 
 // GitPullJSONRequestBody defines body for GitPull for application/json ContentType.
 type GitPullJSONRequestBody GitPullJSONBody
@@ -3502,8 +4087,17 @@ type GitPushJSONRequestBody GitPushJSONBody
 // UpdateGitTargetJSONRequestBody defines body for UpdateGitTarget for application/json ContentType.
 type UpdateGitTargetJSONRequestBody UpdateGitTargetJSONBody
 
+// RestartAgentJSONRequestBody defines body for RestartAgent for application/json ContentType.
+type RestartAgentJSONRequestBody = AgentLifecycleRequest
+
+// StartAgentJSONRequestBody defines body for StartAgent for application/json ContentType.
+type StartAgentJSONRequestBody = AgentLifecycleRequest
+
 // StopAgentJSONRequestBody defines body for StopAgent for application/json ContentType.
-type StopAgentJSONRequestBody StopAgentJSONBody
+type StopAgentJSONRequestBody = StopAgentRequest
+
+// YieldAgentJSONRequestBody defines body for YieldAgent for application/json ContentType.
+type YieldAgentJSONRequestBody = AgentLifecycleRequest
 
 // PatchWorkspaceBackendJSONRequestBody defines body for PatchWorkspaceBackend for application/json ContentType.
 type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
@@ -3579,3 +4173,480 @@ type PatchTerminalTabJSONRequestBody = TabPatchRequest
 
 // PutTerminalTabJSONRequestBody defines body for PutTerminalTab for application/json ContentType.
 type PutTerminalTabJSONRequestBody = TabPutRequest
+
+// AsCreateSupervisedAgentRequest returns the union data inside the CreateUnifiedAgentRequest as a CreateSupervisedAgentRequest
+func (t CreateUnifiedAgentRequest) AsCreateSupervisedAgentRequest() (CreateSupervisedAgentRequest, error) {
+	var body CreateSupervisedAgentRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCreateSupervisedAgentRequest overwrites any union data inside the CreateUnifiedAgentRequest as the provided CreateSupervisedAgentRequest
+func (t *CreateUnifiedAgentRequest) FromCreateSupervisedAgentRequest(v CreateSupervisedAgentRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCreateSupervisedAgentRequest performs a merge with any union data inside the CreateUnifiedAgentRequest, using the provided CreateSupervisedAgentRequest
+func (t *CreateUnifiedAgentRequest) MergeCreateSupervisedAgentRequest(v CreateSupervisedAgentRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsCreatePromptAgentRequest returns the union data inside the CreateUnifiedAgentRequest as a CreatePromptAgentRequest
+func (t CreateUnifiedAgentRequest) AsCreatePromptAgentRequest() (CreatePromptAgentRequest, error) {
+	var body CreatePromptAgentRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCreatePromptAgentRequest overwrites any union data inside the CreateUnifiedAgentRequest as the provided CreatePromptAgentRequest
+func (t *CreateUnifiedAgentRequest) FromCreatePromptAgentRequest(v CreatePromptAgentRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCreatePromptAgentRequest performs a merge with any union data inside the CreateUnifiedAgentRequest, using the provided CreatePromptAgentRequest
+func (t *CreateUnifiedAgentRequest) MergeCreatePromptAgentRequest(v CreatePromptAgentRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t CreateUnifiedAgentRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *CreateUnifiedAgentRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsSupervisedAgent returns the union data inside the CreatedUnifiedAgent as a SupervisedAgent
+func (t CreatedUnifiedAgent) AsSupervisedAgent() (SupervisedAgent, error) {
+	var body SupervisedAgent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSupervisedAgent overwrites any union data inside the CreatedUnifiedAgent as the provided SupervisedAgent
+func (t *CreatedUnifiedAgent) FromSupervisedAgent(v SupervisedAgent) error {
+	v.Kind = "supervised"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSupervisedAgent performs a merge with any union data inside the CreatedUnifiedAgent, using the provided SupervisedAgent
+func (t *CreatedUnifiedAgent) MergeSupervisedAgent(v SupervisedAgent) error {
+	v.Kind = "supervised"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPromptAgentRecord returns the union data inside the CreatedUnifiedAgent as a PromptAgentRecord
+func (t CreatedUnifiedAgent) AsPromptAgentRecord() (PromptAgentRecord, error) {
+	var body PromptAgentRecord
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPromptAgentRecord overwrites any union data inside the CreatedUnifiedAgent as the provided PromptAgentRecord
+func (t *CreatedUnifiedAgent) FromPromptAgentRecord(v PromptAgentRecord) error {
+	v.Kind = "prompt"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePromptAgentRecord performs a merge with any union data inside the CreatedUnifiedAgent, using the provided PromptAgentRecord
+func (t *CreatedUnifiedAgent) MergePromptAgentRecord(v PromptAgentRecord) error {
+	v.Kind = "prompt"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t CreatedUnifiedAgent) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"kind"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t CreatedUnifiedAgent) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "prompt":
+		return t.AsPromptAgentRecord()
+	case "supervised":
+		return t.AsSupervisedAgent()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t CreatedUnifiedAgent) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *CreatedUnifiedAgent) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsMessageResponse returns the union data inside the DeleteUnifiedAgentResponse as a MessageResponse
+func (t DeleteUnifiedAgentResponse) AsMessageResponse() (MessageResponse, error) {
+	var body MessageResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromMessageResponse overwrites any union data inside the DeleteUnifiedAgentResponse as the provided MessageResponse
+func (t *DeleteUnifiedAgentResponse) FromMessageResponse(v MessageResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeMessageResponse performs a merge with any union data inside the DeleteUnifiedAgentResponse, using the provided MessageResponse
+func (t *DeleteUnifiedAgentResponse) MergeMessageResponse(v MessageResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsDeleteAgentRecordResponse returns the union data inside the DeleteUnifiedAgentResponse as a DeleteAgentRecordResponse
+func (t DeleteUnifiedAgentResponse) AsDeleteAgentRecordResponse() (DeleteAgentRecordResponse, error) {
+	var body DeleteAgentRecordResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDeleteAgentRecordResponse overwrites any union data inside the DeleteUnifiedAgentResponse as the provided DeleteAgentRecordResponse
+func (t *DeleteUnifiedAgentResponse) FromDeleteAgentRecordResponse(v DeleteAgentRecordResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDeleteAgentRecordResponse performs a merge with any union data inside the DeleteUnifiedAgentResponse, using the provided DeleteAgentRecordResponse
+func (t *DeleteUnifiedAgentResponse) MergeDeleteAgentRecordResponse(v DeleteAgentRecordResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsDeleteLegacyBindingResponse returns the union data inside the DeleteUnifiedAgentResponse as a DeleteLegacyBindingResponse
+func (t DeleteUnifiedAgentResponse) AsDeleteLegacyBindingResponse() (DeleteLegacyBindingResponse, error) {
+	var body DeleteLegacyBindingResponse
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDeleteLegacyBindingResponse overwrites any union data inside the DeleteUnifiedAgentResponse as the provided DeleteLegacyBindingResponse
+func (t *DeleteUnifiedAgentResponse) FromDeleteLegacyBindingResponse(v DeleteLegacyBindingResponse) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDeleteLegacyBindingResponse performs a merge with any union data inside the DeleteUnifiedAgentResponse, using the provided DeleteLegacyBindingResponse
+func (t *DeleteUnifiedAgentResponse) MergeDeleteLegacyBindingResponse(v DeleteLegacyBindingResponse) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DeleteUnifiedAgentResponse) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DeleteUnifiedAgentResponse) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsPromptAgentRecord returns the union data inside the DurableAgentRecord as a PromptAgentRecord
+func (t DurableAgentRecord) AsPromptAgentRecord() (PromptAgentRecord, error) {
+	var body PromptAgentRecord
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPromptAgentRecord overwrites any union data inside the DurableAgentRecord as the provided PromptAgentRecord
+func (t *DurableAgentRecord) FromPromptAgentRecord(v PromptAgentRecord) error {
+	v.Kind = "prompt"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePromptAgentRecord performs a merge with any union data inside the DurableAgentRecord, using the provided PromptAgentRecord
+func (t *DurableAgentRecord) MergePromptAgentRecord(v PromptAgentRecord) error {
+	v.Kind = "prompt"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsScriptedAgentRecord returns the union data inside the DurableAgentRecord as a ScriptedAgentRecord
+func (t DurableAgentRecord) AsScriptedAgentRecord() (ScriptedAgentRecord, error) {
+	var body ScriptedAgentRecord
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromScriptedAgentRecord overwrites any union data inside the DurableAgentRecord as the provided ScriptedAgentRecord
+func (t *DurableAgentRecord) FromScriptedAgentRecord(v ScriptedAgentRecord) error {
+	v.Kind = "scripted"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeScriptedAgentRecord performs a merge with any union data inside the DurableAgentRecord, using the provided ScriptedAgentRecord
+func (t *DurableAgentRecord) MergeScriptedAgentRecord(v ScriptedAgentRecord) error {
+	v.Kind = "scripted"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DurableAgentRecord) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"kind"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t DurableAgentRecord) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "prompt":
+		return t.AsPromptAgentRecord()
+	case "scripted":
+		return t.AsScriptedAgentRecord()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t DurableAgentRecord) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DurableAgentRecord) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsSupervisedAgent returns the union data inside the UnifiedAgent as a SupervisedAgent
+func (t UnifiedAgent) AsSupervisedAgent() (SupervisedAgent, error) {
+	var body SupervisedAgent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromSupervisedAgent overwrites any union data inside the UnifiedAgent as the provided SupervisedAgent
+func (t *UnifiedAgent) FromSupervisedAgent(v SupervisedAgent) error {
+	v.Kind = "supervised"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeSupervisedAgent performs a merge with any union data inside the UnifiedAgent, using the provided SupervisedAgent
+func (t *UnifiedAgent) MergeSupervisedAgent(v SupervisedAgent) error {
+	v.Kind = "supervised"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPromptAgentRecord returns the union data inside the UnifiedAgent as a PromptAgentRecord
+func (t UnifiedAgent) AsPromptAgentRecord() (PromptAgentRecord, error) {
+	var body PromptAgentRecord
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPromptAgentRecord overwrites any union data inside the UnifiedAgent as the provided PromptAgentRecord
+func (t *UnifiedAgent) FromPromptAgentRecord(v PromptAgentRecord) error {
+	v.Kind = "prompt"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePromptAgentRecord performs a merge with any union data inside the UnifiedAgent, using the provided PromptAgentRecord
+func (t *UnifiedAgent) MergePromptAgentRecord(v PromptAgentRecord) error {
+	v.Kind = "prompt"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsScriptedAgentRecord returns the union data inside the UnifiedAgent as a ScriptedAgentRecord
+func (t UnifiedAgent) AsScriptedAgentRecord() (ScriptedAgentRecord, error) {
+	var body ScriptedAgentRecord
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromScriptedAgentRecord overwrites any union data inside the UnifiedAgent as the provided ScriptedAgentRecord
+func (t *UnifiedAgent) FromScriptedAgentRecord(v ScriptedAgentRecord) error {
+	v.Kind = "scripted"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeScriptedAgentRecord performs a merge with any union data inside the UnifiedAgent, using the provided ScriptedAgentRecord
+func (t *UnifiedAgent) MergeScriptedAgentRecord(v ScriptedAgentRecord) error {
+	v.Kind = "scripted"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsLegacyBindingAgent returns the union data inside the UnifiedAgent as a LegacyBindingAgent
+func (t UnifiedAgent) AsLegacyBindingAgent() (LegacyBindingAgent, error) {
+	var body LegacyBindingAgent
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromLegacyBindingAgent overwrites any union data inside the UnifiedAgent as the provided LegacyBindingAgent
+func (t *UnifiedAgent) FromLegacyBindingAgent(v LegacyBindingAgent) error {
+	v.Kind = "binding"
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeLegacyBindingAgent performs a merge with any union data inside the UnifiedAgent, using the provided LegacyBindingAgent
+func (t *UnifiedAgent) MergeLegacyBindingAgent(v LegacyBindingAgent) error {
+	v.Kind = "binding"
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t UnifiedAgent) Discriminator() (string, error) {
+	var discriminator struct {
+		Discriminator string `json:"kind"`
+	}
+	err := json.Unmarshal(t.union, &discriminator)
+	return discriminator.Discriminator, err
+}
+
+func (t UnifiedAgent) ValueByDiscriminator() (interface{}, error) {
+	discriminator, err := t.Discriminator()
+	if err != nil {
+		return nil, err
+	}
+	switch discriminator {
+	case "binding":
+		return t.AsLegacyBindingAgent()
+	case "prompt":
+		return t.AsPromptAgentRecord()
+	case "scripted":
+		return t.AsScriptedAgentRecord()
+	case "supervised":
+		return t.AsSupervisedAgent()
+	default:
+		return nil, errors.New("unknown discriminator value: " + discriminator)
+	}
+}
+
+func (t UnifiedAgent) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *UnifiedAgent) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}

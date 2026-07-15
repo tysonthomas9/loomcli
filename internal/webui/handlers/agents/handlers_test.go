@@ -78,11 +78,16 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
 	}
-	var created domain.Agent
+	var created struct {
+		ID       string `json:"id"`
+		Kind     string `json:"kind"`
+		Name     string `json:"name"`
+		RoleName string `json:"role_name"`
+	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created agent: %v", err)
 	}
-	if created.Name != "review-nova" || created.RoleName != "pr-review" {
+	if created.ID != "review-nova" || created.Kind != agentRecordKindSupervised || created.Name != "review-nova" || created.RoleName != "pr-review" {
 		t.Fatalf("created agent = %#v, want review-nova/pr-review", created)
 	}
 	role, err := st.Roles().Get(ctx, "TEST2", "pr-review")
@@ -91,6 +96,275 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 	}
 	if role.Kind != domain.RoleKindInteractive || role.PromptFile != "builtin:pr-review" {
 		t.Fatalf("role = kind:%q prompt:%q, want interactive builtin:pr-review", role.Kind, role.PromptFile)
+	}
+
+}
+
+func TestModuleListWithoutRecordStoreUsesUnifiedSupervisedShape(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST2", Name: "Test 2"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "TEST2", Name: "falcon", RoleName: "task"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	mux := http.NewServeMux()
+	NewModule(agentSvc, nil, nil).Register(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST2/agents", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list status = %d body=%s, want 200", rr.Code, rr.Body.String())
+	}
+	var response struct {
+		Data []struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(response.Data) != 1 || response.Data[0].ID != "falcon" || response.Data[0].Name != "falcon" || response.Data[0].Kind != agentRecordKindSupervised {
+		t.Fatalf("list response = %+v, want one unified supervised falcon", response.Data)
+	}
+}
+
+func TestModuleCreateRoutesInteractiveKindToAgentService(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key:           "TEST2",
+		Name:          "Test 2",
+		DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	mux := http.NewServeMux()
+	NewModule(agentSvc, st, nil).Register(mux)
+	body := []byte(`{
+		"name":"review-nova",
+		"role_name":"pr-review",
+		"kind":"interactive",
+		"prompt_file":"builtin:pr-review",
+		"backend":"codex"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
+	}
+	assertSupervisedAgentWireResponse(t, rr, "review-nova")
+	role, err := st.Roles().Get(ctx, "TEST2", "pr-review")
+	if err != nil {
+		t.Fatalf("load created role: %v", err)
+	}
+	if role.Kind != domain.RoleKindInteractive || role.PromptFile != "builtin:pr-review" {
+		t.Fatalf("role = kind:%q prompt:%q, want interactive builtin:pr-review", role.Kind, role.PromptFile)
+	}
+
+	inlineBody := []byte(`{
+		"name":"custom-review",
+		"role_name":"custom-review",
+		"kind":"interactive",
+		"prompt":"Review literally: {{ marker }}",
+		"backend":"codex"
+	}`)
+	inlineReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewReader(inlineBody))
+	inlineRR := httptest.NewRecorder()
+	mux.ServeHTTP(inlineRR, inlineReq)
+	if inlineRR.Code != http.StatusCreated {
+		t.Fatalf("inline status = %d body = %s, want 201", inlineRR.Code, inlineRR.Body.String())
+	}
+	assertSupervisedAgentWireResponse(t, inlineRR, "custom-review")
+	inlineRole, err := st.Roles().Get(ctx, "TEST2", "custom-review")
+	if err != nil {
+		t.Fatalf("load inline role: %v", err)
+	}
+	if inlineRole.Kind != domain.RoleKindInteractive || inlineRole.Prompt != "Review literally: {{ marker }}" {
+		t.Fatalf("inline role = kind:%q prompt:%q, want interactive literal prompt", inlineRole.Kind, inlineRole.Prompt)
+	}
+
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/workspaces/TEST2/agents/review-nova", bytes.NewBufferString(`{"backend":"claude"}`))
+	patchRR := httptest.NewRecorder()
+	mux.ServeHTTP(patchRR, patchReq)
+	if patchRR.Code != http.StatusOK {
+		t.Fatalf("patch status = %d body = %s, want 200", patchRR.Code, patchRR.Body.String())
+	}
+	assertSupervisedAgentWireResponse(t, patchRR, "review-nova")
+}
+
+func TestModuleCreateDispatchesSupportedKindNamespaces(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		agentName  string
+		seedWorker bool
+		wantStatus int
+	}{
+		{
+			name:       "worker role kind",
+			body:       `{"name":"docs-worker","role_name":"docs-worker","kind":"worker","backend":"codex"}`,
+			agentName:  "docs-worker",
+			seedWorker: true,
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "supervised record kind",
+			body:       `{"name":"task-worker","role_name":"task","kind":"supervised","backend":"codex"}`,
+			agentName:  "task-worker",
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "legacy omitted kind",
+			body:       `{"name":"legacy-worker","role_name":"task","backend":"codex"}`,
+			agentName:  "legacy-worker",
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "unknown kind",
+			body:       `{"name":"unknown-worker","role_name":"task","kind":"mystery","backend":"codex"}`,
+			agentName:  "unknown-worker",
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st := memstore.New()
+			if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+				Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+			}); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+			if tt.seedWorker {
+				if _, err := st.Roles().Create(ctx, store.RoleCreate{
+					WorkspaceKey: "TEST2",
+					Name:         "docs-worker",
+					Kind:         string(domain.RoleKindWorker),
+				}); err != nil {
+					t.Fatalf("create worker role: %v", err)
+				}
+			}
+			agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+			mux := http.NewServeMux()
+			NewModule(agentSvc, st, nil).Register(mux)
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents", bytes.NewBufferString(tt.body))
+			rr := httptest.NewRecorder()
+
+			mux.ServeHTTP(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d body = %s, want %d", rr.Code, rr.Body.String(), tt.wantStatus)
+			}
+			_, err := st.Agents().Get(ctx, "TEST2", tt.agentName)
+			if tt.wantStatus == http.StatusCreated && err != nil {
+				t.Fatalf("load created agent: %v", err)
+			}
+			if tt.wantStatus == http.StatusCreated {
+				assertSupervisedAgentWireResponse(t, rr, tt.agentName)
+			}
+			if tt.wantStatus != http.StatusCreated && err == nil {
+				t.Fatal("unsupported kind unexpectedly persisted an agent")
+			}
+		})
+	}
+}
+
+func assertSupervisedAgentWireResponse(t *testing.T, rr *httptest.ResponseRecorder, wantName string) {
+	t.Helper()
+	var got struct {
+		ID   string `json:"id"`
+		Kind string `json:"kind"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode supervised agent response: %v", err)
+	}
+	if got.ID != wantName || got.Name != wantName || got.Kind != agentRecordKindSupervised {
+		t.Fatalf("supervised response = %+v, want id/name %q and kind %q; body=%s", got, wantName, agentRecordKindSupervised, rr.Body.String())
+	}
+}
+
+func TestModuleLifecycleHonorsStopAndRestartContract(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST2", Name: "falcon", RoleName: "task",
+		DesiredState: domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	agentSvc := svcimpl.NewAgentService(nil, nil, nil, st)
+	mux := http.NewServeMux()
+	NewModule(agentSvc, st, nil).Register(mux)
+
+	gracefulReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/falcon/stop", nil)
+	gracefulRR := httptest.NewRecorder()
+	mux.ServeHTTP(gracefulRR, gracefulReq)
+	if gracefulRR.Code != http.StatusAccepted {
+		t.Fatalf("graceful stop status = %d body=%s, want 202", gracefulRR.Code, gracefulRR.Body.String())
+	}
+	agent, err := st.Agents().Get(ctx, "TEST2", "falcon")
+	if err != nil || agent.State != domain.AgentStateIdle || agent.DesiredState != domain.AgentDesiredDraining {
+		t.Fatalf("agent after graceful stop = %+v err=%v, want idle/draining", agent, err)
+	}
+
+	forceReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/falcon/stop", bytes.NewBufferString(`{"force":true}`))
+	forceReq.Header.Set("Content-Type", "application/json")
+	forceRR := httptest.NewRecorder()
+	mux.ServeHTTP(forceRR, forceReq)
+	if forceRR.Code != http.StatusOK {
+		t.Fatalf("force stop status = %d body=%s, want 200", forceRR.Code, forceRR.Body.String())
+	}
+	agent, err = st.Agents().Get(ctx, "TEST2", "falcon")
+	if err != nil || agent.State != domain.AgentStateStopped || agent.DesiredState != domain.AgentDesiredStopped {
+		t.Fatalf("agent after force stop = %+v err=%v, want stopped/stopped", agent, err)
+	}
+
+	restartReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/falcon/restart", nil)
+	restartRR := httptest.NewRecorder()
+	mux.ServeHTTP(restartRR, restartReq)
+	if restartRR.Code != http.StatusOK {
+		t.Fatalf("restart status = %d body=%s, want 200", restartRR.Code, restartRR.Body.String())
+	}
+	agent, err = st.Agents().Get(ctx, "TEST2", "falcon")
+	if err != nil || agent.State != domain.AgentStateActive || agent.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("agent after restart = %+v err=%v, want active/running", agent, err)
+	}
+
+	commands, err := st.AgentCommands().List(ctx, "TEST2", store.AgentCommandFilter{
+		TargetAgentID: "falcon",
+		Status:        domain.AgentCommandQueued,
+	})
+	if err != nil {
+		t.Fatalf("list lifecycle commands: %v", err)
+	}
+	if len(commands) != 3 {
+		t.Fatalf("commands = %+v, want graceful, force, and restart commands", commands)
+	}
+	if commands[0].Type != "yield" || commands[0].Payload["force"] != "" {
+		t.Fatalf("graceful command = %+v, want yield without force", commands[0])
+	}
+	if commands[1].Type != "stop" || commands[1].Payload["force"] != "true" {
+		t.Fatalf("force command = %+v, want stop force=true", commands[1])
+	}
+	if commands[2].Type != "restart" {
+		t.Fatalf("restart command = %+v, want restart", commands[2])
 	}
 }
 

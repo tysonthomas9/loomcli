@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
+	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
@@ -33,6 +37,13 @@ func TestUnifiedAgentsListMergesSupervisedRecordsAndLegacyBindings(t *testing.T)
 		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "docs-assistant",
 	}); err != nil {
 		t.Fatalf("create agent service: %v", err)
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: agentRecordTestWS, ServiceID: "agt-scripted-x8", Name: "Scripted assistant",
+		Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning,
+		DriverID: "driver-1", DriverVersionID: "version-1",
+	}); err != nil {
+		t.Fatalf("create scripted agent service: %v", err)
 	}
 	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "agt-docs-x7-1", Name: "Docs assistant",
@@ -64,11 +75,267 @@ func TestUnifiedAgentsListMergesSupervisedRecordsAndLegacyBindings(t *testing.T)
 	if kinds[agentRecordKindPrompt]["id"] != "agt-docs-x7" {
 		t.Fatalf("prompt item = %+v", kinds[agentRecordKindPrompt])
 	}
+	if kinds[agentRecordKindScripted]["id"] != "agt-scripted-x8" {
+		t.Fatalf("scripted item = %+v", kinds[agentRecordKindScripted])
+	}
+	scriptedBehavior, ok := kinds[agentRecordKindScripted]["behavior"].(map[string]any)
+	if !ok || scriptedBehavior["driver_id"] != "driver-1" || scriptedBehavior["driver_version_id"] != "version-1" {
+		t.Fatalf("scripted behavior = %#v, want driver-1/version-1", kinds[agentRecordKindScripted]["behavior"])
+	}
 	if bindings, ok := kinds[agentRecordKindPrompt]["bindings"].([]any); !ok || len(bindings) != 1 {
 		t.Fatalf("prompt bindings = %#v, want one attached binding", kinds[agentRecordKindPrompt]["bindings"])
 	}
 	if kinds[agentRecordKindBinding]["id"] != "legacy-review" {
 		t.Fatalf("legacy binding item = %+v", kinds[agentRecordKindBinding])
+	}
+}
+
+func TestUnifiedLegacyBindingFallbackSupportsDetailRenameAndDelete(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	seedDriverVersion(t, st, "legacy-driver", "legacy-version")
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: agentRecordTestWS, BindingID: "legacy-review", Name: "Legacy review",
+		SourceKind: store.CronSourceKind, DriverID: "legacy-driver", DriverVersionID: "legacy-version",
+		Schedule: "*/10 * * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create legacy binding: %v", err)
+	}
+	if _, err := st.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
+		WorkspaceKey: agentRecordTestWS, GrantID: "legacy-grant", ConnectorID: "github",
+		BindingID: "legacy-review", Action: "pulls.comment", ResourcePattern: "repo:o/r",
+	}); err != nil {
+		t.Fatalf("create legacy grant: %v", err)
+	}
+	mux := newAgentsMux(st)
+
+	rec := doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents/legacy-review", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("legacy GET status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var got legacyBindingAgentDTO
+	decodeJSON(t, rec.Body.Bytes(), &got)
+	if got.ID != "legacy-review" || got.Kind != agentRecordKindBinding || got.Name != "Legacy review" {
+		t.Fatalf("legacy GET = %+v", got)
+	}
+
+	rec = doAgentRequest(t, mux, http.MethodPatch, "/api/workspaces/WS/agents/legacy-review", `{"name":"Renamed review"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("legacy PATCH status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	binding, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "legacy-review")
+	if err != nil || binding.Name != "Renamed review" {
+		t.Fatalf("binding after PATCH = %+v err=%v", binding, err)
+	}
+
+	rec = doAgentRequest(t, mux, http.MethodDelete, "/api/workspaces/WS/agents/legacy-review", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("legacy DELETE status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "legacy-review"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("binding after DELETE err = %v, want ErrNotFound", err)
+	}
+	grants, err := st.ConnectorGrants().ListByBinding(ctx, agentRecordTestWS, "legacy-review")
+	if err != nil || len(grants) != 0 {
+		t.Fatalf("legacy grants after DELETE = %+v err=%v", grants, err)
+	}
+}
+
+func TestUnifiedLegacyBindingFallbackRejectsAttachedBinding(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	seedRole(t, st, "docs-assistant")
+	seedDriverVersion(t, st, "driver-1", "version-1")
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: agentRecordTestWS, ServiceID: "agt-docs", Name: "Docs",
+		Kind: domain.AgentServiceKindEvent, RoleName: "docs-assistant",
+	}); err != nil {
+		t.Fatalf("create record: %v", err)
+	}
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: agentRecordTestWS, BindingID: "attached-binding", Name: "Attached",
+		SourceKind: store.InternalSourceKind, DriverID: "driver-1", DriverVersionID: "version-1",
+		TargetAgentServiceID: "agt-docs", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create attached binding: %v", err)
+	}
+	mux := newAgentsMux(st)
+
+	for _, method := range []string{http.MethodGet, http.MethodPatch, http.MethodDelete} {
+		body := ""
+		if method == http.MethodPatch {
+			body = `{"name":"Must not apply"}`
+		}
+		rec := doAgentRequest(t, mux, method, "/api/workspaces/WS/agents/attached-binding", body)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s attached fallback status = %d body=%s, want 404", method, rec.Code, rec.Body.String())
+		}
+	}
+	if _, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "attached-binding"); err != nil {
+		t.Fatalf("attached binding mutated or deleted: %v", err)
+	}
+}
+
+func TestUnifiedSupervisedCreateRejectsAgentRecordIDCollision(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	seedRole(t, st, "docs-assistant")
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: agentRecordTestWS, ServiceID: "agt-reserved", Name: "Reserved",
+		Kind: domain.AgentServiceKindEvent, RoleName: "docs-assistant",
+	}); err != nil {
+		t.Fatalf("create agent record: %v", err)
+	}
+	service := svcimpl.NewAgentService(nil, nil, nil, st)
+	mux := http.NewServeMux()
+	NewModule(service, st, nil).Register(mux)
+
+	rec := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents", `{"name":"agt-reserved","role_name":"task","kind":"worker","backend":"codex"}`)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by an agent record") {
+		t.Fatalf("collision status = %d body=%s, want 409", rec.Code, rec.Body.String())
+	}
+	if _, err := st.Agents().Get(ctx, agentRecordTestWS, "agt-reserved"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("colliding supervised agent persisted, err=%v", err)
+	}
+}
+
+func TestUnifiedSupervisedCreateRejectsLegacyBindingIDCollision(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	seedRole(t, st, "task")
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: agentRecordTestWS, BindingID: "legacy-reserved", Name: "Legacy reserved",
+		SourceKind: store.InternalSourceKind, DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+		DriverVersionID: "prompt-agent-version-1", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create legacy binding: %v", err)
+	}
+	service := svcimpl.NewAgentService(nil, nil, nil, st)
+	mux := http.NewServeMux()
+	NewModule(service, st, nil).Register(mux)
+
+	rec := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents", `{"name":"legacy-reserved","role_name":"task","kind":"worker","backend":"codex"}`)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by a legacy binding agent") {
+		t.Fatalf("collision status = %d body=%s, want 409", rec.Code, rec.Body.String())
+	}
+	if _, err := st.Agents().Get(ctx, agentRecordTestWS, "legacy-reserved"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("colliding supervised agent persisted, err=%v", err)
+	}
+	if _, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "legacy-reserved"); err != nil {
+		t.Fatalf("legacy binding mutated: %v", err)
+	}
+}
+
+func TestUnifiedItemRoutesFailClosedOnExistingCrossKindCollision(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	seedRole(t, st, "docs-assistant")
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: agentRecordTestWS, ServiceID: "collision", Name: "Record",
+		Kind: domain.AgentServiceKindEvent, RoleName: "docs-assistant",
+	}); err != nil {
+		t.Fatalf("create record: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: agentRecordTestWS, Name: "collision", RoleName: "task",
+	}); err != nil {
+		t.Fatalf("create supervised agent: %v", err)
+	}
+	mux := newAgentsMux(st)
+
+	listRec := doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents", "")
+	if listRec.Code != http.StatusConflict {
+		t.Fatalf("list collision status = %d body=%s, want 409", listRec.Code, listRec.Body.String())
+	}
+	assertAgentErrorWireResponse(t, listRec, false)
+	for _, method := range []string{http.MethodGet, http.MethodPatch, http.MethodDelete} {
+		body := ""
+		if method == http.MethodPatch {
+			body = `{"name":"Must not apply"}`
+		}
+		rec := doAgentRequest(t, mux, method, "/api/workspaces/WS/agents/collision", body)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("%s collision status = %d body=%s, want 409", method, rec.Code, rec.Body.String())
+		}
+	}
+	record, err := st.AgentServices().Get(ctx, agentRecordTestWS, "collision")
+	if err != nil || record.Name != "Record" || record.DeletedAt != nil {
+		t.Fatalf("colliding record mutated: %+v err=%v", record, err)
+	}
+	if _, err := st.Agents().Get(ctx, agentRecordTestWS, "collision"); err != nil {
+		t.Fatalf("colliding supervised agent mutated: %v", err)
+	}
+}
+
+func TestUnifiedAgentCreateRejectsOversizedBodyWithServiceErrorEnvelope(t *testing.T) {
+	rec := doAgentRequest(t, newAgentsMux(newAgentRecordStore(t)), http.MethodPost, "/api/workspaces/WS/agents", strings.Repeat("x", handler.MaxRequestBody+1))
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized create status = %d body=%s, want 413", rec.Code, rec.Body.String())
+	}
+	assertAgentErrorWireResponse(t, rec, true)
+}
+
+func TestUnifiedRoutesFailClosedOnLegacyBindingIdentityCollision(t *testing.T) {
+	for _, ownerKind := range []string{"supervised", "record"} {
+		t.Run(ownerKind, func(t *testing.T) {
+			st := newAgentRecordStore(t)
+			ctx := context.Background()
+			seedRole(t, st, "task")
+			seedRole(t, st, "docs-assistant")
+			if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+				WorkspaceKey: agentRecordTestWS, BindingID: "collision", Name: "Legacy binding",
+				SourceKind: store.InternalSourceKind, DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+				DriverVersionID: "prompt-agent-version-1", Enabled: true,
+			}); err != nil {
+				t.Fatalf("create legacy binding: %v", err)
+			}
+			switch ownerKind {
+			case "supervised":
+				if _, err := st.Agents().Create(ctx, store.AgentCreate{
+					WorkspaceKey: agentRecordTestWS, Name: "collision", RoleName: "task",
+				}); err != nil {
+					t.Fatalf("create supervised agent: %v", err)
+				}
+			case "record":
+				if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+					WorkspaceKey: agentRecordTestWS, ServiceID: "collision", Name: "Record",
+					Kind: domain.AgentServiceKindEvent, RoleName: "docs-assistant",
+				}); err != nil {
+					t.Fatalf("create agent record: %v", err)
+				}
+			}
+
+			mux := newAgentsMux(st)
+			listRec := doAgentRequest(t, mux, http.MethodGet, "/api/workspaces/WS/agents", "")
+			if listRec.Code != http.StatusConflict {
+				t.Fatalf("list collision status = %d body=%s, want 409", listRec.Code, listRec.Body.String())
+			}
+			for _, method := range []string{http.MethodGet, http.MethodPatch, http.MethodDelete} {
+				body := ""
+				if method == http.MethodPatch {
+					body = `{"name":"Must not apply"}`
+				}
+				rec := doAgentRequest(t, mux, method, "/api/workspaces/WS/agents/collision", body)
+				if rec.Code != http.StatusConflict {
+					t.Fatalf("%s collision status = %d body=%s, want 409", method, rec.Code, rec.Body.String())
+				}
+			}
+
+			binding, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "collision")
+			if err != nil || binding.Name != "Legacy binding" {
+				t.Fatalf("colliding legacy binding mutated: %+v err=%v", binding, err)
+			}
+			if ownerKind == "supervised" {
+				if _, err := st.Agents().Get(ctx, agentRecordTestWS, "collision"); err != nil {
+					t.Fatalf("colliding supervised agent mutated: %v", err)
+				}
+			} else {
+				record, err := st.AgentServices().Get(ctx, agentRecordTestWS, "collision")
+				if err != nil || record.Name != "Record" || record.DeletedAt != nil {
+					t.Fatalf("colliding record mutated: %+v err=%v", record, err)
+				}
+			}
+		})
 	}
 }
 
@@ -108,6 +375,124 @@ func TestPromptAgentCreateTransactionCreatesRecordBindingAndRole(t *testing.T) {
 	if runInput["roleName"] != "docs-assistant" || runInput["backend"] != "codex" {
 		t.Fatalf("run input = %+v", runInput)
 	}
+}
+
+func TestPromptAgentCreateWithoutBuildToolchainFailsAtomically(t *testing.T) {
+	st := memstore.New()
+	ctx := context.Background()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: agentRecordTestWS, Name: "Test Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	t.Setenv("LOOM_SDK_ROOT", filepath.Join(runtimeDir, "missing-sdk"))
+
+	body := `{
+		"kind":"prompt",
+		"name":"Docs assistant",
+		"behavior":{"role_name":"docs-assistant","role_create":{"description":"Docs"}},
+		"trigger":{"source_kind":"internal"},
+		"enabled":true
+	}`
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodPost, "/api/workspaces/WS/agents", body)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /agents status = %d body=%s, want 503", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "workflow build toolchain is unavailable") {
+		t.Fatalf("POST /agents body = %s, want actionable toolchain error", rec.Body.String())
+	}
+	if _, err := st.Roles().Get(ctx, agentRecordTestWS, "docs-assistant"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("role was persisted before driver preflight: %v", err)
+	}
+	records, err := st.AgentServices().List(ctx, agentRecordTestWS, store.AgentServiceFilter{})
+	if err != nil || len(records) != 0 {
+		t.Fatalf("agent records after unavailable preflight = %+v err=%v, want none", records, err)
+	}
+	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, store.TriggerBindingFilter{})
+	if err != nil || len(bindings) != 0 {
+		t.Fatalf("bindings after unavailable preflight = %+v err=%v, want none", bindings, err)
+	}
+}
+
+func TestPromptAgentCreateWithMissingRolldownNativeBindingReturns503Atomically(t *testing.T) {
+	st := memstore.New()
+	ctx := context.Background()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: agentRecordTestWS, Name: "Test Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	configureMissingRolldownBuild(t)
+
+	body := `{
+		"kind":"prompt",
+		"name":"Docs assistant",
+		"behavior":{"role_name":"docs-assistant","role_create":{"description":"Docs"}},
+		"trigger":{"source_kind":"internal"},
+		"enabled":true
+	}`
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodPost, "/api/workspaces/WS/agents", body)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /agents status = %d body=%s, want 503", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "target-platform Rolldown native binding") {
+		t.Fatalf("POST /agents body = %s, want native-binding remediation", rec.Body.String())
+	}
+	if _, err := st.Roles().Get(ctx, agentRecordTestWS, "docs-assistant"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("role was persisted before failed driver build: %v", err)
+	}
+	records, err := st.AgentServices().List(ctx, agentRecordTestWS, store.AgentServiceFilter{})
+	if err != nil || len(records) != 0 {
+		t.Fatalf("agent records after failed driver build = %+v err=%v, want none", records, err)
+	}
+	bindings, err := st.TriggerBindings().List(ctx, agentRecordTestWS, store.TriggerBindingFilter{})
+	if err != nil || len(bindings) != 0 {
+		t.Fatalf("bindings after failed driver build = %+v err=%v, want none", bindings, err)
+	}
+	drivers, err := st.Drivers().List(ctx, agentRecordTestWS, store.DriverFilter{})
+	if err != nil || len(drivers) != 0 {
+		t.Fatalf("drivers after failed driver build = %+v err=%v, want none", drivers, err)
+	}
+	versions, err := st.DriverVersions().List(ctx, agentRecordTestWS, store.DriverVersionFilter{})
+	if err != nil || len(versions) != 0 {
+		t.Fatalf("driver versions after failed driver build = %+v err=%v, want none", versions, err)
+	}
+}
+
+func configureMissingRolldownBuild(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	sdkRoot := filepath.Join(root, "sdk")
+	runtimeRoot := filepath.Join(root, "runtime")
+	for _, path := range []string{
+		sdkRoot,
+		runtimeRoot,
+		filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
+		filepath.Join(runtimeRoot, "node_modules", "hono"),
+	} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+	}
+	for path, name := range map[string]string{sdkRoot: "@loom/sdk", runtimeRoot: "@flue/runtime"} {
+		if err := os.WriteFile(filepath.Join(path, "package.json"), []byte(`{"name":"`+name+`"}`), 0o644); err != nil {
+			t.Fatalf("write package.json for %s: %v", path, err)
+		}
+	}
+	flue := filepath.Join(root, "missing-native-flue.sh")
+	if err := os.WriteFile(flue, []byte("#!/bin/sh\necho \"Error: Cannot find module './rolldown-binding.linux-arm64-gnu.node'\" >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write failing fake flue: %v", err)
+	}
+	command, err := json.Marshal([]string{flue})
+	if err != nil {
+		t.Fatalf("encode failing fake flue command: %v", err)
+	}
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", filepath.Join(root, "runtime-data"))
+	t.Setenv("LOOM_SDK_ROOT", sdkRoot)
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", runtimeRoot)
+	t.Setenv("FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
+	t.Setenv("DAYTONA_SDK_ROOT", "")
+	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", string(command))
+	t.Setenv("LOOM_REAL_FLUE_CMD", "")
 }
 
 func TestPromptAgentCreateBindingFailureDeletesAgentRecord(t *testing.T) {
@@ -344,7 +729,7 @@ func seedDriverVersion(t *testing.T, st store.Store, driverID, versionID string)
 
 func seedPromptAgentDriver(t *testing.T, st store.Store) {
 	t.Helper()
-	seedDriverVersion(t, st, workflowdefs.BuiltinPromptAgentWorkflowName, "prompt-agent-version-1")
+	seedExecutablePromptAgentDriver(t, st)
 }
 
 func createPromptAgentForTest(t *testing.T, mux *http.ServeMux) agentRecordDTO {
@@ -374,6 +759,22 @@ func decodeJSON(t *testing.T, data []byte, out any) {
 	t.Helper()
 	if err := json.Unmarshal(data, out); err != nil {
 		t.Fatalf("decode JSON %s: %v", string(data), err)
+	}
+}
+
+func assertAgentErrorWireResponse(t *testing.T, rec *httptest.ResponseRecorder, wantKind bool) {
+	t.Helper()
+	var body map[string]any
+	decodeJSON(t, rec.Body.Bytes(), &body)
+	if _, ok := body["error"].(string); !ok {
+		t.Fatalf("agent error response has no string error: %s", rec.Body.String())
+	}
+	if _, ok := body["success"]; ok {
+		t.Fatalf("agent error response unexpectedly contains success: %s", rec.Body.String())
+	}
+	_, hasKind := body["kind"].(string)
+	if hasKind != wantKind {
+		t.Fatalf("agent error response kind presence = %v, want %v: %s", hasKind, wantKind, rec.Body.String())
 	}
 }
 

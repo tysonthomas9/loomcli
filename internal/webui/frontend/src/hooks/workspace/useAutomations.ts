@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { setAgentRecordEnabled } from "@/api/agents";
+import {
+  deleteAgentRecord,
+  listAgentRecords,
+  setAgentRecordEnabled,
+  updateAgentRecord,
+  type AgentRecordSummary,
+} from "@/api/agents";
 import {
   createTriggerBinding,
   deleteTriggerBinding,
@@ -25,6 +31,27 @@ import {
  * and every active instance re-pulls its bindings.
  */
 const BINDINGS_CHANGED_EVENT = "loom:trigger-bindings-changed";
+
+/**
+ * Attached bindings are trigger/config children of a durable AgentService.
+ * Render the record's name as the agent identity while retaining the binding's
+ * own name for legacy unattached entries.
+ */
+function withAgentRecordNames(
+  bindings: TriggerBinding[],
+  records: AgentRecordSummary[],
+): TriggerBinding[] {
+  const namesById = new Map(
+    records
+      .filter((record) => record.name.trim() !== "")
+      .map((record) => [record.id, record.name] as const),
+  );
+  return bindings.map((binding) => {
+    const agentId = binding.target_agent_service_id?.trim();
+    const recordName = agentId ? namesById.get(agentId) : undefined;
+    return recordName ? { ...binding, name: recordName } : binding;
+  });
+}
 
 // Exported so out-of-hook binding mutations (the transactional agent create in
 // CreateAgentModal) can nudge every mounted useAutomations instance — without
@@ -83,12 +110,13 @@ export function useAutomations(
     setLoading(true);
     setError(null);
     try {
-      const [wf, bs] = await Promise.all([
+      const [wf, bs, records] = await Promise.all([
         listWorkflows(workspaceId),
         listTriggerBindings(workspaceId),
+        listAgentRecords(workspaceId),
       ]);
       setWorkflows(wf);
-      setBindings(bs);
+      setBindings(withAgentRecordNames(bs, records));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to load automations",
@@ -106,7 +134,11 @@ export function useAutomations(
   const refreshBindings = useCallback(async () => {
     if (!workspaceId || !active) return;
     try {
-      setBindings(await listTriggerBindings(workspaceId));
+      const [nextBindings, records] = await Promise.all([
+        listTriggerBindings(workspaceId),
+        listAgentRecords(workspaceId),
+      ]);
+      setBindings(withAgentRecordNames(nextBindings, records));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to load trigger bindings",
@@ -168,21 +200,55 @@ export function useAutomations(
       bindingId: string,
       req: UpdateTriggerBindingRequest,
     ): Promise<TriggerBinding> => {
-      const binding = await updateTriggerBinding(workspaceId, bindingId, req);
+      const current = bindings.find(
+        (binding) => binding.binding_id === bindingId,
+      );
+      const agentId = current?.target_agent_service_id?.trim();
+      let binding: TriggerBinding;
+
+      if (current && agentId && req.name !== undefined) {
+        // The user-facing name belongs to the durable AgentService identity.
+        // Keep schedule/timezone on the attached trigger binding, but never
+        // rename only that binding and leave the agent record stale.
+        const { name, ...bindingPatch } = req;
+        binding = current;
+        if (Object.keys(bindingPatch).length > 0) {
+          binding = await updateTriggerBinding(
+            workspaceId,
+            bindingId,
+            bindingPatch,
+          );
+        }
+        const record = await updateAgentRecord(workspaceId, agentId, { name });
+        binding = { ...binding, name: record.name };
+      } else {
+        // Unattached bindings are legacy standalone records. Schedule-only
+        // edits also remain binding configuration for both representations.
+        binding = await updateTriggerBinding(workspaceId, bindingId, req);
+      }
       await refreshBindings();
       dispatchBindingsChanged(workspaceId);
       return binding;
     },
-    [workspaceId, refreshBindings],
+    [workspaceId, bindings, refreshBindings],
   );
 
   const deleteBinding = useCallback(
     async (bindingId: string): Promise<void> => {
-      await deleteTriggerBinding(workspaceId, bindingId);
+      const binding = bindings.find((item) => item.binding_id === bindingId);
+      const agentId = binding?.target_agent_service_id?.trim();
+      if (agentId) {
+        // The agent-scoped delete archives the AgentService and cleans up all
+        // attached bindings/grants. Deleting only this binding would orphan a
+        // still-live durable identity.
+        await deleteAgentRecord(workspaceId, agentId);
+      } else {
+        await deleteTriggerBinding(workspaceId, bindingId);
+      }
       await refreshBindings();
       dispatchBindingsChanged(workspaceId);
     },
-    [workspaceId, refreshBindings],
+    [workspaceId, bindings, refreshBindings],
   );
 
   const runWorkflow = useCallback(

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -174,6 +175,49 @@ func resetTask(deps *cli.Deps, taskID string) {
 	} else {
 		fmt.Printf("✓ Task %s reset to open\n", taskID)
 	}
+}
+
+// resetTaskOwnedByAgent is the daemon-safe reset path. Recovery may race with
+// another agent claiming or completing the interrupted task, so a stale local
+// lock is not sufficient authority to mutate it. Re-read immediately before
+// Update and require both the recoverable status and the expected assignee.
+// An in_progress task assigned to this agent cannot be claimed by another agent
+// until this reset makes it open, so this check also closes the release-to-reset
+// handoff without broadening the backend API.
+func resetTaskOwnedByAgent(deps *cli.Deps, taskID, agentName string) error {
+	if deps == nil || deps.IssueBackend == nil {
+		return errors.New("issue backend is unavailable")
+	}
+	if taskID == "" || agentName == "" {
+		return errors.New("task id and agent name are required")
+	}
+
+	ib := deps.IssueBackend
+	ctx := cmdstore.RootContext()
+	detail, err := ib.Get(ctx, taskID)
+	if err != nil {
+		if backend.IsKind(err, backend.KindNotFound) {
+			return nil
+		}
+		return fmt.Errorf("get current task state: %w", err)
+	}
+	if detail == nil {
+		return errors.New("get current task state returned no task")
+	}
+	if detail.Status != "in_progress" || detail.Assignee != agentName {
+		fmt.Printf("[recover] Task %s is now status=%s assignee=%s; skipping stale reset by %s\n",
+			taskID, detail.Status, detail.Assignee, agentName)
+		return nil
+	}
+
+	if err := ib.Update(ctx, taskID, backend.UpdateParams{
+		Status:   strPtr("open"),
+		Assignee: strPtr(""),
+	}); err != nil {
+		return fmt.Errorf("update task to open: %w", err)
+	}
+	fmt.Printf("✓ Task %s reset to open\n", taskID)
+	return nil
 }
 
 // killProcess sends SIGTERM then SIGKILL to the given PID's process group.
@@ -350,7 +394,13 @@ func resetOrphanedAgentTasks(deps *cli.Deps, worktreePath, agentName, alreadyHan
 
 	fmt.Printf("\nFound %d additional orphaned task(s) for agent %s:\n", len(orphaned), agentName)
 	for _, t := range orphaned {
-		handleOrphanedTask(deps, worktreePath, t.ID, analyze)
+		if analyze {
+			handleOrphanedTask(deps, worktreePath, t.ID, true)
+			continue
+		}
+		if err := resetTaskOwnedByAgent(deps, t.ID, agentName); err != nil {
+			fmt.Printf("Warning: failed to reset orphaned task %s: %v\n", t.ID, err)
+		}
 	}
 }
 
