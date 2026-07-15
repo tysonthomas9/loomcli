@@ -21,11 +21,12 @@
 # This script provisions and prints how to drive the live flow; it does NOT
 # fire a webhook itself. scripts/test-a1-live-review.sh drives the real PR.
 #
-# Teardown is `podman rm -f <container>` (podman's own container remove) — this
-# script never runs shell `rm` on files.
+# Teardown is `podman rm -f <container>` (podman's own container remove); the
+# only shell `rm` is the sandbox helper sweeping this run's own build dir on exit.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT_DIR/scripts/lib/sandbox.sh"
 
 # ── Reused mount sources (verbatim shapes from the slack stack) ────────────
 TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/loom-task-runner-invoker.mjs}"
@@ -314,7 +315,8 @@ register_review_workflow() {
   require_path "${LOOM_SDK_DIR}/driver.js"
 
   local build_dir digest
-  build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-github-review-dist.XXXXXX")"
+  loom_mktemp_dir run-github-review-codex-stack; build_dir="$LOOM_SANDBOX_DIR"
+  loom_autoclean "$build_dir"
   write_review_dist "$build_dir"
   digest="$(source_digest)"
 
@@ -339,7 +341,7 @@ register_review_workflow() {
       --trusted \
       --activate \
       --json >/dev/null
-  # build_dir is left for the OS temp reaper — this script never runs shell rm.
+  # build_dir is swept by the sandbox helper's EXIT/INT/TERM autoclean trap.
 }
 
 # resolve_secrets fills GH_TOKEN / A1_WEBHOOK_SECRET / LOOM_CONNECTOR_VAULT_KEY

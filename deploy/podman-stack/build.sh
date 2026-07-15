@@ -25,6 +25,7 @@ set -Eeuo pipefail
 
 STACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOOMCLI_REPO="${LOOMCLI_REPO:-$(cd "$STACK_DIR/../.." && pwd)}"
+. "$LOOMCLI_REPO/scripts/lib/sandbox.sh"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$(cd "$LOOMCLI_REPO/../fleet-db" 2>/dev/null && pwd || true)}"
 FLUE_REPO="${FLUE_REPO:-$(cd "$LOOMCLI_REPO/../flue" 2>/dev/null && pwd || true)}"
 IMAGE_PREFIX="${LOOM_STACK_IMAGE_PREFIX:-localhost/loom-stack}"
@@ -88,9 +89,9 @@ else
 fi
 log "target platform: linux/$GOARCH_TARGET"
 
-TMP_ROOT="$(mktemp -d -t loom-podman-stack-build.XXXXXX)"
+loom_mktemp_dir build; TMP_ROOT="$LOOM_SANDBOX_DIR"
 cleanup() { rm -rf "$TMP_ROOT"; }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 CTX="$TMP_ROOT/ctx"
 mkdir -p "$CTX/bin"

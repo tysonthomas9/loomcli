@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT_DIR/scripts/lib/sandbox.sh"
 FIXTURE_DIR="${FIXTURE_DIR:-${ROOT_DIR}/scripts/fixtures/slack-src}"
 TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/loom-task-runner-invoker.mjs}"
 EPIC_RUNNER_SOURCE="${EPIC_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/epic-runner.ts}"
@@ -104,7 +105,7 @@ cleanup_host_secret() {
     rm -f "$GITHUB_SECRET_TMP"
   fi
 }
-trap cleanup_host_secret EXIT
+trap cleanup_host_secret EXIT INT TERM
 
 log() {
   printf '[slack-codex-stack] %s\n' "$*"
@@ -633,7 +634,7 @@ register_epic_runner_workflow() {
   require_path "${LOOM_SDK_DIR}/driver.js"
 
   local build_dir digest
-  build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-epic-runner-dist.XXXXXX")"
+  loom_mktemp_dir smoke-test-slack-epic-runner-stack; build_dir="$LOOM_SANDBOX_DIR"
   write_epic_runner_dist "$build_dir"
   digest="$(source_digest)"
 
