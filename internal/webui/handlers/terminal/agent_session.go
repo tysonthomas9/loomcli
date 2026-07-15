@@ -115,10 +115,7 @@ func ensureAgentTerminalSession(ctx context.Context, svc service.TerminalService
 	}
 
 	sessionName, label, sortOrder := newAgentTerminalTabPlacement(tabs, existing, agentName)
-	agentForLaunch, orchestratorID, err := ensureTerminalOrchestratorLink(ctx, st, workspace, agent, roleKind)
-	if err != nil {
-		return nil, err
-	}
+	agentForLaunch, orchestratorID := ensureTerminalOrchestratorLink(ctx, st, workspace, agent, roleKind)
 	launch, backend, err := buildAgentLaunchSpec(ctx, st, workspace, sessionName, &agentForLaunch, orchestratorID)
 	if err != nil {
 		return nil, err
@@ -196,17 +193,17 @@ func newAgentTerminalTabPlacement(tabs []tabmeta.TabMetadata, existing *tabmeta.
 // reserves an ID for the launch environment. It deliberately does not persist
 // a running record: loom lead creates and heartbeats that record only after the
 // PTY child actually starts, so an unlaunched tab cannot become a stale session.
-func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspace string, agent *domain.Agent, kind domain.RoleKind) (domain.Agent, string, error) {
+func ensureTerminalOrchestratorLink(ctx context.Context, st store.Store, workspace string, agent *domain.Agent, kind domain.RoleKind) (domain.Agent, string) {
 	agentForLaunch := *agent
 	if kind != domain.RoleKindInteractive {
-		return agentForLaunch, "", nil
+		return agentForLaunch, ""
 	}
 	// Skip when this terminal agent already has an active orchestration session.
 	if existingID, err := store.OrchestrationSessionIDFor(ctx, st, workspace, agentForLaunch.Name); err == nil && existingID != "" {
-		return agentForLaunch, existingID, nil
+		return agentForLaunch, existingID
 	}
 
-	return agentForLaunch, "lead-" + uuid.NewString(), nil
+	return agentForLaunch, "lead-" + uuid.NewString()
 }
 
 func newAgentTerminalTabMetadata(workspace, sessionName, label string, sortOrder int, agent *domain.Agent, backend string, launch *tabmeta.LaunchSpec, existing *tabmeta.TabMetadata) *tabmeta.TabMetadata {

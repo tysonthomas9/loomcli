@@ -124,13 +124,8 @@ func validateValidationRun(run ValidationRun) error {
 	if !slices.Contains([]string{"cross-repo", "fleetdb", "loom"}, run.Repository) {
 		return fmt.Errorf("run %q repository %q must be cross-repo, fleetdb, or loom", run.ID, run.Repository)
 	}
-	if len(run.Command) == 0 {
-		return fmt.Errorf("run %q command must not be empty", run.ID)
-	}
-	for index, arg := range run.Command {
-		if strings.TrimSpace(arg) == "" || strings.ContainsAny(arg, "\r\n") {
-			return fmt.Errorf("run %q command[%d] must be a non-empty single-line argument", run.ID, index)
-		}
+	if err := validateValidationCommand(run.ID, run.Command); err != nil {
+		return err
 	}
 	if err := validateValidationEnvironment(run.ID, run.Environment); err != nil {
 		return err
@@ -138,23 +133,50 @@ func validateValidationRun(run ValidationRun) error {
 	if run.ExpectedSkips == nil || run.ArtifactPaths == nil {
 		return fmt.Errorf("run %q must explicitly record expected_skips and artifact_paths", run.ID)
 	}
-	skipNames := make([]string, 0, len(run.ExpectedSkips))
-	for _, skip := range run.ExpectedSkips {
+	if err := validateValidationExpectedSkips(run.ID, run.ExpectedSkips); err != nil {
+		return err
+	}
+	if err := validateValidationResult(run.ID, run.Result); err != nil {
+		return err
+	}
+	return validateValidationArtifactPaths(run.ID, run.ArtifactPaths)
+}
+
+func validateValidationCommand(runID string, command []string) error {
+	if len(command) == 0 {
+		return fmt.Errorf("run %q command must not be empty", runID)
+	}
+	for index, arg := range command {
+		if strings.TrimSpace(arg) == "" || strings.ContainsAny(arg, "\r\n") {
+			return fmt.Errorf("run %q command[%d] must be a non-empty single-line argument", runID, index)
+		}
+	}
+	return nil
+}
+
+func validateValidationExpectedSkips(runID string, expectedSkips []ValidationSkip) error {
+	skipNames := make([]string, 0, len(expectedSkips))
+	for _, skip := range expectedSkips {
 		if strings.TrimSpace(skip.Name) == "" || strings.TrimSpace(skip.Owner) == "" || strings.TrimSpace(skip.Reason) == "" {
-			return fmt.Errorf("run %q every expected skip requires name, owner, and reason", run.ID)
+			return fmt.Errorf("run %q every expected skip requires name, owner, and reason", runID)
 		}
 		skipNames = append(skipNames, skip.Name)
 	}
-	if err := validateSortedUnique("baseline validation expected skip", skipNames); err != nil {
-		return err
+	return validateSortedUnique("baseline validation expected skip", skipNames)
+}
+
+func validateValidationResult(runID string, result ValidationResult) error {
+	if !slices.Contains([]string{"expected-red", "not-recorded", "pass"}, result.Status) || strings.TrimSpace(result.Summary) == "" {
+		return fmt.Errorf("run %q result requires status pass, expected-red, or not-recorded and a summary", runID)
 	}
-	if !slices.Contains([]string{"expected-red", "not-recorded", "pass"}, run.Result.Status) || strings.TrimSpace(run.Result.Summary) == "" {
-		return fmt.Errorf("run %q result requires status pass, expected-red, or not-recorded and a summary", run.ID)
-	}
-	for index, path := range run.ArtifactPaths {
+	return nil
+}
+
+func validateValidationArtifactPaths(runID string, artifactPaths []string) error {
+	for index, path := range artifactPaths {
 		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(path)))
 		if strings.TrimSpace(path) == "" || strings.ContainsAny(path, "\r\n") || clean != path || strings.HasPrefix(path, "../") {
-			return fmt.Errorf("run %q artifact_paths[%d] must be a clean non-empty path", run.ID, index)
+			return fmt.Errorf("run %q artifact_paths[%d] must be a clean non-empty path", runID, index)
 		}
 	}
 	return nil

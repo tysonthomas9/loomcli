@@ -239,15 +239,7 @@ func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req T
 	if e.Store == nil || session == nil {
 		return nil
 	}
-	if session.cancel != nil {
-		session.cancel()
-	}
-	if session.heartbeatDone != nil {
-		// Heartbeat is a non-CAS read/modify/write in the Redis store. Drain an
-		// in-flight call before writing terminal state so a stale running record
-		// cannot be committed after completion.
-		<-session.heartbeatDone
-	}
+	stopFlueTaskSessionHeartbeat(session)
 	// Execution cancellation is itself a normal terminal outcome. Once the
 	// heartbeat is drained, use an independent bounded context so a canceled
 	// task cannot leave its AgentSession running without further heartbeats.
@@ -295,6 +287,18 @@ func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req T
 		ExitCode:   &exitCodePtr,
 		Metadata:   &metadata,
 	})
+}
+
+func stopFlueTaskSessionHeartbeat(session *flueTaskSession) {
+	if session.cancel != nil {
+		session.cancel()
+	}
+	if session.heartbeatDone != nil {
+		// Heartbeat is a non-CAS read/modify/write in the Redis store. Drain an
+		// in-flight call before writing terminal state so a stale running record
+		// cannot be committed after completion.
+		<-session.heartbeatDone
+	}
 }
 
 func updateFlueAgentSession(ctx context.Context, st store.Store, workspaceKey, sessionID string, patch store.AgentSessionUpdate) error {
