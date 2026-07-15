@@ -496,7 +496,9 @@ func (s *Supervisor) runAgentSessionHeartbeatJob(ctx context.Context, job agentS
 		return agentSessionHeartbeatOutcome{}
 	}
 	if job.agent != nil {
-		job.agent.SessionHeartbeatMu.RLock()
+		if !lockAgentSessionHeartbeat(ctx, &job.agent.SessionHeartbeatMu) {
+			return agentSessionHeartbeatOutcome{}
+		}
 		defer job.agent.SessionHeartbeatMu.RUnlock()
 		if !agentSessionHeartbeatJobIsCurrent(job) {
 			// The session was finalized after this pass took its snapshot. Treat
@@ -525,6 +527,26 @@ func (s *Supervisor) runAgentSessionHeartbeatJob(ctx context.Context, job agentS
 	}
 	s.RecordTick(GoroutineSessionHeartbeat)
 	return agentSessionHeartbeatOutcome{attempted: true, err: err}
+}
+
+// lockAgentSessionHeartbeat acquires the lifecycle barrier without allowing a
+// heartbeat worker to outlive its pass or shutdown context. A plain RLock is
+// not cancelable and can otherwise wait indefinitely behind finalization or a
+// starting-to-running transition.
+func lockAgentSessionHeartbeat(ctx context.Context, barrier *sync.RWMutex) bool {
+	for {
+		if ctx.Err() != nil {
+			return false
+		}
+		if barrier.TryRLock() {
+			if ctx.Err() == nil {
+				return true
+			}
+			barrier.RUnlock()
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func agentSessionHeartbeatJobIsCurrent(job agentSessionHeartbeatJob) bool {

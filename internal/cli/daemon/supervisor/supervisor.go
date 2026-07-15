@@ -603,6 +603,11 @@ func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
 	if s.ControlStore == nil || s.WorkspaceID == "" {
 		return
 	}
+	// Heartbeat is a read/apply/full-record write on the Redis backend. Drain a
+	// heartbeat that may have read the starting record before writing running,
+	// then exclude new heartbeats until the transition is durable.
+	ap.SessionHeartbeatMu.Lock()
+	defer ap.SessionHeartbeatMu.Unlock()
 	backend := s.GetEffectiveBackend(ap)
 	ap.Mu.Lock()
 	sessionID := ap.AgentSessionID
@@ -800,8 +805,7 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 			return
 		}
 		slog.Warn("spawn failed", "worktree", ap.Entry.Worktree, "err", err)
-		orphan, releaseHeartbeatBarrier := takeAgentSessionForFinalize(ap)
-		defer releaseHeartbeatBarrier()
+		orphan := takeAgentSessionForFinalize(ap)
 		if orphan.session != nil {
 			_ = orphan.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
 		}

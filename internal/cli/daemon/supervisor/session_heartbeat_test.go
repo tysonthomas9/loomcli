@@ -163,6 +163,78 @@ func TestAgentSessionFinalizationDrainsInFlightStaleHeartbeat(t *testing.T) {
 	}
 }
 
+func TestAgentSessionRunningTransitionDrainsInFlightStaleHeartbeat(t *testing.T) {
+	ctx := t.Context()
+	base := memstore.New()
+	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := base.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "session-starting-race",
+		AgentID:      "agent-race",
+		Kind:         domain.AgentSessionKindTask,
+		Status:       domain.AgentSessionStarting,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	staleSessions := &staleWriteAgentSessionStore{
+		AgentSessionStore: base.AgentSessions(),
+		read:              make(chan struct{}),
+		release:           make(chan struct{}),
+	}
+	controlStore := &heartbeatTestStore{Store: base, sessions: staleSessions, leases: base.AgentLeases()}
+	ap := &AgentProcess{
+		Entry:          config.AgentEntry{Worktree: "agent-race"},
+		AgentSessionID: "session-starting-race",
+	}
+	s := &Supervisor{
+		ConfigSnapshot: func() *config.DaemonConfig { return &config.DaemonConfig{} },
+		ControlStore:   controlStore,
+		WorkspaceID:    "WS",
+		Agents:         []*AgentProcess{ap},
+	}
+
+	heartbeatDone := make(chan agentSessionHeartbeatResult, 1)
+	go func() { heartbeatDone <- s.heartbeatAgentSessionsOnce() }()
+	select {
+	case <-staleSessions.read:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not capture the starting record")
+	}
+
+	transitionDone := make(chan struct{})
+	go func() {
+		s.markControlPlaneAgentSessionRunning(ap)
+		close(transitionDone)
+	}()
+	select {
+	case <-transitionDone:
+		t.Fatal("running transition completed before the in-flight heartbeat drained")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(staleSessions.release)
+	select {
+	case <-heartbeatDone:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not finish after release")
+	}
+	select {
+	case <-transitionDone:
+	case <-time.After(time.Second):
+		t.Fatal("running transition did not resume after heartbeat drain")
+	}
+
+	final, err := base.AgentSessions().Get(ctx, "WS", "session-starting-race")
+	if err != nil {
+		t.Fatalf("get running session: %v", err)
+	}
+	if final.Status != domain.AgentSessionRunning {
+		t.Fatalf("final session status = %q, want running", final.Status)
+	}
+}
+
 func TestHeartbeatAgentSessionsOnceBoundsManyDegradedAgents(t *testing.T) {
 	const agentCount = 128
 	controlStore, probe := newBlockingHeartbeatStore(t, agentCount*2)
@@ -221,6 +293,51 @@ func TestHeartbeatAgentSessionsOnceBoundsManyDegradedAgents(t *testing.T) {
 	after, ok := s.LoadTick(GoroutineSessionHeartbeat)
 	if !ok || !after.After(before) {
 		t.Fatalf("liveness tick did not advance around bounded pass: before=%v after=%v ok=%v", before, after, ok)
+	}
+}
+
+func TestHeartbeatPassDeadlineCancelsWhileLifecycleBarrierHeld(t *testing.T) {
+	base := memstore.New()
+	ap := &AgentProcess{
+		Entry:          config.AgentEntry{Worktree: "agent-blocked"},
+		AgentSessionID: "session-blocked",
+	}
+	ap.SessionHeartbeatMu.Lock()
+	barrierHeld := true
+	t.Cleanup(func() {
+		if barrierHeld {
+			ap.SessionHeartbeatMu.Unlock()
+		}
+	})
+	s := &Supervisor{
+		ControlStore: &heartbeatTestStore{
+			Store:    base,
+			sessions: base.AgentSessions(),
+			leases:   base.AgentLeases(),
+		},
+		WorkspaceID:                 "WS",
+		Agents:                      []*AgentProcess{ap},
+		SessionHeartbeatPassTimeout: 25 * time.Millisecond,
+	}
+
+	startedAt := time.Now()
+	resultCh := make(chan agentSessionHeartbeatResult, 1)
+	go func() { resultCh <- s.heartbeatAgentSessionsOnce() }()
+	var result agentSessionHeartbeatResult
+	select {
+	case result = <-resultCh:
+	case <-time.After(250 * time.Millisecond):
+		ap.SessionHeartbeatMu.Unlock()
+		barrierHeld = false
+		t.Fatal("heartbeat pass did not honor its deadline while the lifecycle barrier was held")
+	}
+	ap.SessionHeartbeatMu.Unlock()
+	barrierHeld = false
+	if elapsed := time.Since(startedAt); elapsed >= 250*time.Millisecond {
+		t.Fatalf("heartbeat pass elapsed = %v, want under 250ms", elapsed)
+	}
+	if result != (agentSessionHeartbeatResult{Failures: 1}) {
+		t.Fatalf("heartbeat result = %+v, want one bounded failure", result)
 	}
 }
 

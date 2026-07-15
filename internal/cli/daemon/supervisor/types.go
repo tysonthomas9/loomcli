@@ -67,9 +67,10 @@ type AgentProcess struct {
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
 	// SessionHeartbeatMu is a lifecycle barrier. Heartbeat RPCs hold a read
-	// lock, while terminal finalization holds the write lock through the final
-	// control-plane update. This prevents a non-CAS heartbeat that read the
-	// running record from writing it back after completion.
+	// lock; starting-to-running transitions and terminal retirement hold the
+	// write lock. Retirement drains earlier heartbeats and clears the session
+	// IDs before releasing, so queued jobs become no-ops without holding the
+	// barrier through slow transcript, Git, artifact, or completion work.
 	SessionHeartbeatMu sync.RWMutex
 	Mu                 sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
 }

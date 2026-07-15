@@ -86,8 +86,7 @@ func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
 // completePreSpawnCleanup unwinds task/session/worker state created by
 // preFlightSetup when the subprocess cannot safely be started.
 func (s *Supervisor) completePreSpawnCleanup(ap *AgentProcess, errClass string) {
-	state, releaseHeartbeatBarrier := takeAgentSessionForFinalize(ap)
-	defer releaseHeartbeatBarrier()
+	state := takeAgentSessionForFinalize(ap)
 	taskID := s.taskIDForLifecycle(ap, nil)
 	if state.session != nil {
 		_ = state.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: errClass})
@@ -120,8 +119,7 @@ type agentSessionFinalizeState struct {
 
 // finalizeAgentSession finalizes the daemon-created session after agent exit.
 func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
-	state, releaseHeartbeatBarrier := takeAgentSessionForFinalize(ap)
-	defer releaseHeartbeatBarrier()
+	state := takeAgentSessionForFinalize(ap)
 	if state.session == nil && state.sessionID == "" {
 		return
 	}
@@ -145,8 +143,14 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	})
 }
 
-func takeAgentSessionForFinalize(ap *AgentProcess) (agentSessionFinalizeState, func()) {
+// takeAgentSessionForFinalize drains any in-flight heartbeat and retires the
+// session identifiers while holding the lifecycle barrier. It releases the
+// barrier before transcript, Git, artifact, and control-plane completion work:
+// queued heartbeat jobs re-check the cleared identifiers and become no-ops, so
+// terminal work remains protected without blocking a heartbeat pass deadline.
+func takeAgentSessionForFinalize(ap *AgentProcess) agentSessionFinalizeState {
 	ap.SessionHeartbeatMu.Lock()
+	defer ap.SessionHeartbeatMu.Unlock()
 	ap.Mu.Lock()
 	state := agentSessionFinalizeState{
 		session:    ap.Session,
@@ -160,7 +164,7 @@ func takeAgentSessionForFinalize(ap *AgentProcess) (agentSessionFinalizeState, f
 	ap.AgentLeaseID = ""
 	ap.AgentLeaseToken = ""
 	ap.Mu.Unlock()
-	return state, ap.SessionHeartbeatMu.Unlock
+	return state
 }
 
 func (s *Supervisor) taskIDForFinalize(ap *AgentProcess) string {
