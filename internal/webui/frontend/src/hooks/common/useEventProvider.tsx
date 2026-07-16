@@ -20,6 +20,7 @@ import {
 import {
   WorkspaceSSEClient,
   type ConnectionState,
+  type MutationEntityType,
   type MutationPayload,
   type MutationType,
 } from "@/api/common";
@@ -33,6 +34,10 @@ export type { ConnectionState } from "@/api/common";
 export interface SubscriptionOptions {
   /** If provided, only mutations with matching types are delivered. Empty array = all events. */
   types?: MutationType[];
+  /** If provided, only mutations with matching entity types are delivered. Empty array = all events. */
+  entityTypes?: MutationEntityType[];
+  /** If provided, only mutations with matching source actions are delivered. Empty array = all events. */
+  actions?: string[];
 }
 
 /**
@@ -88,6 +93,8 @@ export interface EventProviderProps {
 interface SubscriberEntry {
   callback: (mutation: MutationPayload) => void;
   types: MutationType[] | undefined;
+  entityTypes: MutationEntityType[] | undefined;
+  actions: string[] | undefined;
 }
 
 /**
@@ -133,7 +140,20 @@ export function EventProvider({
       const id = ++subscriberIdRef.current;
       const types =
         options?.types && options.types.length > 0 ? options.types : undefined;
-      subscribersRef.current.set(id, { callback, types });
+      const entityTypes =
+        options?.entityTypes && options.entityTypes.length > 0
+          ? options.entityTypes
+          : undefined;
+      const actions =
+        options?.actions && options.actions.length > 0
+          ? options.actions
+          : undefined;
+      subscribersRef.current.set(id, {
+        callback,
+        types,
+        entityTypes,
+        actions,
+      });
       return () => {
         subscribersRef.current.delete(id);
       };
@@ -167,6 +187,20 @@ export function EventProvider({
         // Fan out to all subscribers
         for (const entry of subscribersRef.current.values()) {
           if (entry.types && !entry.types.includes(mutation.type)) {
+            continue;
+          }
+          if (
+            entry.entityTypes &&
+            (mutation.entity_type == null ||
+              !entry.entityTypes.includes(mutation.entity_type))
+          ) {
+            continue;
+          }
+          if (
+            entry.actions &&
+            (mutation.action == null ||
+              !entry.actions.includes(mutation.action))
+          ) {
             continue;
           }
           try {
@@ -297,17 +331,27 @@ export function useEventSubscription(
   // Stable key for the types filter — re-subscribe only when the actual
   // filter set changes, not on every render due to a new array reference.
   const typesKey = options?.types?.slice().sort().join(",") ?? "";
+  const entityTypesKey = options?.entityTypes?.slice().sort().join(",") ?? "";
+  const actionsKey = options?.actions?.slice().sort().join(",") ?? "";
 
   useEffect(() => {
     const types = typesKey
       ? (typesKey.split(",") as MutationType[])
       : undefined;
+    const entityTypes = entityTypesKey
+      ? (entityTypesKey.split(",") as MutationEntityType[])
+      : undefined;
+    const actions = actionsKey ? actionsKey.split(",") : undefined;
+    const subscriptionOptions: SubscriptionOptions = {};
+    if (types) subscriptionOptions.types = types;
+    if (entityTypes) subscriptionOptions.entityTypes = entityTypes;
+    if (actions) subscriptionOptions.actions = actions;
     const unsubscribe = subscribe(
       (mutation: MutationPayload) => {
         callbackRef.current(mutation);
       },
-      types ? { types } : undefined,
+      types || entityTypes || actions ? subscriptionOptions : undefined,
     );
     return unsubscribe;
-  }, [subscribe, typesKey]);
+  }, [subscribe, typesKey, entityTypesKey, actionsKey]);
 }

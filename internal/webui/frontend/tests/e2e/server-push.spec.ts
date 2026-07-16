@@ -155,7 +155,7 @@ test.describe("Connection establishment", () => {
     await page.waitForTimeout(1000);
 
     // App should still render with issues from API
-    await expect(page.locator("h1")).toHaveText("Aether");
+    await expect(page.locator("h1")).toHaveText("Loom");
     // Issue from API should be visible
     await expect(page.getByText("Test Issue")).toBeVisible();
   });
@@ -246,7 +246,7 @@ test.describe("SSE event handling", () => {
     await page.waitForTimeout(2000);
 
     // App should still be functional
-    await expect(page.locator("h1")).toHaveText("Aether");
+    await expect(page.locator("h1")).toHaveText("Loom");
     // Multiple connection attempts are expected due to EventSource reconnection
     expect(connectionCount).toBeGreaterThanOrEqual(1);
   });
@@ -286,7 +286,7 @@ test.describe("SSE event handling", () => {
     // App should process the mutation without crashing
     // Note: The mutation creates an issue but since the page started with empty issues,
     // the create mutation adds it. We verify the app remains functional.
-    await expect(page.locator("h1")).toHaveText("Aether");
+    await expect(page.locator("h1")).toHaveText("Loom");
 
     // Verify at least one SSE request was made
     expect(requestCount).toBeGreaterThanOrEqual(1);
@@ -394,7 +394,7 @@ test.describe("SSE event handling", () => {
     await page.waitForTimeout(1000);
 
     // App should not crash - should show a warning but continue
-    await expect(page.locator("h1")).toHaveText("Aether");
+    await expect(page.locator("h1")).toHaveText("Loom");
 
     // There might be console warnings about malformed data, but no crash
   });
@@ -534,8 +534,8 @@ test.describe("Multiple clients", () => {
     expect(connections).toBeGreaterThanOrEqual(2);
 
     // Both apps should be functional
-    await expect(page1.locator("h1")).toHaveText("Aether");
-    await expect(page2.locator("h1")).toHaveText("Aether");
+    await expect(page1.locator("h1")).toHaveText("Loom");
+    await expect(page2.locator("h1")).toHaveText("Loom");
 
     await context1.close();
     await context2.close();
@@ -574,7 +574,7 @@ test.describe("Error recovery", () => {
     await page.waitForTimeout(DOM_SETTLE_MS);
 
     // App should not crash with unknown mutation type
-    await expect(page.locator("h1")).toHaveText("Aether");
+    await expect(page.locator("h1")).toHaveText("Loom");
     await expect(page.getByText("Test Issue")).toBeVisible();
   });
 
@@ -603,7 +603,7 @@ test.describe("Error recovery", () => {
     await page.waitForTimeout(DOM_SETTLE_MS);
 
     // App should handle missing issue gracefully
-    await expect(page.locator("h1")).toHaveText("Aether");
+    await expect(page.locator("h1")).toHaveText("Loom");
   });
 
   test("rapid SSE reconnections do not cause memory leak or crash", async ({
@@ -629,7 +629,7 @@ test.describe("Error recovery", () => {
     await page.waitForTimeout(SSE_RETRY_WAIT_MS);
 
     // App should still be responsive
-    await expect(page.locator("h1")).toHaveText("Aether");
+    await expect(page.locator("h1")).toHaveText("Loom");
 
     // Multiple connections are expected, but app should not crash
     expect(connections).toBeGreaterThan(1);
@@ -655,7 +655,7 @@ test.describe("Edge cases", () => {
     // Verify page is interactive
     const heading = page.locator("h1");
     await expect(heading).toBeVisible();
-    await expect(heading).toHaveText("Aether");
+    await expect(heading).toHaveText("Loom");
 
     // Should be able to interact with the page
     const viewSwitcher = page.locator('[data-testid="view-switcher"]');
@@ -682,7 +682,7 @@ test.describe("Edge cases", () => {
     await page.waitForTimeout(DOM_SETTLE_MS);
 
     // App should not crash with wrong content type
-    await expect(page.locator("h1")).toHaveText("Aether");
+    await expect(page.locator("h1")).toHaveText("Loom");
   });
 
   test("empty SSE response is handled gracefully", async ({ page }) => {
@@ -701,7 +701,7 @@ test.describe("Edge cases", () => {
     await page.waitForTimeout(DOM_SETTLE_MS);
 
     // App should handle empty response
-    await expect(page.locator("h1")).toHaveText("Aether");
+    await expect(page.locator("h1")).toHaveText("Loom");
   });
 
   test("SSE with since parameter includes timestamp", async ({ page }) => {

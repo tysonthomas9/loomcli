@@ -23,6 +23,20 @@ func resolveConflictsWithAgentDeps(deps *cli.Deps, repoPath, sourceBranch, targe
 	return invokeAgentForConflictsDeps(deps, repoPath, sourceBranch, targetBranch, conflicts)
 }
 
+func resolveLocalConflictsWithAgentDeps(deps *cli.Deps, repoPath, sourceBranch, targetBranch string, conflicts []string) error {
+	printConflictInfo(conflicts)
+	var prompt string
+	if ConflictPromptGenWithPush != nil {
+		prompt = ConflictPromptGenWithPush(sourceBranch, targetBranch, conflicts, "")
+	} else {
+		prompt = fmt.Sprintf("Resolve merge conflicts in local-only repo: %s -> %s\n\nConflicted files:\n", sourceBranch, targetBranch)
+		for _, f := range conflicts {
+			prompt += "  - " + f + "\n"
+		}
+	}
+	return invokeAgentDeps(deps, repoPath, prompt, "")
+}
+
 func resolveConflictsDetached(repoPath, sourceBranch, targetBranch string, conflicts []string, pushRef string) error {
 	return resolveConflictsDetachedDeps(cli.GetDeps(nil), repoPath, sourceBranch, targetBranch, conflicts, pushRef)
 }

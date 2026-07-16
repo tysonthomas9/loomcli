@@ -238,6 +238,8 @@ type KanbanIssueRPC struct {
 	ParentTitle      string             `json:"parent_title,omitempty"`
 	Repo             string             `json:"repo,omitempty"`
 	IsBlocked        bool               `json:"is_blocked,omitempty"`
+	IsReady          bool               `json:"is_ready,omitempty"`
+	IsDeferred       bool               `json:"is_deferred,omitempty"`
 	BlockedByCount   int                `json:"blocked_by_count,omitempty"`
 	BlockedBy        []string           `json:"blocked_by,omitempty"`
 	BlockedByDetails []types.BlockerRef `json:"blocked_by_details,omitempty"`

@@ -43,7 +43,8 @@ func HandleTerminalToken(svc service.TerminalService) http.HandlerFunc {
 			userID = identity.UserID
 		}
 
-		token, err := svc.GenerateToken(r.Context(), session, userID)
+		workspace := middleware.WorkspaceFromContext(r.Context())
+		token, err := svc.GenerateToken(r.Context(), workspace, session, userID)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return

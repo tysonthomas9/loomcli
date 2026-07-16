@@ -74,7 +74,7 @@ func TestPTYHook_OnRegister_ValidPath(t *testing.T) {
 	// workspace is registered, AttachSession reaches managerForWS and then
 	// PTYManager.AttachSession. Instead, use the in-package test helper
 	// hasManager to confirm the entry exists without spawning a shell.
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, []string{"/bin/true"})
+	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
 	if errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
 		t.Fatalf("AttachSession after register returned ErrWorkspaceNotRegistered: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestPTYHook_OnRegister_InvalidPath_NonexistentDir(t *testing.T) {
 		t.Fatalf("OnRegister should swallow invalid-path errors, got: %v", err)
 	}
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, []string{"/bin/true"})
+	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
 	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
 		t.Fatalf("AttachSession for invalid-path workspace = %v, want ErrWorkspaceNotRegistered", err)
 	}
@@ -110,7 +110,7 @@ func TestPTYHook_OnRegister_InvalidPath_IsFile(t *testing.T) {
 		t.Fatalf("OnRegister should swallow invalid-path errors, got: %v", err)
 	}
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, []string{"/bin/true"})
+	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
 	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
 		t.Fatalf("AttachSession for file-path workspace = %v, want ErrWorkspaceNotRegistered", err)
 	}
@@ -150,7 +150,7 @@ func TestPTYHook_OnDeregister_RemovesEntry(t *testing.T) {
 	}
 	hook.OnDeregister(deregCtx(ws))
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, []string{"/bin/true"})
+	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
 	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
 		t.Fatalf("AttachSession after deregister = %v, want ErrWorkspaceNotRegistered", err)
 	}
@@ -172,7 +172,7 @@ func TestPTYHook_OnRollback_SameAsDeregister(t *testing.T) {
 	}
 	hook.OnRollback(deregCtx(ws))
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, []string{"/bin/true"})
+	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
 	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
 		t.Fatalf("AttachSession after rollback = %v, want ErrWorkspaceNotRegistered", err)
 	}
@@ -193,7 +193,7 @@ func TestPTYHook_IntegrationWithRegistry(t *testing.T) {
 		t.Fatalf("registry.Register: %v", err)
 	}
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, []string{"/bin/true"})
+	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
 	if errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
 		t.Fatalf("post-Register AttachSession returned ErrWorkspaceNotRegistered: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestPTYHook_IntegrationWithRegistry(t *testing.T) {
 
 	registry.Deregister(ws)
 
-	_, _, err = multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t2"}, 80, 24, []string{"/bin/true"})
+	_, _, err = multi.AttachSession(terminal.SessionKey{Workspace: ws, Name: "t2"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
 	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
 		t.Fatalf("post-Deregister AttachSession = %v, want ErrWorkspaceNotRegistered", err)
 	}
@@ -222,7 +222,7 @@ func TestPTYHook_IntegrationWithRegistry_InvalidPath(t *testing.T) {
 		t.Fatalf("registry.Register should succeed for non-critical hook failure, got: %v", err)
 	}
 
-	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: "ws-bad", Name: "t"}, 80, 24, []string{"/bin/true"})
+	_, _, err := multi.AttachSession(terminal.SessionKey{Workspace: "ws-bad", Name: "t"}, 80, 24, &terminal.LaunchSpec{Argv: []string{"/bin/true"}})
 	if !errors.Is(err, terminal.ErrWorkspaceNotRegistered) {
 		t.Fatalf("AttachSession on downgraded workspace = %v, want ErrWorkspaceNotRegistered", err)
 	}

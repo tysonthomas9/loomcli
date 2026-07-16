@@ -491,6 +491,12 @@ func seedBuiltInRoles(ctx context.Context, s storepkg.Store, key string) error {
 			Description:  "Task implementation agent",
 			TaskFilter:   "has_design",
 		},
+		{
+			WorkspaceKey: key,
+			Name:         "lead",
+			Kind:         string(domain.RoleKindInteractive),
+			Description:  "Lead/orchestrator terminal",
+		},
 	}
 	for _, role := range roles {
 		if _, err := s.Roles().Create(ctx, role); err != nil {
@@ -529,16 +535,12 @@ func deleteLocalWorkspaceState(key string) {
 	if key == "" {
 		return
 	}
-	if err := bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return fmt.Errorf("load local workspace state: %w", err)
-		}
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		delete(sc.Workspaces, key)
 		if sc.LastWorkspace == key {
 			sc.LastWorkspace = ""
 		}
-		return bootstrap.SaveStateCache(sc)
+		return nil
 	}); err != nil {
 		slog.Warn("failed to rollback local workspace state", "workspace", key, "err", err)
 	}

@@ -133,6 +133,9 @@ func broadcastTabChange(hub *realtime.Hub, wsID, issueID string) {
 	if hub != nil {
 		hub.Broadcast(&realtime.MutationPayload{
 			Type:        "issue_tabs",
+			EntityType:  "issue",
+			EntityID:    issueID,
+			Action:      "issue.tabs",
 			IssueID:     issueID,
 			Timestamp:   time.Now().UTC().Format(time.RFC3339),
 			WorkspaceID: wsID,

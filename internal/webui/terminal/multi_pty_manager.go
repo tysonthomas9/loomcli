@@ -7,6 +7,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
 // ErrInvalidWorkspacePath is returned when a workspace's directory path fails
@@ -71,18 +73,8 @@ func NewMultiPTYManager(cmd string, maxPerWS int) *MultiPTYManager {
 // nothing. Re-registering an existing wsID shuts down its current
 // PTYManager (if created) and replaces the entry.
 func (mm *MultiPTYManager) Register(wsID, path string) error {
-	if wsID == "" {
-		return fmt.Errorf("%w: empty workspace id", ErrWorkspaceNotRegistered)
-	}
-	if path == "" {
-		return fmt.Errorf("%w: empty path", ErrInvalidWorkspacePath)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("%w: %q: %v", ErrInvalidWorkspacePath, path, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%w: %q: not a directory", ErrInvalidWorkspacePath, path)
+	if err := validateWorkspaceRegistration(wsID, path); err != nil {
+		return err
 	}
 
 	mm.mu.Lock()
@@ -103,6 +95,57 @@ func (mm *MultiPTYManager) Register(wsID, path string) error {
 
 	mm.entries[wsID] = &wsEntry{path: path}
 	slog.Info("registered workspace pty manager", "workspace", wsID, "path", path)
+	return nil
+}
+
+// EnsureRegistered associates a workspace ID with a directory path when it is
+// not already registered. Unlike Register, an existing entry with the same path
+// is left intact so live PTY sessions are not disrupted by just-in-time terminal
+// route healing. If the existing path differs, it replaces the entry to keep the
+// terminal cwd aligned with local state.
+func (mm *MultiPTYManager) EnsureRegistered(wsID, path string) error {
+	if err := validateWorkspaceRegistration(wsID, path); err != nil {
+		return err
+	}
+
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+
+	if mm.closed {
+		return ErrPTYManagerClosed
+	}
+
+	if existing, ok := mm.entries[wsID]; ok {
+		if existing.path == path {
+			return nil
+		}
+		slog.Info("replacing existing pty manager for workspace after path change", "workspace", wsID)
+		if existing.mgr != nil {
+			if err := existing.mgr.Shutdown(); err != nil {
+				slog.Warn("shutting down replaced pty manager", "workspace", wsID, "err", err)
+			}
+		}
+	}
+
+	mm.entries[wsID] = &wsEntry{path: path}
+	slog.Info("registered workspace pty manager", "workspace", wsID, "path", path)
+	return nil
+}
+
+func validateWorkspaceRegistration(wsID, path string) error {
+	if wsID == "" {
+		return fmt.Errorf("%w: empty workspace id", ErrWorkspaceNotRegistered)
+	}
+	if path == "" {
+		return fmt.Errorf("%w: empty path", ErrInvalidWorkspacePath)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%w: %q: %v", ErrInvalidWorkspacePath, path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: %q: not a directory", ErrInvalidWorkspacePath, path)
+	}
 	return nil
 }
 
@@ -279,12 +322,12 @@ func (mm *MultiPTYManager) existingManagerForWS(wsID string) *PTYManager {
 // AttachSession routes to the per-workspace PTYManager, creating it lazily
 // if necessary. Returns ErrWorkspaceNotRegistered if key.Workspace is empty
 // or unknown.
-func (mm *MultiPTYManager) AttachSession(key SessionKey, cols, rows uint16, argv []string) (Attachment, bool, error) {
+func (mm *MultiPTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *tabmeta.LaunchSpec) (Attachment, bool, error) {
 	m, err := mm.managerForWS(key.Workspace)
 	if err != nil {
 		return nil, false, err
 	}
-	return m.AttachSession(key, cols, rows, argv)
+	return m.AttachSession(key, cols, rows, launch)
 }
 
 // EnsureSession routes backend-owned session startup to the per-workspace
@@ -333,6 +376,16 @@ func (mm *MultiPTYManager) HasSession(key SessionKey) bool {
 		return false
 	}
 	return m.HasSession(key)
+}
+
+// SessionClosed reports whether a session existed in the current per-workspace
+// manager and has since exited or been killed.
+func (mm *MultiPTYManager) SessionClosed(key SessionKey) bool {
+	m := mm.existingManagerForWS(key.Workspace)
+	if m == nil {
+		return false
+	}
+	return m.SessionClosed(key)
 }
 
 // AttachmentCount returns the number of concurrent attachments for key.

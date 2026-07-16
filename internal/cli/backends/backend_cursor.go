@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/harness"
@@ -32,10 +33,12 @@ var cursorInvoker = defaultCursorInvoker
 // cursorNonInteractiveInvoker is the function used for non-interactive Cursor invocation (mockable for tests)
 var cursorNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error = defaultCursorNonInteractiveInvoker
 
+var cursorAuthStatus = defaultCursorAuthStatus
+
 // buildCursorInteractiveCmd constructs the exec.Cmd for interactive Cursor invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildCursorInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	cmd := exec.Command("cursor", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
+	cmd := exec.Command("cursor-agent", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 	cmd.Dir = workDir
 	env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
@@ -55,7 +58,7 @@ func defaultCursorInvoker(workDir, prompt, agentName string) error {
 		fmt.Println("Launching Cursor agent (non-interactive, no TTY)...")
 		fmt.Println("")
 
-		cmd := exec.Command("cursor", "-p", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
+		cmd := exec.Command("cursor-agent", "-p", "--force", prompt) //nolint:gosec // G204: prompt is from the CLI operator, not untrusted input
 		cmd.Dir = workDir
 		env := append(cli.FilteredEnv(), "LOOM_WORKTREE_PATH="+workDir)
 		if agentName != "" {
@@ -87,7 +90,7 @@ func defaultCursorNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	// Cursor consumes the prompt as a CLI argument; pass empty stdin
 	// so the wrapper's PTY sees immediate EOF if the harness reads.
 	return runHarness(context.Background(), shutdown, harnessInvocation{
-		BinaryName:  "cursor",
+		BinaryName:  "cursor-agent",
 		Args:        []string{"-p", "--output-format", "stream-json", "--force", prompt},
 		WorkDir:     workDir,
 		Env:         env,
@@ -105,13 +108,13 @@ func defaultCursorNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 
 // Meta returns descriptive metadata about the Cursor backend.
 func (c *CursorBackend) Meta() BackendMeta {
-	version := detectBinaryVersion("cursor")
+	version := detectBinaryVersion("cursor-agent")
 	return BackendMeta{
 		DisplayName: "Cursor",
 		Version:     version,
 		Description: "Cursor AI CLI",
 		URL:         "https://cursor.com/cli",
-		BinaryName:  "cursor",
+		BinaryName:  "cursor-agent",
 	}
 }
 
@@ -120,17 +123,19 @@ func (c *CursorBackend) HealthCheck() HealthStatus {
 	var hs HealthStatus
 	var issues []string
 
-	if _, err := exec.LookPath("cursor"); err == nil {
+	if _, err := exec.LookPath("cursor-agent"); err == nil {
 		hs.Installed = true
-		hs.Version = detectBinaryVersion("cursor")
+		hs.Version = detectBinaryVersion("cursor-agent")
 	} else {
-		issues = append(issues, "cursor binary not found on PATH")
+		issues = append(issues, "cursor-agent binary not found on PATH")
 	}
 
 	if os.Getenv("CURSOR_API_KEY") != "" {
 		hs.APIKeySet = true
+	} else if hs.Installed && cursorAuthStatus() == nil {
+		hs.APIKeySet = true
 	} else {
-		issues = append(issues, "CURSOR_API_KEY not set")
+		issues = append(issues, "CURSOR_API_KEY not set and cursor-agent status is not logged in")
 	}
 
 	hs.Healthy = hs.Installed && hs.APIKeySet
@@ -140,6 +145,22 @@ func (c *CursorBackend) HealthCheck() HealthStatus {
 		hs.Message = "ready"
 	}
 	return hs
+}
+
+func defaultCursorAuthStatus() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "cursor-agent", "status")
+	cmd.Stdin = nil
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
 }
 
 func init() {

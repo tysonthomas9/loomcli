@@ -45,8 +45,7 @@ func (d *Daemon) pollAgentCommands() {
 	ctx, cancel := context.WithTimeout(ctx, agentCommandPollTimeout)
 	defer cancel()
 	cmds, err := d.store.AgentCommands().List(ctx, d.sup.WorkspaceID, store.AgentCommandFilter{
-		Status: domain.AgentCommandQueued,
-		Limit:  50,
+		Limit: 50,
 	})
 	if err != nil {
 		recordCommandPollErr(span, err)
@@ -62,10 +61,22 @@ func (d *Daemon) pollAgentCommands() {
 		attribute.Int64("cycle.duration_ms", time.Since(cycleStart).Milliseconds()),
 	)
 	for _, cmd := range cmds {
+		if cmd == nil || !pollableAgentCommandStatus(cmd.Status) {
+			continue
+		}
 		if cmd.TargetNodeID != "" && cmd.TargetNodeID != d.sup.NodeID {
 			continue
 		}
 		d.handleAgentCommand(cmd)
+	}
+}
+
+func pollableAgentCommandStatus(status domain.AgentCommandStatus) bool {
+	switch status {
+	case "", domain.AgentCommandQueued:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -80,7 +91,7 @@ func (d *Daemon) handleAgentCommand(cmd *domain.AgentCommand) {
 	var resp DaemonControlResponse
 	switch cmd.Type {
 	case "start":
-		resp = d.handleAgentControlStart(cmd.TargetAgentID, cmd.Payload["task_id"])
+		resp = d.handleAgentControlStart(cmd.TargetAgentID, cmd.Payload["task_id"], cmd.Payload["parent_session_id"])
 	case "stop":
 		resp = d.handleAgentControlStop(cmd.TargetAgentID, cmd.Payload["force"] == "true")
 	case "restart":
@@ -104,5 +115,7 @@ func (d *Daemon) handleAgentCommand(cmd *domain.AgentCommand) {
 		ErrorClass: errClass,
 	}); err != nil {
 		slog.Warn("agent command completion failed", "command_id", cmd.CommandID, "err", err)
+	} else {
+		slog.Info("agent command completed", "command_id", cmd.CommandID, "type", cmd.Type, "target_agent_id", cmd.TargetAgentID, "status", status, "result", result)
 	}
 }

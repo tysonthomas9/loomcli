@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,7 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // DaemonControlRequest is sent by the CLI client to the daemon control socket.
@@ -180,24 +184,31 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 	if len(taskIDs) > 0 {
 		taskID = taskIDs[0]
 	}
+	parentSessionID := ""
+	if len(taskIDs) > 1 {
+		parentSessionID = taskIDs[1]
+	}
 	if name == "" {
 		return DaemonControlResponse{Error: "agent name is required"}
 	}
 
-	// Validate agent exists in config
-	if !d.agentExistsInConfig(name) {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
-	}
-
-	// Must be in StoppedAgents set
-	if !d.isAgentStopped(name) {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is not stopped (use restart to reset a running agent)", name)}
-	}
-
-	// Look up the config.AgentEntry from current config
+	// Command-created agents may have been written to fleet-db after the last
+	// config poll. Pull config once synchronously so a queued start command can
+	// materialize the new local worker immediately.
 	entry, ok := d.findAgentEntry(name)
 	if !ok {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", name)}
+		d.reloadAndReconcile()
+		entry, ok = d.findAgentEntry(name)
+	}
+	if !ok {
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
+	}
+	if err := d.validateEphemeralStart(entry, taskID); err != nil {
+		return DaemonControlResponse{Error: err.Error()}
+	}
+
+	if d.isAgentRunning(name) {
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q is already running (use restart to reset a running agent)", name)}
 	}
 
 	// Remove from StoppedAgents and add agent
@@ -206,7 +217,7 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 	d.sup.AgentsMu.Unlock()
 
 	d.drainAddMu.Lock()
-	err := d.sup.AddAgentForTask(entry, taskID)
+	err := d.sup.AddAgentForTask(entry, taskID, parentSessionID)
 	d.drainAddMu.Unlock()
 	if err != nil {
 		// Re-add to StoppedAgents on failure
@@ -215,9 +226,89 @@ func (d *Daemon) handleAgentControlStart(name string, taskIDs ...string) DaemonC
 		d.sup.AgentsMu.Unlock()
 		return DaemonControlResponse{Error: fmt.Sprintf("failed to start agent %q: %v", name, err)}
 	}
+	d.markAgentStartAccepted(name)
 
 	slog.Info("agent started via control socket", "worktree", name)
 	return DaemonControlResponse{Success: true}
+}
+
+func (d *Daemon) markAgentStartAccepted(name string) {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" {
+		return
+	}
+	desired := domain.AgentDesiredRunning
+	state := domain.AgentStateActive
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	d.reconcileMu.Lock()
+	defer d.reconcileMu.Unlock()
+	if _, err := d.store.Agents().Update(ctx, d.sup.WorkspaceID, name, store.AgentUpdate{
+		DesiredState: &desired,
+		State:        &state,
+	}); err != nil {
+		slog.Warn("failed to mark agent start accepted", "worktree", name, "err", err)
+		return
+	}
+	d.setConfigAgentDesiredStateLocked(name, desired)
+}
+
+func (d *Daemon) validateEphemeralStart(entry config.AgentEntry, taskID string) error {
+	if entry.Mode != domain.AgentModeEphemeral {
+		return nil
+	}
+	if taskID == "" {
+		return fmt.Errorf("ephemeral agent %q requires a task_id; rerun the task to create a new worker attempt", entry.Worktree)
+	}
+	if d.hasTerminalEphemeralTaskSession(entry.Worktree) {
+		return fmt.Errorf("ephemeral agent %q already has a terminal task attempt; rerun the task to create a new worker attempt", entry.Worktree)
+	}
+	return nil
+}
+
+func (d *Daemon) hasTerminalEphemeralTaskSession(agentName string) bool {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" || d.store.AgentSessions() == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	sessions, err := d.store.AgentSessions().List(ctx, d.sup.WorkspaceID, store.AgentSessionFilter{
+		AgentID: agentName,
+		Limit:   100,
+	})
+	if err != nil {
+		slog.Warn("failed to inspect ephemeral task sessions", "agent", agentName, "err", err)
+		return true
+	}
+	for _, session := range sessions {
+		if session == nil || session.Kind != domain.AgentSessionKindTask || session.TaskID == "" {
+			continue
+		}
+		switch session.Status {
+		case domain.AgentSessionCompleted, domain.AgentSessionFailed, domain.AgentSessionCancelled, domain.AgentSessionExpired:
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Daemon) setConfigAgentDesiredState(name string, desired domain.AgentDesiredState) {
+	d.reconcileMu.Lock()
+	defer d.reconcileMu.Unlock()
+	d.setConfigAgentDesiredStateLocked(name, desired)
+}
+
+func (d *Daemon) setConfigAgentDesiredStateLocked(name string, desired domain.AgentDesiredState) {
+	if d.config == nil {
+		return
+	}
+	for i := range d.config.Agents {
+		if d.config.Agents[i].Worktree == name {
+			d.config.Agents[i].DesiredState = desired
+			d.configHash = computeConfigHash(d.config)
+			return
+		}
+	}
 }
 
 // handleAgentControlRestart restarts an agent (works for both running and stopped agents).
@@ -229,6 +320,13 @@ func (d *Daemon) handleAgentControlRestart(name string) DaemonControlResponse {
 	// Validate agent exists in config
 	if !d.agentExistsInConfig(name) {
 		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in daemon config", name)}
+	}
+	entry, ok := d.findAgentEntry(name)
+	if !ok {
+		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", name)}
+	}
+	if entry.Mode == domain.AgentModeEphemeral {
+		return DaemonControlResponse{Error: fmt.Sprintf("ephemeral agent %q cannot be restarted; rerun the task to create a new worker attempt", name)}
 	}
 
 	isStopped := d.isAgentStopped(name)
@@ -247,12 +345,6 @@ func (d *Daemon) handleAgentControlRestart(name string) DaemonControlResponse {
 	d.sup.AgentsMu.Lock()
 	delete(d.sup.StoppedAgents, name)
 	d.sup.AgentsMu.Unlock()
-
-	// Look up the config.AgentEntry from current config
-	entry, ok := d.findAgentEntry(name)
-	if !ok {
-		return DaemonControlResponse{Error: fmt.Sprintf("agent %q not found in current config", name)}
-	}
 
 	// Add the agent back with fresh state
 	if err := d.sup.AddAgent(entry); err != nil {

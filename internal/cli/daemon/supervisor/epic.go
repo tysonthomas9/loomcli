@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 )
 
@@ -16,6 +17,9 @@ func (s *Supervisor) handleEpicTransition(ap *AgentProcess) {
 	currentEpicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
 	if currentEpicID == "" {
+		return
+	}
+	if ap.Entry.Mode == domain.AgentModeEphemeral {
 		return
 	}
 

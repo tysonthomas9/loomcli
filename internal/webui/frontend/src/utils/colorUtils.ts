@@ -3,17 +3,18 @@
  */
 
 /**
- * Pastel color palette for agent avatars and repo badges.
+ * Saturated color palette for agent avatars and repo badges (Aether design).
+ * All shades are dark enough that shouldUseWhiteText() returns true → white text.
  */
 export const AVATAR_COLORS = [
-  "#9DC08B", // sage green
-  "#F59E87", // peach
-  "#B6B2DF", // lavender
-  "#95CBE9", // sky blue
-  "#F5C28E", // apricot
-  "#E8A5B3", // rose
-  "#A5D4C8", // mint
-  "#D4A5D8", // orchid
+  "#7c3aed", // violet-600
+  "#ea580c", // orange-600
+  "#0d9488", // teal-600
+  "#2563eb", // blue-600
+  "#db2777", // pink-600
+  "#d97706", // amber-600
+  "#0891b2", // cyan-600
+  "#16a34a", // green-600
 ];
 
 /**

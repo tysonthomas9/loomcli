@@ -11,6 +11,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import {
   useTerminalFont,
+  applyTerminalFont,
+  TERMINAL_FONT_CHANGE_EVENT,
+  TERMINAL_FONT_FAMILY_VAR,
+  TERMINAL_FONT_SIZE_VAR,
   DEFAULT_FONT_FAMILY,
   DEFAULT_FONT_SIZE,
 } from "../useTerminalFont";
@@ -21,6 +25,8 @@ const KEY_SIZE = "cortex:terminal-font-size";
 describe("useTerminalFont", () => {
   beforeEach(() => {
     localStorage.clear();
+    document.documentElement.style.removeProperty(TERMINAL_FONT_FAMILY_VAR);
+    document.documentElement.style.removeProperty(TERMINAL_FONT_SIZE_VAR);
   });
 
   describe("initial state", () => {
@@ -221,6 +227,69 @@ describe("useTerminalFont", () => {
       expect(result.current.fontSize).toBe(20);
 
       spy.mockRestore();
+    });
+  });
+
+  describe("applyTerminalFont", () => {
+    it("sets CSS custom properties on documentElement", () => {
+      applyTerminalFont("Monaco, monospace", 16);
+
+      expect(
+        document.documentElement.style.getPropertyValue(
+          TERMINAL_FONT_FAMILY_VAR,
+        ),
+      ).toBe("Monaco, monospace");
+      expect(
+        document.documentElement.style.getPropertyValue(TERMINAL_FONT_SIZE_VAR),
+      ).toBe("16px");
+    });
+
+    it("applies stored prefs on hook mount", () => {
+      localStorage.setItem(KEY_FAMILY, '"Fira Code", monospace');
+      localStorage.setItem(KEY_SIZE, "18");
+
+      renderHook(() => useTerminalFont());
+
+      expect(
+        document.documentElement.style.getPropertyValue(
+          TERMINAL_FONT_FAMILY_VAR,
+        ),
+      ).toBe('"Fira Code", monospace');
+      expect(
+        document.documentElement.style.getPropertyValue(TERMINAL_FONT_SIZE_VAR),
+      ).toBe("18px");
+    });
+  });
+
+  describe("font change propagation", () => {
+    it("dispatches TERMINAL_FONT_CHANGE_EVENT when font family changes", () => {
+      const handler = vi.fn();
+      window.addEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
+
+      const { result } = renderHook(() => useTerminalFont());
+
+      act(() => {
+        result.current.setFontFamily("Monaco, monospace");
+      });
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect((handler.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+        fontFamily: "Monaco, monospace",
+        fontSize: DEFAULT_FONT_SIZE,
+      });
+
+      window.removeEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
+    });
+
+    it("syncs state across hook instances via custom event", () => {
+      const { result: settings } = renderHook(() => useTerminalFont());
+      const { result: app } = renderHook(() => useTerminalFont());
+
+      act(() => {
+        settings.current.setFontSize(20);
+      });
+
+      expect(app.current.fontSize).toBe(20);
     });
   });
 });

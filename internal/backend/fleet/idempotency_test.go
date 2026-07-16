@@ -19,8 +19,8 @@ func sampleCreateParams() backend.CreateParams {
 		IssueType:   "bug",
 		Priority:    2,
 		Labels:      []string{"a", "b"},
+		ExternalRef: "gh-42", // forwarded to fleet-db's create body
 		// Fields fleet-db drops from the create body:
-		ExternalRef:      "gh-42",
 		EstimatedMinutes: &est,
 		CreatedBy:        "agent-1",
 	}

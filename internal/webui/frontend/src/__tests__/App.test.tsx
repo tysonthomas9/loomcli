@@ -193,6 +193,12 @@ vi.mock("@/components/TerminalView/TerminalView", () => ({
   ),
 }));
 
+vi.mock("@/components/AgentIconRail/AgentIconRail", () => ({
+  AgentIconRail: () => (
+    <nav aria-label="Live agents" data-testid="agent-icon-rail" />
+  ),
+}));
+
 // Mock FileExplorer to avoid CodeMirror dependencies in jsdom
 vi.mock("@/components/FileExplorer", () => ({
   FileExplorer: () => <div data-testid="file-explorer">File Explorer</div>,
@@ -261,6 +267,14 @@ vi.mock("@/hooks", () => ({
   useIssueDetail: mockUseIssueDetail,
   useToast: mockUseToast,
   useRouteView: mockUseRouteView,
+  useWorkspaceTreeWidth: () => ({
+    width: 210,
+    applyDelta: vi.fn(),
+    resetWidth: vi.fn(),
+  }),
+  WORKSPACE_TREE_DEFAULT_WIDTH: 210,
+  WORKSPACE_TREE_MIN_WIDTH: 160,
+  WORKSPACE_TREE_MAX_WIDTH: 420,
   DEFAULT_GROUP_BY: "epic",
   useFilterState: vi.fn(() => [
     {}, // FilterState - empty means App.tsx will apply DEFAULT_GROUP_BY fallback
@@ -892,6 +906,31 @@ function mockHelloWorldWorkspaceContext({
   } as ReturnType<typeof useWorkspaceContext>);
 }
 
+// AgentSection's module import triggers a vitest-4 mock-allocation blowup on
+// import; stub it to a lightweight shim that still renders the store-provided
+// agents as clickable buttons (agent-navigation tests depend on this).
+vi.mock("@/components/WorkspaceTree/AgentSection", () => ({
+  AgentSection: ({
+    onAgentClick,
+  }: {
+    onAgentClick?: (name: string) => void;
+  }) => (
+    <>
+      {(
+        (mockStoreState as { agents?: Array<{ name: string }> })?.agents ?? []
+      ).map((agent) => (
+        <button
+          key={agent.name}
+          type="button"
+          onClick={() => onAgentClick?.(agent.name)}
+        >
+          {agent.name}
+        </button>
+      ))}
+    </>
+  ),
+}));
+
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1025,7 +1064,7 @@ describe("App", () => {
       expect(children?.length).toBe(3);
     });
 
-    it("renders ConnectionStatus in header when loading", () => {
+    it("does not render a ConnectionStatus dot while loading (Aether V3 header)", () => {
       const mockReturn = createMockUseIssuesReturn({
         isLoading: true,
         connectionState: "connecting",
@@ -1034,9 +1073,9 @@ describe("App", () => {
 
       const { container } = render(<App />);
 
-      // ConnectionStatus should be visible with the connection state (showText=false, so check data-state)
+      // The header connection indicator was removed for the Aether V3 design.
       const status = container.querySelector('[data-state="connecting"]');
-      expect(status).toBeInTheDocument();
+      expect(status).not.toBeInTheDocument();
     });
   });
 
@@ -1101,7 +1140,7 @@ describe("App", () => {
       expect(screen.getByText("Specific error message")).toBeInTheDocument();
     });
 
-    it("renders ConnectionStatus with reconnecting state in error state", () => {
+    it("does not render a ConnectionStatus dot in error state (Aether V3)", () => {
       const retryConnection = vi.fn();
       const mockReturn = createMockUseIssuesReturn({
         error: "Connection failed",
@@ -1114,9 +1153,8 @@ describe("App", () => {
 
       const { container } = render(<App />);
 
-      // ConnectionStatus should show reconnecting state (showText=false, check data-state)
       const status = container.querySelector('[data-state="reconnecting"]');
-      expect(status).toBeInTheDocument();
+      expect(status).not.toBeInTheDocument();
     });
 
     it("does not render KanbanBoard when error is present", () => {
@@ -1180,7 +1218,7 @@ describe("App", () => {
       expect(screen.getByText("Third Issue")).toBeInTheDocument();
     });
 
-    it("renders ConnectionStatus in header actions", () => {
+    it("does not render ConnectionStatus in header actions (Aether V3)", () => {
       const mockReturn = createMockUseIssuesReturn({
         connectionState: "connected",
       });
@@ -1188,9 +1226,8 @@ describe("App", () => {
 
       const { container } = render(<App />);
 
-      // Use data-state attribute to find ConnectionStatus (showText=false, no visible text)
       const statusElement = container.querySelector('[data-state="connected"]');
-      expect(statusElement).toBeInTheDocument();
+      expect(statusElement).not.toBeInTheDocument();
     });
 
     it("does not render ErrorDisplay when no error", () => {
@@ -1263,10 +1300,11 @@ describe("App", () => {
 
       render(<App />);
 
-      // Verify KanbanBoard is rendered (we can't easily test the drag event
-      // but we verify the component structure is correct)
+      // Verify the board is rendered (we can't easily test the drag event
+      // but we verify the component structure is correct). The standalone
+      // issue appears in both its lane header and its card, so match all.
       expect(screen.getByRole("heading", { name: "Open" })).toBeInTheDocument();
-      expect(screen.getByText("Test")).toBeInTheDocument();
+      expect(screen.getAllByText("Test").length).toBeGreaterThan(0);
     });
   });
 
@@ -1333,88 +1371,62 @@ describe("App", () => {
     });
   });
 
-  describe("ConnectionStatus in header", () => {
-    it("renders ConnectionStatus with connected state", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "connected",
-        isConnected: true,
+  // The header connection-status dot was removed for the Aether V3 design
+  // (the design header is logo · theme toggle · profile only). These tests
+  // pin its absence across connection states.
+  describe("ConnectionStatus removed from header (Aether V3)", () => {
+    it.each(["connected", "disconnected", "reconnecting", "connecting"])(
+      'renders no connection dot for state "%s"',
+      (state) => {
+        const mockReturn = createMockUseIssuesReturn({
+          connectionState: state,
+          isConnected: state === "connected",
+        });
+        mockStoreState = mockReturn;
+
+        const { container } = render(<App />);
+
+        const status = container.querySelector(`[data-state="${state}"]`);
+        expect(status).not.toBeInTheDocument();
+      },
+    );
+  });
+
+  describe("StaleDataBanner", () => {
+    it("renders on issue-based views when workspace data is stale", () => {
+      mockStoreState = createMockUseIssuesReturn({
+        showStaleBanner: true,
+        disconnectedSince: Date.now() - 10_000,
       });
-      mockStoreState = mockReturn;
 
-      const { container } = render(<App />);
+      render(<App />);
 
-      // ConnectionStatus rendered with showText=false — verify via data-state
-      const status = container.querySelector('[data-state="connected"]');
-      expect(status).toBeInTheDocument();
+      expect(screen.getByText(/data may be stale/)).toBeInTheDocument();
     });
 
-    it("renders ConnectionStatus with disconnected state", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "disconnected",
-        isConnected: false,
+    it("does not render on terminal view when workspace data is stale", async () => {
+      mockUseRouteView.mockReturnValue(createViewStateReturn("terminal"));
+      mockStoreState = createMockUseIssuesReturn({
+        showStaleBanner: true,
+        disconnectedSince: Date.now() - 10_000,
       });
-      mockStoreState = mockReturn;
 
-      const { container } = render(<App />);
+      render(<App />);
 
-      const status = container.querySelector('[data-state="disconnected"]');
-      expect(status).toBeInTheDocument();
-    });
-
-    it("renders ConnectionStatus with reconnecting state and attempt count", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "reconnecting",
-        isConnected: false,
-        reconnectAttempts: 3,
-      });
-      mockStoreState = mockReturn;
-
-      const { container } = render(<App />);
-
-      const status = container.querySelector('[data-state="reconnecting"]');
-      expect(status).toBeInTheDocument();
-    });
-
-    it("renders ConnectionStatus with connecting state", () => {
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "connecting",
-        isConnected: false,
-      });
-      mockStoreState = mockReturn;
-
-      const { container } = render(<App />);
-
-      const status = container.querySelector('[data-state="connecting"]');
-      expect(status).toBeInTheDocument();
-    });
-
-    it("passes retryConnection to ConnectionStatus onRetry", () => {
-      const retryConnection = vi.fn();
-      const mockReturn = createMockUseIssuesReturn({
-        connectionState: "reconnecting",
-        reconnectAttempts: 1,
-        retryConnection,
-      });
-      mockStoreState = mockReturn;
-
-      const { container } = render(<App />);
-
-      // ConnectionStatus is rendered with showRetryButton=false in the new layout,
-      // so verify the status element exists with correct state instead
-      const status = container.querySelector('[data-state="reconnecting"]');
-      expect(status).toBeInTheDocument();
+      expect(await screen.findByTestId("terminal-view")).toBeInTheDocument();
+      expect(screen.queryByText(/data may be stale/)).not.toBeInTheDocument();
     });
   });
 
   describe("AppLayout integration", () => {
-    it("renders with Aether title in header", () => {
+    it("renders with Loom title in header", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       render(<App />);
 
       expect(
-        screen.getByRole("heading", { name: "Aether", level: 1 }),
+        screen.getByRole("heading", { name: "Loom", level: 1 }),
       ).toBeInTheDocument();
     });
 
@@ -1551,7 +1563,7 @@ describe("App", () => {
   });
 
   describe("filter integration", () => {
-    it("renders SearchInput in the navigation slot", () => {
+    it("renders SearchInput in the board toolbar", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -1566,7 +1578,7 @@ describe("App", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders FilterBar in the navigation slot", () => {
+    it("renders no FilterBar in the board toolbar (Aether V3: tabs · search · New Issue)", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -1574,11 +1586,16 @@ describe("App", () => {
 
       render(<App />);
 
-      // FilterBar should be rendered with priority/type dropdowns and more-filters button
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
-      expect(screen.getByTestId("priority-filter")).toBeInTheDocument();
-      expect(screen.getByTestId("type-filter")).toBeInTheDocument();
-      expect(screen.getByTestId("more-filters-trigger")).toBeInTheDocument();
+      // The design board-head has only the view tabs, search, and New Issue —
+      // no filter controls.
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("priority-filter")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("type-filter")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("more-filters-trigger"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("search-input")).toBeInTheDocument();
+      expect(screen.getByTestId("new-issue-button")).toBeInTheDocument();
     });
 
     it("renders filter navigation even in loading state", () => {
@@ -1589,9 +1606,9 @@ describe("App", () => {
 
       render(<App />);
 
-      // In the new layout, search and filters are always in the header
+      // Search stays in the board toolbar; the FilterBar is gone (Aether V3).
       expect(screen.getByTestId("search-input")).toBeInTheDocument();
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
     });
 
     it("renders filter navigation even in error state", () => {
@@ -1603,9 +1620,9 @@ describe("App", () => {
 
       render(<App />);
 
-      // In the new layout, search and filters are always in the header
+      // Search stays in the board toolbar; the FilterBar is gone (Aether V3).
       expect(screen.getByTestId("search-input")).toBeInTheDocument();
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
     });
 
     it("passes filtered issues to KanbanBoard", () => {
@@ -1837,8 +1854,9 @@ describe("App", () => {
 
       render(<App />);
 
-      // FilterBar should be rendered with groupBy props
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+      // FilterBar is gone from the toolbar (Aether V3); groupBy still flows
+      // from filter state into the board.
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
     });
 
     it("updates SwimLaneBoard groupBy when FilterBar groupBy changes", () => {
@@ -2427,39 +2445,20 @@ describe("App", () => {
   });
 
   describe("TerminalView integration", () => {
-    it("renders TalkToLeadButton in the app", () => {
+    // The floating Talk-to-Lead pill was removed for the Aether V3 design
+    // (no design counterpart); the Terminal rail item covers the flow.
+    it("does not render TalkToLeadButton in the app (Aether V3)", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       render(<App />);
 
-      expect(screen.getByTestId("talk-to-lead-button")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("talk-to-lead-button"),
+      ).not.toBeInTheDocument();
     });
 
-    it("TalkToLeadButton has isActive=false when view is not terminal", () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      render(<App />);
-
-      const button = screen.getByTestId("talk-to-lead-button");
-      expect(button).not.toHaveAttribute("data-active");
-      expect(button).toHaveAttribute("aria-pressed", "false");
-    });
-
-    it("TalkToLeadButton click calls navigateToView with terminal", () => {
-      const mockReturn = createMockUseIssuesReturn({});
-      mockStoreState = mockReturn;
-
-      render(<App />);
-
-      const button = screen.getByTestId("talk-to-lead-button");
-      fireEvent.click(button);
-
-      expect(mockNavigateToView).toHaveBeenCalledWith("terminal");
-    });
-
-    it("TalkToLeadButton shows active when view is terminal", () => {
+    it("does not render TalkToLeadButton on the terminal view either", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
       vi.mocked(useRouteView).mockReturnValue(
@@ -2468,9 +2467,9 @@ describe("App", () => {
 
       render(<App />);
 
-      const button = screen.getByTestId("talk-to-lead-button");
-      expect(button).toHaveAttribute("data-active", "true");
-      expect(button).toHaveAttribute("aria-pressed", "true");
+      expect(
+        screen.queryByTestId("talk-to-lead-button"),
+      ).not.toBeInTheDocument();
     });
 
     it("TerminalView is always mounted in the DOM", async () => {
@@ -2895,7 +2894,28 @@ describe("App", () => {
         screen.getByRole("button", { name: "Create & Run" }),
       ).toBeDisabled();
       expect(
-        screen.getByRole("button", { name: "Create Agent" }),
+        screen.queryByRole("button", { name: "Create Agent" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("marks create-agent complete when any workspace agent exists", () => {
+      localStorage.clear();
+      mockStoreState = createMockUseIssuesReturn({ issues: [] });
+      mockBackendState({
+        defaultBackend: "opencode",
+        backends: [backendInfo("opencode", true)],
+      });
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "Planner-A", role_name: "plan" }],
+      });
+
+      render(<App />);
+
+      expect(
+        screen.queryByRole("button", { name: "Create Agent" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Create & Run" }),
       ).toBeInTheDocument();
     });
 
@@ -2962,9 +2982,7 @@ describe("App", () => {
       render(<App />);
 
       // Click first issue — should open panel, not navigate
-      fireEvent.click(
-        screen.getByRole("button", { name: /Issue: First Issue/ }),
-      );
+      fireEvent.click(screen.getByLabelText(/Issue: First Issue/));
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-1",
@@ -2972,9 +2990,7 @@ describe("App", () => {
       expect(fetchIssue).toHaveBeenCalledWith("issue-1");
 
       // Click second issue — same pattern
-      fireEvent.click(
-        screen.getByRole("button", { name: /Issue: Second Issue/ }),
-      );
+      fireEvent.click(screen.getByLabelText(/Issue: Second Issue/));
       expect(mockOpenPanel).toHaveBeenCalledWith({
         type: "issue",
         id: "issue-2",
@@ -3081,9 +3097,7 @@ describe("App", () => {
       const { unmount } = render(<App />);
 
       // Click issue
-      fireEvent.click(
-        screen.getByRole("button", { name: /Issue: Test Issue/ }),
-      );
+      fireEvent.click(screen.getByLabelText(/Issue: Test Issue/));
 
       // Unmount — should not cause any errors
       expect(() => unmount()).not.toThrow();
@@ -3108,9 +3122,7 @@ describe("App", () => {
 
       render(<App />);
 
-      const issueCard = screen.getByRole("button", {
-        name: /Issue: Same Issue/,
-      });
+      const issueCard = screen.getByLabelText(/Issue: Same Issue/);
       fireEvent.click(issueCard);
       expect(fetchIssue).toHaveBeenCalledTimes(1);
       expect(mockOpenPanel).toHaveBeenCalledWith({
@@ -3119,7 +3131,7 @@ describe("App", () => {
       });
     });
 
-    it("clicking agent calls openPanel with agent type", () => {
+    it("clicking agent navigates to the agents view with selection", () => {
       const mockReturn = createMockUseIssuesReturn({
         agents: [
           {
@@ -3142,19 +3154,21 @@ describe("App", () => {
 
       render(<App />);
 
-      // Click first agent — should call openPanel
+      // Clicking an agent navigates to the agents view with the agent
+      // selected (Aether V3) — it no longer opens the legacy slide-over.
       fireEvent.click(screen.getByText("agent-1"));
-      expect(mockOpenPanel).toHaveBeenCalledWith({
+      expect(mockOpenPanel).not.toHaveBeenCalledWith({
         type: "agent",
         name: "agent-1",
       });
+      expect(mockNavigate).toHaveBeenCalledWith(
+        expect.stringContaining("/agents/agent-1"),
+      );
 
-      // Click second agent — should call openPanel again (hook handles dedup)
       fireEvent.click(screen.getByText("agent-2"));
-      expect(mockOpenPanel).toHaveBeenCalledWith({
-        type: "agent",
-        name: "agent-2",
-      });
+      expect(mockNavigate).toHaveBeenCalledWith(
+        expect.stringContaining("/agents/agent-2"),
+      );
     });
 
     it("agent panel close calls closePanel", () => {
@@ -3549,7 +3563,7 @@ describe("App", () => {
   });
 
   describe("sidebar isMultiRepo guard", () => {
-    it("always renders WorkspaceTree sidebar regardless of isMultiRepo", () => {
+    it("renders WorkspaceTree sidebar for workspace view regardless of isMultiRepo", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: null,
         repos: [],
@@ -3581,7 +3595,6 @@ describe("App", () => {
 
       render(<App />);
 
-      // WorkspaceTree is always rendered now (sidebar always shows WorkspaceTree)
       expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
@@ -3653,7 +3666,41 @@ describe("App", () => {
 
       render(<App />);
 
-      // WorkspaceTree is always shown now, regardless of activeView
+      expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
+    });
+
+    it("renders WorkspaceTree sidebar on agents view", () => {
+      vi.mocked(useWorkspaceContext).mockReturnValue({
+        workspace: { name: "my-workspace" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        getRepoByName: vi.fn(),
+        getReposByGroup: vi.fn(() => []),
+        getAgentByName: vi.fn(),
+        activeWorkspaceName: "my-workspace",
+        setActiveWorkspace: vi.fn(),
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: vi.fn().mockResolvedValue(undefined),
+        selectedRepoNames: new Set<string>(),
+        activeRepos: [],
+        activeRepoNames: [],
+        isAllSelected: true,
+        selectRepos: vi.fn(),
+        selectAll: vi.fn(),
+        toggleRepo: vi.fn(),
+        sourceReposFilter: undefined,
+        isMultiRepo: true,
+      });
+      mockUseRouteView.mockReturnValue(createViewStateReturn("agents"));
+      const mockReturn = createMockUseIssuesReturn({});
+      mockStoreState = mockReturn;
+
+      render(<App />);
+
       expect(screen.getByLabelText(/workspace tree/i)).toBeInTheDocument();
     });
 
@@ -3768,7 +3815,7 @@ describe("App", () => {
   });
 
   describe("WorkspaceBreadcrumb isMultiRepo guard", () => {
-    it("renders Aether fallback in breadcrumb when isMultiRepo is false", () => {
+    it("renders Loom fallback in breadcrumb when isMultiRepo is false", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: { name: "my-workspace" },
         repos: [],
@@ -3799,11 +3846,11 @@ describe("App", () => {
       render(<App />);
 
       // Even though workspace has a name, isMultiRepo=false passes null to WorkspaceBreadcrumb
-      // which renders "Aether" fallback
+      // which renders "Loom" fallback
       expect(
-        screen.getByRole("heading", { name: "Aether", level: 1 }),
+        screen.getByRole("heading", { name: "Loom", level: 1 }),
       ).toBeInTheDocument();
-      // Breadcrumb should NOT show workspace name (Aether fallback instead).
+      // Breadcrumb should NOT show workspace name (Loom fallback instead).
       // Note: workspace name may still appear in the sidebar WorkspaceSelectorBar.
       expect(
         screen.queryByRole("heading", { name: "my-workspace", level: 1 }),
@@ -3840,15 +3887,16 @@ describe("App", () => {
 
       render(<App />);
 
-      // isMultiRepo=true passes workspace.name to WorkspaceBreadcrumb which
-      // renders the active view label ("Aether Project" for kanban).
-      // The workspace name itself is not shown in the breadcrumb; it lives
-      // in the sidebar WorkspaceSelectorBar.
+      // Board views show the Loom brand (home button) instead of a
+      // breadcrumb heading — the Aether V3 minimal header. The workspace
+      // name itself lives in the sidebar WorkspaceSelectorBar.
       expect(
         screen.queryByRole("heading", { name: "Cortex", level: 1 }),
       ).not.toBeInTheDocument();
       expect(
-        screen.getByRole("heading", { name: "Aether Project", level: 1 }),
+        screen.getByRole("button", {
+          name: "Loom home — return to Kanban board",
+        }),
       ).toBeInTheDocument();
     });
   });
@@ -3964,8 +4012,8 @@ describe("App", () => {
 
       render(<App />);
 
-      // FilterBar should be present — repo filter dropdown renders when availableRepos > 1
-      expect(screen.getByTestId("filter-bar")).toBeInTheDocument();
+      // No FilterBar even in multi-repo workspaces (Aether V3 toolbar).
+      expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
     });
   });
 });

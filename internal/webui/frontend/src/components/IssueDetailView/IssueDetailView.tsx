@@ -14,6 +14,7 @@ import { useRegisterEscapeLayer, LAYER_ISSUE_PANEL } from "@/hooks";
 import { getReviewType } from "@/utils/issue";
 import { StatusDropdown } from "@/components/StatusDropdown";
 import { ErrorToast } from "@/components/ErrorToast";
+import { DesignPanel, MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { updateIssue } from "@/hooks/api";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
@@ -31,6 +32,8 @@ export interface IssueDetailViewProps {
   onApprove: (issue: Issue) => Promise<void>;
   onReject: (issue: Issue, comment: string) => Promise<void>;
   onOpenInTerminal?: (issue: Issue | IssueDetails) => void;
+  onRunEpic?: (issue: Issue | IssueDetails) => void | Promise<void>;
+  isRunningEpic?: boolean;
   onCopyLink?: () => void;
   onNavigateToIssue?: (issue: Issue) => void;
   onIssueUpdate?: (issue: Issue) => void;
@@ -166,6 +169,8 @@ export function IssueDetailView({
   onApprove,
   onReject,
   onOpenInTerminal,
+  onRunEpic,
+  isRunningEpic = false,
   onCopyLink,
   onNavigateToIssue,
   onIssueUpdate,
@@ -423,6 +428,23 @@ export function IssueDetailView({
             Open in Terminal
           </button>
         )}
+        {issue.issue_type === "epic" && onRunEpic && (
+          <button
+            type="button"
+            className={styles.openTerminalButton}
+            onClick={() => onRunEpic(issue)}
+            disabled={isRunningEpic}
+            aria-label={
+              isRunningEpic ? "Starting epic runner" : "Run epic workflow"
+            }
+            data-testid="detail-run-epic-button"
+          >
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M5 3.5v9l7-4.5-7-4.5z" fill="currentColor" />
+            </svg>
+            {isRunningEpic ? "Starting" : "Run epic"}
+          </button>
+        )}
         {onCopyLink && (
           <button
             type="button"
@@ -573,15 +595,17 @@ export function IssueDetailView({
         {issue.description && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Description</h3>
-            <p className={styles.description}>{issue.description}</p>
+            <MarkdownRenderer
+              className={styles.description ?? ""}
+              content={issue.description}
+            />
           </section>
         )}
 
         {/* Design */}
         {issue.design && (
           <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>Design</h3>
-            <p className={styles.description}>{issue.design}</p>
+            <DesignPanel content={issue.design} format={issue.design_format} />
           </section>
         )}
 
@@ -589,7 +613,10 @@ export function IssueDetailView({
         {issue.notes && (
           <section className={styles.section}>
             <h3 className={styles.sectionTitle}>Notes</h3>
-            <p className={styles.description}>{issue.notes}</p>
+            <MarkdownRenderer
+              className={styles.description ?? ""}
+              content={issue.notes}
+            />
           </section>
         )}
 
@@ -633,7 +660,10 @@ export function IssueDetailView({
                   {comment.author} &middot;{" "}
                   {comment.created_at ? formatDate(comment.created_at) : ""}
                 </div>
-                <p className={styles.description}>{comment.text}</p>
+                <MarkdownRenderer
+                  className={styles.description ?? ""}
+                  content={comment.text}
+                />
               </div>
             ))}
           </section>

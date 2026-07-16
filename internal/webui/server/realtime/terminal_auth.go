@@ -25,10 +25,11 @@ const (
 
 // terminalTokenPayload is the JSON structure signed in a terminal auth token.
 type terminalTokenPayload struct {
-	Session string `json:"session"`
-	UserID  string `json:"uid,omitempty"`
-	Exp     int64  `json:"exp"`
-	Nonce   string `json:"nonce"`
+	Session   string `json:"session"`
+	Workspace string `json:"workspace"`
+	UserID    string `json:"uid,omitempty"`
+	Exp       int64  `json:"exp"`
+	Nonce     string `json:"nonce"`
 }
 
 // TerminalAuth manages one-time tokens for terminal WebSocket connections.
@@ -57,17 +58,18 @@ func NewTerminalAuth() (*TerminalAuth, error) {
 
 // GenerateToken creates a signed, time-limited token for the given session.
 // userID is embedded for audit logging; pass "" in open mode (no auth).
-func (ta *TerminalAuth) GenerateToken(session, userID string) (string, error) {
+func (ta *TerminalAuth) GenerateToken(session, workspace, userID string) (string, error) {
 	nonce := make([]byte, terminalNonceBytes)
 	if _, err := rand.Read(nonce); err != nil {
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
 
 	payload := terminalTokenPayload{
-		Session: session,
-		UserID:  userID,
-		Exp:     time.Now().Add(TerminalTokenExpiry).Unix(),
-		Nonce:   hex.EncodeToString(nonce),
+		Session:   session,
+		Workspace: workspace,
+		UserID:    userID,
+		Exp:       time.Now().Add(TerminalTokenExpiry).Unix(),
+		Nonce:     hex.EncodeToString(nonce),
 	}
 
 	payloadBytes, err := json.Marshal(payload)
@@ -84,9 +86,9 @@ func (ta *TerminalAuth) GenerateToken(session, userID string) (string, error) {
 	return payloadB64 + "." + sig, nil
 }
 
-// ValidateToken checks the token signature, expiry, session match, and single-use.
+// ValidateToken checks the token signature, expiry, workspace/session match, and single-use.
 // Returns the embedded userID (may be empty in open mode) and nil error if valid.
-func (ta *TerminalAuth) ValidateToken(token, session string) (string, error) {
+func (ta *TerminalAuth) ValidateToken(token, session, workspace string) (string, error) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
 		return "", fmt.Errorf("malformed token")
@@ -127,6 +129,9 @@ func (ta *TerminalAuth) ValidateToken(token, session string) (string, error) {
 	// Check session match
 	if payload.Session != session {
 		return "", fmt.Errorf("session mismatch")
+	}
+	if payload.Workspace != workspace {
+		return "", fmt.Errorf("workspace mismatch")
 	}
 
 	// Check single-use

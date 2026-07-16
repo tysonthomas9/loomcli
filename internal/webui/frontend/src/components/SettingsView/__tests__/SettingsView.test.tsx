@@ -34,6 +34,8 @@ vi.mock("@/hooks/workspace", async () => {
     useBackendConfig: vi.fn(),
     useBackends: vi.fn(),
     useLocalSettings: vi.fn(),
+    useWorkspaceDesignFormat: vi.fn(),
+    useWorkspaceContext: vi.fn(),
   };
 });
 
@@ -63,6 +65,8 @@ import {
   useBackendConfig,
   useBackends,
   useLocalSettings,
+  useWorkspaceDesignFormat,
+  useWorkspaceContext,
 } from "@/hooks/workspace";
 import { useTerminalFont } from "@/hooks/terminal";
 import { useToast } from "@/hooks/ui";
@@ -70,6 +74,8 @@ import { useToast } from "@/hooks/ui";
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
 const mockUseBackends = vi.mocked(useBackends);
 const mockUseLocalSettings = vi.mocked(useLocalSettings);
+const mockUseWorkspaceDesignFormat = vi.mocked(useWorkspaceDesignFormat);
+const mockUseWorkspaceContext = vi.mocked(useWorkspaceContext);
 const mockUseTerminalFont = vi.mocked(useTerminalFont);
 const mockUseToast = vi.mocked(useToast);
 
@@ -149,11 +155,22 @@ function createMockLocalSettingsReturn(
         tls: false,
         password_set: false,
       },
+      agent_runtime: {
+        default: "local",
+      },
+      local_task_runner: {},
+      runtime_credentials: {
+        daytona: { configured: false },
+        github: { configured: false },
+      },
     },
     isLoading: false,
     isSaving: false,
     error: null,
     updateRedis: vi.fn().mockResolvedValue(true),
+    updateAgentRuntime: vi.fn().mockResolvedValue(true),
+    updateLocalTaskRunner: vi.fn().mockResolvedValue(true),
+    updateRuntimeCredentials: vi.fn().mockResolvedValue(true),
     refetch: vi.fn(),
     ...overrides,
   };
@@ -188,6 +205,26 @@ describe("SettingsView", () => {
     mockUseBackends.mockReturnValue(createMockBackendsReturn());
     mockUseTerminalFont.mockReturnValue(createMockFontReturn());
     mockUseLocalSettings.mockReturnValue(createMockLocalSettingsReturn());
+    mockUseWorkspaceContext.mockReturnValue({
+      workspaceId: "ALPHA",
+      workspace: {
+        id: "ALPHA",
+        name: "Alpha",
+        path: "/tmp/alpha",
+        repos: [],
+        groups: [],
+        agents: [],
+        workspaces: [],
+        default_workspace: "",
+        design_format: "markdown",
+      },
+      refetch: vi.fn(),
+    } as ReturnType<typeof useWorkspaceContext>);
+    mockUseWorkspaceDesignFormat.mockReturnValue({
+      isSaving: false,
+      error: null,
+      updateDesignFormat: vi.fn().mockResolvedValue(true),
+    });
   });
 
   describe("loading state", () => {
@@ -285,6 +322,132 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       expect(screen.getByText("Default")).toBeInTheDocument();
+    });
+  });
+
+  describe("credential sections", () => {
+    it("groups GitHub separately from remote runtime credentials", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      const githubPanel = screen.getByTestId("github-settings-panel");
+      const remoteRuntimesPanel = screen.getByTestId("remote-runtimes-panel");
+
+      expect(
+        within(githubPanel).getByRole("heading", { name: "GitHub" }),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).getByLabelText(
+          "GitHub Token for Runtimes and PR Review",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).getByText(
+          "Used for GitHub PR review and remote runtime provisioning.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).queryByTestId("daytona-api-key-input"),
+      ).not.toBeInTheDocument();
+
+      expect(
+        within(remoteRuntimesPanel).getByRole("heading", {
+          name: "Remote runtimes",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).getByTestId("daytona-api-key-input"),
+      ).toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).queryByTestId("github-token-input"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).queryByText(/GitHub/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("saves the GitHub token with the existing runtime credential shape", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRuntimeCredentials }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("github-token-input"), {
+        target: { value: " github_pat_new " },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("github-credential-save-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        github: { token: "github_pat_new" },
+      });
+    });
+
+    it("clears the configured GitHub token with the existing PATCH shape", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          settings: {
+            version: 1,
+            fleetdb_redis: {
+              enabled: false,
+              db: 0,
+              tls: false,
+              password_set: false,
+            },
+            agent_runtime: { default: "local" },
+            local_task_runner: {},
+            runtime_credentials: {
+              daytona: { configured: false },
+              github: {
+                configured: true,
+                updated_at: "2026-07-13T12:00:00Z",
+              },
+            },
+          },
+          updateRuntimeCredentials,
+        }),
+      );
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("github-settings-panel")).toHaveTextContent(
+        "Credential saved.",
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("github-credential-clear-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        github: { clear: true },
+      });
+    });
+
+    it("keeps Daytona saves scoped to the remote runtime credential", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRuntimeCredentials }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("daytona-api-key-input"), {
+        target: { value: " dtn_new " },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("daytona-credential-save-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        daytona: { api_key: "dtn_new" },
+      });
     });
   });
 
@@ -427,6 +590,94 @@ describe("SettingsView", () => {
       expect(
         screen.getByText("No per-agent overrides configured."),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("planner design format", () => {
+    it("resets an unsaved selection when the active workspace changes", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      const { rerender } = render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("design-format-select"), {
+        target: { value: "html" },
+      });
+      expect(screen.getByTestId("design-format-select")).toHaveValue("html");
+
+      mockUseWorkspaceContext.mockReturnValue({
+        workspaceId: "BETA",
+        workspace: {
+          id: "BETA",
+          name: "Beta",
+          path: "/tmp/beta",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [],
+          default_workspace: "",
+          design_format: "markdown",
+        },
+        refetch: vi.fn(),
+      } as ReturnType<typeof useWorkspaceContext>);
+      rerender(<SettingsView />);
+
+      expect(screen.getByTestId("design-format-select")).toHaveValue(
+        "markdown",
+      );
+      expect(screen.getByTestId("design-format-save-button")).toBeDisabled();
+    });
+
+    it("persists an HTML selection for the active workspace", async () => {
+      const updateDesignFormat = vi.fn().mockResolvedValue(true);
+      mockUseWorkspaceDesignFormat.mockReturnValue({
+        isSaving: false,
+        error: null,
+        updateDesignFormat,
+      });
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("design-format-select")).toHaveValue(
+        "markdown",
+      );
+      fireEvent.change(screen.getByTestId("design-format-select"), {
+        target: { value: "html" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("design-format-save-button"));
+      });
+
+      expect(updateDesignFormat).toHaveBeenCalledWith("html");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Design format updated successfully",
+        { type: "success" },
+      );
+    });
+  });
+
+  describe("local task runner settings", () => {
+    it("saves the opencode model setting", async () => {
+      const mockUpdateLocalTaskRunner = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          updateLocalTaskRunner: mockUpdateLocalTaskRunner,
+        }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("opencode-model-input"), {
+        target: { value: "anthropic/claude-sonnet-4-20250514" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("local-task-runner-save-button"));
+      });
+
+      expect(mockUpdateLocalTaskRunner).toHaveBeenCalledWith({
+        opencode_model: "anthropic/claude-sonnet-4-20250514",
+      });
     });
   });
 

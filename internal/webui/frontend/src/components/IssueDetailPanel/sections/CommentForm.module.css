@@ -12,8 +12,8 @@
   min-height: 88px;
   padding: 12px;
   font-family: var(--font-family-base);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--font-size-base);
+  line-height: 1.55;
   color: var(--color-text);
   background-color: var(--color-panel-bg);
   border: 1px solid var(--color-border-light);
@@ -45,13 +45,13 @@
 }
 
 .hint {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-muted);
 }
 
 .submitButton {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   background-color: var(--color-primary);
   color: white;
@@ -73,7 +73,7 @@
 .error {
   margin-top: 8px;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--color-danger);
   background-color: var(--color-danger-bg);
   border-radius: var(--radius-sm);

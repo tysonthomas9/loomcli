@@ -185,12 +185,12 @@ func TestIssueFromDetailData(t *testing.T) {
 					CreatedBy:   "eve",
 					ClosedAt:    &closedAt,
 					CloseReason: "completed",
+					Notes:       "Some notes",
+					ExternalRef: "gh-42",
 				},
 				Description:        "A detailed description",
 				AcceptanceCriteria: "Must pass all tests",
-				Notes:              "Some notes",
 				ClosedBySession:    "ses-abc",
-				ExternalRef:        "gh-42",
 				EstimatedMinutes:   &estMins,
 				Dependencies: []backend.DependencyData{
 					{IssueID: "detail-1", DependsOnID: "blocker-1", Type: "blocks", CreatedAt: now, CreatedBy: "eve"},
@@ -283,8 +283,7 @@ func TestIssueFromDetailData(t *testing.T) {
 		{
 			name: "empty ExternalRef produces nil entity.ExternalRef",
 			input: backend.IssueDetailData{
-				IssueData:   backend.IssueData{ID: "ext-empty"},
-				ExternalRef: "",
+				IssueData: backend.IssueData{ID: "ext-empty"},
 			},
 			verify: func(t *testing.T, e entity.Issue) {
 				require.Nil(t, e.ExternalRef)
@@ -293,8 +292,7 @@ func TestIssueFromDetailData(t *testing.T) {
 		{
 			name: "non-empty ExternalRef gh-9 produces pointer",
 			input: backend.IssueDetailData{
-				IssueData:   backend.IssueData{ID: "ext-set"},
-				ExternalRef: "gh-9",
+				IssueData: backend.IssueData{ID: "ext-set", ExternalRef: "gh-9"},
 			},
 			verify: func(t *testing.T, e entity.Issue) {
 				require.NotNil(t, e.ExternalRef)

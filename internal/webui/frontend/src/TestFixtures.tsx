@@ -592,17 +592,7 @@ export function SplitDetailSummaryFixture(): JSX.Element {
   return (
     <WorkspaceProvider workspaceId="fixture-workspace">
       <div data-testid="fixture-root" style={FIXTURE_ROOT_STYLE}>
-        <SplitDetailSummary
-          issue={issue}
-          isSavingPriority={false}
-          isSavingType={false}
-          isSavingAssignee={false}
-          agents={[]}
-          agentTasks={{}}
-          onPrioritySave={async () => {}}
-          onTypeSave={async () => {}}
-          onAssigneeSave={async () => {}}
-        />
+        <SplitDetailSummary issue={issue} />
       </div>
     </WorkspaceProvider>
   );

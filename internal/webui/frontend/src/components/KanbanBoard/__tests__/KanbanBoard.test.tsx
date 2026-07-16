@@ -210,8 +210,9 @@ describe("KanbanBoard", () => {
 
       render(<KanbanBoard issues={issues} />);
 
-      // DraggableIssueCard wraps IssueCard which renders as article
-      expect(screen.getByRole("article")).toBeInTheDocument();
+      // DraggableIssueCard wraps IssueCard which renders as <article>. The
+      // draggable now carries dnd-kit role="button", so query by tag.
+      expect(document.querySelector("article")).toBeInTheDocument();
       expect(screen.getByText("Draggable Issue")).toBeInTheDocument();
     });
   });
@@ -234,9 +235,7 @@ describe("KanbanBoard", () => {
       render(<KanbanBoard issues={[issue]} onIssueClick={handleIssueClick} />);
 
       // When onClick is provided, IssueCard should have button role
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       expect(card).toBeInTheDocument();
     });
 
@@ -249,9 +248,7 @@ describe("KanbanBoard", () => {
 
       render(<KanbanBoard issues={[issue]} onIssueClick={handleIssueClick} />);
 
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -286,12 +283,11 @@ describe("KanbanBoard", () => {
 
       render(<KanbanBoard issues={[issue]} />);
 
-      // IssueCard renders as article (not a button with onClick handler)
-      expect(screen.getByRole("article")).toBeInTheDocument();
-      // The draggable wrapper has role="button" from dnd-kit, but the IssueCard
-      // should not have an onClick handler set
-      const article = screen.getByRole("article");
-      expect(article.tagName).toBe("ARTICLE");
+      // The draggable card carries dnd-kit role="button", so query by tag
+      // rather than the implicit "article" role.
+      const article = document.querySelector("article");
+      expect(article).toBeInTheDocument();
+      expect(article?.tagName).toBe("ARTICLE");
     });
   });
 
@@ -360,7 +356,7 @@ describe("KanbanBoard", () => {
 
       render(<KanbanBoard issues={[issue]} />);
 
-      expect(screen.getByRole("article")).toBeInTheDocument();
+      expect(document.querySelector("article")).toBeInTheDocument();
     });
 
     it("component accepts onDragEnd prop without error", () => {
@@ -372,7 +368,7 @@ describe("KanbanBoard", () => {
         render(<KanbanBoard issues={[issue]} onDragEnd={handleDragEnd} />);
       }).not.toThrow();
 
-      expect(screen.getByRole("article")).toBeInTheDocument();
+      expect(document.querySelector("article")).toBeInTheDocument();
     });
   });
 
@@ -614,8 +610,12 @@ describe("KanbanBoard", () => {
       // Title should be displayed
       expect(screen.getByText("Complete Test Issue")).toBeInTheDocument();
 
-      // Priority badge should show P1
-      expect(screen.getByText("P1")).toBeInTheDocument();
+      // Priority surfaces only as a data attribute (no visible badge —
+      // Aether design tickets carry no priority chip).
+      expect(screen.queryByText("P1")).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Complete Test Issue").closest("article"),
+      ).toHaveAttribute("data-priority", "1");
     });
 
     it("multiple issues in same column preserve order", () => {
@@ -632,7 +632,7 @@ describe("KanbanBoard", () => {
       render(<KanbanBoard issues={issues} columns={THREE_COLUMN_COLUMNS} />);
 
       const openColumn = screen.getByRole("region", { name: "Open issues" });
-      const articles = within(openColumn).getAllByRole("article");
+      const articles = openColumn.querySelectorAll("article");
 
       expect(articles).toHaveLength(3);
       expect(articles[0]).toHaveTextContent("First Issue");
@@ -683,7 +683,7 @@ describe("KanbanBoard", () => {
 
       // When onIssueClick is provided, IssueCard has role="button" with aria-label
       // We need to click the IssueCard button, not the draggable wrapper
-      const cardButton = screen.getByRole("button", { name: /Issue: First/i });
+      const cardButton = screen.getByLabelText(/Issue: First/i);
       fireEvent.click(cardButton);
 
       expect(handleIssueClick).toHaveBeenCalledWith(
@@ -704,8 +704,8 @@ describe("KanbanBoard", () => {
 
       render(<KanbanBoard issues={issues} onIssueClick={handleIssueClick} />);
 
-      const cardA = screen.getByRole("button", { name: /Issue: Issue A/i });
-      const cardB = screen.getByRole("button", { name: /Issue: Issue B/i });
+      const cardA = screen.getByLabelText(/Issue: Issue A/i);
+      const cardB = screen.getByLabelText(/Issue: Issue B/i);
 
       fireEvent.click(cardB);
       expect(handleIssueClick).toHaveBeenLastCalledWith(
@@ -897,6 +897,17 @@ describe("KanbanBoard", () => {
       expect(screen.queryByText("Critical Bug Fix")).not.toBeInTheDocument();
       expect(screen.queryByText("New Feature Request")).not.toBeInTheDocument();
       expect(screen.queryByText("Epic for Q1")).not.toBeInTheDocument();
+    });
+
+    it("filters by issue id", () => {
+      const issues = createFilterTestIssues();
+      const filters: FilterState = { search: "bug-p2-1" };
+
+      render(<KanbanBoard issues={issues} filters={filters} />);
+
+      expect(screen.getByText("Critical Bug Fix")).toBeInTheDocument();
+      expect(screen.queryByText("Important Task")).not.toBeInTheDocument();
+      expect(screen.queryByText("New Feature Request")).not.toBeInTheDocument();
     });
 
     it("combines multiple filters (AND)", () => {
@@ -1478,7 +1489,7 @@ describe("KanbanBoard", () => {
       render(<KanbanBoard issues={issues} />);
 
       const doneColumn = screen.getByRole("region", { name: "Done issues" });
-      const articles = within(doneColumn).getAllByRole("article");
+      const articles = doneColumn.querySelectorAll("article");
       expect(articles).toHaveLength(10);
     });
 
@@ -1502,7 +1513,7 @@ describe("KanbanBoard", () => {
       );
 
       const doneColumn = screen.getByRole("region", { name: "Done issues" });
-      const articles = within(doneColumn).getAllByRole("article");
+      const articles = doneColumn.querySelectorAll("article");
       expect(articles).toHaveLength(15);
     });
 
@@ -1529,7 +1540,7 @@ describe("KanbanBoard", () => {
       render(<KanbanBoard issues={issues} />);
 
       const doneColumn = screen.getByRole("region", { name: "Done issues" });
-      expect(within(doneColumn).getAllByRole("article")).toHaveLength(10);
+      expect(doneColumn.querySelectorAll("article")).toHaveLength(10);
 
       // Remaining is 15, which is less than batch size 50
       expect(
@@ -1540,7 +1551,7 @@ describe("KanbanBoard", () => {
       fireEvent.click(
         screen.getByRole("button", { name: "Load 15 more · 25 total" }),
       );
-      expect(within(doneColumn).getAllByRole("article")).toHaveLength(25);
+      expect(doneColumn.querySelectorAll("article")).toHaveLength(25);
 
       // Now should show "Show recent"
       expect(
@@ -1559,11 +1570,11 @@ describe("KanbanBoard", () => {
       );
 
       const doneColumn = screen.getByRole("region", { name: "Done issues" });
-      expect(within(doneColumn).getAllByRole("article")).toHaveLength(15);
+      expect(doneColumn.querySelectorAll("article")).toHaveLength(15);
 
       // Reset
       fireEvent.click(screen.getByRole("button", { name: "Show recent" }));
-      expect(within(doneColumn).getAllByRole("article")).toHaveLength(10);
+      expect(doneColumn.querySelectorAll("article")).toHaveLength(10);
 
       // Load more button should be back
       expect(
@@ -1577,7 +1588,7 @@ describe("KanbanBoard", () => {
       render(<KanbanBoard issues={issues} />);
 
       const doneColumn = screen.getByRole("region", { name: "Done issues" });
-      const articles = within(doneColumn).getAllByRole("article");
+      const articles = doneColumn.querySelectorAll("article");
       expect(articles).toHaveLength(8);
       expect(
         screen.queryByRole("button", { name: /Load .* more/ }),

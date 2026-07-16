@@ -722,11 +722,11 @@ describe("SwimLaneBoard persistence", () => {
         />,
       );
 
-      // Should render KanbanBoard, not swim lanes
-      expect(screen.queryByTestId("swim-lane-board")).not.toBeInTheDocument();
-
-      // localStorage should not be accessed for the 'none' key
-      // (it may be accessed during initial render check, but we verify no swim lanes rendered)
+      // Renders the flat KanbanBoard (now wrapped in a swim-lane-board div for
+      // the compact toolbar), NOT swim lanes — so the per-lane collapse
+      // localStorage (swimlane-collapsed-none) is never consumed. Absence of any
+      // lane collapse toggle confirms no lanes were rendered.
+      expect(screen.queryByTestId("collapse-toggle")).not.toBeInTheDocument();
     });
   });
 });

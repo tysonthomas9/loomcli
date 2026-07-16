@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -150,7 +151,7 @@ func runService(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	startLocalDaemonSupervisor(serviceCtx, cfg.dataDir, cfg.exe, cfg.port)
+	startLocalDaemonSupervisor(serviceCtx, cfg.dataDir, cfg.exe, cfg.port, cfg.url)
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime: %s\n", info.URL)
 	return waitServeExit(serviceCtx, serveCmd, cfg.dataDir, info)
 }
@@ -233,14 +234,22 @@ func newRuntimeInfo(cfg *localServiceConfig) *runtimeInfo {
 // startServeProcess spawns `loom serve` as a child, records its PID in
 // runtime.json, and returns the running *exec.Cmd. Caller owns Wait().
 func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile *os.File, info *runtimeInfo) (*exec.Cmd, error) {
-	// #nosec G204 — exe is this process's resolved binary path; args are fixed
-	// subcommand + CLI-validated bindFlag / port. No user-controlled strings.
-	serveCmd := exec.CommandContext(ctx, cfg.exe, "serve",
+	// exe is this process's resolved binary path; args are fixed subcommand +
+	// CLI-validated bindFlag / port. The guard refuses to re-exec a *.test
+	// binary (fork-bomb protection; see reexec_guard.go).
+	serveCmd, err := loomReexecCommandContext(ctx, cfg.exe, "serve",
 		"--bind", cfg.bindAddr,
 		"--port", strconv.Itoa(cfg.port),
 		"--fleet-mode",
 	)
+	if err != nil {
+		info.Status = "failed"
+		info.Error = err.Error()
+		_ = writeRuntime(cfg.dataDir, info)
+		return nil, fmt.Errorf("start loom serve: %w", err)
+	}
 	serveCmd.Env = localEnv(cfg.dataDir, cfg.port)
+	serveCmd.Dir = cfg.dataDir
 	serveCmd.Stdout = logFile
 	serveCmd.Stderr = logFile
 	serveCmd.SysProcAttr = newDetachedSysProcAttr()
@@ -462,7 +471,15 @@ func startRuntime(dataDir string, port int, force bool) (*RuntimeStartResult, er
 // (nil, nil) so the caller can spawn a fresh one. Errors propagate.
 func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error) {
 	info, err := readRuntime(dataDir)
-	if err != nil || !processRunning(info.PID) {
+	if err != nil {
+		return nil, nil
+	}
+	if !processRunning(info.PID) {
+		if processRunning(info.ServePID) {
+			if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
+				return nil, fmt.Errorf("stop orphaned local runtime: %w", err)
+			}
+		}
 		return nil, nil
 	}
 	if !force {
@@ -475,7 +492,7 @@ func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error
 			return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
 		}
 	}
-	if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
+	if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
 		return nil, fmt.Errorf("stop stale local runtime: %w", err)
 	}
 	return nil, nil
@@ -494,10 +511,15 @@ func spawnDetachedService(exe, dataDir string, port int) (*RuntimeStartResult, e
 	if port > 0 {
 		args = append(args, "--port", strconv.Itoa(port))
 	}
-	// #nosec G204 — exe is this process's resolved binary path; args are fixed
-	// subcommand strings + CLI-validated dataDir / port.
-	service := exec.Command(exe, args...)
+	// exe is this process's resolved binary path; args are fixed subcommand
+	// strings + CLI-validated dataDir / port. The guard refuses to re-exec a
+	// *.test binary (fork-bomb protection; see reexec_guard.go).
+	service, err := loomReexecCommand(exe, args...)
+	if err != nil {
+		return nil, err
+	}
 	service.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+dataDir)
+	service.Dir = dataDir
 	service.Stdout = logFile
 	service.Stderr = logFile
 	service.SysProcAttr = newDetachedSysProcAttr()
@@ -559,13 +581,13 @@ func runStop(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("read runtime: %w", err)
 	}
-	if !processRunning(info.PID) {
+	if !runtimeProcessRunning(info) {
 		info.Status = "stopped"
 		_ = writeRuntime(dataDir, info)
 		_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime is not running.")
 		return nil
 	}
-	if err := stopRuntimeProcess(info.PID, 15*time.Second); err != nil {
+	if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintln(cmd.OutOrStdout(), "Loom local runtime stopped.")
@@ -573,21 +595,85 @@ func runStop(cmd *cobra.Command, _ []string) error {
 }
 
 func stopRuntimeProcess(pid int, timeout time.Duration) error {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return fmt.Errorf("find process %d: %w", pid, err)
+	return stopRuntimePIDs([]int{pid}, timeout)
+}
+
+func stopRuntimeProcesses(info *runtimeInfo, timeout time.Duration) error {
+	return stopRuntimePIDs(runtimePIDs(info), timeout)
+}
+
+func runtimeProcessRunning(info *runtimeInfo) bool {
+	for _, pid := range runtimePIDs(info) {
+		if processRunning(pid) {
+			return true
+		}
 	}
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		return fmt.Errorf("stop process %d: %w", pid, err)
+	return false
+}
+
+func runtimePIDs(info *runtimeInfo) []int {
+	if info == nil {
+		return nil
 	}
+	pids := make([]int, 0, 2)
+	seen := map[int]struct{}{}
+	for _, pid := range []int{info.PID, info.ServePID} {
+		if pid <= 0 {
+			continue
+		}
+		if _, ok := seen[pid]; ok {
+			continue
+		}
+		seen[pid] = struct{}{}
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
+func stopRuntimePIDs(pids []int, timeout time.Duration) error {
+	if len(pids) == 0 {
+		return nil
+	}
+	for _, pid := range pids {
+		if !processRunning(pid) {
+			continue
+		}
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			return fmt.Errorf("find process %d: %w", pid, err)
+		}
+		if err := proc.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+			return fmt.Errorf("stop process %d: %w", pid, err)
+		}
+	}
+
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !processRunning(pid) {
+		running := runningPIDs(pids)
+		if len(running) == 0 {
 			return nil
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return fmt.Errorf("local runtime did not stop within %s", timeout)
+	return fmt.Errorf("local runtime processes %s did not stop within %s", formatPIDs(runningPIDs(pids)), timeout)
+}
+
+func runningPIDs(pids []int) []int {
+	running := make([]int, 0, len(pids))
+	for _, pid := range pids {
+		if processRunning(pid) {
+			running = append(running, pid)
+		}
+	}
+	return running
+}
+
+func formatPIDs(pids []int) string {
+	parts := make([]string, 0, len(pids))
+	for _, pid := range pids {
+		parts = append(parts, strconv.Itoa(pid))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func runInstallService(cmd *cobra.Command, _ []string) error {

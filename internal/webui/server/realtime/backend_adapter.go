@@ -20,6 +20,9 @@ func BackendMutationToPayload(m backend.MutationData, workspaceID string) *Mutat
 	return &MutationPayload{
 		Cursor:      m.Cursor,
 		Type:        m.Type,
+		EntityType:  m.EntityType,
+		EntityID:    m.EntityID,
+		Action:      m.Action,
 		IssueID:     m.IssueID,
 		Title:       m.Title,
 		Assignee:    m.Assignee,
@@ -44,6 +47,9 @@ func BackendMutationToRPCEvent(m backend.MutationData) rpc.MutationEvent {
 	return rpc.MutationEvent{
 		Cursor:     m.Cursor,
 		Type:       m.Type,
+		EntityType: m.EntityType,
+		EntityID:   m.EntityID,
+		Action:     m.Action,
 		IssueID:    m.IssueID,
 		Title:      m.Title,
 		Assignee:   m.Assignee,
@@ -62,6 +68,9 @@ func RPCEventToMutationData(e rpc.MutationEvent) backend.MutationData {
 	return backend.MutationData{
 		Cursor:     e.Cursor,
 		Type:       e.Type,
+		EntityType: e.EntityType,
+		EntityID:   e.EntityID,
+		Action:     e.Action,
 		IssueID:    e.IssueID,
 		Title:      e.Title,
 		Assignee:   e.Assignee,

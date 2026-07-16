@@ -79,6 +79,7 @@ type CommandStub struct {
 // CommandMock provides a mock command executor for tests
 type CommandMock struct {
 	t     *testing.T
+	mu    sync.Mutex
 	stubs []CommandStub
 	calls []CommandStub
 	idx   int
@@ -91,8 +92,21 @@ func NewCommandMock(t *testing.T, stubs []CommandStub) *CommandMock {
 func slicesEqual(a, b []string) bool { return clitest.SlicesEqual(a, b) }
 
 func (m *CommandMock) Exec(dir, name string, args ...string) cli.CommandResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	call := CommandStub{Dir: dir, Name: name, Args: args}
 	m.calls = append(m.calls, call)
+	if name == "git" && len(args) == 3 && args[0] == "remote" && args[1] == "get-url" {
+		if m.idx < len(m.stubs) {
+			stub := m.stubs[m.idx]
+			if (stub.Name == "" || stub.Name == name) && slicesEqual(stub.Args, args) {
+				m.idx++
+				return cli.CommandResult{Stdout: stub.Stdout, Stderr: stub.Stderr, Err: stub.Err}
+			}
+		}
+		return cli.CommandResult{Stdout: args[2] + "\n"}
+	}
 	if m.idx >= len(m.stubs) {
 		m.t.Fatalf("unexpected command call #%d: %s %v in %s", m.idx+1, name, args, dir)
 	}
@@ -115,6 +129,9 @@ func (m *CommandMock) Run(dir, name string, args ...string) cli.CommandResult {
 }
 
 func (m *CommandMock) Verify() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.idx != len(m.stubs) {
 		m.t.Errorf("expected %d command calls, got %d", len(m.stubs), m.idx)
 	}
@@ -137,7 +154,14 @@ func (m *CommandMock) InstallOn(deps *cli.Deps) {
 	m.t.Cleanup(func() { m.Verify() })
 }
 
-func (m *CommandMock) Calls() []CommandStub { return m.calls }
+func (m *CommandMock) Calls() []CommandStub {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result := make([]CommandStub, len(m.calls))
+	copy(result, m.calls)
+	return result
+}
 
 // OutputCommandStub represents an expected RunWithOutput call.
 type OutputCommandStub struct {
@@ -149,6 +173,7 @@ type OutputCommandStub struct {
 
 type OutputCommandMock struct {
 	t     *testing.T
+	mu    sync.Mutex
 	stubs []OutputCommandStub
 	calls []OutputCommandStub
 	idx   int
@@ -159,6 +184,9 @@ func NewOutputCommandMock(t *testing.T, stubs []OutputCommandStub) *OutputComman
 }
 
 func (m *OutputCommandMock) Exec(dir string, args ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	call := OutputCommandStub{Dir: dir, Args: args}
 	m.calls = append(m.calls, call)
 	if m.idx >= len(m.stubs) {
@@ -170,6 +198,9 @@ func (m *OutputCommandMock) Exec(dir string, args ...string) error {
 }
 
 func (m *OutputCommandMock) Verify() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.idx != len(m.stubs) {
 		m.t.Errorf("expected %d output command calls, got %d", len(m.stubs), m.idx)
 	}
@@ -339,8 +370,17 @@ func setupWorkspaceConfigInDir(t *testing.T, configDir string, cfg *config.LoomC
 		}
 		state.Workspaces[key] = bootstrap.WorkspaceLocalState{Path: ws.Path, Repos: localRepos}
 	}
-	if err := bootstrap.SaveStateCache(state); err != nil {
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = state.LastWorkspace
+		for k, v := range state.Workspaces {
+			sc.Workspaces[k] = v
+		}
+		return nil
+	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
+	}
+	if cfg.DefaultWorkspace != "" {
+		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
 	}
 	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {
 		t.Fatalf("prime config cache: %v", err)

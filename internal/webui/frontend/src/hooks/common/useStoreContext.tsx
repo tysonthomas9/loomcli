@@ -64,8 +64,19 @@ const MONITOR_REFRESH_TYPES = new Set<MutationPayload["type"]>([
   "refresh",
 ]);
 
+const MONITOR_REFRESH_ENTITY_TYPES = new Set([
+  "issue",
+  "dependency",
+  "dep",
+  "comment",
+  "label",
+  "agent",
+  "workspace",
+  "session",
+]);
+
 const MONITOR_REFRESH_DEBOUNCE_MS = 250;
-const AGENT_REFRESH_INTERVAL_MS = 5_000;
+const AGENT_REFRESH_INTERVAL_MS = 30_000;
 
 // ---------------------------------------------------------------------------
 // Context
@@ -126,7 +137,11 @@ function StoreWiring({
     const unsubscribe = subscribe((mutation) => {
       if (mutation.workspace_id && mutation.workspace_id !== workspaceId)
         return;
-      if (!MONITOR_REFRESH_TYPES.has(mutation.type)) return;
+      if (mutation.entity_type) {
+        if (!MONITOR_REFRESH_ENTITY_TYPES.has(mutation.entity_type)) return;
+      } else if (!MONITOR_REFRESH_TYPES.has(mutation.type)) {
+        return;
+      }
       scheduleRefresh();
     });
 

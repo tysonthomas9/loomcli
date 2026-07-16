@@ -127,6 +127,20 @@ func installWrapperRunMock(t *testing.T, fn wrapperRunFn) {
 	t.Cleanup(func() { wrapperRun = orig })
 }
 
+func installClaudeRunTurnMock(t *testing.T, fn claudeRunTurnFn) {
+	t.Helper()
+	orig := claudeRunTurn
+	claudeRunTurn = fn
+	t.Cleanup(func() { claudeRunTurn = orig })
+}
+
+func completedClaudeTurn(text string) claudeRunTurnResult {
+	res := claudeRunTurnResult{}
+	res.Turn.State = "complete"
+	res.Turn.Text = text
+	return res
+}
+
 // SetupMockClaudeInvoker installs a mock claude invoker for tests.
 type MockClaudeInvokerRecorder struct {
 	mu          sync.Mutex
@@ -230,8 +244,17 @@ func setupWorkspaceConfig(t *testing.T, cfg *config.LoomConfig) {
 		}
 		state.Workspaces[key] = bootstrap.WorkspaceLocalState{Path: ws.Path, Repos: localRepos}
 	}
-	if err := bootstrap.SaveStateCache(state); err != nil {
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = state.LastWorkspace
+		for k, v := range state.Workspaces {
+			sc.Workspaces[k] = v
+		}
+		return nil
+	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
+	}
+	if cfg.DefaultWorkspace != "" {
+		t.Setenv("LOOM_WORKSPACE", strings.ToUpper(cfg.DefaultWorkspace))
 	}
 	if _, err := config.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {
 		t.Fatalf("prime config cache: %v", err)

@@ -144,6 +144,16 @@ describe("getOpenStatus", () => {
     it('returns "ready" when design has content and other labels', () => {
       expect(getOpenStatus({ design: "plan", labels: ["bug"] })).toBe("ready");
     });
+
+    it('returns "ready" for an artifact-backed collection item without the body', () => {
+      expect(
+        getOpenStatus({
+          design: "",
+          has_design: true,
+          design_artifact_id: "design-task-1-hash",
+        }),
+      ).toBe("ready");
+    });
   });
 
   describe("needs_plan status", () => {

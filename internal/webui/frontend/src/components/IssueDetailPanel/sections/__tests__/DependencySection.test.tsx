@@ -127,7 +127,8 @@ describe("DependencySection", () => {
       ];
       render(<DependencySection {...defaultProps({ dependencies: deps })} />);
 
-      expect(screen.getByText("parent-child")).toBeInTheDocument();
+      // Type badge renders the human-readable label ("Parent Child").
+      expect(screen.getByText("Parent Child")).toBeInTheDocument();
     });
 
     it("applies closed styling to closed dependencies", () => {

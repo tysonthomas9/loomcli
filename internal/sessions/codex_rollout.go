@@ -35,7 +35,7 @@ func (s *Store) SyncLatestCodexRollout(sessionID, workDir string, since time.Tim
 	if bestPath == "" {
 		return "", nil
 	}
-	if err := s.SyncNativeTranscript(sessionID, bestPath); err != nil {
+	if err := s.SyncNativeTranscript(sessionID, bestPath, TranscriptFormatRaw); err != nil {
 		recordErr(span, err)
 		return "", err
 	}

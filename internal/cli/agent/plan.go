@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/agent/tsruntime"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -171,7 +172,7 @@ func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
 	// → log mtime advances per turn.
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
-	invokeErr := deps.Agent.InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+	invokeErr := tsruntime.Invoker(deps.Agent).InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
 	if invokeErr == nil {
 		clearDaemonResumeOnSuccess(worktreePath)
 	}

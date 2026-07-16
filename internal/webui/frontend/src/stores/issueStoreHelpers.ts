@@ -163,23 +163,38 @@ export const INITIAL_STATE: IssueStoreState = {
 // ---------------------------------------------------------------------------
 
 export function issuesAreEqual(a: Issue, b: Issue): boolean {
-  if (a.id !== b.id) return false;
-  if (a.updated_at !== b.updated_at) return false;
-  if (a.title !== b.title) return false;
-  if (a.status !== b.status) return false;
-  if (a.priority !== b.priority) return false;
-  if (a.assignee !== b.assignee) return false;
-  if (a.issue_type !== b.issue_type) return false;
-  if (a.owner !== b.owner) return false;
-  const aLabels = a.labels;
-  const bLabels = b.labels;
-  if (aLabels !== bLabels) {
-    if (!aLabels || !bLabels) return false;
-    if (aLabels.length !== bLabels.length) return false;
-    for (let i = 0; i < aLabels.length; i++) {
-      if (aLabels[i] !== bLabels[i]) return false;
-    }
+  return jsonishEqual(a, b);
+}
+
+function jsonishEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return a === b;
+  if (typeof a !== "object" || typeof b !== "object") {
+    return Object.is(a, b);
   }
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!jsonishEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const leftKeys = Object.keys(left).filter((key) => left[key] !== undefined);
+  const rightKeys = Object.keys(right).filter(
+    (key) => right[key] !== undefined,
+  );
+  if (leftKeys.length !== rightKeys.length) return false;
+
+  for (const key of leftKeys) {
+    if (!Object.prototype.hasOwnProperty.call(right, key)) return false;
+    if (!jsonishEqual(left[key], right[key])) return false;
+  }
+
   return true;
 }
 
@@ -199,8 +214,9 @@ export function isStaleMutation(
 
 function createIssueFromMutation(mutation: MutationPayload): Issue {
   const now = mutation.timestamp;
+  const issueId = mutation.issue_id ?? "";
   const issue: Issue = {
-    id: mutation.issue_id,
+    id: issueId,
     title: mutation.title ?? "Untitled",
     priority: 2,
     created_at: now,
@@ -245,6 +261,14 @@ function applyBondedToIssue(issue: Issue, mutation: MutationPayload): Issue {
   });
 }
 
+const ISSUE_PROJECTION_ENTITY_TYPES = new Set([
+  "issue",
+  "dependency",
+  "dep",
+  "comment",
+  "label",
+]);
+
 // ---------------------------------------------------------------------------
 // processMutation: pure function returning a result instead of calling set()
 // ---------------------------------------------------------------------------
@@ -258,6 +282,25 @@ export interface MutationResult {
   trackDeletion: string | null;
   /** Whether a debounced refetch should be scheduled */
   scheduleRefresh: boolean;
+}
+
+export function issueMutationInvalidatesProjection(
+  mutation: MutationPayload,
+): boolean {
+  if (mutation.entity_type != null && mutation.entity_type !== "") {
+    return ISSUE_PROJECTION_ENTITY_TYPES.has(mutation.entity_type);
+  }
+
+  return (
+    mutation.type === MutationRefresh ||
+    (typeof mutation.issue_id === "string" && mutation.issue_id.length > 0)
+  );
+}
+
+export function issueMutationAppliesToLocalIssue(
+  mutation: MutationPayload,
+): boolean {
+  return mutation.entity_type == null || mutation.entity_type === "issue";
 }
 
 /**

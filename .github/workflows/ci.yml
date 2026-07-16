@@ -168,3 +168,57 @@ jobs:
 
       - name: Test
         run: go test -v -race -timeout 15m ./...
+
+  # Builds the builtin workflow sources against pinned Flue in a scratch
+  # directory and runs their Node tests. Generated bundle output is intentionally
+  # not committed.
+  builtin-bundle-pin:
+    name: Builtin Bundle (flue pin)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned flue commit
+        id: pin
+        run: |
+          set -euo pipefail
+          sha="$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"
+          # Validate before it flows into actions/checkout `ref:` — must be a 40-char hex SHA.
+          if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "ERROR: FLUE_COMMIT is not a 40-char hex SHA: '$sha'" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Check out flue
+        uses: actions/checkout@v4
+        with:
+          # Override via the FLUE_REPOSITORY repo variable if the source moves.
+          repository: ${{ vars.FLUE_REPOSITORY || 'withastro/flue' }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: flue
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24' # the bundle imports node:sqlite
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '11.1.1'
+
+      - name: Build flue
+        run: cd flue && pnpm install --frozen-lockfile && pnpm --filter @flue/runtime --filter @flue/cli build
+
+      - name: Build builtin workflow bundle from source
+        env:
+          FLUE_REPO: ${{ github.workspace }}/flue
+          BUILTIN_DIST_DEST: ${{ runner.temp }}/bundle-dist
+        run: scripts/rebuild-builtin-bundle.sh
+
+      - name: Builtin workflow node tests
+        env:
+          FLUE_REPO: ${{ github.workspace }}/flue
+        run: make test-builtin-workflows

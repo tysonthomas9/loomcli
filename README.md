@@ -20,7 +20,16 @@ export PATH="$HOME/.local/bin:$PATH"
 
 State lives in a fleet-db service. Local mode auto-spawns an embedded
 fleet-db on first command (zero install). Cloud mode points loom at a
-shared fleet-db via `LOOM_FLEET_DB_URL`.
+shared fleet-db via `LOOM_FLEET_DB_URL`. Runtime code has only two valid
+control-plane paths:
+
+```text
+local mode:
+loomcli -> HTTP client -> fleet-db subprocess -> RedisStorage -> miniredis or external Redis
+
+cloud mode:
+loomcli -> HTTP client -> fleet-db service -> Redis/Postgres
+```
 
 ```bash
 # 1. Create a workspace + a repo + a role + an agent
@@ -35,7 +44,7 @@ loom serve
 
 # 3. Run agents
 loom plan falcon              # Planning agent creates designs
-loom lead                     # Review and approve plans
+loom lead                     # Default interactive terminal agent for review/triage
 loom task falcon              # Implementation agent builds it
 ```
 
@@ -87,7 +96,7 @@ The `LOOM_FLEET_MODE=true` env var is equivalent to `--fleet-mode`.
 - **Settings** — backend configuration per-project and per-agent
 
 **Features:**
-- **Talk to Lead** — built-in terminal running `loom lead` (wterm + tmux via WebSocket)
+- **Talk to Lead** — default interactive terminal role running `loom lead`; any role with `kind=interactive` can run as an interactive terminal agent
 - **Real-time updates** — SSE pushes mutations to all connected browsers
 - **Per-agent terminals** — attach to live agent tmux sessions
 - **Authentication** — external auth via `--auth-url` (RS256 JWT verification)
@@ -96,10 +105,10 @@ The `LOOM_FLEET_MODE=true` env var is equivalent to `--fleet-mode`.
 
 ### Agent Commands
 ```
-plan       Run a planning agent (creates designs, marks for review)
-task       Run an implementation agent (implements approved designs)
-lead       Interactive AI project management (review plans, triage backlog)
-agent      Run a custom agent with a user-defined prompt template
+plan       Run a worker planning agent (creates designs, marks for review)
+task       Run a worker implementation agent (implements approved designs)
+lead       Run the default interactive terminal agent, or a custom prompt with --prompt
+agent      Run a custom worker agent with a user-defined prompt template
 monitor    Live dashboard showing agent status and task progress
 list       List all agents (worktrees) and their status
 recover    Recover agent from error state (clear locks, reset tasks)
@@ -138,7 +147,7 @@ loom plan falcon              # Single planning task in falcon worktree
 loom task falcon --auto       # Continuous implementation mode
 loom plan falcon -a -m 5      # Process up to 5 tasks, then stop
 loom plan falcon -a -t 30     # Exit after 30 min idle
-loom lead                     # Interactive backlog management
+loom lead                     # Default interactive terminal agent
 
 # Git operations
 loom push --all               # Push all worktrees to main
@@ -272,9 +281,20 @@ loom repo remove frontend
 
 # Roles (workspace-scoped)
 loom role set reviewer --prompt-file ./prompts/reviewer.txt --backend codex
+loom role add pr-review --kind interactive --prompt-file builtin:pr-review
+loom role set pr-review kind interactive
 loom role show reviewer
 loom role unset reviewer --backend                       # Clear a single field
 loom role list
+
+# Role fields: `kind` (`interactive` | `worker`, empty uses the legacy name
+# convention where lead/orchestrator are interactive), `prompt_file`, `backend`,
+# `model`, `task_filter`, tool allowlists, repo/path filters, and concurrency or
+# budget limits.
+
+# Interactive terminal agents
+loom agentdef add pr-review --role pr-review             # Interactive agent definition
+loom lead --prompt builtin:pr-review                     # Run an interactive prompt directly
 
 # Agent definitions (workspace-scoped)
 loom agentdef add falcon --role reviewer --repo frontend
@@ -293,6 +313,9 @@ loom daemon profile unset --max-agents                   # Clear an int field
 |---|---|---|---|
 | **Local** (default) | `LOOM_FLEET_DB_URL` unset | Embedded subprocess auto-spawned per CLI invocation. Backed by an in-process miniredis with a JSON snapshot at `~/.loom/fleet-db/redis-snapshot.json`. | Zero-install. The miniredis snapshot is the source of truth for backups — copy that file. |
 | **Cloud** | `LOOM_FLEET_DB_URL=<https://...>` | External fleet-db (shared across loom installs). Requires `LOOM_FLEET_DB_API_KEY` for auth, or `LOOM_FLEET_DB_ACTOR=<name>` in dev mode. | Multi-user / multi-machine. State stays on the server. |
+
+`internal/infra/memstore` is test-only. It is not a local runtime, fallback,
+cache, or embedded Redis implementation.
 
 `~/.loom/state.json` is a per-user cache of local checkout paths and the last
 selected workspace hint. Runtime commands do not use it as an implicit default;

@@ -141,7 +141,7 @@ func fixOrphanedTranscripts(store *sessions.Store, orphans []orphanSession) Chec
 // backfillSession mirrors the transcript into the session and records token
 // usage, mirroring the hook-based captureTokenUsage path.
 func backfillSession(store *sessions.Store, o orphanSession, srcPath string) error {
-	if err := store.SyncNativeTranscript(o.sessionID, srcPath); err != nil {
+	if err := store.SyncNativeTranscript(o.sessionID, srcPath, sessions.TranscriptFormatRaw); err != nil {
 		return err
 	}
 	tok, err := sessions.SumTranscriptUsage(srcPath)
@@ -195,7 +195,12 @@ func claudeCandidateFiles(workspaceToken, agentName string) []transcriptCandidat
 		if !d.IsDir() || !strings.HasSuffix(d.Name(), suffix) {
 			continue
 		}
-		if workspaceToken != "" && !strings.Contains(d.Name(), workspaceToken) {
+		// Case-insensitive: the workspace path case can drift (e.g. registered as
+		// "WEB" while Claude encoded the worktree cwd as "web"), and Claude's
+		// project-dir names are a verbatim case-preserving encoding of that cwd.
+		// A case-sensitive Contains here matched nothing and left every transcript
+		// unbackfilled.
+		if workspaceToken != "" && !strings.Contains(strings.ToLower(d.Name()), strings.ToLower(workspaceToken)) {
 			continue
 		}
 		out = append(out, readProjectTranscripts(filepath.Join(root, d.Name()))...)

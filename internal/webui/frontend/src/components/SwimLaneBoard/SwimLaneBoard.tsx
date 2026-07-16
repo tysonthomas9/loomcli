@@ -17,8 +17,11 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useStore } from "zustand";
 
+import { useAgentStoreInstance } from "@/hooks/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
+import { buildEpicLeadClaims } from "@/utils/agentRole";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 import { DraggableIssueCard } from "@/components/DraggableIssueCard";
 import { EmptyWorkspaceBoard } from "@/components/EmptyWorkspaceBoard";
@@ -36,7 +39,9 @@ import {
 } from "./groupingUtils";
 import {
   loadCollapsedLanes,
+  loadCompactColumns,
   saveCollapsedLanes,
+  saveCompactColumns,
   resolveColumns,
 } from "./swimLaneStorage";
 import styles from "./SwimLaneBoard.module.css";
@@ -75,6 +80,10 @@ export interface SwimLaneBoardProps {
   isMultiRepo?: boolean;
   /** Whether caller-applied filters/search are active */
   hasFiltersActive?: boolean;
+  /** Start the epic-runner workflow for an unclaimed epic lane */
+  onRunEpic?: (issue: Issue) => void;
+  /** Returns true while an epic-runner start is in flight for the lane */
+  isRunningEpic?: (epicId: string) => boolean;
 }
 
 /**
@@ -98,10 +107,54 @@ export function SwimLaneBoard({
   pendingIds,
   isMultiRepo,
   hasFiltersActive,
+  onRunEpic,
+  isRunningEpic,
 }: SwimLaneBoardProps): JSX.Element {
+  const { workspaceId } = useWorkspaceContext();
+  const [compactColumns, setCompactColumns] = useState(() =>
+    loadCompactColumns(workspaceId),
+  );
+
+  // Reload the persisted value when the workspace changes (covers in-place
+  // switches where this component is not remounted).
+  useEffect(() => {
+    setCompactColumns(loadCompactColumns(workspaceId));
+  }, [workspaceId]);
+
+  // Persist only on the user toggle. A second save-on-change effect (keyed on
+  // workspaceId) would also fire on a workspace switch with the PREVIOUS value
+  // and clobber the new workspace's saved preference before the reload effect
+  // above reads it.
+  const toggleCompactColumns = useCallback(() => {
+    setCompactColumns((value) => {
+      const next = !value;
+      saveCompactColumns(next, workspaceId);
+      return next;
+    });
+  }, [workspaceId]);
+
   const columns = useMemo(
     () => resolveColumns(propColumns, groupBy),
     [propColumns, groupBy],
+  );
+
+  const compactToggle = (
+    <div className={styles.compactToggle}>
+      <span className={styles.compactToggleLabel} id="compact-columns-label">
+        Compact
+      </span>
+      <button
+        type="button"
+        role="switch"
+        className={styles.compactSwitch}
+        aria-labelledby="compact-columns-label"
+        aria-checked={compactColumns}
+        onClick={toggleCompactColumns}
+        data-testid="toggle-compact-columns"
+      >
+        <span className={styles.compactSwitchThumb} aria-hidden="true" />
+      </button>
+    </div>
   );
 
   // When groupBy='none', delegate to KanbanBoard
@@ -111,15 +164,30 @@ export function SwimLaneBoard({
       issues,
       columns,
       showBlocked,
+      compactColumns,
       ...(filters !== undefined && { filters }),
       ...(onIssueClick !== undefined && { onIssueClick }),
       ...(onDragEnd !== undefined && { onDragEnd }),
-      ...(className !== undefined && { className }),
       ...(blockedIssues !== undefined && { blockedIssues }),
       ...(pendingIds !== undefined && { pendingIds }),
       ...(isMultiRepo !== undefined && { isMultiRepo }),
     };
-    return <KanbanBoard {...kanbanProps} />;
+    return (
+      <div
+        className={[styles.swimLaneBoard, className].filter(Boolean).join(" ")}
+        data-testid="swim-lane-board"
+        data-compact-columns={compactColumns || undefined}
+      >
+        <div
+          className={styles.toolbar}
+          role="toolbar"
+          aria-label="Board controls"
+        >
+          {compactToggle}
+        </div>
+        <KanbanBoard {...kanbanProps} />
+      </div>
+    );
   }
 
   // Build props conditionally to satisfy exactOptionalPropertyTypes
@@ -130,6 +198,8 @@ export function SwimLaneBoard({
     showBlocked,
     sortLanesBy,
     defaultCollapsed,
+    compactColumns,
+    compactToggle,
     ...(onIssueClick !== undefined && { onIssueClick }),
     ...(onDragEnd !== undefined && { onDragEnd }),
     ...(className !== undefined && { className }),
@@ -138,6 +208,8 @@ export function SwimLaneBoard({
     ...(pendingIds !== undefined && { pendingIds }),
     ...(isMultiRepo !== undefined && { isMultiRepo }),
     ...(hasFiltersActive !== undefined && { hasFiltersActive }),
+    ...(onRunEpic !== undefined && { onRunEpic }),
+    ...(isRunningEpic !== undefined && { isRunningEpic }),
   };
 
   return <SwimLaneBoardContent {...contentProps} />;
@@ -162,11 +234,25 @@ function SwimLaneBoardContent({
   pendingIds,
   isMultiRepo,
   hasFiltersActive,
+  compactColumns,
+  compactToggle,
+  onRunEpic,
+  isRunningEpic,
 }: Omit<SwimLaneBoardProps, "filters" | "groupBy"> & {
   groupBy: Exclude<GroupByField, "none">;
   columns: KanbanColumnConfig[];
+  compactColumns: boolean;
+  compactToggle: JSX.Element;
 }): JSX.Element {
   const { workspaceId } = useWorkspaceContext();
+  // Lead claims for epic lane headers (Aether design, pin 10): show which
+  // lead is running each epic, or "Unclaimed" when nobody has bound to it.
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const epicLeadClaims = useMemo(
+    () => (groupBy === "epic" ? buildEpicLeadClaims(agents) : undefined),
+    [groupBy, agents],
+  );
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
   const [showCompletedLanes, setShowCompletedLanes] = useState(() => {
@@ -224,9 +310,13 @@ function SwimLaneBoardContent({
     const active: LaneGroup[] = [];
     let completed = 0;
     for (const lane of allLanes) {
+      // A lane is "completed" when every card is closed — or when it's an
+      // empty lane whose epic itself is closed (a zero-child closed epic
+      // would otherwise render a full empty lane forever).
       const allClosed =
-        lane.issues.length > 0 &&
-        lane.issues.every((i) => i.status === "closed");
+        lane.issues.length > 0
+          ? lane.issues.every((i) => i.status === "closed")
+          : lane.groupIssue?.status === "closed";
       if (allClosed) {
         completed++;
         if (showCompletedLanes) active.push(lane);
@@ -382,52 +472,66 @@ function SwimLaneBoardContent({
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className={rootClassName} data-testid="swim-lane-board">
-        {/* Toolbar: Expand/Collapse All + completed epic toggle */}
-        {(lanes.length > 1 ||
-          (groupBy === "epic" && completedLaneCount > 0)) && (
-          <div
-            className={styles.toolbar}
-            role="toolbar"
-            aria-label="Lane controls"
-          >
-            {lanes.length > 1 && (
-              <>
-                <button
-                  type="button"
-                  className={styles.toolbarButton}
-                  onClick={expandAll}
-                  aria-label="Expand all lanes"
-                  data-testid="expand-all-lanes"
-                >
-                  Expand All
-                </button>
-                <button
-                  type="button"
-                  className={styles.toolbarButton}
-                  onClick={collapseAll}
-                  aria-label="Collapse all lanes"
-                  data-testid="collapse-all-lanes"
-                >
-                  Collapse All
-                </button>
-              </>
-            )}
-            {groupBy === "epic" && completedLaneCount > 0 && (
+      <div
+        className={rootClassName}
+        data-testid="swim-lane-board"
+        data-compact-columns={compactColumns || undefined}
+      >
+        {/* Toolbar: compact mode + expand/collapse + completed epic toggle */}
+        <div
+          className={styles.toolbar}
+          role="toolbar"
+          aria-label="Lane controls"
+        >
+          {compactToggle}
+          {(lanes.length > 1 ||
+            (groupBy === "epic" && completedLaneCount > 0)) && (
+            <span className={styles.toolbarDivider} aria-hidden="true" />
+          )}
+          {lanes.length > 1 && (
+            <>
               <button
                 type="button"
                 className={styles.toolbarButton}
-                onClick={() => setShowCompletedLanes((v) => !v)}
-                data-testid="toggle-completed-lanes"
+                onClick={expandAll}
+                aria-label="Expand all lanes"
+                data-testid="expand-all-lanes"
               >
-                {showCompletedLanes
-                  ? "Hide Completed"
-                  : `${completedLaneCount} Completed`}
+                Expand All
               </button>
-            )}
-          </div>
-        )}
+              <button
+                type="button"
+                className={styles.toolbarButton}
+                onClick={collapseAll}
+                aria-label="Collapse all lanes"
+                data-testid="collapse-all-lanes"
+              >
+                Collapse All
+              </button>
+            </>
+          )}
+          {groupBy === "epic" && completedLaneCount > 0 && (
+            <button
+              type="button"
+              className={styles.toolbarButton}
+              onClick={() => setShowCompletedLanes((v) => !v)}
+              data-testid="toggle-completed-lanes"
+            >
+              {showCompletedLanes
+                ? "Hide Completed"
+                : `${completedLaneCount} Completed`}
+            </button>
+          )}
+        </div>
         {lanes.map((lane) => {
+          // Epic lanes get a runner badge; the synthetic Ungrouped lane and
+          // non-epic groupings do not.
+          const epicKey =
+            lane.groupIssue?.id ?? lane.id.replace(/^lane-epic-/, "");
+          const epicRunner =
+            epicLeadClaims !== undefined && epicKey !== "__ungrouped__"
+              ? (epicLeadClaims.get(epicKey) ?? null)
+              : undefined;
           // Build props conditionally to satisfy exactOptionalPropertyTypes
           const laneProps = {
             id: lane.id,
@@ -436,6 +540,7 @@ function SwimLaneBoardContent({
             columns,
             isCollapsed: isLaneCollapsed(lane.id),
             onToggleCollapse: () => toggleLaneCollapse(lane.id),
+            ...(epicRunner !== undefined && { epicRunner }),
             ...(onIssueClick !== undefined && { onIssueClick }),
             ...(lane.groupIssue !== undefined &&
               onIssueClick !== undefined && {
@@ -446,6 +551,12 @@ function SwimLaneBoardContent({
             ...(showBlocked !== undefined && { showBlocked }),
             ...(cardLimit !== undefined && { cardLimit }),
             ...(pendingIds !== undefined && { pendingIds }),
+            compactColumns,
+            ...(onRunEpic !== undefined &&
+              lane.groupIssue?.issue_type === "epic" && {
+                onRunEpic: () => onRunEpic(lane.groupIssue!),
+                isRunningEpic: isRunningEpic?.(lane.groupIssue.id) ?? false,
+              }),
           };
           return <SwimLane key={lane.id} {...laneProps} />;
         })}

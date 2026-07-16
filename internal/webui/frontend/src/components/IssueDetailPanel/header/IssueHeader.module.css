@@ -4,6 +4,8 @@
  */
 
 .issueHeader {
+  min-width: 0;
+  max-width: 100%;
   padding: 0 var(--panel-padding-md) var(--panel-padding-md);
 }
 
@@ -15,57 +17,34 @@
 .topRow {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 64px;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  min-height: 40px;
   margin: 0 calc(var(--panel-padding-md) * -1) 20px;
   padding: 0 var(--panel-padding-md);
   border-bottom: 1px solid var(--color-border-light);
 }
 
-/* Priority badge in header */
-.priorityBadge {
-  display: inline-flex;
+.topRowMain {
+  display: flex;
   align-items: center;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1.1;
-  border-radius: 4px;
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  border: 1px solid var(--color-border-light);
-  transition:
-    background-color var(--transition-fast),
-    border-color var(--transition-fast);
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
-.priorityBadge:hover {
-  background-color: var(--color-bg-active);
-}
-
-.priorityBadge[data-priority="0"],
-.priorityBadge[data-priority="1"] {
-  background-color: var(--color-priority-0);
-  color: #fff;
-  border-color: transparent;
-}
-
-.priorityBadge[data-priority="0"]:hover,
-.priorityBadge[data-priority="1"]:hover {
-  background-color: color-mix(in srgb, var(--color-priority-0) 88%, black);
-}
-
-.priorityBadge[data-priority="2"] {
-  background-color: var(--color-warning-bg);
-  color: var(--color-text);
-}
-
-.priorityBadge[data-priority="2"]:hover {
-  background-color: color-mix(in srgb, var(--color-warning-bg) 88%, black);
+.topRowActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
 }
 
 .issueId {
+  flex-shrink: 0;
   font-size: 11px;
   color: var(--color-text-tertiary);
   font-family: var(--font-family-mono);
@@ -152,8 +131,44 @@
   outline-offset: 2px;
 }
 
+.runEpicButton {
+  min-width: 86px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  background: var(--color-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.runEpicButton:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-primary) 88%, black);
+}
+
+.runEpicButton:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.runEpicButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .copyLinkButton {
-  margin-left: auto;
   width: 28px;
   height: 28px;
   display: flex;
@@ -205,19 +220,33 @@
   outline-offset: 2px;
 }
 
-/* When copyLinkButton is present, it takes the margin-left: auto.
-   closeButton only needs it when copyLinkButton is absent. */
-.copyLinkButton + .moveButton,
-.copyLinkButton + .closeButton {
-  margin-left: 0;
+.maximizeButton {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
-.moveButton + .closeButton {
-  margin-left: 0;
+.maximizeButton:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.maximizeButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .closeButton {
-  margin-left: auto;
   width: 28px;
   height: 28px;
   display: flex;
@@ -250,4 +279,6 @@
   margin: 0;
   line-height: 1.25;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }

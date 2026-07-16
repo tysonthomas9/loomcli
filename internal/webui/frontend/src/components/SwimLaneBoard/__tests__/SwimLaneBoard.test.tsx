@@ -111,8 +111,9 @@ describe("SwimLaneBoard", () => {
         screen.getByRole("heading", { name: "Closed" }),
       ).toBeInTheDocument();
 
-      // Should NOT have swim-lane-board test id
-      expect(screen.queryByTestId("swim-lane-board")).not.toBeInTheDocument();
+      // Wrapped in swim-lane-board shell with compact toggle + KanbanBoard inside
+      expect(screen.getByTestId("swim-lane-board")).toBeInTheDocument();
+      expect(screen.getByTestId("toggle-compact-columns")).toBeInTheDocument();
     });
 
     it("passes onIssueClick to KanbanBoard when groupBy=none", () => {
@@ -132,9 +133,7 @@ describe("SwimLaneBoard", () => {
         />,
       );
 
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -507,9 +506,7 @@ describe("SwimLaneBoard", () => {
         />,
       );
 
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -544,10 +541,8 @@ describe("SwimLaneBoard", () => {
         />,
       );
 
-      const aliceCard = screen.getByRole("button", {
-        name: /Issue: Alice Issue/i,
-      });
-      const bobCard = screen.getByRole("button", { name: /Issue: Bob Issue/i });
+      const aliceCard = screen.getByLabelText(/Issue: Alice Issue/i);
+      const bobCard = screen.getByLabelText(/Issue: Bob Issue/i);
 
       fireEvent.click(aliceCard);
       expect(handleIssueClick).toHaveBeenLastCalledWith(
@@ -591,7 +586,7 @@ describe("SwimLaneBoard", () => {
       );
 
       fireEvent.click(
-        screen.getByRole("button", { name: "Open epic: Epic One" }),
+        screen.getByRole("button", { name: "Open epic epic-1: Epic One" }),
       );
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -988,7 +983,7 @@ describe("SwimLaneBoard", () => {
 
       expect(screen.queryByText("Ungrouped")).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("button", { name: /Issue: Epic Issue/i }),
+        screen.queryByLabelText(/Issue: Epic Issue/i),
       ).not.toBeInTheDocument();
       expect(screen.getByText("Task Issue")).toBeInTheDocument();
     });
@@ -1087,6 +1082,53 @@ describe("SwimLaneBoard", () => {
 
       // Explicit status columns don't filter epics, so it should be visible
       expect(screen.getByText("Epic Issue")).toBeInTheDocument();
+    });
+  });
+
+  describe("compact columns mode", () => {
+    it("shows compact toggle in swim lane mode", () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", assignee: "alice", status: "open" }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="assignee" />);
+
+      expect(screen.getByTestId("toggle-compact-columns")).toBeInTheDocument();
+    });
+
+    it("hides empty columns when compact mode is enabled", () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", assignee: "alice", status: "open" }),
+      ];
+
+      render(
+        <SwimLaneBoard
+          issues={issues}
+          groupBy="assignee"
+          columns={defaultColumns}
+        />,
+      );
+
+      const laneContent = screen.getByTestId("lane-content");
+      expect(within(laneContent).getByText("Open")).toBeInTheDocument();
+      expect(within(laneContent).getByText("In Progress")).toBeInTheDocument();
+      expect(within(laneContent).getByText("Closed")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("toggle-compact-columns"));
+
+      expect(screen.getByTestId("toggle-compact-columns")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(screen.getByTestId("swim-lane-board")).toHaveAttribute(
+        "data-compact-columns",
+        "true",
+      );
+      expect(within(laneContent).getByText("Open")).toBeInTheDocument();
+      expect(
+        within(laneContent).queryByText("In Progress"),
+      ).not.toBeInTheDocument();
+      expect(within(laneContent).queryByText("Closed")).not.toBeInTheDocument();
     });
   });
 });

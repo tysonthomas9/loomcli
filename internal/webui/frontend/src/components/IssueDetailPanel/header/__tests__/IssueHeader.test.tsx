@@ -73,6 +73,51 @@ describe("IssueHeader", () => {
     expect(screen.getByTestId("issue-header")).toHaveClass("custom");
   });
 
+  it("does not render the epic runner action by default", () => {
+    render(<IssueHeader issue={mockIssue} onClose={() => {}} />);
+    expect(
+      screen.queryByTestId("header-run-epic-button"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the epic runner action when provided", () => {
+    render(
+      <IssueHeader issue={mockIssue} onClose={() => {}} onRunEpic={() => {}} />,
+    );
+    const button = screen.getByTestId("header-run-epic-button");
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveTextContent("Run epic");
+    expect(button).toHaveAccessibleName("Run epic workflow");
+  });
+
+  it("calls onRunEpic when the epic runner action is clicked", () => {
+    const onRunEpic = vi.fn();
+    render(
+      <IssueHeader
+        issue={mockIssue}
+        onClose={() => {}}
+        onRunEpic={onRunEpic}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("header-run-epic-button"));
+    expect(onRunEpic).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the epic runner action while starting", () => {
+    render(
+      <IssueHeader
+        issue={mockIssue}
+        onClose={() => {}}
+        onRunEpic={() => {}}
+        isRunningEpic={true}
+      />,
+    );
+    const button = screen.getByTestId("header-run-epic-button");
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("Starting");
+    expect(button).toHaveAccessibleName("Starting epic runner");
+  });
+
   it("renders open status with correct data attribute", () => {
     const openIssue = { ...mockIssue, status: "open" };
     render(<IssueHeader issue={openIssue} onClose={() => {}} />);
@@ -95,125 +140,6 @@ describe("IssueHeader", () => {
     const badge = screen.getByTestId("issue-status-badge");
     expect(badge).toHaveTextContent("Blocked");
     expect(badge).toHaveAttribute("data-status", "blocked");
-  });
-
-  describe("priority badge", () => {
-    it("shows priority badge when showPriority is true", () => {
-      render(
-        <IssueHeader
-          issue={mockIssue}
-          onClose={() => {}}
-          showPriority={true}
-        />,
-      );
-      expect(screen.getByTestId("header-priority-badge")).toBeInTheDocument();
-    });
-
-    it("does not show priority badge when showPriority is false", () => {
-      render(
-        <IssueHeader
-          issue={mockIssue}
-          onClose={() => {}}
-          showPriority={false}
-        />,
-      );
-      expect(
-        screen.queryByTestId("header-priority-badge"),
-      ).not.toBeInTheDocument();
-    });
-
-    it("does not show priority badge when showPriority is not provided", () => {
-      render(<IssueHeader issue={mockIssue} onClose={() => {}} />);
-      expect(
-        screen.queryByTestId("header-priority-badge"),
-      ).not.toBeInTheDocument();
-    });
-
-    it("displays correct priority label for P0", () => {
-      const p0Issue = { ...mockIssue, priority: 0 };
-      render(
-        <IssueHeader issue={p0Issue} onClose={() => {}} showPriority={true} />,
-      );
-      const badge = screen.getByTestId("header-priority-badge");
-      expect(badge).toHaveTextContent("P0");
-      expect(badge).toHaveAttribute("data-priority", "0");
-    });
-
-    it("displays correct priority label for P1", () => {
-      const p1Issue = { ...mockIssue, priority: 1 };
-      render(
-        <IssueHeader issue={p1Issue} onClose={() => {}} showPriority={true} />,
-      );
-      const badge = screen.getByTestId("header-priority-badge");
-      expect(badge).toHaveTextContent("P1");
-      expect(badge).toHaveAttribute("data-priority", "1");
-    });
-
-    it("displays correct priority label for P2", () => {
-      const p2Issue = { ...mockIssue, priority: 2 };
-      render(
-        <IssueHeader issue={p2Issue} onClose={() => {}} showPriority={true} />,
-      );
-      const badge = screen.getByTestId("header-priority-badge");
-      expect(badge).toHaveTextContent("P2");
-      expect(badge).toHaveAttribute("data-priority", "2");
-    });
-
-    it("displays correct priority label for P3", () => {
-      const p3Issue = { ...mockIssue, priority: 3 };
-      render(
-        <IssueHeader issue={p3Issue} onClose={() => {}} showPriority={true} />,
-      );
-      const badge = screen.getByTestId("header-priority-badge");
-      expect(badge).toHaveTextContent("P3");
-      expect(badge).toHaveAttribute("data-priority", "3");
-    });
-
-    it("displays correct priority label for P4", () => {
-      const p4Issue = { ...mockIssue, priority: 4 };
-      render(
-        <IssueHeader issue={p4Issue} onClose={() => {}} showPriority={true} />,
-      );
-      const badge = screen.getByTestId("header-priority-badge");
-      expect(badge).toHaveTextContent("P4");
-      expect(badge).toHaveAttribute("data-priority", "4");
-    });
-
-    it("has accessible aria-label with full priority description", () => {
-      const p0Issue = { ...mockIssue, priority: 0 };
-      render(
-        <IssueHeader issue={p0Issue} onClose={() => {}} showPriority={true} />,
-      );
-      const badge = screen.getByTestId("header-priority-badge");
-      expect(badge).toHaveAttribute("aria-label", "Priority: P0 - Critical");
-    });
-
-    it("calls onPriorityClick when priority badge is clicked", () => {
-      const onPriorityClick = vi.fn();
-      render(
-        <IssueHeader
-          issue={mockIssue}
-          onClose={() => {}}
-          showPriority={true}
-          onPriorityClick={onPriorityClick}
-        />,
-      );
-      fireEvent.click(screen.getByTestId("header-priority-badge"));
-      expect(onPriorityClick).toHaveBeenCalledTimes(1);
-    });
-
-    it("defaults to P2 for unknown priority values", () => {
-      const unknownPriorityIssue = { ...mockIssue, priority: 99 };
-      render(
-        <IssueHeader
-          issue={unknownPriorityIssue}
-          onClose={() => {}}
-          showPriority={true}
-        />,
-      );
-      const badge = screen.getByTestId("header-priority-badge");
-      expect(badge).toHaveTextContent("P2");
-    });
   });
 
   describe("PR links", () => {

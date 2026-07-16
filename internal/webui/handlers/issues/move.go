@@ -140,14 +140,11 @@ func resolveWorkspaceRef(ctx context.Context, st store.Store, ref string) (strin
 	if ref == "" {
 		return "", "", domain.ErrNotFound
 	}
-	ws, err := st.Workspaces().Get(ctx, ref)
-	if err == nil && ws != nil {
+	ws, getErr := st.Workspaces().Get(ctx, ref)
+	if getErr == nil && ws != nil {
 		return ws.Key, ws.Name, nil
 	}
-	if err != nil && !errors.Is(err, domain.ErrNotFound) && !errors.Is(err, domain.ErrInvalid) {
-		return "", "", err
-	}
-	ws, err = st.Workspaces().GetByName(ctx, ref)
+	ws, err := st.Workspaces().GetByName(ctx, ref)
 	if err != nil {
 		return "", "", err
 	}

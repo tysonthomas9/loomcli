@@ -35,6 +35,7 @@ export type { SessionRecord } from "@/api/terminal";
 export {
   patchTerminalState,
   deleteTabMetadata,
+  ensureAgentTerminalSession,
   startTerminalSetup,
 } from "@/api/terminal";
 export type {

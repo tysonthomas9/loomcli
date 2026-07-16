@@ -29,6 +29,7 @@ type AgentProcess struct {
 	TranscriptPath         string            // path to session transcript.jsonl for watchdog liveness (set by superviseAgent)
 	Session                *sessions.Session // daemon-created session handle (nil when no session active)
 	AgentSessionID         string            // fleet-db control-plane session id (empty when no session active)
+	ParentSessionID        string            // lead/orchestration session that requested this run (empty when unattached)
 	AgentLeaseID           string            // fleet-db control-plane lease id (empty when no lease active)
 	AgentLeaseToken        string            // fleet-db control-plane lease token (empty when no lease active)
 	OwnershipLeaseID       string            // fleet-db logical-agent ownership lease id (empty when not owner)
@@ -54,7 +55,7 @@ type AgentProcess struct {
 	RateRetryCount int                  // consecutive rate-limit retries (separate from RestartCount)
 	LastNoWork     bool                 // true if last exit was due to no claimable tasks
 	NoWorkCount    int                  // consecutive NoWork exits (reset on non-NoWork exit)
-	ParkCount      int                  // park cycles since the last successful run (drives ParkBudget escalation; display-only in the state file, never hydrated across daemon restarts)
+	BlockCount     int                  // block cycles since the last successful run (drives BlockBudget escalation; display-only in the state file, never hydrated across daemon restarts)
 
 	CurrentBackendIdx int       // 0=primary, 1+=fallback index into Entry.FallbackBackends
 	BackoffUntil      time.Time // when current backoff sleep ends (zero if not in backoff)
@@ -65,7 +66,7 @@ type AgentProcess struct {
 
 	StopReason StopReason // why the agent was stopped (set at decision site, empty while running)
 
-	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
+	Mu sync.Mutex // protects Cmd, Pid, LogFile, restart tracking, AssignedEpicID, AssignedTaskID, RequestedTaskID, ResumeTaskID, ResumeFailures, RecoveryMode, LastError, CurrentBackendIdx, Session, AgentSessionID, ParentSessionID, AgentLeaseID, AgentLeaseToken, ownership fields, TranscriptPath, BeforeRef, StopReason, LastActivity
 }
 
 // StopReason identifies why an agent was stopped.
@@ -82,15 +83,16 @@ const (
 	StopReasonYielded            StopReason = "yielded"
 	StopReasonWatchdog           StopReason = "watchdog"
 	StopReasonBackendUnavailable StopReason = "backend_unavailable"
-	// StopReasonMaxRetriesParked marks an agent that exhausted its restart
-	// budget and is now park-and-retrying on a fixed interval (policy
-	// Decision Retry with OnExhaustion Park) instead of being abandoned.
+	StopReasonEphemeralDone      StopReason = "ephemeral_done" // ephemeral-mode agent exited cleanly after one successful task
+	// StopReasonMaxRetriesBlocked marks an agent that exhausted its restart
+	// budget and is now block-and-retrying on a fixed interval (policy
+	// Decision Retry with OnExhaustion Block) instead of being abandoned.
 	// The supervise goroutine stays alive and the agent self-resumes once a
 	// transient root cause clears.
-	StopReasonMaxRetriesParked StopReason = "max_retries_parked"
+	StopReasonMaxRetriesBlocked StopReason = "max_retries_blocked"
 	// StopReasonFastFail marks a deterministic failure the policy refuses to
-	// retry or park (Decision FastFail — e.g. ContextOverflow, ModelNotFound
-	// with backends exhausted, or a capped park that never made progress).
+	// retry or block (Decision FastFail — e.g. ContextOverflow, ModelNotFound
+	// with backends exhausted, or a capped block that never made progress).
 	// Surfaced as "failed" in daemon-status.
 	StopReasonFastFail StopReason = "fast_fail"
 )
@@ -139,7 +141,7 @@ type SupervisedAgentStatus struct {
 	StopReason             StopReason // why the agent stopped (empty while running)
 	LastErrorClass         string     // string representation of last error class (e.g. "RateLimited")
 	NoWorkCount            int        // consecutive NoWork exits
-	ParkCount              int        // park cycles since the last successful run
+	BlockCount             int        // block cycles since the last successful run
 	BackoffUntil           time.Time  // when backoff sleep ends (zero if not in backoff)
 	RemoteBranch           string     // remote tracking ref (e.g. "origin/main")
 	OwnershipLeaseID       string

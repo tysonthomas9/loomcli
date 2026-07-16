@@ -33,6 +33,8 @@ import {
   INITIAL_STATE,
   issuesAreEqual,
   extractErrorMessage,
+  issueMutationAppliesToLocalIssue,
+  issueMutationInvalidatesProjection,
   processMutation as applyMutationPure,
 } from "./issueStoreHelpers";
 import type {
@@ -79,11 +81,20 @@ export function createIssueStore(
   let activeGraphFilter: GraphFilter | undefined;
   let mutationCountAtDisconnect = 0;
   let prevConnectionState: ConnectionState = "disconnected";
+  let reconnectRecoveryPending = false;
   let maxReconnectAttemptsTracked = 0;
   let eventUnsubscribe: (() => void) | null = null;
 
   let onToast = initialConfig?.onToast ?? null;
   let retryConnectionFn = initialConfig?.retryConnectionFn ?? null;
+
+  function scheduleProjectionRefresh(get: () => IssueStore): void {
+    if (refreshTimeout) clearTimeout(refreshTimeout);
+    refreshTimeout = setTimeout(() => {
+      refreshTimeout = null;
+      void get().refetch();
+    }, REFRESH_DEBOUNCE_MS);
+  }
 
   /** Apply a mutation to the store, handling side effects from the pure result */
   function applyMutationToStore(
@@ -91,18 +102,20 @@ export function createIssueStore(
     set: (partial: Partial<IssueStore>) => void,
     get: () => IssueStore,
   ): void {
-    const result = applyMutationPure(
-      get().issuesMap,
-      mutation,
-      activeController !== null,
-    );
+    const result = issueMutationAppliesToLocalIssue(mutation)
+      ? applyMutationPure(get().issuesMap, mutation, activeController !== null)
+      : {
+          newMap: null,
+          incrementCount: false,
+          trackDeletion: null,
+          scheduleRefresh: false,
+        };
 
-    if (result.scheduleRefresh) {
-      if (refreshTimeout) clearTimeout(refreshTimeout);
-      refreshTimeout = setTimeout(() => {
-        refreshTimeout = null;
-        void get().refetch();
-      }, REFRESH_DEBOUNCE_MS);
+    if (
+      result.scheduleRefresh ||
+      issueMutationInvalidatesProjection(mutation)
+    ) {
+      scheduleProjectionRefresh(get);
     }
 
     if (result.trackDeletion) {
@@ -473,6 +486,7 @@ export function createIssueStore(
           }
         }
         removeOptimisticEntry(issueId, get, set);
+        scheduleProjectionRefresh(get);
       } catch (err) {
         const currentEntry = optimisticEntries.get(issueId);
         if (currentEntry) {
@@ -500,6 +514,7 @@ export function createIssueStore(
 
       if (newState === "reconnecting" && prev !== "reconnecting") {
         const now = Date.now();
+        reconnectRecoveryPending = true;
         set({ disconnectedSince: now });
         mutationCountAtDisconnect = get().mutationCount;
 
@@ -509,7 +524,7 @@ export function createIssueStore(
         }, STALE_BANNER_DELAY_MS);
       }
 
-      if (prev === "reconnecting" && newState === "connected") {
+      if (newState === "connected" && reconnectRecoveryPending) {
         if (staleBannerTimeout) {
           clearTimeout(staleBannerTimeout);
           staleBannerTimeout = null;
@@ -539,13 +554,15 @@ export function createIssueStore(
           }
         }
         maxReconnectAttemptsTracked = 0;
+        reconnectRecoveryPending = false;
       }
 
-      if (newState === "disconnected" && prev === "reconnecting") {
+      if (newState === "disconnected" && reconnectRecoveryPending) {
         if (staleBannerTimeout) {
           clearTimeout(staleBannerTimeout);
           staleBannerTimeout = null;
         }
+        reconnectRecoveryPending = false;
       }
     },
 
@@ -607,6 +624,7 @@ export function createIssueStore(
       activeGraphFilter = undefined;
       mutationCountAtDisconnect = 0;
       prevConnectionState = "disconnected";
+      reconnectRecoveryPending = false;
       maxReconnectAttemptsTracked = 0;
 
       set({ ...INITIAL_STATE, pendingIds: new Set(), issuesMap: new Map() });

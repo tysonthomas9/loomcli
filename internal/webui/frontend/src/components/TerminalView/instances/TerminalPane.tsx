@@ -4,7 +4,6 @@ import type {
 } from "./TerminalInstance";
 import { TerminalInstance } from "./TerminalInstance";
 import { CrashOverlay } from "./CrashOverlay";
-import { NotesBar } from "@/components/TerminalView/controls";
 import {
   ReconnectingOverlay,
   type ReconnectOverlayState,
@@ -29,9 +28,6 @@ export interface TerminalPaneProps {
   onTerminalFocus: (() => void) | undefined;
   hasConnected: boolean;
   reconnectState: ReconnectOverlayState;
-  notes: string;
-  onSaveNotes: (text: string) => Promise<void>;
-  isMetaLoading: boolean;
   /**
    * False when the backend reports this tab's PTY is not running — either
    * metadata survived a server restart without the shell, or the shell
@@ -43,6 +39,8 @@ export interface TerminalPaneProps {
   ptyAlive?: boolean | undefined;
   /** Automatically replace stale PTYs for tabs where losing old scrollback is acceptable. */
   autoStartStaleSession?: boolean | undefined;
+  /** Automatically reconnect after an unexpected WebSocket close. */
+  autoReconnect?: boolean | undefined;
 }
 
 export function TerminalPane({
@@ -59,12 +57,26 @@ export function TerminalPane({
   onTerminalFocus,
   hasConnected,
   reconnectState,
-  notes,
-  onSaveNotes,
-  isMetaLoading,
   ptyAlive,
   autoStartStaleSession,
+  autoReconnect,
 }: TerminalPaneProps) {
+  // TerminalConnectionOverlay renders its own overlay for the initial
+  // connecting spinner and for every actionable state (disconnected /
+  // error / session_ended). ReconnectingOverlay is the slim background
+  // indicator shown only while the terminal itself stays visible
+  // (connecting after a prior successful connect). Rendering both at once
+  // — e.g. "Disconnected" + "Auto-reconnecting..." subtext on top of a
+  // faint "Reconnecting..." pulse — produced overlapping text and two
+  // Reconnect buttons. Suppress ReconnectingOverlay whenever the
+  // connection overlay owns the pane; it carries the expired message as
+  // subtext so no call-to-action is lost.
+  const connectionOverlayVisible =
+    tab.connectionState === "connecting"
+      ? !hasConnected
+      : tab.connectionState === "disconnected" ||
+        tab.connectionState === "error" ||
+        tab.connectionState === "session_ended";
   return (
     <>
       <TerminalInstance
@@ -76,9 +88,10 @@ export function TerminalPane({
         onOutput={onOutput}
         onBackendCrash={onBackendCrash}
         onTerminalFocus={onTerminalFocus}
-        agentName={tab.agentName}
+        writable={tab.writable}
         ptyAlive={ptyAlive}
         autoStartStaleSession={autoStartStaleSession}
+        autoReconnect={autoReconnect}
       />
       {tab.crashReason != null ? (
         <CrashOverlay
@@ -92,14 +105,18 @@ export function TerminalPane({
             connectionState={tab.connectionState}
             hasConnected={hasConnected}
             onReconnect={onReconnect}
+            autoReconnect={autoReconnect}
+            isAutoReconnecting={reconnectState === "reconnecting"}
+            reconnectExpired={reconnectState === "expired"}
           />
-          <ReconnectingOverlay
-            state={reconnectState}
-            onReconnect={onReconnect}
-          />
+          {!connectionOverlayVisible && (
+            <ReconnectingOverlay
+              state={reconnectState}
+              onReconnect={onReconnect}
+            />
+          )}
         </>
       )}
-      <NotesBar notes={notes} onSave={onSaveNotes} isLoading={isMetaLoading} />
     </>
   );
 }

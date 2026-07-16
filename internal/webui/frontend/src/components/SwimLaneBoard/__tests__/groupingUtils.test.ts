@@ -169,7 +169,7 @@ describe("groupIssuesByField", () => {
       expect(result[0].groupIssue?.id).toBe("epic-empty");
     });
 
-    it("uses parent ID as title when parent_title is not available", () => {
+    it("falls back to a friendly 'Untitled epic' label (not the raw parent ID) when parent_title is not available", () => {
       const issues = [
         createMockIssue({ id: "issue-1", parent: "epic-id-123" }),
       ];
@@ -177,7 +177,9 @@ describe("groupIssuesByField", () => {
       const result = groupIssuesByField(issues, "epic");
 
       expect(result).toHaveLength(1);
-      expect(result[0].title).toBe("epic-id-123");
+      // The raw internal parent ID must never surface as a user-facing lane
+      // title; show a friendly placeholder instead.
+      expect(result[0].title).toBe("Untitled epic");
     });
   });
 

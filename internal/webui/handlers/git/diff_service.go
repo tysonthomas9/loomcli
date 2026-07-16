@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
+	"github.com/tysonthomas9/loomcli/internal/webui/service/pathsec"
 )
 
 // Compile-time check.
@@ -32,8 +33,8 @@ func (s *diffServiceImpl) resolveAgent(wsID, agentName string) (*ops.AgentWorktr
 	if agentName == "" {
 		return nil, service.ErrValidation("missing agent name")
 	}
-	if !service.ValidAgentName.MatchString(agentName) {
-		return nil, service.ErrValidation("invalid agent name: must match [a-zA-Z0-9_-]+")
+	if !service.IsValidAgentName(agentName) {
+		return nil, service.ErrValidation("invalid agent name")
 	}
 	wt, err := s.gitOps.ResolveAgentWorktree(wsID, agentName)
 	if err != nil {
@@ -128,7 +129,7 @@ func (s *diffServiceImpl) DiffFilePatch(ctx context.Context, wsID, agentName, fr
 	if filePath == "" {
 		return nil, service.ErrValidation("missing required parameter: path")
 	}
-	if !validateDiffPath(filePath) {
+	if !pathsec.ValidateDiffPath(filePath) {
 		return nil, service.ErrValidation("invalid path: must be relative with no '..' traversal")
 	}
 

@@ -3,9 +3,23 @@
  * Icon-only navigation rail for switching between views.
  */
 
+import { useEffect, useRef } from "react";
+
 import type { ViewMode } from "@/types";
+import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
+
+import { CompactRailHost } from "@/components/CompactRail";
+import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 
 import styles from "./NavRail.module.css";
+
+/** Aether wireframe pin 5: ~5 workspace dots visible, then scroll. */
+export const WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX = 210;
+
+export interface NavRailWorkspace {
+  id: string;
+  name: string;
+}
 
 export interface NavRailProps {
   activeView: ViewMode;
@@ -13,6 +27,14 @@ export interface NavRailProps {
   className?: string;
   sessionCount?: number;
   badges?: Partial<Record<ViewMode, boolean>>;
+  /** Workspaces shown as switcher avatars at the rail bottom. */
+  workspaces?: NavRailWorkspace[];
+  /** Currently active workspace id (highlighted avatar). */
+  activeWorkspaceId?: string;
+  /** Switch to a workspace by id. */
+  onWorkspaceSwitch?: (id: string) => void;
+  /** Open the create-workspace flow. */
+  onAddWorkspace?: () => void;
 }
 
 type NavItem = {
@@ -73,8 +95,47 @@ const TOP_ITEMS: NavItem[] = [
     ),
   },
   {
+    id: "prs",
+    label: "Pull Requests",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle
+          cx="6"
+          cy="6"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="6"
+          cy="18"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <circle
+          cx="18"
+          cy="18"
+          r="2.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        />
+        <path
+          d="M6 8.5v7M18 15.5V12a3 3 0 00-3-3h-3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+  {
     id: "terminal",
-    label: "Monitor",
+    label: "Terminal",
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <rect
@@ -104,6 +165,28 @@ const TOP_ITEMS: NavItem[] = [
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: "files",
+    label: "Files",
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M6 2h8l4 4v15a1 1 0 01-1 1H6a1 1 0 01-1-1V3a1 1 0 011-1z"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M14 2v4h4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
         />
       </svg>
     ),
@@ -143,8 +226,17 @@ export function NavRail({
   className,
   sessionCount,
   badges,
+  workspaces,
+  activeWorkspaceId,
+  onWorkspaceSwitch,
+  onAddWorkspace,
 }: NavRailProps): JSX.Element {
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
+  const activeWorkspaceRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    activeWorkspaceRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [activeWorkspaceId, workspaces]);
 
   const renderButton = (item: NavItem) => {
     const isActive = (item.activeForViews ?? [item.id]).includes(activeView);
@@ -159,7 +251,6 @@ export function NavRail({
         data-active={isActive || undefined}
         onClick={() => onChange(item.id)}
         aria-label={item.label}
-        title={item.label}
       >
         <span className={styles.icon}>{item.icon}</span>
         {showBadge && (
@@ -177,15 +268,72 @@ export function NavRail({
             aria-label="has unread output"
           />
         )}
-        <span className={styles.tooltip}>{item.label}</span>
+        <span className={styles.tooltip} role="tooltip">
+          {item.label}
+        </span>
       </button>
     );
   };
+
+  const hasWorkspaceAvatars =
+    (workspaces && workspaces.length > 0) || Boolean(onAddWorkspace);
 
   return (
     <nav className={rootClassName} aria-label="Primary">
       {TOP_ITEMS.map(renderButton)}
       <div className={styles.spacer} />
+      {hasWorkspaceAvatars && (
+        <>
+          <div className={styles.wsDivider} aria-hidden="true" />
+          <section
+            className={styles.workspaceSwitcher}
+            aria-label="Workspace selector"
+          >
+            <div className={styles.workspaceList}>
+              {workspaces?.map((ws) => {
+                const color = getAvatarColor(ws.name);
+                const isActive = ws.id === activeWorkspaceId;
+                return (
+                  <CompactRailHost
+                    key={ws.id}
+                    as="button"
+                    type="button"
+                    label={ws.name}
+                    aria-label={`Switch to ${ws.name}`}
+                    hostRef={isActive ? activeWorkspaceRef : undefined}
+                    className={styles.wsAvatar}
+                    data-active={isActive || undefined}
+                    onClick={() => onWorkspaceSwitch?.(ws.id)}
+                  >
+                    <span
+                      className={styles.wsAvatarCircle}
+                      style={{
+                        backgroundColor: color,
+                        color: shouldUseWhiteText(color) ? "#fff" : "#171717",
+                      }}
+                      aria-hidden="true"
+                    >
+                      {getCompactAvatarInitials(ws.name)}
+                    </span>
+                  </CompactRailHost>
+                );
+              })}
+            </div>
+            {onAddWorkspace && (
+              <CompactRailHost
+                as="button"
+                type="button"
+                label="Add workspace"
+                className={styles.wsAdd}
+                onClick={onAddWorkspace}
+              >
+                +
+              </CompactRailHost>
+            )}
+          </section>
+          <div className={styles.wsDivider} aria-hidden="true" />
+        </>
+      )}
       {BOTTOM_ITEMS.map(renderButton)}
     </nav>
   );

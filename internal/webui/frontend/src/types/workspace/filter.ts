@@ -34,7 +34,6 @@ export interface WorkFilter {
   sort_policy?: SortPolicy;
   parent_id?: string;
   mol_type?: MolType;
-  include_deferred?: boolean;
   include_mol_steps?: boolean;
   source_repos?: string[];
 }

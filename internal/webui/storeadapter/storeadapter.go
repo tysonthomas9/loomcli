@@ -79,6 +79,7 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 		Workspaces:       summaries,
 		WorkspaceOrder:   nil, // TODO(.16): persist order in DaemonProfile or similar
 		DefaultWorkspace: "",
+		DesignFormat:     ws.DesignFormat,
 	}, nil
 }
 
@@ -150,6 +151,7 @@ func loadRepos(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspac
 			Path:          repoPath,
 			DefaultBranch: db,
 			Remote:        remote,
+			RemoteURL:     r.RemoteURL,
 			SourceRepoID:  r.SourceRepoID,
 			Groups:        r.Groups,
 		})
@@ -174,6 +176,7 @@ func loadAgents(ctx context.Context, s store.Store, wsKey string) ([]ops.Workspa
 	for _, a := range agents {
 		out = append(out, ops.WorkspaceAgentInfo{
 			Name:       a.Name,
+			RoleName:   a.RoleName,
 			Repos:      a.Repos,
 			RepoGroups: a.RepoGroups,
 			CrossRepo:  a.CrossRepo,

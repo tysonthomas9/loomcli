@@ -13,6 +13,64 @@ import "@testing-library/jest-dom";
 import { DesignPanel } from "../DesignPanel";
 
 describe("DesignPanel", () => {
+  it("renders explicitly formatted HTML through the design-only sanitizer", () => {
+    render(
+      <DesignPanel
+        format="html"
+        content={'<h2>Plan</h2>\n<p class="safe">Ship it</p>'}
+      />,
+    );
+    const frame = screen.getByTitle("HTML design artifact");
+    expect(frame).toHaveAttribute("sandbox", "allow-same-origin");
+    expect(frame.getAttribute("srcdoc")).toContain(
+      '<p class="safe">Ship it</p>',
+    );
+  });
+
+  it("renders safe inline SVG and strips executable SVG content", () => {
+    render(
+      <DesignPanel
+        format="html"
+        content={
+          '<svg width="40" height="40" viewBox="0 0 40 40"><script>window.bad=1</script><rect width="40" height="40" fill="none" onload="window.bad=2"/></svg>'
+        }
+      />,
+    );
+    const frame = screen.getByTestId("design-html-content");
+    const srcDoc = frame.getAttribute("srcdoc") ?? "";
+    expect(srcDoc).toContain("<svg");
+    expect(srcDoc).toContain("<rect");
+    expect(srcDoc).not.toContain("<script");
+    expect(srcDoc).not.toContain("onload");
+    expect(srcDoc).not.toContain("window.bad");
+  });
+
+  it("keeps embedded artifact styles in one isolated document", () => {
+    render(
+      <DesignPanel
+        format="html"
+        content={
+          '<style>.card{display:grid}</style>\n<h2>Plan</h2>\n<div class="card">Ship it</div>'
+        }
+      />,
+    );
+
+    const frames = screen.getAllByTitle("HTML design artifact");
+    expect(frames).toHaveLength(1);
+    expect(frames[0]?.getAttribute("srcdoc")).toContain(
+      "<style>.card{display:grid}</style>",
+    );
+    expect(
+      screen.queryByTestId("design-panel-section"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps explicit markdown authoritative even when it starts with HTML", () => {
+    render(<DesignPanel format="markdown" content='<p class="raw">text</p>' />);
+    expect(
+      screen.getByTestId("design-panel").querySelector("p.raw"),
+    ).toBeNull();
+  });
   describe("Empty states", () => {
     it("renders empty placeholder when content is null", () => {
       render(<DesignPanel content={null} />);
@@ -123,34 +181,36 @@ describe("DesignPanel", () => {
     });
 
     it("clicking fullscreen button adds fullscreen class", () => {
-      render(<DesignPanel content="Some content" />);
-      const panel = screen.getByTestId("design-panel");
+      const { container } = render(<DesignPanel content="Some content" />);
 
-      // Not fullscreen initially
-      expect(panel.className).not.toMatch(/fullscreen/);
+      expect(screen.getByTestId("design-panel").className).not.toMatch(
+        /fullscreen/,
+      );
 
-      // Click fullscreen button
       fireEvent.click(screen.getByLabelText("Enter fullscreen"));
 
-      // Should now have fullscreen class
+      const panel = screen.getByTestId("design-panel");
       expect(panel.className).toMatch(/fullscreen/);
-      // Button label should change
+      expect(panel.parentElement).toBe(document.body);
+      expect(
+        container.querySelector('[data-testid="design-panel"]'),
+      ).toBeNull();
       expect(screen.getByLabelText("Exit fullscreen")).toBeInTheDocument();
     });
 
     it("escape key exits fullscreen without propagating", () => {
-      render(<DesignPanel content="Some content" />);
+      const { container } = render(<DesignPanel content="Some content" />);
 
-      // Enter fullscreen
       fireEvent.click(screen.getByLabelText("Enter fullscreen"));
-      const panel = screen.getByTestId("design-panel");
-      expect(panel.className).toMatch(/fullscreen/);
+      expect(screen.getByTestId("design-panel").className).toMatch(
+        /fullscreen/,
+      );
 
-      // Press Escape
       fireEvent.keyDown(document, { key: "Escape" });
 
-      // Should exit fullscreen
+      const panel = screen.getByTestId("design-panel");
       expect(panel.className).not.toMatch(/fullscreen/);
+      expect(container.contains(panel)).toBe(true);
       expect(screen.getByLabelText("Enter fullscreen")).toBeInTheDocument();
     });
 

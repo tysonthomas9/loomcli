@@ -66,7 +66,7 @@
 
 .badge[data-status="working"],
 .badge[data-status="planning"] {
-  border-color: var(--color-status-working, #facc15);
+  border-color: var(--color-status-working, #3b82f6);
 }
 
 .badge[data-status="done"] {

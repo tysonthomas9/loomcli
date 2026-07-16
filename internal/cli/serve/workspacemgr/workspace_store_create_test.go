@@ -6,10 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -63,8 +65,8 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	if err != nil {
 		t.Fatalf("list roles: %v", err)
 	}
-	if len(roles) != 2 || !hasRole(roles, "plan") || !hasRole(roles, "task") {
-		t.Fatalf("roles = %#v, want plan and task", roles)
+	if len(roles) != 3 || !hasRole(roles, "plan") || !hasRole(roles, "task") || !hasRole(roles, "lead") {
+		t.Fatalf("roles = %#v, want plan, task, and lead", roles)
 	}
 	roleByName := rolesByName(roles)
 	if roleByName["plan"].TaskFilter != "needs_plan" {
@@ -72,6 +74,9 @@ func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) 
 	}
 	if roleByName["task"].TaskFilter != "has_design" {
 		t.Fatalf("task task filter = %q, want has_design", roleByName["task"].TaskFilter)
+	}
+	if roleByName["lead"].Kind != domain.RoleKindInteractive {
+		t.Fatalf("lead kind = %q, want interactive", roleByName["lead"].Kind)
 	}
 
 	sc, err := bootstrap.LoadStateCache()
@@ -148,6 +153,64 @@ func TestStoreBackedCreateWorkspaceRejectsExternalNonEmptyPath(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(externalPath, "keep.txt")); statErr != nil {
 		t.Fatalf("non-empty external path was modified, stat err=%v", statErr)
+	}
+}
+
+func TestAddWorktreesRecoversCorruptBranchRef(t *testing.T) {
+	src := initTestGitRepo(t, t.TempDir(), "app")
+	baseBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
+	runGit(t, src, "checkout", "-b", "local-coder")
+	if err := os.WriteFile(filepath.Join(src, "agent.txt"), []byte("agent\n"), 0o644); err != nil {
+		t.Fatalf("write agent file: %v", err)
+	}
+	runGit(t, src, "add", "agent.txt")
+	runGit(t, src, "commit", "-m", "agent")
+	agentSHA := strings.TrimSpace(gitOutput(t, src, "rev-parse", "HEAD"))
+	runGit(t, src, "checkout", baseBranch)
+	corruptWorkspaceBranchRef(t, src, "local-coder")
+
+	wsDir := filepath.Join(t.TempDir(), "workspace")
+	ctx := service.WithCreateWarnings(context.Background())
+	created, repos, err := addWorktrees(ctx, []resolvedRepo{{path: src, name: "app"}}, wsDir, "local-coder")
+	if err != nil {
+		t.Fatalf("addWorktrees: %v", err)
+	}
+	if len(created) != 1 || len(repos) != 1 {
+		t.Fatalf("created=%d repos=%d, want one each", len(created), len(repos))
+	}
+	if warnings := service.GetCreateWarnings(ctx); len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if got := strings.TrimSpace(gitOutput(t, filepath.Join(wsDir, "app"), "rev-parse", "HEAD")); got != agentSHA {
+		t.Fatalf("worktree HEAD = %s, want recovered reflog SHA %s", got, agentSHA)
+	}
+}
+
+func TestAddWorktreesSkipsUnrecoverableCheckoutWithWarning(t *testing.T) {
+	src := initTestGitRepo(t, t.TempDir(), "app")
+	wsDir := filepath.Join(t.TempDir(), "workspace")
+	blockedPath := filepath.Join(wsDir, "app")
+	if err := os.MkdirAll(blockedPath, 0o755); err != nil {
+		t.Fatalf("mkdir blocked checkout path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blockedPath, "not-a-checkout.txt"), []byte("blocked\n"), 0o644); err != nil {
+		t.Fatalf("write blocked checkout marker: %v", err)
+	}
+
+	ctx := service.WithCreateWarnings(context.Background())
+	created, repos, err := addWorktrees(ctx, []resolvedRepo{{path: src, name: "app"}}, wsDir, "local-coder")
+	if err != nil {
+		t.Fatalf("addWorktrees returned fatal error: %v", err)
+	}
+	if len(created) != 0 {
+		t.Fatalf("created = %v, want no created worktrees", created)
+	}
+	if len(repos) != 1 || repos[0].Path != blockedPath {
+		t.Fatalf("repos = %#v, want intended skipped checkout path", repos)
+	}
+	warnings := service.GetCreateWarnings(ctx)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "Skipped checkout") {
+		t.Fatalf("warnings = %v, want skipped checkout warning", warnings)
 	}
 }
 
@@ -384,8 +447,8 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	if err != nil {
 		t.Fatalf("list roles: %v", err)
 	}
-	if len(roles) != 2 || !hasRole(roles, "plan") || !hasRole(roles, "task") {
-		t.Fatalf("roles = %#v, want plan and task", roles)
+	if len(roles) != 3 || !hasRole(roles, "plan") || !hasRole(roles, "task") || !hasRole(roles, "lead") {
+		t.Fatalf("roles = %#v, want plan, task, and lead", roles)
 	}
 	if _, err := os.Stat(filepath.Join(wsPath, "app", ".git")); err != nil {
 		t.Fatalf("clone checkout not created: %v", err)
@@ -636,4 +699,19 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 	return string(out)
+}
+
+func corruptWorkspaceBranchRef(t *testing.T, repoPath, branch string) {
+	t.Helper()
+	common, err := gitbranch.CommonDir(repoPath)
+	if err != nil {
+		t.Fatalf("git common dir: %v", err)
+	}
+	refPath := filepath.Join(common, "refs", "heads", filepath.FromSlash(branch))
+	if err := os.MkdirAll(filepath.Dir(refPath), 0o755); err != nil {
+		t.Fatalf("mkdir branch ref parent: %v", err)
+	}
+	if err := os.WriteFile(refPath, nil, 0o644); err != nil {
+		t.Fatalf("corrupt branch ref: %v", err)
+	}
 }

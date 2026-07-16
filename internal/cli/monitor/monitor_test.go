@@ -730,6 +730,7 @@ func TestCollectStatistics(t *testing.T) {
 		wantInProgress int
 		wantReview     int
 		wantBlocked    int
+		countResult    int
 	}{
 		{
 			name:        "normal case",
@@ -759,8 +760,7 @@ func TestCollectStatistics(t *testing.T) {
 			statsResult: &backend.StatsData{TotalIssues: 20, OpenIssues: 10, InProgressIssues: 2, ClosedIssues: 5, BlockedIssues: 1},
 			wantOpen:    10, wantClosed: 5, wantTotal: 20, wantCompl: 25.0,
 			wantRemaining: 15, wantInProgress: 2, wantBlocked: 1,
-			// Review = 20 - 10 - 2 - 5 - 1 - 0 - 0 = 2
-			wantReview: 2,
+			wantReview: 2, countResult: 2,
 		},
 		{
 			name:        "negative review clamped to zero",
@@ -782,8 +782,7 @@ func TestCollectStatistics(t *testing.T) {
 			wantOpen:    10, wantClosed: 8, wantTotal: 30,
 			wantCompl:     float64(8) / float64(30) * 100,
 			wantRemaining: 22, wantInProgress: 3, wantBlocked: 2,
-			// Review = 30 - 10 - 3 - 8 - 2 - 2 - 1 = 4
-			wantReview: 4,
+			wantReview: 4, countResult: 4,
 		},
 	}
 
@@ -794,6 +793,7 @@ func TestCollectStatistics(t *testing.T) {
 			mock := NewMockIssueBackend()
 			mock.StatsResult = tt.statsResult
 			mock.StatsErr = tt.statsErr
+			mock.CountResult = tt.countResult
 			deps.IssueBackend = mock
 
 			stats := collectStatisticsDeps(deps)

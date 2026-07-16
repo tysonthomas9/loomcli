@@ -19,6 +19,8 @@ export type ReviewType = "plan" | "code" | "help";
 
 interface OpenStatusCheckable {
   design?: string;
+  design_artifact_id?: string;
+  has_design?: boolean;
   labels?: string[];
 }
 
@@ -45,7 +47,9 @@ export function hasNeedsRevision(issue: { labels?: string[] }): boolean {
  * SYNC: Must match taskfilter.go NeedsPlan() / ReadyToImplement()
  */
 export function getOpenStatus(issue: OpenStatusCheckable): OpenStatus {
-  if (issue.design && !hasNeedsRevision(issue)) {
+  const hasDesign =
+    !!issue.design || !!issue.design_artifact_id || issue.has_design === true;
+  if (hasDesign && !hasNeedsRevision(issue)) {
     return "ready";
   }
   return "needs_plan";
@@ -64,6 +68,38 @@ export function isPRUrl(ref?: string | null): boolean {
     return url.pathname.includes("/pull/") || url.pathname.includes("/pulls/");
   } catch {
     return false;
+  }
+}
+
+/** Normalize a PR URL for matching issue external_ref to GitHub list entries. */
+export function normalizePrUrl(ref?: string | null): string | null {
+  if (!isPRUrl(ref)) return null;
+  try {
+    const url = new URL(ref!);
+    const path = url.pathname.replace(/\/$/, "").toLowerCase();
+    return `${url.origin.toLowerCase()}${path}`;
+  } catch {
+    return ref?.trim().toLowerCase() ?? null;
+  }
+}
+
+/**
+ * Stable join key for a PR reference: "owner/repo#number".
+ * Robust to URL variants that break exact-string matching (http vs https,
+ * www host, trailing ".git", sub-paths like /pull/42/files, trailing slash).
+ */
+export function prKeyFromRef(ref?: string | null): string | null {
+  if (!ref) return null;
+  try {
+    const url = new URL(ref);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    const match = url.pathname.match(
+      /^\/([^/]+)\/([^/]+?)(?:\.git)?\/pulls?\/(\d+)(?:\/|$)/i,
+    );
+    if (!match) return null;
+    return `${match[1]!.toLowerCase()}/${match[2]!.toLowerCase()}#${match[3]!}`;
+  } catch {
+    return null;
   }
 }
 

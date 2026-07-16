@@ -5,6 +5,7 @@ import { IssueViewGuard } from "@/components/IssueViewGuard";
 import type { Status } from "@/types";
 import { updateIssue } from "@/api";
 import { useRecentAssignees } from "@/hooks";
+import { useRunEpicWorkflow } from "@/hooks/workspace";
 import {
   useWorkspaceViewData,
   useWorkspaceViewActions,
@@ -32,6 +33,7 @@ export function KanbanPage() {
 
   const { handleIssueClick, updateIssueStatus, refetch, showToast } =
     useWorkspaceViewActions();
+  const { runEpic, isRunningEpic } = useRunEpicWorkflow({ showToast });
 
   // Assignee prompt state for Ready -> In Progress drag
   const { recentAssignees, addRecentAssignee } = useRecentAssignees();
@@ -121,8 +123,11 @@ export function KanbanPage() {
             groupBy={groupBy}
             onDragEnd={handleDragEnd}
             onIssueClick={handleIssueClick}
+            onRunEpic={runEpic}
+            isRunningEpic={isRunningEpic}
             isMultiRepo={isMultiRepo}
             hasFiltersActive={hasActiveFilters}
+            cardLimit={15}
             {...(blockedIssuesMap !== undefined && {
               blockedIssues: blockedIssuesMap,
             })}

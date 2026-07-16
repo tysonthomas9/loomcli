@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -92,6 +93,9 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
 		logger.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
 	}
+	if config.ExtAuthURL != "" && config.WorkspaceRoleResolver == nil {
+		logger.Warn("remote file-browser requests will be DENIED (403): file browser RBAC not configured; configure a workspace role resolver to enable remote file access")
+	}
 	if config.FrontendDir == "" {
 		logger.Info("api-only mode — frontend served externally")
 	} else {
@@ -111,6 +115,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if app.actualPort != config.Port {
 		logger.Info("configured port in use, using fallback", "requested_port", config.Port, "actual_port", app.actualPort)
 	}
+	addBundledLoopbackFrontendOrigins(&app.config, app.actualPort)
 
 	// MultiPool for workspace-aware connection routing.
 	app.multiPool = appinfra.NewMultiPool(middleware.WorkspaceFromContext, config.PoolSize)
@@ -295,18 +300,22 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		}
 		if err := app.registry.Register(app.initialWorkspaceID, initialWSPath); err != nil {
 			logger.Warn("failed to register initial workspace", "err", err)
-		} else {
-			// Daemon was confirmed running above, activate subscriber immediately.
-			_ = app.registry.ActivateSubscriber(app.initialWorkspaceID)
 		}
 	}
 
 	// Reconcile all store workspaces. Subscribers for secondary workspaces
-	// activate lazily via the workspace middleware on the first API request.
+	// activate lazily via the workspace SSE token/stream routes.
 	appinfra.ReconcileStoreWorkspaces(workspacePathsFn, app.initialWorkspaceID, app.pool != nil, app.registry, config.Logger)
 
+	// Periodic re-reconcile: workspaces created out-of-band (CLI
+	// `loom workspace create` while serve is running, or another
+	// loom-serve instance against shared fleet-db) need to be picked up
+	// without a serve restart. Without this, terminal attach for those
+	// workspaces fails with "workspace not registered" until restart.
+	appinfra.StartPeriodicWorkspaceReconcile(ctx, workspacePathsFn, app.registry, 15*time.Second, config.Logger)
+
 	if config.DaemonStartupFn != nil {
-		onReady := func(wsID string) { _ = app.registry.ActivateSubscriber(wsID) }
+		onReady := func(string) {}
 		go config.DaemonStartupFn(ctx, onReady)
 	}
 
@@ -359,8 +368,9 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.jobStore = svcimpl.NewWorkspaceJobStore()
 	cleanups = append(cleanups, func() { app.jobStore.Stop() })
 
-	// Workspace-existence checker. Also activates the SSE subscriber lazily
-	// on the first API request (idempotent — no-op if already active).
+	// Workspace-existence checker. Subscriber activation is deliberately not
+	// part of existence resolution: only workspace SSE token/stream routes start
+	// FleetDB mutation long-polls.
 	//
 	// Workspace IDs in URLs are usually UUIDs, but external callers (CLI
 	// tooling, parity tests, the fdb client) frequently use the workspace
@@ -376,12 +386,10 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	app.wsResolveFn = func(reqCtx context.Context, id string) (middleware.WorkspaceRef, bool) {
 		ref := middleware.WorkspaceRef{RequestedID: id, CanonicalID: id}
 		if app.registry.Registered(id) {
-			_ = app.registry.ActivateSubscriber(id)
 			return ref, true
 		}
 		if wsResolver != nil {
 			if uuid, err := wsResolver(id); err == nil && uuid != "" && app.registry.Registered(uuid) {
-				_ = app.registry.ActivateSubscriber(uuid)
 				ref.CanonicalID = uuid
 				return ref, true
 			}
@@ -392,7 +400,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 			}
 			if key, err := storeadapter.ResolveWorkspaceKeyByName(reqCtx, wsStore, id); err == nil && key != "" {
 				ref.CanonicalID = key
-				app.ensureStoreBackedSubscriber(reqCtx, key)
 				return ref, true
 			}
 		}
@@ -456,7 +463,42 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	return app, nil
 }
 
-func (app *Server) ensureStoreBackedSubscriber(ctx context.Context, wsID string) {
+func addBundledLoopbackFrontendOrigins(config *webui.ServerConfig, actualPort int) {
+	if config == nil || config.ExtAuthURL != "" || config.FrontendDir == "" || len(config.FrontendOrigins) > 0 || actualPort <= 0 {
+		return
+	}
+	if !isLoopbackBindAddress(config.BindAddress) {
+		return
+	}
+	config.FrontendOrigins = append(config.FrontendOrigins,
+		fmt.Sprintf("http://localhost:%d", actualPort),
+		fmt.Sprintf("http://127.0.0.1:%d", actualPort),
+	)
+}
+
+func isLoopbackBindAddress(bindAddress string) bool {
+	if bindAddress == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(bindAddress)
+	return ip != nil && ip.IsLoopback()
+}
+
+func (app *Server) activateSSESubscriber(ctx context.Context, wsID string) {
+	if app == nil || wsID == "" || app.multiSub == nil {
+		return
+	}
+	if app.registry != nil && app.registry.Registered(wsID) {
+		if err := app.registry.ActivateSubscriber(wsID); err != nil {
+			logger.Warn("failed to activate registered workspace SSE subscriber",
+				"workspace", wsID, "err", err)
+		}
+		return
+	}
+	app.ensureStoreBackedSSESubscriber(ctx, wsID)
+}
+
+func (app *Server) ensureStoreBackedSSESubscriber(ctx context.Context, wsID string) {
 	if app == nil || wsID == "" || app.multiSub == nil || app.config.IssueBackendFn == nil {
 		return
 	}
@@ -470,7 +512,7 @@ func (app *Server) ensureStoreBackedSubscriber(ctx context.Context, wsID string)
 	if be == nil {
 		return
 	}
-	if err := app.multiSub.EnsureActive(ctx, wsID, be, appstores.ActivationReasonHTTP); err != nil {
+	if err := app.multiSub.EnsureActive(ctx, wsID, be, appstores.ActivationReasonSSE); err != nil {
 		logger.Warn("failed to start store-backed workspace subscriber",
 			"workspace", wsID, "err", err)
 	}
@@ -480,8 +522,15 @@ func storeWorkspacePathsFn(ctx context.Context, config webui.ServerConfig) func(
 	if config.Store == nil {
 		return nil
 	}
+	// Capture only the store handle, not the whole ServerConfig, so this
+	// long-lived closure (held by the reconcile/health goroutines) doesn't
+	// retain the full config struct for the process lifetime.
+	store := config.Store
 	return func() (map[string]string, error) {
-		return storeadapter.ListWorkspacePaths(ctx, config.Store)
+		// Healing variant: re-bind a workspace whose local path is missing from
+		// state.json to an existing on-disk checkout, so reconciliation recovers
+		// the terminal/readyz instead of leaving the workspace degraded.
+		return storeadapter.ListWorkspacePathsOrHeal(ctx, store)
 	}
 }
 

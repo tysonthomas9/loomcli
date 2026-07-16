@@ -54,6 +54,10 @@ type GitStatusSummary struct {
 	StashCount      int      `json:"stash_count"`
 }
 
+// PorcelainStatus maps a root-relative file path to the raw two-character
+// git status --porcelain XY code for that path.
+type PorcelainStatus map[string]string
+
 // PushBranchInRepoResult performs a push (merge-into-target) and returns a structured result.
 // This is the API-friendly equivalent of pushBranchInRepo. It does NOT launch an AI agent
 // for conflicts — it returns conflict info for the caller to handle.
@@ -392,6 +396,44 @@ func getChangedFiles(dir string) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// GetPorcelainStatus returns root-relative changed file paths with their raw
+// two-character porcelain XY status code preserved.
+func GetPorcelainStatus(dir string) (PorcelainStatus, error) {
+	output, err := cli.RunGitCommand(dir, "status", "--porcelain", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	return ParsePorcelainStatus(output), nil
+}
+
+// ParsePorcelainStatus parses git status --porcelain output while preserving
+// the two-character XY code. Renames/copies are keyed by their destination path.
+func ParsePorcelainStatus(output string) PorcelainStatus {
+	trimmed := strings.Trim(output, "\r\n")
+	if trimmed == "" {
+		return PorcelainStatus{}
+	}
+	lines := strings.Split(trimmed, "\n")
+	status := make(PorcelainStatus, len(lines))
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if len(line) < 3 {
+			continue
+		}
+		xy := line[:2]
+		path := strings.TrimSpace(line[3:])
+		if path == "" {
+			continue
+		}
+		if strings.Contains(path, " -> ") {
+			parts := strings.Split(path, " -> ")
+			path = parts[len(parts)-1]
+		}
+		status[path] = xy
+	}
+	return status
 }
 
 // getAheadBehind returns the ahead/behind counts relative to remote tracking branch.
