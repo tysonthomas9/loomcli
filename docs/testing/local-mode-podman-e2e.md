@@ -75,6 +75,17 @@ and the coder session exposes a diff containing
 before seeding on the same VM clock FleetDB uses; malformed or historical
 timestamps fail closed. Historical volume data cannot satisfy a new run.
 
+The local-mode FleetDB port is host-loopback-only. FleetDB runs with API-key
+authentication and RBAC enabled, and the profile bootstraps the deterministic
+`loom-local-mode-test-only-admin-key-v1` admin fixture so Compose and host-side
+proof scripts use the same credential. This is a checked-in test key for a
+disposable local stack, not a secret suitable for shared or production use.
+Use `LOCAL_MODE_FLEETDB_API_KEY=<test-key>` to override it consistently across
+FleetDB, Loom, and the verification scripts.
+Set `LOCAL_MODE_FLEETDB_SOURCE_ROOT=/absolute/path/to/fleet-db-worktree` when
+the proof must build a paired feature branch instead of the default sibling
+`fleet-db` checkout.
+
 ## Prerequisites
 
 - Podman with Compose support, or `podman-compose`.

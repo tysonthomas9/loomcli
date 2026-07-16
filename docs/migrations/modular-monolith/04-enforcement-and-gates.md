@@ -8,13 +8,13 @@
 
 ## Architecture source of truth
 
-Phase 1 checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. The graph declares:
+Phase 1 checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. During Phase 2, `workflowcatalog` may be marked `active` as soon as its source root exists, while `completed_phase` remains `1` until the pilot's required proof closes. The graph declares:
 
 - every capability root;
 - allowed capability-to-capability import, synchronous command/query, and durable event edges;
 - `app` and `platform` restrictions;
 - default-deny third-party imports for capability and named-workflow cores/adapters, plus the core standard-library infrastructure denylist;
-- `completed_phase: 1`, which makes legacy-path and direct-write expiry fail once the declared last permitted phase completes;
+- a conservative `completed_phase`, which makes legacy-path and direct-write expiry fail once the declared last permitted phase completes rather than when implementation merely begins;
 - temporary legacy paths and their owners/expiry;
 - the [Phase 0 baselines](00-phase-0-baseline.md) for broad Store use and type-resolved direct adapter writes.
 
@@ -235,11 +235,11 @@ These are not assumed to be covered by the root Go/frontend gate:
 
 ## Performance and operability
 
-Phase 1 records the pre-extraction values for:
+The checked-in performance inventory records:
 
 - `loom serve` startup time;
-- p50/p95 latency for the migrated use case, currently `not-yet-migrated` with sample count `0` and null p50/p95;
-- fleet-db round trips per command, currently `not-yet-migrated` with a null count;
+- Phase 2 authenticated workflow-approval p50/p95 from 30 retained samples;
+- six observed FleetDB round trips per successful approval command, with the request mix retained in evidence rather than inferred from call sites;
 - background-loop/reconciler counts;
 - build/test/gate duration;
 - frontend route chunk sizes for migrated routes.
@@ -253,7 +253,7 @@ Also record per slice:
 - Store/direct-write counts before and after;
 - fleet-db round-trip and latency sampling procedure.
 
-A module boundary that adds synchronous chatter without reducing broad dependencies is a regression. Phase 2 sets pilot budgets from the checked-in [performance baseline](06-phase-1-decisions-and-evidence.md#performance-and-operability-baseline) before approving the complete pilot; it must not invent target-path numbers from the legacy direct-Store flow.
+A module boundary that adds synchronous chatter without reducing broad dependencies is a regression. Phase 2 populated the pilot measurements from the authenticated management path in the checked-in `performance-baseline.yaml`; later phases compare against those observed values and must not substitute numbers from a legacy direct-Store flow.
 
 ## Outcome measures
 
@@ -263,7 +263,7 @@ After two completed backend slices, all three must improve:
 2. direct persistence writes from handlers/CLI decrease;
 3. zero business-rule files change outside the owner capability; only declared adapters/contracts may accompany the slice.
 
-Every completed extraction must reduce at least one legacy coupling count. Performance budgets are set from the checked-in Phase 1 inventory before the first pilot is approved; the two target-path nulls are populated only after the Phase 2 management boundary makes them observable.
+Every completed extraction must reduce at least one legacy coupling count. Phase 2 replaced both target-path nulls only after the authenticated management boundary made them observable; later slices follow the same evidence-before-budget rule.
 
 If those do not improve, stop and revisit the capability map before extracting more code.
 
