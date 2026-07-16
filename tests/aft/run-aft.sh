@@ -104,28 +104,91 @@ preflight_ports() {
     preflight_port "$E2E_FRONTEND_PORT" frontend
 }
 
-if [[ "${AFT_REAL_CODEX:-}" == "1" ]]; then
-    echo "[aft] ====================================================================="
-    echo "[aft] REAL CODEX MODE -- server codex is the operator's real CLI"
-    echo "[aft] Requires codex on PATH and a logged-in ~/.codex/auth.json."
-    echo "[aft] Claude remains stubbed; codex consumes the account rate-limit window."
-    echo "[aft] ====================================================================="
-    if ! CODEX_BIN="$(command -v codex 2>/dev/null)"; then
-        echo "[aft] real codex tier needs codex on PATH" >&2
-        exit 1
-    fi
-    case "$CODEX_BIN" in
-        "$REPO_ROOT"/e2e/stubs/*|"$REPO_ROOT"/e2e/stubs-claude-only/*)
-            echo "[aft] codex resolved to a test stub ($CODEX_BIN); real tier needs the operator's real codex CLI" >&2
+# Real-backend tiers: AFT_REAL_BACKEND=<codex|claude|opencode|cursor> lets ONE real
+# agent CLI resolve on the server's PATH while every other agent CLI stays stubbed.
+# AFT_REAL_CODEX=1 is the back-compat alias for AFT_REAL_BACKEND=codex.
+if [[ "${AFT_REAL_CODEX:-}" == "1" && -z "${AFT_REAL_BACKEND:-}" ]]; then
+    AFT_REAL_BACKEND=codex
+fi
+
+REAL_BIN=""
+REAL_STUB_DIR=""
+REAL_UNSET_FLAGS=""   # `env` flags applied to the server launch, e.g. "-u OPENAI_API_KEY"
+if [[ -n "${AFT_REAL_BACKEND:-}" ]]; then
+    case "$AFT_REAL_BACKEND" in
+        codex)
+            REAL_BIN=codex
+            REAL_STUB_DIR="stubs-claude-only"
+            # unset so codex uses the ChatGPT-account auth.json, not API billing
+            REAL_UNSET_FLAGS="-u OPENAI_API_KEY"
+            ;;
+        claude)
+            REAL_BIN=claude
+            REAL_STUB_DIR="stubs-real-claude"
+            # unset so claude uses the subscription OAuth login, not API billing
+            REAL_UNSET_FLAGS="-u ANTHROPIC_API_KEY"
+            ;;
+        opencode)
+            REAL_BIN=opencode
+            REAL_STUB_DIR="stubs-real-opencode"
+            REAL_UNSET_FLAGS=""   # opencode reads its own provider auth config
+            ;;
+        cursor)
+            REAL_BIN=cursor-agent
+            REAL_STUB_DIR="stubs-real-cursor"
+            # unset so cursor-agent uses the account login, not API billing
+            REAL_UNSET_FLAGS="-u CURSOR_API_KEY"
+            ;;
+        *)
+            echo "[aft] unknown AFT_REAL_BACKEND '$AFT_REAL_BACKEND' (want codex|claude|opencode|cursor)" >&2
             exit 1
             ;;
     esac
-    if [[ ! -f "$HOME/.codex/auth.json" ]]; then
-        echo "[aft] ~/.codex/auth.json missing -- run 'codex login' before make test-aft-real" >&2
+
+    echo "[aft] ====================================================================="
+    echo "[aft] REAL $(printf '%s' "$AFT_REAL_BACKEND" | tr '[:lower:]' '[:upper:]') MODE -- server $REAL_BIN is the operator's real CLI"
+    echo "[aft] Every other agent CLI stays stubbed (e2e/$REAL_STUB_DIR)."
+    echo "[aft] The run consumes the $AFT_REAL_BACKEND account's rate-limit window."
+    echo "[aft] ====================================================================="
+    if ! REAL_BIN_PATH="$(command -v "$REAL_BIN" 2>/dev/null)"; then
+        echo "[aft] real $AFT_REAL_BACKEND tier needs $REAL_BIN on PATH" >&2
         exit 1
     fi
+    case "$REAL_BIN_PATH" in
+        "$REPO_ROOT"/e2e/stubs*)
+            echo "[aft] $REAL_BIN resolved to a test stub ($REAL_BIN_PATH); real tier needs the operator's real CLI" >&2
+            exit 1
+            ;;
+    esac
+    case "$AFT_REAL_BACKEND" in
+        codex)
+            if [[ ! -f "$HOME/.codex/auth.json" ]]; then
+                echo "[aft] ~/.codex/auth.json missing -- run 'codex login' before make test-aft-real" >&2
+                exit 1
+            fi
+            ;;
+        claude)
+            if [[ ! -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" ]]; then
+                echo "[aft] ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json missing -- log in to Claude Code first" >&2
+                exit 1
+            fi
+            ;;
+        cursor)
+            if ! "$REAL_BIN_PATH" status >/dev/null 2>&1; then
+                echo "[aft] cursor-agent is not logged in -- run 'cursor-agent login' before make test-aft-real-cursor" >&2
+                exit 1
+            fi
+            ;;
+        opencode)
+            : # binary-only HealthCheck; provider auth lives in opencode's own config
+            ;;
+    esac
     : "${AFT_TIMEOUT:=600000}"
-    : "${AFT_SUITES:=$SCRIPT_DIR/real-suites}"
+    if [[ "$AFT_REAL_BACKEND" == "codex" ]]; then
+        : "${AFT_SUITES:=$SCRIPT_DIR/real-suites}"
+    else
+        : "${AFT_SUITES:=$SCRIPT_DIR/real-suites-$AFT_REAL_BACKEND}"
+    fi
 fi
 
 if [[ ! -f "$AFT_DIR/dist/cli.js" ]]; then
@@ -184,9 +247,10 @@ FLUE_CMD_JSON=""
 if [[ -n "$FLUE_REPO" && -f "$FLUE_REPO/packages/cli/bin/flue.mjs" ]]; then
     FLUE_CMD_JSON="[\"node\",\"$FLUE_REPO/packages/cli/bin/flue.mjs\"]"
 fi
-if [[ "${AFT_REAL_CODEX:-}" == "1" ]]; then
-    env -u OPENAI_API_KEY E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
-        PATH="$REPO_ROOT/e2e/stubs-claude-only:$PATH" FLUE_REPO="$FLUE_REPO" \
+if [[ -n "${AFT_REAL_BACKEND:-}" ]]; then
+    # $REAL_UNSET_FLAGS is deliberately unquoted: it expands to "-u VAR" pairs or nothing.
+    env $REAL_UNSET_FLAGS E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
+        PATH="$REPO_ROOT/e2e/$REAL_STUB_DIR:$PATH" FLUE_REPO="$FLUE_REPO" \
         LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
         bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
 else

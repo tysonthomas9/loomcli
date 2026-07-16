@@ -1,0 +1,91 @@
+# REAL cursor tier — runs the operator's real `cursor-agent` CLI through the serve epic-runner.
+# Gated: only runs under AFT_REAL_BACKEND=cursor (run-aft.sh points AFT_SUITES at
+# real-suites-cursor/). Needs a logged-in cursor-agent (`cursor-agent login`);
+# CURSOR_API_KEY is unset by the harness so the run bills the account login, not the API.
+# Every other agent CLI is stubbed (e2e/stubs-real-cursor). Named zz- defensively.
+# NOT part of the default suites/ dir.
+suite: zz-real-cursor-epic
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: >-
+  "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  "$AFT_TESTS_DIR/scripts/real-backend-teardown.sh" cursor || true
+
+tests:
+  - name: real cursor epic-runner creates HELLO.md and closes the task
+    intent: The real cursor CLI, selected as the workspace default backend, claims the seeded child task via epic-runner, creates HELLO.md in a resolved task worktree, patches it back, records a real transcript+diff, and closes the task
+    steps:
+      # 0) select cursor as this workspace's default backend. The stack is freshly
+      #    booted per run, so this cannot leak into other suites or runs.
+      - run: >-
+          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/config/backend"
+          -H "Content-Type: application/json"
+          -d '{"backend":"cursor"}' >/dev/null;
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/config/backend"
+          | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; assert d.get('backend')=='cursor', d"
+      # 1) seed epic + one child task carrying a tiny, deterministic DESIGN (the cursor prompt).
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"real-cursor epic $RUN_ID\",\"issue_type\":\"epic\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/rcu-epic.id"
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"real-cursor task $RUN_ID\",\"issue_type\":\"task\",\"priority\":2,\"parent\":\"$(cat "$AFT_WORK_DIR/rcu-epic.id")\",\"design\":\"Create a file named HELLO.md at the repository root whose entire contents are exactly the line: hello world. Do not create any other files. Do not modify any other files.\"}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/rcu-task.id"
+      # 2) confirm the card is on the board (SSE) before triggering.
+      - open: /ws/E2E-WS/kanban
+      - wait: { fn: "!!document.querySelector('[data-testid=board-toolbar]')" }
+      - wait: { text: real-cursor task }
+      # 3) trigger epic-runner (workspace backend = cursor). POST carries the one-time flue
+      #    bundle build; still well under the 120s run-step ceiling.
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/workflows/epic-runner"
+          -H "Content-Type: application/json"
+          -d "{\"epicId\":\"$(cat "$AFT_WORK_DIR/rcu-epic.id")\"}"
+          > "$AFT_WORK_DIR/rcu-run.json"
+      # 4) WAIT for completion by polling the API for status:closed (see real-codex suite for
+      #    why the board is not a usable completion signal). Chained grace polls keep each
+      #    run: step under aft's 120s ceiling — ~5.5 min total budget.
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rcu-task.id")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "not closed yet (grace window 1)"; exit 0
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rcu-task.id")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "not closed yet (grace window 2)"; exit 0
+      - run: >-
+          for i in $(seq 1 55); do curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/rcu-task.id")" | grep -q '"status":"closed"' && exit 0; sleep 2; done; echo "task never closed"; exit 1
+      # 5) board-level UX assert on the FLAT board, where closed cards do render in Done.
+      - open: /ws/E2E-WS/kanban?groupBy=none
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll("section[data-status=done] article"))
+              .some((el) => el.textContent.includes('real-cursor task ${RUN_ID:-local}'))
+      # 6) a session was recorded, and it is a cursor/local run with a real diff
+      #    (files_changed>=1). Also capture the session id for the transcript check.
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rcu-task.id")/sessions"
+          | python3 -c "import sys,json,os; d=json.load(sys.stdin); items=(d.get('data') or {}).get('sessions') or []; assert items, 'no session recorded'; s=items[0]; assert s.get('backend')=='cursor', 'backend='+str(s.get('backend')); assert s.get('exit_code')==0, 'exit_code='+str(s.get('exit_code')); assert int(s.get('files_changed') or 0) >= 1, 'files_changed='+str(s.get('files_changed'))+' (STUB would be 0)'; ev=s.get('evidence') or {}; assert ev.get('status')=='ok' and not ev.get('conflicts'), ev; usage=ev.get('usage_status'); assert usage in ('reported','unavailable'), ev; fields=('input_tokens','output_tokens','cache_read_tokens','cache_write_tokens','estimated_cost_usd'); assert (all(s.get(f) is None for f in fields) if usage=='unavailable' else all(isinstance(s.get(f),(int,float)) for f in fields)), s; open(os.environ['AFT_WORK_DIR']+'/rcu-session.id','w').write(s['session_id'])"
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rcu-task.id")/sessions/$(cat "$AFT_WORK_DIR/rcu-session.id")"
+          | python3 -c "import sys,json; s=json.load(sys.stdin)['data']; assert s.get('has_transcript') is True, s; assert s.get('has_diff') is True, s; assert (s.get('evidence') or {}).get('status') == 'ok', s"
+      # 7) transcript is real: >=1 non-system entry AND references the file it created / tool
+      #    activity (stub signature otherwise).
+      - run: >-
+          code=$(curl -s -o "$AFT_WORK_DIR/rcu-transcript.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rcu-task.id")/sessions/$(cat "$AFT_WORK_DIR/rcu-session.id")/transcript");
+          [ "$code" = "200" ] || { echo "transcript endpoint returned $code (expected 200)"; cat "$AFT_WORK_DIR/rcu-transcript.json"; exit 1; };
+          python3 -c "import json,os; d=json.load(open(os.environ['AFT_WORK_DIR']+'/rcu-transcript.json')); ents=(d.get('data') or {}).get('entries') or []; nonsys=[e for e in ents if e.get('role')!='system']; assert nonsys, 'no non-system transcript entries'; blob=json.dumps(ents).lower(); assert 'hello.md' in blob or any(e.get('role')=='tool' for e in ents) or 'tool_use' in blob, 'transcript lacks tool activity / HELLO.md reference (stub signature)'"
+      # 7b) the session diff is readable — content assertion, not a flag check.
+      - run: >-
+          code=$(curl -s -o "$AFT_WORK_DIR/rcu-diff.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/tasks/$(cat "$AFT_WORK_DIR/rcu-task.id")/sessions/$(cat "$AFT_WORK_DIR/rcu-session.id")/diff");
+          [ "$code" = "200" ] || { echo "session diff returned $code (expected 200)"; cat "$AFT_WORK_DIR/rcu-diff.json"; exit 1; };
+          grep -q 'HELLO.md' "$AFT_WORK_DIR/rcu-diff.json" || { echo "diff does not mention HELLO.md"; head -c 400 "$AFT_WORK_DIR/rcu-diff.json"; exit 1; }
+      # 8) NEGATIVE GUARD via filesystem: the real cursor physically created HELLO.md with the
+      #    exact content. The stub creates NO file. This is the strongest real-vs-stub
+      #    discriminator and is independent of any serve projection gap.
+      - run: >-
+          ws="$AFT_TESTS_DIR/../../tmp/e2e-workspace";
+          f="$(find "$ws" -name HELLO.md -print 2>/dev/null | head -n1)";
+          test -n "$f" || { echo "HELLO.md not found on disk — stub likely ran, not real cursor"; exit 1; };
+          grep -qx "hello world" "$f" || { echo "HELLO.md content wrong: $(cat "$f")"; exit 1; };
+          echo "real cursor wrote $f"

@@ -54,6 +54,29 @@ separate `make test-aft-real` target sets it, and real scenarios live in
 In real mode the harness also unsets `OPENAI_API_KEY`, defaults `AFT_TIMEOUT` to
 `600000`, and fails fast if `codex` or `~/.codex/auth.json` is missing.
 
+### Other real backends: claude, opencode, cursor
+
+The same host epic-runner tier exists for every other first-class agent backend,
+gated behind `AFT_REAL_BACKEND=<codex|claude|opencode|cursor>` (`AFT_REAL_CODEX=1`
+is the back-compat alias for `codex`). Each tier lets exactly ONE real CLI resolve
+on the server's PATH; every other agent CLI is stubbed via a per-tier stub set
+(`e2e/stubs-real-<backend>/`, symlinks into `e2e/stubs/`). Suites live in
+`tests/aft/real-suites-<backend>/` and force the workspace default backend via
+`PATCH /api/workspaces/E2E-WS/config/backend` as their first step, then assert the
+recorded session's `backend`, `files_changed >= 1`, a real transcript + diff, and
+HELLO.md physically on disk — same real-vs-stub discriminators as the codex tier.
+
+| target | real CLI | preflight | cost class |
+|---|---|---|---|
+| `make test-aft-real` | `codex` | `~/.codex/auth.json` | ChatGPT-account rate window (`OPENAI_API_KEY` unset) |
+| `make test-aft-real-claude` | `claude` | `${CLAUDE_CONFIG_DIR:-~/.claude}/.credentials.json` | Claude subscription rate window (`ANTHROPIC_API_KEY` unset) |
+| `make test-aft-real-opencode` | `opencode` | binary only — provider auth lives in opencode's own config | whatever provider opencode selects |
+| `make test-aft-real-cursor` | `cursor-agent` | `cursor-agent status` logged in | Cursor account usage (`CURSOR_API_KEY` unset) |
+
+`make test-aft-real-all` runs all four sequentially, each on its own fresh stack.
+None of these run in CI (no operator credentials there), and none should be looped
+casually — every run consumes the respective account's rate/usage window.
+
 ### Live terminal tier
 
 `make test-aft-terminal` proves the agents-page Logs tab's live-tmux path:

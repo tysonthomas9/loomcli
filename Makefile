@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-aft test-aft-real test-aft-terminal test-aft-strict test-aft-heal demo test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-product-invariants gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-aft test-aft-real test-aft-real-claude test-aft-real-opencode test-aft-real-cursor test-aft-real-all test-aft-terminal test-aft-strict test-aft-heal demo test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-product-invariants gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -359,6 +359,28 @@ test-aft:
 test-aft-real:
 	@echo "Running aft REAL-CODEX tier (spends nothing on a ChatGPT-account codex; needs ~/.codex login)..."
 	@AFT_REAL_CODEX=1 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in: run the REAL claude CLI through epic-runner (subscription OAuth login; consumes
+# the Claude account rate window — ANTHROPIC_API_KEY is unset so no API dollars; never in CI)
+test-aft-real-claude:
+	@echo "Running aft REAL-CLAUDE tier (subscription login; needs ~/.claude/.credentials.json)..."
+	@AFT_REAL_BACKEND=claude tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in: run the REAL opencode CLI through epic-runner (bills whatever provider its own
+# auth config selects; never in CI)
+test-aft-real-opencode:
+	@echo "Running aft REAL-OPENCODE tier (needs opencode + its provider auth)..."
+	@AFT_REAL_BACKEND=opencode tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in: run the REAL cursor-agent CLI through epic-runner (account login; consumes the
+# Cursor account usage window — CURSOR_API_KEY is unset so no API billing; never in CI)
+test-aft-real-cursor:
+	@echo "Running aft REAL-CURSOR tier (needs a logged-in cursor-agent)..."
+	@AFT_REAL_BACKEND=cursor tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# Opt-in convenience: every real backend tier sequentially, each on its own fresh stack.
+# Consumes all four accounts' rate windows — do not loop.
+test-aft-real-all: test-aft-real test-aft-real-claude test-aft-real-opencode test-aft-real-cursor
 
 # Opt-in: exercise the agents-page Logs tab's live-tmux terminal with real codex.
 test-aft-terminal:
