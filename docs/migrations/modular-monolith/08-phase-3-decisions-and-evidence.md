@@ -3,6 +3,8 @@
 - **Status:** Architecture, paired gates, non-UI, and local-browser proof complete; Terra export not recorded
 - **Loom base:** `e8b73a2a65f4a1c9fb6cd56653335d8e4a1c7bb7`
 - **FleetDB base:** `430dce8d9fcc9c48bc9d52613b78403b8aae19d4`
+- **Loom implementation:** `7f95b9bf1c0cd4d6ab45fb10617189ec4ef5f048`
+- **FleetDB implementation:** `f1c4e11199c2c7cdab52cce55899af4df328fbcb`
 - **OpenAPI SHA-256:** `7b9abcdce6b47b553687f592253c3ed437b9ec03fe823e758738fb0bb4c8ebeb` for the FleetDB source and Loom vendored snapshot
 - **Paired FleetDB binary SHA-256:** `f5e91ea7a35665240ba9edbe2ec95d8d601b11704e6d5265367c9099e2a9ae58`
 - **Scope:** Automation ownership, trigger admission, webhook ingestion, cron and delivery retry lifecycle, and custom-driver entry lanes
@@ -237,9 +239,10 @@ then excludes tests, architecture tooling, generated OpenAPI fixtures, and
 generated workflow bundles. The result is 98 changed non-generated runtime
 production Go files. Primary attribution is mutually exclusive: 71 belong to
 the Automation extraction and its entry/composition surfaces, and 27 belong to
-the required Execution await/outcome companion. This is intentionally a
-self-reference-free pre-commit measurement identified by the base plus diff;
-final local commit IDs are reported in the handoff rather than embedded here.
+the required Execution await/outcome companion. This remains an intentionally
+self-reference-free pre-commit measurement identified by the base plus diff.
+The separate post-commit audit snapshot in `migration-baseline.json` binds that
+exact product source to Loom `7f95b9bf1` and FleetDB `f1c4e1119`.
 
 | Slice | Owner and changed production files | Allowed inbound adapters/contracts | Business-rule files outside the owner | Composite Store and direct-write delta |
 |---|---|---|---|---|
@@ -321,7 +324,7 @@ sample. Aggregates use nearest-rank percentiles.
 | Measurement | Result |
 |---|---|
 | Environment | macOS 15.6.1 (24G90), arm64 Apple M4 Pro (12 cores), 24 GB memory, Go 1.26.0, Node 24.13.1; local real processes, no external model |
-| Source identity | Loom base `e8b73a2a65f4` plus the measured Phase 3 pre-commit diff; FleetDB base `430dce8d9fcc` plus the measured companion pre-commit diff. Final local commit IDs are reported in the handoff rather than embedded in this self-reference-free snapshot. |
+| Source identity | The self-reference-free measurement uses Loom base `e8b73a2a65f4` plus the Phase 3 diff and FleetDB base `430dce8d9fcc` plus its companion diff. The post-commit audit binds the resulting product source to Loom `7f95b9bf1` and FleetDB `f1c4e1119`. |
 | Samples | `n=30` fresh unique signed webhook deliveries; the post-hardening named test passed in `20.62s` and retains the measured vector in its command output |
 | Nearest-rank latency | p50 `6.314ms`; p95 `19.023ms`; both pass the test's `100ms`/`250ms` budgets |
 | FleetDB round trips | Exactly `12` for every sample; this is asserted by a pinned constant, not learned from the first sample or inferred from call sites |
@@ -362,6 +365,23 @@ screenshots are:
 - `/tmp/loom-mm-phase3-ui/06-agent-history-after-trust-fix.png`
 - `/tmp/loom-mm-phase3-ui/07-final-run-now-completed.png`
 
+The post-commit frontend audit also ran the checked-in Playwright local-operator
+journey against the installed Chromium binary:
+
+```sh
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Chromium.app/Contents/MacOS/Chromium \
+  ./node_modules/.bin/playwright test \
+  tests/e2e/workflow-catalog-local-operator.spec.ts \
+  --project=chromium --reporter=line
+```
+
+All `3/3` scenarios passed in `3.8s`. They exercise the same
+`localOperatorSession` implementation used by the Phase 3 agent and binding
+mutations: one-time launch-fragment exchange and erasure, denial of lifecycle
+authority to a raw browser, and authority removal after a workspace switch.
+This targeted Playwright proof complements the real local-stack browser
+journey; it does not replace it.
+
 The first browser attempt had exposed a real storage-policy mismatch: Loom's
 Catalog correctly treated a trusted version manifest as trusted without an
 explicit approval marker, while Automation's atomic admission and direct-
@@ -400,10 +420,11 @@ before supervisor deletion; the full matrix remains the Phase 6 gate.
 
 ## Completion evidence
 
-The machine validation snapshot records the exact Phase 3 base SHAs and states
-that its measured source is the pre-commit diff. It does not invent
-self-referential final commit identities; final local commit IDs belong in the
-handoff. Every required paired gate below is complete. Only the
+The machine validation baseline retains the exact Phase 3 base-plus-diff
+measurement without inventing a self-referential identity. A separate
+post-commit audit snapshot records the resulting core implementation commits,
+the targeted Playwright and committed-source smoke checks, and the repeated
+contract checksum. Every required paired gate below is complete. Only the
 approval-dependent external Terra export remains not recorded.
 
 | Proof | Result | Evidence |
@@ -419,6 +440,7 @@ approval-dependent external Terra export remains not recorded.
 | HTTP webhook, binding-management, manual-run, and CLI E2E | **PASS post-hardening** | In one escalated run, `TestE2E_AutomationPhase3RealFleetDBLoomHTTPAndCLI` passed in `42.47s` including the paired FleetDB build; `TestE2E_GitHubWebhookDispatchesDriverRunWithEphemeralStack` passed in `8.41s`; and the `n=30` performance E2E passed in `20.62s` with p50 `6.314ms`, p95 `19.023ms`, and exactly 12 FleetDB round trips per sample. |
 | Checkout-scoped deterministic local mode | **PASS** | Project `loomcli-mm-phase3` used the exact Loom, FleetDB, and pinned Flue checkouts on ports 8580/8582/8583. The generic planner/coder/session/transcript/diff verifier and signed-webhook verifier passed; webhook redelivery was idempotent and its secret remained redacted. |
 | Authenticated local-browser manual-run journey | **PASS** | One-time operator exchange `POST` returned `200`; UI Run now for `s1-bug-fix` returned `202`; run-history `GET` returned `200`. Run `automation-run-107e83e1e7a899fe76a407177cc8a33e` completed on `bug-fix-agent-v-b14ca933dc57` with summary `bug-fix: no ready bug to claim`; final console/error inspection was empty. Screenshots `/tmp/loom-mm-phase3-ui/06-agent-history-after-trust-fix.png` and `/tmp/loom-mm-phase3-ui/07-final-run-now-completed.png` retain the visible proof. |
+| Targeted frontend Playwright journey | **PASS post-commit audit** | The checked-in local-operator suite passed `3/3` with installed Chromium in `3.8s`, covering one-time exchange/fragment erasure, raw-browser denial, and workspace-switch authority clearing through the same `localOperatorSession` implementation used by the Phase 3 mutation clients. |
 | GPT-5.6 Terra screenshot review | **NOT RECORDED — not claimed** | Exporting the local screenshots to an external model awaits explicit informed approval. This is an evidence-policy boundary, not a product failure, and it does not negate the completed local-browser product proof. |
 | FleetDB `make gate` | **PASS post-correction** | Static/lint, unit/race, Redis/Postgres integration/API/contracts, real-container E2E, harness, and the final quality gate passed at 78.0% coverage; the gate ended with `Quality Gate PASSED`. |
 | Loom `make gate` against the exact final FleetDB companion binary | **PASS post-correction** | The aggregate Go and frontend gates passed with `FLEET_DB_BIN=/tmp/fleet-db-modular-monolith-phase3`, the matching companion worktree, and a clean HOME/runtime environment. The paired binary SHA-256 is `f5e91ea7a35665240ba9edbe2ec95d8d601b11704e6d5265367c9099e2a9ae58`. |

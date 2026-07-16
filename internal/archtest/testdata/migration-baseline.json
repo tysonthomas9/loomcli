@@ -337,6 +337,63 @@
             "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
           }
         ]
+      },
+      {
+        "id": "phase3-postcommit-audit-7f95b9bf1",
+        "loom_head": "7f95b9bf1c0cd4d6ab45fb10617189ec4ef5f048",
+        "fleetdb_head": "f1c4e11199c2c7cdab52cce55899af4df328fbcb",
+        "openapi_sha256": "7b9abcdce6b47b553687f592253c3ed437b9ec03fe823e758738fb0bb4c8ebeb",
+        "recorded_at": "2026-07-16",
+        "runs": [
+          {
+            "id": "audit-01-frontend-playwright-local-operator",
+            "repository": "loom",
+            "command": ["./node_modules/.bin/playwright", "test", "tests/e2e/workflow-catalog-local-operator.spec.ts", "--project=chromium", "--reporter=line"],
+            "environment": {
+              "set": ["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/Applications/Chromium.app/Contents/MacOS/Chromium"],
+              "unset": [],
+              "notes": "Post-commit audit of the localOperatorSession path shared by the Workflow Catalog and Phase 3 agent/binding mutation clients."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "All 3 scenarios passed in 3.8 seconds: one-time exchange and fragment erasure, raw-browser lifecycle denial, and workspace-switch authority clearing."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "audit-02-loom-committed-capability-smoke",
+            "repository": "loom",
+            "command": ["go", "test", "./internal/modules/workflowcatalog", "./internal/modules/automation", "./internal/app/webhookingestion", "./internal/app/systemeventing", "./internal/app/workflowbinding", "./internal/app/workfloweventing", "./internal/platform/runtime", "./internal/cli/trigger"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Run from committed Loom implementation head 7f95b9bf1 with ephemeral loopback permission for the management-client fixture."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Workflow Catalog, Automation, all four named application workflows, runtime host, and HTTP-only trigger CLI packages passed from the committed source."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "audit-03-fleetdb-committed-security-smoke",
+            "repository": "fleetdb",
+            "command": ["go", "test", "./cmd/fleet-db", "./internal/api", "./internal/storage", "-run", "Test(RedisAutomationCatalogEffectiveTrustParity|RedisAutomationCatalogMalformedApprovalCannotAuthorizeAtomicScripts|ResolveAwaitAndResumeAtomicGenericReplay|AutomationAdmissionReservationReservesRunOutcomeIdentity)", "-count=1"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Run from committed FleetDB implementation head f1c4e1119 with ephemeral miniredis loopback permission."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The effective-trust precedence, malformed-approval rejection, atomic generic await replay, and reserved run-outcome identity smoke tests passed from the committed source."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          },
+          {
+            "id": "audit-04-contract-snapshot-match",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "fleet-db-modular-monolith-phase3/api/openapi.yaml", "loomcli-modular-monolith-phase3/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"],
+            "environment": {"set": [], "unset": [], "notes": "Run against the two committed Phase 3 implementation heads."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The committed FleetDB source and Loom vendored OpenAPI remain byte-identical at SHA-256 7b9abcdce6b47b553687f592253c3ed437b9ec03fe823e758738fb0bb4c8ebeb."},
+            "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
+          }
+        ]
       }
     ]
   },

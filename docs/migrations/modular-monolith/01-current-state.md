@@ -120,7 +120,7 @@ git merge-base --is-ancestor origin/main HEAD
 shasum -a 256 api/openapi.yaml
 ```
 
-The Phase 1 architecture tooling generated and continues to validate capability edges, Store consumers, direct adapter writes, runtime components, performance records, and authority/transaction specifications. The frozen pre-extraction values remain zero capability module roots, 93 composite-Store files, 82 outside composition, and 233 direct-write rows. The Phase 3 pre-commit base-plus-diff snapshot has two active module roots, 88 composite-Store files, 77 outside composition, and 226 direct-write rows across 249 call sites. The historical table above is therefore not presented as the Phase 3 source state; final local commit IDs are reported in the handoff rather than embedded in the snapshot they identify.
+The Phase 1 architecture tooling generated and continues to validate capability edges, Store consumers, direct adapter writes, runtime components, performance records, and authority/transaction specifications. The frozen pre-extraction values remain zero capability module roots, 93 composite-Store files, 82 outside composition, and 233 direct-write rows. The Phase 3 pre-commit base-plus-diff snapshot has two active module roots, 88 composite-Store files, 77 outside composition, and 226 direct-write rows across 249 call sites. The historical table above is therefore not presented as the Phase 3 source state; a separate post-commit audit snapshot binds the measured result to Loom `7f95b9bf1` and FleetDB `f1c4e1119` without changing the original measurement.
 
 ---
 

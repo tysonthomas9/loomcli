@@ -8,7 +8,7 @@
 
 ## Architecture source of truth
 
-Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog and Automation are now `active`, `completed_phase` is `3`, and the ledger records the 14 Automation mutations plus the three Workflow Catalog lifecycle commands. The baseline retains the immutable Phase 2 snapshot and adds an explicit Phase 3 pre-commit base-plus-diff snapshot bound to the two base SHAs, the measured diff, and the exact completed versus not-recorded proof. The graph declares:
+Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog and Automation are now `active`, `completed_phase` is `3`, and the ledger records the 14 Automation mutations plus the three Workflow Catalog lifecycle commands. The baseline retains the immutable Phase 2 snapshot, the self-reference-free Phase 3 base-plus-diff measurement, and a separate post-commit audit bound to the core Loom/FleetDB implementation commits. The graph declares:
 
 - every capability root;
 - allowed capability-to-capability import, synchronous command/query, and durable event edges;
