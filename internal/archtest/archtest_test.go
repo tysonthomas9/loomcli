@@ -48,10 +48,10 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.PerformanceMetrics, 6; got != want {
 		t.Fatalf("performance metrics = %d, want %d", got, want)
 	}
-	if got, want := report.PerformanceMetricsMeasured, 4; got != want {
+	if got, want := report.PerformanceMetricsMeasured, 6; got != want {
 		t.Fatalf("measured performance metrics = %d, want %d", got, want)
 	}
-	if got, want := report.PerformanceMetricsDeferred, 2; got != want {
+	if got, want := report.PerformanceMetricsDeferred, 0; got != want {
 		t.Fatalf("deferred performance metrics = %d, want %d", got, want)
 	}
 }
