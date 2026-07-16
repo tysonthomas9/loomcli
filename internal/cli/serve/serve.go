@@ -16,7 +16,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
@@ -30,7 +29,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
-	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -334,7 +332,7 @@ func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle,
 	if cli.IsFleetActive() {
 		ensureFleetStoreEnv(fs.clientCfg)
 	}
-	required, err := requiredFleetDBCapabilities(serveAuthURL != "", false)
+	required, err := serveadapter.RequiredFleetDBCapabilities(serveAuthURL != "", false)
 	if err != nil {
 		return nil, fmt.Errorf("derive required FleetDB capabilities: %w", err)
 	}
@@ -712,17 +710,13 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
-	enabled, err := workflowCatalogEnabled(cfg.ExtAuthURL != "", cfg.WorkspaceRoleResolver != nil)
+	enabled, err := serveadapter.WorkflowCatalogEnabled(cfg.ExtAuthURL != "", cfg.WorkspaceRoleResolver != nil)
 	if err != nil {
 		return webui.ServerConfig{}, fmt.Errorf("configure Workflow Catalog: %w", err)
 	}
-	var sharedFleetDBClient *infrafleetdb.Client
-	if storeHandle != nil {
-		sharedFleetDBClient = storeHandle.FleetDBClient()
-	}
-	module, err := appserve.NewWorkflowCatalogModule(appserve.WorkflowCatalogConfig{
+	module, err := serveadapter.BuildWorkflowCatalogModule(serveadapter.WorkflowCatalogConfig{
 		Enabled:               enabled,
-		FleetDBClient:         sharedFleetDBClient,
+		StoreHandle:           storeHandle,
 		RuntimeDir:            cli.GetWorkspaceRuntimeDir(),
 		Workspace:             cfg.InitialWorkspaceID,
 		ExternalAuth:          cfg.ExtAuthURL != "",

@@ -75,8 +75,7 @@ if [[ -s "$tmp" ]]; then
       internal/bootstrap/embedded.go | \
       internal/app/serve/workflow_catalog.go | \
       internal/app/serve/workflow_catalog_fleetdb.go | \
-      internal/cli/serve/workflow_catalog.go | \
-      internal/cli/serve/serve.go)
+      internal/cli/serve/serveadapter/workflow_catalog.go)
         ;;
       *)
         printf '%s:%s:%s\n' "$file" "$line" "$text" >>"$disallowed"

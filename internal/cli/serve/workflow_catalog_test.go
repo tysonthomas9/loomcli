@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
@@ -29,8 +30,8 @@ func TestRequiredFleetDBCapabilitiesFollowEnabledSlices(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			t.Setenv(workflowCatalogEnabledEnv, test.value)
-			got, err := requiredFleetDBCapabilities(test.externalAuth, test.resolverAvailable)
+			t.Setenv(serveadapter.WorkflowCatalogEnabledEnv, test.value)
+			got, err := serveadapter.RequiredFleetDBCapabilities(test.externalAuth, test.resolverAvailable)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("error = %v, wantErr=%t", err, test.wantErr)
 			}
@@ -55,7 +56,7 @@ func TestBuildServerConfigExternalWorkflowCatalogProfile(t *testing.T) {
 	t.Cleanup(func() { serveAuthURL = originalAuthURL })
 
 	t.Run("default omits route module", func(t *testing.T) {
-		t.Setenv(workflowCatalogEnabledEnv, "")
+		t.Setenv(serveadapter.WorkflowCatalogEnabledEnv, "")
 		cfg, err := buildServerConfig(webui.MonitorHandlers{}, fleetState{}, nil)
 		if err != nil {
 			t.Fatalf("buildServerConfig: %v", err)
@@ -66,7 +67,7 @@ func TestBuildServerConfigExternalWorkflowCatalogProfile(t *testing.T) {
 	})
 
 	t.Run("explicit enable fails before registration", func(t *testing.T) {
-		t.Setenv(workflowCatalogEnabledEnv, "true")
+		t.Setenv(serveadapter.WorkflowCatalogEnabledEnv, "true")
 		cfg, err := buildServerConfig(webui.MonitorHandlers{}, fleetState{}, nil)
 		if err == nil || !strings.Contains(err.Error(), "requires a workspace role resolver") {
 			t.Fatalf("buildServerConfig error = %v, want missing resolver error", err)
