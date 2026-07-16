@@ -27,7 +27,7 @@ func TestUnifiedSupervisedCreateNormalizesAgentRecordCollisionLookup(t *testing.
 	}
 
 	mux := http.NewServeMux()
-	NewModule(svcimpl.NewAgentService(nil, nil, nil, st), st, nil).Register(mux)
+	newTestAgentsModule(svcimpl.NewAgentService(nil, nil, nil, st), st, nil, agentRecordTestWS).Register(mux)
 	rec := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents",
 		`{"name":"AGT-RESERVED","role_name":"task","kind":"supervised","backend":"codex"}`)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by an agent record") {

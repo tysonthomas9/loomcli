@@ -188,7 +188,7 @@ func TestUnifiedSupervisedCreateRejectsAgentRecordIDCollision(t *testing.T) {
 	}
 	service := svcimpl.NewAgentService(nil, nil, nil, st)
 	mux := http.NewServeMux()
-	NewModule(service, st, nil).Register(mux)
+	newTestAgentsModule(service, st, nil, agentRecordTestWS).Register(mux)
 
 	rec := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents", `{"name":"agt-reserved","role_name":"task","kind":"worker","backend":"codex"}`)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by an agent record") {
@@ -212,7 +212,7 @@ func TestUnifiedSupervisedCreateRejectsLegacyBindingIDCollision(t *testing.T) {
 	}
 	service := svcimpl.NewAgentService(nil, nil, nil, st)
 	mux := http.NewServeMux()
-	NewModule(service, st, nil).Register(mux)
+	newTestAgentsModule(service, st, nil, agentRecordTestWS).Register(mux)
 
 	rec := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents", `{"name":"legacy-reserved","role_name":"task","kind":"worker","backend":"codex"}`)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by a legacy binding agent") {
@@ -534,8 +534,15 @@ func TestPromptAgentCreateBindingFailureDeletesAgentRecord(t *testing.T) {
 func TestAgentEnableDisableFanoutAndBindingGuard(t *testing.T) {
 	st := newAgentRecordStore(t)
 	mux := http.NewServeMux()
-	NewModule(nil, st, nil).Register(mux)
-	triggerbindings.NewModule(st).Register(mux)
+	newTestAgentsModule(nil, st, nil, agentRecordTestWS).Register(mux)
+	triggerbindings.New(triggerbindings.Config{
+		Commands: &testBindingOperations{store: st}, Queries: &testBindingOperations{store: st},
+		ManualDispatch: &testBindingOperations{store: st}, OperatorAuthority: testOperatorAuthorityResolver{},
+		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS }, Runs: st.DriverRuns(),
+		Connectors: testTriggerConnectorCompatibility{
+			testBindingGrantCompatibility{grants: st.ConnectorGrants()},
+		},
+	}).Register(mux)
 	created := createPromptAgentForTest(t, mux)
 	bindingID := created.Bindings[0].BindingID
 
@@ -700,7 +707,7 @@ func newAgentRecordStore(t *testing.T) *memstore.Store {
 
 func newAgentsMux(st store.Store) *http.ServeMux {
 	mux := http.NewServeMux()
-	NewModule(nil, st, nil).Register(mux)
+	newTestAgentsModule(nil, st, nil, agentRecordTestWS).Register(mux)
 	return mux
 }
 
@@ -750,6 +757,7 @@ func doAgentRequest(t *testing.T, mux *http.ServeMux, method, path, body string)
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Authorization", "Bearer test-operator")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	return rec

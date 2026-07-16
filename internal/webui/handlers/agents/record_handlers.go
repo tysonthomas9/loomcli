@@ -13,17 +13,18 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	rolehandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
-func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Unified response merges three agent representations.
+func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen // Unified response must merge and collision-check three agent representations.
 	if m.store == nil {
 		if m.agentSvc == nil {
 			handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
@@ -32,7 +33,10 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) { //nolint:f
 		HandleList(m.agentSvc)(w, r)
 		return
 	}
-	ws := requestWorkspaceID(r)
+	ws, ok := m.requireCanonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	now := time.Now()
 	items := []any{}
 
@@ -76,15 +80,19 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) { //nolint:f
 		}
 		dto, err := m.agentRecordDTO(r.Context(), ws, record, now)
 		if err != nil {
-			handler.WriteDomainError(w, err, "decorate agent record failed")
+			writeBindingError(w, err, "decorate agent record failed")
 			return
 		}
 		items = append(items, dto)
 	}
 
-	bindings, err := m.store.TriggerBindings().List(r.Context(), ws, store.TriggerBindingFilter{})
+	if m.bindings == nil {
+		writeBindingError(w, automation.ErrUnavailable, "list trigger bindings failed")
+		return
+	}
+	bindings, err := m.bindings.ListBindings(r.Context(), ws, automation.BindingFilter{})
 	if err != nil {
-		handler.WriteDomainError(w, err, "list trigger bindings failed")
+		writeBindingError(w, err, "list trigger bindings failed")
 		return
 	}
 	for _, b := range bindings {
@@ -106,6 +114,10 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) { //nolint:f
 }
 
 func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
+	ws, ok := m.requireCanonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody))
 	if err != nil {
 		handler.HandleServiceError(w, service.ErrPayloadTooLarge("request body too large (max 1MB)"))
@@ -120,12 +132,12 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	switch strings.ToLower(strings.TrimSpace(probe.Kind)) {
 	case "", string(domain.RoleKindInteractive), string(domain.RoleKindWorker):
-		if m.rejectSupervisedIdentityCollision(w, r.Context(), requestWorkspaceID(r), probe.Name) {
+		if m.rejectSupervisedIdentityCollision(w, r.Context(), ws, probe.Name) {
 			return
 		}
 		m.createSupervisedAgent(w, r)
 	case agentRecordKindSupervised:
-		if m.rejectSupervisedIdentityCollision(w, r.Context(), requestWorkspaceID(r), probe.Name) {
+		if m.rejectSupervisedIdentityCollision(w, r.Context(), ws, probe.Name) {
 			return
 		}
 		// Unified agent records use kind="supervised" as their representation
@@ -165,6 +177,10 @@ func (m *Module) rejectSupervisedIdentityCollision(w http.ResponseWriter, ctx co
 	if m.store == nil || strings.TrimSpace(name) == "" {
 		return false
 	}
+	if m.bindings == nil {
+		writeBindingError(w, automation.ErrUnavailable, "check agent identifier failed")
+		return true
+	}
 	// The supervised service lowercases names before persistence. Probe the
 	// cross-kind namespaces with that prospective stored identity, while leaving
 	// durable record and binding identifiers themselves case-sensitive.
@@ -177,7 +193,7 @@ func (m *Module) rejectSupervisedIdentityCollision(w http.ResponseWriter, ctx co
 		return true
 	}
 	if _, ok, err := m.unattachedBindingByID(ctx, ws, id); err != nil {
-		handler.WriteDomainError(w, err, "check agent identifier failed")
+		writeBindingError(w, err, "check agent identifier failed")
 		return true
 	} else if ok {
 		handler.RespondError(w, http.StatusConflict, "agent identifier is already used by a legacy binding agent")
@@ -244,13 +260,31 @@ func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body 
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
 	}
-	ws := requestWorkspaceID(r)
+	ws, ok := m.requireCanonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	plan, err := parsePromptAgentCreatePlan(body)
 	if err != nil {
 		handler.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	req := plan.request
+	createBindingAuth, ok := m.resolveBindingAuthority(w, r, ws, automation.ActionCreateManagedBinding)
+	if !ok {
+		return
+	}
+	var disableBindingAuth, deleteBindingAuth authority.OperatorAuthority
+	if len(req.Grants) > 0 {
+		disableBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionDisableManagedBinding)
+		if !ok {
+			return
+		}
+		deleteBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionDeleteManagedBinding)
+		if !ok {
+			return
+		}
+	}
 	// Resolve and, for the embedded prompt-agent, materialize the executable
 	// driver before mutating role/service state. Some deployment profiles are
 	// intentionally read/run-only and omit the Flue build toolchain; those must
@@ -300,7 +334,9 @@ func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body 
 		return
 	}
 
-	binding, err := m.createPromptAgentBinding(r.Context(), ws, agentID, driverRecord, req, plan.roleName, plan.enabled, plan.sourceKind)
+	binding, err := m.createPromptAgentBinding(
+		r.Context(), createBindingAuth, ws, agentID, driverRecord, req, plan.roleName, plan.enabled, plan.sourceKind,
+	)
 	if err != nil {
 		// Compensation failures are non-fatal by design (§5: an orphan
 		// "unconfigured" agent is legal and deletable) but must never be
@@ -309,12 +345,14 @@ func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body 
 			slog.Warn("prompt agent create: compensation failed, orphan agent record left behind",
 				"workspace", ws, "agent_id", agentID, "err", compErr)
 		}
-		handler.WriteDomainError(w, err, "create prompt agent binding failed")
+		writeBindingError(w, err, "create prompt agent binding failed")
 		return
 	}
 
 	if err := m.provisionPromptAgentGrants(r.Context(), ws, binding.BindingID, req.Grants); err != nil {
-		if _, compErr := triggerbindings.DeleteBindingAndRevokeGrants(context.WithoutCancel(r.Context()), m.store, ws, binding.BindingID); compErr != nil {
+		if _, compErr := m.deleteManagedBinding(
+			context.WithoutCancel(r.Context()), ws, binding.BindingID, agentID, disableBindingAuth, deleteBindingAuth,
+		); compErr != nil {
 			slog.Warn("prompt agent create: binding compensation failed after grant error",
 				"workspace", ws, "binding_id", binding.BindingID, "err", compErr)
 		}
@@ -372,7 +410,19 @@ func (m *Module) resolvePromptAgentDriver(ctx context.Context, ws string) (*doma
 	return workflowdefs.EnsureAndResolveDriver(ctx, m.store, ws, workflowdefs.BuiltinPromptAgentWorkflowName)
 }
 
-func (m *Module) createPromptAgentBinding(ctx context.Context, ws, agentID string, driver *domain.Driver, req createPromptAgentRequest, roleName string, enabled bool, sourceKind string) (*domain.TriggerBinding, error) {
+func (m *Module) createPromptAgentBinding(
+	ctx context.Context,
+	auth authority.OperatorAuthority,
+	ws, agentID string,
+	driver *domain.Driver,
+	req createPromptAgentRequest,
+	roleName string,
+	enabled bool,
+	sourceKind string,
+) (*domain.TriggerBinding, error) {
+	if m.bindings == nil {
+		return nil, automation.ErrUnavailable
+	}
 	if driver == nil {
 		return nil, fmt.Errorf("prompt-agent driver is required: %w", domain.ErrInvalid)
 	}
@@ -395,22 +445,17 @@ func (m *Module) createPromptAgentBinding(ctx context.Context, ws, agentID strin
 	if err != nil {
 		return nil, err
 	}
-	return m.store.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
-		WorkspaceKey:         ws,
-		BindingID:            bindingID,
-		Name:                 firstNonEmpty(strings.TrimSpace(req.Name), roleName, bindingID),
-		SourceKind:           sourceKind,
-		RouteKey:             strings.TrimSpace(req.Trigger.RouteKey),
-		EventTypePatterns:    eventPatterns,
-		DriverID:             driver.DriverID,
-		DriverVersionID:      versionID,
-		TargetEntrypoint:     firstNonEmpty(strings.TrimSpace(req.Trigger.Entrypoint), "run"),
-		TargetAgentServiceID: agentID,
-		Enabled:              enabled,
-		Schedule:             strings.TrimSpace(req.Trigger.Schedule),
-		ScheduleTimezone:     strings.TrimSpace(req.Trigger.ScheduleTimezone),
-		SourceConfigRef:      sourceConfigRef,
-		ConcurrencyPolicy:    domain.TriggerBindingConcurrencyOneActivePerEpic,
+	return m.bindings.CreateManagedBinding(ctx, auth, automation.CreateManagedBindingCommand{
+		WorkspaceKey: ws, AgentServiceID: agentID,
+		Definition: automation.BindingDefinition{
+			BindingID: bindingID, Name: firstNonEmpty(strings.TrimSpace(req.Name), roleName, bindingID),
+			SourceKind: sourceKind, RouteKey: strings.TrimSpace(req.Trigger.RouteKey), EventTypePatterns: eventPatterns,
+			DriverID: driver.DriverID, DriverVersionID: versionID,
+			TargetEntrypoint:     firstNonEmpty(strings.TrimSpace(req.Trigger.Entrypoint), "run"),
+			TargetAgentServiceID: agentID, Enabled: enabled,
+			Schedule: strings.TrimSpace(req.Trigger.Schedule), ScheduleTimezone: strings.TrimSpace(req.Trigger.ScheduleTimezone),
+			SourceConfigRef: sourceConfigRef, ConcurrencyPolicy: automation.ConcurrencyOneActivePerEpic,
+		},
 	})
 }
 
@@ -445,10 +490,13 @@ func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
 	}
-	ws := requestWorkspaceID(r)
+	ws, ok := m.requireCanonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	id := agentRouteValue(r, "name", "idOrName")
 	if supervised, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-		handler.WriteDomainError(w, err, "get supervised agent failed")
+		writeBindingError(w, err, "get supervised agent failed")
 		return
 	} else if ok {
 		handler.WriteJSON(w, http.StatusOK, supervisedAgentDTO{Agent: supervised, ID: supervised.Name, Kind: agentRecordKindSupervised})
@@ -458,7 +506,7 @@ func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, domain.ErrNotFound) {
 		binding, ok, bindingErr := m.unattachedBindingByID(r.Context(), ws, id)
 		if bindingErr != nil {
-			handler.WriteDomainError(w, bindingErr, "get legacy binding agent failed")
+			writeBindingError(w, bindingErr, "get legacy binding agent failed")
 			return
 		}
 		if !ok {
@@ -474,18 +522,21 @@ func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := m.agentRecordDTO(r.Context(), ws, record, time.Now())
 	if err != nil {
-		handler.WriteDomainError(w, err, "decorate agent record failed")
+		writeBindingError(w, err, "decorate agent record failed")
 		return
 	}
 	handler.WriteJSON(w, http.StatusOK, out)
 }
 
-func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Kind routing and record patching share one endpoint.
+func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen // The endpoint must route three agent kinds before applying record-specific validation.
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
 	}
-	ws := requestWorkspaceID(r)
+	ws, ok := m.requireCanonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	id := agentRouteValue(r, "name", "idOrName")
 	if m.patchSupervisedAgent(w, r, ws, id) {
 		return
@@ -532,20 +583,28 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:f
 		handler.RespondError(w, http.StatusBadRequest, "no fields to update")
 		return
 	}
+	var updateBindingAuth authority.OperatorAuthority
+	if newRoleName != "" {
+		var ok bool
+		updateBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionUpdateManagedBinding)
+		if !ok {
+			return
+		}
+	}
 	record, err := m.store.AgentServices().Update(r.Context(), ws, existingRecord.ServiceID, patch)
 	if err != nil {
 		handler.WriteDomainError(w, err, "update agent record failed")
 		return
 	}
 	if newRoleName != "" {
-		if err := m.updateAttachedBindingRole(r.Context(), ws, record.ServiceID, newRoleName); err != nil {
-			handler.WriteDomainError(w, err, "update attached binding role failed")
+		if err := m.updateAttachedBindingRole(r.Context(), updateBindingAuth, ws, record.ServiceID, newRoleName); err != nil {
+			writeBindingError(w, err, "update attached binding role failed")
 			return
 		}
 	}
 	out, err := m.agentRecordDTO(r.Context(), ws, record, time.Now())
 	if err != nil {
-		handler.WriteDomainError(w, err, "decorate agent record failed")
+		writeBindingError(w, err, "decorate agent record failed")
 		return
 	}
 	broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
@@ -554,7 +613,7 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:f
 
 func (m *Module) patchSupervisedAgent(w http.ResponseWriter, r *http.Request, ws, id string) bool {
 	if _, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-		handler.WriteDomainError(w, err, "get supervised agent failed")
+		writeBindingError(w, err, "get supervised agent failed")
 		return true
 	} else if ok {
 		if m.agentSvc == nil {
@@ -567,15 +626,18 @@ func (m *Module) patchSupervisedAgent(w http.ResponseWriter, r *http.Request, ws
 	return false
 }
 
-func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Lifecycle deletion keeps binding cleanup and archival ordered.
+func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen // Lifecycle deletion keeps kind routing, binding cleanup, and archival visibly ordered.
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
 	}
-	ws := requestWorkspaceID(r)
+	ws, ok := m.requireCanonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	id := agentRouteValue(r, "name", "idOrName")
 	if _, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-		handler.WriteDomainError(w, err, "get supervised agent failed")
+		writeBindingError(w, err, "get supervised agent failed")
 		return
 	} else if ok {
 		if m.agentSvc == nil {
@@ -595,20 +657,38 @@ func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:
 		handler.WriteDomainError(w, err, "get agent record failed")
 		return
 	}
-	bindings, err := m.store.TriggerBindings().List(r.Context(), ws, store.TriggerBindingFilter{TargetAgentServiceID: record.ServiceID})
+	if m.bindings == nil {
+		writeBindingError(w, automation.ErrUnavailable, "list attached bindings failed")
+		return
+	}
+	bindings, err := m.bindings.ListBindings(r.Context(), ws, automation.BindingFilter{TargetAgentServiceID: record.ServiceID})
 	if err != nil {
-		handler.WriteDomainError(w, err, "list attached bindings failed")
+		writeBindingError(w, err, "list attached bindings failed")
 		return
 	}
 	bindingsDeleted := 0
 	grantsRevoked := 0
+	var disableBindingAuth, deleteBindingAuth authority.OperatorAuthority
+	if len(bindings) > 0 {
+		var ok bool
+		disableBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionDisableManagedBinding)
+		if !ok {
+			return
+		}
+		deleteBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionDeleteManagedBinding)
+		if !ok {
+			return
+		}
+	}
 	for _, b := range bindings {
 		if b == nil {
 			continue
 		}
-		result, err := triggerbindings.DeleteBindingAndRevokeGrants(r.Context(), m.store, ws, b.BindingID)
+		result, err := m.deleteManagedBinding(
+			r.Context(), ws, b.BindingID, record.ServiceID, disableBindingAuth, deleteBindingAuth,
+		)
 		if err != nil {
-			handler.WriteDomainError(w, err, "delete attached binding failed")
+			writeBindingError(w, err, "delete attached binding failed")
 			return
 		}
 		if result.Deleted {
@@ -640,7 +720,7 @@ func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:
 	}
 	out, err := m.agentRecordDTO(r.Context(), ws, archived, time.Now())
 	if err != nil {
-		handler.WriteDomainError(w, err, "decorate archived agent record failed")
+		writeBindingError(w, err, "decorate archived agent record failed")
 		return
 	}
 	broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
@@ -653,8 +733,11 @@ func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:
 }
 
 func (m *Module) unattachedBindingByID(ctx context.Context, ws, id string) (*domain.TriggerBinding, bool, error) {
-	binding, err := m.store.TriggerBindings().Get(ctx, ws, id)
-	if errors.Is(err, domain.ErrNotFound) {
+	if m.bindings == nil {
+		return nil, false, automation.ErrUnavailable
+	}
+	binding, err := m.bindings.GetBinding(ctx, ws, id)
+	if bindingNotFound(err) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -669,7 +752,7 @@ func (m *Module) unattachedBindingByID(ctx context.Context, ws, id string) (*dom
 func (m *Module) patchLegacyBindingAgent(w http.ResponseWriter, r *http.Request, ws, id string, req patchAgentRecordRequest) {
 	binding, ok, err := m.unattachedBindingByID(r.Context(), ws, id)
 	if err != nil {
-		handler.WriteDomainError(w, err, "get legacy binding agent failed")
+		writeBindingError(w, err, "get legacy binding agent failed")
 		return
 	}
 	if !ok {
@@ -685,9 +768,15 @@ func (m *Module) patchLegacyBindingAgent(w http.ResponseWriter, r *http.Request,
 		handler.RespondError(w, http.StatusBadRequest, "name cannot be empty")
 		return
 	}
-	updated, err := m.store.TriggerBindings().Update(r.Context(), ws, binding.BindingID, store.TriggerBindingUpdate{Name: &name})
+	auth, ok := m.resolveBindingAuthority(w, r, ws, automation.ActionUpdateBinding)
+	if !ok {
+		return
+	}
+	updated, err := m.bindings.UpdateBinding(r.Context(), auth, automation.UpdateBindingCommand{
+		WorkspaceKey: ws, BindingID: binding.BindingID, Patch: automation.BindingPatch{Name: &name},
+	})
 	if err != nil {
-		handler.WriteDomainError(w, err, "update legacy binding agent failed")
+		writeBindingError(w, err, "update legacy binding agent failed")
 		return
 	}
 	broadcastAgentRefresh(m.hub, ws, updated.BindingID, r.Header.Get("X-Actor"))
@@ -697,32 +786,43 @@ func (m *Module) patchLegacyBindingAgent(w http.ResponseWriter, r *http.Request,
 func (m *Module) deleteLegacyBindingAgent(w http.ResponseWriter, r *http.Request, ws, id string) {
 	binding, ok, err := m.unattachedBindingByID(r.Context(), ws, id)
 	if err != nil {
-		handler.WriteDomainError(w, err, "get legacy binding agent failed")
+		writeBindingError(w, err, "get legacy binding agent failed")
 		return
 	}
 	if !ok {
 		handler.WriteDomainError(w, domain.ErrNotFound, "get agent record failed")
 		return
 	}
-	result, err := triggerbindings.DeleteBindingAndRevokeGrants(r.Context(), m.store, ws, binding.BindingID)
+	disableAuth, ok := m.resolveBindingAuthority(w, r, ws, automation.ActionDisableBinding)
+	if !ok {
+		return
+	}
+	deleteAuth, ok := m.resolveBindingAuthority(w, r, ws, automation.ActionDeleteBinding)
+	if !ok {
+		return
+	}
+	result, err := m.deleteUnmanagedBinding(r.Context(), ws, binding.BindingID, disableAuth, deleteAuth)
 	if err != nil {
-		handler.WriteDomainError(w, err, "delete legacy binding agent failed")
+		writeBindingError(w, err, "delete legacy binding agent failed")
 		return
 	}
 	broadcastAgentRefresh(m.hub, ws, binding.BindingID, r.Header.Get("X-Actor"))
 	handler.WriteJSON(w, http.StatusOK, result)
 }
 
-func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc {
+func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc { //nolint:funlen // The handler keeps authority, record state, and attached-binding updates in one ordered transaction-like flow.
 	return func(w http.ResponseWriter, r *http.Request) {
 		if m.store == nil {
 			handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 			return
 		}
-		ws := requestWorkspaceID(r)
+		ws, ok := m.requireCanonicalWorkspace(w, r)
+		if !ok {
+			return
+		}
 		id := agentRouteValue(r, "id", "name")
 		if _, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-			handler.WriteDomainError(w, err, "get supervised agent failed")
+			writeBindingError(w, err, "get supervised agent failed")
 			return
 		} else if ok {
 			handler.RespondError(w, http.StatusBadRequest, "supervised agents use start/stop lifecycle actions")
@@ -737,6 +837,14 @@ func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc {
 			handler.RespondError(w, http.StatusConflict, "agent is archived")
 			return
 		}
+		action := automation.ActionDisableManagedBinding
+		if enabled {
+			action = automation.ActionEnableManagedBinding
+		}
+		bindingAuth, ok := m.resolveBindingAuthority(w, r, ws, action)
+		if !ok {
+			return
+		}
 		desired := domain.AgentServiceDesiredPaused
 		if enabled {
 			desired = domain.AgentServiceDesiredRunning
@@ -746,13 +854,13 @@ func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc {
 			handler.WriteDomainError(w, err, "update agent record failed")
 			return
 		}
-		if err := m.setAttachedBindingsEnabled(r.Context(), ws, record.ServiceID, enabled); err != nil {
-			handler.WriteDomainError(w, err, "update attached bindings failed")
+		if err := m.setAttachedBindingsEnabled(r.Context(), bindingAuth, ws, record.ServiceID, enabled); err != nil {
+			writeBindingError(w, err, "update attached bindings failed")
 			return
 		}
 		out, err := m.agentRecordDTO(r.Context(), ws, updated, time.Now())
 		if err != nil {
-			handler.WriteDomainError(w, err, "decorate agent record failed")
+			writeBindingError(w, err, "decorate agent record failed")
 			return
 		}
 		broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
@@ -765,10 +873,13 @@ func (m *Module) listAgentRuns(w http.ResponseWriter, r *http.Request) {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
 	}
-	ws := requestWorkspaceID(r)
+	ws, ok := m.requireCanonicalWorkspace(w, r)
+	if !ok {
+		return
+	}
 	id := agentRouteValue(r, "id", "name")
 	if _, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-		handler.WriteDomainError(w, err, "get supervised agent failed")
+		writeBindingError(w, err, "get supervised agent failed")
 		return
 	} else if ok {
 		handler.RespondError(w, http.StatusBadRequest, "agent runs are available for record agents")
@@ -785,7 +896,7 @@ func (m *Module) listAgentRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	runs, err := m.runsForAgent(r.Context(), ws, record.ServiceID, limit)
 	if err != nil {
-		handler.WriteDomainError(w, err, "list agent runs failed")
+		writeBindingError(w, err, "list agent runs failed")
 		return
 	}
 	handler.WriteJSON(w, http.StatusOK, map[string]any{
@@ -811,7 +922,10 @@ func (m *Module) runsForAgent(ctx context.Context, ws, agentID string, limit int
 
 	// Compatibility for runs created before fleet-db stamped agent_service_id:
 	// while their binding remains attached, retain the historical binding join.
-	bindings, err := m.store.TriggerBindings().List(ctx, ws, store.TriggerBindingFilter{TargetAgentServiceID: agentID})
+	if m.bindings == nil {
+		return nil, automation.ErrUnavailable
+	}
+	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: agentID})
 	if err != nil {
 		return nil, err
 	}

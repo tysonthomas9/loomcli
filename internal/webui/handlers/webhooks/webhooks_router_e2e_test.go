@@ -74,9 +74,7 @@ func routerE2EBinding(t *testing.T, st *memstore.Store, in store.TriggerBindingC
 }
 
 func routerE2EMux(st store.Store) *http.ServeMux {
-	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
-	return mux
+	return newServer(st)
 }
 
 // routerE2EPRBody builds a GitHub pull_request payload for PR acme/widgets#7

@@ -17,26 +17,20 @@ package trigger
 //	         is audited and NEVER resumes the run or feeds its payload —
 //	         killing both the self-trigger loop and the prompt-injection
 //	         hijack (vet A3).
-//	RULE 2 — ResolveAwait atomically marks exactly this instance satisfied
-//	         by this event (first event wins; losers are recorded no-ops),
-//	RULE 3 — then ResumeAwaiting re-queues the suspended run. A resume
-//	         blocked because the run is not suspended leaves the resolution
-//	         standing: the event is journaled and the satisfied row replays
-//	         (re-entry contract).
+//	RULE 2 — ResolveAwaitAndResume atomically marks exactly this instance
+//	         satisfied by this event and re-queues its suspended run (or
+//	         writes the pending-resume marker). First event wins; same-event
+//	         replay converges; a different-event loser is a recorded no-op.
 //
 // Multi-waiter cardinality is the LOCKED decision: one event resolves ALL
 // pending instances whose pattern equals the rendered key, in RegisteredAt
 // order (store contract).
 //
 // Pending->suspend window (locked decision): an event can arrive after
-// RegisterAwaitAndCheck pending the await but before the executor's Suspend
-// landed. The fleet-db backend records a pending-resume marker and surfaces
-// domain.ErrDriverRunAlreadyResumed to the suspend leg; memstore instead has
-// the matcher retry the resume briefly until the suspend lands (the
-// still-running run returns domain.ErrInvalidTransition). Both shapes are
-// tolerated here; a window that outlives the retry budget is recorded as
-// resume_deferred — the resolution stands and the deadline machinery (AW8)
-// converges the run.
+// RegisterAwaitAndCheck pends the await but before the executor's Suspend
+// lands. Both backends atomically write a pending-resume marker; Suspend then
+// surfaces domain.ErrDriverRunAlreadyResumed and the execution continues
+// inline. No retry budget or split resolve/resume crash window remains.
 
 import (
 	"context"
@@ -45,32 +39,33 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// Default pending->suspend-window retry budget: how often and how long Dispatch
-// re-attempts a resume blocked by a still-running run before recording
-// resume_deferred. Bounded so an ingress hook never stalls long.
-const (
-	defaultAwaitResumeRetries    = 5
-	defaultAwaitResumeRetryDelay = 100 * time.Millisecond
-)
+// AwaitMatcherStore is the legacy narrow repository view used by existing
+// trigger adapters. New composition should prefer NewAwaitMatcher so it can
+// pass the two owned ports directly instead of a composite repository.
+type AwaitMatcherStore interface {
+	Awaits() store.AwaitStore
+	DriverRuns() store.DriverRunStore
+}
 
 // AwaitMatcher resolves pending awaits against admitted router events. The
 // zero value plus Store is ready to use; safe for concurrent use (it holds no
 // state of its own).
 type AwaitMatcher struct {
-	Store store.Store
+	Store AwaitMatcherStore
+	// AwaitStore and DriverRunStore are the preferred narrow composition
+	// inputs. Store remains only for compatibility with legacy trigger owners
+	// that have not yet completed their later-phase extraction.
+	AwaitStore     store.AwaitStore
+	DriverRunStore store.DriverRunStore
 	// Logger receives audit records (actor rejections, deferred resumes);
 	// slog.Default when nil.
 	Logger *slog.Logger
-	// ResumeRetries / ResumeRetryDelay tune the pending->suspend-window retry
-	// budget; zero values select the package defaults.
-	ResumeRetries    int
-	ResumeRetryDelay time.Duration
 	// SystemTimeoutLane marks the deadline sweeper's dispatch lane (AW8): the
 	// RULE 4 carve-out — domain.AwaitTimeoutActor is always allowed to resolve
 	// the one instance its synthetic event targets, so a due await times out
@@ -79,6 +74,12 @@ type AwaitMatcher struct {
 	// ingress or loopback event still faces the await's allow-list (explicit
 	// carve-out, not a general system bypass).
 	SystemTimeoutLane bool
+}
+
+// NewAwaitMatcher composes the Execution matcher from its two persistence
+// ports without exposing the platform-wide composite store.
+func NewAwaitMatcher(awaits store.AwaitStore, driverRuns store.DriverRunStore) *AwaitMatcher {
+	return &AwaitMatcher{AwaitStore: awaits, DriverRunStore: driverRuns}
 }
 
 // AwaitDispatchEvent is the router-output view of one admitted event — the
@@ -90,6 +91,8 @@ type AwaitMatcher struct {
 type AwaitDispatchEvent struct {
 	EventID    string
 	EventType  string
+	SourceKind string
+	Origin     domain.TriggerEventOrigin
 	SubjectRef string
 	ActorRef   string
 	Payload    json.RawMessage
@@ -108,10 +111,8 @@ const (
 	// AwaitMatchAlreadyResolved — a racing event (or the timeout sweeper) won;
 	// this dispatch is the recorded no-op loser.
 	AwaitMatchAlreadyResolved AwaitMatchOutcome = "already_resolved"
-	// AwaitMatchResumeDeferred — the resolution stands but the run could not
-	// be transitioned here (pending->suspend window outlived the retry budget,
-	// run already re-queued by the backend's pending-resume marker, or run
-	// terminal).
+	// AwaitMatchResumeDeferred — the resolution stands but the run was already
+	// terminal, so no run transition was possible or needed.
 	AwaitMatchResumeDeferred AwaitMatchOutcome = "resume_deferred"
 	// AwaitMatchFailed — a store error; details in the record's Reason and the
 	// joined error returned by Dispatch.
@@ -133,10 +134,6 @@ type AwaitMatchRecord struct {
 	RunID       string
 	Outcome     AwaitMatchOutcome
 	Reason      string
-	// PayloadOmitted reports that the event payload exceeded the resume
-	// payload cap and the await resolved without it (the satisfied row
-	// carries no inline payload; the journaled event remains the source).
-	PayloadOmitted bool
 }
 
 // AwaitDispatchResult collects one Dispatch pass over all candidates.
@@ -167,20 +164,37 @@ func (r *AwaitDispatchResult) Resolved() int {
 // silent no-op.
 func (m *AwaitMatcher) Dispatch(ctx context.Context, ws string, ev AwaitDispatchEvent) (*AwaitDispatchResult, error) {
 	result := &AwaitDispatchResult{}
-	if m == nil || m.Store == nil || strings.TrimSpace(ev.EventID) == "" ||
+	awaits, driverRuns := m.persistence()
+	if awaits == nil || driverRuns == nil || strings.TrimSpace(ev.EventID) == "" ||
 		strings.TrimSpace(ev.EventType) == "" || strings.TrimSpace(ev.SubjectRef) == "" {
 		return result, nil
 	}
+	isTimeout := domain.IsAwaitTimeoutEventID(ev.EventID)
+	switch {
+	case isTimeout && !m.SystemTimeoutLane:
+		return result, fmt.Errorf("await dispatch: event id %q uses the reserved timeout prefix outside the timeout lane: %w",
+			ev.EventID, domain.ErrInvalid)
+	case m.SystemTimeoutLane && (!isTimeout || ev.ActorRef != domain.AwaitTimeoutActor):
+		return result, fmt.Errorf("await dispatch: timeout lane requires a canonical timeout id and actor: %w", domain.ErrInvalid)
+	}
+	if !isTimeout && !eventpolicy.EligibleForAwait(
+		ev.EventType, string(ev.Origin), ev.SourceKind, ev.ActorRef, ev.EventID,
+	) {
+		// Provenance is immutable. Treat a historical or forged reserved event
+		// as an audited successful no-op so durable notification consumers can
+		// complete it without backoff and a later genuine event can still win.
+		m.auditReservedProvenanceRejected(ws, ev)
+		return result, nil
+	}
 	result.SubjectKey = domain.AwaitEventKey(ev.EventType, ev.SubjectRef)
-	candidates, err := m.Store.Awaits().ListAwaitsByPattern(ctx, ws, result.SubjectKey)
+	candidates, err := awaits.ListAwaitsByPattern(ctx, ws, result.SubjectKey)
 	if err != nil {
 		if errors.Is(err, errors.ErrUnsupported) {
 			return result, nil
 		}
 		return result, fmt.Errorf("await dispatch: list awaits for key %q in workspace %q: %w", result.SubjectKey, ws, err)
 	}
-	payload, omitted := capAwaitResumePayload(ev.Payload)
-	timeoutTarget, isTimeout := domain.AwaitTimeoutTargetInstance(ev.EventID)
+	timeoutTarget, _ := domain.AwaitTimeoutTargetInstance(ev.EventID)
 	var errs []error
 	for _, inst := range candidates { // resolve ALL matching (locked decision)
 		if isTimeout && inst.InstanceKey != timeoutTarget {
@@ -189,99 +203,89 @@ func (m *AwaitMatcher) Dispatch(ctx context.Context, ws string, ev AwaitDispatch
 			// deadlines (multi-waiter does not apply to timeouts).
 			continue
 		}
-		record, err := m.dispatchOne(ctx, ws, ev, inst, payload, omitted)
+		record, err := m.dispatchOne(ctx, ws, ev, inst, ev.Payload)
 		result.Records = append(result.Records, record)
 		errs = append(errs, err)
 	}
 	return result, errors.Join(errs...)
 }
 
-// dispatchOne runs the RULE 4 actor predicate, the atomic resolve and the
-// resume for a single candidate instance.
-func (m *AwaitMatcher) dispatchOne(ctx context.Context, ws string, ev AwaitDispatchEvent, inst *domain.AwaitInstance, payload json.RawMessage, omitted bool) (AwaitMatchRecord, error) {
-	record := AwaitMatchRecord{InstanceKey: inst.InstanceKey, RunID: inst.RunID, PayloadOmitted: omitted}
+// dispatchOne runs the RULE 4 actor predicate and the atomic resolve+resume
+// command for a single candidate instance.
+func (m *AwaitMatcher) dispatchOne(ctx context.Context, ws string, ev AwaitDispatchEvent, inst *domain.AwaitInstance, payload json.RawMessage) (AwaitMatchRecord, error) { //nolint:funlen // Atomic resolution outcome classification stays adjacent to the command it verifies.
+	record := AwaitMatchRecord{InstanceKey: inst.InstanceKey, RunID: inst.RunID}
+	awaits, driverRuns := m.persistence()
 	if !m.dispatchActorAllowed(ev, inst) {
 		record.Outcome, record.Reason = AwaitMatchActorRejected, AwaitReasonActorRejected
-		record.PayloadOmitted = false // nothing fed, nothing to omit
 		m.auditActorRejected(ws, ev, inst)
 		return record, nil
 	}
-	resolution, err := m.Store.Awaits().ResolveAwait(ctx, ws, inst.InstanceKey, ev.EventID, payload, ev.ActorRef)
+	resolver, ok := awaits.(store.AtomicAwaitStore)
+	if !ok {
+		err := fmt.Errorf("await store lacks atomic resolve-and-resume: %w", errors.ErrUnsupported)
+		record.Outcome, record.Reason = AwaitMatchFailed, err.Error()
+		return record, fmt.Errorf("await dispatch: resolve and resume %q by event %q: %w", inst.InstanceKey, ev.EventID, err)
+	}
+	err := resolver.ResolveAwaitAndResume(ctx, ws, inst.InstanceKey, ev.EventID, payload, ev.ActorRef)
 	if err != nil {
 		record.Outcome, record.Reason = AwaitMatchFailed, err.Error()
-		return record, fmt.Errorf("await dispatch: resolve %q by event %q: %w", inst.InstanceKey, ev.EventID, err)
+		return record, fmt.Errorf("await dispatch: resolve and resume %q by event %q: %w", inst.InstanceKey, ev.EventID, err)
 	}
-	if !resolution.Resume {
-		// First event won earlier; this dispatch is the recorded no-op loser
-		// and must not touch the run (the winner owns the resume).
+	resolution, err := awaits.GetSatisfiedAwait(ctx, ws, inst.InstanceKey)
+	if err != nil {
+		// A cancel cascade can win after the pending candidate list was read.
+		// Cancelled rows intentionally are not returned by GetSatisfiedAwait;
+		// their terminal owner run proves this dispatch is a no-op loser.
+		if errors.Is(err, domain.ErrNotFound) {
+			run, runErr := driverRuns.Get(ctx, ws, inst.RunID)
+			if runErr == nil && run.Status.IsTerminal() {
+				record.Outcome = AwaitMatchAlreadyResolved
+				return record, nil
+			}
+		}
+		record.Outcome, record.Reason = AwaitMatchFailed, err.Error()
+		return record, fmt.Errorf("await dispatch: read atomic resolution %q by event %q: %w", inst.InstanceKey, ev.EventID, err)
+	}
+	if resolution.SatisfiedByEventID != ev.EventID {
+		// A racing event (or timeout) won. The atomic command left its winner
+		// and run transition untouched.
 		record.Outcome = AwaitMatchAlreadyResolved
 		return record, nil
 	}
-	record.Outcome, record.Reason = m.resumeRun(ctx, ws, inst, ev.EventID)
-	if record.Outcome != AwaitMatchResolved {
+	run, err := driverRuns.Get(ctx, ws, inst.RunID)
+	if err != nil {
+		record.Outcome, record.Reason = AwaitMatchFailed, err.Error()
+		return record, fmt.Errorf("await dispatch: inspect atomically resumed run %q: %w", inst.RunID, err)
+	}
+	if run.ResumeSourceEventID == ev.EventID {
+		record.Outcome = AwaitMatchResolved
+		return record, nil
+	}
+	if run.Status.IsTerminal() {
+		record.Outcome, record.Reason = AwaitMatchResumeDeferred, AwaitReasonRunTerminal
 		m.auditResumeOutcome(ws, ev, inst, record)
+		return record, nil
 	}
-	if record.Outcome == AwaitMatchFailed {
-		return record, fmt.Errorf("await dispatch: %q resolved by event %q but run %q resume failed: %s",
-			inst.InstanceKey, ev.EventID, inst.RunID, record.Reason)
-	}
-	return record, nil
+	record.Outcome = AwaitMatchFailed
+	record.Reason = fmt.Sprintf("atomic command returned run status %s without resume source %q", run.Status, ev.EventID)
+	return record, fmt.Errorf("await dispatch: %q resolved by event %q but run %q did not converge: %s",
+		inst.InstanceKey, ev.EventID, inst.RunID, record.Reason)
 }
 
-// resumeRun re-queues the suspended run, tolerating the pending->suspend window:
-// a still-running run is retried within the budget (memstore shape), a
-// pending-resume marker (fleet-db shape) and a lost resume race are recorded
-// deferred no-ops. The resolution stands in every non-failed branch.
-func (m *AwaitMatcher) resumeRun(ctx context.Context, ws string, inst *domain.AwaitInstance, eventID string) (AwaitMatchOutcome, string) {
-	retries, delay := m.resumeRetryBudget()
-	for attempt := 0; ; attempt++ {
-		_, err := m.Store.DriverRuns().ResumeAwaiting(ctx, ws, inst.RunID, inst.InstanceKey, eventID)
-		switch {
-		case err == nil:
-			return AwaitMatchResolved, ""
-		case errors.Is(err, domain.ErrDriverRunAlreadyResumed):
-			return AwaitMatchResumeDeferred, AwaitReasonRunAlreadyResumed
-		case errors.Is(err, domain.ErrInvalidTransition):
-			reason, retry := m.classifyResumeBlock(ctx, ws, inst.RunID)
-			if !retry || attempt >= retries || !sleepAwaitResumeRetry(ctx, delay) {
-				return AwaitMatchResumeDeferred, reason
-			}
-		default:
-			return AwaitMatchFailed, fmt.Sprintf("resume run: %v", err)
+func (m *AwaitMatcher) persistence() (store.AwaitStore, store.DriverRunStore) {
+	if m == nil {
+		return nil, nil
+	}
+	awaits, driverRuns := m.AwaitStore, m.DriverRunStore
+	if m.Store != nil {
+		if awaits == nil {
+			awaits = m.Store.Awaits()
+		}
+		if driverRuns == nil {
+			driverRuns = m.Store.DriverRuns()
 		}
 	}
-}
-
-// classifyResumeBlock inspects a run whose resume hit ErrInvalidTransition
-// (every blocked shape is a deferred resolution): queued means a racing
-// resume already won, terminal means the run finished before the event
-// landed, running means the accepted pending->suspend window — the only
-// retryable shape.
-func (m *AwaitMatcher) classifyResumeBlock(ctx context.Context, ws, runID string) (reason string, retry bool) {
-	run, err := m.Store.DriverRuns().Get(ctx, ws, runID)
-	if err != nil {
-		return fmt.Sprintf("inspect blocked run: %v", err), false
-	}
-	switch {
-	case run.Status == domain.DriverRunQueued:
-		return AwaitReasonRunAlreadyResumed, false
-	case run.Status.IsTerminal():
-		return AwaitReasonRunTerminal, false
-	default:
-		// running (pending->suspend window) or transiently re-suspended: retry.
-		return AwaitReasonPendingSuspendWindow, true
-	}
-}
-
-func (m *AwaitMatcher) resumeRetryBudget() (int, time.Duration) {
-	retries, delay := m.ResumeRetries, m.ResumeRetryDelay
-	if retries <= 0 {
-		retries = defaultAwaitResumeRetries
-	}
-	if delay <= 0 {
-		delay = defaultAwaitResumeRetryDelay
-	}
-	return retries, delay
+	return awaits, driverRuns
 }
 
 // auditActorRejected records the RULE 4 rejection. DEVIATION from the chunk
@@ -304,6 +308,22 @@ func (m *AwaitMatcher) auditActorRejected(ws string, ev AwaitDispatchEvent, inst
 	)
 }
 
+// auditReservedProvenanceRejected records a forged or historical event that
+// is ineligible to enter the await matcher. There is intentionally no error:
+// retrying immutable provenance would poison a durable notification queue.
+func (m *AwaitMatcher) auditReservedProvenanceRejected(ws string, ev AwaitDispatchEvent) {
+	m.logger().Warn("await dispatch: reserved event provenance rejected",
+		"workspace", ws,
+		"event_id", ev.EventID,
+		"event_type", ev.EventType,
+		"source_kind", ev.SourceKind,
+		"origin", string(ev.Origin),
+		"subject_ref", ev.SubjectRef,
+		"actor_ref", ev.ActorRef,
+		"reason", "reserved_provenance",
+	)
+}
+
 // auditResumeOutcome records a resolution whose resume did not land here.
 func (m *AwaitMatcher) auditResumeOutcome(ws string, ev AwaitDispatchEvent, inst *domain.AwaitInstance, record AwaitMatchRecord) {
 	m.logger().Warn("await dispatch: resolved without resuming run",
@@ -321,17 +341,6 @@ func (m *AwaitMatcher) logger() *slog.Logger {
 		return m.Logger
 	}
 	return slog.Default()
-}
-
-// capAwaitResumePayload enforces the resume payload size cap at dispatch
-// time: an oversized payload is omitted (the await still resolves; the
-// journaled event remains the payload source) instead of failing the resolve
-// and stranding the await.
-func capAwaitResumePayload(payload json.RawMessage) (json.RawMessage, bool) {
-	if len(payload) <= domain.DefaultAwaitResumePayloadCap {
-		return payload, false
-	}
-	return nil, true
 }
 
 // dispatchActorAllowed applies RULE 4 with the AW8 timeout carve-out: on the
@@ -361,17 +370,4 @@ func awaitDispatchActorAllowed(allow []string, actor string) bool {
 		}
 	}
 	return false
-}
-
-// sleepAwaitResumeRetry waits one retry interval, aborting on ctx
-// cancellation.
-func sleepAwaitResumeRetry(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }

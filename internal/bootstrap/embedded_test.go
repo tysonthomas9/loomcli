@@ -130,6 +130,7 @@ func TestEmbeddedFleetDBSecurityProfileAndChildEnvSanitization(t *testing.T) {
 		"FLEET_AUTH_BOOTSTRAP_ADMIN_KEY=old",
 		"FLEET_AUTH_BOOTSTRAP_ADMIN_KEY=older",
 		"FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED=false",
+		"FLEET_AUTOMATION_TRIGGER_ADMISSION_ENABLED=false",
 		embeddedFleetDBArtifactBackendEnv + "=http",
 		embeddedFleetDBArtifactDirEnv + "=/tmp/wrong",
 		"UNCHANGED=value",
@@ -137,6 +138,7 @@ func TestEmbeddedFleetDBSecurityProfileAndChildEnvSanitization(t *testing.T) {
 	env = withoutEnvKey(env, "FLEET_CONFIG")
 	env = withEnvValue(env, "FLEET_AUTH_BOOTSTRAP_ADMIN_KEY", "new-secret")
 	env = withEnvValue(env, "FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED", "true")
+	env = withEnvValue(env, "FLEET_AUTOMATION_TRIGGER_ADMISSION_ENABLED", "true")
 	env = withEnvValue(env, embeddedFleetDBArtifactBackendEnv, "local")
 	env = withEnvValue(env, embeddedFleetDBArtifactDirEnv, "/private/runtime/artifacts")
 	if envKeyCount(env, "FLEET_CONFIG") != 0 {
@@ -147,6 +149,9 @@ func TestEmbeddedFleetDBSecurityProfileAndChildEnvSanitization(t *testing.T) {
 	}
 	if envKeyCount(env, "FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED") != 1 || !envHas(env, "FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED=true") {
 		t.Fatalf("lifecycle capability was not forced on: %v", env)
+	}
+	if envKeyCount(env, "FLEET_AUTOMATION_TRIGGER_ADMISSION_ENABLED") != 1 || !envHas(env, "FLEET_AUTOMATION_TRIGGER_ADMISSION_ENABLED=true") {
+		t.Fatalf("automation capability was not forced on: %v", env)
 	}
 	if envKeyCount(env, embeddedFleetDBArtifactBackendEnv) != 1 || !envHas(env, embeddedFleetDBArtifactBackendEnv+"=local") {
 		t.Fatalf("embedded artifact backend was not forced local: %v", env)

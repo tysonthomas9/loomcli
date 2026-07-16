@@ -361,8 +361,11 @@ func TestResolveInboundSecretCandidates(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := NewModule(connectorOverrideStore{Store: seedStore(t, true), conns: tc.conns})
-			got, err := m.resolveInboundSecretCandidates(context.Background(), testWS, binding, now)
+			st := seedStore(t, true)
+			verifier := NewCompatibilityVerifier(CompatibilityVerifierConfig{
+				Bindings: st.TriggerBindings(), Connectors: tc.conns,
+			})
+			got, err := verifier.resolveInboundSecretCandidates(context.Background(), testWS, binding, now)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("err = %v, want %v", err, tc.wantErr)
@@ -417,5 +420,24 @@ func TestWebhookSecretResolutionFailureIsUniform401(t *testing.T) {
 	events, _ := st.TriggerEvents().List(context.Background(), testWS, store.TriggerEventFilter{})
 	if len(events) != 0 {
 		t.Fatalf("resolution failure persisted %d trigger events", len(events))
+	}
+}
+
+func TestWebhookNilResolvedConnectorSecretFailsClosed(t *testing.T) {
+	st := seedStore(t, true)
+	connectors := &stubConnectorStore{
+		conns:   []*domain.Connector{ghConnector("gh-nil")},
+		secrets: map[string]*store.ConnectorInboundSecrets{"gh-nil": nil},
+	}
+	mux := newServer(connectorOverrideStore{Store: st, conns: connectors})
+
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, signedRequest("github", "d-nil-secret", prOpenedBody))
+	if recorder.Code != http.StatusUnauthorized || recorder.Body.String() != uniform401Body {
+		t.Fatalf("nil secret result = %d %q, want uniform 401", recorder.Code, recorder.Body.String())
+	}
+	events, err := st.TriggerEvents().List(t.Context(), testWS, store.TriggerEventFilter{})
+	if err != nil || len(events) != 0 {
+		t.Fatalf("nil secret result persisted events = %d, %v", len(events), err)
 	}
 }

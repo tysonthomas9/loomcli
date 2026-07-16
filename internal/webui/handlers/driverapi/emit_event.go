@@ -3,21 +3,20 @@ package driverapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 // emit-event is the workflow lane of the internal-event loopback (chunk C14):
-// a running workflow posts an event it produced and the loopback re-enters it
-// into the trigger router with structural provenance. The lane is run-scoped:
-// verifyParent proves the caller owns a RUNNING DriverRun, the origin is
-// forced to workflow (never client-chosen) and the parent trigger event is
-// derived from the verified run's SourceRef — the event id the dispatch path
-// stamped when it admitted the run — so hop depth accumulates structurally
-// and a workflow cannot forge a shallow chain. See
-// internal/trigger/internal_source.go for the guard and transport decision.
+// a running workflow posts event content to the named workfloweventing
+// application workflow. The lane is run-scoped: verifyParent proves the caller
+// owns a RUNNING DriverRun, the authority provider derives ExecutionAuthority
+// from that verified run, and Automation re-derives origin, parent, actor,
+// epic, hop depth, source, route, signature status, and idempotency.
 
 // emitEventParams is the camelCase driver-op request wire.
 type emitEventParams struct {
@@ -56,6 +55,11 @@ type emitEventResponse struct {
 	Deliveries []emitEventDelivery `json:"deliveries"`
 }
 
+// WorkflowEventAwaitDispatcher is the narrow post-admission AW7 seam.
+type WorkflowEventAwaitDispatcher interface {
+	Dispatch(context.Context, string, trigger.AwaitDispatchEvent) (*trigger.AwaitDispatchResult, error)
+}
+
 func (m *Module) emitEvent(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[emitEventParams](body)
 	if err != nil {
@@ -65,23 +69,21 @@ func (m *Module) emitEvent(ctx context.Context, ws string, id driverIdentity, bo
 	if err != nil {
 		return nil, err
 	}
-	result, err := m.internalEvents.Emit(ctx, ws, trigger.InternalEvent{
-		EventID:   params.EventID,
-		EventType: params.EventType,
-		// Structural provenance: the run-scoped lane is always the workflow
-		// origin, and the parent event is the verified run's admitting
-		// trigger event (SourceRef), never a client-supplied id.
-		Origin:         domain.TriggerEventOriginWorkflow,
-		ParentEventID:  parent.SourceRef,
-		EmittedByRunID: parent.RunID,
-		SubjectRef:     params.SubjectRef,
-		ActorRef:       firstNonEmpty(params.ActorRef, driverpkg.DriverRunActor(parent.RunID)),
-		EpicID:         firstNonEmpty(params.EpicID, parent.EpicID, driverpkg.DriverRunPayloadEpicID(parent.Payload)),
-		Payload:        params.Payload,
-		SubjectAttrs:   params.SubjectAttrs,
+	if m.workflowEventing == nil {
+		return nil, workfloweventing.ErrUnavailable
+	}
+	result, err := m.workflowEventing.Emit(ctx, workfloweventing.VerifiedRun{
+		WorkspaceKey: parent.WorkspaceKey, RunID: parent.RunID, Status: string(parent.Status),
+		NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
+	}, workfloweventing.EmitRequest{
+		WorkspaceKey: ws, EventID: params.EventID, EventType: params.EventType,
+		SubjectRef: params.SubjectRef, Payload: params.Payload, SubjectAttrs: params.SubjectAttrs,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if result == nil {
+		return nil, fmt.Errorf("workflow event admission returned no result: %w", automation.ErrInvalidPersistedState)
 	}
 	resp := emitEventResponse{
 		Dropped:    result.Dropped,
@@ -92,16 +94,38 @@ func (m *Module) emitEvent(ctx context.Context, ws string, id driverIdentity, bo
 		HopDepth:   result.HopDepth,
 		Deliveries: []emitEventDelivery{},
 	}
-	if result.Dispatch != nil {
-		for _, leg := range result.Dispatch.Deliveries {
-			resp.Deliveries = append(resp.Deliveries, emitEventDelivery{
-				DeliveryID:      leg.DeliveryID,
-				BindingID:       leg.BindingID,
-				RunID:           leg.RunID,
-				Status:          string(leg.Status),
-				RejectionReason: leg.RejectionReason,
-			})
+	if !result.Dropped {
+		for _, leg := range result.Deliveries {
+			if leg != nil {
+				resp.Deliveries = append(resp.Deliveries, emitEventDelivery{
+					DeliveryID:      leg.DeliveryID,
+					BindingID:       leg.TriggerBindingID,
+					RunID:           leg.DriverRunID,
+					Status:          string(leg.Status),
+					RejectionReason: leg.RejectionReason,
+				})
+			}
 		}
 	}
+	m.notifyWorkflowEventAwaits(ctx, ws, result, params.Payload)
 	return resp, nil
+}
+
+// notifyWorkflowEventAwaits preserves the existing best-effort AW7 behavior
+// after durable admission. Every identity used here is Automation-derived;
+// caller-supplied actor/epic fields are intentionally ignored.
+func (m *Module) notifyWorkflowEventAwaits(ctx context.Context, ws string, result *automation.AdmissionResult, payload json.RawMessage) {
+	if m.eventAwaits == nil || result == nil || result.Dropped || result.Event == nil {
+		return
+	}
+	event := result.Event
+	if _, err := m.eventAwaits.Dispatch(ctx, ws, trigger.AwaitDispatchEvent{
+		EventID: event.SourceEventID, EventType: event.EventType,
+		SourceKind: event.SourceKind, Origin: event.Origin,
+		SubjectRef: event.SubjectRef, ActorRef: event.ActorRef, Payload: payload,
+	}); err != nil {
+		slog.WarnContext(ctx, "workflow event await dispatch failed",
+			"workspace", ws, "event_id", event.SourceEventID,
+			"event_type", event.EventType, "error", err)
+	}
 }

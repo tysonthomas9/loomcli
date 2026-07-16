@@ -52,6 +52,7 @@ LOCAL_MODE_CODEX_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-m
 LOCAL_MODE_CODEX_WORKFLOW_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml -f test/local-mode/docker-compose.workflow-build.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CLAUDE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.claude.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_DAYTONA_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.daytona.yml $(LOCAL_MODE_COMPOSE_EXTRA)
+LOCAL_MODE_WORKFLOW_BUILD_CHECK = $(if $(filter %docker-compose.workflow-build.yml,$(LOCAL_MODE_COMPOSE_FILES)),local-mode-workflow-build-check)
 export LOCAL_MODE_FLEETDB_IMAGE
 export LOCAL_MODE_LOOM_IMAGE
 export LOCAL_MODE_LOOM_CODEX_IMAGE
@@ -226,7 +227,7 @@ local-mode-info:
 	@echo "checkout_id=$(LOCAL_MODE_CHECKOUT_ID)"
 	@echo "compose_project=$(LOCAL_MODE_COMPOSE_PROJECT)"
 
-local-mode-up: local-mode-frontend-dist
+local-mode-up: local-mode-frontend-dist $(LOCAL_MODE_WORKFLOW_BUILD_CHECK)
 	@echo "Starting local-mode dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
@@ -243,13 +244,17 @@ local-mode-codex-up: local-mode-frontend-dist
 local-mode-workflow-build-check:
 	@set -e; \
 	missing=""; \
-	for rel in packages/cli/bin/flue.mjs packages/cli/dist/flue.js packages/runtime/package.json packages/runtime/dist/node/index.mjs packages/runtime/node_modules/@hono/node-server packages/runtime/node_modules/hono; do \
+	for rel in packages/cli/bin/flue.mjs packages/cli/dist/flue.js packages/runtime/package.json packages/runtime/dist/node/index.mjs packages/runtime/node_modules/@hono/node-server packages/runtime/node_modules/hono node_modules/.pnpm/node_modules/@daytona/sdk/package.json; do \
 	  if [ ! -e "$(FLUE_SRC)/$$rel" ]; then missing="$$missing $$rel"; fi; \
 	done; \
 	if [ "$$missing" != "" ]; then \
 	  echo "Flue workflow build toolchain is incomplete at $(FLUE_SRC)." >&2; \
 	  echo "Missing:$$missing" >&2; \
-	  echo "Install/build the pinned Flue checkout (pnpm install --frozen-lockfile && pnpm build) or set FLUE_SRC=/path/to/flue." >&2; \
+	  echo "Built-in workflow sources require the Flue CLI/runtime plus @daytona/sdk from Flue's hello-world workspace." >&2; \
+	  echo "From the pinned Flue checkout, run:" >&2; \
+	  echo "  pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime... --filter hello-world..." >&2; \
+	  echo "  pnpm build" >&2; \
+	  echo "Or set FLUE_SRC=/path/to/flue with an already prepared checkout." >&2; \
 	  exit 1; \
 	fi; \
 	container_arch="$(LOCAL_MODE_CONTAINER_ARCH)"; \
@@ -278,8 +283,8 @@ local-mode-workflow-build-check:
 	  echo "From the pinned Flue checkout, install both current-host and Linux-container dependencies:" >&2; \
 	  echo "  export XDG_CONFIG_HOME=\"\$${TMPDIR:-/tmp}/loom-flue-pnpm-$$binding\"" >&2; \
 	  echo "  pnpm config set --global supportedArchitectures '{\"os\":[\"current\",\"linux\"],\"cpu\":[\"current\",\"$$pnpm_cpu\"],\"libc\":[\"current\",\"glibc\"]}'" >&2; \
-	  echo "  pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime..." >&2; \
-	  echo "Then rerun make local-mode-codex-workflows-up." >&2; \
+	  echo "  pnpm install --frozen-lockfile --force --filter @flue/cli... --filter @flue/runtime... --filter hello-world..." >&2; \
+	  echo "Then rerun the selected local-mode target." >&2; \
 	  exit 1; \
 	fi; \
 	expected="$$(tr -d '[:space:]' < internal/workflows/FLUE_COMMIT)"; \

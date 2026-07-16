@@ -54,7 +54,7 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		workerProfiles:       &tracedWorkerProfileStore{inner: inner.WorkerProfiles()},
 		agentServices:        &tracedAgentServiceStore{inner: inner.AgentServices()},
 		triggerBindings:      &tracedTriggerBindingStore{inner: inner.TriggerBindings()},
-		driverRuns:           &tracedDriverRunStore{inner: inner.DriverRuns()},
+		driverRuns:           wrapTracedDriverRunStore(inner.DriverRuns()),
 		driverSteps:          &tracedDriverStepStore{inner: inner.DriverSteps()},
 		taskRuns:             &tracedTaskRunStore{inner: inner.TaskRuns()},
 		taskRunEvents:        &tracedTaskRunEventStore{inner: inner.TaskRunEvents()},
@@ -87,7 +87,7 @@ type tracedStore struct {
 	workerProfiles       *tracedWorkerProfileStore
 	agentServices        *tracedAgentServiceStore
 	triggerBindings      *tracedTriggerBindingStore
-	driverRuns           *tracedDriverRunStore
+	driverRuns           store.DriverRunStore
 	driverSteps          *tracedDriverStepStore
 	taskRuns             *tracedTaskRunStore
 	taskRunEvents        *tracedTaskRunEventStore

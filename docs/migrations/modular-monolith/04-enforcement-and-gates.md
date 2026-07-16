@@ -1,14 +1,14 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** Reviewed — Phase 1 enforcement complete
+- **Status:** Reviewed — Phase 3 architecture enforcement and paired-gate evidence complete
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
-**Phase 1 status:** Analyzer `1.0.0` strictly validates the approved graph and baseline, enforces all four release and seven tag/race profiles plus the all-files AST pass, rejects undeclared module roots/edges and cycles, detects forbidden signature/type leakage, and ratchets semantic composite-Store, plural-handler, and 233 type-resolved direct-write rows. The reviewed mutation ledger, 83-component runtime inventory with exact parity and default-deny lifecycle dispositions for 108 in-scope non-test source goroutine launch definitions, six-record performance baseline, and five-row characterization matrix are checked in. The supervisor-disabled manifest and runner are productized, but their only execution row is intentionally RED; this completed failure contract is not supervisor-disabled functionality.
+**Phase 3 status:** Analyzer `1.0.0` strictly validates the approved graph and baseline, enforces all four release and seven tag/race profiles plus the all-files AST pass, rejects undeclared module roots/edges and cycles, and detects forbidden signature/type leakage. The current ratchets are 88 semantic composite-Store files, 77 outside composition, 91 plural-handler imports (42 denied-root and 49 legacy-service exceptions), and 226 type-resolved direct-write rows across 249 call sites. Two capability roots are active, the mutation ledger contains 17 commands, all six performance records are measured, and no architecture decision is pending. The runtime inventory contains 85 components, including 56 ticker sites and 58 managed components, with exact default-deny dispositions for 107 in-scope non-test goroutine launch definitions. The supervisor-disabled manifest remains intentionally RED; Phase 3 does not relabel that completed failure contract as supervisor-disabled functionality.
 
 ## Architecture source of truth
 
-Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Phase 2 is now complete: `workflowcatalog` is `active`, `completed_phase` is `2`, and the baseline carries a source-bound Phase 2 validation snapshot. The graph declares:
+Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog and Automation are now `active`, `completed_phase` is `3`, and the ledger records the 14 Automation mutations plus the three Workflow Catalog lifecycle commands. The baseline retains the immutable Phase 2 snapshot and adds an explicit Phase 3 pre-commit base-plus-diff snapshot bound to the two base SHAs, the measured diff, and the exact completed versus not-recorded proof. The graph declares:
 
 - every capability root;
 - allowed capability-to-capability import, synchronous command/query, and durable event edges;
@@ -19,6 +19,8 @@ Phase 1 established the checks in `internal/archtest/testdata/capability-graph.y
 - the [Phase 0 baselines](00-phase-0-baseline.md) for broad Store use and type-resolved direct adapter writes.
 
 The human ownership tables in [02-target-architecture.md](02-target-architecture.md) and the machine graph change together. An import exception without an ownership decision is not accepted.
+
+The `internal/workflows` legacy-path expiry is explicitly extended from Phase 3 to Phase 5 under `workflow-distribution-lane`. It cannot truthfully expire in Phase 3: the package still mixes embedded source authoring/catalog duties with trusted global-runner resolution, and 16 checked-in Go callers remain. The graph records the rationale, Workflow Catalog and Execution replacement roots, and the exact sorted caller list; `TestLegacyWorkflowsExtensionMatchesCurrentCallers` fails if that evidence drifts. Phase 5 is the last permitted milestone under this review, not a silent waiver.
 
 ## Go dependency gates
 
@@ -133,7 +135,7 @@ Structural requirements:
 - connector secrets remain inside Connectors dispatch/materialization boundaries;
 - TaskRun and PTY environment-audit tests prove operator/forge credentials are absent; PTY commands also prove the session fence and session scope.
 
-Workflow approve/unapprove/activate and every grant-write path require negative tests on HTTP, CLI, and any internal entry surface. The standalone CLI must reach these commands through the authenticated management API, not by constructing authority or Store access locally. Its behavior slice also tests endpoint discovery, approved optional host startup, unavailable-host failure, local/open-mode authentication, non-interactive use, output/exit-code compatibility, and rollback. A temporary legacy-authority adapter keeps the slice explicitly security-incomplete and carries a removal issue.
+Workflow approve/unapprove/activate and every grant-write path require negative tests on HTTP, CLI, and any internal entry surface. The standalone CLI must reach these commands through the authenticated management API, not by constructing authority or Store access locally. Its behavior slice also tests endpoint discovery, the prohibition on implicit host startup, unavailable-host failure, local/open-mode authentication, non-interactive use, output/exit-code compatibility, and rollback.
 
 ## Runtime gates
 
@@ -314,4 +316,4 @@ The modular-monolith migration is complete only when:
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Migration plan](03-migration-plan.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Migration plan](03-migration-plan.md) · [Phase 3 evidence](08-phase-3-decisions-and-evidence.md)

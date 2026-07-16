@@ -4,13 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/eventpolicy"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 )
 
 const (
@@ -46,9 +52,111 @@ func seedStore(t *testing.T, enabled bool) *memstore.Store {
 	return st
 }
 
+// legacyAdmission is deliberately test-only. It lets the pre-Phase-3 router
+// behavior suites drive the new named workflow while their fixtures still use
+// memstore's legacy trigger dispatcher. Production handler files contain no
+// corresponding fallback.
+type legacyAdmission struct{ st store.Store }
+
+func (adapter legacyAdmission) AdmitEvent(ctx context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+	if adapter.st == nil || adapter.st.TriggerRoutes() == nil {
+		return nil, automation.ErrUnavailable
+	}
+	// Mirror Automation's centralized derived-admission boundary in this
+	// deliberately legacy test adapter. Production always calls the real core;
+	// this keeps signed HTTP regression tests on the same shared policy.
+	if !eventpolicy.EligibleForAdmission(
+		command.EventType, string(automation.EventOriginExternal), command.SourceKind,
+		command.ActorRef, command.SourceEventID,
+	) {
+		return nil, automation.ErrInvalid
+	}
+	result, err := adapter.st.TriggerRoutes().DispatchTriggerRouteV2(ctx, command.WorkspaceKey, command.RouteKey, store.TriggerRouteDispatch{
+		IdempotencyKey: command.SourceKind + ":" + command.SourceEventID,
+		SourceEventID:  command.SourceEventID, EventType: command.EventType,
+		SubjectRef: command.SubjectRef, ActorRef: command.ActorRef,
+		SignatureStatus: "verified", RawPayloadRef: command.RawPayloadRef,
+		RawPayloadDigest: command.RawPayloadDigest, Payload: command.Payload,
+		SubjectAttrs: command.SubjectAttrs,
+	})
+	if err != nil {
+		return nil, legacyAutomationError(err)
+	}
+	deliveries := make([]*automation.Delivery, 0, len(result.Deliveries))
+	for _, delivery := range result.Deliveries {
+		deliveries = append(deliveries, &automation.Delivery{
+			DeliveryID: delivery.DeliveryID, TriggerBindingID: delivery.BindingID,
+			DriverRunID: delivery.RunID, Status: delivery.Status,
+			RejectionReason: delivery.RejectionReason,
+		})
+	}
+	return &automation.AdmissionResult{Deliveries: deliveries}, nil
+}
+
+type legacyQueries struct{ st store.Store }
+
+func (adapter legacyQueries) GetEvent(ctx context.Context, workspace, eventID string) (*automation.Event, error) {
+	event, err := adapter.st.TriggerEvents().Get(ctx, workspace, eventID)
+	return event, legacyAutomationError(err)
+}
+
+func (adapter legacyQueries) ListEvents(ctx context.Context, workspace string, filter automation.EventFilter) ([]*automation.Event, error) {
+	events, err := adapter.st.TriggerEvents().List(ctx, workspace, store.TriggerEventFilter{
+		SourceKind: filter.SourceKind, TriggerBindingID: filter.BindingID, Limit: filter.Limit,
+	})
+	return events, legacyAutomationError(err)
+}
+
+func (adapter legacyQueries) GetDelivery(ctx context.Context, workspace, deliveryID string) (*automation.Delivery, error) {
+	delivery, err := adapter.st.TriggerDeliveries().Get(ctx, workspace, deliveryID)
+	return delivery, legacyAutomationError(err)
+}
+
+func (adapter legacyQueries) ListDeliveries(ctx context.Context, workspace string, filter automation.DeliveryFilter) ([]*automation.Delivery, error) {
+	deliveries, err := adapter.st.TriggerDeliveries().List(ctx, workspace, store.TriggerDeliveryFilter{
+		TriggerEventID: filter.EventID, TriggerBindingID: filter.BindingID,
+		Status: filter.Status, Limit: filter.Limit,
+	})
+	return deliveries, legacyAutomationError(err)
+}
+
+func legacyAutomationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, domain.ErrNotFound):
+		return errors.Join(automation.ErrNotFound, err)
+	case errors.Is(err, domain.ErrInvalid):
+		return errors.Join(automation.ErrInvalid, err)
+	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists):
+		return errors.Join(automation.ErrConflict, err)
+	default:
+		return err
+	}
+}
+
+type testAuthorityProvider struct{}
+
+func (testAuthorityProvider) AuthorityForVerifiedWebhook(context.Context, webhookingestion.AuthorityRequest) (authority.WebhookAuthority, error) {
+	return authority.WebhookAuthority{}, nil
+}
+
 func newServer(st store.Store) *http.ServeMux {
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	workflow, err := webhookingestion.New(
+		NewCompatibilityVerifier(CompatibilityVerifierConfig{
+			Bindings: st.TriggerBindings(), Connectors: st.Connectors(),
+		}),
+		testAuthorityProvider{}, legacyAdmission{st: st},
+	)
+	if err != nil {
+		panic(err)
+	}
+	New(Config{
+		Workflow: workflow, Automation: legacyQueries{st: st},
+		Awaits: &trigger.AwaitMatcher{Store: st},
+	}).Register(mux)
 	return mux
 }
 
@@ -365,8 +473,8 @@ func TestReceiveWebhookDisabledBinding(t *testing.T) {
 	mux := newServer(seedStore(t, false))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, signedRequest("github", "d", prOpenedBody))
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", rr.Code)
+	if rr.Code != http.StatusUnauthorized || rr.Body.String() != uniform401Body {
+		t.Fatalf("disabled binding denial = %d %q, want uniform 401", rr.Code, rr.Body.String())
 	}
 }
 
@@ -382,7 +490,9 @@ func TestReceiveWebhookUnknownAdapter(t *testing.T) {
 
 func TestReceiveWebhookNoBindingForRoute(t *testing.T) {
 	mux := newServer(seedStore(t, true))
-	// closed action has no binding → 404, and we never reach verification.
+	// A closed action has no binding, but route presence is not exposed through
+	// a distinct response: missing, disabled, and bad-signature requests share
+	// the same denial.
 	body := []byte(`{"action":"closed","repository":{"full_name":"acme/widgets"}}`)
 	r := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+testWS+"/webhooks/github", bytes.NewReader(body))
 	r.Header.Set(githubEventHeader, "pull_request")
@@ -390,8 +500,8 @@ func TestReceiveWebhookNoBindingForRoute(t *testing.T) {
 	r.Header.Set(githubSignatureHeader, githubSignature(testSecret, body))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, r)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 for unbound route", rr.Code)
+	if rr.Code != http.StatusUnauthorized || rr.Body.String() != uniform401Body {
+		t.Fatalf("unbound route denial = %d %q, want uniform 401", rr.Code, rr.Body.String())
 	}
 }
 

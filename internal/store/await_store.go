@@ -127,6 +127,37 @@ type AwaitStore interface {
 	GetSatisfiedAwait(ctx context.Context, workspaceKey, instanceKey string) (*domain.AwaitInstance, error)
 }
 
+// AtomicAwaitStore is the generic dispatch-side resolve-and-resume command.
+// It commits the await's terminal transition together with either re-queuing
+// its suspended run or recording the pending-resume marker for a run that has
+// not suspended yet. A same-event replay is idempotent and converges the run;
+// a different event never steals a resolution that already won.
+//
+// eventID selects satisfied versus timed_out using the canonical synthetic
+// timeout prefix. actor is the verified event actor and is checked against the
+// persisted ActorAllow predicate for ordinary satisfied resolutions.
+type AtomicAwaitStore interface {
+	ResolveAwaitAndResume(
+		ctx context.Context,
+		workspaceKey, instanceKey, eventID string,
+		payload json.RawMessage,
+		actor string,
+	) error
+}
+
+// RunOutcomeAwaitStore is the narrow atomic command required by Execution's
+// durable run.finished consumer. It resolves one pending composition await and
+// either re-queues its suspended parent or records the pending-resume marker in
+// the same backend transaction. A same-event replay is idempotent and must
+// converge any still-suspended parent before returning success.
+type RunOutcomeAwaitStore interface {
+	ResolveRunOutcomeAwaitAndResume(
+		ctx context.Context,
+		workspaceKey, instanceKey, eventID string,
+		payload json.RawMessage,
+	) error
+}
+
 // Fail-closed placeholder for Store implementations that have not wired
 // await persistence yet (memstore lands in AW2, fleet-db in AW3). Every
 // method returns an error wrapping errors.ErrUnsupported so callers can

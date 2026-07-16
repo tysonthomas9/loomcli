@@ -393,6 +393,7 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	cmd.Env = withoutEnvKey(cmd.Env, "FLEET_CONFIG")
 	cmd.Env = withEnvValue(cmd.Env, "FLEET_AUTH_BOOTSTRAP_ADMIN_KEY", serviceCredential)
 	cmd.Env = withEnvValue(cmd.Env, "FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED", "true")
+	cmd.Env = withEnvValue(cmd.Env, "FLEET_AUTOMATION_TRIGGER_ADMISSION_ENABLED", "true")
 	// FleetDB's artifact-backed issue design mode requires an explicit content
 	// backend. Embedded mode owns a private durable directory beside its Redis
 	// snapshot; force that child-only local backend instead of inheriting a

@@ -130,6 +130,82 @@ func TestAwaitResolveWire(t *testing.T) {
 	}
 }
 
+func TestResolveRunOutcomeAwaitAndResumeWire(t *testing.T) {
+	client := awaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/awaits/resolve-run-outcome" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		var req struct {
+			InstanceKey string          `json:"instance_key"`
+			EventID     string          `json:"event_id"`
+			Payload     json.RawMessage `json:"payload"`
+		}
+		decodeJSONBody(t, r, &req)
+		if req.InstanceKey != "parent#await-1" || req.EventID != "run-finished:child:completed" ||
+			string(req.Payload) != `{"runId":"child","status":"completed"}` {
+			t.Errorf("atomic outcome-await body = %+v", req)
+		}
+		writeJSON(t, w, map[string]bool{"resolved": true})
+	})
+	resolver := client.Awaits().(store.RunOutcomeAwaitStore)
+	err := resolver.ResolveRunOutcomeAwaitAndResume(
+		t.Context(), "WS", "parent#await-1", "run-finished:child:completed",
+		json.RawMessage(`{"runId":"child","status":"completed"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveAwaitAndResumeWire(t *testing.T) {
+	client := awaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/awaits/resolve-and-resume" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		var req struct {
+			InstanceKey string          `json:"instance_key"`
+			EventID     string          `json:"event_id"`
+			Status      string          `json:"status"`
+			Actor       string          `json:"actor"`
+			Payload     json.RawMessage `json:"payload"`
+		}
+		decodeJSONBody(t, r, &req)
+		if req.InstanceKey != "run-1#await-1" || req.EventID != "approval-9" ||
+			req.Status != "satisfied" || req.Actor != "alice" ||
+			string(req.Payload) != `{"decision":"approved"}` {
+			t.Errorf("atomic await body = %+v", req)
+		}
+		writeJSON(t, w, map[string]bool{"resolved": true})
+	})
+	resolver := client.Awaits().(store.AtomicAwaitStore)
+	if err := resolver.ResolveAwaitAndResume(
+		t.Context(), "WS", "run-1#await-1", "approval-9",
+		json.RawMessage(`{"decision":"approved"}`), "alice",
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResolveAwaitAndResumeTimeoutWire(t *testing.T) {
+	client := awaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Status string `json:"status"`
+		}
+		decodeJSONBody(t, r, &req)
+		if req.Status != "timed_out" {
+			t.Errorf("atomic timeout status = %q, want timed_out", req.Status)
+		}
+		writeJSON(t, w, map[string]bool{"resolved": true})
+	})
+	resolver := client.Awaits().(store.AtomicAwaitStore)
+	if err := resolver.ResolveAwaitAndResume(
+		t.Context(), "WS", "run-1#await-1", domain.AwaitTimeoutEventID("run-1#await-1"), nil,
+		domain.AwaitTimeoutActor,
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The synthetic-timeout-event convention: an await-timeout-* event ID is
 // sent with status timed_out (resume-with-timeout-event decision).
 func TestAwaitResolveTimeoutStatus(t *testing.T) {
@@ -158,6 +234,20 @@ func TestAwaitResolvePayloadCapClientSide(t *testing.T) {
 	_, err := client.Awaits().ResolveAwait(t.Context(), "WS", "run-1#await-1", "event-1", oversize, "alice")
 	if !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("oversize resolve err = %v, want ErrInvalid", err)
+	}
+}
+
+func TestResolveRunOutcomeAwaitPayloadCapClientSide(t *testing.T) {
+	client := awaitTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("oversized atomic run outcome payload reached the wire")
+	})
+	resolver := client.Awaits().(store.RunOutcomeAwaitStore)
+	err := resolver.ResolveRunOutcomeAwaitAndResume(
+		t.Context(), "WS", "parent#await-1", "run-finished:child:completed",
+		json.RawMessage(make([]byte, domain.DefaultAwaitResumePayloadCap+1)),
+	)
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("oversize atomic resolve err = %v, want ErrInvalid", err)
 	}
 }
 

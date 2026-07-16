@@ -303,7 +303,7 @@ func TestWorkflowBuildTextHandoffNamesManagementServerAndWorkspace(t *testing.T)
 	const digest = "sha256:custom-source"
 	var gotOptions workflows.BuildAndRegisterOptions
 	originalBuild := workflowBuildAndRegister
-	workflowBuildAndRegister = func(_ context.Context, _ store.Store, opts workflows.BuildAndRegisterOptions) (*driverpkg.RegisterFlueResult, string, error) {
+	workflowBuildAndRegister = func(_ context.Context, _ workflows.DriverCatalog, opts workflows.BuildAndRegisterOptions) (*driverpkg.RegisterFlueResult, string, error) {
 		gotOptions = opts
 		return &driverpkg.RegisterFlueResult{
 			Driver:  &domain.Driver{WorkspaceKey: opts.WorkspaceKey, DriverID: opts.Name},
@@ -343,7 +343,7 @@ func TestWorkflowBuildJSONFailureDoesNotCreateVersion(t *testing.T) {
 	workflowBuildSource = sourceDir
 	workflowBuildJSON = true
 	origBuild := workflowBuildAndRegister
-	workflowBuildAndRegister = func(context.Context, store.Store, workflows.BuildAndRegisterOptions) (*driverpkg.RegisterFlueResult, string, error) {
+	workflowBuildAndRegister = func(context.Context, workflows.DriverCatalog, workflows.BuildAndRegisterOptions) (*driverpkg.RegisterFlueResult, string, error) {
 		return nil, "redacted diagnostics", errors.New("flue build failed")
 	}
 	t.Cleanup(func() { workflowBuildAndRegister = origBuild })

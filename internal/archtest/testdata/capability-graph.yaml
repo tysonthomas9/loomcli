@@ -1,6 +1,6 @@
 schema_version: 1
 status: approved
-completed_phase: 2
+completed_phase: 3
 decision_dependencies:
   - MM-1
   - MM-2
@@ -19,7 +19,8 @@ restrictions:
   named_apps_own_ports_only: true
   modules_reject_legacy_types: true
 external_import_policy:
-  core_allowed_prefixes: []
+  core_allowed_prefixes:
+    - github.com/robfig/cron/v3
   adapter_allowed_prefixes: []
   platform_allowed_prefixes: []
   core_denied_standard_prefixes:
@@ -44,7 +45,7 @@ capabilities:
     status: active
   - name: automation
     root: automation
-    status: planned
+    status: active
   - name: execution
     root: execution
     status: planned
@@ -144,9 +145,33 @@ legacy_paths:
     removal_issue: MM-LEGACY-SVCIMPL
     expires_after_phase: 7
   - path: internal/workflows
-    owner: workflow-catalog-lane
+    owner: workflow-distribution-lane
     removal_issue: MM-LEGACY-WORKFLOWS
-    expires_after_phase: 3
+    expires_after_phase: 5
+    extension:
+      reviewed_by: phase-3-architecture-review
+      reviewed_at: 2026-07-16
+      rationale: Phase 3 moved Automation callers through its module API without rewriting the mixed builtin-source, authoring, registration, and trusted runner-resolution package. Removing this path now would conflate the behavior-preserving Automation slice with Workflow Catalog authoring and Phase 4 Execution ownership work.
+      replacement_apis:
+        - internal/modules/execution
+        - internal/modules/workflowcatalog
+      remaining_call_sites:
+        - internal/app/serve/workflow_catalog.go
+        - internal/cli/agent/tsruntime/tsruntime.go
+        - internal/cli/epic/run.go
+        - internal/cli/serve/workspacemgr/agent_identity_migration.go
+        - internal/cli/serve/workspacemgr/agent_identity_migration_test.go
+        - internal/cli/workflow/management_client_test.go
+        - internal/cli/workflow/workflow_cmd.go
+        - internal/cli/workflow/workflow_cmd_test.go
+        - internal/cli/workflow/workflow_digest_test.go
+        - internal/webui/handlers/agents/record_handlers.go
+        - internal/webui/handlers/agents/record_handlers_driver_test.go
+        - internal/webui/handlers/agents/record_handlers_test.go
+        - internal/webui/handlers/workflows/builtins.go
+        - internal/webui/handlers/workflows/module.go
+        - internal/webui/handlers/workflows/module_test.go
+        - internal/webui/handlers/workflows/preflight.go
 edges:
   - from: sourcecontrol
     to: workspace

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/triggerbindings"
 )
@@ -146,7 +148,10 @@ func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.A
 		CreatedAt:    record.CreatedAt,
 		UpdatedAt:    record.UpdatedAt,
 	}
-	bindings, err := m.store.TriggerBindings().List(ctx, ws, store.TriggerBindingFilter{TargetAgentServiceID: record.ServiceID})
+	if m.bindings == nil {
+		return out, automation.ErrUnavailable
+	}
+	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: record.ServiceID})
 	if err != nil {
 		return out, err
 	}
@@ -291,8 +296,15 @@ func promptAgentSourceConfigRef(roleName, backend string) (string, error) {
 	return string(data), nil
 }
 
-func (m *Module) updateAttachedBindingRole(ctx context.Context, ws, agentID, roleName string) error {
-	bindings, err := m.store.TriggerBindings().List(ctx, ws, store.TriggerBindingFilter{TargetAgentServiceID: agentID})
+func (m *Module) updateAttachedBindingRole(
+	ctx context.Context,
+	auth authority.OperatorAuthority,
+	ws, agentID, roleName string,
+) error {
+	if m.bindings == nil {
+		return automation.ErrUnavailable
+	}
+	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: agentID})
 	if err != nil {
 		return err
 	}
@@ -301,7 +313,10 @@ func (m *Module) updateAttachedBindingRole(ctx context.Context, ws, agentID, rol
 			continue
 		}
 		ref := sourceConfigRefWithRole(b.SourceConfigRef, roleName)
-		if _, err := m.store.TriggerBindings().Update(ctx, ws, b.BindingID, store.TriggerBindingUpdate{SourceConfigRef: &ref}); err != nil {
+		if _, err := m.bindings.UpdateManagedBinding(ctx, auth, automation.UpdateManagedBindingCommand{
+			WorkspaceKey: ws, BindingID: b.BindingID, AgentServiceID: agentID,
+			Patch: automation.BindingPatch{SourceConfigRef: &ref},
+		}); err != nil {
 			return err
 		}
 	}
@@ -322,8 +337,16 @@ func sourceConfigRefWithRole(ref, roleName string) string {
 	return string(data)
 }
 
-func (m *Module) setAttachedBindingsEnabled(ctx context.Context, ws, agentID string, enabled bool) error {
-	bindings, err := m.store.TriggerBindings().List(ctx, ws, store.TriggerBindingFilter{TargetAgentServiceID: agentID})
+func (m *Module) setAttachedBindingsEnabled(
+	ctx context.Context,
+	auth authority.OperatorAuthority,
+	ws, agentID string,
+	enabled bool,
+) error {
+	if m.bindings == nil {
+		return automation.ErrUnavailable
+	}
+	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: agentID})
 	if err != nil {
 		return err
 	}
@@ -331,8 +354,14 @@ func (m *Module) setAttachedBindingsEnabled(ctx context.Context, ws, agentID str
 		if b == nil {
 			continue
 		}
-		flag := enabled
-		if _, err := m.store.TriggerBindings().Update(ctx, ws, b.BindingID, store.TriggerBindingUpdate{Enabled: &flag}); err != nil {
+		command := automation.ManagedBindingCommand{WorkspaceKey: ws, BindingID: b.BindingID, AgentServiceID: agentID}
+		var err error
+		if enabled {
+			_, err = m.bindings.EnableManagedBinding(ctx, auth, command)
+		} else {
+			_, err = m.bindings.DisableManagedBinding(ctx, auth, command)
+		}
+		if err != nil {
 			return err
 		}
 	}

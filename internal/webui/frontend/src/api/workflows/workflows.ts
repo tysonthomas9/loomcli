@@ -1,5 +1,5 @@
 import { del, get, patch, post, wsUrl } from "@/api/common";
-import { getLocalWorkflowLifecycleBearer } from "./localOperatorSession";
+import { localOperatorRequestOptions } from "./localOperatorSession";
 
 export const EPIC_RUNNER_WORKFLOW_NAME = "epic-runner";
 
@@ -257,7 +257,11 @@ export async function createTriggerBinding(
   workspaceId: string,
   req: CreateTriggerBindingRequest,
 ): Promise<TriggerBinding> {
-  return post<TriggerBinding>(wsUrl(workspaceId, `/trigger-bindings`), req);
+  return post<TriggerBinding>(
+    wsUrl(workspaceId, `/trigger-bindings`),
+    req,
+    localOperatorRequestOptions(workspaceId),
+  );
 }
 
 /**
@@ -277,6 +281,7 @@ export async function runTriggerBinding(
       `/trigger-bindings/${encodeURIComponent(bindingId)}/run`,
     ),
     {},
+    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -310,6 +315,7 @@ export async function setTriggerBindingEnabled(
       }`,
     ),
     {},
+    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -335,6 +341,7 @@ export async function updateTriggerBinding(
   return patch<TriggerBinding>(
     wsUrl(workspaceId, `/trigger-bindings/${encodeURIComponent(bindingId)}`),
     req,
+    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -360,6 +367,7 @@ export async function deleteTriggerBinding(
 ): Promise<DeleteTriggerBindingResult> {
   return del<DeleteTriggerBindingResult>(
     wsUrl(workspaceId, `/trigger-bindings/${encodeURIComponent(bindingId)}`),
+    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -513,7 +521,7 @@ export async function approveWorkflowVersion(
       `/workflows/${encodeURIComponent(name)}/versions/${encodeURIComponent(versionId)}/approve`,
     ),
     {},
-    localLifecycleRequestOptions(workspaceId),
+    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -529,7 +537,7 @@ export async function unapproveWorkflowVersion(
       `/workflows/${encodeURIComponent(name)}/versions/${encodeURIComponent(versionId)}/unapprove`,
     ),
     {},
-    localLifecycleRequestOptions(workspaceId),
+    localOperatorRequestOptions(workspaceId),
   );
 }
 
@@ -548,15 +556,6 @@ export async function activateWorkflowVersion(
       `/workflows/${encodeURIComponent(name)}/versions/${encodeURIComponent(versionId)}/activate`,
     ),
     {},
-    localLifecycleRequestOptions(workspaceId),
+    localOperatorRequestOptions(workspaceId),
   );
-}
-
-function localLifecycleRequestOptions(
-  workspaceId: string,
-): { headers: Record<string, string> } | undefined {
-  const bearer = getLocalWorkflowLifecycleBearer(workspaceId);
-  return bearer
-    ? { headers: { Authorization: `Bearer ${bearer}` } }
-    : undefined;
 }

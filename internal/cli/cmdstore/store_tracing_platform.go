@@ -9,6 +9,8 @@ package cmdstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -248,10 +250,24 @@ func (t *tracedTriggerBindingStore) ResolveWebhookSecret(ctx context.Context, ws
 
 type tracedDriverRunStore struct{ inner store.DriverRunStore }
 
+type tracedDriverRunOutcomeStore struct {
+	*tracedDriverRunStore
+	outcomes store.DriverRunOutcomeStore
+}
+
+func wrapTracedDriverRunStore(inner store.DriverRunStore) store.DriverRunStore {
+	base := &tracedDriverRunStore{inner: inner}
+	if outcomes, ok := inner.(store.DriverRunOutcomeStore); ok {
+		return &tracedDriverRunOutcomeStore{tracedDriverRunStore: base, outcomes: outcomes}
+	}
+	return base
+}
+
 // Lock in the optional events-reader forwarding (Events): same silent-drift class as
 // ArtifactContentReader on tracedArtifactStore — without this guard the wrapper could
 // drop it and the consumer's comma-ok type assertion would fail silently.
 var _ store.DriverRunEventsReader = (*tracedDriverRunStore)(nil)
+var _ store.DriverRunOutcomeStore = (*tracedDriverRunOutcomeStore)(nil)
 
 func (t *tracedDriverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) {
 	return traced(ctx, "DriverRuns", "Create", func(ctx context.Context) (*domain.DriverRun, error) {
@@ -380,6 +396,24 @@ func (t *tracedDriverRunStore) ResumeAwaiting(ctx context.Context, ws, runID, aw
 	)
 }
 
+func (t *tracedDriverRunOutcomeStore) ClaimDriverRunOutcomes(ctx context.Context, claim store.DriverRunOutcomeClaim) ([]store.DriverRunOutcome, error) {
+	return tracedList(ctx, "DriverRuns", "ClaimOutcomes", func(ctx context.Context) ([]store.DriverRunOutcome, error) {
+		return t.outcomes.ClaimDriverRunOutcomes(ctx, claim)
+	}, attribute.String("loom.workspace", claim.WorkspaceKey))
+}
+
+func (t *tracedDriverRunOutcomeStore) CompleteDriverRunOutcome(ctx context.Context, completion store.DriverRunOutcomeCompletion) error {
+	return tracedErr(ctx, "DriverRuns", func(ctx context.Context) error {
+		return t.outcomes.CompleteDriverRunOutcome(ctx, completion)
+	}, attribute.String("loom.workspace", completion.WorkspaceKey), attribute.String("loom.driver_run", completion.RunID))
+}
+
+func (t *tracedDriverRunOutcomeStore) RetryDriverRunOutcome(ctx context.Context, retry store.DriverRunOutcomeRetry) error {
+	return tracedErr(ctx, "DriverRuns", func(ctx context.Context) error {
+		return t.outcomes.RetryDriverRunOutcome(ctx, retry)
+	}, attribute.String("loom.workspace", retry.WorkspaceKey), attribute.String("loom.driver_run", retry.RunID))
+}
+
 // --- AwaitStore ---
 
 type tracedAwaitStore struct{ inner store.AwaitStore }
@@ -411,6 +445,43 @@ func (t *tracedAwaitStore) ResolveAwait(ctx context.Context, ws, instanceKey, ev
 	}
 	finish(span, err)
 	return out, err
+}
+
+func (t *tracedAwaitStore) ResolveAwaitAndResume(
+	ctx context.Context,
+	ws, instanceKey, eventID string,
+	payload json.RawMessage,
+	actor string,
+) error {
+	resolver, ok := t.inner.(store.AtomicAwaitStore)
+	if !ok {
+		return fmt.Errorf("Awaits.ResolveAwaitAndResume: %w", errors.ErrUnsupported)
+	}
+	return tracedErr(ctx, "Awaits", func(ctx context.Context) error {
+		return resolver.ResolveAwaitAndResume(ctx, ws, instanceKey, eventID, payload, actor)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_instance", instanceKey),
+		attribute.String("loom.event", eventID),
+	)
+}
+
+func (t *tracedAwaitStore) ResolveRunOutcomeAwaitAndResume(
+	ctx context.Context,
+	ws, instanceKey, eventID string,
+	payload json.RawMessage,
+) error {
+	resolver, ok := t.inner.(store.RunOutcomeAwaitStore)
+	if !ok {
+		return fmt.Errorf("Awaits.ResolveRunOutcomeAwaitAndResume: %w", errors.ErrUnsupported)
+	}
+	return tracedErr(ctx, "Awaits", func(ctx context.Context) error {
+		return resolver.ResolveRunOutcomeAwaitAndResume(ctx, ws, instanceKey, eventID, payload)
+	},
+		attribute.String("loom.workspace", ws),
+		attribute.String("loom.await_instance", instanceKey),
+		attribute.String("loom.event", eventID),
+	)
 }
 
 func (t *tracedAwaitStore) ListAwaitsByPattern(ctx context.Context, ws, pattern string) ([]*domain.AwaitInstance, error) {

@@ -20,8 +20,9 @@ package driver
 // registration-time journal scan finds the journaled run.finished of an
 // already-terminal child, so it resolves inline with no lost wakeup, and the
 // await consumes a normal awaitIndex slot so parent re-entry replays the
-// child result deterministically (RULE 3). No actor predicate: run.finished
-// is server-emitted with actor=system (the composition carve-out).
+// child result deterministically (RULE 3). The await requires actor=system:
+// run.finished is a server-owned lifecycle event and external/session events
+// must never satisfy this internal composition lane.
 //
 // cascadeCancelChildren is the composition cascade (locked decision): when a
 // parent reaches a terminal status its QUEUED children are cancelled (each
@@ -31,6 +32,7 @@ package driver
 // children are left to their own await deadlines (RULE 5 bounds them).
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -261,7 +263,7 @@ type AwaitChildWorkflowOptions struct {
 // await flow over the child's run.finished subject key. It returns the await
 // outcome plus the child run (as read this request — terminal info for
 // satisfied awaits, current status otherwise).
-func AwaitChildWorkflow(ctx context.Context, st store.Store, opts AwaitChildWorkflowOptions) (*AwaitEventOutcome, *domain.DriverRun, error) {
+func AwaitChildWorkflow(ctx context.Context, st store.Store, opts AwaitChildWorkflowOptions) (*AwaitEventOutcome, *domain.DriverRun, error) { //nolint:funlen // Parent-child validation and await registration form one ordered composition operation.
 	childRunID := strings.TrimSpace(opts.ChildRunID)
 	if childRunID == "" {
 		return nil, nil, fmt.Errorf("childRunId required: %w", domain.ErrInvalid)
@@ -273,22 +275,108 @@ func AwaitChildWorkflow(ctx context.Context, st store.Store, opts AwaitChildWork
 	if child.ParentRunID == "" || child.ParentRunID != opts.RunID {
 		return nil, nil, fmt.Errorf("run %s is not a child of run %s: %w", childRunID, opts.RunID, domain.ErrNotOwner)
 	}
-	outcome, err := AwaitEvent(ctx, st, AwaitEventOptions{
+	awaitOptions := AwaitEventOptions{
 		WorkspaceKey: opts.WorkspaceKey,
 		RunID:        opts.RunID,
 		NodeID:       opts.NodeID,
 		LeaseID:      opts.LeaseID,
 		FencingToken: opts.FencingToken,
 		Pattern:      RunFinishedSubjectKey(childRunID),
-		// No actor predicate: run.finished is emitted with actor=system.
-		TimeoutMs:  opts.TimeoutMs,
-		AwaitIndex: opts.AwaitIndex,
-		MaxTimeout: opts.MaxTimeout,
-	})
+		ActorAllow:   []string{RunFinishedActor},
+		TimeoutMs:    opts.TimeoutMs,
+		AwaitIndex:   opts.AwaitIndex,
+		MaxTimeout:   opts.MaxTimeout,
+	}
+	// Serialize this child's outcome notification with registration and the
+	// post-registration terminal re-read. This covers all orderings:
+	// finished-before-register resolves inline, registered-before-finish is
+	// resolved by the normal notification, and a concurrent finish cannot
+	// fall between the two without one side observing the other's durable row.
+	unlock := lockRunOutcome(opts.WorkspaceKey, childRunID)
+	registered, instanceKey, err := registerAwait(ctx, st, awaitOptions)
+	if err != nil {
+		unlock()
+		return nil, nil, err
+	}
+	if registered.Satisfied {
+		if registered.Instance == nil {
+			unlock()
+			return nil, nil, fmt.Errorf("satisfied child await %s returned no instance: %w", instanceKey, domain.ErrInvalidTransition)
+		}
+		if registered.Instance.Status == domain.AwaitSatisfied {
+			// Registration-time catch-up may inspect rows written by an older
+			// deployment. Re-read the child after the atomic scan, then require
+			// the recorded winner to be the exact trusted terminal outcome.
+			child, err = st.DriverRuns().Get(ctx, opts.WorkspaceKey, childRunID)
+			if err != nil {
+				unlock()
+				return nil, nil, fmt.Errorf("recheck child run %s after satisfied await registration: %w", childRunID, err)
+			}
+			if err := validateSatisfiedChildAwait(ctx, registered.Instance, child); err != nil {
+				unlock()
+				return nil, child, err
+			}
+		}
+		unlock()
+		return &AwaitEventOutcome{Status: string(registered.Instance.Status), Instance: registered.Instance}, child, nil
+	}
+	child, err = st.DriverRuns().Get(ctx, opts.WorkspaceKey, childRunID)
+	if err != nil {
+		unlock()
+		return nil, nil, fmt.Errorf("recheck child run %s after await registration: %w", childRunID, err)
+	}
+	if child.Status.IsTerminal() {
+		outcome, resolveErr := resolveTerminalChildAwait(ctx, st, awaitOptions, instanceKey, child)
+		unlock()
+		if resolveErr != nil {
+			return nil, nil, resolveErr
+		}
+		return outcome, child, nil
+	}
+	unlock()
+	outcome, err := suspendForAwait(ctx, st, awaitOptions, instanceKey, registered.Instance)
 	if err != nil {
 		return nil, nil, err
 	}
 	return outcome, child, nil
+}
+
+// validateSatisfiedChildAwait prevents historical or forged run.finished
+// rows from becoming composition truth. The child terminal record is the
+// authority; event identity, actor, and bounded payload must agree exactly.
+func validateSatisfiedChildAwait(ctx context.Context, instance *domain.AwaitInstance, child *domain.DriverRun) error {
+	if instance == nil || child == nil || !child.Status.IsTerminal() {
+		return fmt.Errorf("composition await was satisfied while child is nonterminal: %w", domain.ErrConflict)
+	}
+	expectedEventID := RunFinishedEventID(child.RunID, child.Status)
+	expectedPayload := marshalRunFinishedPayload(ctx, child)
+	if instance.SatisfiedByEventID != expectedEventID || instance.SatisfiedActor != RunFinishedActor ||
+		!bytes.Equal(instance.SatisfiedPayload, expectedPayload) {
+		return fmt.Errorf(
+			"composition await winner %q/%q does not match terminal child outcome %q/%q: %w",
+			instance.SatisfiedByEventID, instance.SatisfiedActor,
+			expectedEventID, RunFinishedActor, domain.ErrConflict,
+		)
+	}
+	return nil
+}
+
+// resolveTerminalChildAwait records a deterministic run.finished outcome on
+// the already-registered await while the parent is still running. There is no
+// resume call: the workflow continues inline in the same fenced execution.
+// Re-entry reads the satisfied row by the same awaitIndex.
+func resolveTerminalChildAwait(ctx context.Context, st store.Store, opts AwaitEventOptions, instanceKey string, child *domain.DriverRun) (*AwaitEventOutcome, error) {
+	eventID := RunFinishedEventID(child.RunID, child.Status)
+	resolution, err := st.Awaits().ResolveAwait(ctx, opts.WorkspaceKey, instanceKey, eventID,
+		marshalRunFinishedPayload(ctx, child), RunFinishedActor)
+	if err != nil {
+		return nil, fmt.Errorf("resolve terminal child await %s by %s: %w", instanceKey, eventID, err)
+	}
+	instance := resolution.Instance
+	if instance == nil || instance.Status != domain.AwaitSatisfied || instance.SatisfiedByEventID != eventID {
+		return nil, fmt.Errorf("terminal child await %s returned invalid resolution: %w", instanceKey, domain.ErrInvalidTransition)
+	}
+	return &AwaitEventOutcome{Status: string(instance.Status), Instance: instance}, nil
 }
 
 // cascadeCancelChildren applies the composition cascade for one terminal
@@ -296,7 +384,7 @@ func AwaitChildWorkflow(ctx context.Context, st store.Store, opts AwaitChildWork
 // cascading recursively), running children get a cooperative cancel request.
 // Best-effort like every lifecycle leg — failures are logged, never returned;
 // backends without store.DriverRunCancelSupport skip the cascade entirely.
-func cascadeCancelChildren(ctx context.Context, st store.Store, src *trigger.InternalSource, parent *domain.DriverRun, depth int) {
+func cascadeCancelChildren(ctx context.Context, st store.Store, outcomes RunOutcomePublisher, parent *domain.DriverRun, depth int) {
 	if st == nil || parent == nil || !parent.Status.IsTerminal() || depth > compositionMaxDepthFromEnv() {
 		return
 	}
@@ -314,13 +402,13 @@ func cascadeCancelChildren(ctx context.Context, st store.Store, src *trigger.Int
 	}
 	reason := fmt.Sprintf("parent run %s reached terminal status %s", parent.RunID, parent.Status)
 	for _, child := range children {
-		cascadeCancelChild(ctx, st, src, canceller, child, reason, depth)
+		cascadeCancelChild(ctx, st, outcomes, canceller, child, reason, depth)
 	}
 }
 
 // cascadeCancelChild applies one child's cascade leg per the locked decision:
 // queued -> cancelled, running -> cancel-requested, anything else untouched.
-func cascadeCancelChild(ctx context.Context, st store.Store, src *trigger.InternalSource, canceller store.DriverRunCancelSupport, child *domain.DriverRun, reason string, depth int) {
+func cascadeCancelChild(ctx context.Context, st store.Store, outcomes RunOutcomePublisher, canceller store.DriverRunCancelSupport, child *domain.DriverRun, reason string, depth int) {
 	switch child.Status {
 	case domain.DriverRunQueued:
 		cancelled, err := canceller.CancelQueuedRun(ctx, child.WorkspaceKey, child.RunID, reason, CancelErrorClassParentTerminal)
@@ -333,8 +421,8 @@ func cascadeCancelChild(ctx context.Context, st store.Store, src *trigger.Intern
 		}
 		// A cancelled child is a terminal transition like any other: its
 		// own waiters resolve and its own children cascade.
-		emitRunFinishedEvent(ctx, st, src, cancelled)
-		cascadeCancelChildren(ctx, st, src, cancelled, depth+1)
+		emitRunFinishedEvent(ctx, st, outcomes, cancelled)
+		cascadeCancelChildren(ctx, st, outcomes, cancelled, depth+1)
 	case domain.DriverRunRunning:
 		if _, err := canceller.RequestCancel(ctx, child.WorkspaceKey, child.RunID, reason); err != nil {
 			slog.WarnContext(ctx, "composition cancel cascade: request cancel failed",

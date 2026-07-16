@@ -14,8 +14,10 @@ import (
 type driverRunStore struct {
 	mu       sync.RWMutex
 	items    map[string]map[string]*domain.DriverRun
+	outcomes map[string]map[string]*memDriverRunOutcome
 	versions *driverVersionStore
 	bindings *triggerBindingStore
+	events   *triggerEventStore
 	taskRuns *taskRunStore
 	steps    *driverStepStore
 	next     int64
@@ -25,8 +27,20 @@ type driverRunStore struct {
 	awaitResumeEligible func(ws, instanceKey string) bool
 }
 
+type memDriverRunOutcome struct {
+	value       store.DriverRunOutcome
+	state       string
+	claimID     string
+	claimUntil  time.Time
+	availableAt time.Time
+	lastError   string
+}
+
 func newDriverRunStore(versions *driverVersionStore, bindings *triggerBindingStore) *driverRunStore {
-	return &driverRunStore{items: make(map[string]map[string]*domain.DriverRun), versions: versions, bindings: bindings}
+	return &driverRunStore{
+		items: make(map[string]map[string]*domain.DriverRun), outcomes: make(map[string]map[string]*memDriverRunOutcome),
+		versions: versions, bindings: bindings,
+	}
 }
 
 // setAwaitResumeEligible wires the await-status probe ResumeAwaiting consults
@@ -39,6 +53,7 @@ func (s *driverRunStore) setAwaitResumeEligible(probe func(ws, instanceKey strin
 var (
 	_ store.DriverRunStore         = (*driverRunStore)(nil)
 	_ store.DriverRunCancelSupport = (*driverRunStore)(nil)
+	_ store.DriverRunOutcomeStore  = (*driverRunStore)(nil)
 )
 
 func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) { //nolint:funlen // Validation and persisted run assembly stay adjacent.
@@ -291,6 +306,7 @@ func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish stor
 	run.Output = cloneMap(finish.Output)
 	run.FinishedAt = &now
 	run.UpdatedAt = now
+	s.enqueueRunOutcomeLocked(run)
 	return cloneDriverRun(run), nil
 }
 
@@ -300,10 +316,9 @@ func (s *driverRunStore) Finish(_ context.Context, ws, runID string, finish stor
 // owner guard as Finish — may suspend, and the transition releases the
 // execution slot by clearing node and lease. Suspending an already-suspended
 // run is an idempotent no-op (current row returned) so the driver-op layer
-// can retry the pending->suspend leg safely. awaitInstanceKey names the await
-// cycle the run suspends on; memstore requires it (interface parity with the
-// fleet-db wire) but does not persist it — the key is derivable as
-// runID#await-{n} and the payload ref lives on the satisfied await row.
+// can retry the pending->suspend leg safely. awaitInstanceKey names and is
+// persisted as the current await cycle, including when an atomic outcome
+// resolution wins the pending->suspend window.
 func (s *driverRunStore) Suspend(_ context.Context, ws, runID, nodeID, leaseID string, fencingToken int64, awaitInstanceKey string) (*domain.DriverRun, error) {
 	if awaitInstanceKey == "" {
 		return nil, fmt.Errorf("await instance key required: %w", domain.ErrInvalid)
@@ -315,7 +330,11 @@ func (s *driverRunStore) Suspend(_ context.Context, ws, runID, nodeID, leaseID s
 		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotFound)
 	}
 	if run.Status == domain.DriverRunSuspendedAwaitingEvent {
-		return cloneDriverRun(run), nil
+		if run.AwaitInstanceKey == awaitInstanceKey {
+			return cloneDriverRun(run), nil
+		}
+		return nil, fmt.Errorf("driver run %q is suspended on await %q, not %q: %w",
+			runID, run.AwaitInstanceKey, awaitInstanceKey, domain.ErrInvalidTransition)
 	}
 	if run.NodeID != nodeID || run.LeaseID != leaseID || run.FencingToken != fencingToken {
 		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrNotOwner)
@@ -323,8 +342,20 @@ func (s *driverRunStore) Suspend(_ context.Context, ws, runID, nodeID, leaseID s
 	if run.Status != domain.DriverRunRunning {
 		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
 	}
+	if run.ResumeSourceEventID != "" {
+		if run.AwaitInstanceKey == awaitInstanceKey {
+			return nil, fmt.Errorf("driver run %q await %q already resolved: %w",
+				runID, awaitInstanceKey, domain.ErrDriverRunAlreadyResumed)
+		}
+	}
 	now := time.Now().UTC()
 	run.Status = domain.DriverRunSuspendedAwaitingEvent
+	run.AwaitInstanceKey = awaitInstanceKey
+	// A resume marker belongs to the await cycle named by AwaitInstanceKey.
+	// Once the re-queued run is claimed for a later cycle, a fresh suspend
+	// replaces that cycle key and clears the stale marker. This mirrors the
+	// FleetDB atomic suspend operation and keeps multi-turn awaits possible.
+	run.ResumeSourceEventID = ""
 	run.NodeID = ""
 	run.LeaseID = ""
 	run.SuspendedAt = &now
@@ -368,6 +399,10 @@ func (s *driverRunStore) ResumeAwaiting(_ context.Context, ws, runID, awaitInsta
 	if run.Status != domain.DriverRunSuspendedAwaitingEvent {
 		return nil, fmt.Errorf("driver run %q in workspace %q: %w", runID, ws, domain.ErrInvalidTransition)
 	}
+	if run.AwaitInstanceKey != awaitInstanceKey {
+		return nil, fmt.Errorf("driver run %q awaits %q, not %q: %w",
+			runID, run.AwaitInstanceKey, awaitInstanceKey, domain.ErrInvalidTransition)
+	}
 	run.Status = domain.DriverRunQueued
 	run.ResumeSourceEventID = resumeSourceEventID
 	run.UpdatedAt = time.Now().UTC()
@@ -391,6 +426,7 @@ func (s *driverRunStore) cancelQueuedForSupersede(ws, runID, summary string) boo
 	run.ErrorClass = "superseded"
 	run.FinishedAt = &now
 	run.UpdatedAt = now
+	s.enqueueRunOutcomeLocked(run)
 	return true
 }
 
@@ -419,6 +455,7 @@ func (s *driverRunStore) CancelQueuedRun(_ context.Context, ws, runID, summary, 
 	run.ErrorClass = errorClass
 	run.FinishedAt = &now
 	run.UpdatedAt = now
+	s.enqueueRunOutcomeLocked(run)
 	return cloneDriverRun(run), nil
 }
 
@@ -480,10 +517,119 @@ func (s *driverRunStore) RecoverStale(_ context.Context, ws string, recover stor
 		run.ErrorClass = plan.errorClass
 		run.FinishedAt = &plan.recoveredAt
 		run.UpdatedAt = plan.recoveredAt
+		s.enqueueRunOutcomeLocked(run)
 		plan.result.Recovered++
 		plan.result.RecoveredRunIDs = append(plan.result.RecoveredRunIDs, run.RunID)
 	}
 	return plan.result, nil
+}
+
+func (s *driverRunStore) enqueueRunOutcomeLocked(run *domain.DriverRun) {
+	if run == nil || !run.Status.IsTerminal() || run.FinishedAt == nil {
+		return
+	}
+	if s.outcomes[run.WorkspaceKey] == nil {
+		s.outcomes[run.WorkspaceKey] = make(map[string]*memDriverRunOutcome)
+	}
+	if _, exists := s.outcomes[run.WorkspaceKey][run.RunID]; exists {
+		return
+	}
+	parentEventID := ""
+	if s.events != nil && run.SourceRef != "" {
+		s.events.mu.RLock()
+		_, exists := s.events.items[run.WorkspaceKey][run.SourceRef]
+		s.events.mu.RUnlock()
+		if exists {
+			parentEventID = run.SourceRef
+		}
+	}
+	occurredAt := run.FinishedAt.UTC()
+	s.outcomes[run.WorkspaceKey][run.RunID] = &memDriverRunOutcome{
+		value: store.DriverRunOutcome{
+			WorkspaceKey: run.WorkspaceKey, RunID: run.RunID, Status: run.Status,
+			Summary: run.Summary, ErrorClass: run.ErrorClass, ParentRunID: run.ParentRunID,
+			ParentEventID: parentEventID, EpicID: run.EpicID, OccurredAt: occurredAt,
+		},
+		state: "pending", availableAt: occurredAt,
+	}
+}
+
+func (s *driverRunStore) ClaimDriverRunOutcomes(_ context.Context, claim store.DriverRunOutcomeClaim) ([]store.DriverRunOutcome, error) {
+	if claim.WorkspaceKey == "" || claim.ClaimID == "" || claim.Limit < 0 || claim.ClaimUntil.IsZero() || !claim.ClaimUntil.After(claim.Before) {
+		return nil, fmt.Errorf("invalid driver run outcome claim: %w", domain.ErrInvalid)
+	}
+	limit := claim.Limit
+	if limit == 0 {
+		limit = 50
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows := make([]*memDriverRunOutcome, 0, len(s.outcomes[claim.WorkspaceKey]))
+	for _, row := range s.outcomes[claim.WorkspaceKey] {
+		due := row.state == "pending" && !row.availableAt.After(claim.Before)
+		expired := row.state == "claimed" && !row.claimUntil.After(claim.Before)
+		if due || expired {
+			rows = append(rows, row)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].availableAt.Equal(rows[j].availableAt) {
+			return rows[i].value.RunID < rows[j].value.RunID
+		}
+		return rows[i].availableAt.Before(rows[j].availableAt)
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	out := make([]store.DriverRunOutcome, 0, len(rows))
+	for _, row := range rows {
+		row.state = "claimed"
+		row.claimID = claim.ClaimID
+		row.claimUntil = claim.ClaimUntil
+		row.value.Attempt++
+		out = append(out, row.value)
+	}
+	return out, nil
+}
+
+func (s *driverRunStore) CompleteDriverRunOutcome(_ context.Context, completion store.DriverRunOutcomeCompletion) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row := s.outcomes[completion.WorkspaceKey][completion.RunID]
+	if row == nil {
+		return domain.ErrNotFound
+	}
+	if row.state == "delivered" && row.claimID == completion.ClaimID {
+		return nil
+	}
+	if row.state != "claimed" || row.claimID != completion.ClaimID {
+		return domain.ErrNotOwner
+	}
+	row.state = "delivered"
+	row.claimUntil = time.Time{}
+	row.lastError = ""
+	return nil
+}
+
+func (s *driverRunStore) RetryDriverRunOutcome(_ context.Context, retry store.DriverRunOutcomeRetry) error {
+	if retry.AvailableAt.IsZero() {
+		return fmt.Errorf("driver run outcome retry available_at required: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row := s.outcomes[retry.WorkspaceKey][retry.RunID]
+	if row == nil {
+		return domain.ErrNotFound
+	}
+	if row.state != "claimed" || row.claimID != retry.ClaimID {
+		return domain.ErrNotOwner
+	}
+	row.state = "pending"
+	row.claimID = ""
+	row.claimUntil = time.Time{}
+	row.availableAt = retry.AvailableAt
+	row.lastError = retry.Error
+	return nil
 }
 
 type staleDriverRunRecoveryMem struct {

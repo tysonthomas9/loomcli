@@ -7,6 +7,8 @@
 //	GET  /api/v1/{ws}/awaits/due
 //	GET  /api/v1/{ws}/awaits/{instance_key}/satisfied
 //	POST /api/v1/{ws}/awaits/{instance_key}/resolve
+//	POST /api/v1/{ws}/awaits/resolve-and-resume
+//	POST /api/v1/{ws}/awaits/resolve-run-outcome
 //	POST /api/v1/{ws}/driver-runs/{run_id}/suspend
 //	POST /api/v1/{ws}/driver-runs/{run_id}/resume
 //
@@ -33,9 +35,6 @@ import (
 )
 
 // awaitInstanceWire mirrors fleet-db's models.AwaitInstance JSON shape.
-// fleet-db additionally carries satisfied_actor; the loomcli domain row has
-// no such field (the verified actor is an audit detail of the store), so it
-// is intentionally dropped here.
 type awaitInstanceWire struct {
 	WorkspaceKey       string          `json:"workspace_key"`
 	InstanceKey        string          `json:"instance_key"`
@@ -46,6 +45,7 @@ type awaitInstanceWire struct {
 	RegisteredAt       time.Time       `json:"registered_at"`
 	Status             string          `json:"status"`
 	SatisfiedByEventID string          `json:"satisfied_by_event_id"`
+	SatisfiedActor     string          `json:"satisfied_actor"`
 	SatisfiedPayload   json.RawMessage `json:"satisfied_payload"`
 	ResumedAt          *time.Time      `json:"resumed_at"`
 }
@@ -61,6 +61,7 @@ func (w *awaitInstanceWire) toDomain() *domain.AwaitInstance {
 		RegisteredAt:       w.RegisteredAt,
 		Status:             domain.AwaitStatus(w.Status),
 		SatisfiedByEventID: w.SatisfiedByEventID,
+		SatisfiedActor:     w.SatisfiedActor,
 		SatisfiedPayload:   w.SatisfiedPayload,
 		ResumedAt:          w.ResumedAt,
 	}
@@ -85,6 +86,8 @@ func awaitErrSentinel(code string) error {
 type awaitStore struct{ client *Client }
 
 var _ store.AwaitStore = (*awaitStore)(nil)
+var _ store.AtomicAwaitStore = (*awaitStore)(nil)
+var _ store.RunOutcomeAwaitStore = (*awaitStore)(nil)
 
 func (s *awaitStore) awaitsPath(ws string) string {
 	return "/api/v1/" + pathEscape(ws) + "/awaits"
@@ -161,6 +164,62 @@ func (s *awaitStore) ResolveAwait(ctx context.Context, workspaceKey, instanceKey
 		return nil, fmt.Errorf("fleetdb: resolve await %s: response carries no await row", instanceKey)
 	}
 	return &store.AwaitResolution{Instance: resp.Await.toDomain(), Resume: resp.Resume}, nil
+}
+
+// ResolveAwaitAndResume invokes FleetDB's generic atomic dispatch command.
+// The service commits the terminal await row together with the run transition
+// (or pending-resume marker), so neither a process crash nor a lost HTTP
+// response can strand a suspended run behind an unindexed satisfied await.
+func (s *awaitStore) ResolveAwaitAndResume(
+	ctx context.Context,
+	workspaceKey, instanceKey, eventID string,
+	payload json.RawMessage,
+	actor string,
+) error {
+	if len(payload) > domain.DefaultAwaitResumePayloadCap {
+		return fmt.Errorf("fleetdb: resolve await and resume %s: payload is %d bytes (cap %d): %w",
+			instanceKey, len(payload), domain.DefaultAwaitResumePayloadCap, domain.ErrInvalid)
+	}
+	status := domain.AwaitSatisfied
+	if domain.IsAwaitTimeoutEventID(eventID) {
+		if actor != domain.AwaitTimeoutActor {
+			return fmt.Errorf("fleetdb: resolve await and resume %s: timeout event actor %q: %w",
+				instanceKey, actor, domain.ErrAwaitActorForbidden)
+		}
+		status = domain.AwaitTimedOut
+	}
+	body := map[string]any{
+		"instance_key": instanceKey,
+		"event_id":     eventID,
+		"status":       status,
+		"actor":        actor,
+	}
+	if len(payload) > 0 {
+		body["payload"] = payload
+	}
+	return s.client.do(ctx, "POST", s.awaitsPath(workspaceKey)+"/resolve-and-resume", body, nil)
+}
+
+// ResolveRunOutcomeAwaitAndResume invokes FleetDB's atomic run.finished
+// command. The instance key stays in JSON rather than a path segment, and a
+// successful replay guarantees both the await and parent run have converged.
+func (s *awaitStore) ResolveRunOutcomeAwaitAndResume(
+	ctx context.Context,
+	workspaceKey, instanceKey, eventID string,
+	payload json.RawMessage,
+) error {
+	if len(payload) > domain.DefaultAwaitResumePayloadCap {
+		return fmt.Errorf("fleetdb: resolve run outcome await %s: payload is %d bytes (cap %d): %w",
+			instanceKey, len(payload), domain.DefaultAwaitResumePayloadCap, domain.ErrInvalid)
+	}
+	body := map[string]any{
+		"instance_key": instanceKey,
+		"event_id":     eventID,
+	}
+	if len(payload) > 0 {
+		body["payload"] = payload
+	}
+	return s.client.do(ctx, "POST", s.awaitsPath(workspaceKey)+"/resolve-run-outcome", body, nil)
 }
 
 func (s *awaitStore) ListAwaitsByPattern(ctx context.Context, workspaceKey, pattern string) ([]*domain.AwaitInstance, error) {

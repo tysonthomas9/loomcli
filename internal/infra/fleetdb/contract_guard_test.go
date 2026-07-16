@@ -54,7 +54,7 @@ const (
 // do/doWithHeaders/doRaw/doBytes call sites in this package's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 150
+const expectedClientCallSites = 181
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -192,6 +192,30 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/drivers/{}/versions/{}/unapprove"},
 	{"POST", "/api/v1/{}/drivers/{}/versions/{}/activate"},
 
+	// driver_run_outcome.go — durable terminal-outcome reconciliation.
+	{"POST", "/api/v1/{}/driver-run-outcomes/claim"},
+	{"POST", "/api/v1/{}/driver-run-outcomes/complete"},
+	{"POST", "/api/v1/{}/driver-run-outcomes/retry"},
+
+	// await_event_notification.go — durable generic-event await reconciliation.
+	{"POST", "/api/v1/{}/await-event-notifications/claim"},
+	{"POST", "/api/v1/{}/await-event-notifications/complete"},
+	{"POST", "/api/v1/{}/await-event-notifications/retry"},
+
+	// automation.go — deterministic matching, atomic admission, retry claim,
+	// authoritative dispatch, and non-dispatch delivery transition.
+	// Binding/Event/Delivery CRUD reads reuse compatibility routes below.
+	{"GET", "/api/v1/{}/automation/binding-matches/{}"},
+	{"POST", "/api/v1/{}/automation/admissions/external/{}"},
+	{"POST", "/api/v1/{}/automation/admissions/system/{}"},
+	{"POST", "/api/v1/{}/driver-runs/{}/automation/admissions/{}"},
+	{"POST", "/api/v1/{}/automation/deliveries/claim-due"},
+	{"POST", "/api/v1/{}/automation/cron/claim-due"},
+	{"POST", "/api/v1/{}/automation/cron/{}/complete"},
+	{"POST", "/api/v1/{}/automation/bindings/{}/dispatch"},
+	{"POST", "/api/v1/{}/automation/deliveries/{}/dispatch"},
+	{"POST", "/api/v1/{}/automation/deliveries/{}/transition"},
+
 	{"POST", "/api/v1/{}/trigger-bindings"},
 	{"GET", "/api/v1/{}/trigger-bindings/{}"},
 	{"GET", "/api/v1/{}/trigger-bindings"},
@@ -225,6 +249,7 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/task-runs/{}/complete"},
 	{"POST", "/api/v1/{}/task-runs/{}/logs"},
 	{"GET", "/api/v1/{}/task-runs/{}/logs"},
+	{"POST", "/api/v1/{}/trigger-events"},
 	{"GET", "/api/v1/{}/trigger-events/{}"},
 	{"GET", "/api/v1/{}/trigger-events"},
 	{"GET", "/api/v1/{}/trigger-deliveries/{}"},
@@ -232,6 +257,8 @@ var clientRoutes = []clientRoute{
 
 	// platform_await.go
 	{"POST", "/api/v1/{}/awaits/register-and-check"},
+	{"POST", "/api/v1/{}/awaits/resolve-and-resume"},
+	{"POST", "/api/v1/{}/awaits/resolve-run-outcome"},
 	{"POST", "/api/v1/{}/awaits/{}/resolve"},
 	{"POST", "/api/v1/{}/awaits/{}/resolve-system"},
 	{"GET", "/api/v1/{}/awaits"},

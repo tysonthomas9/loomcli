@@ -6,10 +6,15 @@ package webhooks
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -41,6 +46,107 @@ func awaitE2ESuspendedRun(t *testing.T, st *memstore.Store, runID, pattern strin
 		t.Fatalf("Suspend run: %v", err)
 	}
 	return key
+}
+
+func awaitE2EPendingComposition(t *testing.T, st *memstore.Store, parentRunID, childRunID string) string {
+	t.Helper()
+	ctx := t.Context()
+	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: routerE2EWS, RunID: parentRunID,
+		DriverID: "pr-review", DriverVersionID: "v1", Entrypoint: "run",
+	}); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	parent, err := st.DriverRuns().Claim(ctx, routerE2EWS, parentRunID, "node-parent", "lease-parent")
+	if err != nil {
+		t.Fatalf("claim parent: %v", err)
+	}
+	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: routerE2EWS, RunID: childRunID,
+		DriverID: "pr-review", DriverVersionID: "v1", Entrypoint: "run",
+		ParentRunID: parentRunID, SourceKind: driver.ChildRunSourceKind, SourceRef: parentRunID,
+	}); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	outcome, _, err := driver.AwaitChildWorkflow(ctx, st, driver.AwaitChildWorkflowOptions{
+		WorkspaceKey: routerE2EWS, RunID: parent.RunID,
+		NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
+		ChildRunID: childRunID, TimeoutMs: time.Minute.Milliseconds(), AwaitIndex: 1,
+	})
+	if err != nil || outcome == nil || outcome.Status != driver.AwaitOutcomeSuspended {
+		t.Fatalf("AwaitChildWorkflow = %+v, %v; want suspended", outcome, err)
+	}
+	if outcome.Instance == nil || len(outcome.Instance.ActorAllow) != 1 ||
+		outcome.Instance.ActorAllow[0] != driver.RunFinishedActor {
+		t.Fatalf("composition await = %+v; want actor allow %q", outcome.Instance, driver.RunFinishedActor)
+	}
+	return outcome.Instance.InstanceKey
+}
+
+func postSignedRunFinishedSpoof(t *testing.T, mux *http.ServeMux, deliveryID, childRunID string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Appendf(nil, `{"repository":{"full_name":%q},"sender":{"login":"system"}}`, childRunID)
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/workspaces/"+routerE2EWS+"/webhooks/github", bytes.NewReader(body))
+	req.Header.Set(githubEventHeader, driver.RunFinishedEventType)
+	req.Header.Set(githubDeliveryHeader, deliveryID)
+	req.Header.Set(githubSignatureHeader, githubSignature(routerE2ESecret, body))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("signed run.finished spoof status = %d, body = %s; want 400", rr.Code, rr.Body.String())
+	}
+	return rr
+}
+
+func assertPendingComposition(t *testing.T, st *memstore.Store, parentRunID, childRunID, instanceKey string) {
+	t.Helper()
+	run, err := st.DriverRuns().Get(t.Context(), routerE2EWS, parentRunID)
+	if err != nil || run.Status != domain.DriverRunSuspendedAwaitingEvent || run.ResumeSourceEventID != "" {
+		t.Fatalf("parent after spoof = %+v, %v; want suspended without resume source", run, err)
+	}
+	if _, err := st.Awaits().GetSatisfiedAwait(t.Context(), routerE2EWS, instanceKey); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("satisfied await after spoof = %v; want not found", err)
+	}
+	pending, err := st.Awaits().ListAwaitsByPattern(
+		t.Context(), routerE2EWS, driver.RunFinishedSubjectKey(childRunID),
+	)
+	if err != nil || len(pending) != 1 || pending[0].InstanceKey != instanceKey {
+		t.Fatalf("pending composition awaits = %+v, %v; want %s", pending, err, instanceKey)
+	}
+}
+
+func TestSignedWebhookRunFinishedSpoofBeforeCompositionRegistrationIsRejected(t *testing.T) {
+	st := routerE2EStore(t)
+	routerE2EBinding(t, st, store.TriggerBindingCreate{
+		BindingID: "b-run-finished-future", RouteKey: "github." + driver.RunFinishedEventType,
+		WebhookSecret: routerE2ESecret,
+	})
+	mux := routerE2EMux(st)
+	postSignedRunFinishedSpoof(t, mux, "spoof-before", "child-future")
+	if events, runs, deliveries := routerE2ECounts(t, st); events != 0 || runs != 0 || deliveries != 0 {
+		t.Fatalf("signed preseed created state: events=%d runs=%d deliveries=%d", events, runs, deliveries)
+	}
+
+	key := awaitE2EPendingComposition(t, st, "parent-future", "child-future")
+	assertPendingComposition(t, st, "parent-future", "child-future", key)
+	if events, runs, deliveries := routerE2ECounts(t, st); events != 0 || runs != 2 || deliveries != 0 {
+		t.Fatalf("post-registration state: events=%d runs=%d deliveries=%d; want 0/2/0", events, runs, deliveries)
+	}
+}
+
+func TestSignedWebhookRunFinishedSpoofAgainstPendingCompositionIsRejected(t *testing.T) {
+	st := routerE2EStore(t)
+	routerE2EBinding(t, st, store.TriggerBindingCreate{
+		BindingID: "b-run-finished-pending", RouteKey: "github." + driver.RunFinishedEventType,
+		WebhookSecret: routerE2ESecret,
+	})
+	key := awaitE2EPendingComposition(t, st, "parent-pending", "child-pending")
+	postSignedRunFinishedSpoof(t, routerE2EMux(st), "spoof-pending", "child-pending")
+	assertPendingComposition(t, st, "parent-pending", "child-pending", key)
+	if events, runs, deliveries := routerE2ECounts(t, st); events != 0 || runs != 2 || deliveries != 0 {
+		t.Fatalf("signed pending spoof created state: events=%d runs=%d deliveries=%d", events, runs, deliveries)
+	}
 }
 
 // TestWebhookDispatchResumesAwaitingRun: the full ingress path — signed

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
@@ -143,8 +144,8 @@ type AgentService struct {
 // retry fields: 5 attempts with 30s exponential backoff (the sweeper caps
 // backoff at 1h).
 const (
-	DefaultTriggerRetryMaxAttempts    = 5
-	DefaultTriggerRetryBackoffSeconds = 30
+	DefaultTriggerRetryMaxAttempts    = automation.DefaultTriggerRetryMaxAttempts
+	DefaultTriggerRetryBackoffSeconds = automation.DefaultTriggerRetryBackoffSeconds
 )
 
 // TriggerActorFilter scopes which event actors a binding reacts to. It is most
@@ -152,191 +153,70 @@ const (
 // could otherwise feed back into workflows. Loopback protection itself is
 // structural (event origin + hop_depth), so the filter is advisory and a
 // missing filter on an internal binding is accepted.
-type TriggerActorFilter struct {
-	ExcludeActorKinds []string `json:"exclude_actor_kinds,omitempty"`
-	AllowActors       []string `json:"allow_actors,omitempty"`
-}
+type TriggerActorFilter = automation.ActorFilter
 
-// IsZero reports whether the filter is nil or carries no constraints.
-func (f *TriggerActorFilter) IsZero() bool {
-	return f == nil || (len(f.ExcludeActorKinds) == 0 && len(f.AllowActors) == 0)
-}
-
-// Clone returns a deep copy of the filter (nil-safe).
-func (f *TriggerActorFilter) Clone() *TriggerActorFilter {
-	if f == nil {
-		return nil
-	}
-	return &TriggerActorFilter{
-		ExcludeActorKinds: append([]string(nil), f.ExcludeActorKinds...),
-		AllowActors:       append([]string(nil), f.AllowActors...),
-	}
-}
-
-type TriggerBindingConcurrencyPolicy string
+type TriggerBindingConcurrencyPolicy = automation.BindingConcurrencyPolicy
 
 const (
-	TriggerBindingConcurrencyAllow            TriggerBindingConcurrencyPolicy = "allow"
-	TriggerBindingConcurrencyForbid           TriggerBindingConcurrencyPolicy = "forbid"
-	TriggerBindingConcurrencyReplace          TriggerBindingConcurrencyPolicy = "replace"
-	TriggerBindingConcurrencyQueue            TriggerBindingConcurrencyPolicy = "queue"
-	TriggerBindingConcurrencyOneActivePerEpic TriggerBindingConcurrencyPolicy = "one_active_per_epic"
+	TriggerBindingConcurrencyAllow            = automation.ConcurrencyAllow
+	TriggerBindingConcurrencyForbid           = automation.ConcurrencyForbid
+	TriggerBindingConcurrencyReplace          = automation.ConcurrencyReplace
+	TriggerBindingConcurrencyQueue            = automation.ConcurrencyQueue
+	TriggerBindingConcurrencyOneActivePerEpic = automation.ConcurrencyOneActivePerEpic
 )
 
-type TriggerBinding struct {
-	WorkspaceKey         string                          `json:"workspace_key"`
-	BindingID            string                          `json:"binding_id"`
-	Name                 string                          `json:"name"`
-	SourceKind           string                          `json:"source_kind"`
-	SourceRef            string                          `json:"source_ref,omitempty"`
-	SourceConfigRef      string                          `json:"source_config_ref,omitempty"`
-	RouteKey             string                          `json:"route_key,omitempty"`
-	Method               string                          `json:"method,omitempty"`
-	PathTemplate         string                          `json:"path_template,omitempty"`
-	Topic                string                          `json:"topic,omitempty"`
-	EventTypePatterns    []string                        `json:"event_type_patterns,omitempty"`
-	FilterRef            string                          `json:"filter_ref,omitempty"`
-	DriverID             string                          `json:"driver_id"`
-	DriverVersionID      string                          `json:"driver_version_id"`
-	TargetEntrypoint     string                          `json:"target_entrypoint,omitempty"`
-	TargetAgentServiceID string                          `json:"target_agent_service_id,omitempty"`
-	ConcurrencyPolicy    TriggerBindingConcurrencyPolicy `json:"concurrency_policy"`
-	IdempotencyPolicy    string                          `json:"idempotency_policy,omitempty"`
-	AuthPolicy           string                          `json:"auth_policy,omitempty"`
-	// WebhookSecret is the shared secret used to verify inbound webhook
-	// signatures (e.g. GitHub's X-Hub-Signature-256 HMAC) for this route.
-	WebhookSecret string `json:"webhook_secret,omitempty"`
-	// SubjectKeyTemplate renders the concurrency subject key for deliveries
-	// using {{subject_ref}}, {{event_type}} and {{attrs.X}} tokens (templates
-	// never read the raw payload). Empty means the default key
-	// binding_id|subject_ref.
-	SubjectKeyTemplate string `json:"subject_key_template,omitempty"`
-	// ActorFilter scopes which actors this binding reacts to; advisory for
-	// source_kind=internal bindings (see TriggerActorFilter).
-	ActorFilter *TriggerActorFilter `json:"actor_filter,omitempty"`
-	// RetryMaxAttempts and RetryBackoffSeconds drive the delivery retry
-	// sweeper; zero values are defaulted at write time (see
-	// DefaultTriggerRetryMaxAttempts / DefaultTriggerRetryBackoffSeconds).
-	RetryMaxAttempts    int `json:"retry_max_attempts,omitempty"`
-	RetryBackoffSeconds int `json:"retry_backoff_seconds,omitempty"`
-	// Schedule is a standard 5-field cron expression (or @descriptor);
-	// required when SourceKind is "cron". ScheduleTimezone is an IANA zone
-	// name evaluated against Schedule (UTC when empty).
-	Schedule         string    `json:"schedule,omitempty"`
-	ScheduleTimezone string    `json:"schedule_timezone,omitempty"`
-	Permissions      []string  `json:"permissions,omitempty"`
-	Enabled          bool      `json:"enabled"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
-}
+// TriggerBinding is owned by Automation. This alias preserves the legacy
+// domain import while callers migrate to the capability API.
+type TriggerBinding = automation.Binding
 
 // TriggerEventOrigin mirrors fleet-db's structural event provenance: every
 // trigger event carries a server-stamped origin so workflow-originated events
 // are distinguishable from genuine external ones. Webhook ingest stamps
 // external (hop depth 0), the workflow events API stamps workflow (hop depth
 // parent+1, capped), and system schedulers stamp system.
-type TriggerEventOrigin string
+type TriggerEventOrigin = automation.EventOrigin
 
 const (
-	TriggerEventOriginExternal TriggerEventOrigin = "external"
-	TriggerEventOriginWorkflow TriggerEventOrigin = "workflow"
-	TriggerEventOriginSystem   TriggerEventOrigin = "system"
+	TriggerEventOriginExternal = automation.EventOriginExternal
+	TriggerEventOriginWorkflow = automation.EventOriginWorkflow
+	TriggerEventOriginSystem   = automation.EventOriginSystem
 )
 
-// TriggerEvent is a durable record of an external event ingested by the
-// trigger layer (e.g. a verified GitHub webhook delivery), persisted before
-// any dispatch happens.
-type TriggerEvent struct {
-	WorkspaceKey     string `json:"workspace_key"`
-	EventID          string `json:"event_id"`
-	TriggerBindingID string `json:"trigger_binding_id,omitempty"`
-	SourceKind       string `json:"source_kind"`
-	SourceEventID    string `json:"source_event_id,omitempty"`
-	EventType        string `json:"event_type"`
-	SubjectRef       string `json:"subject_ref,omitempty"`
-	ActorRef         string `json:"actor_ref,omitempty"`
-	// Origin is the server-stamped provenance (external|workflow|system).
-	// Records persisted before provenance existed round-trip with an empty
-	// origin and normalize to external on read (zero-value back-compat).
-	Origin TriggerEventOrigin `json:"origin,omitempty"`
-	// HopDepth counts workflow re-trigger hops from the originating
-	// external or system event (which sit at depth 0).
-	HopDepth         int       `json:"hop_depth,omitempty"`
-	OccurredAt       time.Time `json:"occurred_at"`
-	ReceivedAt       time.Time `json:"received_at"`
-	IdempotencyKey   string    `json:"idempotency_key,omitempty"`
-	RawPayloadRef    string    `json:"raw_payload_ref,omitempty"`
-	RawPayloadDigest string    `json:"raw_payload_digest,omitempty"`
-	SignatureStatus  string    `json:"signature_status,omitempty"`
-	ReplayOfEventID  string    `json:"replay_of_event_id,omitempty"`
-}
-
-// NormalizeProvenance applies zero-value back-compat on read: events written
-// before structural provenance existed were all externally ingested.
-func (e *TriggerEvent) NormalizeProvenance() {
-	if e.Origin == "" {
-		e.Origin = TriggerEventOriginExternal
-	}
-}
+// TriggerEvent is owned by Automation. This alias preserves the legacy domain
+// import while callers migrate to the capability API.
+type TriggerEvent = automation.Event
 
 // TriggerDeliveryStatus enumerates the lifecycle of a TriggerDelivery.
-type TriggerDeliveryStatus string
+type TriggerDeliveryStatus = automation.DeliveryStatus
 
 const (
-	TriggerDeliveryAccepted   TriggerDeliveryStatus = "accepted"
-	TriggerDeliveryRejected   TriggerDeliveryStatus = "rejected"
-	TriggerDeliveryDuplicate  TriggerDeliveryStatus = "duplicate"
-	TriggerDeliveryQueued     TriggerDeliveryStatus = "queued"
-	TriggerDeliveryDispatched TriggerDeliveryStatus = "dispatched"
-	TriggerDeliveryFailed     TriggerDeliveryStatus = "failed"
-	TriggerDeliveryReplayed   TriggerDeliveryStatus = "replayed"
+	TriggerDeliveryAccepted   = automation.DeliveryAccepted
+	TriggerDeliveryRejected   = automation.DeliveryRejected
+	TriggerDeliveryDuplicate  = automation.DeliveryDuplicate
+	TriggerDeliveryQueued     = automation.DeliveryQueued
+	TriggerDeliveryDispatched = automation.DeliveryDispatched
+	TriggerDeliveryFailed     = automation.DeliveryFailed
+	TriggerDeliveryReplayed   = automation.DeliveryReplayed
 	// TriggerDeliverySuperseded marks a delivery replaced by a newer event for
 	// the same subject key (replace concurrency policy). TriggerDeliveryHeld
 	// holds a delivery behind an active run for its subject key (queue
 	// concurrency policy); the retry sweeper promotes it. Both are additive
 	// enum values on the fleet-db v1 wire.
-	TriggerDeliverySuperseded TriggerDeliveryStatus = "superseded"
-	TriggerDeliveryHeld       TriggerDeliveryStatus = "held"
+	TriggerDeliverySuperseded = automation.DeliverySuperseded
+	TriggerDeliveryHeld       = automation.DeliveryHeld
 )
 
 // TriggerDeliveryErrorRetriesExhausted is the terminal error class stamped on
 // a failed delivery once its binding's RetryMaxAttempts budget is spent
 // (mirrors fleet-db's write-time rule). A failed delivery carrying it is
 // final and leaves the retry due-index.
-const TriggerDeliveryErrorRetriesExhausted = "retries_exhausted"
-
-// IsValid reports whether the status is a known TriggerDeliveryStatus
-// (mirrors fleet-db's models.TriggerDeliveryStatus.IsValid).
-func (s TriggerDeliveryStatus) IsValid() bool {
-	switch s {
-	case TriggerDeliveryAccepted, TriggerDeliveryRejected, TriggerDeliveryDuplicate,
-		TriggerDeliveryQueued, TriggerDeliveryDispatched, TriggerDeliveryFailed,
-		TriggerDeliveryReplayed, TriggerDeliverySuperseded, TriggerDeliveryHeld:
-		return true
-	}
-	return false
-}
+const TriggerDeliveryErrorRetriesExhausted = automation.TriggerDeliveryErrorRetriesExhausted
 
 // TriggerDelivery links a TriggerEvent to the binding that matched it and the
 // DriverRun it enqueued.
-type TriggerDelivery struct {
-	WorkspaceKey     string                `json:"workspace_key"`
-	DeliveryID       string                `json:"delivery_id"`
-	TriggerEventID   string                `json:"trigger_event_id"`
-	TriggerBindingID string                `json:"trigger_binding_id"`
-	Status           TriggerDeliveryStatus `json:"status"`
-	// SubjectKey is the rendered concurrency subject key for this delivery:
-	// the binding's SubjectKeyTemplate output, or the default
-	// binding_id|subject_ref when the binding has no template.
-	SubjectKey      string     `json:"subject_key,omitempty"`
-	RejectionReason string     `json:"rejection_reason,omitempty"`
-	DriverRunID     string     `json:"driver_run_id,omitempty"`
-	Attempt         int        `json:"attempt"`
-	NextRetryAt     *time.Time `json:"next_retry_at,omitempty"`
-	ErrorClass      string     `json:"error_class,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-}
+// TriggerDelivery is owned by Automation. This alias preserves the legacy
+// domain import while callers migrate to the capability API.
+type TriggerDelivery = automation.Delivery
 
 type DriverRunStatus string
 
@@ -379,20 +259,24 @@ type DriverRun struct {
 	// it; decoded here for a tag-identical round-trip (AW5). It scopes a
 	// binding's run history and failure health to that binding, so bindings
 	// sharing a driver do not bleed metrics into each other.
-	TriggerBindingID string            `json:"trigger_binding_id,omitempty"`
-	AgentServiceID   string            `json:"agent_service_id,omitempty"`
-	Status           DriverRunStatus   `json:"status"`
-	NodeID           string            `json:"node_id,omitempty"`
-	LeaseID          string            `json:"lease_id,omitempty"`
-	FencingToken     int64             `json:"fencing_token,omitempty"`
-	IdempotencyKey   string            `json:"idempotency_key,omitempty"`
-	Payload          json.RawMessage   `json:"payload,omitempty"`
-	Output           map[string]string `json:"output,omitempty"`
-	Summary          string            `json:"summary,omitempty"`
-	ErrorClass       string            `json:"error_class,omitempty"`
-	StartedAt        time.Time         `json:"started_at,omitempty"`
-	LastHeartbeat    time.Time         `json:"last_heartbeat,omitempty"`
-	FinishedAt       *time.Time        `json:"finished_at,omitempty"`
+	TriggerBindingID string `json:"trigger_binding_id,omitempty"`
+	AgentServiceID   string `json:"agent_service_id,omitempty"`
+	// SubjectKey is Fleet's rendered trigger-concurrency subject snapshot.
+	// It is output-only for Loom's generic run store and lets atomic dispatch
+	// responses round-trip the complete DriverRun contract.
+	SubjectKey     string            `json:"subject_key,omitempty"`
+	Status         DriverRunStatus   `json:"status"`
+	NodeID         string            `json:"node_id,omitempty"`
+	LeaseID        string            `json:"lease_id,omitempty"`
+	FencingToken   int64             `json:"fencing_token,omitempty"`
+	IdempotencyKey string            `json:"idempotency_key,omitempty"`
+	Payload        json.RawMessage   `json:"payload,omitempty"`
+	Output         map[string]string `json:"output,omitempty"`
+	Summary        string            `json:"summary,omitempty"`
+	ErrorClass     string            `json:"error_class,omitempty"`
+	StartedAt      time.Time         `json:"started_at,omitempty"`
+	LastHeartbeat  time.Time         `json:"last_heartbeat,omitempty"`
+	FinishedAt     *time.Time        `json:"finished_at,omitempty"`
 	// Composition + await fields (Phase D). snake_case tags like the rest
 	// of this struct: the fleet-db client decodes v1 responses directly
 	// into DriverRun (tag-identical round-trip, AW5); the driver/watch wire
@@ -402,6 +286,9 @@ type DriverRun struct {
 	// Empty means detached/root (no cancel cascade). Orthogonal to EpicID:
 	// a run can belong to an epic, a parent run, both, or neither.
 	ParentRunID string `json:"parent_run_id,omitempty"`
+	// AwaitInstanceKey identifies the current await cycle while suspended or
+	// while a matching event has won the pending-to-suspend race.
+	AwaitInstanceKey string `json:"await_instance_key,omitempty"`
 	// SuspendedAt is set when the run suspends in suspended_awaiting_event.
 	SuspendedAt *time.Time `json:"suspended_at,omitempty"`
 	// CancelRequestedAt records a cooperative cancel request against a
