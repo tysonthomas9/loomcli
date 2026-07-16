@@ -1,12 +1,12 @@
 package usage
 
 import (
-	"os"
-	"strconv"
 	"time"
 )
 
-// SessionUsage records token consumption and estimated cost for one agent session.
+// SessionUsage records token consumption and optional provider-reported cost
+// for one agent session. EstimatedCostUSD is a pass-through for backend
+// cost_usd when available; Loom does not fabricate cost from tokens.
 type SessionUsage struct {
 	AgentName        string    `json:"agent_name"`
 	Backend          string    `json:"backend"`
@@ -22,63 +22,4 @@ type SessionUsage struct {
 	ExitCode         int       `json:"exit_code"`
 	Model            string    `json:"model,omitempty"`
 	SessionID        string    `json:"session_id,omitempty"`
-}
-
-// PricingTier holds per-million-token pricing for a backend.
-type PricingTier struct {
-	InputPerMTok      float64
-	OutputPerMTok     float64
-	CacheReadPerMTok  float64
-	CacheWritePerMTok float64
-}
-
-// DefaultPricing maps backend names to their default pricing tiers.
-// Defaults to Claude Sonnet 4 rates ($3/$15 per MTok input/output).
-var DefaultPricing = map[string]PricingTier{
-	"claude": {
-		InputPerMTok:      3.0,
-		OutputPerMTok:     15.0,
-		CacheReadPerMTok:  0.30,
-		CacheWritePerMTok: 3.75,
-	},
-	"codex": {
-		InputPerMTok:  2.50,
-		OutputPerMTok: 10.0,
-	},
-	"opencode": {
-		InputPerMTok:  3.0,
-		OutputPerMTok: 15.0,
-	},
-}
-
-// EstimateCost computes estimated cost in USD from token counts and a pricing tier.
-func EstimateCost(tier PricingTier, u SessionUsage) float64 {
-	const mtok = 1_000_000.0
-	cost := float64(u.InputTokens) / mtok * tier.InputPerMTok
-	cost += float64(u.OutputTokens) / mtok * tier.OutputPerMTok
-	cost += float64(u.CacheReadTokens) / mtok * tier.CacheReadPerMTok
-	cost += float64(u.CacheWriteTokens) / mtok * tier.CacheWritePerMTok
-	return cost
-}
-
-// ResolvePricing returns the pricing tier for the given backend, applying
-// env var overrides (LOOM_COST_PER_MTOK_INPUT, LOOM_COST_PER_MTOK_OUTPUT)
-// if set.
-func ResolvePricing(backend string) PricingTier {
-	tier, ok := DefaultPricing[backend]
-	if !ok {
-		tier = DefaultPricing["claude"] // fallback to Claude rates
-	}
-
-	if v := os.Getenv("LOOM_COST_PER_MTOK_INPUT"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			tier.InputPerMTok = f
-		}
-	}
-	if v := os.Getenv("LOOM_COST_PER_MTOK_OUTPUT"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			tier.OutputPerMTok = f
-		}
-	}
-	return tier
 }

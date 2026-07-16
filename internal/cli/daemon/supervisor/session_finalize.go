@@ -15,32 +15,25 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
-// leafUsage is the token/cost usage a canonical transcript's terminal `result`
-// entry carries (the TS leaf serializes it into that entry's `output` field —
-// local-task-runner resultEntry/taskUsageFromEntries). The Go leaf's raw stream
-// has no such entry, so that decode yields the zero value; harnessLeafUsage is
-// the second source that covers the Go leaf.
+// leafUsage is the token/cost usage recovered from a leaf transcript. Prefer the
+// TS leaf's terminal `result.output`; fall back to Codex rollout token_count /
+// turn.completed events for the Go leaf.
 type leafUsage struct {
 	InputTokens      int64   `json:"input_tokens"`
 	OutputTokens     int64   `json:"output_tokens"`
 	CacheReadTokens  int64   `json:"cache_read_tokens"`
 	CacheWriteTokens int64   `json:"cache_write_tokens"`
 	CostUSD          float64 `json:"cost_usd"`
-	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
 }
 
 func (u leafUsage) cost() float64 {
-	if u.CostUSD != 0 {
-		return u.CostUSD
-	}
-	return u.EstimatedCostUSD
+	// Only persist provider-reported cost_usd. Loom does not estimate from tokens.
+	return u.CostUSD
 }
 
 // readLeafTranscript reads the session's on-disk native transcript ONCE so the
@@ -62,10 +55,24 @@ func (s *Supervisor) readLeafTranscript(sessionID string) (data []byte, usage le
 	return data, extractLeafUsage(data), true
 }
 
-// extractLeafUsage scans a canonical transcript from the end for the terminal
-// `result` entry and decodes the usage object the TS leaf serialized into its
-// `output` field. Returns the zero value for a raw backend stream (no `result`).
+// extractLeafUsage recovers token/cost usage from a leaf transcript. Prefers the
+// TS-leaf terminal `result` entry (including cost_usd); falls back to Codex
+// rollout token_count / turn.completed events so the Go leaf no longer lands
+// tokens=0.
 func extractLeafUsage(data []byte) leafUsage {
+	if u, ok := extractResultEntryLeafUsage(data); ok {
+		return u
+	}
+	u := sessions.ExtractTranscriptUsage(data)
+	return leafUsage{
+		InputTokens:      u.InputTokens,
+		OutputTokens:     u.OutputTokens,
+		CacheReadTokens:  u.CacheReadTokens,
+		CacheWriteTokens: u.CacheWriteTokens,
+	}
+}
+
+func extractResultEntryLeafUsage(data []byte) (leafUsage, bool) {
 	lines := bytes.Split(data, []byte("\n"))
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := bytes.TrimSpace(lines[i])
@@ -76,98 +83,16 @@ func extractLeafUsage(data []byte) leafUsage {
 			Type   string `json:"type"`
 			Output string `json:"output"`
 		}
-		if json.Unmarshal(line, &ev) != nil {
-			continue
-		}
-		if ev.Type != "result" || ev.Output == "" {
+		if json.Unmarshal(line, &ev) != nil || ev.Type != "result" || ev.Output == "" {
 			continue
 		}
 		var u leafUsage
 		if json.Unmarshal([]byte(ev.Output), &u) != nil {
-			return leafUsage{}
+			return leafUsage{}, false
 		}
-		return u
+		return u, true
 	}
-	return leafUsage{}
-}
-
-// resolveLeafTokens applies the two-source precedence for a collector-less
-// finalize: the TS leaf's own accounting when it reported any, otherwise the
-// back-fill read from the harness's transcript.
-//
-// The TS leaf wins because its `result` entry is the runner's first-hand
-// accounting for exactly this run, while the back-fill infers a session from
-// what is newest on disk. backfill is a thunk so the harness read — which walks
-// a project directory and parses JSONL — is skipped entirely on the TS path.
-func resolveLeafTokens(fromResultEntry leafUsage, backfill func() leafUsage) leafUsage {
-	if fromResultEntry != (leafUsage{}) {
-		return fromResultEntry
-	}
-	return backfill()
-}
-
-// backfillHarnessUsage back-fills tokens for the Go leaf, which writes no
-// canonical `result` entry for extractLeafUsage to find.
-//
-// It gathers the three things the harness transcript readers need — which
-// backend ran, which working directory it ran in, and when the session started
-// — then reads the totals straight out of the backend's own session log. The
-// worktree lock's carried claude_session_id is passed as a hint; it is present
-// after a failed run (the daemon keeps it for --resume) and cleared after a
-// successful one, so the resolver falls back to the newest transcript written
-// since the session began, exactly as the transcript mirror already does.
-//
-// Best-effort throughout: every miss returns the zero value, which is the
-// tokens=0 that used to be recorded unconditionally.
-func (s *Supervisor) backfillHarnessUsage(ap *AgentProcess, sess *sessions.Session) leafUsage {
-	backend := s.GetEffectiveBackend(ap)
-	if backend == "" || ap.WorktreePath == "" {
-		return leafUsage{}
-	}
-
-	ap.Mu.Lock()
-	since := ap.LastStart
-	ap.Mu.Unlock()
-	if sess != nil && !sess.Meta.StartedAt.IsZero() {
-		since = sess.Meta.StartedAt
-	}
-
-	hint := ""
-	if info, lockErr := cli.ReadLockFile(ap.WorktreePath); lockErr == nil {
-		hint = info.ClaudeSessionID
-	}
-	return harnessLeafUsage(backend, ap.WorktreePath, hint, since)
-}
-
-// harnessLeafUsage is the pure half: resolve the harness session id, read its
-// cumulative usage, and price it.
-//
-// The token counts are carried across verbatim — see
-// backends.SessionTokensFromHarnessUsage for why Claude's and Codex's
-// input_tokens must not be reconciled with each other. The cost is an ESTIMATE
-// from loom's own pricing table, not a harness-reported figure, so it lands in
-// EstimatedCostUSD and leafUsage.cost() still lets a real cost_usd win wherever
-// one exists.
-func harnessLeafUsage(backend, workDir, hintSessionID string, since time.Time) leafUsage {
-	sessionID := sessions.LatestHarnessSessionID(backend, workDir, hintSessionID, since)
-	u := backends.ReadHarnessUsage(backend, sessionID, workDir)
-	if u == nil {
-		return leafUsage{}
-	}
-	input, output, cacheRead, cacheWrite := backends.SessionTokensFromHarnessUsage(u)
-	out := leafUsage{
-		InputTokens:      input,
-		OutputTokens:     output,
-		CacheReadTokens:  cacheRead,
-		CacheWriteTokens: cacheWrite,
-	}
-	out.EstimatedCostUSD = usage.EstimateCost(usage.ResolvePricing(backend), usage.SessionUsage{
-		InputTokens:      out.InputTokens,
-		OutputTokens:     out.OutputTokens,
-		CacheReadTokens:  out.CacheReadTokens,
-		CacheWriteTokens: out.CacheWriteTokens,
-	})
-	return out
+	return leafUsage{}, false
 }
 
 func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
@@ -214,10 +139,7 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	// finalizeLocalSession) and the control-plane transcript_ref artifact upload.
 	// Read before finalizeLocalSession, whose codex/claude re-sync can rewrite the
 	// on-disk file — this captures the TS leaf's canonical transcript verbatim.
-	transcriptData, resultEntryTokens, _ := s.readLeafTranscript(state.sessionID)
-	leafTokens := resolveLeafTokens(resultEntryTokens, func() leafUsage {
-		return s.backfillHarnessUsage(ap, state.session)
-	})
+	transcriptData, leafTokens, _ := s.readLeafTranscript(state.sessionID)
 	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass, leafTokens)
 	// KNOWN GAP — local session only. leafTokens lands on the on-disk session
 	// record; it does NOT reach the control plane, because store.AgentSessionUpdate
@@ -295,7 +217,7 @@ func finalizeLocalSession(
 		// Carry the leaf's reported usage so the supervisor's collector-less finalize
 		// records non-zero tokens on the session (otherwise the reaped worker's
 		// collector-aware finalize never runs and tokens land 0). Sourced from the
-		// TS leaf's `result` entry, else from the harness's own transcript.
+		// TS leaf's `result` entry, else from a supported native transcript.
 		InputTokens:      leafTokens.InputTokens,
 		OutputTokens:     leafTokens.OutputTokens,
 		CacheReadTokens:  leafTokens.CacheReadTokens,

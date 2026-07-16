@@ -333,16 +333,18 @@ func prepareReviewerCheckout(w http.ResponseWriter, spec reviewerCheckoutSpec) (
 	return checkedOutSHA, true
 }
 
-func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) error {
+func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName, repo string) error {
 	if err := m.ensureReviewerRole(ctx, ws); err != nil {
 		return err
 	}
 	backend := m.reviewerBackend(ctx, ws)
+	repos := reviewerRepos(repo)
 	_, err := m.store.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: ws,
 		Name:         agentName,
 		RoleName:     reviewerRoleName,
 		Backend:      backend,
+		Repos:        repos,
 		DesiredState: domain.AgentDesiredRunning,
 	})
 	if err == nil {
@@ -355,10 +357,45 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName string) 
 	if getErr != nil {
 		return fmt.Errorf("load existing reviewer agent: %w", getErr)
 	}
-	if reviewerAgentCurrent(agent, backend, reviewerRoleName) {
+	if !reviewerAgentCurrent(agent, backend, reviewerRoleName) {
+		if err := m.migrateReviewer(ctx, ws, agentName, backend, reviewerRoleName, repos); err != nil {
+			return err
+		}
 		return nil
 	}
-	return m.migrateReviewer(ctx, ws, agentName, backend, reviewerRoleName)
+	return m.ensureReviewerRepos(ctx, ws, agentName, agent, repos)
+}
+
+func reviewerRepos(repo string) []string {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return nil
+	}
+	return []string{repo}
+}
+
+func reviewerHasRepo(agent *domain.Agent, repo string) bool {
+	if agent == nil || repo == "" {
+		return repo == "" && (agent == nil || len(agent.Repos) == 0)
+	}
+	for _, existing := range agent.Repos {
+		if strings.TrimSpace(existing) == repo {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Module) ensureReviewerRepos(ctx context.Context, ws, agentName string, agent *domain.Agent, repos []string) error {
+	if len(repos) == 0 || reviewerHasRepo(agent, repos[0]) {
+		return nil
+	}
+	if _, err := m.store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{
+		Repos: &repos,
+	}); err != nil {
+		return fmt.Errorf("update reviewer agent repos: %w", err)
+	}
+	return nil
 }
 
 func (m *Module) ensureReviewerAgentAndRetireLegacy(
@@ -366,7 +403,7 @@ func (m *Module) ensureReviewerAgentAndRetireLegacy(
 	ws, agentName, owner, repo string,
 	number int,
 ) error {
-	if err := m.ensureReviewerAgent(ctx, ws, agentName); err != nil {
+	if err := m.ensureReviewerAgent(ctx, ws, agentName, repo); err != nil {
 		return err
 	}
 	return m.retireLegacyReviewer(ctx, ws, agentName,
@@ -479,16 +516,20 @@ func (m *Module) reviewerBackend(ctx context.Context, ws string) string {
 // first so it cannot keep overwriting the orchestration session's runtime
 // metadata after the clear, then stale provider identity keys are removed so
 // the new runtime starts from a clean slate, then the agent record flips.
-func (m *Module) migrateReviewer(ctx context.Context, ws, agentName, backend, roleName string) error {
+func (m *Module) migrateReviewer(ctx context.Context, ws, agentName, backend, roleName string, repos []string) error {
 	if err := m.stopAndClearReviewerRuntime(ctx, ws, agentName); err != nil {
 		return err
 	}
 	running := domain.AgentDesiredRunning
-	if _, err := m.store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{
+	patch := store.AgentUpdate{
 		Backend:      &backend,
 		RoleName:     &roleName,
 		DesiredState: &running,
-	}); err != nil {
+	}
+	if len(repos) > 0 {
+		patch.Repos = &repos
+	}
+	if _, err := m.store.Agents().Update(ctx, ws, agentName, patch); err != nil {
 		return fmt.Errorf("update reviewer agent: %w", err)
 	}
 	return nil

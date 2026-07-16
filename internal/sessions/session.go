@@ -10,6 +10,14 @@ type Session struct {
 	Meta  SessionMetadata
 }
 
+// Store returns the session's backing Store.
+func (s *Session) Store() *Store {
+	if s == nil {
+		return nil
+	}
+	return s.store
+}
+
 // SessionID returns the session's unique identifier.
 func (s *Session) SessionID() string {
 	return s.Meta.SessionID

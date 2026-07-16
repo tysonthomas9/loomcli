@@ -523,8 +523,11 @@ test.describe("Cost summary display", () => {
   });
 
   test("Shows formatted token total", async ({ page }) => {
-    // completedSession: 5000+3000=8000, activeSession: 1500+800=2300, failedSession: 500+200=700
-    // total = 11000 → "11.0K"
+    // Totals include cache tokens (same as detail masthead).
+    // completed: 5000+3000+1000+500=9500
+    // active: 1500+800+1000+500=3800
+    // failed: 500+200+1000+500=2200
+    // total = 15500 → "15.5K"
     await installIssuesMock(page, [mockIssue]);
     await setupBaseMocks(page);
     await setupSessionMocks(page);
@@ -533,7 +536,7 @@ test.describe("Cost summary display", () => {
     await switchToSessionsTab(page);
 
     const tab = page.getByTestId("sessions-tab");
-    await expect(tab).toContainText("11.0K");
+    await expect(tab).toContainText("15.5K");
   });
 
   test("Shows formatted cost total", async ({ page }) => {
@@ -593,7 +596,7 @@ test.describe("Empty state", () => {
     await switchToSessionsTab(page);
 
     await expect(page.getByTestId("sessions-empty")).toBeVisible();
-    await expect(page.getByText("No sessions recorded yet")).toBeVisible();
+    await expect(page.getByText("No agent runs recorded yet")).toBeVisible();
   });
 });
 
@@ -651,7 +654,7 @@ test.describe("Session timeline rendering", () => {
 
     // Placeholder visible when no session selected
     await expect(
-      page.getByText("Select a session to view details"),
+      page.getByText("Select a run to view details"),
     ).toBeVisible();
   });
 });
@@ -669,7 +672,7 @@ test.describe("Session selection", () => {
 
     await expect(page.getByTestId("session-detail-view")).toBeVisible();
     await expect(
-      page.getByText("Select a session to view details"),
+      page.getByText("Select a run to view details"),
     ).not.toBeVisible();
   });
 

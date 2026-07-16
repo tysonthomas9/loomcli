@@ -2544,6 +2544,16 @@ export interface components {
       role: string;
       text: string;
       phase?: string;
+      /** @description text | tool_use. Omitted or empty means a normal chat bubble (text). tool_use is rendered as a collapsed pill; tool_result is paired into tool_result rather than emitted as its own message. */
+      kind?: string;
+      /** @description Tool name when kind is tool_use. */
+      tool_name?: string;
+      /** @description Native tool-call id used to pair results (when available). */
+      tool_use_id?: string;
+      /** @description Tool arguments as JSON text or a plain command/path preview. */
+      tool_input?: string;
+      /** @description Paired tool output when available. */
+      tool_result?: string;
     };
     ReviewerConversation: {
       /** @description starting | reconnecting | idle | running | failed | unsupported. failed: the reviewer runtime died or its conversation is unreadable. unsupported: the reviewer's backend has no readable conversation (the terminal tab still works); detail says why. */
@@ -3276,6 +3286,10 @@ export interface components {
       role?: string;
       /** @enum {string} */
       role_kind?: "interactive" | "worker";
+      /** @description Optional short UI role label. When present, clients prefer this over capitalizing role (e.g. pr-reviewer → "Review"). */
+      role_label?: string;
+      /** @description Optional short UI title. When present, clients prefer this over name (e.g. review-…-pr-222 → "loomcli#222"). */
+      display_name?: string;
       repo?: string;
       workspace: string;
       daemon_managed?: boolean;

@@ -134,6 +134,12 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("Cost")).toBeInTheDocument();
     });
 
+    it("omits Cost when estimated_cost_usd is zero", () => {
+      const session = createSession({ estimated_cost_usd: 0 });
+      render(<SessionDetailView taskId="task-1" session={session} />);
+      expect(screen.queryByText("Cost")).not.toBeInTheDocument();
+    });
+
     it("shows non-zero exit code as a plain number", () => {
       const session = createSession({ exit_code: 1 });
       render(<SessionDetailView taskId="task-1" session={session} />);
@@ -175,7 +181,7 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("active")).toBeInTheDocument();
     });
 
-    it("surfaces the initial user text as a Prompt block", () => {
+    it("does not surface the kickoff user text in the masthead or transcript", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [
           createEntry({
@@ -190,20 +196,27 @@ describe("SessionDetailView", () => {
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.getByText("Prompt")).toBeInTheDocument();
-      expect(screen.getByText("do the thing")).toBeInTheDocument();
+      expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
+      expect(screen.queryByText("do the thing")).not.toBeInTheDocument();
+      expect(screen.getByText("ok")).toBeInTheDocument();
     });
 
-    it("renders the prompt as formatted Markdown (heading + inline code), not literal source", () => {
+    it("renders mid-run user text as formatted Markdown (heading + inline code)", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [
           createEntry({
             seq: 1,
             role: "user",
             type: "text",
+            text: "kickoff",
+          }),
+          createEntry({
+            seq: 2,
+            role: "user",
+            type: "text",
             text: "## WORKFLOW\n\nCall `foo.bar()` now.",
           }),
-          createEntry({ seq: 2, role: "assistant", text: "ok" }),
+          createEntry({ seq: 3, role: "assistant", text: "ok" }),
         ],
         isLoading: false,
         error: null,
@@ -221,16 +234,6 @@ describe("SessionDetailView", () => {
       // No literal markdown syntax survives in the DOM text
       expect(container.textContent).not.toContain("## WORKFLOW");
       expect(container.textContent).not.toContain("`foo.bar()`");
-    });
-
-    it("does not render a Prompt block when no user text exists", () => {
-      mockUseSessionTranscript.mockReturnValue({
-        entries: [createEntry({ seq: 1, role: "assistant", text: "hi" })],
-        isLoading: false,
-        error: null,
-      });
-      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
     });
   });
 
@@ -481,6 +484,27 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("File created")).toBeInTheDocument();
     });
 
+    it("uses tool_use.output when no paired tool_result exists", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "tool_use",
+            tool_name: "Read",
+            tool_input: { file_path: "/tmp/a" },
+            tool_use_id: "tu-embed",
+            output: "embedded result body",
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      fireEvent.click(screen.getByTestId("tool-pill"));
+      expect(screen.getByText("embedded result body")).toBeInTheDocument();
+    });
+
     it("renders subsequent user text as a user-message interjection", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [
@@ -492,9 +516,10 @@ describe("SessionDetailView", () => {
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      // First user text → Prompt (masthead)
-      expect(screen.getByText("first")).toBeInTheDocument();
-      // Second user text → interjection
+      // Kickoff user text is omitted from the worklog
+      expect(screen.queryByText("first")).not.toBeInTheDocument();
+      expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
+      // Subsequent user text → interjection
       expect(screen.getByTestId("transcript-interjection")).toBeInTheDocument();
       expect(screen.getByText("User message")).toBeInTheDocument();
       expect(screen.getByText("second")).toBeInTheDocument();

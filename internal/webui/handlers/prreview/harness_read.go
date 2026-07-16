@@ -195,46 +195,85 @@ func reviewerStateFromRuntimeStatus(status string) string {
 }
 
 // reviewerMessagesFromEvents flattens canonical transcript events into chat
-// messages: text events with a user/assistant role and non-empty text; tool
-// calls, tool results, and system/session records are skipped. IDs are
-// namespaced by provider+session so a backend migration can never collide
-// ids across transcripts, and de-duplicated with an ordinal because
-// Event.ID() can repeat (gemini's content-hash fallback collides for
+// messages: text events with a user/assistant role and non-empty text, plus
+// tool_use events (tool_result output is paired in). System/session records
+// stay omitted. IDs are namespaced by provider+session so a backend migration
+// can never collide ids across transcripts, and de-duplicated with an ordinal
+// because Event.ID() can repeat (gemini's content-hash fallback collides for
 // identical messages with absent timestamps).
 func reviewerMessagesFromEvents(provider, harnessSessionID string, events []hwtranscript.Event) []reviewerStreamMessage {
 	idPrefix := provider + "/" + shortSessionID(harnessSessionID) + "/"
 	ordinals := make(map[string]int)
+	results := make(map[string]string)
+	for _, ev := range events {
+		if ev.Type != hwtranscript.EventToolResult || ev.ToolUseID == "" {
+			continue
+		}
+		if out := strings.TrimSpace(ev.Output); out != "" {
+			results[ev.ToolUseID] = ev.Output
+		}
+	}
 	var out []reviewerStreamMessage
 	for _, ev := range events {
-		if ev.Type != hwtranscript.EventText {
+		switch ev.Type {
+		case hwtranscript.EventText:
+			if ev.Role != hwtranscript.RoleUser && ev.Role != hwtranscript.RoleAssistant {
+				continue
+			}
+			if strings.TrimSpace(ev.Text) == "" {
+				continue
+			}
+			turnID, itemID := reviewerEventIDs(idPrefix, ordinals, ev)
+			out = append(out, reviewerStreamMessage{
+				TurnID: turnID,
+				ItemID: itemID,
+				Role:   ev.Role,
+				Text:   ev.Text,
+			})
+		case hwtranscript.EventToolUse:
+			name := strings.TrimSpace(ev.ToolName)
+			if name == "" {
+				name = "tool"
+			}
+			turnID, itemID := reviewerEventIDs(idPrefix, ordinals, ev)
+			msg := reviewerStreamMessage{
+				TurnID:    turnID,
+				ItemID:    itemID,
+				Role:      "assistant",
+				Kind:      "tool_use",
+				ToolName:  name,
+				ToolUseID: ev.ToolUseID,
+				ToolInput: strings.TrimSpace(string(ev.ToolInput)),
+				Text:      name,
+			}
+			if ev.ToolUseID != "" {
+				msg.ToolResult = results[ev.ToolUseID]
+			}
+			if msg.ToolResult == "" {
+				msg.ToolResult = strings.TrimSpace(ev.Output)
+			}
+			out = append(out, msg)
+		default:
 			continue
 		}
-		if ev.Role != hwtranscript.RoleUser && ev.Role != hwtranscript.RoleAssistant {
-			continue
-		}
-		if strings.TrimSpace(ev.Text) == "" {
-			continue
-		}
-		base := ev.ID()
-		itemID := idPrefix + base
-		if n := ordinals[base]; n > 0 {
-			itemID += "#" + strconv.Itoa(n)
-		}
-		ordinals[base]++
-		turnID := itemID
-		if ev.UUID != "" {
-			// Multiple content blocks of one native message share the message
-			// UUID — group them under one turn.
-			turnID = idPrefix + "msg:" + ev.UUID
-		}
-		out = append(out, reviewerStreamMessage{
-			TurnID: turnID,
-			ItemID: itemID,
-			Role:   ev.Role,
-			Text:   ev.Text,
-		})
 	}
 	return trimReviewerPreamble(out)
+}
+
+func reviewerEventIDs(idPrefix string, ordinals map[string]int, ev hwtranscript.Event) (turnID, itemID string) {
+	base := ev.ID()
+	itemID = idPrefix + base
+	if n := ordinals[base]; n > 0 {
+		itemID += "#" + strconv.Itoa(n)
+	}
+	ordinals[base]++
+	turnID = itemID
+	if ev.UUID != "" {
+		// Multiple content blocks of one native message share the message
+		// UUID — group them under one turn.
+		turnID = idPrefix + "msg:" + ev.UUID
+	}
+	return turnID, itemID
 }
 
 func shortSessionID(id string) string {

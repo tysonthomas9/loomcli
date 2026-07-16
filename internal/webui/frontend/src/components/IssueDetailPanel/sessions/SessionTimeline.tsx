@@ -1,5 +1,6 @@
 /**
  * SessionTimeline - Vertical list of session rows, sorted newest-first.
+ * Aggregate Runs / Tokens / Cost live in the rail header.
  */
 
 import type { SessionRecord } from "@/types/agent";
@@ -7,11 +8,32 @@ import type { SessionRecord } from "@/types/agent";
 import { SessionTimelineRow } from "./SessionTimelineRow";
 import styles from "./SessionsTab.module.css";
 
+export interface RunRailSummary {
+  count: number;
+  totalTokens: number;
+  totalCost: number;
+  activeSessions: number;
+  failedSessions: number;
+}
+
 export interface SessionTimelineProps {
   sessions: SessionRecord[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   isLoading: boolean;
+  summary: RunRailSummary;
+}
+
+function formatTokensShort(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
+  return String(count);
+}
+
+function formatCostUSD(usd: number): string {
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return "<$0.01";
+  return `$${usd.toFixed(2)}`;
 }
 
 export function SessionTimeline({
@@ -19,10 +41,14 @@ export function SessionTimeline({
   selectedId,
   onSelect,
   isLoading,
+  summary,
 }: SessionTimelineProps): JSX.Element {
   if (isLoading && sessions.length === 0) {
     return (
       <div className={styles.timeline}>
+        <div className={styles.timelineHeader}>
+          <span className={styles.timelineTitle}>Runs</span>
+        </div>
         <div className={styles.timelineSkeleton}>
           <div className={styles.skeletonRow} />
           <div className={styles.skeletonRow} />
@@ -38,16 +64,43 @@ export function SessionTimeline({
       new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
   );
 
+  const summaryParts = [
+    String(summary.count),
+    `${formatTokensShort(summary.totalTokens)} tok`,
+  ];
+  if (summary.totalCost > 0) {
+    summaryParts.push(formatCostUSD(summary.totalCost));
+  }
+  if (summary.activeSessions > 0) {
+    summaryParts.push(`${summary.activeSessions} active`);
+  }
+  if (summary.failedSessions > 0) {
+    summaryParts.push(`${summary.failedSessions} failed`);
+  }
+
   return (
     <div className={styles.timeline} data-testid="session-timeline">
-      {sorted.map((session) => (
-        <SessionTimelineRow
-          key={session.session_id}
-          session={session}
-          isSelected={selectedId === session.session_id}
-          onClick={() => onSelect(session.session_id)}
-        />
-      ))}
+      <div className={styles.timelineHeader} data-testid="timeline-summary">
+        <span className={styles.timelineTitle}>Runs</span>
+        <span className={styles.timelineSummary}>
+          {summaryParts.map((part, i) => (
+            <span key={part}>
+              {i > 0 && <span aria-hidden="true"> · </span>}
+              <span className={styles.summaryValue}>{part}</span>
+            </span>
+          ))}
+        </span>
+      </div>
+      <div className={styles.timelineList}>
+        {sorted.map((session) => (
+          <SessionTimelineRow
+            key={session.session_id}
+            session={session}
+            isSelected={selectedId === session.session_id}
+            onClick={() => onSelect(session.session_id)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

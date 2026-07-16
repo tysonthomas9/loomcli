@@ -143,6 +143,7 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 				SessionRecord: rec,
 				IsActive:      rec.Status == sessions.StatusRunning,
 			}
+			enrichSessionUsageFromTranscript(sessStore, &item.SessionRecord)
 			if info, err := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
@@ -171,6 +172,7 @@ func (s *sessionServiceImpl) enrichSessionListItemsFromFileStores(ctx context.Co
 				continue
 			}
 			enrichSessionRecordFromLocal(&item.SessionRecord, meta.SessionRecord)
+			enrichSessionUsageFromTranscript(sessStore, &item.SessionRecord)
 			if info, err := os.Stat(sessStore.NativeTranscriptPath(item.SessionID)); err == nil && info.Size() > 0 {
 				item.HasTranscript = true
 			}
@@ -180,6 +182,27 @@ func (s *sessionServiceImpl) enrichSessionListItemsFromFileStores(ctx context.Co
 			break
 		}
 	}
+}
+
+// enrichSessionUsageFromTranscript backfills token fields from the on-disk native
+// transcript when session metadata still has zeros (common for completed Go Codex
+// daemon runs whose collector finalize never persisted usage).
+func enrichSessionUsageFromTranscript(store *sessions.Store, rec *sessions.SessionRecord) {
+	if localHasUsage(*rec) {
+		return
+	}
+	data, err := os.ReadFile(store.NativeTranscriptPath(rec.SessionID)) //nolint:gosec // session-owned path
+	if err != nil || len(data) == 0 {
+		return
+	}
+	u := sessions.ExtractTranscriptUsage(data)
+	if u.IsZero() {
+		return
+	}
+	rec.InputTokens = u.InputTokens
+	rec.OutputTokens = u.OutputTokens
+	rec.CacheReadTokens = u.CacheReadTokens
+	rec.CacheWriteTokens = u.CacheWriteTokens
 }
 
 func enrichSessionRecordFromLocal(rec *sessions.SessionRecord, local sessions.SessionRecord) {

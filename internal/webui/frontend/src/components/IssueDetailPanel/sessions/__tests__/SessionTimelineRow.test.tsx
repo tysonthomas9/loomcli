@@ -89,6 +89,20 @@ describe("SessionTimelineRow", () => {
         screen.getByLabelText("Run by nova, Completed"),
       ).toBeInTheDocument();
     });
+
+    it("renders outcome status pill", () => {
+      render(<SessionTimelineRow {...defaultProps} />);
+      expect(screen.getByText("Completed")).toBeInTheDocument();
+    });
+
+    it("renders local start time", () => {
+      render(<SessionTimelineRow {...defaultProps} />);
+      // started_at is 2026-01-20T10:00:00Z — local HH:MM from Date
+      const d = new Date("2026-01-20T10:00:00Z");
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      expect(screen.getByText(`${hh}:${mm}`)).toBeInTheDocument();
+    });
   });
 
   describe("duration formatting", () => {
@@ -130,7 +144,7 @@ describe("SessionTimelineRow", () => {
         output_tokens: 300,
       });
       render(<SessionTimelineRow {...defaultProps} session={session} />);
-      expect(screen.getByText("500 tok")).toBeInTheDocument();
+      expect(screen.getByText("500")).toBeInTheDocument();
     });
 
     it("formats token count with K suffix for >= 1000", () => {
@@ -139,7 +153,7 @@ describe("SessionTimelineRow", () => {
         output_tokens: 700,
       });
       render(<SessionTimelineRow {...defaultProps} session={session} />);
-      expect(screen.getByText("1.5K tok")).toBeInTheDocument();
+      expect(screen.getByText("1.5K")).toBeInTheDocument();
     });
 
     it("formats token count with K suffix for >= 10000", () => {
@@ -148,7 +162,42 @@ describe("SessionTimelineRow", () => {
         output_tokens: 7000,
       });
       render(<SessionTimelineRow {...defaultProps} session={session} />);
-      expect(screen.getByText("15.0K tok")).toBeInTheDocument();
+      expect(screen.getByText("15.0K")).toBeInTheDocument();
+    });
+
+    it("includes cache tokens in the total", () => {
+      const session = createSession({
+        input_tokens: 200,
+        output_tokens: 300,
+        cache_read_tokens: 400,
+        cache_write_tokens: 100,
+      });
+      render(<SessionTimelineRow {...defaultProps} session={session} />);
+      expect(screen.getByText("1.0K")).toBeInTheDocument();
+    });
+  });
+
+  describe("files stat", () => {
+    it("shows files changed with line deltas", () => {
+      const session = createSession({
+        files_changed: 1,
+        lines_added: 1,
+        lines_removed: 0,
+      });
+      render(<SessionTimelineRow {...defaultProps} session={session} />);
+      expect(screen.getByTestId("row-files-stat")).toHaveTextContent(
+        "1 +1 −0",
+      );
+    });
+
+    it("omits files when nothing changed", () => {
+      const session = createSession({
+        files_changed: 0,
+        lines_added: 0,
+        lines_removed: 0,
+      });
+      render(<SessionTimelineRow {...defaultProps} session={session} />);
+      expect(screen.queryByTestId("row-files-stat")).not.toBeInTheDocument();
     });
   });
 
@@ -159,13 +208,14 @@ describe("SessionTimelineRow", () => {
       expect(screen.getByText("$1.50")).toBeInTheDocument();
     });
 
-    it("renders zero cost", () => {
+    it("omits cost when zero (no provider-reported cost)", () => {
       const session = createSession({ estimated_cost_usd: 0 });
       render(<SessionTimelineRow {...defaultProps} session={session} />);
-      expect(screen.getByText("$0.00")).toBeInTheDocument();
+      expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+      expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
     });
 
-    it("renders very small cost as <$0.01", () => {
+    it("renders very small positive cost as <$0.01", () => {
       const session = createSession({ estimated_cost_usd: 0.005 });
       render(<SessionTimelineRow {...defaultProps} session={session} />);
       expect(screen.getByText("<$0.01")).toBeInTheDocument();

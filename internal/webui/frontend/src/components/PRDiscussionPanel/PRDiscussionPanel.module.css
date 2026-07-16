@@ -139,7 +139,6 @@
   border-radius: var(--radius-sm);
   font-size: 13px;
   line-height: 1.45;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -158,6 +157,146 @@
 
 .messageText {
   min-width: 0;
+}
+
+/* Drop shared MarkdownRenderer block padding so bubble spacing stays on the
+   message container, and keep chat typography on the primary text color.
+   Reset white-space: markdown already lays out paragraphs/lists; inheriting
+   pre-wrap from the old plain-text bubbles turns inter-element newlines into
+   huge blank gaps (react-markdown#611). */
+.messageText.messageText {
+  padding-top: 0;
+  padding-bottom: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: 1.5;
+  white-space: normal;
+}
+
+.messageText.messageText p {
+  margin: 0 0 0.55em;
+}
+
+.messageText.messageText p:last-child {
+  margin-bottom: 0;
+}
+
+.messageText.messageText ul,
+.messageText.messageText ol {
+  margin: 0 0 0.55em;
+}
+
+.messageText.messageText ul:last-child,
+.messageText.messageText ol:last-child {
+  margin-bottom: 0;
+}
+
+.toolBlock {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 96%;
+}
+
+.toolPill {
+  display: inline-flex;
+  align-items: stretch;
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--color-bg-card, var(--color-bg));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, var(--radius-sm));
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+  color: var(--color-text);
+  text-align: left;
+  padding: 0;
+}
+
+.toolPill:hover {
+  border-color: var(--color-border-strong, var(--color-text-muted));
+  background: var(--color-bg-hover, var(--color-bg-subtle));
+}
+
+.toolPillOpen {
+  border-color: #ea580c;
+}
+
+.toolPillIcon {
+  padding: 6px 10px;
+  background: rgba(234, 88, 12, 0.12);
+  color: #ea580c;
+  border-right: 1px solid var(--color-border);
+  border-radius: var(--radius-md, var(--radius-sm)) 0 0
+    var(--radius-md, var(--radius-sm));
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-size: 11.5px;
+}
+
+[data-theme="light"] .toolPillIcon {
+  background: #fff1e6;
+}
+
+.toolPillArg {
+  padding: 6px 10px;
+  color: var(--color-text-secondary);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolPillCaret {
+  padding: 6px 10px;
+  color: var(--color-text-muted);
+  border-left: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+}
+
+.toolPillOpen .toolPillCaret {
+  color: #ea580c;
+}
+
+.toolBody {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid #ea580c;
+  width: 100%;
+  min-width: 0;
+}
+
+.toolInput,
+.toolOutput {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  background: var(--color-bg-card, var(--color-bg));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, var(--radius-sm));
+  padding: 10px 12px;
+  margin: 0;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--color-text);
+}
+
+.toolOutput {
+  color: var(--color-text-secondary);
+}
+
+.toolResultLabel {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  margin: 8px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .composer {

@@ -7,6 +7,7 @@
  */
 
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
 
 import { sanitizeHtml } from "@/utils/sanitizeHtml";
@@ -21,7 +22,8 @@ export interface MarkdownRendererProps {
 
 /**
  * MarkdownRenderer displays markdown content with consistent typography styles.
- * Handles empty/null content gracefully.
+ * Handles empty/null content gracefully. GFM (tables, strikethrough, task lists,
+ * autolinks) is enabled via remark-gfm.
  */
 export function MarkdownRenderer({
   content,
@@ -41,7 +43,12 @@ export function MarkdownRenderer({
 
   return (
     <div className={rootClassName} data-testid="markdown-content">
-      <Markdown rehypePlugins={[rehypeSanitize]}>{sanitizedContent}</Markdown>
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSanitize]}
+      >
+        {sanitizedContent}
+      </Markdown>
     </div>
   );
 }

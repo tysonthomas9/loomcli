@@ -170,12 +170,15 @@ func monitorAgentStatuses(
 			orchID = sess.SessionID
 		}
 		inboxSummary := inboxByAgent[assignment.Name]
+		displayName, roleLabel := prReviewerDisplayFields(assignment)
 		agents = append(agents, monitor.AgentStatus{
 			Name:                  assignment.Name,
 			Branch:                monitorBranchFromAgent(workspaceData, assignment),
 			Status:                monitorStatusFromAgentState(assignment.State),
 			Role:                  assignment.RoleName,
 			RoleKind:              string(domain.ResolveRoleKind(rolesByName[assignment.RoleName], assignment.RoleName)),
+			RoleLabel:             roleLabel,
+			DisplayName:           displayName,
 			Repo:                  monitorRepoFromAgent(assignment),
 			Workspace:             wsName,
 			DaemonManaged:         assignment.Auto,

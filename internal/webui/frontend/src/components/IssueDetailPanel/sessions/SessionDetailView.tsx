@@ -1,10 +1,11 @@
 /**
  * SessionDetailView — detail panel for a selected session.
  *
- * Renders the canonical transcript.Event stream as an agent worklog. The
- * kickoff user prompt is surfaced once in the masthead; each subsequent
- * assistant response is a turn with inline collapsible tool calls; mid-run
- * user messages render as distinct interjection blocks.
+ * Renders the canonical transcript.Event stream as an agent worklog.
+ * Assistant responses are turns with inline collapsible tool calls; mid-run
+ * user messages render as distinct interjection blocks. The kickoff user
+ * text is omitted from the worklog (agent backends often prepend synthetic
+ * context as the first user message).
  */
 
 import { useMemo, useState } from "react";
@@ -109,17 +110,17 @@ type RenderBlock =
     };
 
 interface GroupedEvents {
-  prompt: { text: string; timestamp?: string } | null;
   blocks: RenderBlock[];
 }
 
 /**
  * Walk the event stream and produce render-ready blocks:
- *  - the first user text becomes the "prompt" (shown once in the masthead)
+ *  - the first user text is omitted (often synthetic agent context)
  *  - subsequent user text messages become "interjection" blocks
  *  - assistant text + tool_use events are grouped into "turn" blocks
  *  - tool_result events are matched to their tool_use by tool_use_id and
- *    rendered inline inside the turn (never as their own block)
+ *    rendered inline inside the turn (never as their own block);
+ *    when absent, tool_use.output is used (TS leaf / Codex embed path)
  *
  * Consecutive assistant events sharing a uuid (a single native message
  * with mixed content blocks) collapse into one turn.
@@ -134,7 +135,6 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
     }
   }
 
-  let prompt: GroupedEvents["prompt"] = null;
   let sawFirstUserText = false;
   const blocks: RenderBlock[] = [];
   let current: Extract<RenderBlock, { kind: "turn" }> | null = null;
@@ -153,9 +153,11 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
     if (e.role === "user" && e.type === "text") {
       const text = (e.text ?? "").trim();
       if (!text) continue;
+      // Omit kickoff user text from the worklog — backends often inject
+      // synthetic context as the first user message, and we no longer
+      // surface a Prompt masthead.
       if (!sawFirstUserText) {
         sawFirstUserText = true;
-        prompt = e.timestamp ? { text, timestamp: e.timestamp } : { text };
         continue;
       }
       flushCurrent();
@@ -197,7 +199,8 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
           input: e.tool_input,
           inputPreview: formatToolInput(e.tool_input),
         };
-        if (paired?.output) tool.result = paired.output;
+        const resultText = paired?.output || e.output;
+        if (resultText) tool.result = resultText;
         if (paired?.timestamp) tool.resultTimestamp = paired.timestamp;
         turn.items.push(tool);
       }
@@ -208,7 +211,7 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
   }
   flushCurrent();
 
-  return { prompt, blocks };
+  return { blocks };
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────
@@ -358,16 +361,6 @@ export function SessionDetailView({
           )}
         </div>
 
-        {grouped.prompt && (
-          <div className={styles.promptBlock}>
-            <div className={styles.promptLabel}>Prompt</div>
-            <MarkdownRenderer
-              content={grouped.prompt.text}
-              className={styles.promptBody}
-            />
-          </div>
-        )}
-
         {runError && (
           <div
             className={styles.runErrorBanner}
@@ -405,12 +398,14 @@ export function SessionDetailView({
             <div className={styles.statLabel}>Tokens</div>
             <div className={styles.statValue}>{formatTokens(totalTokens)}</div>
           </div>
-          <div className={styles.stat}>
-            <div className={styles.statLabel}>Cost</div>
-            <div className={styles.statValue}>
-              {formatCost(session.estimated_cost_usd)}
+          {(session.estimated_cost_usd ?? 0) > 0 && (
+            <div className={styles.stat}>
+              <div className={styles.statLabel}>Cost</div>
+              <div className={styles.statValue}>
+                {formatCost(session.estimated_cost_usd)}
+              </div>
             </div>
-          </div>
+          )}
           {(session.files_changed > 0 ||
             session.lines_added > 0 ||
             session.lines_removed > 0) && (

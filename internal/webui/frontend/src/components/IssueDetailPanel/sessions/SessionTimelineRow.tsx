@@ -1,6 +1,6 @@
 /**
  * SessionTimelineRow - A single row in the run timeline.
- * Shows agent name, phase badge, status dot, duration, token count, and cost.
+ * Shows agent name, phase/outcome pills, duration · tokens · cost · files, and local time.
  */
 
 import type { SessionRecord } from "@/types/agent";
@@ -51,6 +51,14 @@ function formatRunStatus(status: string): string {
   }
 }
 
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 function runErrorSummary(session: SessionRecord): string | null {
   if (session.last_error) return session.last_error;
   if (session.error_class) return session.error_class;
@@ -63,9 +71,19 @@ export function SessionTimelineRow({
   isSelected,
   onClick,
 }: SessionTimelineRowProps): JSX.Element {
-  const totalTokens = session.input_tokens + session.output_tokens;
+  const totalTokens =
+    session.input_tokens +
+    session.output_tokens +
+    (session.cache_read_tokens ?? 0) +
+    (session.cache_write_tokens ?? 0);
   const errorSummary = runErrorSummary(session);
   const statusLabel = formatRunStatus(session.status);
+  const when = formatWhen(session.started_at);
+  const showFiles =
+    session.files_changed > 0 ||
+    session.lines_added > 0 ||
+    session.lines_removed > 0;
+  const showCost = (session.estimated_cost_usd ?? 0) > 0;
 
   return (
     <div
@@ -82,21 +100,23 @@ export function SessionTimelineRow({
       aria-label={`Run by ${session.agent_name}, ${statusLabel}${errorSummary ? `, ${errorSummary}` : ""}`}
       data-testid={`session-row-${session.session_id}`}
     >
-      <span
-        className={styles.statusDot}
-        data-status={session.status}
-        aria-label={session.status}
-      />
       <div className={styles.rowMain}>
         <div className={styles.rowTop}>
+          <span
+            className={styles.statusDot}
+            data-status={session.status}
+            aria-label={session.status}
+          />
           <span className={styles.agentName}>{session.agent_name}</span>
-          <span className={styles.backendBadge}>{session.backend}</span>
+          {when && <span className={styles.rowWhen}>{when}</span>}
+        </div>
+        <div className={styles.rowPills}>
           {session.phase && (
             <span className={styles.phaseBadge} data-phase={session.phase}>
               {session.phase}
             </span>
           )}
-          <span className={styles.statusLabel} data-status={session.status}>
+          <span className={styles.statusPill} data-status={session.status}>
             {statusLabel}
           </span>
         </div>
@@ -107,10 +127,30 @@ export function SessionTimelineRow({
           <span className={styles.duration}>
             {formatDuration(session.duration_s)}
           </span>
-          <span className={styles.tokens}>{formatTokens(totalTokens)} tok</span>
-          <span className={styles.cost}>
-            {formatCost(session.estimated_cost_usd)}
-          </span>
+          <span aria-hidden="true">·</span>
+          <span className={styles.tokens}>{formatTokens(totalTokens)}</span>
+          {showCost && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className={styles.cost}>
+                {formatCost(session.estimated_cost_usd)}
+              </span>
+            </>
+          )}
+          {showFiles && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className={styles.filesStat} data-testid="row-files-stat">
+                {session.files_changed}
+                {(session.lines_added > 0 || session.lines_removed > 0) && (
+                  <span className={styles.filesDelta}>
+                    {" "}
+                    +{session.lines_added} −{session.lines_removed}
+                  </span>
+                )}
+              </span>
+            </>
+          )}
         </div>
       </div>
     </div>

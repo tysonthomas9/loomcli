@@ -295,6 +295,7 @@ export function WorkspaceTree({
             onAgentClick={onAgentClick}
             selectedAgentName={selectedAgentName}
             onAddClick={onAddClick}
+            activeView={activeView}
           />
           {workspaceId ? (
             <>
@@ -374,6 +375,7 @@ export function WorkspaceTree({
               selectedAgentName={selectedAgentName}
               agentTasks={agentTasks}
               onAddClick={onAddClick}
+              activeView={activeView}
             />
           )}
 

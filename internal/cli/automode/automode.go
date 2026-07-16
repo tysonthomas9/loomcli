@@ -482,12 +482,7 @@ func recordAndFinalize(ctx *autoLoopCtx, collector *usage.Collector, sess *sessi
 	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
 
 	inTok, outTok, cacheRead, cacheWrite := collector.Totals()
-	tier := usage.ResolvePricing(backendName)
-	costUSD := usage.EstimateCost(tier, usage.SessionUsage{
-		InputTokens: inTok, OutputTokens: outTok,
-		CacheReadTokens: cacheRead, CacheWriteTokens: cacheWrite,
-	})
-	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, costUSD)
+	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, 0)
 }
 
 func classifyInvokeError(err error, backendName string) *agenterr.AgentError {
