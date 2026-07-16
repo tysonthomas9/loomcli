@@ -6,26 +6,31 @@ import {
   createWorkflowVersion,
   getWorkflowSource,
   listWorkflowVersions,
+  unapproveWorkflowVersion,
   type CreateWorkflowVersionResult,
   type WorkflowSource,
   type WorkflowVersionActionResult,
   type WorkflowVersionsResponse,
 } from "@/api/workflows";
+import { getAuthToken } from "@/api/common";
+import { hasLocalWorkflowLifecycleSession } from "@/api/workflows/localOperatorSession";
 
 export interface SaveWorkflowSourceInput {
   files: Record<string, string>;
   entrypoint: string;
-  /** Point the driver at the new version once built (default true). */
+  /** Legacy compatibility field. Workflow Catalog builds must pass false. */
   activate?: boolean;
 }
 
 export interface UseWorkflowSourceReturn {
+  /** Whether this browser has external JWT or trusted Desktop lifecycle authority. */
+  canManageVersions: boolean;
   /** Load a builtin workflow's TS source. Rejects with `ApiError` 404 when none. */
   getSource: (name: string) => Promise<WorkflowSource>;
   /** List built driver versions for a workflow. */
   listVersions: (name: string) => Promise<WorkflowVersionsResponse>;
   /**
-   * Build + register a new version from edited source. A build failure rejects
+   * Build + register an inactive version from edited source. A build failure rejects
    * with `ApiError` (400) carrying the diagnostics; success resolves with
    * `build_diagnostics` + `activated`.
    */
@@ -35,6 +40,11 @@ export interface UseWorkflowSourceReturn {
   ) => Promise<CreateWorkflowVersionResult>;
   /** Approve a version (untrusted → trusted) so the runtime will run it. */
   approveVersion: (
+    name: string,
+    versionId: string,
+  ) => Promise<WorkflowVersionActionResult>;
+  /** Remove explicit approval without changing the active pointer. */
+  unapproveVersion: (
     name: string,
     versionId: string,
   ) => Promise<WorkflowVersionActionResult>;
@@ -53,6 +63,8 @@ export interface UseWorkflowSourceReturn {
 export function useWorkflowSource(
   workspaceId: string,
 ): UseWorkflowSourceReturn {
+  const canManageVersions =
+    hasLocalWorkflowLifecycleSession(workspaceId) || getAuthToken() !== null;
   const getSource = useCallback(
     (name: string): Promise<WorkflowSource> =>
       getWorkflowSource(workspaceId, name),
@@ -90,14 +102,30 @@ export function useWorkflowSource(
     [workspaceId],
   );
 
+  const unapproveVersion = useCallback(
+    (name: string, versionId: string): Promise<WorkflowVersionActionResult> =>
+      unapproveWorkflowVersion(workspaceId, name, versionId),
+    [workspaceId],
+  );
+
   return useMemo(
     () => ({
+      canManageVersions,
       getSource,
       listVersions,
       saveSource,
       approveVersion,
+      unapproveVersion,
       activateVersion,
     }),
-    [getSource, listVersions, saveSource, approveVersion, activateVersion],
+    [
+      getSource,
+      listVersions,
+      saveSource,
+      approveVersion,
+      unapproveVersion,
+      activateVersion,
+      canManageVersions,
+    ],
   );
 }

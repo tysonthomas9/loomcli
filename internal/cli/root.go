@@ -110,21 +110,8 @@ func init() {
 	// Resolve and set active backend before any subcommand runs,
 	// then inject the Deps container into the command context.
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if err := InitLogger(logFormat, logOutput); err != nil {
+		if err := prepareCommandEnvironment(); err != nil {
 			return err
-		}
-		// Mirror --server / --workspace flags into env vars so that
-		// resolveIssueBackendFromEnv and the factory helpers see the same
-		// value whether the caller used the flag or the env var directly.
-		if serverFlag != "" {
-			if err := os.Setenv("LOOM_SERVER_URL", serverFlag); err != nil {
-				return err
-			}
-		}
-		if workspaceFlag != "" {
-			if err := os.Setenv("LOOM_WORKSPACE", workspaceFlag); err != nil {
-				return err
-			}
 		}
 		if err := ResolveAndSetBackend(); err != nil {
 			return err
@@ -148,6 +135,35 @@ func init() {
 	rootCmd.AddGroup(&cobra.Group{ID: "git", Title: "Git Operations:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "config", Title: "Configuration:"})
 	rootCmd.AddGroup(&cobra.Group{ID: "workspace", Title: "Workspace Commands:"})
+}
+
+// PrepareStandaloneHTTPCommand is a PersistentPreRunE hook for commands that
+// use an explicitly configured Loom HTTP endpoint and do not consume the
+// process-wide IssueBackend or Deps container. It preserves logging and global
+// flag-to-environment behavior while deliberately skipping eager issue-backend
+// construction (and its separate /api/config auth discovery).
+func PrepareStandaloneHTTPCommand(_ *cobra.Command, _ []string) error {
+	return prepareCommandEnvironment()
+}
+
+func prepareCommandEnvironment() error {
+	if err := InitLogger(logFormat, logOutput); err != nil {
+		return err
+	}
+	// Mirror --server / --workspace flags into env vars so that HTTP clients
+	// and backend factory helpers see the same value whether the caller used
+	// the flag or the env var directly.
+	if serverFlag != "" {
+		if err := os.Setenv("LOOM_SERVER_URL", serverFlag); err != nil {
+			return err
+		}
+	}
+	if workspaceFlag != "" {
+		if err := os.Setenv("LOOM_WORKSPACE", workspaceFlag); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Execute runs the root command

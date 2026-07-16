@@ -27,6 +27,7 @@ import (
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -110,8 +111,9 @@ type githubWebhookE2E struct {
 	workDir   string
 	configDir string
 
-	fleetURL string
-	loomURL  string
+	fleetURL    string
+	fleetAPIKey string
+	loomURL     string
 
 	enableDriverExecutor bool
 	useHostHomeForDriver bool
@@ -221,7 +223,8 @@ func (e *githubWebhookE2E) startFleetDB() {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	e.t.Cleanup(cancel)
 
-	embedded, err := bootstrap.StartEmbedded(ctx, filepath.Join(e.t.TempDir(), "fleet-data"), githubWebhookQuietLogger())
+	dataDir := filepath.Join(e.t.TempDir(), "fleet-data")
+	embedded, err := bootstrap.StartEmbedded(ctx, dataDir, githubWebhookQuietLogger())
 	if err != nil {
 		e.t.Fatalf("start embedded fleet-db: %v", err)
 	}
@@ -232,10 +235,11 @@ func (e *githubWebhookE2E) startFleetDB() {
 	})
 
 	e.fleetURL = embedded.URL()
-	e.fleetClient, err = fleetdb.New(fleetdb.Config{
-		BaseURL: e.fleetURL,
-		Actor:   e.actor,
-	})
+	e.fleetAPIKey, err = authority.ReadLocalFleetDBServiceCredential(filepath.Join(dataDir, "fleet-db", "auth"))
+	if err != nil {
+		e.t.Fatalf("read embedded FleetDB service credential: %v", err)
+	}
+	e.fleetClient, err = embedded.NewClient(fleetdb.Config{Actor: e.actor})
 	if err != nil {
 		e.t.Fatalf("create fleet-db client: %v", err)
 	}
@@ -297,7 +301,7 @@ func (e *githubWebhookE2E) startLoomServe() {
 		"LOOM_DRIVER_EXECUTOR_NODE_ID": "github-webhook-e2e-node",
 		"LOOM_ISSUE_BACKEND":           "",
 		bootstrap.EnvFleetDBBin:        e.fleetDBBin,
-		bootstrap.EnvFleetDBAPIKey:     "",
+		bootstrap.EnvFleetDBAPIKey:     e.fleetAPIKey,
 		bootstrap.EnvFleetDBActor:      e.actor,
 	})
 	var stdout bytes.Buffer

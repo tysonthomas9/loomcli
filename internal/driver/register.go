@@ -598,7 +598,7 @@ func demoteReregisteredDriver(ctx context.Context, s store.Store, driver *domain
 }
 
 func activateRegisteredDriver(ctx context.Context, s store.Store, result *RegisterFlueResult, ws, driverID, versionID string, _ map[string]string) error {
-	driver, version, err := ActivateDriverVersion(ctx, s, ws, driverID, versionID)
+	driver, version, err := ActivateDriverVersion(ctx, s.Drivers(), s.DriverVersions(), ws, driverID, versionID)
 	if err != nil {
 		return fmt.Errorf("activate native Flue driver version: %w", err)
 	}

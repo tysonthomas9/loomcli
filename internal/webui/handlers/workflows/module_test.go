@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -426,6 +427,61 @@ func TestCreateWorkflowVersionRejectsPackageManifest(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateWorkflowVersionRejectsInlineActivation(t *testing.T) {
+	st := memstore.New()
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	body := `{"files":{"workflows/demo.ts":"export async function run(){ return {}; }"},"activate":true}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo/versions", stringsReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "approve and activate the version through the workflow catalog lifecycle API") {
+		t.Fatalf("body = %s, want lifecycle API guidance", rec.Body.String())
+	}
+	if _, err := st.Drivers().Get(context.Background(), "TEST", "demo"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("activation bypass registered driver: %v", err)
+	}
+}
+
+func TestCreateWorkflowVersionRegistersWithoutActivation(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	installFakeFlueBuild(t)
+	t.Chdir(t.TempDir())
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	body := `{"files":{"workflows/demo.ts":"export async function run(){ return {}; }"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo/versions", stringsReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s, want 201", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Activated bool                  `json:"activated"`
+		Driver    *domain.Driver        `json:"driver"`
+		Version   *domain.DriverVersion `json:"version"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Activated || response.Driver == nil || response.Version == nil {
+		t.Fatalf("response = %+v, want registered inactive version", response)
+	}
+	driverRecord, err := st.Drivers().Get(ctx, "TEST", response.Driver.DriverID)
+	if err != nil {
+		t.Fatalf("get registered driver: %v", err)
+	}
+	if driverRecord.ActiveVersionID != "" || driverRecord.Status != domain.DriverStatusDraft {
+		t.Fatalf("driver = %+v, want draft with no active version", driverRecord)
 	}
 }
 

@@ -51,6 +51,9 @@ LOOM_PORT="${LOOM_PORT:-$(freeport)}"
 FLEET_URL="http://127.0.0.1:${FLEET_PORT}"
 LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
 NODE_ID="failclosed-node"
+# This runner matrix intentionally runs FleetDB without authorization and does
+# not prove the Workflow Catalog lifecycle capability.
+export LOOM_WORKFLOW_CATALOG_ENABLED=false
 
 TMP_ROOT="$(mktemp -d -t loom-runner-failclosed.XXXXXX)"
 BIN_DIR="$TMP_ROOT/bin"

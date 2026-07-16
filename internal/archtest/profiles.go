@@ -111,6 +111,13 @@ func profilePackageViolations(root, profile string, pkg *packages.Package, graph
 	if !strings.HasPrefix(pkg.PkgPath, modulePath+"/internal/") {
 		return nil
 	}
+	// packages.Load(Tests: true) adds a synthetic test-main package whose path
+	// ends in ".test". Its imports are the test harness, not a production or
+	// test source boundary. The real package-under-test variants are loaded
+	// separately and remain fully checked, including their _test.go imports.
+	if strings.HasSuffix(pkg.PkgPath, ".test") {
+		return nil
+	}
 	violations := []string{}
 	for importPath := range pkg.Imports {
 		if reason := forbiddenBoundaryImport(pkg.PkgPath, importPath, graph); reason != "" {
@@ -854,8 +861,13 @@ func boundaryImportViolations(rel, directoryImport string, specs []*ast.ImportSp
 }
 
 func moduleASTViolations(rel string, file *ast.File, aliases map[string]string, graph CapabilityGraph) []string {
-	violations := []string{}
 	localLeaks := localLeakedTypeAliases(file, aliases, graph)
+	violations := compositeStoreInjectionViolations(rel, file, aliases)
+	return append(violations, exportedTypeLeakViolations(rel, file, aliases, localLeaks, graph)...)
+}
+
+func compositeStoreInjectionViolations(rel string, file *ast.File, aliases map[string]string) []string {
+	violations := []string{}
 	storeAlias := ""
 	for alias, importPath := range aliases {
 		if importPath == modulePath+"/internal/store" {
@@ -876,30 +888,37 @@ func moduleASTViolations(rel string, file *ast.File, aliases map[string]string, 
 		}
 		return true
 	})
+	return violations
+}
+
+func exportedTypeLeakViolations(rel string, file *ast.File, aliases, localLeaks map[string]string, graph CapabilityGraph) []string {
+	violations := []string{}
 	for _, decl := range file.Decls {
 		if !exportedDeclaration(decl) {
 			continue
 		}
-		ast.Inspect(decl, func(node ast.Node) bool {
-			if ident, ok := node.(*ast.Ident); ok {
-				if importPath := localLeaks[ident.Name]; importPath != "" {
-					violations = append(violations, fmt.Sprintf("AST file %s exports local alias %s of forbidden type from %s", rel, ident.Name, importPath))
+		for _, expression := range exportedSignatureExpressions(decl) {
+			ast.Inspect(expression, func(node ast.Node) bool {
+				if ident, ok := node.(*ast.Ident); ok {
+					if importPath := localLeaks[ident.Name]; importPath != "" {
+						violations = append(violations, fmt.Sprintf("AST file %s exports local alias %s of forbidden type from %s", rel, ident.Name, importPath))
+					}
+					return true
+				}
+				selector, ok := node.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				ident, ok := selector.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				if importPath := aliases[ident.Name]; isLeakedSignatureImport(importPath, graph) {
+					violations = append(violations, fmt.Sprintf("AST file %s exports legacy or implementation type %s.%s", rel, ident.Name, selector.Sel.Name))
 				}
 				return true
-			}
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			ident, ok := selector.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			if importPath := aliases[ident.Name]; isLeakedSignatureImport(importPath, graph) {
-				violations = append(violations, fmt.Sprintf("AST file %s exports legacy or implementation type %s.%s", rel, ident.Name, selector.Sel.Name))
-			}
-			return true
-		})
+			})
+		}
 	}
 	return violations
 }
@@ -924,13 +943,159 @@ func localLeakedTypeAliases(file *ast.File, aliases map[string]string, graph Cap
 			if leaked[spec.Name.Name] != "" {
 				continue
 			}
-			if importPath := firstLeakedASTTypeImport(spec.Type, aliases, leaked, graph); importPath != "" {
-				leaked[spec.Name.Name] = importPath
-				changed = true
+			for _, expression := range publicTypeExpressions(spec.Type) {
+				if importPath := firstLeakedASTTypeImport(expression, aliases, leaked, graph); importPath != "" {
+					leaked[spec.Name.Name] = importPath
+					changed = true
+					break
+				}
 			}
 		}
 	}
 	return leaked
+}
+
+// exportedSignatureExpressions returns only type/value expressions that are
+// observable through the package API. Function bodies, method receivers,
+// unexported receiver methods, and unexported struct/interface fields are
+// implementation details and must not turn an allowed private adapter field
+// into a public-signature violation.
+func exportedSignatureExpressions(decl ast.Decl) []ast.Expr {
+	switch value := decl.(type) {
+	case *ast.FuncDecl:
+		if !exportedFunctionDeclaration(value) {
+			return nil
+		}
+		return appendFieldListExpressions(nil, value.Type.TypeParams, value.Type.Params, value.Type.Results)
+	case *ast.GenDecl:
+		expressions := []ast.Expr{}
+		for _, spec := range value.Specs {
+			switch typed := spec.(type) {
+			case *ast.TypeSpec:
+				if typed.Name.IsExported() {
+					expressions = append(expressions, publicTypeExpressions(typed.Type)...)
+				}
+			case *ast.ValueSpec:
+				expressions = append(expressions, exportedValueExpressions(typed)...)
+			}
+		}
+		return expressions
+	default:
+		return nil
+	}
+}
+
+func appendFieldListExpressions(expressions []ast.Expr, lists ...*ast.FieldList) []ast.Expr {
+	for _, list := range lists {
+		if list == nil {
+			continue
+		}
+		for _, field := range list.List {
+			expressions = append(expressions, field.Type)
+		}
+	}
+	return expressions
+}
+
+func exportedValueExpressions(spec *ast.ValueSpec) []ast.Expr {
+	if spec == nil {
+		return nil
+	}
+	exported := make([]int, 0, len(spec.Names))
+	for index, name := range spec.Names {
+		if name.IsExported() {
+			exported = append(exported, index)
+		}
+	}
+	if len(exported) == 0 {
+		return nil
+	}
+	expressions := []ast.Expr{}
+	if spec.Type != nil {
+		expressions = append(expressions, spec.Type)
+	}
+	if len(spec.Values) != len(spec.Names) {
+		return append(expressions, spec.Values...)
+	}
+	for _, index := range exported {
+		expressions = append(expressions, spec.Values[index])
+	}
+	return expressions
+}
+
+// publicTypeExpressions mirrors the typed exported-signature check for files
+// outside the active build profile. Private struct fields and private explicit
+// interface methods are not package API. Embedded interface types remain part
+// of the public type identity and are therefore checked.
+func publicTypeExpressions(expression ast.Expr) []ast.Expr {
+	switch typed := expression.(type) {
+	case *ast.StructType:
+		return publicStructTypeExpressions(typed)
+	case *ast.InterfaceType:
+		return publicInterfaceTypeExpressions(typed)
+	default:
+		return []ast.Expr{expression}
+	}
+}
+
+func publicStructTypeExpressions(typed *ast.StructType) []ast.Expr {
+	expressions := []ast.Expr{}
+	if typed.Fields == nil {
+		return expressions
+	}
+	for _, field := range typed.Fields.List {
+		if len(field.Names) == 0 {
+			if embeddedFieldExported(field.Type) {
+				expressions = append(expressions, field.Type)
+			}
+			continue
+		}
+		if hasExportedFieldName(field.Names) {
+			expressions = append(expressions, field.Type)
+		}
+	}
+	return expressions
+}
+
+func publicInterfaceTypeExpressions(typed *ast.InterfaceType) []ast.Expr {
+	expressions := []ast.Expr{}
+	if typed.Methods == nil {
+		return expressions
+	}
+	for _, field := range typed.Methods.List {
+		if len(field.Names) == 0 || hasExportedFieldName(field.Names) {
+			expressions = append(expressions, field.Type)
+		}
+	}
+	return expressions
+}
+
+func hasExportedFieldName(names []*ast.Ident) bool {
+	for _, name := range names {
+		if name.IsExported() {
+			return true
+		}
+	}
+	return false
+}
+
+func embeddedFieldExported(expression ast.Expr) bool {
+	switch typed := expression.(type) {
+	case *ast.Ident:
+		return typed.IsExported()
+	case *ast.SelectorExpr:
+		return typed.Sel.IsExported()
+	case *ast.StarExpr:
+		return embeddedFieldExported(typed.X)
+	case *ast.IndexExpr:
+		return embeddedFieldExported(typed.X)
+	case *ast.IndexListExpr:
+		return embeddedFieldExported(typed.X)
+	case *ast.ParenExpr:
+		return embeddedFieldExported(typed.X)
+	default:
+		return false
+	}
 }
 
 func firstLeakedASTTypeImport(expression ast.Expr, aliases, localLeaks map[string]string, graph CapabilityGraph) string {
@@ -961,7 +1126,7 @@ func firstLeakedASTTypeImport(expression ast.Expr, aliases, localLeaks map[strin
 func exportedDeclaration(decl ast.Decl) bool {
 	switch value := decl.(type) {
 	case *ast.FuncDecl:
-		return value.Name.IsExported()
+		return exportedFunctionDeclaration(value)
 	case *ast.GenDecl:
 		for _, spec := range value.Specs {
 			switch typed := spec.(type) {
@@ -979,6 +1144,16 @@ func exportedDeclaration(decl ast.Decl) bool {
 		}
 	}
 	return false
+}
+
+func exportedFunctionDeclaration(function *ast.FuncDecl) bool {
+	if function == nil || !function.Name.IsExported() {
+		return false
+	}
+	if function.Recv == nil || len(function.Recv.List) == 0 {
+		return true
+	}
+	return embeddedFieldExported(function.Recv.List[0].Type)
 }
 
 func isLeakedSignatureImport(importPath string, graph CapabilityGraph) bool {

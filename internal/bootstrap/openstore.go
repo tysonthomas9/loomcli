@@ -10,6 +10,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -31,6 +32,15 @@ type StoreHandle struct {
 	Store store.Store
 	mode  Mode
 	url   string
+	// fleetDBClientAPIKey is retained only in process memory so composition
+	// can authenticate secondary FleetDB clients (for example, the
+	// per-workspace mutation subscriber). It must never be logged, persisted,
+	// or copied into ambient environment state.
+	fleetDBClientAPIKey string //nolint:gosec // process-local FleetDB service credential
+	// fleetDBClient is the single low-level transport client constructed for
+	// this handle. Composition may wrap it in capability adapters while the
+	// legacy Store continues to use the same connection pool and credentials.
+	fleetDBClient *fleetdb.Client
 
 	// embedded is the embedded fleet-db handle, set only in ModeLocal.
 	embedded *EmbeddedFleetDB
@@ -59,6 +69,25 @@ func (h *StoreHandle) URL() string {
 		return h.url
 	}
 	return os.Getenv(EnvFleetDBURL)
+}
+
+// FleetDBClient returns the shared low-level FleetDB client for capability
+// adapter composition. It is nil only for test handles not opened by bootstrap.
+func (h *StoreHandle) FleetDBClient() *fleetdb.Client {
+	if h == nil {
+		return nil
+	}
+	return h.fleetDBClient
+}
+
+// FleetDBClientAPIKey returns the process-local credential needed when serve
+// composes a secondary FleetDB client. Callers must keep the value in memory
+// and must not log, persist, or export it to child processes.
+func (h *StoreHandle) FleetDBClientAPIKey() string {
+	if h == nil {
+		return ""
+	}
+	return h.fleetDBClientAPIKey
 }
 
 // Close shuts down the store and any subprocess it owns. Idempotent.
@@ -163,7 +192,13 @@ func openCloudStore(cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, erro
 		return nil, fmt.Errorf("openstore: cloud: %w", err)
 	}
 	logger.Info("opened cloud fleet-db client", "url", cfg.BaseURL)
-	return &StoreHandle{Store: client, mode: ModeCloud, url: cfg.BaseURL}, nil
+	return &StoreHandle{
+		Store:               client,
+		mode:                ModeCloud,
+		url:                 cfg.BaseURL,
+		fleetDBClientAPIKey: cfg.APIKey,
+		fleetDBClient:       client,
+	}, nil
 }
 
 func openLocalStore(ctx context.Context, dataDir string, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {
@@ -180,13 +215,20 @@ func openLocalStore(ctx context.Context, dataDir string, cfg fleetdb.Config, log
 		return nil, fmt.Errorf("openstore: local: %w", err)
 	}
 	cfg.BaseURL = emb.URL()
-	client, err := fleetdb.New(cfg)
+	client, err := emb.NewClient(cfg)
 	if err != nil {
 		_ = emb.Stop()
 		return nil, fmt.Errorf("openstore: local client: %w", err)
 	}
 	logger.Info("opened embedded fleet-db client", "url", cfg.BaseURL)
-	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL, embedded: emb}, nil
+	return &StoreHandle{
+		Store:               client,
+		mode:                ModeLocal,
+		url:                 cfg.BaseURL,
+		fleetDBClientAPIKey: emb.serviceCredential,
+		fleetDBClient:       client,
+		embedded:            emb,
+	}, nil
 }
 
 func tryReuseLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, bool, error) {
@@ -198,12 +240,23 @@ func tryReuseLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config
 		return nil, false, nil
 	}
 	cfg.BaseURL = url
+	serviceCredential, err := authority.ReadLocalFleetDBServiceCredential(embeddedFleetDBAuthDir(filepath.Dir(fleetDir)))
+	if err != nil {
+		return nil, true, fmt.Errorf("openstore: local reused service credential: %w", err)
+	}
+	cfg.APIKey = serviceCredential
 	client, err := fleetdb.New(cfg)
 	if err != nil {
 		return nil, true, fmt.Errorf("openstore: local reused client: %w", err)
 	}
 	logger.Info("opened existing embedded fleet-db client", "url", cfg.BaseURL)
-	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, true, nil
+	return &StoreHandle{
+		Store:               client,
+		mode:                ModeLocal,
+		url:                 cfg.BaseURL,
+		fleetDBClientAPIKey: serviceCredential,
+		fleetDBClient:       client,
+	}, true, nil
 }
 
 func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Config, logger *slog.Logger, lockErr error) (*StoreHandle, error) {
@@ -212,12 +265,23 @@ func waitAndOpenLocalStore(ctx context.Context, fleetDir string, cfg fleetdb.Con
 		return nil, fmt.Errorf("openstore: local: %w; existing runtime did not become healthy: %v", lockErr, waitErr)
 	}
 	cfg.BaseURL = url
+	serviceCredential, err := authority.ReadLocalFleetDBServiceCredential(embeddedFleetDBAuthDir(filepath.Dir(fleetDir)))
+	if err != nil {
+		return nil, fmt.Errorf("openstore: local waited service credential: %w", err)
+	}
+	cfg.APIKey = serviceCredential
 	client, err := fleetdb.New(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("openstore: local waited client: %w", err)
 	}
 	logger.Info("opened existing embedded fleet-db client after startup wait", "url", cfg.BaseURL)
-	return &StoreHandle{Store: client, mode: ModeLocal, url: cfg.BaseURL}, nil
+	return &StoreHandle{
+		Store:               client,
+		mode:                ModeLocal,
+		url:                 cfg.BaseURL,
+		fleetDBClientAPIKey: serviceCredential,
+		fleetDBClient:       client,
+	}, nil
 }
 
 // resolveActor returns the X-Actor identity.

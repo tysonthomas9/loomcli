@@ -44,6 +44,8 @@ tags:
     description: Worker heartbeat and lifecycle
   - name: Drivers
     description: Driver definitions and published runtime versions
+  - name: Workflow Catalog
+    description: Atomic workflow version trust and activation lifecycle
   - name: Worker Profiles
     description: Worker pool profile definitions used for task placement
   - name: Agent Services
@@ -124,6 +126,20 @@ paths:
                   error:
                     type: string
                     example: backend unavailable
+
+  /api/v1/capabilities:
+    get:
+      tags: [Health]
+      summary: Get deployment capability manifest
+      description: Returns only versioned operations usable by the running backend, registered routes, authentication, and feature configuration.
+      operationId: getCapabilities
+      responses:
+        "200":
+          description: Deployment capability manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityManifest"
 
   # ---------------------------------------------------------------------------
   # Workspaces (admin)
@@ -2273,6 +2289,7 @@ paths:
     post:
       tags: [Drivers]
       summary: Create a driver
+      description: Creates a draft driver without active or approved versions. Creating a trusted draft requires workflow_catalog.version_lifecycle permission.
       operationId: createDriver
       requestBody:
         required: true
@@ -2289,6 +2306,8 @@ paths:
                 $ref: "#/components/schemas/Driver"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
     get:
@@ -2336,6 +2355,7 @@ paths:
     patch:
       tags: [Drivers]
       summary: Update a driver
+      description: Updates generic driver fields. Lifecycle-sensitive fields remain available only as a deprecated old-Loom compatibility lane and require workflow_catalog.version_lifecycle permission; new clients must use the Workflow Catalog intent operations.
       operationId: updateDriver
       requestBody:
         required: true
@@ -2352,6 +2372,8 @@ paths:
                 $ref: "#/components/schemas/Driver"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -2362,6 +2384,7 @@ paths:
     post:
       tags: [Drivers]
       summary: Create a driver version
+      description: Creates a pending version by default. Trusted manifests require workflow_catalog.version_lifecycle permission; versions created without that permission are server-stamped untrusted, including old-Loom requests that report passed validation.
       operationId: createDriverVersionForDriver
       requestBody:
         required: true
@@ -2405,6 +2428,98 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ListDriverVersionsResponse"
+
+  /api/v1/{workspace}/drivers/{driver_id}/versions/{version_id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverID"
+      - $ref: "#/components/parameters/DriverVersionID"
+    post:
+      tags: [Workflow Catalog]
+      summary: Approve a validated driver version
+      operationId: approveDriverVersion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverVersionLifecycleRequest"
+      responses:
+        "200":
+          description: Version approved or prior committed result replayed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverVersionLifecycleResponse"
+        "400": { $ref: "#/components/responses/WorkflowCatalogLifecycleBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WorkflowCatalogLifecycleForbidden" }
+        "404": { $ref: "#/components/responses/WorkflowCatalogLifecycleNotFound" }
+        "409": { $ref: "#/components/responses/WorkflowCatalogLifecycleConflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "422": { $ref: "#/components/responses/WorkflowCatalogLifecyclePreconditionFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/drivers/{driver_id}/versions/{version_id}/unapprove:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverID"
+      - $ref: "#/components/parameters/DriverVersionID"
+    post:
+      tags: [Workflow Catalog]
+      summary: Remove approval from a driver version
+      operationId: unapproveDriverVersion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverVersionLifecycleRequest"
+      responses:
+        "200":
+          description: Version unapproved or prior committed result replayed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverVersionLifecycleResponse"
+        "400": { $ref: "#/components/responses/WorkflowCatalogLifecycleBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WorkflowCatalogLifecycleForbidden" }
+        "404": { $ref: "#/components/responses/WorkflowCatalogLifecycleNotFound" }
+        "409": { $ref: "#/components/responses/WorkflowCatalogLifecycleConflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/drivers/{driver_id}/versions/{version_id}/activate:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverID"
+      - $ref: "#/components/parameters/DriverVersionID"
+    post:
+      tags: [Workflow Catalog]
+      summary: Activate an approved driver version
+      operationId: activateDriverVersion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverVersionLifecycleRequest"
+      responses:
+        "200":
+          description: Version activated or prior committed result replayed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverVersionLifecycleResponse"
+        "400": { $ref: "#/components/responses/WorkflowCatalogLifecycleBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/WorkflowCatalogLifecycleForbidden" }
+        "404": { $ref: "#/components/responses/WorkflowCatalogLifecycleNotFound" }
+        "409": { $ref: "#/components/responses/WorkflowCatalogLifecycleConflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "422": { $ref: "#/components/responses/WorkflowCatalogLifecyclePreconditionFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /api/v1/{workspace}/driver-versions:
     parameters:
@@ -6250,19 +6365,21 @@ components:
       name: driver_id
       in: path
       required: true
-      description: Driver identifier.
+      description: Exact driver identifier; leading and trailing whitespace and the reserved colon delimiter are rejected.
       schema:
         type: string
         minLength: 1
+        pattern: '^(?!.*:)\S(?:.*\S)?$'
 
     DriverVersionID:
       name: version_id
       in: path
       required: true
-      description: Driver version identifier.
+      description: Exact driver version identifier; leading and trailing whitespace are rejected.
       schema:
         type: string
         minLength: 1
+        pattern: '^\S(?:.*\S)?$'
 
     ProfileID:
       name: profile_id
@@ -7372,10 +7489,15 @@ components:
 
     Driver:
       type: object
-      required: [workspace_key, driver_id, name, owner_type, status, created_at, updated_at]
+      required: [workspace_key, driver_id, revision, name, owner_type, status, created_at, updated_at]
       properties:
         workspace_key: { type: string }
-        driver_id: { type: string }
+        driver_id:
+          type: string
+          minLength: 1
+          pattern: '^(?!.*:)\S(?:.*\S)?$'
+          description: Exact identity; leading and trailing whitespace and the reserved colon delimiter are rejected.
+        revision: { type: integer, format: int64, minimum: 1 }
         name: { type: string }
         owner_type:
           $ref: "#/components/schemas/DriverOwnerType"
@@ -7403,19 +7525,28 @@ components:
       type: object
       required: [driver_id, name]
       properties:
-        driver_id: { type: string }
+        driver_id:
+          type: string
+          minLength: 1
+          pattern: '^(?!.*:)\S(?:.*\S)?$'
+          description: Exact identity; leading and trailing whitespace and the reserved colon delimiter are rejected.
         name: { type: string }
         owner_type:
           $ref: "#/components/schemas/DriverOwnerType"
         owner_ref: { type: string }
         description: { type: string }
-        active_version_id: { type: string }
         status:
-          $ref: "#/components/schemas/DriverStatus"
+          type: string
+          enum: [draft]
+          description: New drivers must start in draft state.
         trust_level:
-          $ref: "#/components/schemas/DriverTrustLevel"
+          allOf:
+            - $ref: "#/components/schemas/DriverTrustLevel"
+          description: Creating a trusted draft requires workflow_catalog.version_lifecycle permission; omitted values default to untrusted.
         metadata:
-          $ref: "#/components/schemas/StringMap"
+          allOf:
+            - $ref: "#/components/schemas/StringMap"
+          description: Workflow Catalog approved_version keys are rejected during creation.
 
     UpdateDriverRequest:
       type: object
@@ -7425,13 +7556,22 @@ components:
           $ref: "#/components/schemas/DriverOwnerType"
         owner_ref: { type: string }
         description: { type: string }
-        active_version_id: { type: string }
+        active_version_id:
+          type: string
+          deprecated: true
+          description: Deprecated old-Loom activation field. The exact identifier must not contain leading or trailing whitespace. Accepted only in the combined active_version_id, active status, and metadata patch; requires workflow_catalog.version_lifecycle permission, same-driver version ownership, and passed validation. This compatibility path never implicitly approves an untrusted version. New clients must use the activate operation.
         status:
-          $ref: "#/components/schemas/DriverStatus"
+          allOf:
+            - $ref: "#/components/schemas/DriverStatus"
+          description: Lifecycle-sensitive updates require workflow_catalog.version_lifecycle permission; new clients should use Workflow Catalog intent operations.
         trust_level:
-          $ref: "#/components/schemas/DriverTrustLevel"
+          allOf:
+            - $ref: "#/components/schemas/DriverTrustLevel"
+          description: Requires workflow_catalog.version_lifecycle permission.
         metadata:
-          $ref: "#/components/schemas/StringMap"
+          allOf:
+            - $ref: "#/components/schemas/StringMap"
+          description: Ordinary replacement preserves existing approved_version lifecycle markers for callers without lifecycle permission. Adding, changing, or removing those markers is a deprecated old-Loom compatibility operation requiring workflow_catalog.version_lifecycle permission.
 
     ListDriversResponse:
       type: object
@@ -7449,8 +7589,16 @@ components:
       required: [workspace_key, version_id, driver_id, version, source_digest, bundle_digest, validation_status, created_at]
       properties:
         workspace_key: { type: string }
-        version_id: { type: string }
-        driver_id: { type: string }
+        version_id:
+          type: string
+          minLength: 1
+          pattern: '^\S(?:.*\S)?$'
+          description: Exact identity; leading and trailing whitespace are rejected.
+        driver_id:
+          type: string
+          minLength: 1
+          pattern: '^(?!.*:)\S(?:.*\S)?$'
+          description: Exact identity; leading and trailing whitespace and the reserved colon delimiter are rejected.
         version: { type: integer, minimum: 1 }
         source_ref: { type: string }
         source_digest: { type: string }
@@ -7469,7 +7617,11 @@ components:
       type: object
       required: [version_id, version, source_digest, bundle_digest]
       properties:
-        version_id: { type: string }
+        version_id:
+          type: string
+          minLength: 1
+          pattern: '^\S(?:.*\S)?$'
+          description: Exact identity; leading and trailing whitespace are rejected.
         version: { type: integer, minimum: 1 }
         source_ref: { type: string }
         source_digest: { type: string }
@@ -7477,10 +7629,14 @@ components:
         bundle_digest: { type: string }
         runtime: { type: string }
         manifest:
-          $ref: "#/components/schemas/StringMap"
+          allOf:
+            - $ref: "#/components/schemas/StringMap"
+          description: A trust_level of trusted requires workflow_catalog.version_lifecycle permission; approved_version keys are rejected. For callers without lifecycle permission, missing or unknown trust is server-stamped untrusted.
         build_diagnostics: { type: string }
         validation_status:
-          $ref: "#/components/schemas/DriverVersionValidationStatus"
+          allOf:
+            - $ref: "#/components/schemas/DriverVersionValidationStatus"
+          description: Omit to create pending. Old-Loom callers may report validation, but callers without lifecycle permission always persist an untrusted manifest.
         created_by: { type: string }
 
     ListDriverVersionsResponse:
@@ -7493,6 +7649,90 @@ components:
             $ref: "#/components/schemas/DriverVersion"
         count:
           type: integer
+
+    CapabilityManifest:
+      type: object
+      required: [api_revision, capabilities]
+      properties:
+        api_revision:
+          type: string
+          example: v1
+        capabilities:
+          type: array
+          items: { type: string }
+          example: [workflow_catalog.version_lifecycle.v1]
+
+    DriverVersionLifecycleRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9223372036854775806
+
+    DriverVersionLifecycleResponse:
+      type: object
+      additionalProperties: false
+      required: [committed_revision, semantic_impact, replayed, driver, version]
+      properties:
+        committed_revision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Revision committed by the original durable command, including on replay.
+        semantic_impact:
+          type: string
+          description: Durable semantic read-model impact recorded for this command.
+          enum:
+            - workflow_catalog.version_trust_changed.v1
+            - workflow_catalog.effective_version_changed.v1
+        replayed:
+          type: boolean
+          description: True when this response came from the durable replay record.
+        driver:
+          $ref: "#/components/schemas/Driver"
+        version:
+          $ref: "#/components/schemas/DriverVersion"
+
+    WorkflowCatalogLifecycleErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: |
+                Stable lifecycle codes include revision_conflict,
+                workflow_catalog_version_ownership,
+                workflow_catalog_version_not_validated, and
+                workflow_catalog_version_not_approved. Generic transport and
+                resource failures retain their existing API codes.
+              example: revision_conflict
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                required: [field, message]
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+            meta:
+              type: object
+              additionalProperties:
+                type: string
+              properties:
+                expected_revision: { type: string, example: "7" }
+                current_revision: { type: string, example: "9" }
 
     WorkerProfile:
       type: object
@@ -10346,8 +10586,50 @@ components:
   # Responses
   # ---------------------------------------------------------------------------
   responses:
+    WorkflowCatalogLifecycleBadRequest:
+      description: Invalid request or driver/version ownership mismatch
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WorkflowCatalogLifecycleErrorResponse"
+
+    WorkflowCatalogLifecycleForbidden:
+      description: Authenticated actor does not have the lifecycle permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WorkflowCatalogLifecycleErrorResponse"
+
+    WorkflowCatalogLifecycleNotFound:
+      description: Driver or driver version was not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WorkflowCatalogLifecycleErrorResponse"
+
+    WorkflowCatalogLifecycleConflict:
+      description: Driver revision does not match expected_revision
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WorkflowCatalogLifecycleErrorResponse"
+
+    WorkflowCatalogLifecyclePreconditionFailed:
+      description: Version validation or approval precondition failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WorkflowCatalogLifecycleErrorResponse"
+
     BadRequest:
       description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: Authentication is required or the supplied credentials are invalid
       content:
         application/json:
           schema:

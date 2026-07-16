@@ -1,4 +1,5 @@
 import { del, get, patch, post, wsUrl } from "@/api/common";
+import { getLocalWorkflowLifecycleBearer } from "./localOperatorSession";
 
 export const EPIC_RUNNER_WORKFLOW_NAME = "epic-runner";
 
@@ -412,8 +413,11 @@ export interface WorkflowDriver {
 
 /** GET /workflows/{name}/versions response. */
 export interface WorkflowVersionsResponse {
+  /** Canonical aggregate snapshot carrying revision and approval metadata. */
+  driver?: WorkflowDriver;
   driver_id: string;
   active_version_id: string;
+  revision?: number;
   versions: DriverVersion[];
 }
 
@@ -421,7 +425,7 @@ export interface WorkflowVersionsResponse {
 export interface CreateWorkflowVersionRequest {
   files: Record<string, string>;
   entrypoint: string;
-  /** Point the driver at the new version once built (default true server-side). */
+  /** Legacy compatibility field; the Workflow Catalog build path sends false. */
   activate?: boolean;
 }
 
@@ -431,9 +435,9 @@ export interface CreateWorkflowVersionRequest {
  * version. A build FAILURE never reaches here — it surfaces as an `ApiError`
  * (status 400) whose message carries the diagnostics.
  *
- * NOTE (honesty): versions built via this HTTP path are stamped UNTRUSTED. Even
- * with `activated: true`, the version must be approved (see `approveWorkflowVersion`)
- * before the runtime will actually execute it.
+ * NOTE (honesty): versions built via this HTTP path are inactive and stamped
+ * UNTRUSTED. They must be approved and then activated through the Workflow
+ * Catalog lifecycle commands before the runtime will execute them.
  */
 export interface CreateWorkflowVersionResult {
   driver: WorkflowDriver;
@@ -448,7 +452,7 @@ export interface CreateWorkflowVersionResult {
 
 /** POST approve/activate result. */
 export interface WorkflowVersionActionResult {
-  action: "approve" | "activate";
+  action: "approve" | "unapprove" | "activate";
   driver: WorkflowDriver;
   version: DriverVersion;
 }
@@ -479,8 +483,8 @@ export async function listWorkflowVersions(
 /**
  * Build + register a new workflow version from edited source. A build failure
  * throws `ApiError` (400) with the redacted diagnostics in its message; on
- * success the result carries `build_diagnostics` + `activated`. flue toolchain
- * must be present on the serve host.
+ * success the result carries `build_diagnostics` + `activated` (false for the
+ * supported draft path). flue toolchain must be present on the serve host.
  */
 export async function createWorkflowVersion(
   workspaceId: string,
@@ -509,6 +513,23 @@ export async function approveWorkflowVersion(
       `/workflows/${encodeURIComponent(name)}/versions/${encodeURIComponent(versionId)}/approve`,
     ),
     {},
+    localLifecycleRequestOptions(workspaceId),
+  );
+}
+
+/** Remove a version's explicit approval without changing the active pointer. */
+export async function unapproveWorkflowVersion(
+  workspaceId: string,
+  name: string,
+  versionId: string,
+): Promise<WorkflowVersionActionResult> {
+  return post<WorkflowVersionActionResult>(
+    wsUrl(
+      workspaceId,
+      `/workflows/${encodeURIComponent(name)}/versions/${encodeURIComponent(versionId)}/unapprove`,
+    ),
+    {},
+    localLifecycleRequestOptions(workspaceId),
   );
 }
 
@@ -527,5 +548,15 @@ export async function activateWorkflowVersion(
       `/workflows/${encodeURIComponent(name)}/versions/${encodeURIComponent(versionId)}/activate`,
     ),
     {},
+    localLifecycleRequestOptions(workspaceId),
   );
+}
+
+function localLifecycleRequestOptions(
+  workspaceId: string,
+): { headers: Record<string, string> } | undefined {
+  const bearer = getLocalWorkflowLifecycleBearer(workspaceId);
+  return bearer
+    ? { headers: { Authorization: `Bearer ${bearer}` } }
+    : undefined;
 }

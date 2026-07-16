@@ -17,10 +17,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/localredis"
 )
 
@@ -39,6 +41,12 @@ const (
 
 	defaultEmbeddedFleetRedisPoolSize     = "100"
 	defaultEmbeddedFleetRedisMinIdleConns = "10"
+
+	embeddedFleetDBServiceActor = "loom-local-service"
+	embeddedFleetDBAuthDirName  = "auth"
+
+	embeddedFleetDBArtifactBackendEnv = "FLEETDB_ARTIFACT_CONTENT_BACKEND"
+	embeddedFleetDBArtifactDirEnv     = "FLEETDB_ARTIFACT_CONTENT_DIR"
 )
 
 // ErrEmbeddedAlreadyRunning is returned when another process owns the local
@@ -285,11 +293,12 @@ const startupTimeout = 30 * time.Second
 // Stop is idempotent and safe to call from a deferred function plus a
 // signal handler.
 type EmbeddedFleetDB struct {
-	url      string
-	cmd      *exec.Cmd
-	redisMgr *localredis.Manager
-	runLock  *embeddedRuntimeLock
-	logger   *slog.Logger
+	url               string
+	serviceCredential string
+	cmd               *exec.Cmd
+	redisMgr          *localredis.Manager
+	runLock           *embeddedRuntimeLock
+	logger            *slog.Logger
 
 	stopOnce      sync.Once
 	stopRequested atomic.Bool   // true once Stop is invoked; suppresses "unexpected exit" log
@@ -356,6 +365,13 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	} else if err := localsettings.Validate(redisCfg); err != nil {
 		return nil, fmt.Errorf("embedded: invalid external Redis settings: %w", err)
 	}
+	serviceCredential, err := authority.LoadOrCreateLocalFleetDBServiceCredential(embeddedFleetDBAuthDir(dataDir))
+	if err != nil {
+		if redisMgr != nil {
+			_ = redisMgr.Close()
+		}
+		return nil, fmt.Errorf("embedded: local FleetDB service credential: %w", err)
+	}
 
 	httpAddr, _, err := netutil.PickFreeLoopbackPort()
 	if err != nil {
@@ -367,19 +383,26 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	//   --redis-durability-profile=managed  miniredis rejects CONFIG SET; "managed" skips
 	//                                       all CONFIG calls (designed for managed-Redis providers,
 	//                                       fits embedded-miniredis equally well)
-	//   --auth-dev-mode                     accept X-Actor as identity (no JWT setup)
-	//   --authz-enabled=false               single-user mode skips RBAC
+	//   --auth-enabled=true                 require a Redis-backed API key
+	//   --auth-dev-mode=false               never trust caller-supplied X-Actor
+	//   --authz-enabled=true                enforce the seeded global-admin role
 	//   --rpc-enabled=false                 embedded mode uses HTTP only; avoid binding /var/run
-	cmd := exec.CommandContext(ctx, binPath, //nolint:gosec // binPath is from controlled discovery
-		"--redis-durability-profile=managed",
-		"--auth-dev-mode",
-		"--authz-enabled=false",
-		"--rpc-enabled=false",
-	)
+	cmd := exec.CommandContext(ctx, binPath, embeddedFleetDBArgs()...) //nolint:gosec // binPath is from controlled discovery
 	cmd.Env = append(os.Environ(),
 		"FLEET_SERVER_ADDR="+httpAddr,
 		"FLEET_REDIS_ADDR="+redisAddr,
 	)
+	// The bootstrap key is child-only configuration: never place it in argv,
+	// mutate the parent environment, or log it.
+	cmd.Env = withoutEnvKey(cmd.Env, "FLEET_CONFIG")
+	cmd.Env = withEnvValue(cmd.Env, "FLEET_AUTH_BOOTSTRAP_ADMIN_KEY", serviceCredential)
+	cmd.Env = withEnvValue(cmd.Env, "FLEET_WORKFLOW_CATALOG_LIFECYCLE_ENABLED", "true")
+	// FleetDB's artifact-backed issue design mode requires an explicit content
+	// backend. Embedded mode owns a private durable directory beside its Redis
+	// snapshot; force that child-only local backend instead of inheriting a
+	// host HTTP backend or writing into an unrelated user cache directory.
+	cmd.Env = withEnvValue(cmd.Env, embeddedFleetDBArtifactBackendEnv, "local")
+	cmd.Env = withEnvValue(cmd.Env, embeddedFleetDBArtifactDirEnv, filepath.Join(fleetDir, "artifacts"))
 	cmd.Env = appendEmbeddedFleetDBEnvDefaults(cmd.Env)
 	// Propagate the active trace context to the spawned fleet-db so its
 	// bootstrap work shows up as a child of the loom span that triggered
@@ -416,13 +439,14 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	logger.Info("embedded fleet-db started", "pid", cmd.Process.Pid, "addr", httpAddr, "redis", redisAddr, "redis_external", redisCfg.Enabled, "binary", binPath)
 
 	emb := &EmbeddedFleetDB{
-		url:      "http://" + httpAddr,
-		cmd:      cmd,
-		redisMgr: redisMgr,
-		runLock:  runLock,
-		logger:   logger,
-		waitErr:  make(chan error, 1),
-		done:     make(chan struct{}),
+		url:               "http://" + httpAddr,
+		serviceCredential: serviceCredential,
+		cmd:               cmd,
+		redisMgr:          redisMgr,
+		runLock:           runLock,
+		logger:            logger,
+		waitErr:           make(chan error, 1),
+		done:              make(chan struct{}),
 	}
 	// Reaper goroutine. The sole cmd.Wait() caller in the lifecycle —
 	// Stop reads from waitErr instead of calling Wait again to avoid the
@@ -458,6 +482,22 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 
 // URL returns the base HTTP URL of the embedded fleet-db (no trailing slash).
 func (e *EmbeddedFleetDB) URL() string { return e.url }
+
+// NewClient constructs an authenticated client for this embedded process
+// without exposing the service credential through ambient process state.
+// Caller-supplied transport and actor settings are preserved; FleetDB derives
+// the authoritative actor from the API key because dev-mode auth is disabled.
+func (e *EmbeddedFleetDB) NewClient(cfg fleetdb.Config) (*fleetdb.Client, error) {
+	if e == nil || strings.TrimSpace(e.url) == "" || strings.TrimSpace(e.serviceCredential) == "" {
+		return nil, errors.New("embedded: FleetDB client credentials are unavailable")
+	}
+	cfg.BaseURL = e.url
+	cfg.APIKey = e.serviceCredential
+	if strings.TrimSpace(cfg.Actor) == "" {
+		cfg.Actor = embeddedFleetDBServiceActor
+	}
+	return fleetdb.New(cfg)
+}
 
 // Stop signals fleet-db to terminate, waits briefly for clean shutdown,
 // and closes the miniredis. Idempotent.
@@ -613,6 +653,44 @@ func withDefaultEnv(env []string, key, value string) []string {
 		return env
 	}
 	return append(env, prefix+value)
+}
+
+func embeddedFleetDBArgs() []string {
+	return []string{
+		"--backend=redis",
+		"--redis-durability-profile=managed",
+		"--auth-enabled=true",
+		"--auth-dev-mode=false",
+		"--authz-enabled=true",
+		"--auth-bootstrap-admin-actor=" + embeddedFleetDBServiceActor,
+		"--rpc-enabled=false",
+	}
+}
+
+func withEnvValue(env []string, key, value string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return append(out, prefix+value)
+}
+
+func withoutEnvKey(env []string, key string) []string {
+	prefix := key + "="
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func embeddedFleetDBAuthDir(dataDir string) string {
+	return filepath.Join(dataDir, "fleet-db", embeddedFleetDBAuthDirName)
 }
 
 func probeFleetDBBinary(path string, checked []string, remediation string) FleetDBBinaryDiagnostic {

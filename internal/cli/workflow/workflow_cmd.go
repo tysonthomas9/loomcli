@@ -67,24 +67,27 @@ var workflowBuildCmd = &cobra.Command{
 }
 
 var workflowApproveCmd = &cobra.Command{
-	Use:   "approve <workflow>",
-	Short: "Approve one workflow DriverVersion for local process execution",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkflowApprove,
+	Use:               "approve <workflow>",
+	Short:             "Approve one workflow DriverVersion for local process execution",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkflowApprove,
 }
 
 var workflowUnapproveCmd = &cobra.Command{
-	Use:   "unapprove <workflow>",
-	Short: "Remove approval from one workflow DriverVersion",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkflowUnapprove,
+	Use:               "unapprove <workflow>",
+	Short:             "Remove approval from one workflow DriverVersion",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkflowUnapprove,
 }
 
 var workflowActivateCmd = &cobra.Command{
-	Use:   "activate <workflow>",
-	Short: "Make a workflow DriverVersion the active version",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkflowActivate,
+	Use:               "activate <workflow>",
+	Short:             "Make a workflow DriverVersion the active version",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkflowActivate,
 }
 
 var workflowRunCmd = &cobra.Command{
@@ -95,17 +98,19 @@ var workflowRunCmd = &cobra.Command{
 }
 
 var workflowListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List registered workflows",
-	Args:  cobra.NoArgs,
-	RunE:  runWorkflowList,
+	Use:               "list",
+	Short:             "List registered workflows",
+	Args:              cobra.NoArgs,
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkflowList,
 }
 
 var workflowVersionsCmd = &cobra.Command{
-	Use:   "versions <workflow>",
-	Short: "List registered workflow versions",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkflowVersions,
+	Use:               "versions <workflow>",
+	Short:             "List registered workflow versions",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkflowVersions,
 }
 
 var workflowReadyzCmd = &cobra.Command{
@@ -266,45 +271,45 @@ func runWorkflowBuild(_ *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Built workflow %s version %s\n", result.Driver.DriverID, result.Version.VersionID)
 		fmt.Printf("Source digest: %s\n", result.Version.SourceDigest)
-		fmt.Printf("Activate after review: loom workflow approve %s --version %s && loom workflow activate %s --version %s\n", result.Driver.DriverID, result.Version.VersionID, result.Driver.DriverID, result.Version.VersionID)
+		fmt.Println("Management server required: set LOOM_SERVER_URL to its URL, or replace $LOOM_SERVER_URL below with the URL.")
+		fmt.Printf("Target workspace: %s\n", ws)
+		fmt.Printf("Approve and activate after review: loom --server \"$LOOM_SERVER_URL\" --workspace %s workflow approve %s --version %s && loom --server \"$LOOM_SERVER_URL\" --workspace %s workflow activate %s --version %s\n", ws, result.Driver.DriverID, result.Version.VersionID, ws, result.Driver.DriverID, result.Version.VersionID)
 		return nil
 	})
 }
 
-func runWorkflowApprove(_ *cobra.Command, args []string) error {
-	return workflowVersionAction(args[0], workflowVersionID, workflowApproveJSON, "approved", driverpkg.ApproveDriverVersion)
+func runWorkflowApprove(cmd *cobra.Command, args []string) error {
+	return workflowVersionAction(workflowCommandContext(cmd), args[0], workflowVersionID, workflowApproveJSON, "approved", "approve")
 }
 
-func runWorkflowUnapprove(_ *cobra.Command, args []string) error {
-	return workflowVersionAction(args[0], workflowVersionID, workflowApproveJSON, "unapproved", driverpkg.UnapproveDriverVersion)
+func runWorkflowUnapprove(cmd *cobra.Command, args []string) error {
+	return workflowVersionAction(workflowCommandContext(cmd), args[0], workflowVersionID, workflowApproveJSON, "unapproved", "unapprove")
 }
 
-func runWorkflowActivate(_ *cobra.Command, args []string) error {
-	return workflowVersionAction(args[0], workflowVersionID, workflowActivateJSON, "activated", driverpkg.ActivateDriverVersion)
+func runWorkflowActivate(cmd *cobra.Command, args []string) error {
+	return workflowVersionAction(workflowCommandContext(cmd), args[0], workflowVersionID, workflowActivateJSON, "activated", "activate")
 }
 
-func workflowVersionAction(workflow, versionID string, jsonOut bool, action string, fn func(context.Context, store.Store, string, string, string) (*domain.Driver, *domain.DriverVersion, error)) error {
-	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		driverID, err := workflows.ResolveDriverID(ctx, h.Store, ws, workflow)
-		if err != nil {
-			return fmt.Errorf("resolve workflow driver: %w", err)
-		}
-		driver, version, err := fn(ctx, h.Store, ws, driverID, versionID)
-		if err != nil {
-			return err
-		}
-		out := workflowVersionOutput{
-			Version:        version,
-			Active:         driver.ActiveVersionID == version.VersionID,
-			Approved:       driverpkg.DriverVersionApproved(driver, version),
-			EffectiveTrust: driverpkg.DriverVersionEffectiveTrust(driver, version),
-		}
-		if jsonOut {
-			return cmdstore.WriteJSON(out)
-		}
-		fmt.Printf("%s workflow %s version %s\n", workflowActionTitle(action), driver.DriverID, version.VersionID)
-		return nil
-	})
+func workflowVersionAction(ctx context.Context, workflow, versionID string, jsonOut bool, outputAction, apiAction string) error {
+	client, err := newWorkflowManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	result, err := client.applyVersionAction(ctx, workflow, versionID, apiAction)
+	if err != nil {
+		return err
+	}
+	out := workflowVersionOutput{
+		Version:        result.Version,
+		Active:         result.Driver.ActiveVersionID == result.Version.VersionID,
+		Approved:       driverpkg.DriverVersionApproved(result.Driver, result.Version),
+		EffectiveTrust: driverpkg.DriverVersionEffectiveTrust(result.Driver, result.Version),
+	}
+	if jsonOut {
+		return cmdstore.WriteJSON(out)
+	}
+	fmt.Printf("%s workflow %s version %s\n", workflowActionTitle(outputAction), result.Driver.DriverID, result.Version.VersionID)
+	return nil
 }
 
 func workflowActionTitle(action string) string {
@@ -368,74 +373,128 @@ func runWorkflowRun(_ *cobra.Command, args []string) error {
 	})
 }
 
-func runWorkflowList(_ *cobra.Command, _ []string) error {
-	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		drivers, err := h.Store.Drivers().List(ctx, ws, store.DriverFilter{})
-		if err != nil {
-			return err
-		}
-		items := []map[string]any{}
-		for _, driver := range drivers {
-			item := map[string]any{
-				"driver_id":         driver.DriverID,
-				"name":              driver.Name,
-				"status":            driver.Status,
-				"active_version_id": driver.ActiveVersionID,
-				"built_in":          isBuiltinWorkflow(driver.DriverID),
-			}
-			if driver.ActiveVersionID != "" {
-				if version, err := h.Store.DriverVersions().Get(ctx, ws, driver.ActiveVersionID); err == nil {
-					item["approved"] = driverpkg.DriverVersionApproved(driver, version)
-					item["effective_trust"] = driverpkg.DriverVersionEffectiveTrust(driver, version)
-				}
-			}
-			items = append(items, item)
-		}
-		if workflowListJSON {
-			return cmdstore.WriteJSON(map[string]any{"workflows": items})
-		}
-		for _, item := range items {
-			fmt.Printf("%s\t%s\t%s\n", item["driver_id"], item["status"], item["active_version_id"])
-		}
-		return nil
-	})
+func runWorkflowList(cmd *cobra.Command, _ []string) error {
+	ctx := workflowCommandContext(cmd)
+	client, err := newWorkflowManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	response, err := client.listWorkflows(ctx)
+	if err != nil {
+		return err
+	}
+	items := make([]map[string]any, 0, len(response.Workflows))
+	for _, apiItem := range response.Workflows {
+		items = append(items, workflowListOutputItem(ctx, client, apiItem))
+	}
+	if workflowListJSON {
+		return cmdstore.WriteJSON(map[string]any{"workflows": items})
+	}
+	for _, item := range items {
+		fmt.Printf("%s\t%s\t%s\n", item["driver_id"], item["status"], item["active_version_id"])
+	}
+	return nil
 }
 
-func runWorkflowVersions(_ *cobra.Command, args []string) error {
-	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		driverID, err := workflows.ResolveDriverID(ctx, h.Store, ws, args[0])
-		if err != nil {
-			return fmt.Errorf("resolve workflow driver: %w", err)
+func workflowListOutputItem(ctx context.Context, client *workflowManagementClient, apiItem workflowListAPIItem) map[string]any {
+	driver := apiItem.Driver
+	if driver == nil {
+		driver = &domain.Driver{
+			DriverID:        apiItem.DriverID,
+			Name:            apiItem.Name,
+			Status:          apiItem.Status,
+			ActiveVersionID: apiItem.ActiveVersionID,
+			Revision:        apiItem.Revision,
 		}
-		driver, err := h.Store.Drivers().Get(ctx, ws, driverID)
-		if err != nil {
-			return err
-		}
-		versions, err := h.Store.DriverVersions().List(ctx, ws, store.DriverVersionFilter{DriverID: driverID})
-		if err != nil {
-			return err
-		}
-		out := make([]workflowVersionOutput, 0, len(versions))
-		for _, version := range versions {
-			out = append(out, workflowVersionOutput{
-				Version:        version,
-				Active:         driver.ActiveVersionID == version.VersionID,
-				Approved:       driverpkg.DriverVersionApproved(driver, version),
-				EffectiveTrust: driverpkg.DriverVersionEffectiveTrust(driver, version),
-			})
-		}
-		if workflowVersionsJSON {
-			return cmdstore.WriteJSON(map[string]any{"driver_id": driverID, "versions": out})
-		}
-		for _, item := range out {
-			active := ""
-			if item.Active {
-				active = "active"
-			}
-			fmt.Printf("%s\t%s\tapproved=%t\ttrust=%s\n", item.Version.VersionID, active, item.Approved, item.EffectiveTrust)
-		}
+	}
+	item := map[string]any{
+		"driver_id":         driver.DriverID,
+		"name":              driver.Name,
+		"status":            driver.Status,
+		"active_version_id": driver.ActiveVersionID,
+		"built_in":          apiItem.BuiltIn || apiItem.Builtin || isBuiltinWorkflow(driver.DriverID),
+	}
+	if driver.ActiveVersionID == "" {
+		return item
+	}
+	activeVersion := apiItem.Version
+	if activeVersion == nil {
+		activeVersion = workflowListActiveVersion(ctx, client, driver)
+	}
+	approved := false
+	if apiItem.Approved != nil {
+		approved = *apiItem.Approved
+	} else if activeVersion != nil {
+		approved = driverpkg.DriverVersionApproved(driver, activeVersion)
+	}
+	trust := apiItem.EffectiveTrust
+	if trust == "" && activeVersion != nil {
+		trust = driverpkg.DriverVersionEffectiveTrust(driver, activeVersion)
+	}
+	if apiItem.Approved != nil || apiItem.EffectiveTrust != "" || activeVersion != nil {
+		item["approved"] = approved
+		item["effective_trust"] = trust
+	}
+	return item
+}
+
+func workflowListActiveVersion(ctx context.Context, client *workflowManagementClient, driver *domain.Driver) *domain.DriverVersion {
+	versions, err := client.listVersions(ctx, driver.DriverID)
+	if err != nil {
 		return nil
-	})
+	}
+	for _, version := range versions.Versions {
+		if version != nil && version.VersionID == driver.ActiveVersionID {
+			return version
+		}
+	}
+	return nil
+}
+
+func runWorkflowVersions(cmd *cobra.Command, args []string) error {
+	ctx := workflowCommandContext(cmd)
+	client, err := newWorkflowManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	response, err := client.listVersions(ctx, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve workflow driver: %w", err)
+	}
+	driver := response.Driver
+	if driver == nil || strings.TrimSpace(driver.DriverID) == "" {
+		return fmt.Errorf("workflow management API returned no driver for %q", args[0])
+	}
+	out := make([]workflowVersionOutput, 0, len(response.Versions))
+	for _, version := range response.Versions {
+		if version == nil {
+			return fmt.Errorf("workflow management API returned a null version for driver %q", driver.DriverID)
+		}
+		out = append(out, workflowVersionOutput{
+			Version:        version,
+			Active:         driver.ActiveVersionID == version.VersionID,
+			Approved:       driverpkg.DriverVersionApproved(driver, version),
+			EffectiveTrust: driverpkg.DriverVersionEffectiveTrust(driver, version),
+		})
+	}
+	if workflowVersionsJSON {
+		return cmdstore.WriteJSON(map[string]any{"driver_id": driver.DriverID, "versions": out})
+	}
+	for _, item := range out {
+		active := ""
+		if item.Active {
+			active = "active"
+		}
+		fmt.Printf("%s\t%s\tapproved=%t\ttrust=%s\n", item.Version.VersionID, active, item.Approved, item.EffectiveTrust)
+	}
+	return nil
+}
+
+func workflowCommandContext(cmd *cobra.Command) context.Context {
+	if cmd != nil && cmd.Context() != nil {
+		return cmd.Context()
+	}
+	return context.Background()
 }
 
 func runWorkflowReadyz(_ *cobra.Command, _ []string) error {

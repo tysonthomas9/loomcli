@@ -120,8 +120,8 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 93,
-      "max_outside_composition": 82,
+      "max_production_files": 92,
+      "max_outside_composition": 81,
       "composition_prefixes": [
         "internal/cli/serve/",
         "internal/infra/",
@@ -159,7 +159,6 @@
         "internal/cli/workflow/workflow_cmd.go",
         "internal/cli/workspace/ops_cmd.go",
         "internal/cli/workspace/workspacev2_cmd.go",
-        "internal/driver/approval.go",
         "internal/driver/await_op.go",
         "internal/driver/await_timeout_sweeper.go",
         "internal/driver/composition.go",

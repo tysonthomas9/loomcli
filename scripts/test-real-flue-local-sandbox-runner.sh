@@ -21,6 +21,9 @@ FLEET_PORT="${FLEET_PORT:-18195}"
 LOOM_PORT="${LOOM_PORT:-18196}"
 FLEET_URL="http://127.0.0.1:${FLEET_PORT}"
 LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
+# This runtime regression intentionally runs FleetDB without authorization and
+# does not prove the Workflow Catalog lifecycle capability.
+export LOOM_WORKFLOW_CATALOG_ENABLED=false
 
 TMP_ROOT="$(mktemp -d -t loom-real-flue-local-sandbox.XXXXXX)"
 BIN_DIR="$TMP_ROOT/bin"

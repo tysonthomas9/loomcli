@@ -173,6 +173,45 @@ func refs(s store.WorkspaceStore) {
 	}
 }
 
+func TestSnapshotDirectWritesAllowsOwnerCoreThroughOwnDeclaredPortOnly(t *testing.T) {
+	root := t.TempDir()
+	writeDirectWriteModule(t, root)
+	writeGoFile(t, root, "internal/modules/workflowcatalog/ports.go", `package workflowcatalog
+type VersionLifecycleStore interface { ApproveVersion() error }
+`)
+	writeGoFile(t, root, "internal/modules/workflowcatalog/service.go", `package workflowcatalog
+func execute(port VersionLifecycleStore) error { return port.ApproveVersion() }
+`)
+	writeGoFile(t, root, "internal/modules/workflowcatalog/fleetdb/adapter.go", `package fleetdb
+import "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+func apply(port workflowcatalog.VersionLifecycleStore) error { return port.ApproveVersion() }
+`)
+
+	matrix := oneDirectWriteProfile()
+	inventory := DirectWriteInventory{
+		AdapterRoots:              []string{"internal/modules"},
+		AnalysisProfiles:          directWriteProfileNames(matrix),
+		CandidateReceiverSuffixes: []string{"Repository", "Store"},
+		PersistencePackages: []PersistencePackage{{
+			Path: modulePath + "/internal/modules/workflowcatalog", ReceiverNames: []string{"VersionLifecycleStore"}, ReceiverSuffixes: []string{},
+		}},
+		MethodSets: []PersistenceMethodSet{{
+			Name: "lifecycle", ReadOnly: []string{}, Mutating: []string{"ApproveVersion"},
+		}},
+		ReceiverSurfaces: []PersistenceReceiverSurface{{
+			Receiver: modulePath + "/internal/modules/workflowcatalog.VersionLifecycleStore",
+			Package:  modulePath + "/internal/modules/workflowcatalog", MethodSet: "lifecycle", CapabilityOwner: "workflowcatalog",
+		}},
+	}
+	uses, err := SnapshotDirectWrites(root, matrix, inventory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(uses) != 1 || uses[0].File != "internal/modules/workflowcatalog/fleetdb/adapter.go" || uses[0].Method != "ApproveVersion" {
+		t.Fatalf("direct writes = %+v, want only the concrete adapter call retained", uses)
+	}
+}
+
 func TestSnapshotDirectWritesIncludesPackageLevelPersistenceHelper(t *testing.T) {
 	root := t.TempDir()
 	writeDirectWriteModule(t, root)

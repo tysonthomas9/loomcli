@@ -15,7 +15,8 @@ package fleetdb
 //     template statically would need real data-flow analysis, which is
 //     disproportionate for ~130 routes that change rarely.
 //  2. The table cannot silently rot: TestFleetDBClientCallSiteCount counts
-//     the package's client.do/doWithHeaders/doRaw/doBytes call sites and
+//     the package's service-client and direct Client do/doWithHeaders/doRaw/
+//     doBytes call sites and
 //     fails when the count drifts from expectedClientCallSites, forcing the
 //     editor of the client to revisit the table.
 //  3. The spec snapshot (testdata/fleetdb-openapi.yaml) cannot silently rot:
@@ -46,13 +47,14 @@ import (
 const (
 	specSnapshotPath = "testdata/fleetdb-openapi.yaml"
 	siblingSpecPath  = "../../../../fleet-db/api/openapi.yaml"
+	companionRepoEnv = "FLEET_DB_REPO"
 )
 
-// expectedClientCallSites pins the number of client.do / client.doWithHeaders
-// / client.doRaw / client.doBytes call sites in this package's non-test
-// sources. When you add/remove/move a client call, update clientRoutes below
-// FIRST, then bump this constant.
-const expectedClientCallSites = 148
+// expectedClientCallSites pins the number of service-client and direct Client
+// do/doWithHeaders/doRaw/doBytes call sites in this package's non-test sources.
+// When you add/remove/move a client call, update clientRoutes below FIRST, then
+// bump this constant.
+const expectedClientCallSites = 150
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -64,6 +66,9 @@ type clientRoute struct {
 // clientRoutes enumerates every route the fleet-db client issues, grouped by
 // source file. Keep in lockstep with the client (see the call-site tripwire).
 var clientRoutes = []clientRoute{
+	// capabilities.go
+	{"GET", "/api/v1/capabilities"},
+
 	// workspace.go
 	{"POST", "/api/v1/admin/workspaces"},
 	{"GET", "/api/v1/admin/workspaces/{}"},
@@ -181,6 +186,12 @@ var clientRoutes = []clientRoute{
 	{"GET", "/api/v1/{}/drivers/{}/versions"},
 	{"GET", "/api/v1/{}/driver-versions/{}"},
 	{"GET", "/api/v1/{}/driver-versions"},
+
+	// workflow_catalog.go — atomic owner-scoped version lifecycle commands.
+	{"POST", "/api/v1/{}/drivers/{}/versions/{}/approve"},
+	{"POST", "/api/v1/{}/drivers/{}/versions/{}/unapprove"},
+	{"POST", "/api/v1/{}/drivers/{}/versions/{}/activate"},
+
 	{"POST", "/api/v1/{}/trigger-bindings"},
 	{"GET", "/api/v1/{}/trigger-bindings/{}"},
 	{"GET", "/api/v1/{}/trigger-bindings"},
@@ -314,9 +325,13 @@ func TestFleetDBClientRoutesExistInSpec(t *testing.T) {
 // sibling checkout it logs and passes: the routes test above still runs
 // against the snapshot.
 func TestFleetDBSpecSnapshotFresh(t *testing.T) {
-	live, err := os.ReadFile(siblingSpecPath)
+	liveSpecPath := siblingSpecPath
+	if companionRepo := strings.TrimSpace(os.Getenv(companionRepoEnv)); companionRepo != "" {
+		liveSpecPath = filepath.Join(companionRepo, "api", "openapi.yaml")
+	}
+	live, err := os.ReadFile(liveSpecPath)
 	if err != nil {
-		t.Logf("no side-by-side fleet-db checkout at %s (%v); snapshot freshness not verifiable here", siblingSpecPath, err)
+		t.Logf("no companion fleet-db checkout at %s (%v); snapshot freshness not verifiable here", liveSpecPath, err)
 		return
 	}
 	snapshot, err := os.ReadFile(specSnapshotPath)
@@ -326,23 +341,25 @@ func TestFleetDBSpecSnapshotFresh(t *testing.T) {
 	if string(live) != string(snapshot) {
 		t.Fatalf("vendored fleet-db spec snapshot is STALE relative to %s.\n"+
 			"Update it (from the loomcli repo root):\n"+
-			"  cp ../fleet-db/api/openapi.yaml internal/infra/fleetdb/testdata/fleetdb-openapi.yaml\n"+
+			"  cp %s internal/infra/fleetdb/testdata/fleetdb-openapi.yaml\n"+
 			"then re-run this package's tests so the route guard checks the current spec.",
-			siblingSpecPath)
+			liveSpecPath, liveSpecPath)
 	}
 }
 
 // TestFleetDBClientCallSiteCount is the tripwire that keeps clientRoutes
-// honest: it counts the client.do/doWithHeaders/doRaw/doBytes call sites in
-// this package's non-test sources and fails when the count drifts from
-// expectedClientCallSites, so a new/removed client call cannot land without
-// revisiting the route table.
+// honest: it counts both service-client calls (s.client.do) and direct Client
+// receiver calls (c.do) in this package's non-test sources. client.go is
+// excluded from the direct-receiver expression because Client.do delegates to
+// Client.doWithHeaders there; that internal transport hop is not an API route.
+// A count drift therefore forces the route table to be revisited.
 func TestFleetDBClientCallSiteCount(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatalf("glob package sources: %v", err)
 	}
-	callRe := regexp.MustCompile(`\.client\.(do|doWithHeaders|doRaw|doBytes)\(ctx`)
+	serviceCallRe := regexp.MustCompile(`\.client\.(do|doWithHeaders|doRaw|doBytes)\(ctx`)
+	directClientCallRe := regexp.MustCompile(`\bc\.(do|doWithHeaders|doRaw|doBytes)\(ctx`)
 	total := 0
 	perFile := make([]string, 0, len(files))
 	for _, f := range files {
@@ -353,7 +370,11 @@ func TestFleetDBClientCallSiteCount(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		if n := len(callRe.FindAll(src, -1)); n > 0 {
+		n := len(serviceCallRe.FindAll(src, -1))
+		if f != "client.go" {
+			n += len(directClientCallRe.FindAll(src, -1))
+		}
+		if n > 0 {
 			total += n
 			perFile = append(perFile, fmt.Sprintf("%s: %d", f, n))
 		}

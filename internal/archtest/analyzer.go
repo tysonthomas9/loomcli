@@ -622,6 +622,7 @@ func inspectModuleSpecs(specs []*ast.ImportSpec, graph CapabilityGraph, from, fi
 	violations := []string{}
 	prefix := modulePath + "/" + graph.ModuleRoot + "/"
 	internalPrefix := modulePath + "/internal/"
+	directoryImport := modulePath + "/" + strings.TrimSuffix(filepath.ToSlash(filepath.Dir(file)), ".")
 	for _, spec := range specs {
 		importPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
@@ -630,8 +631,14 @@ func inspectModuleSpecs(specs []*ast.ImportSpec, graph CapabilityGraph, from, fi
 		if !strings.HasPrefix(importPath, internalPrefix) {
 			continue
 		}
+		if reason := forbiddenBoundaryImport(directoryImport, importPath, graph); reason != "" {
+			violations = append(violations, fmt.Sprintf("%s imports %s: %s", file, importPath, reason))
+			continue
+		}
 		if !strings.HasPrefix(importPath, prefix) {
-			violations = append(violations, fmt.Sprintf("%s imports forbidden internal package %s", file, importPath))
+			// The shared boundary policy admits platform mechanisms from every
+			// capability layer and the shared FleetDB transport only from a
+			// capability's fleetdb adapter. They are not capability edges.
 			continue
 		}
 		targetParts := strings.Split(strings.TrimPrefix(importPath, prefix), "/")

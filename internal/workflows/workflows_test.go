@@ -404,11 +404,16 @@ func TestBuildAndRegisterCustomSourceWithRealFlue(t *testing.T) {
 	if result.Version.Manifest["workflow_dependencies"] != `{"@daytona/sdk":"optional-local","@flue/runtime":"local","@loom/sdk":"local"}` {
 		t.Fatalf("workflow dependency provenance = %q", result.Version.Manifest["workflow_dependencies"])
 	}
-	driverRecord, version, err := driverpkg.ApproveDriverVersion(ctx, st, "CUSTOM", result.Driver.DriverID, result.Version.VersionID)
-	if err != nil {
-		t.Fatalf("ApproveDriverVersion: %v", err)
+	approvedMetadata := make(map[string]string, len(result.Driver.Metadata)+1)
+	for key, value := range result.Driver.Metadata {
+		approvedMetadata[key] = value
 	}
-	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, version); got != domain.DriverTrustTrusted {
+	approvedMetadata[driverpkg.ApprovedVersionMetadataKey(result.Version.VersionID)] = result.Version.SourceDigest
+	driverRecord, err := st.Drivers().Update(ctx, "CUSTOM", result.Driver.DriverID, store.DriverUpdate{Metadata: &approvedMetadata})
+	if err != nil {
+		t.Fatalf("approve test fixture version: %v", err)
+	}
+	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, result.Version); got != domain.DriverTrustTrusted {
 		t.Fatalf("approved version trust = %q, want trusted", got)
 	}
 	run, err := driverpkg.CreateDriverRun(ctx, st, driverpkg.RunOptions{
