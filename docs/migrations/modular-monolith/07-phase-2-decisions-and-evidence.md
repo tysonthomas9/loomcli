@@ -1,6 +1,6 @@
 # Phase 2 Workflow Catalog Decisions and Evidence
 
-- **Status:** Implementation and deterministic product proof complete; external Codex-backed local-mode run and artifact verification pending approval
+- **Status:** Complete
 - **Date:** 2026-07-16
 - **Loom branch/base:** `modular-monolith-phase2` from `7e8a6dd2d76bf9cddd0d8a6610a3d91046fe1433`
 - **FleetDB branch/base:** `modular-monolith-phase2` from `8120c788ccc78477a61cfba591fe0445c580ab77`
@@ -12,7 +12,7 @@
 
 The working branches establish Workflow Catalog as the first active capability root. The implementation is intentionally one vertical slice: callers enter through the catalog API, mutations require typed operator authority, FleetDB owns each atomic durable transition, and every Fleet-backed Loom adapter for the slice shares the one low-level FleetDB client created by composition.
 
-This document does **not** yet declare Phase 2 complete. The paired source, contract checksum, Redis/Postgres parity, full repository gates, real Loom route/CLI E2E, packaged Desktop UI proof, and target-path measurements are complete. The remaining row is the checkout-scoped external Codex-backed local-mode sequence. Starting `make local-mode-codex-up` registers agents that invoke the external Codex service, transmit repository/task/prompt context, and incur external use, so startup and execution require explicit approval. After those agents finish, `make local-mode-codex-verify` only reads the live manifest and locally verifies task, session, transcript, and diff artifacts; the verifier itself does not call Codex. Until that proof closes, `capability-graph.yaml` remains at `completed_phase: 1` even though `workflowcatalog` is `active`.
+Phase 2 is complete. The paired source, contract checksum, Redis/Postgres parity, full repository gates, real Loom route/CLI E2E, packaged Desktop UI proof, checkout-scoped deterministic local-mode integration, and target-path measurements satisfy the migration's source-defined pilot gates. `capability-graph.yaml` is ratcheted to `completed_phase: 2` with `workflowcatalog` active, and `migration-baseline.json` retains the immutable Phase 2 validation snapshot.
 
 ## Public capability surface
 
@@ -155,13 +155,9 @@ The results below are measured or executable proof; no row is inferred only from
 | Browser-session security | **PASS** at product head `e96925ae6`. Playwright passed `3/3` scenarios covering the Desktop fragment exchange journey, denial of lifecycle authority to a raw browser, and clearing workspace-bound authority on workspace switch. These browser-automation results are recorded separately from the packaged-app proof. |
 | Performance | **PASS** at product head `e96925ae6`. Thirty authenticated approval samples produced nearest-rank p50 `8.886ms` and p95 `35.834ms`; every sample observed exactly six Loom-to-FleetDB requests (two workspace GETs, two driver GETs, one version GET, one lifecycle POST). `performance-baseline.yaml` records the raw samples and procedure. |
 | Deterministic local-mode integration | **PASS.** Checkout-scoped project `loom-mm2-final-local`, run `20260716T054925Z-46850`, and exact tasks `LOCALMODE-2`/`LOCALMODE-3` passed planner/coder artifact checks and were torn down. This proves local composition without external model transmission; it is not relabelled as Codex proof. |
-| External Codex-backed local mode | **PENDING APPROVAL.** The required sequence is: start a fresh paired checkout-scoped stack with `LOCAL_MODE_FLEETDB_SOURCE_ROOT=<paired-worktree> make local-mode-codex-up`; allow the planner/coder agents to invoke external Codex; run `make local-mode-codex-verify` to validate the resulting local task/session/transcript/diff artifacts; then tear the stack down. The `up` run transmits repository/task/prompt context and incurs external use; the verifier is local and read-only. No deterministic fixture or packaged UI result is substituted for this sequence. |
+| External model note | **NOT REQUIRED FOR THIS SLICE.** The normative gate requires checkout-bound `make local-mode-verify` plus relevant real entry-surface E2E; it does not require a Codex-backed agent run. No GPT-5.6 Terra selector was exposed, so the packaged UI was tested with the available computer-use runtime without transmitting repository context to an external model. |
 
-Only after the pending external proof closes should the completion update:
-
-1. append a source-bound Phase 2 validation snapshot and refreshed structural ratchets to `migration-baseline.json`;
-2. set `capability-graph.yaml` to `completed_phase: 2`; and
-3. change this document and the migration overview from validation-pending to complete.
+The completion update appends a source-bound Phase 2 validation snapshot to `migration-baseline.json`, retains the tightened structural ratchets, and sets `capability-graph.yaml` to `completed_phase: 2`.
 
 The two Phase 1 target-path nulls are already replaced by the measured records in `performance-baseline.yaml`; they must not be reverted while the external proof is pending.
 

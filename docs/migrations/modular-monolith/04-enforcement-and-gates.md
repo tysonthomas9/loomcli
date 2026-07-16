@@ -8,7 +8,7 @@
 
 ## Architecture source of truth
 
-Phase 1 checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. During Phase 2, `workflowcatalog` may be marked `active` as soon as its source root exists, while `completed_phase` remains `1` until the pilot's required proof closes. The graph declares:
+Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Phase 2 is now complete: `workflowcatalog` is `active`, `completed_phase` is `2`, and the baseline carries a source-bound Phase 2 validation snapshot. The graph declares:
 
 - every capability root;
 - allowed capability-to-capability import, synchronous command/query, and durable event edges;

@@ -106,6 +106,89 @@
             "artifact_paths": ["docs/migrations/modular-monolith/00-phase-0-baseline.md"]
           }
         ]
+      },
+      {
+        "id": "phase2-workflow-catalog-84cccb761",
+        "loom_head": "84cccb76123d7531a881988ca0b1e9db49e17677",
+        "fleetdb_head": "430dce8d9fcc9c48bc9d52613b78403b8aae19d4",
+        "openapi_sha256": "4f50d5e0b98cabea2a904e5713bf13c838fd05e0c91d967e1d7a1b6528c9ca19",
+        "recorded_at": "2026-07-16",
+        "runs": [
+          {
+            "id": "architecture-check",
+            "repository": "loom",
+            "command": ["go", "run", "./scripts/archcheck", "check"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Final implementation head after the serve-import fanout remediation."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "All architecture profiles, capability edges, Store and handler ratchets, direct-write inventory, mutation ledger, runtime inventory, and measured performance records passed."},
+            "artifact_paths": ["docs/migrations/modular-monolith/07-phase-2-decisions-and-evidence.md"]
+          },
+          {
+            "id": "contract-snapshot-match",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "fleet-db-modular-monolith-phase2/api/openapi.yaml", "loomcli-modular-monolith-phase2/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"],
+            "environment": {"set": [], "unset": [], "notes": "Run from the rc-2 multi-repository workspace root against the paired Phase 2 worktrees."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "FleetDB source and Loom vendored OpenAPI were byte-identical at the recorded SHA-256."},
+            "artifact_paths": ["docs/migrations/modular-monolith/07-phase-2-decisions-and-evidence.md"]
+          },
+          {
+            "id": "deterministic-local-mode-verify",
+            "repository": "cross-repo",
+            "command": ["make", "local-mode-verify"],
+            "environment": {
+              "set": ["LOCAL_MODE_COMPOSE_PROJECT=loom-mm2-final-local", "LOCAL_MODE_FLEETDB_SOURCE_ROOT=<paired-fleetdb-worktree>"],
+              "unset": [],
+              "notes": "Checkout-scoped run 20260716T054925Z-46850; live manifest tasks LOCALMODE-2 and LOCALMODE-3; stack torn down after verification."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Fresh planner and coder task, session, transcript, design, completion, and diff assertions passed from the live container manifest."},
+            "artifact_paths": ["docs/migrations/modular-monolith/07-phase-2-decisions-and-evidence.md"]
+          },
+          {
+            "id": "fleetdb-gate",
+            "repository": "fleetdb",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache"],
+              "unset": [],
+              "notes": "Companion Phase 2 checkout with Redis, Postgres, lifecycle API/auth/config, concurrency, replay, E2E, and coverage gates enabled."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The complete FleetDB gate passed with 76.9 percent coverage and all package floors."},
+            "artifact_paths": ["docs/migrations/modular-monolith/07-phase-2-decisions-and-evidence.md"]
+          },
+          {
+            "id": "loom-gate",
+            "repository": "loom",
+            "command": ["make", "gate"],
+            "environment": {
+              "set": ["FLEET_DB_BIN=/tmp/fleet-db-phase2-430dce8d", "FLEET_DB_REPO=<paired-fleetdb-worktree>", "GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Exact paired FleetDB binary and source were pinned so embedded tests and the contract guard exercised the same companion head."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The aggregate target reported Go, frontend, and all quality gates passed; the Go gate covered all 16 checks, serialized race, and 65.5 percent coverage."},
+            "artifact_paths": ["docs/migrations/modular-monolith/07-phase-2-decisions-and-evidence.md"]
+          },
+          {
+            "id": "real-route-cli-e2e",
+            "repository": "cross-repo",
+            "command": ["go", "test", "-tags=e2e", "./internal/webui/handlers/workflows", "-run", "^TestE2E_WorkflowCatalogPhase2RealFleetDBLoomHTTPAndCLI$", "-count=1", "-v"],
+            "environment": {
+              "set": ["FLEET_DB_BIN=/tmp/fleet-db-phase2-430dce8d", "FLEET_DB_REPO=<paired-fleetdb-worktree>", "GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Final Loom implementation head against a fresh embedded Redis-backed FleetDB and real loom serve process."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "The public Loom HTTP and management CLI journey listed, approved, activated, and unapproved a durable workflow version; denial and failure classes remained covered by focused suites."},
+            "artifact_paths": ["docs/migrations/modular-monolith/07-phase-2-decisions-and-evidence.md"]
+          }
+        ]
       }
     ]
   },

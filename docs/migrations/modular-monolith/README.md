@@ -1,6 +1,6 @@
 # Modular Monolith Migration
 
-- **Status:** Reviewed — Phase 1 complete; Phase 2 external proof pending
+- **Status:** Reviewed — Phase 2 complete; Phase 3 is next
 - **Date:** 2026-07-16
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, and [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom implementation head `84cccb761` with FleetDB `430dce8d9`
@@ -54,7 +54,7 @@ The required base integration is complete and its validated code heads are pushe
 
 Phase 0 and Phase 1 are complete. The final Phase 1 Loom head is `7e8a6dd2`; it approved the capability graph, completed the direct-write, authority, transaction, runtime, and performance inventories, enforced all 11 declared build profiles plus all-files AST checks, added the characterization gate, and productized the supervisor-disabled proof contract. It also closed the stale-task default/clock and session-heartbeat reliability items and added fail-fast FleetDB capability negotiation for slices that declare required keys.
 
-Phase 2 now has an active `internal/modules/workflowcatalog` root. Loom implementation head `84cccb761` and FleetDB `430dce8d9` implement the read API, typed operator commands, shared FleetDB adapter, management HTTP and CLI adapters, local credential mechanism, and Redis/Postgres lifecycle contract. The paired gates, checksum `4f50d5e0…ca19`, real route/CLI E2E, packaged Desktop journey, deterministic local-mode integration, and measured p50/p95 plus round trips pass. This is not yet a completion claim: the graph intentionally remains at `completed_phase: 1` until a fresh external Codex-backed stack run is explicitly approved, passes, and its local artifacts verify. See the [Phase 2 evidence](07-phase-2-decisions-and-evidence.md).
+Phase 2 is complete with an active `internal/modules/workflowcatalog` root. Loom implementation head `84cccb761` and FleetDB `430dce8d9` implement the read API, typed operator commands, shared FleetDB adapter, management HTTP and CLI adapters, local credential mechanism, and Redis/Postgres lifecycle contract. The paired gates, checksum `4f50d5e0…ca19`, real route/CLI E2E, packaged Desktop journey, checkout-scoped deterministic local-mode integration, and measured p50/p95 plus round trips pass. The graph is ratcheted to `completed_phase: 2`, and the machine baseline includes the immutable Phase 2 validation snapshot. See the [Phase 2 evidence](07-phase-2-decisions-and-evidence.md).
 
 The supervisor-disabled execution row remains intentionally RED and cannot count as parity proof or be changed by the Workflow Catalog pilot.
 

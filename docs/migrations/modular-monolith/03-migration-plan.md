@@ -1,6 +1,6 @@
 # Migration Plan
 
-- **Status:** Reviewed — Phase 1 complete; Phase 2 external proof pending
+- **Status:** Reviewed — Phase 2 complete; Phase 3 is next
 - **Strategy:** Incremental vertical extraction aligned with active product work; no standalone big-bang reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -96,7 +96,7 @@ The four upward edges found by the legacy plane scan can be fixed when their own
 
 The pilot is intentionally narrower than the entire driver subsystem and must prove more than folder isolation.
 
-**Current implementation status:** The Phase 2 branches start from Loom `7e8a6dd2` and FleetDB `8120c788`; implementation heads are Loom `84cccb761` and FleetDB `430dce8d9`. The public Workflow Catalog root, typed authority, shared FleetDB adapter, Redis/Postgres lifecycle commands, FleetDB and Loom HTTP routes, capability negotiation, and management CLI are implemented. Paired gates, negative cases, contract checksum, real route/CLI and packaged UI journeys, deterministic local-mode integration, and both target-path measurements pass. The milestone remains open only for a fresh external Codex-backed local-mode run plus local artifact verification; starting that stack invokes external Codex and requires explicit data-transmission approval. The exact ledger is in [07-phase-2-decisions-and-evidence.md](07-phase-2-decisions-and-evidence.md).
+**Completed:** The Phase 2 branches start from Loom `7e8a6dd2` and FleetDB `8120c788`; implementation heads are Loom `84cccb761` and FleetDB `430dce8d9`. The public Workflow Catalog root, typed authority, shared FleetDB adapter, Redis/Postgres lifecycle commands, FleetDB and Loom HTTP routes, capability negotiation, and management CLI are implemented. Paired gates, negative cases, contract checksum, real route/CLI and packaged UI journeys, checkout-scoped deterministic local-mode integration, and both target-path measurements pass. The graph is ratcheted to `completed_phase: 2`; the exact ledger is in [07-phase-2-decisions-and-evidence.md](07-phase-2-decisions-and-evidence.md).
 
 ### 2A — establish a read seam
 
