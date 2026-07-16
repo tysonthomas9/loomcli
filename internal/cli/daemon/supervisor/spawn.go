@@ -29,8 +29,6 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 		return s.buildSandboxCommand(ap)
 	}
 
-	cfg := s.ConfigSnapshot()
-
 	ap.Mu.Lock()
 	epicID := ap.AssignedEpicID
 	ap.Mu.Unlock()
@@ -44,42 +42,55 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cmd.Dir = ap.WorktreePath
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	cmd.Env = append(cli.FilteredEnv(),
+	env, err := s.buildAgentEnv(ap)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = env
+
+	return cmd, nil
+}
+
+// buildAgentEnv assembles the environment for a host agent subprocess.
+func (s *Supervisor) buildAgentEnv(ap *AgentProcess) ([]string, error) {
+	cfg := s.ConfigSnapshot()
+
+	env := append(cli.FilteredEnv(),
 		fmt.Sprintf("LOOM_AGENT_NAME=%s", ap.Entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
 
-	cmd.Env = appendRoleEnv(cmd.Env, ap)
-	cmd.Env = appendRoutingEnv(cmd.Env, ap)
+	env = appendRoleEnv(env, ap)
+	env = appendRoutingEnv(env, ap)
 
 	sourceRepos, err := cfgpkg.ResolveAgentRepos(ap.Entry, s.Repos)
 	if err != nil {
 		return nil, fmt.Errorf("resolve agent repos: %w", err)
 	}
 	if len(sourceRepos) > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
+		env = append(env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
 	}
 
 	ap.Mu.Lock()
 	assignedTaskID := ap.AssignedTaskID
 	ap.Mu.Unlock()
 	if assignedTaskID != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
+		env = append(env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
 	}
 
-	cmd.Env = s.appendDaemonEnv(cmd.Env)
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
-	cmd.Env = appendSessionEnv(cmd.Env, ap)
+	env = s.appendDaemonEnv(env)
+	env = append(env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
+	env = appendSessionEnv(env, ap)
 
 	// Propagate the active trace context so the agent subprocess's bootstrap
 	// span and per-request spans inherit the daemon's trace tree.
 	// See docs/observability/tracing-contract.md §5.
 	if tp := tracing.TraceparentFromContext(cmdstore.RootContext()); tp != "" {
-		cmd.Env = append(cmd.Env, "LOOM_TRACE_PARENT="+tp)
+		env = append(env, "LOOM_TRACE_PARENT="+tp)
 	}
 
-	return cmd, nil
+	return env, nil
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
