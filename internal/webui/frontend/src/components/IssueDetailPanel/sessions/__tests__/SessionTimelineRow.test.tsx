@@ -185,9 +185,7 @@ describe("SessionTimelineRow", () => {
         lines_removed: 0,
       });
       render(<SessionTimelineRow {...defaultProps} session={session} />);
-      expect(screen.getByTestId("row-files-stat")).toHaveTextContent(
-        "1 +1 −0",
-      );
+      expect(screen.getByTestId("row-files-stat")).toHaveTextContent("1 +1 −0");
     });
 
     it("omits files when nothing changed", () => {

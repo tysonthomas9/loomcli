@@ -43,10 +43,7 @@ export function MarkdownRenderer({
 
   return (
     <div className={rootClassName} data-testid="markdown-content">
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeSanitize]}
-      >
+      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
         {sanitizedContent}
       </Markdown>
     </div>

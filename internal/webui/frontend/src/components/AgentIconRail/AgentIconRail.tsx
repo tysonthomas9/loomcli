@@ -144,8 +144,7 @@ export function AgentAvatarButton({
   );
   const dotColor = STATUS_DOT_COLOR[parsed.type] ?? STATUS_DOT_COLOR["idle"];
   const prLabel = agentCompactAvatarLabel(agent);
-  const initial =
-    prLabel || getCompactAvatarInitials(agent.name ?? "");
+  const initial = prLabel || getCompactAvatarInitials(agent.name ?? "");
   const avatarBg = getAvatarColor(agent.name ?? "");
   const avatarFg = shouldUseWhiteText(avatarBg) ? "#fff" : "#1a1a1a";
   const tooltip = agentAvatarTooltip(agent);

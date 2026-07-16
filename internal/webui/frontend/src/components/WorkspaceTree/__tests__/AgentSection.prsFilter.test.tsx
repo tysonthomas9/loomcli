@@ -65,16 +65,18 @@ vi.mock("@/components/AgentCard", () => ({
   AgentCard: ({ agent }: { agent: LoomAgentStatus }) => (
     <div data-testid={`agent-card-${agent.name}`}>
       {agent.display_name ?? agent.name}
-      {agent.role_label ? ` ${agent.role_label}` : agent.role ? ` ${agent.role}` : ""}
+      {agent.role_label
+        ? ` ${agent.role_label}`
+        : agent.role
+          ? ` ${agent.role}`
+          : ""}
     </div>
   ),
 }));
 
 import { AgentSection } from "../AgentSection";
 
-function makeAgent(
-  overrides: Partial<LoomAgentStatus> = {},
-): LoomAgentStatus {
+function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
   return {
     name: "agent",
     branch: "main",

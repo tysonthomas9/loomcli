@@ -10,10 +10,7 @@ import { useTaskSessions } from "@/hooks/terminal";
 
 import type { SessionRecord } from "@/types/agent";
 
-import {
-  SessionTimeline,
-  type RunRailSummary,
-} from "./SessionTimeline";
+import { SessionTimeline, type RunRailSummary } from "./SessionTimeline";
 import { SessionDetailView } from "./SessionDetailView";
 import styles from "./SessionsTab.module.css";
 

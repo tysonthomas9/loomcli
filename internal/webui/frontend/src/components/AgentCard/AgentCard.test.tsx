@@ -385,9 +385,7 @@ describe("AgentCard", () => {
     it('hides "Uncommitted changes" for dirty status', () => {
       render(<AgentCard agent={makeAgent({ status: "dirty", branch: "b" })} />);
 
-      expect(
-        screen.queryByText("Uncommitted changes"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText("Uncommitted changes")).not.toBeInTheDocument();
     });
 
     it('hides "2 changes" for changes status', () => {

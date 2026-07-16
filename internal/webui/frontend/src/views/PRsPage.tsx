@@ -498,27 +498,24 @@ export function PRsPage(): JSX.Element {
               aria-label="Filter pull requests"
             >
               {FILTERS.filter(
-                (f) =>
-                  f.id === "all" || f.id === "review" || counts[f.id] > 0,
-              ).map(
-                (f) => {
-                  const isActive = filter === f.id;
-                  return (
-                    <button
-                      key={f.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={isActive}
-                      className={styles.pill}
-                      data-active={isActive || undefined}
-                      onClick={() => setFilter(f.id)}
-                    >
-                      {f.label}
-                      <span className={styles.pillCount}>{counts[f.id]}</span>
-                    </button>
-                  );
-                },
-              )}
+                (f) => f.id === "all" || f.id === "review" || counts[f.id] > 0,
+              ).map((f) => {
+                const isActive = filter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className={styles.pill}
+                    data-active={isActive || undefined}
+                    onClick={() => setFilter(f.id)}
+                  >
+                    {f.label}
+                    <span className={styles.pillCount}>{counts[f.id]}</span>
+                  </button>
+                );
+              })}
             </div>
             <div className={styles.groupControl}>
               <span className={styles.groupLabel}>Group</span>

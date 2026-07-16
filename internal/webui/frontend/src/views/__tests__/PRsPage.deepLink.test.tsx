@@ -76,10 +76,7 @@ describe("PRsPage deep-link", () => {
 
     const workspace = screen.getByTestId("pr-review-workspace");
     expect(workspace).toBeInTheDocument();
-    expect(workspace).toHaveAttribute(
-      "data-title",
-      "tysonthomas9/loomcli#220",
-    );
+    expect(workspace).toHaveAttribute("data-title", "tysonthomas9/loomcli#220");
     expect(workspace).toHaveAttribute("data-number", "220");
     expect(workspace).toHaveAttribute("data-repo", "tysonthomas9/loomcli");
     expect(workspace).toHaveAttribute("data-discuss", "1");

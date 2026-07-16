@@ -133,11 +133,7 @@
 .archiveButton:hover,
 .archiveButton:focus-visible {
   color: var(--color-danger, #dc2626);
-  background: color-mix(
-    in srgb,
-    var(--color-danger, #dc2626) 10%,
-    transparent
-  );
+  background: color-mix(in srgb, var(--color-danger, #dc2626) 10%, transparent);
 }
 
 .dragHandle {
