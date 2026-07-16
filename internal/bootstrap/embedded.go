@@ -321,13 +321,9 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 		logger = slog.Default()
 	}
 
-	diag := DiagnoseFleetDBBinary()
-	if diag.Err != nil {
-		return nil, diag.Err
-	}
-	binPath := diag.Path
-	if !diag.Runnable {
-		return nil, fmt.Errorf("embedded: fleet-db binary %s is not runnable. %s", binPath, diag.Remediation)
+	binPath, err := resolveEmbeddedFleetDBBinary()
+	if err != nil {
+		return nil, err
 	}
 
 	fleetDir := filepath.Join(dataDir, "fleet-db")
@@ -478,6 +474,17 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 
 	releaseLockOnError = false
 	return emb, nil
+}
+
+func resolveEmbeddedFleetDBBinary() (string, error) {
+	diag := DiagnoseFleetDBBinary()
+	if diag.Err != nil {
+		return "", diag.Err
+	}
+	if !diag.Runnable {
+		return "", fmt.Errorf("embedded: fleet-db binary %s is not runnable. %s", diag.Path, diag.Remediation)
+	}
+	return diag.Path, nil
 }
 
 // URL returns the base HTTP URL of the embedded fleet-db (no trailing slash).

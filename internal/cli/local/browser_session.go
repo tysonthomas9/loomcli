@@ -39,6 +39,12 @@ type localBrowserSessionOutput struct {
 	ExpiresAt  string `json:"expires_at"`
 }
 
+type localBrowserSessionLaunchResponse struct {
+	LaunchCode string `json:"launch_code"`
+	Workspace  string `json:"workspace"`
+	ExpiresAt  string `json:"expires_at"`
+}
+
 var browserSessionCmd = &cobra.Command{
 	Use:    "browser-session",
 	Short:  "Create a one-time trusted Desktop browser session",
@@ -88,6 +94,25 @@ func createLocalBrowserSession(ctx context.Context, dataDir, runtimeURL string, 
 	}
 
 	endpoint := baseURL + "/api/workspaces/" + url.PathEscape(workspace) + "/operator-sessions/launch"
+	payload, err := requestLocalBrowserSession(ctx, doer, endpoint, token)
+	if err != nil {
+		return nil, err
+	}
+	if payload.Workspace != workspace {
+		return nil, fmt.Errorf("local browser session workspace mismatch")
+	}
+	if !validLocalBrowserToken(payload.LaunchCode) {
+		return nil, fmt.Errorf("local browser session endpoint returned an invalid launch code")
+	}
+	return &localBrowserSessionOutput{
+		RuntimeURL: baseURL,
+		Workspace:  workspace,
+		LaunchCode: payload.LaunchCode,
+		ExpiresAt:  payload.ExpiresAt,
+	}, nil
+}
+
+func requestLocalBrowserSession(ctx context.Context, doer localBrowserSessionHTTPDoer, endpoint, token string) (*localBrowserSessionLaunchResponse, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build local browser session request: %w", err)
@@ -103,27 +128,12 @@ func createLocalBrowserSession(ctx context.Context, dataDir, runtimeURL string, 
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, localBrowserSessionResponseLimit))
 		return nil, fmt.Errorf("local browser session endpoint returned HTTP %d", response.StatusCode)
 	}
-	var payload struct {
-		LaunchCode string `json:"launch_code"`
-		Workspace  string `json:"workspace"`
-		ExpiresAt  string `json:"expires_at"`
-	}
+	var payload localBrowserSessionLaunchResponse
 	decoder := json.NewDecoder(io.LimitReader(response.Body, localBrowserSessionResponseLimit+1))
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, fmt.Errorf("decode local browser session response: %w", err)
 	}
-	if payload.Workspace != workspace {
-		return nil, fmt.Errorf("local browser session workspace mismatch")
-	}
-	if !validLocalBrowserToken(payload.LaunchCode) {
-		return nil, fmt.Errorf("local browser session endpoint returned an invalid launch code")
-	}
-	return &localBrowserSessionOutput{
-		RuntimeURL: baseURL,
-		Workspace:  workspace,
-		LaunchCode: payload.LaunchCode,
-		ExpiresAt:  payload.ExpiresAt,
-	}, nil
+	return &payload, nil
 }
 
 func fetchActiveWorkspaceID(ctx context.Context, doer localBrowserSessionHTTPDoer, baseURL string) (string, error) {
