@@ -1,0 +1,109 @@
+name: Desktop Release
+
+# Builds, signs (Developer ID), notarizes, staples, and uploads the "Loom Agents"
+# macOS desktop app DMG to a GitHub release.
+#
+# Trigger by pushing a desktop-specific tag (kept separate from the CLI's `v*`
+# GoReleaser tag), e.g.:
+#   git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   APPLE_CERTIFICATE          base64 of a .p12 export of the Developer ID
+#                              Application certificate (`base64 -i cert.p12`)
+#   APPLE_CERTIFICATE_PASSWORD password used when exporting the .p12
+#   APPLE_SIGNING_IDENTITY     e.g. "Developer ID Application: Tyson Kuthur Thomas (BN879H59CY)"
+#   APPLE_API_ISSUER           App Store Connect API key issuer id (UUID)
+#   APPLE_API_KEY_ID           App Store Connect API key id
+#   APPLE_API_KEY_P8           contents of the AuthKey_XXXX.p8 file
+#   FLEET_DB_TOKEN             (optional) PAT/deploy token to checkout the
+#                              private tysonthomas9/fleet-db repo; omit if public
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. desktop-v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    # macOS arm64 runner: produces an aarch64-apple-darwin build with valid
+    # darwin signatures (matches the locally-built artifact).
+    runs-on: macos-latest
+    steps:
+      - name: Checkout loomcli
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout fleet-db sidecar repo
+        uses: actions/checkout@v4
+        with:
+          repository: tysonthomas9/fleet-db
+          path: fleet-db
+          token: ${{ secrets.FLEET_DB_TOKEN || github.token }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Install web UI deps
+        run: cd internal/webui/frontend && npm ci
+
+      - name: Install desktop deps
+        run: cd desktop && npm ci
+
+      - name: Write App Store Connect API key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/asc"
+          printf '%s' "$APPLE_API_KEY_P8" > "${RUNNER_TEMP}/asc/AuthKey.p8"
+          chmod 600 "${RUNNER_TEMP}/asc/AuthKey.p8"
+
+      - name: Build, sign, notarize & release DMG
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Sidecar build: point prepare-sidecar.sh at the fleet-db checkout.
+          FLEET_DB_REPO: ${{ github.workspace }}/fleet-db
+          # Code signing (imported into a temp keychain by tauri-action).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Notarization via App Store Connect API key.
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/asc/AuthKey.p8
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: 'Loom Agents ${{ github.event.inputs.tag || github.ref_name }} (Apple Silicon)'
+          releaseBody: 'Signed + notarized macOS desktop app. Apple Silicon (arm64).'
+          releaseDraft: true
+          prerelease: false
+          # tauri-action's beforeBuildCommand (prepare-sidecar) builds the Go
+          # sidecars; this just selects the bundle targets.
+          args: --bundles app,dmg

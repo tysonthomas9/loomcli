@@ -10,17 +10,10 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type {
-  Issue,
-  Priority,
-  IssueType,
-  LoomAgentStatus,
-  LoomTaskInfo,
-} from "@/types";
+import type { Issue } from "@/types";
 
 import { SplitDetailSummary } from "../SplitDetailSummary";
 
-// Mock child components (located in sub-barrels)
 vi.mock("../sections", () => ({
   EditableDescription: ({
     description,
@@ -42,48 +35,6 @@ vi.mock("../sections", () => ({
   ),
 }));
 
-vi.mock("../fields", () => ({
-  PriorityDropdown: ({
-    priority,
-    isSaving,
-  }: {
-    priority: Priority;
-    onSave: (p: Priority) => Promise<void>;
-    isSaving: boolean;
-  }) => (
-    <div data-testid="priority-dropdown" data-saving={isSaving}>
-      Priority: {priority}
-    </div>
-  ),
-  TypeDropdown: ({
-    type,
-    isSaving,
-  }: {
-    type: IssueType;
-    onSave: (t: IssueType) => Promise<void>;
-    isSaving: boolean;
-  }) => (
-    <div data-testid="type-dropdown" data-saving={isSaving}>
-      Type: {type}
-    </div>
-  ),
-  AssigneeDropdown: ({
-    assignee,
-    isSaving,
-  }: {
-    assignee: string;
-    onSave: (a: string) => Promise<void>;
-    isSaving: boolean;
-    agents: LoomAgentStatus[];
-    agentTasks: Record<string, LoomTaskInfo>;
-  }) => (
-    <div data-testid="assignee-dropdown" data-saving={isSaving}>
-      Assignee: {assignee}
-    </div>
-  ),
-}));
-
-// Mock updateIssue API
 vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
 }));
@@ -125,14 +76,6 @@ function createIssue(overrides: Partial<Issue> = {}): Issue {
 describe("SplitDetailSummary", () => {
   const defaultProps = {
     issue: createIssue(),
-    isSavingPriority: false,
-    isSavingType: false,
-    isSavingAssignee: false,
-    agents: [] as LoomAgentStatus[],
-    agentTasks: {} as Record<string, LoomTaskInfo>,
-    onPrioritySave: vi.fn().mockResolvedValue(undefined),
-    onTypeSave: vi.fn().mockResolvedValue(undefined),
-    onAssigneeSave: vi.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(() => {
@@ -140,13 +83,6 @@ describe("SplitDetailSummary", () => {
   });
 
   describe("rendering", () => {
-    it("renders all dropdowns", () => {
-      render(<SplitDetailSummary {...defaultProps} />);
-      expect(screen.getByTestId("priority-dropdown")).toBeInTheDocument();
-      expect(screen.getByTestId("type-dropdown")).toBeInTheDocument();
-      expect(screen.getByTestId("assignee-dropdown")).toBeInTheDocument();
-    });
-
     it("renders description section", () => {
       render(<SplitDetailSummary {...defaultProps} />);
       expect(screen.getByText("Description")).toBeInTheDocument();
@@ -159,92 +95,13 @@ describe("SplitDetailSummary", () => {
       expect(screen.getByText("My description")).toBeInTheDocument();
     });
 
-    it("passes correct priority to PriorityDropdown", () => {
-      const issue = createIssue({ priority: 1 });
-      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
-      expect(screen.getByText("Priority: 1")).toBeInTheDocument();
-    });
-
-    it("passes correct type to TypeDropdown", () => {
-      const issue = createIssue({ issue_type: "bug" });
-      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
-      expect(screen.getByText("Type: bug")).toBeInTheDocument();
-    });
-
-    it("passes correct assignee to AssigneeDropdown", () => {
-      const issue = createIssue({ assignee: "falcon" });
-      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
-      expect(screen.getByText("Assignee: falcon")).toBeInTheDocument();
-    });
-  });
-
-  describe("saving states", () => {
-    it("passes isSavingPriority to PriorityDropdown", () => {
-      render(<SplitDetailSummary {...defaultProps} isSavingPriority={true} />);
-      expect(screen.getByTestId("priority-dropdown")).toHaveAttribute(
-        "data-saving",
-        "true",
-      );
-    });
-
-    it("passes isSavingType to TypeDropdown", () => {
-      render(<SplitDetailSummary {...defaultProps} isSavingType={true} />);
-      expect(screen.getByTestId("type-dropdown")).toHaveAttribute(
-        "data-saving",
-        "true",
-      );
-    });
-
-    it("passes isSavingAssignee to AssigneeDropdown", () => {
-      render(<SplitDetailSummary {...defaultProps} isSavingAssignee={true} />);
-      expect(screen.getByTestId("assignee-dropdown")).toHaveAttribute(
-        "data-saving",
-        "true",
-      );
-    });
-
-    it("does not show saving state when not saving", () => {
-      render(<SplitDetailSummary {...defaultProps} />);
-      expect(screen.getByTestId("priority-dropdown")).toHaveAttribute(
-        "data-saving",
-        "false",
-      );
-      expect(screen.getByTestId("type-dropdown")).toHaveAttribute(
-        "data-saving",
-        "false",
-      );
-      expect(screen.getByTestId("assignee-dropdown")).toHaveAttribute(
-        "data-saving",
-        "false",
-      );
-    });
-  });
-
-  describe("design panel", () => {
-    it("renders design panel when issue has design field", () => {
-      const issue = createIssue({ design: "Some design content" });
+    it("renders design panel when design is present", () => {
+      const issue = createIssue({ design: "# Design doc" });
       render(<SplitDetailSummary {...defaultProps} issue={issue} />);
       expect(screen.getByTestId("design-section")).toBeInTheDocument();
-      expect(screen.getByTestId("design-panel")).toBeInTheDocument();
-      expect(screen.getByText("Some design content")).toBeInTheDocument();
-    });
-
-    it("does not render design panel when design is absent", () => {
-      const issue = createIssue({ design: undefined });
-      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
-      expect(screen.queryByTestId("design-section")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("design-panel")).not.toBeInTheDocument();
-    });
-
-    it("uses two-column layout when design exists", () => {
-      const issue = createIssue({ design: "Design content" });
-      const { container } = render(
-        <SplitDetailSummary {...defaultProps} issue={issue} />,
+      expect(screen.getByTestId("design-panel")).toHaveTextContent(
+        "# Design doc",
       );
-      // The parent div should have detailColumns class
-      const detailContent = container.firstChild as HTMLElement;
-      const columnsDiv = detailContent?.firstChild as HTMLElement;
-      expect(columnsDiv?.className).toContain("detailColumns");
     });
 
     it("uses full-width layout when design is absent", () => {
@@ -254,7 +111,6 @@ describe("SplitDetailSummary", () => {
       );
       const detailContent = container.firstChild as HTMLElement;
       const innerDiv = detailContent?.firstChild as HTMLElement;
-      // Should not have detailColumns class
       expect(innerDiv?.className || "").not.toContain("detailColumns");
     });
   });
@@ -301,12 +157,6 @@ describe("SplitDetailSummary", () => {
   });
 
   describe("edge cases", () => {
-    it("renders with empty assignee", () => {
-      const issue = createIssue({ assignee: "" });
-      render(<SplitDetailSummary {...defaultProps} issue={issue} />);
-      expect(screen.getByText("Assignee:")).toBeInTheDocument();
-    });
-
     it("renders with undefined description", () => {
       const issue = createIssue({ description: undefined });
       render(<SplitDetailSummary {...defaultProps} issue={issue} />);

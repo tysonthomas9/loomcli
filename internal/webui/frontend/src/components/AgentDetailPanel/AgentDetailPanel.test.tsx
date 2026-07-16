@@ -65,17 +65,20 @@ vi.mock("./DiffTab", () => ({
   ),
 }));
 
-// Mock FileEditorPanel to avoid pulling in CodeMirror and editor stack
-vi.mock("@/components/FileEditorPanel/FileEditorPanel", () => ({
-  FileEditorPanel: ({
+// Mock the v3 file browser to avoid pulling in CodeMirror and editor stack.
+vi.mock("@/components/FileExplorer", () => ({
+  WorkspaceFileBrowser: ({
+    mode,
     agentName,
     isActive,
   }: {
-    agentName: string;
-    isActive: boolean;
+    mode?: string;
+    agentName?: string;
+    isActive?: boolean;
   }) => (
     <div
-      data-testid="file-editor-panel-mock"
+      data-testid="workspace-file-browser-mock"
+      data-mode={mode}
       data-agent={agentName}
       data-active={String(isActive)}
     />
@@ -364,18 +367,17 @@ describe("AgentDetailPanel", () => {
       expect(tabPanel).toBeInTheDocument();
     });
 
-    it("passes correct props to FileEditorPanel", async () => {
+    it("passes correct props to WorkspaceFileBrowser", async () => {
       renderPanel({ name: "nova" });
 
-      // Click Files tab to render FileEditorPanel
       fireEvent.click(screen.getByRole("tab", { name: "Files" }));
 
-      // FileEditorPanel is lazy-loaded, wait for it to resolve
-      const fileEditorMock = await screen.findByTestId(
-        "file-editor-panel-mock",
+      const fileBrowserMock = await screen.findByTestId(
+        "workspace-file-browser-mock",
       );
-      expect(fileEditorMock).toHaveAttribute("data-agent", "nova");
-      expect(fileEditorMock).toHaveAttribute("data-active", "true");
+      expect(fileBrowserMock).toHaveAttribute("data-mode", "agent");
+      expect(fileBrowserMock).toHaveAttribute("data-agent", "nova");
+      expect(fileBrowserMock).toHaveAttribute("data-active", "true");
     });
 
     it("Files tab panel has correct ARIA attributes", () => {

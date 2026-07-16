@@ -2,7 +2,6 @@ package svcimpl
 
 import (
 	"errors"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -25,50 +24,29 @@ var validTaskID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 // alphanumeric, dots, underscores, hyphens.
 var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
-// deniedExtensions lists file extensions that must not be read or written.
-var deniedExtensions = map[string]bool{
-	".key": true, ".pem": true, ".p12": true, ".pfx": true,
-	".env": true, ".gpg": true, ".asc": true,
-}
-
-// deniedFilenames lists filenames (without path) that must not be read or written.
-var deniedFilenames = map[string]bool{
-	"id_rsa": true, "id_ed25519": true, "id_ecdsa": true, "id_dsa": true,
-	".env": true, ".env.local": true, ".env.production": true, ".netrc": true,
-}
-
-// isDeniedPath checks if a path refers to a sensitive file by extension or filename.
-func isDeniedPath(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	if deniedExtensions[ext] {
-		return true
-	}
-	base := strings.ToLower(filepath.Base(path))
-	return deniedFilenames[base]
-}
-
-// validateDiffPath checks that a file path is safe (no traversal, not absolute, not empty).
-func validateDiffPath(p string) bool {
-	if p == "" {
-		return false
-	}
-	if strings.HasPrefix(p, "/") {
-		return false
-	}
-	cleaned := filepath.Clean(p)
-	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return false
-	}
-	return true
-}
-
 // validateAgentName checks that the agent name is non-empty and matches the allowed pattern.
 func validateAgentName(name string) error {
 	if name == "" {
 		return service.ErrValidation("missing agent name")
 	}
-	if !service.ValidAgentName.MatchString(name) {
-		return service.ErrValidation("invalid agent name: must match [a-zA-Z0-9_-]+")
+	if !service.IsValidAgentName(name) {
+		return service.ErrValidation("invalid agent name")
+	}
+	return nil
+}
+
+// normalizeStoredAgentName lowercases and trims agent names before persistence.
+func normalizeStoredAgentName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// validateStoredAgentName checks a normalized agent name against fleet-db rules.
+func validateStoredAgentName(name string) error {
+	if name == "" {
+		return service.ErrValidation("missing agent name")
+	}
+	if !service.ValidStoredAgentName.MatchString(name) {
+		return service.ErrValidation("invalid agent name: use 1-100 lowercase letters, numbers, hyphens, dots, or underscores (cannot start or end with punctuation)")
 	}
 	return nil
 }

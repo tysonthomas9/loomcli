@@ -6,6 +6,8 @@ import (
 	"sort"
 	"sync"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 func TestSetActiveSessionRuntimeEnv(t *testing.T) {
@@ -117,6 +119,32 @@ func TestBuildBackendEnv_IncludesActiveSessionEnv(t *testing.T) {
 		if !envHas(env, want) {
 			t.Fatalf("buildBackendEnv missing %q in %v", want, env)
 		}
+	}
+}
+
+func TestBuildBackendEnvPrependsLoomExecutableDirToPath(t *testing.T) {
+	t.Cleanup(ClearActiveSessionEnv)
+
+	oldPath := os.Getenv("PATH")
+	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Cleanup(func() {
+		_ = os.Setenv("PATH", oldPath)
+	})
+
+	env := buildBackendEnv("/worktree", "local-planner")
+	got, ok := envValue(env, "PATH")
+	if !ok {
+		t.Fatalf("buildBackendEnv missing PATH in %v", env)
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	wantPrefix := filepath.Dir(exe)
+	parts := filepath.SplitList(got)
+	if len(parts) == 0 || parts[0] != wantPrefix {
+		t.Fatalf("PATH = %q, want first entry %q", got, wantPrefix)
 	}
 }
 
@@ -287,6 +315,8 @@ func TestResolveNotifyToken_EnvVar(t *testing.T) {
 }
 
 func TestResolveNotifyToken_FileOnDisk(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	// Ensure LOOM_NOTIFY_TOKEN env var is not set.
 	t.Setenv("LOOM_NOTIFY_TOKEN", "")
 
@@ -319,6 +349,8 @@ func TestResolveNotifyToken_FileOnDisk(t *testing.T) {
 }
 
 func TestResolveNotifyToken_BothFail(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	// No env var.
 	t.Setenv("LOOM_NOTIFY_TOKEN", "")
 	t.Setenv("LOOM_WORKSPACE", "TEST")

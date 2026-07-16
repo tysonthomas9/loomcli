@@ -44,6 +44,7 @@ type WorkspaceConfig struct {
 	Repos        []RepoConfig   `yaml:"repos" json:"repos"`                                     // Repositories in this workspace
 	State        WorkspaceState `yaml:"state,omitempty" json:"state,omitempty"`                 // Lifecycle state (empty/"" = ready)
 	ErrorMessage string         `yaml:"error_message,omitempty" json:"error_message,omitempty"` // Error detail when State=error
+	DesignFormat string         `yaml:"design_format,omitempty" json:"design_format,omitempty"` // Planner design output format ("markdown" default, "html")
 }
 
 // RepoConfig defines a single repository within a workspace
@@ -128,7 +129,7 @@ func LoadConfig() (*LoomConfig, error) {
 
 // GetWorkspaceDir returns the directory path for a named workspace.
 func GetWorkspaceDir(name string) string {
-	return filepath.Join(GetConfigDir(), "workspaces", name)
+	return bootstrap.WorkspaceDir(name)
 }
 
 // ResolveActiveWorkspace returns the active FleetDB workspace projected into the
@@ -232,6 +233,7 @@ func workspaceConfigFromStore(
 		Repos:        repos,
 		State:        WorkspaceState(ws.State),
 		ErrorMessage: ws.ErrorMessage,
+		DesignFormat: ws.DesignFormat,
 	}
 	if profile, err := st.Daemon().Get(ctx, ws.Key); err == nil && profile != nil {
 		wsc.Backend = profile.AgentBackend

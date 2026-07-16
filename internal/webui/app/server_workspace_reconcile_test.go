@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -451,6 +452,61 @@ func TestReconcileStoreWorkspaces_UUIDKeys(t *testing.T) {
 	if ids[1] != extraUUID {
 		t.Errorf("WorkspaceIDs[1] = %q, want %q", ids[1], extraUUID)
 	}
+}
+
+// TestStartPeriodicWorkspaceReconcile_PicksUpNewWorkspaces simulates the
+// "workspace created out-of-band after serve startup" scenario that produced
+// "workspace not registered" errors during the multi-lead dogfood. The
+// periodic loop should detect the new workspace and register it without a
+// serve restart.
+func TestStartPeriodicWorkspaceReconcile_PicksUpNewWorkspaces(t *testing.T) {
+	registry, multiPool := newTestCoordinatorRegistry(t)
+
+	initialID := "initial"
+	initialPath := t.TempDir()
+	_ = registry.Register(initialID, initialPath)
+
+	extraID := "new-after-startup"
+	extraPath := t.TempDir()
+
+	// listFn returns just the initial workspace at first; after the test
+	// "creates" the second one out-of-band, returns both.
+	var hasExtra atomic.Bool
+	listFn := func() (map[string]string, error) {
+		out := map[string]string{initialID: initialPath}
+		if hasExtra.Load() {
+			out[extraID] = extraPath
+		}
+		return out, nil
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	appinfra.StartPeriodicWorkspaceReconcile(ctx, listFn, registry, 25*time.Millisecond, slog.Default())
+
+	// Confirm only the initial workspace is registered before the second appears.
+	time.Sleep(60 * time.Millisecond)
+	if got := multiPool.WorkspaceIDs(); len(got) != 1 || got[0] != initialID {
+		t.Fatalf("pre-extra IDs = %v, want only %q", got, initialID)
+	}
+
+	// "Create" the extra workspace out-of-band. The loop should pick it up.
+	hasExtra.Store(true)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ids := multiPool.WorkspaceIDs()
+		if len(ids) == 2 {
+			sort.Strings(ids)
+			if ids[0] == extraID || ids[1] == extraID {
+				return // success
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("periodic reconcile did not register %q within deadline; final IDs = %v",
+		extraID, multiPool.WorkspaceIDs())
 }
 
 func TestReconcileStoreWorkspaces_NameKeys(t *testing.T) {

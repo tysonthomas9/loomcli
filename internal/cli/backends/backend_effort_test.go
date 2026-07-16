@@ -21,10 +21,10 @@ func TestAppendCodexEffortArgsSkipsEmpty(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeNonInteractiveArgsAddsEffort(t *testing.T) {
+func TestBuildClaudeRunTurnArgsAddsEffort(t *testing.T) {
 	t.Setenv("LOOM_AGENT_EFFORT", "high")
 
-	got := buildClaudeNonInteractiveArgs("session-1", "do work")
+	got := buildClaudeRunTurnArgs("session-1")
 
 	if !slices.Contains(got, "--effort") {
 		t.Fatalf("expected --effort in args, got %v", got)

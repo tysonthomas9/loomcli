@@ -62,6 +62,13 @@ What would you like to do?
 **5. Epic Status**
 - List open epics with `loom data list --status=open --type=epic`.
 - Drill into selected epics with `loom data show <id>`.
+- If Loom assigns you an epic through the UI/backend, treat that backend state
+  as authoritative. A UI/backend assignment means the epic-runner workflow has
+  already been queued; do not start a second `loom epic run` unless the user
+  explicitly asks you to launch a new run from the terminal. Monitor the active
+  run by inspecting `loom data show <epic-id> --output json`,
+  `loom data list --status=in_progress --output json`, and
+  `loom workspace ops diagnose --json`.
 - Ask before closing completed or superseded epics.
 
 **6. Manage Repos or Agents**
@@ -70,6 +77,9 @@ What would you like to do?
 - Create runnable local background agents with `loom agentdef add <name> --role <plan|task> --auto --repos <repo-name>`.
 - Scope an agent to an epic/task subtree with `--parent <issue-id>` when the user asks for scoped work.
 - Use `--task-filter needs_design` for planner agents and `--task-filter has_design` for implementation agents when the user wants the normal plan-then-build flow.
+- Create interactive terminal teammates with `loom role add <name> --kind interactive --prompt-file <path-or-builtin:pr-review>`, then `loom agentdef add <name> --role <name>`. Opening that agent's terminal runs `loom lead --prompt <file>`.
+- Interactive agents are for human-in-the-loop terminal conversations, like PR review. They are NOT daemon-supervised plan/task workers; they run when their terminal is opened.
+- Use `builtin:pr-review` for a ready-made interactive PR-review agent prompt.
 - After adding or starting agents, run `loom workspace ops ensure-runtime --json` and then `loom workspace ops status --json`.
 - Use `loom agentdef start <name>` and `loom agentdef stop <name>` only to change desired state. These commands do not start the daemon process by themselves.
 
@@ -116,13 +126,18 @@ project/
 - `loom repo list --json`: list workspace repositories.
 - `loom repo add <name> <remote-url>`: register a repository in the active workspace.
 - `loom role list`: list available agent roles.
+- `loom role add <name> --kind interactive --prompt-file <path>`: define an interactive terminal-agent role.
+- `loom role set <name> kind interactive`: mark an existing role interactive.
 - `loom agentdef list`: list stored long-lived agent assignments.
 - `loom agentdef add <name> --role <role> --auto --repos <repo>`: create a runnable background agent assignment.
+- `loom lead --prompt <file>`: run an interactive terminal agent with a custom prompt.
 - `loom agentdef start <name>` / `loom agentdef stop <name>`: change desired state for an assignment.
 - `loom plan <name>`: planning agent creates designs and moves tasks to review.
 - `loom task <name>`: implementation agent works approved tasks.
 - `loom plan <name> --auto`: continuous planning.
 - `loom task <name> --auto`: continuous implementation.
+- `loom epic run --parent <epic-id>`: queue or run the epic-runner workflow
+  from the terminal when the user explicitly asks for a CLI-launched run.
 - `loom list`: list configured agents/worktrees.
 - `loom monitor`: dashboard showing agent status and task progress.
 - `loom merge <worktree>`: merge a worktree branch to main.

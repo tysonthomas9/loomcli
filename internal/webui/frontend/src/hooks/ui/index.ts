@@ -65,6 +65,25 @@ export type {
   ToastProviderProps,
 } from "./useToast";
 
+export {
+  useOpenQueuePanelWidth,
+  OPEN_QUEUE_PANEL_DEFAULT_WIDTH,
+  OPEN_QUEUE_PANEL_MIN_WIDTH,
+  OPEN_QUEUE_PANEL_MAX_WIDTH,
+} from "./useOpenQueuePanelWidth";
+export type { UseOpenQueuePanelWidthReturn } from "./useOpenQueuePanelWidth";
+
+export { useAgentWorkPanelViewState } from "./useAgentWorkPanelViewState";
+export type { UseAgentWorkPanelViewStateReturn } from "./useAgentWorkPanelViewState";
+
+export {
+  useWorkspaceTreeWidth,
+  WORKSPACE_TREE_DEFAULT_WIDTH,
+  WORKSPACE_TREE_MIN_WIDTH,
+  WORKSPACE_TREE_MAX_WIDTH,
+} from "./useWorkspaceTreeWidth";
+export type { UseWorkspaceTreeWidthReturn } from "./useWorkspaceTreeWidth";
+
 export { useVirtualList } from "./useVirtualList";
 export type {
   UseVirtualListOptions,

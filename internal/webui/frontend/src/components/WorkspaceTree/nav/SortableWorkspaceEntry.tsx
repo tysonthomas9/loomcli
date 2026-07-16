@@ -7,6 +7,7 @@ import type React from "react";
 import { useSortable } from "@dnd-kit/sortable";
 
 import type { WorkspaceSummary } from "@/api/workspace";
+import { formatStatusLabel } from "@/utils/issue";
 
 import styles from "../WorkspaceTree.module.css";
 
@@ -189,7 +190,10 @@ export function SortableWorkspaceEntry({
         <span className={styles.errorDot} title={ws.error_message ?? "Error"} />
       )}
       {ws.state && ws.state !== "ready" && ws.state !== "error" && (
-        <span className={styles.stateSpinner} title={`${ws.state}...`} />
+        <span
+          className={styles.stateSpinner}
+          title={`${formatStatusLabel(ws.state)}…`}
+        />
       )}
       <span className={styles.workspaceEntryMeta}>
         <span className={styles.workspaceRepoCount}>{ws.repo_count}</span>

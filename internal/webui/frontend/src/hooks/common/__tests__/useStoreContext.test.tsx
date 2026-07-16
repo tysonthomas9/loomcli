@@ -451,7 +451,7 @@ describe("useStoreContext", () => {
 
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
         workspaceId: "test-ws-id",
-        pollInterval: 5000,
+        pollInterval: 30000,
       });
     });
   });
@@ -483,7 +483,7 @@ describe("useStoreContext", () => {
       expect(issueMethodsRef.current.fetchIssues).not.toHaveBeenCalled();
       expect(agentMethodsRef.current.startPolling).toHaveBeenCalledWith({
         workspaceId: "new-ws-id",
-        pollInterval: 5000,
+        pollInterval: 30000,
       });
     });
   });

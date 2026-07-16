@@ -384,3 +384,100 @@ func TestUpdate_ReviewFromOpen_NoRelease(t *testing.T) {
 		t.Error("expected PATCH to set status=review")
 	}
 }
+
+// Quarantine write shape (supervisor task-quarantine).
+
+// TestUpdate_QuarantineShape_OpenToBlockedWithLabelAndUnassign pins the exact
+// request decomposition for the supervisor's quarantine write — one Update
+// with {Status: blocked, Assignee: "", AddLabels: [loom:quarantined]} against
+// an OPEN issue: label POST -> status PATCH -> assign "". No /release-lock is
+// issued from open; the in_progress race path (sibling claims the task in the
+// open->blocked gap) is already pinned by
+// TestUpdate_ReviewOrBlockedFromInProgress_ReleasesClaim above.
+func TestUpdate_QuarantineShape_OpenToBlockedWithLabelAndUnassign(t *testing.T) {
+	var mutations []string
+	var labeled bool
+	var labelAdded, patchedStatus, assignedTo string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-q1"):
+			var labels []string
+			if labeled { // waitForLabelState polls until the label projects
+				labels = []string{"loom:quarantined"}
+			}
+			respondOK(w, types.Issue{
+				ID:        "test-q1",
+				Title:     "stalled task",
+				Status:    types.StatusOpen,
+				Labels:    labels,
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-q1/deps"):
+			respondOK(w, map[string]interface{}{"dependencies": []interface{}{}})
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/test-q1/comments"):
+			respondOK(w, []interface{}{})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-q1/labels"):
+			mutations = append(mutations, "label")
+			labeled = true
+			var body struct {
+				Label string `json:"label"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode label body: %v", err)
+			}
+			labelAdded = body.Label
+			respondOK(w, json.RawMessage(`{}`))
+		case r.Method == "PATCH" && strings.HasSuffix(r.URL.Path, "/issues/test-q1"):
+			mutations = append(mutations, "status")
+			var body struct {
+				Status string `json:"status"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode patch body: %v", err)
+			}
+			patchedStatus = body.Status
+			respondOK(w, json.RawMessage(`{}`))
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-q1/release-lock"):
+			t.Error("unexpected /release-lock: nothing holds a claim on an open issue")
+			respondOK(w, json.RawMessage(`{}`))
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/test-q1/assign"):
+			mutations = append(mutations, "assign")
+			var body struct {
+				Assignee string `json:"assignee"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode assign body: %v", err)
+			}
+			assignedTo = body.Assignee
+			respondOK(w, json.RawMessage(`{}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			respondErr(w, http.StatusNotFound, "unexpected")
+		}
+	})
+	defer ts.Close()
+
+	blocked := "blocked"
+	empty := ""
+	if err := fb.Update(context.Background(), "test-q1", backend.UpdateParams{
+		Status:    &blocked,
+		Assignee:  &empty,
+		AddLabels: []string{"loom:quarantined"},
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	if got, want := strings.Join(mutations, ">"), "label>status>assign"; got != want {
+		t.Errorf("mutation order = %q, want %q", got, want)
+	}
+	if labelAdded != "loom:quarantined" {
+		t.Errorf("label added = %q, want loom:quarantined", labelAdded)
+	}
+	if patchedStatus != "blocked" {
+		t.Errorf("patched status = %q, want blocked", patchedStatus)
+	}
+	if assignedTo != "" {
+		t.Errorf("assigned to = %q, want explicit empty (unassign)", assignedTo)
+	}
+}

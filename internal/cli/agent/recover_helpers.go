@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	clibackends "github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 )
@@ -50,12 +52,23 @@ func analyzeTaskCompletion(deps *cli.Deps, worktreePath, taskID string) (complet
 
 	prompt := buildCompletionAnalysisPrompt(taskID, taskDetails, gitOutput)
 
-	claudeResult := deps.Exec.Run(worktreePath, "claude", "-p", "--output-format", "text", prompt)
-	if claudeResult.Err != nil {
-		return false, fmt.Sprintf("Claude analysis failed: %v", claudeResult.Err)
+	analysis, err := runCompletionAnalysis(ctxForCompletionAnalysis(), deps, worktreePath, prompt)
+	if err != nil {
+		return false, fmt.Sprintf("Claude analysis failed: %v", err)
 	}
 
-	return parseCompletionResponse(claudeResult.Stdout)
+	return parseCompletionResponse(analysis)
+}
+
+func ctxForCompletionAnalysis() context.Context {
+	return context.Background()
+}
+
+func runCompletionAnalysis(ctx context.Context, deps *cli.Deps, worktreePath, prompt string) (string, error) {
+	if deps != nil && deps.TextAnalyzer != nil {
+		return deps.TextAnalyzer.AnalyzeText(ctx, worktreePath, prompt)
+	}
+	return clibackends.RunClaudeTurnText(ctx, worktreePath, prompt, "")
 }
 
 // gatherTaskGitLogs collects git log entries mentioning taskID. In workspace
@@ -135,7 +148,9 @@ func closeTask(deps *cli.Deps, taskID, reason string) {
 
 // resetTask resets a task to open status, but only if it's still in_progress.
 // Tasks that have already reached review or closed status were successfully
-// processed and should not be reset.
+// processed and should not be reset; a blocked task was quarantined by the
+// daemon (or blocked by a human) and must not be flipped back to open by a
+// crash-recovery pass.
 func resetTask(deps *cli.Deps, taskID string) {
 	ib := deps.IssueBackend
 	ctx := cmdstore.RootContext()
@@ -143,7 +158,7 @@ func resetTask(deps *cli.Deps, taskID string) {
 	// Check current status before resetting
 	detail, err := ib.Get(ctx, taskID)
 	if err == nil && detail != nil {
-		if detail.Status == "review" || detail.Status == "closed" {
+		if detail.Status == "review" || detail.Status == "closed" || detail.Status == "blocked" {
 			fmt.Printf("✓ Task %s already %s, skipping reset\n", taskID, detail.Status)
 			return
 		}

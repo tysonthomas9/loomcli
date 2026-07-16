@@ -9,6 +9,7 @@ package tabmeta
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -33,17 +34,32 @@ var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // its backing shell did not. AttachedClients>1 means the same session is
 // being viewed by multiple WebSocket clients concurrently.
 type TabMetadata struct {
-	SessionName     string    `json:"session_name"`
-	Workspace       string    `json:"workspace,omitempty"`
-	Label           string    `json:"label"`
-	Notes           string    `json:"notes"`
-	SortOrder       int       `json:"sort_order"`
-	Pinned          bool      `json:"pinned"`
-	IssueID         string    `json:"issue_id,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	PTYAlive        bool      `json:"pty_alive"`
-	AttachedClients int       `json:"attached_clients"`
+	SessionName     string      `json:"session_name"`
+	Workspace       string      `json:"workspace,omitempty"`
+	Label           string      `json:"label"`
+	Notes           string      `json:"notes"`
+	SortOrder       int         `json:"sort_order"`
+	Pinned          bool        `json:"pinned"`
+	IssueID         string      `json:"issue_id,omitempty"`
+	Kind            string      `json:"kind,omitempty"`
+	AgentID         string      `json:"agent_id,omitempty"`
+	Role            string      `json:"role,omitempty"`
+	Backend         string      `json:"backend,omitempty"`
+	Writable        bool        `json:"writable,omitempty"`
+	Launch          *LaunchSpec `json:"launch,omitempty"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
+	PTYAlive        bool        `json:"pty_alive"`
+	AttachedClients int         `json:"attached_clients"`
+}
+
+// LaunchSpec is the explicit command contract for a terminal session. Agent
+// tabs persist this instead of deriving behavior from the human-facing tab
+// name.
+type LaunchSpec struct {
+	Argv []string          `json:"argv,omitempty"`
+	Env  map[string]string `json:"env,omitempty"`
+	Cwd  string            `json:"cwd,omitempty"`
 }
 
 // Store provides Redis-backed persistence for terminal tab metadata.
@@ -239,8 +255,22 @@ func (s *Store) Set(ctx context.Context, meta *TabMetadata) error {
 		"sort_order": strconv.Itoa(meta.SortOrder),
 		"pinned":     pinnedStr,
 		"issue_id":   meta.IssueID,
+		"kind":       meta.Kind,
+		"agent_id":   meta.AgentID,
+		"role":       meta.Role,
+		"backend":    meta.Backend,
+		"writable":   strconv.FormatBool(meta.Writable),
 		"created_at": meta.CreatedAt.UTC().Format(time.RFC3339),
 		"updated_at": meta.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+	if meta.Launch != nil {
+		raw, err := json.Marshal(meta.Launch)
+		if err != nil {
+			return fmt.Errorf("marshal launch spec %s: %w", meta.SessionName, err)
+		}
+		fields["launch"] = string(raw)
+	} else {
+		fields["launch"] = ""
 	}
 
 	if err := s.client.HSet(ctx, metaKey(meta.Workspace, meta.SessionName), fields).Err(); err != nil {
@@ -396,6 +426,10 @@ func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabM
 		Label:       vals["label"],
 		Notes:       vals["notes"],
 		IssueID:     vals["issue_id"],
+		Kind:        vals["kind"],
+		AgentID:     vals["agent_id"],
+		Role:        vals["role"],
+		Backend:     vals["backend"],
 	}
 
 	if so, ok := vals["sort_order"]; ok {
@@ -407,6 +441,16 @@ func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabM
 
 	if p, ok := vals["pinned"]; ok {
 		meta.Pinned = p == "true"
+	}
+	if writable, ok := vals["writable"]; ok {
+		meta.Writable = writable == "true"
+	}
+	if raw, ok := vals["launch"]; ok && strings.TrimSpace(raw) != "" {
+		var spec LaunchSpec
+		if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+			return nil, fmt.Errorf("parse launch spec for %s: %w", sessionName, err)
+		}
+		meta.Launch = &spec
 	}
 
 	if ca, ok := vals["created_at"]; ok {

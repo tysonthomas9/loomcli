@@ -28,7 +28,10 @@ import type { FilterState } from "@/hooks/issues";
 import type { Issue, Status } from "@/types";
 import type { BlockedInfo } from "@/types/issue";
 
+import { issueMatchesSearch } from "@/utils/issueSearch";
+
 import { DEFAULT_COLUMNS } from "./columnConfigs";
+import { visibleKanbanColumns } from "./columnVisibility";
 import styles from "./KanbanBoard.module.css";
 import type { KanbanColumnConfig } from "./types";
 
@@ -58,6 +61,8 @@ export interface KanbanBoardProps {
   pendingIds?: Set<string>;
   /** Whether the app is in multi-repo mode (affects empty state text) */
   isMultiRepo?: boolean;
+  /** Hide columns with no issues */
+  compactColumns?: boolean;
 }
 
 /**
@@ -76,6 +81,7 @@ export function KanbanBoard({
   showBlocked = true,
   pendingIds,
   isMultiRepo,
+  compactColumns = false,
 }: KanbanBoardProps): JSX.Element {
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const [sourceColumnId, setSourceColumnId] = useState<string | null>(null);
@@ -121,6 +127,15 @@ export function KanbanBoard({
 
     if (!filters) return result;
 
+    if (filters.search !== undefined && filters.search !== "") {
+      // Flat board has no lanes to keep intact, so match each card directly —
+      // filterIssuesBySearch's epic-sibling inclusion (used by grouped/lane
+      // views) would otherwise flood the board with an epic's child tasks.
+      result = result.filter((issue) =>
+        issueMatchesSearch(issue, filters.search as string),
+      );
+    }
+
     return result.filter((issue) => {
       // Priority filter (exact match)
       if (
@@ -139,15 +154,6 @@ export function KanbanBoard({
       if (filters.labels !== undefined && filters.labels.length > 0) {
         const issueLabels = issue.labels ?? [];
         if (!filters.labels.every((label) => issueLabels.includes(label))) {
-          return false;
-        }
-      }
-
-      // Search filter (case-insensitive title match)
-      if (filters.search !== undefined && filters.search !== "") {
-        const searchLower = filters.search.toLowerCase();
-        const titleLower = issue.title.toLowerCase();
-        if (!titleLower.includes(searchLower)) {
           return false;
         }
       }
@@ -175,6 +181,11 @@ export function KanbanBoard({
     }
     return grouped;
   }, [filteredIssues, columns, blockedIssues]);
+
+  const displayColumns = useMemo(
+    () => visibleKanbanColumns(columns, issuesByColumn, compactColumns),
+    [columns, issuesByColumn, compactColumns],
+  );
 
   // Handle drag start - store the dragged issue and source column for DragOverlay
   const handleDragStart = useCallback(
@@ -262,8 +273,11 @@ export function KanbanBoard({
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
     >
-      <div className={rootClassName}>
-        {columns.map((col) => {
+      <div
+        className={rootClassName}
+        data-compact-columns={compactColumns || undefined}
+      >
+        {displayColumns.map((col) => {
           const allColIssues = issuesByColumn.get(col.id) ?? [];
           const columnClassName =
             col.style === "muted"

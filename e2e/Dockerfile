@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && CGO_ENABLED=0 go build -o /out/loom ./cmd/loom
 
 # ─── Stage 2: Build frontend ────────────────────────────────────────────────
-FROM node:20-alpine AS frontend
+FROM node:22-alpine AS frontend
 
 WORKDIR /app/internal/webui/frontend
 COPY internal/webui/frontend/ .
@@ -30,11 +30,11 @@ RUN --mount=type=cache,target=/app/internal/webui/frontend/node_modules \
     npm ci && npm run build
 
 # ─── Stage 3: Runtime ───────────────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 
 # System packages
 RUN apk add --no-cache \
-    tmux git jq curl ca-certificates bash chromium \
+    tmux git jq curl ca-certificates bash coreutils make chromium \
     nss freetype harfbuzz ttf-freefont
 
 # Playwright: use system chromium instead of downloading
@@ -62,10 +62,11 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY e2e/stubs/claude e2e/stubs/codex e2e/stubs/opencode /usr/local/bin/
 COPY e2e/verify_todo.sh e2e/verify_list.sh /usr/local/bin/
 COPY e2e/run_test.sh /usr/local/bin/run_test.sh
+COPY e2e/epic_runner_codex.sh /usr/local/bin/epic_runner_codex.sh
 RUN mkdir -p /etc/loom \
     && chmod +x /usr/local/bin/claude /usr/local/bin/codex /usr/local/bin/opencode \
         /usr/local/bin/verify_todo.sh /usr/local/bin/verify_list.sh \
-        /usr/local/bin/run_test.sh
+        /usr/local/bin/run_test.sh /usr/local/bin/epic_runner_codex.sh
 COPY e2e/task_template.txt /etc/loom/task_template.txt
 COPY scripts/start-e2e-server.sh /usr/local/bin/start-e2e-server.sh
 RUN chmod +x /usr/local/bin/start-e2e-server.sh

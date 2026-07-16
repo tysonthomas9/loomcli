@@ -1,0 +1,8 @@
+# Defense in depth: package.json "files" is the allowlist of record; this
+# file keeps dev-only artifacts out even if "files" is ever removed.
+*.test.mjs
+*.test-d.ts
+tsconfig*.json
+node_modules/
+examples/
+.npmignore

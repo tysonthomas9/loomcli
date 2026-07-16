@@ -100,6 +100,57 @@ func TestCheckOrphanedTranscripts_Backfills(t *testing.T) {
 	}
 }
 
+func TestCheckOrphanedTranscripts_BackfillCaseInsensitiveWorkspaceToken(t *testing.T) {
+	// Regression: the workspace path case can drift (registered "WEB" while
+	// Claude encoded the worktree cwd as "web"). A case-sensitive token match
+	// found nothing and left every transcript unbackfilled.
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+	runtimeDir := filepath.Join(t.TempDir(), "WEB") // token = "WEB"
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(ResetWorkspaceRuntimeDirCache)
+
+	store, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	sess, err := store.CreateSession(sessions.CreateOptions{
+		AgentName: "quill", Backend: "claude", Phase: "implementation",
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	sid := sess.SessionID()
+
+	// Claude encoded the cwd with lowercase "web" — differs only in case.
+	projectDir := filepath.Join(home, ".claude", "projects", "-tmp-web-worktrees-quill")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"assistant","message":{"id":"m1","usage":` +
+		`{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "cc-uuid.jsonl"), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	markSessionCompleted(t, store, sid)
+
+	doctorFix = true
+	t.Cleanup(func() { doctorFix = false })
+
+	res := checkOrphanedTranscripts()
+	if res.Status != StatusPass {
+		t.Fatalf("status = %v; case-only token difference should still backfill (summary=%q detail=%q)", res.Status, res.Summary, res.Detail)
+	}
+	if _, err := os.Stat(store.NativeTranscriptPath(sid)); err != nil {
+		t.Errorf("transcript not backfilled despite case-only workspace-token difference: %v", err)
+	}
+}
+
 func TestCheckOrphanedTranscripts_SkipsRunningSessions(t *testing.T) {
 	runtimeDir := t.TempDir()
 	home := t.TempDir()

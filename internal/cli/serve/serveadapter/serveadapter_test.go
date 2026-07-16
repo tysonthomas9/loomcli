@@ -19,17 +19,10 @@ func TestWorkspaceDeleteFnDeletesStoreAndLocalState(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return err
-		}
-		if sc.Workspaces == nil {
-			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
-		}
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		sc.LastWorkspace = "ALPHA"
 		sc.Workspaces["ALPHA"] = bootstrap.WorkspaceLocalState{Path: "/tmp/alpha"}
-		return bootstrap.SaveStateCache(sc)
+		return nil
 	}); err != nil {
 		t.Fatalf("seed state cache: %v", err)
 	}
@@ -57,17 +50,10 @@ func TestWorkspaceDeleteFnDoesNotClearStateWhenStoreDeleteFails(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
 	st := memstore.New()
-	if err := bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return err
-		}
-		if sc.Workspaces == nil {
-			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
-		}
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		sc.LastWorkspace = "MISSING"
 		sc.Workspaces["MISSING"] = bootstrap.WorkspaceLocalState{Path: "/tmp/missing"}
-		return bootstrap.SaveStateCache(sc)
+		return nil
 	}); err != nil {
 		t.Fatalf("seed state cache: %v", err)
 	}

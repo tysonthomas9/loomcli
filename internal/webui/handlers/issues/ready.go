@@ -169,18 +169,17 @@ func serveReadyViaBackend(w http.ResponseWriter, r *http.Request, backendFn Issu
 		return true
 	}
 	opts := backend.ReadyOpts{
-		Assignee:        args.Assignee,
-		Unassigned:      args.Unassigned,
-		Priority:        args.Priority,
-		Type:            args.Type,
-		ParentID:        args.ParentID,
-		Limit:           args.Limit,
-		SortPolicy:      args.SortPolicy,
-		Labels:          args.Labels,
-		LabelsAny:       args.LabelsAny,
-		MolType:         args.MolType,
-		IncludeDeferred: args.IncludeDeferred,
-		SourceRepos:     args.SourceRepos,
+		Assignee:    args.Assignee,
+		Unassigned:  args.Unassigned,
+		Priority:    args.Priority,
+		Type:        args.Type,
+		ParentID:    args.ParentID,
+		Limit:       args.Limit,
+		SortPolicy:  args.SortPolicy,
+		Labels:      args.Labels,
+		LabelsAny:   args.LabelsAny,
+		MolType:     args.MolType,
+		SourceRepos: args.SourceRepos,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -234,20 +233,23 @@ func issueDataToTypesIssue(d *backend.IssueData) *types.Issue {
 		return nil
 	}
 	issue := &types.Issue{
-		ID:         d.ID,
-		Title:      d.Title,
-		Status:     types.Status(d.Status),
-		Priority:   d.Priority,
-		IssueType:  types.IssueType(d.IssueType),
-		Assignee:   d.Assignee,
-		Owner:      d.Owner,
-		Labels:     d.Labels,
-		SourceRepo: d.SourceRepo,
-		Design:     d.Design,
-		CreatedAt:  d.CreatedAt,
-		UpdatedAt:  d.UpdatedAt,
-		DueAt:      d.DueAt,
-		DeferUntil: d.DeferUntil,
+		ID:               d.ID,
+		Title:            d.Title,
+		Status:           types.Status(d.Status),
+		Priority:         d.Priority,
+		IssueType:        types.IssueType(d.IssueType),
+		Assignee:         d.Assignee,
+		Owner:            d.Owner,
+		Labels:           d.Labels,
+		SourceRepo:       d.SourceRepo,
+		Design:           d.Design,
+		DesignArtifactID: d.DesignArtifactID,
+		DesignFormat:     d.DesignFormat,
+		HasDesign:        d.HasDesign || d.Design != "",
+		CreatedAt:        d.CreatedAt,
+		UpdatedAt:        d.UpdatedAt,
+		DueAt:            d.DueAt,
+		DeferUntil:       d.DeferUntil,
 	}
 	return issue
 }
@@ -469,9 +471,6 @@ func parseReadyParams(r *http.Request) (*rpc.ReadyArgs, error) {
 
 	var err error
 	if args.Unassigned, err = handler.ParseBoolParam(q, "unassigned"); err != nil {
-		return nil, err
-	}
-	if args.IncludeDeferred, err = handler.ParseBoolParam(q, "include_deferred"); err != nil {
 		return nil, err
 	}
 	if err := parseReadyIntParams(q, args); err != nil {

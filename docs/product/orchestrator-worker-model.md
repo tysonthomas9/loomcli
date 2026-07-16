@@ -22,8 +22,9 @@ dispatches *short-lived* workers to fix specific tasks.
 
 This PRD proposes a small, additive split:
 
-- **Orchestrator** — a `loom lead` chat session, registered in fleet-db
-  as an `AgentSession{Kind: orchestration}`. Persistent. Talks to the
+- **Orchestrator** — an interactive terminal agent for any role with
+  `kind=interactive` (the built-in `lead` is the default), registered in
+  fleet-db as an `AgentSession{Kind: orchestration}`. Persistent. Talks to the
   user. Spawns workers via the existing `loom agentdef add` CLI.
 - **Worker** — a `domain.Agent` with `Mode = ephemeral`, scoped to one
   task by `parent` (epic) or `--task`. Exits cleanly after a single
@@ -123,7 +124,7 @@ nothing currently *uses* these fields. This PRD makes them load-bearing.
 
 | Term | Definition |
 |---|---|
-| **Orchestrator** | A `loom lead` interactive AI session, persisted as `AgentSession{Kind: orchestration}`. One per Terminal tab. |
+| **Orchestrator** | Any role with `kind=interactive` runs as an interactive terminal/orchestrator agent, persisted as `AgentSession{Kind: orchestration}`. The built-in `lead` is the default; custom ones can cover jobs like PR review. This interactive/worker split is by role `kind` and complements the ephemeral/service `AgentMode` axis. |
 | **Worker** | A `domain.Agent` with `Mode = ephemeral`. Spawned to handle a specific task and exits when that task completes. |
 | **Lead session** | The tmux + AI process that backs an orchestrator. Already exists; this PRD just gives it an identity. |
 | **Service agent** | A `domain.Agent` with `Mode = service` (or no mode). Today's default behavior: loops forever. Unchanged by this PRD. |
@@ -755,7 +756,7 @@ export default defineWorkflow({
     const review = ctx.step("review", "agent_gate", {
       role: "reviewer",
       pr: pr.output("url"),
-      decisionSchema: ["approved", "changes_requested", "rejected", "needs_human"],
+      decisionSchema: ["approved", "changes_requested", "rejected", "needs_review"],
     }).after(pr);
 
     ctx.step("merge", "merge_pr", {
@@ -796,7 +797,7 @@ They should not mutate the repository by default.
 
 ```ts
 type GateDecision = {
-  decision: "approved" | "changes_requested" | "rejected" | "needs_human";
+  decision: "approved" | "changes_requested" | "rejected" | "needs_review";
   summary: string;
   findings: Array<{
     severity: "blocker" | "major" | "minor";
@@ -817,7 +818,7 @@ Useful gatekeeper roles:
 - `release-manager` — gates multi-repo release sequencing.
 
 Review/fix loops must have a max-attempt cap and a deterministic
-fallback, usually `needs_human`.
+fallback, usually `needs_review`.
 
 ### Service agents
 
@@ -1233,7 +1234,7 @@ existing PR rather than creating another.
 | Wrong dependency unblock timing | Only close the issue when the workflow intentionally wants dependents unblocked. |
 | SDK code performs unsafe side effects | SDK emits IR; runtime executes typed, capability-checked actions. |
 | Direct push to protected branch | Protected-branch policy, required checks, explicit approval gate. |
-| Infinite review/fix loop | Max attempts and terminal `needs_human` fallback. |
+| Infinite review/fix loop | Max attempts and terminal `needs_review` fallback. |
 | External drift (PR exists, CI reran, box deleted) | Persist external refs and reconcile from provider APIs. |
 | Cost explosion from fanout | Max concurrency, max attempts, budget caps per run and service agent. |
 | Multi-repo partial delivery | One artifact per repo; close only when all required artifacts complete. |

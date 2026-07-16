@@ -68,6 +68,15 @@ export interface TabMetadata {
   sort_order: number;
   pinned: boolean;
   issue_id?: string;
+  kind?: string;
+  agent_id?: string;
+  role?: string;
+  backend?: string;
+  writable?: boolean;
+  launch?: {
+    argv?: string[];
+    env?: Record<string, string>;
+  };
   created_at: string;
   updated_at: string;
   /**
@@ -84,6 +93,27 @@ export interface TabMetadata {
    * destructive tab-close actions.
    */
   attached_clients: number;
+}
+
+export async function ensureAgentTerminalSession(
+  workspaceId: string,
+  agentName: string,
+): Promise<TabMetadata> {
+  const response = await post<{
+    success: boolean;
+    data?: TabMetadata;
+    error?: string;
+  }>(
+    wsUrl(
+      workspaceId,
+      `/agents/${encodeURIComponent(agentName)}/terminal/session`,
+    ),
+    {},
+  );
+  if (!response.success || !response.data) {
+    throw new Error(response.error || "Failed to resolve agent terminal");
+  }
+  return response.data;
 }
 
 export interface TerminalSetupResult {

@@ -28,7 +28,7 @@ type DaemonAgentStatus struct {
 	Role                   string    `json:"role"`
 	Repo                   string    `json:"repo,omitempty"`
 	PID                    int       `json:"pid"`
-	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "parked"
+	Status                 string    `json:"status"` // "running", "starting", "stopped", "failed", "blocked"
 	TaskID                 string    `json:"task_id,omitempty"`
 	EpicID                 string    `json:"epic_id,omitempty"`
 	CurrentBackend         string    `json:"current_backend,omitempty"`
@@ -41,7 +41,7 @@ type DaemonAgentStatus struct {
 	WorktreePath           string    `json:"worktree_path,omitempty"`
 	LastErrorClass         string    `json:"last_error_class,omitempty"`
 	NoWorkCount            int       `json:"no_work_count,omitempty"`
-	ParkCount              int       `json:"park_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
+	BlockCount             int       `json:"block_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
 	BackoffUntil           time.Time `json:"backoff_until,omitempty"`
 	RemoteBranch           string    `json:"remote_branch,omitempty"`
 	OwnershipLeaseID       string    `json:"ownership_lease_id,omitempty"`
@@ -55,6 +55,10 @@ type DaemonState struct {
 	PID       int                 `json:"pid"`
 	StartedAt time.Time           `json:"started_at"`
 	Agents    []DaemonAgentStatus `json:"agents"`
+	// QuarantinedTasks lists tasks the daemon set to blocked after repeated
+	// no-progress kills (plus pending retries when the write is failing).
+	// Display-only: never hydrated back into supervision across restarts.
+	QuarantinedTasks []supervisor.QuarantinedTaskInfo `json:"quarantined_tasks,omitempty"`
 }
 
 // Cobra command variables
@@ -325,9 +329,13 @@ func initDaemonServices(config *cfgpkg.DaemonConfig, projectDir string, paths da
 
 	daemon, err := NewDaemon(config, projectDir, eventBus, cli.DefaultIssueBackend(), st)
 	if err != nil {
+		if storeHandle != nil {
+			_ = storeHandle.Close()
+		}
 		fmt.Fprintf(os.Stderr, "Error: creating daemon: %v\n", err)
 		os.Exit(1)
 	}
+	daemon.storeHandle = storeHandle
 
 	return shutdown, daemon
 }
@@ -345,7 +353,7 @@ func runDaemonMainLoop(config *cfgpkg.DaemonConfig, projectDir string, paths dae
 	}
 
 	startedAt := time.Now()
-	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), maxRetries); err != nil {
+	if err := writeStateFile(paths.stateFile, startedAt, daemon.Agents(), daemon.QuarantinedTasks(), maxRetries); err != nil {
 		fmt.Printf("Warning: failed to write initial state file: %v\n", err)
 	}
 
@@ -502,6 +510,8 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	for _, agent := range state.Agents {
 		printAgentStatus(agent)
 	}
+
+	printQuarantinedTasks(state.QuarantinedTasks)
 }
 
 func runDaemonStop(cmd *cobra.Command, args []string) {

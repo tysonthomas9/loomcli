@@ -196,6 +196,15 @@ func hasCommitsBetweenRemoteDeps(deps *cli.Deps, dir, remote, target, source str
 	return strings.TrimSpace(output) != "", nil
 }
 
+func remoteConfiguredDeps(deps *cli.Deps, dir, remote string) bool {
+	r := resolveRemote(remote)
+	if err := validateGitRef(r); err != nil {
+		return false
+	}
+	output, err := runGit(deps, dir, "remote", "get-url", r)
+	return err == nil && strings.TrimSpace(output) != ""
+}
+
 func isRefCheckedOutInWorktreeDeps(deps *cli.Deps, dir, branch string) (bool, string, error) {
 	output, err := runGit(deps, dir, "worktree", "list", "--porcelain")
 	if err != nil {

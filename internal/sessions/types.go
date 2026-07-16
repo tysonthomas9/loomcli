@@ -16,6 +16,15 @@ const (
 // Existing sessions without a version are implicitly version 0.
 const CurrentSchemaVersion = 1
 
+// Transcript formats for SessionRecord.TranscriptFormat. "raw" is the backend's
+// own stream (captured by the Go-leaf hooks); "canonical" is a stream of
+// transcript.Event objects (written by the TS leaf). An empty value means
+// unmarked — a legacy session, which LoadNativeEvents treats as raw.
+const (
+	TranscriptFormatRaw       = "raw"
+	TranscriptFormatCanonical = "canonical"
+)
+
 // SessionRecord is the index entry in sessions/index.jsonl.
 // Contains all queryable fields. One record per agent run.
 type SessionRecord struct {
@@ -32,6 +41,11 @@ type SessionRecord struct {
 	Backend   string `json:"backend"`
 	Model     string `json:"model,omitempty"`
 	Phase     string `json:"phase,omitempty"` // "planning" or "implementation"
+
+	// TranscriptFormat records how agent_transcript.jsonl is encoded ("raw" |
+	// "canonical"), so LoadNativeEvents dispatches deterministically instead of
+	// guessing. Empty (omitted) on legacy sessions → treated as "raw".
+	TranscriptFormat string `json:"transcript_format,omitempty"`
 
 	// Timing
 	StartedAt time.Time  `json:"started_at"`

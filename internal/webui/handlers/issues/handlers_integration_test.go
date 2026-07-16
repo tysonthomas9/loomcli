@@ -625,9 +625,6 @@ func TestParseReadyParams_EmptyQuery(t *testing.T) {
 	if args.MolType != "" {
 		t.Errorf("MolType = %q, want empty", args.MolType)
 	}
-	if args.IncludeDeferred {
-		t.Error("IncludeDeferred = true, want false")
-	}
 }
 
 func TestParseReadyParams_Assignee(t *testing.T) {
@@ -949,12 +946,11 @@ func TestParseReadyParams_LabelsAny(t *testing.T) {
 
 func TestParseReadyParams_BooleanParams(t *testing.T) {
 	tests := []struct {
-		name             string
-		query            string
-		wantUnassigned   bool
-		wantIncludeDefer bool
-		wantErr          bool
-		errSubstr        string
+		name           string
+		query          string
+		wantUnassigned bool
+		wantErr        bool
+		errSubstr      string
 	}{
 		{
 			name:           "unassigned true",
@@ -976,22 +972,6 @@ func TestParseReadyParams_BooleanParams(t *testing.T) {
 			query:     "unassigned=yes",
 			wantErr:   true,
 			errSubstr: "invalid unassigned value",
-		},
-		{
-			name:             "include_deferred true",
-			query:            "include_deferred=true",
-			wantIncludeDefer: true,
-		},
-		{
-			name:             "include_deferred false",
-			query:            "include_deferred=false",
-			wantIncludeDefer: false,
-		},
-		{
-			name:      "include_deferred invalid",
-			query:     "include_deferred=maybe",
-			wantErr:   true,
-			errSubstr: "invalid include_deferred value",
 		},
 	}
 
@@ -1019,9 +999,6 @@ func TestParseReadyParams_BooleanParams(t *testing.T) {
 
 			if args.Unassigned != tt.wantUnassigned {
 				t.Errorf("Unassigned = %v, want %v", args.Unassigned, tt.wantUnassigned)
-			}
-			if args.IncludeDeferred != tt.wantIncludeDefer {
-				t.Errorf("IncludeDeferred = %v, want %v", args.IncludeDeferred, tt.wantIncludeDefer)
 			}
 		})
 	}
@@ -1207,17 +1184,16 @@ func intPtr(i int) *int {
 // Verify that rpc.ReadyArgs fields match what we expect (compile-time check)
 var _ = func() bool {
 	args := &rpc.ReadyArgs{
-		Assignee:        "",
-		Unassigned:      false,
-		Priority:        nil,
-		Type:            "",
-		Limit:           0,
-		SortPolicy:      "",
-		Labels:          nil,
-		LabelsAny:       nil,
-		ParentID:        "",
-		MolType:         "",
-		IncludeDeferred: false,
+		Assignee:   "",
+		Unassigned: false,
+		Priority:   nil,
+		Type:       "",
+		Limit:      0,
+		SortPolicy: "",
+		Labels:     nil,
+		LabelsAny:  nil,
+		ParentID:   "",
+		MolType:    "",
 	}
 	_ = args
 	return true

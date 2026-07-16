@@ -38,7 +38,7 @@ var openCodeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdo
 // buildOpenCodeInteractiveCmd constructs the exec.Cmd for interactive OpenCode invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildOpenCodeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	args := append([]string{"run", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
+	args := append([]string{"run", "--dir", workDir}, openCodeModelArgs()...)
 	args = append(args, prompt)
 	cmd := exec.Command("opencode", args...)
 	cmd.Dir = workDir
@@ -59,7 +59,7 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
-	args := append([]string{"run", "--format", "json", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
+	args := append([]string{"run", "--format", "json", "--dir", workDir}, openCodeModelArgs()...)
 
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
 	fmt.Println("")

@@ -280,6 +280,23 @@ export interface paths {
     patch: operations["patchWorkspaceBackend"];
     trace?: never;
   };
+  "/api/workspaces/{ws}/config/design-format": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Set the workspace planner design format */
+    patch: operations["patchWorkspaceDesignFormat"];
+    trace?: never;
+  };
   "/api/workspaces/{ws}/readyz": {
     parameters: {
       query?: never;
@@ -484,7 +501,13 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List ready (unblocked) issues */
+    /**
+     * List ready (unblocked) issues
+     * @description Returns the canonical ready availability view from the issue backend:
+     *     open, non-epic work that is not canonically blocked and not currently
+     *     deferred. Filters may narrow this view, but they must not make
+     *     non-open statuses or epics ready.
+     */
     get: operations["listReady"];
     put?: never;
     post?: never;
@@ -501,7 +524,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List blocked issues with blocker details */
+    /**
+     * List blocked issues with blocker details
+     * @description Returns canonical blocked work from the issue backend. For FleetDB-backed
+     *     workspaces this includes explicit status=blocked issues, issues blocked
+     *     by non-terminal dependencies, and descendants of blocked parents.
+     *     Dependency blocker IDs/details are returned when known; explicit
+     *     status-only and parent-only blocked issues may have no dependency
+     *     blocker IDs.
+     */
     get: operations["listBlocked"];
     put?: never;
     post?: never;
@@ -545,6 +576,9 @@ export interface paths {
      *     ```json
      *     {
      *       "type": "update",
+     *       "entity_type": "issue",
+     *       "entity_id": "proj-abc.5",
+     *       "action": "issue.update",
      *       "issue_id": "proj-abc.5",
      *       "title": "Fix login bug",
      *       "assignee": "agent-1",
@@ -561,7 +595,8 @@ export interface paths {
      *     ```
      *
      *     **Mutation types**: `create`, `update`, `delete`, `comment`, `status`,
-     *     `bonded`, `squashed`, `burned`, `refresh`, `terminal_session_change`
+     *     `bonded`, `squashed`, `burned`, `refresh`, `terminal_metadata`,
+     *     `terminal_session_change`, `issue_tabs`, `session_change`
      *
      *     **Authentication**: Accepts Bearer token via `Authorization` header or
      *     one-time token via `token` query parameter (for EventSource which
@@ -1152,6 +1187,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/interactive-prompts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List built-in interactive terminal prompt options */
+    get: operations["listInteractivePrompts"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents": {
     parameters: {
       query?: never;
@@ -1162,7 +1214,8 @@ export interface paths {
     /** List agents via daemon control socket */
     get: operations["listAgents"];
     put?: never;
-    post?: never;
+    /** Create an agent assignment */
+    post: operations["createAgent"];
     delete?: never;
     options?: never;
     head?: never;
@@ -1378,6 +1431,125 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get pull request detail via the GitHub connector */
+    get: operations["getPullRequestDetail"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get pull request diff via the GitHub connector */
+    get: operations["getPullRequestDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/review": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Post a pull request review via the GitHub connector */
+    post: operations["postPullRequestReview"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/reviewer": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Ensure a per-PR terminal reviewer agent */
+    post: operations["ensurePullRequestReviewer"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/messages": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Send a message to a per-PR terminal reviewer agent */
+    post: operations["postPullRequestReviewerMessage"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Stream the per-PR reviewer conversation */
+    get: operations["streamPullRequestReviewer"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/pull-requests/{owner}/{repo}/{number}/conversation": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Snapshot of the per-PR reviewer conversation (poll target) */
+    get: operations["getPullRequestReviewerConversation"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/agents/{name}/git/diff-stat": {
     parameters: {
       query?: never;
@@ -1446,15 +1618,15 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/agents/{name}/files/tree": {
+  "/api/workspaces/{ws}/files/stat": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Get file tree for an agent worktree */
-    get: operations["getFileTree"];
+    /** Get mutation metadata and a strong version for a scoped path */
+    get: operations["statScopedFile"];
     put?: never;
     post?: never;
     delete?: never;
@@ -1463,22 +1635,227 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/agents/{name}/files": {
+  "/api/workspaces/{ws}/files/capabilities": {
     parameters: {
       query?: never;
       header?: never;
       path?: never;
       cookie?: never;
     };
-    /** Read a file from an agent worktree */
-    get: operations["readFile"];
-    /** Write a file to an agent worktree */
-    put: operations["writeFile"];
+    /** Get effective workspace file-browser capabilities */
+    get: operations["getFileCapabilities"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/tree": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get file tree for a scoped file browser root */
+    get: operations["getScopedFileTree"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/index": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get quick-open file index for a scoped file browser root */
+    get: operations["getScopedFileIndex"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/search": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Search files in a scoped file browser root */
+    post: operations["searchScopedFiles"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/git-status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get git status decorations for a scoped file browser root */
+    get: operations["getScopedFileGitStatus"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/checkouts": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List workspace file checkouts and local change counts */
+    get: operations["getFileCheckouts"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/checkouts/repair": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Repair or provision a known workspace file checkout */
+    post: operations["repairFileCheckout"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get unified diff for a file in a scoped file browser root */
+    get: operations["getScopedFileDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/history": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get bounded commit history for a file */
+    get: operations["getScopedFileHistory"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/blame": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get bounded git blame data for a file */
+    get: operations["getScopedFileBlame"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a file from a scoped file browser root */
+    get: operations["readScopedFile"];
+    /** Create or update a file in a scoped file browser root */
+    put: operations["writeScopedFile"];
+    post?: never;
+    /** Delete a file or directory in a scoped file browser root */
+    delete: operations["deleteScopedFile"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/mkdir": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create a directory in a scoped file browser root */
+    post: operations["mkdirScopedFile"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/files/move": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Move or rename a path in a scoped file browser root */
+    patch: operations["moveScopedFile"];
     trace?: never;
   };
   "/api/editors": {
@@ -1917,6 +2294,7 @@ export interface components {
       success: false;
       error: string;
       code?: string;
+      retryable?: boolean;
       details?: Record<string, never>;
     };
     MessageResponse: {
@@ -1924,12 +2302,255 @@ export interface components {
       success: true;
       message: string;
     };
+    FileMutationResponse: {
+      success: boolean;
+      version: string;
+    };
+    FileStatResponse: {
+      path: string;
+      is_dir: boolean;
+      /** Format: int64 */
+      size: number;
+      /** Format: date-time */
+      mod_time: string;
+      version: string;
+    };
+    FileTreeEntry: {
+      name: string;
+      is_dir: boolean;
+      /** Format: int64 */
+      size: number;
+      /** Format: date-time */
+      mod_time: string;
+    };
+    FileCapabilitiesResponse: {
+      read: boolean;
+      write: boolean;
+      sensitive: boolean;
+    };
+    FileTreeResponse: {
+      path: string;
+      entries: components["schemas"]["FileTreeEntry"][];
+    };
+    FileReadResponse: {
+      path: string;
+      content?: string;
+      /** Format: int64 */
+      size: number;
+      binary: boolean;
+      truncated: boolean;
+      version: string;
+    };
+    FileIndexResponse: {
+      paths: string[];
+      truncated: boolean;
+      partial_reasons: components["schemas"]["FilePartialReason"][];
+    };
+    /** @enum {string} */
+    FilePartialReason:
+      | "file_count"
+      | "result_count"
+      | "byte_limit"
+      | "file_size"
+      | "deadline"
+      | "canceled";
+    FileSearchRequest: {
+      query: string;
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
+      /** @default false */
+      regex: boolean;
+      include?: string[];
+      exclude?: string[] | null;
+      /** @default false */
+      caseSensitive: boolean;
+    };
+    FileSearchMatch: {
+      line: number;
+      col: number;
+      preview: string;
+    };
+    FileSearchFileResult: {
+      path: string;
+      matches: components["schemas"]["FileSearchMatch"][];
+    };
+    FileSearchResponse: {
+      results: components["schemas"]["FileSearchFileResult"][];
+      limitHit: boolean;
+      partial_reasons: components["schemas"]["FilePartialReason"][];
+    };
+    FileGitStatusResponse: {
+      status: {
+        [key: string]: string;
+      };
+      partial: boolean;
+      limit_hit: boolean;
+      errors: components["schemas"]["FileCheckoutError"][];
+    };
+    FileCheckoutError: {
+      /** @enum {string} */
+      kind: "agent" | "repo";
+      agent?: string;
+      repo: string;
+      error: string;
+    };
+    FileCheckout: {
+      /** @enum {string} */
+      kind: "agent" | "repo";
+      agent?: string;
+      repo: string;
+      exists: boolean;
+      branch?: string;
+      change_count: number;
+      status_error?: boolean;
+      error?: string;
+      partial?: boolean;
+      limit_hit?: boolean;
+    };
+    FileCheckoutsResponse: {
+      checkouts: components["schemas"]["FileCheckout"][];
+      partial: boolean;
+      limit_hit: boolean;
+      errors: components["schemas"]["FileCheckoutError"][];
+    };
+    FileCheckoutRepairRequest: {
+      /** @enum {string} */
+      scope: "agent" | "repo";
+      target: string;
+      /** @description Repo qualifier, valid when scope=agent. */
+      repo?: string;
+      force?: boolean;
+    };
+    FileCheckoutRepairResponse: {
+      repaired: boolean;
+      /** @enum {string} */
+      method: "repair" | "recreate" | "provision" | "none";
+      requires_force?: boolean;
+      backup_path?: string;
+      message: string;
+    };
+    FileDiffResponse: {
+      path: string;
+      patch: string;
+      partial: boolean;
+      limit_hit: boolean;
+    };
+    FileBlameLine: {
+      line: number;
+      lines: number;
+      sha: string;
+      author: string;
+      time: string;
+      summary: string;
+    };
+    FileBlameResponse: {
+      path: string;
+      skipped: boolean;
+      reason?: string;
+      message?: string;
+      lines: components["schemas"]["FileBlameLine"][];
+      partial: boolean;
+      limit_hit: boolean;
+    };
+    FileHistoryEntry: {
+      /** @enum {string} */
+      kind: "commit";
+      sha: string;
+      author: string;
+      time: string;
+      summary: string;
+    };
+    FileHistoryResponse: {
+      path: string;
+      entries: components["schemas"]["FileHistoryEntry"][];
+      partial: boolean;
+      limit_hit: boolean;
+    };
+    FileWriteRequest: {
+      content: string;
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
+    };
+    FileRepoQualifierRequest: {
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
+    };
+    FileMoveRequest: {
+      from: string;
+      to: string;
+      /** @description Optional repo qualifier, valid only when scope=agent. */
+      repo?: string;
+      /** @default false */
+      overwrite: boolean;
+      /** @description Required by the server; current strong version of the source path. */
+      source_version?: string;
+      /** @description Required when overwriting an existing regular file. */
+      destination_version?: string;
+    };
     RuntimeReadyResponse: {
       ready: boolean;
       /** @enum {string} */
       mode: "daemon" | "fleet";
       workspace: string;
       reason?: string;
+    };
+    PullRequestDetail: {
+      number: number;
+      state: string;
+      title: string;
+      is_draft: boolean;
+      head_ref_name: string;
+      base_ref_name: string;
+      head_sha: string;
+      merged: boolean;
+    };
+    PullRequestDiff: {
+      files: components["schemas"]["PullRequestDiffFile"][];
+      diff: string;
+    };
+    PullRequestDiffFile: {
+      path: string;
+      status: string;
+      additions: number;
+      deletions: number;
+      patch: string;
+    };
+    PullRequestReviewRequest: {
+      /** @enum {string} */
+      event: "approve" | "request_changes" | "comment";
+      body?: string;
+      expected_head_sha: string;
+    };
+    PullRequestReviewResult: {
+      review_id?: number;
+      state?: string;
+    };
+    ReviewerEnsureResult: {
+      agent_name: string;
+      checked_out_sha: string;
+      seeded: boolean;
+    };
+    ReviewerMessageRequest: {
+      text: string;
+    };
+    ReviewerMessageResult: {
+      state: string;
+      reason: string;
+    };
+    ReviewerMessage: {
+      turn_id: string;
+      item_id: string;
+      /** @description user | assistant */
+      role: string;
+      text: string;
+      phase?: string;
+    };
+    ReviewerConversation: {
+      /** @description starting | reconnecting | idle | running | failed | unsupported. failed: the reviewer runtime died or its conversation is unreadable. unsupported: the reviewer's backend has no readable conversation (the terminal tab still works); detail says why. */
+      state: string;
+      /** @description Human-readable context for failed/unsupported states. */
+      detail?: string;
+      messages: components["schemas"]["ReviewerMessage"][];
     };
     /**
      * @description Core issue type used in list endpoints. Maps to `types.Issue` json
@@ -1941,7 +2562,17 @@ export interface components {
       id: string;
       title: string;
       description?: string;
+      /** @description Hydrated design body when available; collection responses may omit it. */
       design?: string;
+      /** @description Managed FleetDB artifact reference for the design body. */
+      design_artifact_id?: string;
+      /**
+       * @description Durable format of the hydrated design body.
+       * @enum {string}
+       */
+      design_format?: "markdown" | "html";
+      /** @description True for either a legacy inline or artifact-backed design. */
+      has_design?: boolean;
       acceptance_criteria?: string;
       notes?: string;
       /**
@@ -2004,6 +2635,15 @@ export interface components {
       title: string;
       description?: string;
       design?: string;
+      /** @description Managed FleetDB artifact reference for the design body. */
+      design_artifact_id?: string;
+      /**
+       * @description Durable format of the hydrated design body.
+       * @enum {string}
+       */
+      design_format?: "markdown" | "html";
+      /** @description True for either a legacy inline or artifact-backed design. */
+      has_design?: boolean;
       acceptance_criteria?: string;
       notes?: string;
       /** @enum {string} */
@@ -2091,9 +2731,10 @@ export interface components {
       /** Format: date-time */
       edited_at?: string | null;
     };
-    /** @description Issue with blocking information */
+    /** @description Canonically blocked issue with blocking information when available. */
     BlockedIssue: components["schemas"]["Issue"] & {
       blocked_by_count: number;
+      /** @description Dependency blocker IDs when known. May be empty for explicit status-only or parent-propagated blocking. */
       blocked_by: string[];
       blocked_by_details?: components["schemas"]["BlockerRef"][];
     };
@@ -2175,6 +2816,8 @@ export interface components {
       assignee?: string | null;
       owner?: string | null;
       design?: string | null;
+      /** @enum {string|null} */
+      design_format?: "markdown" | "html" | null;
       acceptance_criteria?: string | null;
       notes?: string | null;
       external_ref?: string | null;
@@ -2234,6 +2877,8 @@ export interface components {
       workspaces: components["schemas"]["WorkspaceSummary"][];
       workspace_order?: string[];
       default_workspace: string;
+      /** @enum {string} */
+      design_format?: "markdown" | "html";
     };
     WorkspaceSummary: {
       id: string;
@@ -2249,6 +2894,7 @@ export interface components {
       path: string;
       default_branch: string;
       remote: string;
+      remote_url?: string;
       source_repo_id?: string;
       /** @default [] */
       groups: string[];
@@ -2266,6 +2912,10 @@ export interface components {
     };
     WorkspaceBackendPatchRequest: {
       backend: string;
+    };
+    WorkspaceDesignFormatPatchRequest: {
+      /** @enum {string} */
+      design_format: "markdown" | "html";
     };
     BackendConfigResponse: {
       success: boolean;
@@ -2499,9 +3149,12 @@ export interface components {
       task_title?: string;
     };
     /**
-     * @description SSE mutation event payload. All fields except type, issue_id, and
-     *     timestamp are context-dependent. For status events: old_status and
-     *     new_status are present. For bonded events: parent_id and step_count
+     * @description SSE mutation event payload. `type` is the legacy coarse mutation kind.
+     *     New consumers should prefer the generic `entity_type`, `entity_id`, and
+     *     `action` envelope fields when deciding which local state to invalidate.
+     *     `issue_id` is retained for backward-compatible issue-scoped consumers
+     *     and may be omitted for non-issue entities. For status events: old_status
+     *     and new_status are present. For bonded events: parent_id and step_count
      *     are present. This is documented as a flat schema (no discriminator)
      *     because the SSE stream is not validated by generated clients.
      */
@@ -2517,8 +3170,18 @@ export interface components {
         | "squashed"
         | "burned"
         | "refresh"
-        | "terminal_session_change";
-      issue_id: string;
+        | "terminal_metadata"
+        | "terminal_session_change"
+        | "issue_tabs"
+        | "session_change";
+      /** @description Generic changed entity type, for example issue, dependency, comment, label, agent, terminal, session, or workspace. */
+      entity_type?: string;
+      /** @description Generic changed entity identifier. */
+      entity_id?: string;
+      /** @description Source action for the mutation, usually the fleet-db action such as issue.update or dep.add. */
+      action?: string;
+      /** @description Legacy issue identifier for issue-scoped consumers; omitted for non-issue entities. */
+      issue_id?: string;
       title?: string;
       assignee?: string;
       actor?: string;
@@ -2611,9 +3274,23 @@ export interface components {
       ahead: number;
       behind: number;
       role?: string;
+      /** @enum {string} */
+      role_kind?: "interactive" | "worker";
       repo?: string;
       workspace: string;
       daemon_managed?: boolean;
+      /** @description Active epic assignment for lead/workers. */
+      parent?: string;
+      /** @description Lead/orchestrator session that spawned or owns the agent. */
+      orchestrator_session_id?: string;
+      /** @description Latest task session associated with this agent. */
+      task_id?: string;
+      /** @description Latest control-plane session associated with this agent. */
+      session_id?: string;
+      /** @description Assignment mode, such as persistent or ephemeral. */
+      mode?: string;
+      /** @description Requested daemon state for the agent. */
+      desired_state?: string;
       commits?: components["schemas"]["MonitorCommitDetail"][];
       changes?: components["schemas"]["MonitorFileChange"][];
       /** @description Task this daemon-managed agent has currently claimed. Empty between tasks (just spawned, polling, finished). UI joins this against issue.id to render which agent is working each card. */
@@ -3392,6 +4069,42 @@ export interface operations {
       };
     };
   };
+  patchWorkspaceDesignFormat: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WorkspaceDesignFormatPatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Invalid design format */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getWorkspaceRuntimeReady: {
     parameters: {
       query?: never;
@@ -3982,12 +4695,12 @@ export interface operations {
     parameters: {
       query?: {
         assignee?: string;
+        /** @description Filter by issue type. Epics are always excluded from the ready view. */
         type?: "bug" | "feature" | "task" | "epic" | "chore";
         parent_id?: string;
         mol_type?: "swarm" | "patrol" | "work";
         sort?: "hybrid" | "priority" | "oldest";
         unassigned?: boolean;
-        include_deferred?: boolean;
         priority?: number;
         limit?: number;
         /** @description Comma-separated labels (all must match) */
@@ -5217,6 +5930,34 @@ export interface operations {
       };
     };
   };
+  listInteractivePrompts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Built-in interactive prompts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            prompts: {
+              id: string;
+              label: string;
+            }[];
+          };
+        };
+      };
+    };
+  };
   listAgents: {
     parameters: {
       query?: never;
@@ -5242,6 +5983,72 @@ export interface operations {
         };
       };
       /** @description Daemon unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  createAgent: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          workspace_key?: string;
+          name: string;
+          role_name: string;
+          /** @description Optional role kind for creating an interactive role. */
+          kind?: string;
+          /** @description Literal inline prompt text for interactive roles. */
+          prompt?: string;
+          /** @description Custom or builtin prompt selector for interactive roles. */
+          prompt_file?: string;
+          auto?: boolean;
+          backend?: string;
+          fallback_backends?: string[];
+          repos?: string[];
+          repo_groups?: string[];
+          cross_repo?: boolean;
+          parent?: string;
+          desired_state?: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Agent created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceAgentInfo"];
+        };
+      };
+      /** @description Invalid agent create request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Agent already exists */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Agent service unavailable */
       503: {
         headers: {
           [name: string]: unknown;
@@ -5612,6 +6419,445 @@ export interface operations {
       };
     };
   };
+  getPullRequestDetail: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull request detail */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestDetail"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered in the workspace */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getPullRequestDiff: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Pull request diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestDiff"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered in the workspace */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  postPullRequestReview: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PullRequestReviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Pull request review result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["PullRequestReviewResult"];
+          };
+        };
+      };
+      /** @description Invalid request body or path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector grant denied */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered in the workspace */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Pull request head changed before review was posted */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Expected head SHA precondition is required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  ensurePullRequestReviewer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reviewer agent and checkout */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["ReviewerEnsureResult"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or not checked out locally */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Pull request head changed while preparing the reviewer */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Worktree or reviewer setup failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Upstream pull request metadata was incomplete */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Connector egress unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  postPullRequestReviewerMessage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReviewerMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Reviewer message delivery result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["ReviewerMessageResult"];
+          };
+        };
+      };
+      /** @description Invalid request body or path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or reviewer was not started */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Reviewer message delivery failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  streamPullRequestReviewer: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description SSE event stream of reviewer status and messages */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/event-stream": string;
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or reviewer was not started */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getPullRequestReviewerConversation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        owner: string;
+        repo: string;
+        number: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Reviewer conversation snapshot */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            /** @constant */
+            success: true;
+            data: components["schemas"]["ReviewerConversation"];
+          };
+        };
+      };
+      /** @description Invalid path parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Repository is not registered or reviewer was not started */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getAgentDiffStat: {
     parameters: {
       query?: never;
@@ -5714,15 +6960,72 @@ export interface operations {
       };
     };
   };
-  getFileTree: {
+  statScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        repo?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Path metadata */
+      200: {
+        headers: {
+          /** @description Strong current path version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileStatResponse"];
+        };
+      };
+    };
+  };
+  getFileCapabilities: {
     parameters: {
       query?: never;
       header?: never;
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Effective file-browser capabilities */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCapabilitiesResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileTree: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
       };
       cookie?: never;
     };
@@ -5734,22 +7037,259 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": Record<string, never>;
+          "application/json": components["schemas"]["FileTreeResponse"];
         };
       };
     };
   };
-  readFile: {
+  getScopedFileIndex: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Quick-open file index */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileIndexResponse"];
+        };
+      };
+    };
+  };
+  searchScopedFiles: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileSearchRequest"];
+      };
+    };
+    responses: {
+      /** @description File search results */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileSearchResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileGitStatus: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Root-relative file paths mapped to raw git porcelain XY codes */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileGitStatusResponse"];
+        };
+      };
+    };
+  };
+  getFileCheckouts: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Known file checkouts */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCheckoutsResponse"];
+        };
+      };
+    };
+  };
+  repairFileCheckout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileCheckoutRepairRequest"];
+      };
+    };
+    responses: {
+      /** @description Checkout repair result */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileCheckoutRepairResponse"];
+        };
+      };
+      /** @description Unknown or disallowed checkout target */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileDiff: {
     parameters: {
       query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+        from?: string;
+        to?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Unified file diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileDiffResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileHistory: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
         path: string;
       };
       header?: never;
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File timeline */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileHistoryResponse"];
+        };
+      };
+    };
+  };
+  getScopedFileBlame: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File blame data or skip signal */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileBlameResponse"];
+        };
+      };
+    };
+  };
+  readScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+        rev?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
       };
       cookie?: never;
     };
@@ -5758,42 +7298,38 @@ export interface operations {
       /** @description File content */
       200: {
         headers: {
+          /** @description Strong SHA-256 version for the current file (not revision reads). */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            content?: string;
-          };
+          "application/json": components["schemas"]["FileReadResponse"];
         };
-      };
-      /** @description File not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
     };
   };
-  writeFile: {
+  writeScopedFile: {
     parameters: {
       query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
         path: string;
       };
-      header?: never;
+      header?: {
+        /** @description Optional strong version for replace/restore callers. Ordinary editor saves omit it and remain last-write-wins. */
+        "If-Match"?: string;
+        /** @description Use * for create-only writes. */
+        "If-None-Match"?: string;
+      };
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
       };
       cookie?: never;
     };
     requestBody: {
       content: {
-        "application/json": {
-          content: string;
-        };
+        "application/json": components["schemas"]["FileWriteRequest"];
       };
     };
     responses: {
@@ -5803,8 +7339,139 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["FileMutationResponse"];
+        };
+      };
+      /** @description A supplied file precondition no longer matches */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  deleteScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+        recursive?: boolean;
+      };
+      header: {
+        /** @description Strong current source version from file stat/read. */
+        "If-Match": string;
+      };
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description File or directory deleted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["MessageResponse"];
         };
+      };
+      /** @description Source version no longer matches */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Source version is required */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  mkdirScopedFile: {
+    parameters: {
+      query: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+        /** @description Optional repo qualifier, valid only when scope=agent. */
+        repo?: string;
+        path: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["FileRepoQualifierRequest"];
+      };
+    };
+    responses: {
+      /** @description Directory created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+    };
+  };
+  moveScopedFile: {
+    parameters: {
+      query?: {
+        scope?: "workspace" | "repo" | "agent";
+        target?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FileMoveRequest"];
+      };
+    };
+    responses: {
+      /** @description Path moved */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FileMutationResponse"];
+        };
+      };
+      /** @description Source or destination version no longer matches */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description A required source or destination version is missing */
+      428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
     };
   };

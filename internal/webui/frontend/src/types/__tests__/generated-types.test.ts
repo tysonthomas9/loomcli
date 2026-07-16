@@ -564,19 +564,21 @@ describe("Agent type aliases", () => {
     expect(change.path).toBe("src/parser.ts");
   });
 
-  it("LoomAgentStatus extends MonitorAgentStatus with cross_repo/path/worktree_path", () => {
+  it("LoomAgentStatus extends MonitorAgentStatus with state/cross_repo/path/worktree_path", () => {
     const agent: LoomAgentStatus = {
       name: "nova",
       branch: "feature/fix",
       status: "working",
       ahead: 2,
       behind: 0,
+      state: "active",
       cross_repo: true,
       path: "/home/user/repo",
       worktree_path: "/home/user/repo/.worktrees/nova",
     };
 
     expect(agent.name).toBe("nova");
+    expect(agent.state).toBe("active");
     expect(agent.cross_repo).toBe(true);
     expect(agent.path).toBe("/home/user/repo");
     expect(agent.worktree_path).toBe("/home/user/repo/.worktrees/nova");

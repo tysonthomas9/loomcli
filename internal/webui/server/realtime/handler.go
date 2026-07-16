@@ -38,6 +38,8 @@ type HandlerConfig struct {
 	GetMutationsSince func(wsID string, since string) []rpc.MutationEvent
 	WorkspaceFromCtx  func(context.Context) string
 	TokenStore        *TokenStore // nil = open mode (no auth required)
+	// OnAuthenticated runs after the stream request passes handler-level auth.
+	OnAuthenticated func(context.Context, string)
 }
 
 // Handler is an http.Handler for the SSE endpoint with configurable heartbeat.
@@ -47,6 +49,7 @@ type Handler struct {
 	heartbeatInterval time.Duration
 	tokenStore        *TokenStore
 	workspaceFromCtx  func(context.Context) string
+	onAuthenticated   func(context.Context, string)
 	clientIDCounter   atomic.Int64
 }
 
@@ -58,6 +61,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		heartbeatInterval: HeartbeatInterval,
 		tokenStore:        cfg.TokenStore,
 		workspaceFromCtx:  cfg.WorkspaceFromCtx,
+		onAuthenticated:   cfg.OnAuthenticated,
 	}
 }
 
@@ -92,6 +96,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if workspaceID == "" {
 		slog.Warn("SSE client connected with empty workspace_id — will not receive mutations (fail-closed)", "client_id", clientID, "remote_addr", r.RemoteAddr)
+	}
+	if h.onAuthenticated != nil && workspaceID != "" {
+		h.onAuthenticated(r.Context(), workspaceID)
 	}
 
 	// Short-lived child span covering the SSE handshake — catch-up replay
@@ -289,6 +296,9 @@ func RPCMutationToPayload(m rpc.MutationEvent) *MutationPayload {
 	return &MutationPayload{
 		Cursor:     m.Cursor,
 		Type:       m.Type,
+		EntityType: m.EntityType,
+		EntityID:   m.EntityID,
+		Action:     m.Action,
 		IssueID:    m.IssueID,
 		Title:      m.Title,
 		Assignee:   m.Assignee,

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 )
 
 // ============================================================================
@@ -293,6 +295,59 @@ func TestReadStateFile_ValidJSON(t *testing.T) {
 	}
 	if result.Agents[1].RestartCount != 2 {
 		t.Errorf("Agents[1].RestartCount = %d, want 2", result.Agents[1].RestartCount)
+	}
+}
+
+func TestWriteStateFile_RoundTripsQuarantinedTasks(t *testing.T) {
+	tmpDir := t.TempDir()
+	stateFilePath := filepath.Join(tmpDir, "daemon-agents.json")
+
+	quarantined := []supervisor.QuarantinedTaskInfo{
+		{
+			TaskID:         "WEB-49",
+			Count:          3,
+			QuarantinedAt:  time.Date(2026, 6, 5, 14, 40, 0, 0, time.UTC),
+			LastKillReason: "watchdog/Timeout",
+		},
+		{
+			TaskID:         "WEB-50",
+			Count:          4,
+			LastKillReason: "crash/Unknown",
+			WriteFailed:    true,
+		},
+	}
+	if err := writeStateFile(stateFilePath, time.Now(), nil, quarantined, 3); err != nil {
+		t.Fatalf("writeStateFile() error = %v", err)
+	}
+
+	result, err := ReadStateFile(stateFilePath)
+	if err != nil {
+		t.Fatalf("ReadStateFile() error = %v", err)
+	}
+	if len(result.QuarantinedTasks) != 2 {
+		t.Fatalf("len(QuarantinedTasks) = %d, want 2", len(result.QuarantinedTasks))
+	}
+	got := result.QuarantinedTasks[0]
+	if got.TaskID != "WEB-49" || got.Count != 3 || got.LastKillReason != "watchdog/Timeout" || got.WriteFailed {
+		t.Errorf("QuarantinedTasks[0] = %+v, want WEB-49/3/watchdog-Timeout/!failed", got)
+	}
+	if !got.QuarantinedAt.Equal(quarantined[0].QuarantinedAt) {
+		t.Errorf("QuarantinedAt = %v, want %v", got.QuarantinedAt, quarantined[0].QuarantinedAt)
+	}
+	if pending := result.QuarantinedTasks[1]; !pending.WriteFailed || !pending.QuarantinedAt.IsZero() {
+		t.Errorf("QuarantinedTasks[1] = %+v, want pending write-failed with zero QuarantinedAt", pending)
+	}
+
+	// Empty quarantine list keeps the field out of the JSON entirely.
+	if err := writeStateFile(stateFilePath, time.Now(), nil, nil, 3); err != nil {
+		t.Fatalf("writeStateFile() error = %v", err)
+	}
+	raw, err := os.ReadFile(stateFilePath)
+	if err != nil {
+		t.Fatalf("read state file: %v", err)
+	}
+	if strings.Contains(string(raw), "quarantined_tasks") {
+		t.Errorf("empty quarantine list must be omitted from JSON:\n%s", raw)
 	}
 }
 
@@ -611,7 +666,7 @@ func TestWriteStateFile_Success(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, 3)
 
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
@@ -644,7 +699,7 @@ func TestWriteStateFile_AtomicWrite(t *testing.T) {
 
 	// Write state
 	agents := []SupervisedAgentStatus{{Worktree: "test", Role: "plan"}}
-	if err := writeStateFile(stateFilePath, startedAt, agents, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -812,7 +867,7 @@ func TestStateFileLifecycle(t *testing.T) {
 	agents := []SupervisedAgentStatus{
 		{Worktree: "falcon", Role: "plan", PID: os.Getpid()},
 	}
-	if err := writeStateFile(stateFilePath, startedAt, agents, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
 
@@ -827,7 +882,7 @@ func TestStateFileLifecycle(t *testing.T) {
 
 	// Update state (add agent)
 	agents = append(agents, SupervisedAgentStatus{Worktree: "nova", Role: "task"})
-	if err := writeStateFile(stateFilePath, startedAt, agents, 3); err != nil {
+	if err := writeStateFile(stateFilePath, startedAt, agents, nil, 3); err != nil {
 		t.Fatalf("writeStateFile() update error = %v", err)
 	}
 
@@ -1000,41 +1055,41 @@ func TestComputeAgentStatus_MaxRetries_StopReason(t *testing.T) {
 	}
 }
 
-func TestComputeAgentStatus_Parked(t *testing.T) {
-	// A parked agent (exhausted budget, retrying) is not running and not
-	// failed: RestartCount is reset to 0 and the parked stop reason yields
-	// "parked".
+func TestComputeAgentStatus_Blocked(t *testing.T) {
+	// A blocked agent (exhausted budget, retrying) is not running and not
+	// failed: RestartCount is reset to 0 and the blocked stop reason yields
+	// "blocked".
 	ap := SupervisedAgentStatus{
 		PID:          0,
 		RestartCount: 0,
-		StopReason:   StopReasonMaxRetriesParked,
+		StopReason:   StopReasonMaxRetriesBlocked,
 	}
 
 	status := computeAgentStatus(ap, 3)
 
-	if status != "parked" {
-		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetriesParked", status, "parked")
+	if status != "blocked" {
+		t.Errorf("computeAgentStatus() = %q, want %q for StopReasonMaxRetriesBlocked", status, "blocked")
 	}
 }
 
-func TestComputeAgentStatus_Parked_RunningTakesPrecedence(t *testing.T) {
-	// A re-spawned parked agent (PID alive) reads as "running" — the running
-	// guard is checked before the parked stop reason.
+func TestComputeAgentStatus_Blocked_RunningTakesPrecedence(t *testing.T) {
+	// A re-spawned blocked agent (PID alive) reads as "running" — the running
+	// guard is checked before the blocked stop reason.
 	ap := SupervisedAgentStatus{
 		PID:          os.Getpid(), // a live process
 		RestartCount: 0,
-		StopReason:   StopReasonMaxRetriesParked,
+		StopReason:   StopReasonMaxRetriesBlocked,
 	}
 
 	status := computeAgentStatus(ap, 3)
 
 	if status != "running" {
-		t.Errorf("computeAgentStatus() = %q, want %q (running must override a stale parked reason)", status, "running")
+		t.Errorf("computeAgentStatus() = %q, want %q (running must override a stale blocked reason)", status, "running")
 	}
 }
 
 func TestComputeAgentStatus_FastFail(t *testing.T) {
-	// A fast-failed agent (deterministic failure the policy refused to park)
+	// A fast-failed agent (deterministic failure the policy refused to block)
 	// is terminal: surfaced as "failed".
 	ap := SupervisedAgentStatus{
 		PID:        0,
@@ -1245,7 +1300,7 @@ func TestWriteStateFile_WithStopReason(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, 3)
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}
@@ -1448,7 +1503,7 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 		},
 	}
 
-	err := writeStateFile(stateFilePath, startedAt, agents, 3)
+	err := writeStateFile(stateFilePath, startedAt, agents, nil, 3)
 	if err != nil {
 		t.Fatalf("writeStateFile() error = %v", err)
 	}

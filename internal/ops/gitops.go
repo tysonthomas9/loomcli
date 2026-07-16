@@ -26,6 +26,11 @@ type GitOps interface {
 	// CreatePR creates a GitHub PR from the source branch to the target branch.
 	CreatePR(worktreePath, sourceBranch, targetBranch, remote string) (*GitPRResult, error)
 
+	// ListWorkspacePullRequests lists GitHub PRs across all repos in a workspace.
+	// Repos whose listing fails are skipped and reported via Warnings so one
+	// bad repo doesn't take down the whole listing.
+	ListWorkspacePullRequests(workspaceID, state string, limit int) (*GitPullRequestList, error)
+
 	// Reset hard-resets a worktree to a target branch.
 	// If push is true, force-pushes the branch to origin after resetting.
 	Reset(worktreePath, worktreeName, targetBranch string, force, push bool) (*GitResetResult, error)
@@ -88,6 +93,34 @@ type GitPullResult struct {
 	Message         string   `json:"message"`
 	AlreadyUpToDate bool     `json:"already_up_to_date"`
 	ConflictedFiles []string `json:"conflicted_files,omitempty"`
+}
+
+// GitPullRequest is a GitHub pull request returned by gh pr list.
+type GitPullRequest struct {
+	Number         int    `json:"number"`
+	Title          string `json:"title"`
+	URL            string `json:"url"`
+	State          string `json:"state"`
+	IsDraft        bool   `json:"is_draft"`
+	HeadRefName    string `json:"head_ref_name"`
+	BaseRefName    string `json:"base_ref_name"`
+	AuthorLogin    string `json:"author_login,omitempty"`
+	CreatedAt      string `json:"created_at,omitempty"`
+	UpdatedAt      string `json:"updated_at,omitempty"`
+	ReviewDecision string `json:"review_decision,omitempty"`
+	RepoName       string `json:"repo_name"`
+	SourceRepo     string `json:"source_repo,omitempty"`
+	Additions      int    `json:"additions,omitempty"`
+	Deletions      int    `json:"deletions,omitempty"`
+	ChangedFiles   int    `json:"changed_files,omitempty"`
+}
+
+// GitPullRequestList is the aggregate result of listing PRs across workspace
+// repos. Warnings carry per-repo failures (non-GitHub remote, auth, …) that
+// did not prevent the rest of the listing.
+type GitPullRequestList struct {
+	PullRequests []GitPullRequest `json:"pull_requests"`
+	Warnings     []string         `json:"warnings,omitempty"`
 }
 
 // GitPRResult contains the result of a PR creation.

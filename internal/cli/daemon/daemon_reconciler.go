@@ -1,16 +1,21 @@
 package daemon
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // configReconciler polls FleetDB-backed daemon config and reconciles agents.
@@ -56,6 +61,7 @@ func (d *Daemon) reloadAndReconcile() {
 
 	oldAgents := d.config.Agents
 	added, removed, modified := diffAgents(oldAgents, newConfig.Agents)
+	modified = includeRoleConfigChanges(d.config.Roles, newConfig.Roles, oldAgents, newConfig.Agents, modified)
 
 	if len(added) == 0 && len(removed) == 0 && len(modified) == 0 {
 		d.config = newConfig
@@ -111,11 +117,123 @@ func (d *Daemon) applyAgentChanges(added, removed, modified []config.AgentEntry)
 	d.drainAddMu.Lock()
 	defer d.drainAddMu.Unlock()
 
+	modifiedToDrain := d.modifiedAgentsToDrain(modified)
 	d.drainAgents(removed, "removed")
-	d.drainAgents(modified, "modified")
+	d.drainAgents(modifiedToDrain, "modified")
 
 	d.addNewAgents(added, "add")
-	d.addNewAgents(modified, "re-add modified")
+	d.addNewAgents(modifiedToDrain, "re-add modified")
+}
+
+func (d *Daemon) modifiedAgentsToDrain(entries []config.AgentEntry) []config.AgentEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]config.AgentEntry, 0, len(entries))
+	for _, entry := range entries {
+		if d.hasDurableActiveEphemeralWork(entry) {
+			slog.Info("deferring modified agent reconcile while ephemeral task is active", "worktree", entry.Worktree)
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func (d *Daemon) hasDurableActiveEphemeralWork(entry config.AgentEntry) bool {
+	if entry.Mode != domain.AgentModeEphemeral || d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	active, err := d.hasLiveEphemeralStartCommand(ctx, entry.Worktree)
+	if err != nil {
+		slog.Warn("ephemeral command state check failed; deferring reconcile", "worktree", entry.Worktree, "err", err)
+		return true
+	}
+	if active {
+		return true
+	}
+	active, err = d.hasLiveEphemeralTaskSession(ctx, entry.Worktree)
+	if err != nil {
+		slog.Warn("ephemeral session state check failed; deferring reconcile", "worktree", entry.Worktree, "err", err)
+		return true
+	}
+	if active {
+		return true
+	}
+	agent, err := d.store.Agents().Get(ctx, d.sup.WorkspaceID, entry.Worktree)
+	if errors.Is(err, domain.ErrNotFound) || agent == nil {
+		return false
+	}
+	if err != nil {
+		slog.Warn("ephemeral agent state check failed; deferring reconcile", "worktree", entry.Worktree, "err", err)
+		return true
+	}
+	return agent.Mode == domain.AgentModeEphemeral && agent.State == domain.AgentStateActive
+}
+
+func (d *Daemon) hasLiveEphemeralStartCommand(ctx context.Context, agentName string) (bool, error) {
+	if d.store.AgentCommands() == nil {
+		return false, nil
+	}
+	cmds, err := d.store.AgentCommands().List(ctx, d.sup.WorkspaceID, store.AgentCommandFilter{
+		TargetAgentID: agentName,
+		Limit:         100,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, cmd := range cmds {
+		if cmd == nil || cmd.Type != "start" || cmd.Payload["task_id"] == "" {
+			continue
+		}
+		if liveAgentCommandStatus(cmd.Status) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (d *Daemon) hasLiveEphemeralTaskSession(ctx context.Context, agentName string) (bool, error) {
+	if d.store.AgentSessions() == nil {
+		return false, nil
+	}
+	sessions, err := d.store.AgentSessions().List(ctx, d.sup.WorkspaceID, store.AgentSessionFilter{
+		AgentID: agentName,
+		Limit:   100,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, session := range sessions {
+		if session == nil || session.Kind != domain.AgentSessionKindTask || session.TaskID == "" {
+			continue
+		}
+		if liveAgentSessionStatus(session.Status) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func liveAgentCommandStatus(status domain.AgentCommandStatus) bool {
+	switch status {
+	case "", domain.AgentCommandQueued, domain.AgentCommandAcked, domain.AgentCommandRunning:
+		return true
+	default:
+		return false
+	}
+}
+
+func liveAgentSessionStatus(status domain.AgentSessionStatus) bool {
+	switch status {
+	case domain.AgentSessionQueued, domain.AgentSessionLeased, domain.AgentSessionStarting, domain.AgentSessionRunning:
+		return true
+	default:
+		return false
+	}
 }
 
 // drainAgents stops a list of agents, logging errors.
@@ -129,8 +247,13 @@ func (d *Daemon) drainAgents(entries []config.AgentEntry, label string) {
 
 // addNewAgents starts agents, skipping those manually stopped.
 func (d *Daemon) addNewAgents(entries []config.AgentEntry, label string) {
+	cfg := d.configSnapshot()
+	var roles map[string]config.RoleConfig
+	if cfg != nil {
+		roles = cfg.Roles
+	}
 	for _, entry := range entries {
-		if !entry.ShouldSupervise() {
+		if !entry.ShouldSuperviseWithRoles(roles) {
 			slog.Info("skipping "+label+" of agent with non-running desired state", "worktree", entry.Worktree, "desired_state", entry.DesiredState)
 			continue
 		}
@@ -169,6 +292,37 @@ func diffAgents(old, new []config.AgentEntry) (added, removed, modified []config
 		}
 	}
 	return
+}
+
+// includeRoleConfigChanges marks unchanged agent rows as modified when their
+// referenced role configuration changes and either the old or new role is
+// daemon-supervised. Role configuration is load-bearing daemon input (kind,
+// prompt, model, policy, and limits), so changing it must reconcile every
+// assigned worker even when the agent row itself is unchanged.
+func includeRoleConfigChanges(oldRoles, newRoles map[string]config.RoleConfig, oldAgents, newAgents, modified []config.AgentEntry) []config.AgentEntry {
+	oldByName := make(map[string]config.AgentEntry, len(oldAgents))
+	for _, entry := range oldAgents {
+		oldByName[entry.Worktree] = entry
+	}
+	modifiedNames := make(map[string]bool, len(modified))
+	for _, entry := range modified {
+		modifiedNames[entry.Worktree] = true
+	}
+	for _, newEntry := range newAgents {
+		oldEntry, exists := oldByName[newEntry.Worktree]
+		if !exists || modifiedNames[newEntry.Worktree] || oldEntry.Role != newEntry.Role {
+			continue
+		}
+		if reflect.DeepEqual(oldRoles[newEntry.Role], newRoles[newEntry.Role]) {
+			continue
+		}
+		if !oldEntry.ShouldSuperviseWithRoles(oldRoles) && !newEntry.ShouldSuperviseWithRoles(newRoles) {
+			continue
+		}
+		modified = append(modified, newEntry)
+		modifiedNames[newEntry.Worktree] = true
+	}
+	return modified
 }
 
 // computeConfigHash returns a SHA-256 hex digest of the serialized config.DaemonConfig.

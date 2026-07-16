@@ -5,6 +5,6 @@
   min-width: 0;
   max-width: 100%;
   min-height: 0; /* Allow flex item to shrink below content height */
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto; /* SwimLaneBoard needs vertical scroll */
 }

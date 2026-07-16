@@ -100,6 +100,9 @@ func startScenarioDaemon(t *testing.T, scenario, logPath string) *exec.Cmd {
 	if v, ok := env["LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS"]; ok {
 		procEnv = append(procEnv, "LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS="+v)
 	}
+	if v, ok := env["LOOM_TASK_QUARANTINE_THRESHOLD"]; ok {
+		procEnv = append(procEnv, "LOOM_TASK_QUARANTINE_THRESHOLD="+v)
+	}
 	cmd.Env = procEnv
 	logFile, err := os.Create(logPath)
 	if err != nil {
@@ -897,4 +900,268 @@ func firstIssueIDForScenario(t *testing.T, scenario string) string {
 	}
 	t.Fatalf("could not parse loom data list payload:\n%s", payload)
 	return ""
+}
+
+// TestScenarioTaskQuarantine asserts the full task-quarantine loop: a task
+// whose backend silently stalls is watchdog-killed repeatedly with no
+// progress (each cycle: claim -> silent stall -> watchdog kill -> [recover]
+// reset to open -> re-pick), and after LOOM_TASK_QUARANTINE_THRESHOLD such
+// kills the daemon sets it to blocked with the loom:quarantined label and a
+// kill-timeline comment — and the agent moves on to close the remaining
+// healthy task (the ticket's acceptance criterion).
+//
+// The log-line assertion is deliberately class-agnostic: kill timing makes
+// the classified class vary (-1/137/143 => Unknown/Timeout/Transient), all
+// of which are quarantine-eligible.
+func TestScenarioTaskQuarantine(t *testing.T) {
+	requireServe(t)
+
+	const scenario = "stall-task"
+	watchdog := durationFromEnv("PLAYGROUND_WATCHDOG_TIMEOUT", 10*time.Second)
+	startedTimeout := durationFromEnv("PLAYGROUND_STALL_STARTED_WAIT", 25*time.Second)
+	quarantineTimeout := durationFromEnv("PLAYGROUND_STALL_QUARANTINE_WAIT", 180*time.Second)
+	closedTimeout := durationFromEnv("PLAYGROUND_STALL_CLOSED_WAIT", 120*time.Second)
+
+	_ = exec.Command("bash",
+		filepath.Join(hereDir(t), "teardown.sh"), scenario).Run()
+
+	runScenarioScript(t, "setup.sh", []string{scenario}, map[string]string{
+		"LOOM_DAEMON_OUTPUT_TIMEOUT_SECONDS": strconv.Itoa(int(watchdog.Seconds())),
+		"LOOM_TASK_QUARANTINE_THRESHOLD":     "3",
+	})
+
+	daemonLog := filepath.Join(scenarioRuntimeDir(t, scenario), "stall-task.daemon.log")
+	// Stall task gets the higher priority so it is picked first and spirals;
+	// the healthy task proves the agent escapes the boomerang afterward.
+	runLoom(t, scenario,
+		"data", "create",
+		"--title", "[STALL] hung task",
+		"--type", "task",
+		"--priority", "1",
+		"--status", "open",
+		"--design", "Task-quarantine verification: this backend stalls silently",
+	)
+	runLoom(t, scenario,
+		"data", "create",
+		"--title", "normal task",
+		"--type", "task",
+		"--priority", "2",
+		"--status", "open",
+		"--design", "Task-quarantine verification: happy path",
+	)
+
+	daemon := startScenarioDaemon(t, scenario, daemonLog)
+	t.Cleanup(func() { scenarioCleanup(t, scenario, daemon) })
+
+	startedFlag := filepath.Join(scenarioMarkerDir(t, scenario), "started.flag")
+	if !waitForFile(startedFlag, startedTimeout) {
+		t.Fatalf("stall backend never wrote started.flag at %s within %s\n--- daemon.log tail ---\n%s",
+			startedFlag, startedTimeout, tailFile(daemonLog, 50))
+	}
+
+	quarantinePattern := regexp.MustCompile(`quarantined after repeated no-progress kills`)
+	if !waitForLogLine(daemonLog, quarantinePattern, quarantineTimeout) {
+		t.Fatalf("daemon never logged the quarantine within %s\n--- daemon.log tail ---\n%s",
+			quarantineTimeout, tailFile(daemonLog, 80))
+	}
+
+	stallID, normalID := scenarioTaskIDsByTitle(t, scenario)
+
+	// Stall task: blocked, labeled, kill-timeline comment attached.
+	detail := showIssueDetail(t, scenario, stallID)
+	if !strings.EqualFold(detail.Status, "blocked") {
+		t.Errorf("stall task %s status = %q, want blocked\n--- daemon.log tail ---\n%s",
+			stallID, detail.Status, tailFile(daemonLog, 50))
+	}
+	if !containsString(detail.Labels, "loom:quarantined") {
+		t.Errorf("stall task %s labels = %v, want loom:quarantined", stallID, detail.Labels)
+	}
+	foundTimeline := false
+	for _, c := range detail.Comments {
+		if strings.Contains(c.Text, "Task quarantined by loom daemon") &&
+			strings.Contains(c.Text, "| 1 |") {
+			foundTimeline = true
+			break
+		}
+	}
+	if !foundTimeline {
+		t.Errorf("stall task %s has no kill-timeline comment (comments: %d)", stallID, len(detail.Comments))
+	}
+
+	// daemon-agents.json surfaces the quarantine. The file is flushed by the
+	// state-updater ticker, not synchronously with the quarantine write, so
+	// poll up to a tick-plus-margin rather than reading once.
+	stateTimeout := durationFromEnv("PLAYGROUND_STALL_STATE_WAIT", 45*time.Second)
+	stateDeadline := time.Now().Add(stateTimeout)
+	for {
+		state := readScenarioDaemonState(t, scenario)
+		found := false
+		if state != nil {
+			for _, qt := range state.QuarantinedTasks {
+				if qt.TaskID == stallID {
+					found = true
+				}
+			}
+		}
+		if found {
+			break
+		}
+		if time.Now().After(stateDeadline) {
+			if state == nil {
+				t.Log("daemon-agents.json not found; skipping state-file assertion")
+			} else {
+				t.Errorf("daemon-agents.json quarantined_tasks = %+v after %s, want %s listed",
+					state.QuarantinedTasks, stateTimeout, stallID)
+			}
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// The healthy task closes — the agent escaped the boomerang.
+	deadline := time.Now().Add(closedTimeout)
+	for {
+		if d := showIssueDetail(t, scenario, normalID); strings.EqualFold(d.Status, "closed") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("normal task %s never closed within %s — agent still stuck?\n--- daemon.log tail ---\n%s",
+				normalID, closedTimeout, tailFile(daemonLog, 80))
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// scenarioTaskIDsByTitle returns (stallID, normalID) for the quarantine
+// scenario's two seeded tasks, identified by the [STALL] title marker.
+func scenarioTaskIDsByTitle(t *testing.T, scenario string) (string, string) {
+	t.Helper()
+	out, err := runLoomCapture(t, scenario, nil, "data", "list", "--output", "json")
+	if err != nil {
+		t.Fatalf("loom data list: %v\n%s", err, out)
+	}
+	stallID, normalID := "", ""
+	for _, i := range parseIssueListJSON(t, out) {
+		if strings.Contains(i.Title, "[STALL]") {
+			stallID = i.ID
+		} else {
+			normalID = i.ID
+		}
+	}
+	if stallID == "" || normalID == "" {
+		t.Fatalf("could not identify stall/normal tasks from list output:\n%s", out)
+	}
+	return stallID, normalID
+}
+
+// parseIssueListJSON strips any pre-JSON log noise and parses either the
+// raw-array or envelope shape of `loom data list --output json`.
+func parseIssueListJSON(t *testing.T, out string) []issue {
+	t.Helper()
+	jsonStart := strings.Index(out, "[")
+	envStart := strings.Index(out, "{")
+	if envStart >= 0 && (jsonStart < 0 || envStart < jsonStart) {
+		jsonStart = envStart
+	}
+	if jsonStart < 0 {
+		t.Fatalf("no JSON payload in loom data list output:\n%s", out)
+	}
+	payload := out[jsonStart:]
+	var arr []issue
+	if err := json.Unmarshal([]byte(payload), &arr); err == nil {
+		return arr
+	}
+	var env issueEnvelope
+	if err := json.Unmarshal([]byte(payload), &env); err == nil {
+		if len(env.Data) > 0 {
+			return env.Data
+		}
+		return env.Items
+	}
+	t.Fatalf("could not parse loom data list payload:\n%s", payload)
+	return nil
+}
+
+// issueDetail is the subset of `loom data show --output json` the quarantine
+// scenario asserts against.
+type issueDetail struct {
+	ID       string   `json:"id"`
+	Status   string   `json:"status"`
+	Labels   []string `json:"labels"`
+	Comments []struct {
+		Text string `json:"text"`
+	} `json:"comments"`
+}
+
+// showIssueDetail fetches one issue via `loom data show --output json`.
+func showIssueDetail(t *testing.T, scenario, id string) issueDetail {
+	t.Helper()
+	out, err := runLoomCapture(t, scenario, nil, "data", "show", id, "--output", "json")
+	if err != nil {
+		t.Fatalf("loom data show %s: %v\n%s", id, err, out)
+	}
+	jsonStart := strings.Index(out, "{")
+	if jsonStart < 0 {
+		t.Fatalf("no JSON payload in loom data show output:\n%s", out)
+	}
+	var d issueDetail
+	if err := json.Unmarshal([]byte(out[jsonStart:]), &d); err != nil {
+		t.Fatalf("parse loom data show payload: %v\n%s", err, out)
+	}
+	return d
+}
+
+// scenarioDaemonState is the subset of daemon-agents.json the quarantine
+// scenario asserts against.
+type scenarioDaemonState struct {
+	QuarantinedTasks []struct {
+		TaskID string `json:"task_id"`
+		Count  int    `json:"count"`
+	} `json:"quarantined_tasks"`
+}
+
+// readScenarioDaemonState locates and parses the scenario daemon's
+// daemon-agents.json. The path depends on workspace-mode PIDFile resolution,
+// so walk the workspace runtime dir and fall back to the local .loom/.
+// Returns nil when no state file is found (caller logs and skips).
+func readScenarioDaemonState(t *testing.T, scenario string) *scenarioDaemonState {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	loomDir := os.Getenv("LOOM_CONFIG_DIR")
+	if loomDir == "" {
+		loomDir = filepath.Join(home, ".loom")
+	}
+	var candidates []string
+	wsRoot := filepath.Join(loomDir, "workspaces", "playground-"+scenario)
+	_ = filepath.Walk(wsRoot, func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && filepath.Base(path) == "daemon-agents.json" {
+			candidates = append(candidates, path)
+		}
+		return nil
+	})
+	candidates = append(candidates, filepath.Join(hereDir(t), ".loom", "daemon-agents.json"))
+	for _, path := range candidates {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var st scenarioDaemonState
+		if json.Unmarshal(b, &st) == nil {
+			return &st
+		}
+	}
+	return nil
+}
+
+// containsString reports whether list contains exactly s.
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

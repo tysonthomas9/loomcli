@@ -30,7 +30,7 @@ test.describe('Test helpers smoke test', () => {
     await page.goto(workspacePath('/'));
     await page.waitForLoadState('domcontentloaded');
 
-    await expect(page.locator('h1')).toHaveText('Aether');
+    await expect(page.locator('h1')).toHaveText('Loom');
     await expect(
       page.getByRole('status', { name: /Connection status/i }),
     ).toBeVisible({ timeout: 10_000 });

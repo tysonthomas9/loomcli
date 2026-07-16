@@ -13,8 +13,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// EnvFleetDBAPIKey is the env var holding the X-Fleet-API-Key value
-// for fleet-db requests. Optional in dev mode.
+// EnvFleetDBAPIKey is the env var holding the fleet-db API key value.
+// Clients send it as X-API-Key and X-Fleet-API-Key. Optional in dev mode.
 const EnvFleetDBAPIKey = "LOOM_FLEET_DB_API_KEY" //nolint:gosec // env var name, not a credential
 
 // EnvFleetDBActor is the env var holding the X-Actor header value.

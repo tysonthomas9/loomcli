@@ -26,6 +26,7 @@ const (
 	ActivationReasonHTTP     ActivationReason = "http"
 	ActivationReasonRegistry ActivationReason = "registry"
 	ActivationReasonLegacy   ActivationReason = "legacy"
+	ActivationReasonSSE      ActivationReason = "sse"
 )
 
 // workspaceSubscriber abstracts a per-workspace backend mutation source.
@@ -92,9 +93,9 @@ func (m *MultiWorkspaceSubscriber) AddWorkspaceWithBackend(wsID string, b backen
 }
 
 // EnsureActive creates and starts the per-workspace backend subscriber if one
-// is not already active. HTTP traffic warms subscribers; connected SSE clients
-// retain them, and the manager idle loop removes subscribers with no SSE
-// clients after the idle grace period.
+// is not already active. SSE token/stream traffic activates subscribers;
+// connected SSE clients retain them, and the manager idle loop removes
+// subscribers with no SSE clients after the idle grace period.
 func (m *MultiWorkspaceSubscriber) EnsureActive(ctx context.Context, wsID string, b backend.IssueBackend, reason ActivationReason) error {
 	if b == nil {
 		return fmt.Errorf("EnsureActive: backend must not be nil for workspace %q", wsID)

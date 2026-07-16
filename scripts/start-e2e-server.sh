@@ -66,7 +66,7 @@ go_sources_newer_than() {
         [[ -d "$dir" ]] && dirs+=("$dir")
     done
     [[ "${#dirs[@]}" -eq 0 ]] && return 1
-    find "${dirs[@]}" -type f -name '*.go' ! -name '*_test.go' -newer "$target" | grep -q .
+    [[ -n "$(find "${dirs[@]}" -type f -name '*.go' ! -name '*_test.go' -newer "$target" -print -quit)" ]]
 }
 
 if [[ -x "$MAIN_BIN" ]] && ! go_sources_newer_than "$MAIN_BIN" && { [[ ! -x "$LOOM_BIN" ]] || [[ "$MAIN_BIN" -nt "$LOOM_BIN" ]] || go_sources_newer_than "$LOOM_BIN"; }; then
@@ -97,6 +97,8 @@ else
 fi
 export FLEET_DB_BIN
 export FLEET_RATE_LIMIT_ENABLED="${FLEET_RATE_LIMIT_ENABLED:-false}"
+export FLEET_REDIS_POOL_SIZE="${FLEET_REDIS_POOL_SIZE:-200}"
+export FLEET_REDIS_MIN_IDLE_CONNS="${FLEET_REDIS_MIN_IDLE_CONNS:-10}"
 
 # --- 2. Build frontend dist if missing or stale ---
 frontend_dist_index="$FRONTEND_DIR/dist/index.html"
@@ -107,9 +109,9 @@ elif [[ "$FRONTEND_DIR/index.html" -nt "$frontend_dist_index" ]]; then
     frontend_needs_build=1
 elif [[ "$FRONTEND_DIR/package.json" -nt "$frontend_dist_index" ]] || [[ "$FRONTEND_DIR/package-lock.json" -nt "$frontend_dist_index" ]] || [[ "$FRONTEND_DIR/vite.config.ts" -nt "$frontend_dist_index" ]]; then
     frontend_needs_build=1
-elif find "$FRONTEND_DIR/src" -type f -newer "$frontend_dist_index" | grep -q .; then
+elif [[ -n "$(find "$FRONTEND_DIR/src" -type f -newer "$frontend_dist_index" -print -quit)" ]]; then
     frontend_needs_build=1
-elif find "$FRONTEND_DIR/public" -type f -newer "$frontend_dist_index" | grep -q .; then
+elif [[ -n "$(find "$FRONTEND_DIR/public" -type f -newer "$frontend_dist_index" -print -quit)" ]]; then
     frontend_needs_build=1
 fi
 
@@ -163,6 +165,9 @@ echo "[e2e] Starting loom serve (port :${PORT})..."
 export LOOM_DISABLE_H2C=1
 export LOOM_ISSUE_BACKEND=fleetdb
 export LOOM_FLEET_DB_ACTOR=loom-e2e
+if [[ -z "${LOOM_SDK_ROOT:-}" && -f "$REPO_ROOT/sdk/package.json" ]]; then
+    export LOOM_SDK_ROOT="$REPO_ROOT/sdk"
+fi
 # Run from E2E workspace so the Loom API server discovers the isolated project.
 cd "$E2E_WORKSPACE"
 "$LOOM_BIN" serve \

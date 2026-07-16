@@ -132,21 +132,28 @@ type TerminalSession struct {
 }
 
 type Artifact struct {
-	WorkspaceKey string            `json:"workspace_key"`
-	ArtifactID   string            `json:"artifact_id"`
-	AgentID      string            `json:"agent_id,omitempty"`
-	SessionID    string            `json:"session_id,omitempty"`
-	TerminalID   string            `json:"terminal_id,omitempty"`
-	TaskID       string            `json:"task_id,omitempty"`
-	Type         string            `json:"type"`
-	URI          string            `json:"uri"`
-	Summary      string            `json:"summary,omitempty"`
-	MIMEType     string            `json:"mime_type,omitempty"`
-	SizeBytes    int64             `json:"size_bytes,omitempty"`
-	Checksum     string            `json:"checksum,omitempty"`
-	Metadata     map[string]string `json:"metadata,omitempty"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
+	WorkspaceKey    string            `json:"workspace_key"`
+	ArtifactID      string            `json:"artifact_id"`
+	AgentID         string            `json:"agent_id,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	TerminalID      string            `json:"terminal_id,omitempty"`
+	TaskID          string            `json:"task_id,omitempty"`
+	OwnerType       string            `json:"owner_type,omitempty"`
+	OwnerID         string            `json:"owner_id,omitempty"`
+	Type            string            `json:"type"`
+	URI             string            `json:"uri,omitempty"`
+	Summary         string            `json:"summary,omitempty"`
+	MIMEType        string            `json:"mime_type,omitempty"`
+	SizeBytes       int64             `json:"size_bytes,omitempty"`
+	Checksum        string            `json:"checksum,omitempty"`
+	ContentHash     string            `json:"content_hash,omitempty"`
+	Visibility      string            `json:"visibility,omitempty"`
+	RedactionStatus string            `json:"redaction_status,omitempty"`
+	DurableStatus   string            `json:"durable_status,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	FinalizedAt     *time.Time        `json:"finalized_at,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 type AgentLeaseStatus string
@@ -215,4 +222,38 @@ type AgentCommand struct {
 	ErrorClass    string             `json:"error_class,omitempty"`
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
+type AgentInboxMessageStatus string
+
+const (
+	AgentInboxMessageQueued    AgentInboxMessageStatus = "queued"
+	AgentInboxMessageDelivered AgentInboxMessageStatus = "delivered"
+	AgentInboxMessageFailed    AgentInboxMessageStatus = "failed"
+)
+
+type AgentInboxMessage struct {
+	WorkspaceKey      string                  `json:"workspace_key"`
+	InboxMessageID    string                  `json:"inbox_message_id"`
+	Cursor            int64                   `json:"cursor"`
+	TargetAgentID     string                  `json:"target_agent_id"`
+	SessionID         string                  `json:"session_id,omitempty"`
+	Body              string                  `json:"body"`
+	Status            AgentInboxMessageStatus `json:"status"`
+	SourceKind        string                  `json:"source_kind,omitempty"`
+	SourceRef         string                  `json:"source_ref,omitempty"`
+	DriverRunID       string                  `json:"driver_run_id,omitempty"`
+	TaskRunID         string                  `json:"task_run_id,omitempty"`
+	TriggerEventID    string                  `json:"trigger_event_id,omitempty"`
+	TriggerDeliveryID string                  `json:"trigger_delivery_id,omitempty"`
+	DedupeKey         string                  `json:"dedupe_key,omitempty"`
+	Attempt           int                     `json:"attempt,omitempty"`
+	ClaimedBy         string                  `json:"claimed_by,omitempty"`
+	ClaimExpiresAt    *time.Time              `json:"claim_expires_at,omitempty"`
+	LastError         string                  `json:"last_error,omitempty"`
+	ErrorClass        string                  `json:"error_class,omitempty"`
+	DeliveredThreadID string                  `json:"delivered_thread_id,omitempty"`
+	DeliveredAt       *time.Time              `json:"delivered_at,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
 }

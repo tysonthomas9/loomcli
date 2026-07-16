@@ -1,6 +1,6 @@
 /**
  * AgentSection styles.
- * Flat agent list with repo·branch second line.
+ * Flat agent list in the workspace sidebar.
  */
 
 .section {
@@ -12,24 +12,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.375rem 1rem 0.25rem;
-  font-size: 0.6875rem;
+  padding: 0.25rem 0.75rem 0.125rem;
+  font-size: 0.625rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-tertiary);
-}
-
-.header :global(.sectionCount) {
-  min-width: 20px;
-  text-align: center;
-  font-size: 0.7rem;
-  color: var(--color-text-secondary);
-  font-weight: 600;
-  background: var(--color-bg-tertiary);
-  border-radius: 999px;
-  padding: 2px 8px;
-  border: 1px solid var(--color-border-light);
 }
 
 .list {
@@ -37,63 +25,126 @@
   flex-direction: column;
 }
 
-.agentRow {
+.sortableList {
   display: flex;
   flex-direction: column;
+}
+
+.subgroup {
+  display: flex;
+  flex-direction: column;
+  margin: 0.375rem 0.5rem 0;
+  padding: 0.125rem 0 0.25rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.subgroupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.5rem 0.125rem;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+}
+
+.subgroupList {
+  display: flex;
+  flex-direction: column;
+}
+
+.agentRow {
+  display: flex;
+  align-items: stretch;
   transition: background-color 0.15s ease;
 }
 
-.agentRow[role="button"] {
+.agentRow[data-dragging] {
+  z-index: 1;
+}
+
+.agentCardInRow {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+}
+
+.agentCardInRow[role="button"] {
   cursor: pointer;
 }
 
-.agentRow[role="button"]:hover {
+.agentCardInRow[role="button"]:hover {
   background: var(--color-bg-hover);
 }
 
-.agentRow[role="button"]:focus-visible {
+.agentCardInRow[data-selected="true"] {
+  background: color-mix(
+    in srgb,
+    var(--color-accent, #c96442) 12%,
+    var(--color-bg-primary, #fff)
+  );
+  box-shadow: inset 3px 0 0 var(--color-accent, #c96442);
+}
+
+.agentCardInRow[data-selected="true"][role="button"]:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-accent, #c96442) 18%,
+    var(--color-bg-primary, #fff)
+  );
+}
+
+.agentCardInRow[role="button"]:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: -2px;
 }
 
-/* Override AgentCard padding for compact sidebar use.
-   The card is the first child div of agentRow. */
-.agentRow > div:first-child {
-  padding: 0.5rem 1rem 0.125rem;
-  border-bottom: none;
-}
-
-/* Scope line sits below the AgentCard, indented to align with the info column.
-   Math: card padding-left (1rem) + avatar (34px) + gap (0.75rem) */
-.scopeLine {
-  padding: 0 1rem 0.375rem calc(1rem + 34px + 0.75rem);
-  min-height: 0;
-}
-
-.scopeLabel {
-  font-size: 0.6875rem;
+.dragHandle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  align-self: center;
+  width: 0.875rem;
+  margin-right: 0.375rem;
   color: var(--color-text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: block;
+  cursor: grab;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 
-.scopeBranch {
-  font-family: monospace;
-  font-size: 0.6875rem;
+.agentRow:hover .dragHandle,
+.agentRow[data-dragging] .dragHandle,
+.dragHandle:focus-visible {
+  opacity: 1;
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.dragHandle:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+  border-radius: 2px;
 }
 
 .addButton {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 0.375rem 1rem;
-  margin-top: 0.125rem;
+  padding: 0.4375rem 0.75rem;
+  margin-top: 0.375rem;
+  margin-bottom: 0.375rem;
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   color: var(--color-text-tertiary);
   transition:
     color 0.15s ease,

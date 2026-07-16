@@ -20,12 +20,15 @@ type AgentCreate struct {
 	RepoGroups       []string
 	CrossRepo        bool
 	Parent           string
-	Mode             domain.AgentMode
-	TaskFilter       string
-	MaxConcurrency   int
-	BudgetPolicy     string
-	DesiredState     domain.AgentDesiredState
-	Execution        string
+	// OrchestratorSessionID was here historically as a denormalized cache
+	// of the lead-to-orchestration AgentSession join. AgentSession is the
+	// single source of truth; use store.OrchestrationSessionIDFor.
+	Mode           domain.AgentMode
+	TaskFilter     string
+	MaxConcurrency int
+	BudgetPolicy   string
+	DesiredState   domain.AgentDesiredState
+	Execution      string
 }
 
 // AgentUpdate is the partial-update payload for agents.
@@ -38,13 +41,14 @@ type AgentUpdate struct {
 	RepoGroups       *[]string
 	CrossRepo        *bool
 	Parent           *string
-	State            *domain.AgentState
-	Mode             *domain.AgentMode
-	TaskFilter       *string
-	MaxConcurrency   *int
-	BudgetPolicy     *string
-	DesiredState     *domain.AgentDesiredState
-	Execution        *string
+	// OrchestratorSessionID removed; see comment on AgentCreate.
+	State          *domain.AgentState
+	Mode           *domain.AgentMode
+	TaskFilter     *string
+	MaxConcurrency *int
+	BudgetPolicy   *string
+	DesiredState   *domain.AgentDesiredState
+	Execution      *string
 }
 
 // AgentStore is the persistence interface for Agent assignments.

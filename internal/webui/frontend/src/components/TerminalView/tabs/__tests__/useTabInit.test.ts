@@ -435,6 +435,148 @@ describe("useTabInit", () => {
     expect(tabs[0].connectionState).toBe("disconnected");
   });
 
+  it("restores persisted agent tabs with agent routing metadata", () => {
+    const metadata: TabMetadata[] = [
+      {
+        session_name: "term_550e8400-e29b-41d4-a716-446655440000",
+        label: "agent-lead-ui-e2e",
+        notes: "",
+        sort_order: 1,
+        pinned: false,
+        kind: "agent",
+        agent_id: "lead-ui-e2e",
+        role: "lead",
+        backend: "codex",
+        writable: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+        pty_alive: true,
+        attached_clients: 0,
+      },
+    ];
+
+    const setTabs = vi.fn();
+    const args = createArgs({
+      tabMetadata: metadata,
+      config: {
+        backend: "codex",
+        source: "config",
+        available: ["codex"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+    });
+
+    renderHook(() => useTabInit(args));
+
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs[0]).toMatchObject({
+      sessionName: "term_550e8400-e29b-41d4-a716-446655440000",
+      backendName: "codex",
+      agentName: "lead-ui-e2e",
+      writable: true,
+    });
+  });
+
+  it("excludes agent tabs when excludeAgentTabs is true", () => {
+    const metadata: TabMetadata[] = [
+      {
+        session_name: "term_agent_session",
+        label: "agent-local-planner",
+        notes: "",
+        sort_order: 0,
+        pinned: false,
+        kind: "agent",
+        agent_id: "local-planner",
+        role: "plan",
+        backend: "codex",
+        writable: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+        pty_alive: true,
+        attached_clients: 0,
+      },
+      {
+        session_name: "lead-codex-1",
+        label: "lead-codex-1",
+        notes: "",
+        sort_order: 1,
+        pinned: false,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+        pty_alive: true,
+        attached_clients: 0,
+      },
+    ];
+
+    const setTabs = vi.fn();
+    const setActiveTabId = vi.fn();
+    const args = createArgs({
+      tabMetadata: metadata,
+      excludeAgentTabs: true,
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      setActiveTabId: setActiveTabId as unknown as React.Dispatch<
+        React.SetStateAction<string>
+      >,
+    });
+
+    renderHook(() => useTabInit(args));
+
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]?.sessionName).toBe("lead-codex-1");
+    expect(setActiveTabId).toHaveBeenCalledWith("lead-codex-1");
+  });
+
+  it("auto-creates lead tab when metadata is agent-only and excludeAgentTabs is true", () => {
+    const metadata: TabMetadata[] = [
+      {
+        session_name: "term_agent_session",
+        label: "agent-local-planner",
+        notes: "",
+        sort_order: 0,
+        pinned: false,
+        kind: "agent",
+        agent_id: "local-planner",
+        role: "plan",
+        backend: "codex",
+        writable: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+        pty_alive: true,
+        attached_clients: 0,
+      },
+    ];
+
+    const setTabs = vi.fn();
+    const createTab = vi.fn().mockResolvedValue(undefined);
+    const args = createArgs({
+      tabMetadata: metadata,
+      excludeAgentTabs: true,
+      config: {
+        backend: "codex",
+        source: "config",
+        available: ["codex"],
+        agents: [],
+      },
+      setTabs: setTabs as unknown as React.Dispatch<
+        React.SetStateAction<TabState[]>
+      >,
+      createTab,
+    });
+
+    renderHook(() => useTabInit(args));
+
+    const tabs = setTabs.mock.calls[0][0] as TabState[];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]?.label).toBe("lead-codex-1");
+    expect(createTab).toHaveBeenCalled();
+  });
+
   it("filters shell from auto-created backends", () => {
     const setTabs = vi.fn();
     const setActiveTabId = vi.fn();

@@ -135,37 +135,53 @@ func waitForProcessExit(ap *AgentProcess, pid int, timeout time.Duration) bool {
 	return false
 }
 
-// checkWatchdog checks both transcript mtime (updated by hooks on every turn)
-// and log file mtime (stdout output). Kills the agent if no activity signal is
-// newer than outputTimeout seconds.
+// checkWatchdog kills the agent if no liveness signal is newer than
+// outputTimeout seconds. It considers three signals and uses the freshest:
+//
+//   - ap.LastActivity: live PTY-output heartbeat from the agent's wrapper,
+//     delivered over agent IPC (RecordAgentActivity). This is the ONLY live
+//     signal on the RunTurn path, whose interactive TUI updates neither the
+//     stdout log nor a hook transcript — without it a busy agent looks
+//     "silent" and is wrongly killed at the timeout.
+//   - session transcript mtime (updated by hooks on every turn, when installed).
+//   - stdout log file mtime.
 func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath string, lastStart time.Time, worktreeName string) {
 	var lastActivity time.Time
 	activitySource := "none"
-
-	// Tier 1: session transcript (updated by hooks on every turn). Skipped for
-	// sandbox agents: the transcript is written INSIDE the container, so the host
-	// path is always stale and would falsely trip the watchdog — sandbox agents
-	// rely on log mtime (Tier 2), fed by openshell-forwarded container stdout.
-	if !ap.IsSandbox() {
-		ap.Mu.Lock()
-		txPath := ap.TranscriptPath
-		ap.Mu.Unlock()
-		if txPath != "" {
-			if info, err := os.Stat(txPath); err == nil {
-				lastActivity = info.ModTime()
-				activitySource = "transcript"
-			}
+	// consider records t as the activity signal when it is the newest seen.
+	consider := func(t time.Time, source string) {
+		if t.IsZero() {
+			return
+		}
+		if activitySource == "none" || t.After(lastActivity) {
+			lastActivity = t
+			activitySource = source
 		}
 	}
 
-	// Tier 2: Check log file mtime (stdout output). Use the newest signal so a
-	// stale hook transcript does not mask active stdout.
+	ap.Mu.Lock()
+	heartbeat := ap.LastActivity
+	txPath := ap.TranscriptPath
+	ap.Mu.Unlock()
+
+	// Tier 0: live PTY-output heartbeat (agent IPC). Survives the RunTurn path,
+	// where the file-based tiers below go stale even while the agent is busy.
+	consider(heartbeat, "heartbeat")
+
+	// Tier 1: session transcript mtime (updated by hooks on every turn). Skipped
+	// for sandbox agents: the transcript is written INSIDE the container, so the
+	// host path is always stale and would falsely trip the watchdog — sandbox
+	// agents rely on log mtime (Tier 2), fed by openshell-forwarded container stdout.
+	if !ap.IsSandbox() && txPath != "" {
+		if info, err := os.Stat(txPath); err == nil {
+			consider(info.ModTime(), "transcript")
+		}
+	}
+
+	// Tier 2: log file mtime (stdout output).
 	if logPath != "" {
 		if info, err := os.Stat(logPath); err == nil {
-			if activitySource == "none" || info.ModTime().After(lastActivity) {
-				lastActivity = info.ModTime()
-				activitySource = "log"
-			}
+			consider(info.ModTime(), "log")
 		}
 	}
 

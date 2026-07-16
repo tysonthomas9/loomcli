@@ -1,145 +1,312 @@
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  z-index: 1000;
+.form {
   display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel {
+  padding: 14px 14px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-secondary);
+}
+
+.panelHeader {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.group + .group {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.groupLabel {
+  margin: 0 0 2px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-tertiary);
+}
+
+.groupHint {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+}
+
+.templateList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.templateCard {
+  --template-accent: var(--color-primary);
+
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-bg);
+  color: var(--color-text);
+  cursor: pointer;
+  box-shadow: inset 3px 0 0 transparent;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.templateCard:hover:not(:disabled) {
+  border-color: color-mix(
+    in srgb,
+    var(--template-accent) 45%,
+    var(--color-border)
+  );
+  background: var(--color-bg-hover);
+}
+
+.templateCard:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.templateCard[data-active] {
+  border-color: color-mix(
+    in srgb,
+    var(--template-accent) 55%,
+    var(--color-border)
+  );
+  background: color-mix(
+    in srgb,
+    var(--template-accent) 8%,
+    var(--color-panel-bg)
+  );
+  box-shadow: inset 3px 0 0 var(--template-accent);
+}
+
+.templateCard:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.templateGlyph {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.dialog {
-  background: var(--color-panel-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 24px;
-  max-width: 480px;
-  width: 90%;
-}
-
-.headerRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.title {
-  font-weight: 600;
-  font-size: 16px;
-  margin: 0;
-  color: var(--color-text);
-}
-
-.closeButton {
-  background: none;
-  border: none;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: 18px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
   line-height: 1;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
+  color: #fff;
 }
 
-.closeButton:hover:not(:disabled) {
-  color: var(--color-text);
+.templateBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.templateTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.templateTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.templateSelectedMark {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--template-accent);
+  background: color-mix(in srgb, var(--template-accent) 14%, transparent);
+}
+
+.templateDescription {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.configRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
 .fieldGroup {
-  margin-bottom: 14px;
+  margin-bottom: 0;
+}
+
+.fieldGroupSpaced {
+  margin-top: 12px;
 }
 
 .label {
   display: block;
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--color-text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 5px;
 }
 
 .input,
-.select {
+.select,
+.textarea {
+  /* Explicit height so <input> and native <select> line up in the config row —
+     a native select renders ~4px taller than an input at the same padding. */
+  height: 36px;
   width: 100%;
-  padding: 6px 10px;
+  padding: 0 10px;
   font-size: 13px;
+  line-height: normal;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
-  background: transparent;
+  background: var(--color-panel-bg);
   color: var(--color-text);
   outline: none;
   box-sizing: border-box;
+  transition: border-color var(--transition-fast);
+}
+
+.textarea {
+  min-height: 108px;
+  height: auto;
+  padding: 9px 10px;
+  line-height: 1.45;
+  resize: vertical;
 }
 
 .input:focus,
-.select:focus {
+.select:focus,
+.textarea:focus {
   border-color: var(--color-primary);
 }
 
-.row {
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.65;
+}
+
+.repoChips {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.row .fieldGroup {
-  flex: 1;
-}
-
-.checkboxRow {
+.repoChip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  padding: 6px 12px 6px 8px;
   font-size: 13px;
-  color: var(--color-text);
-  margin-bottom: 14px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.repoChip:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-text-primary);
+}
+
+.repoChip[data-active] {
+  border-color: var(--color-primary);
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+.repoChip:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.repoChipBox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-tertiary);
+  color: #fff;
+}
+
+.repoChip[data-active] .repoChipBox {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.emptyHint {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--color-text-muted);
 }
 
 .error {
   color: var(--color-danger);
   font-size: 12px;
-  margin: 0 0 14px;
-  padding: 6px 10px;
-  background: rgba(239, 68, 68, 0.1);
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--color-danger-bg);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 25%, transparent);
   border-radius: var(--radius-sm);
 }
 
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
-}
-
-.cancelButton,
-.submitButton {
-  padding: 6px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.cancelButton {
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text);
-}
-
-.cancelButton:hover:not(:disabled) {
-  background: var(--color-bg-hover);
-}
-
-.submitButton {
-  border: 1px solid var(--color-primary);
-  background: var(--color-primary);
-  color: #fff;
-}
-
-.submitButton:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-}
-
-.cancelButton:disabled,
-.submitButton:disabled,
-.closeButton:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+@media (max-width: 520px) {
+  .configRow {
+    grid-template-columns: 1fr;
+  }
 }

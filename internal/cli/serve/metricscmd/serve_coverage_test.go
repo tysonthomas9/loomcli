@@ -88,6 +88,20 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 		Name:         "falcon",
 		RoleName:     "task",
 		Repos:        []string{"repo-a"},
+		Parent:       "EPIC-1",
+		Mode:         domain.AgentModeEphemeral,
+		DesiredState: domain.AgentDesiredStopped,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Seed the orchestration AgentSession row — the monitor data source
+	// reads attribution via OrchestrationSessionIDFor.
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS1",
+		SessionID:    "lead-session",
+		AgentID:      "falcon",
+		Kind:         domain.AgentSessionKindOrchestration,
+		Status:       domain.AgentSessionRunning,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -103,19 +117,26 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if _, err := st.Agents().Update(ctx, "WS1", "falcon", store.AgentUpdate{State: &active}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS1",
+		SessionID:    "session-falcon",
+		AgentID:      "falcon",
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	falconWorktree := filepath.Join(wsRoot, "worktrees", "repo-a", "falcon")
 	if err := runGitForMetricsTest(t, falconWorktree, "init", "-b", "feature/falcon"); err != nil {
 		t.Fatalf("init falcon worktree: %v", err)
 	}
-	if err := bootstrap.SaveStateCache(&bootstrap.StateCache{
-		Version:       1,
-		LastWorkspace: "WS1",
-		Workspaces: map[string]bootstrap.WorkspaceLocalState{
-			"WS1": {
-				Path:  wsRoot,
-				Repos: map[string]string{"repo-a": filepath.Join(wsRoot, "repo-a")},
-			},
-		},
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = "WS1"
+		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
+			Path:  wsRoot,
+			Repos: map[string]string{"repo-a": filepath.Join(wsRoot, "repo-a")},
+		}
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
@@ -170,6 +191,12 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	}
 	if falcon.LastActivityAt == nil || !falcon.LastActivityAt.Equal(lastActivity) {
 		t.Fatalf("falcon LastActivityAt = %v, want %v", falcon.LastActivityAt, lastActivity)
+	}
+	if got := byName["falcon"]; got.Parent != "EPIC-1" || got.OrchestratorSessionID != "lead-session" || got.Mode != "ephemeral" || got.DesiredState != "stopped" {
+		t.Fatalf("falcon orchestration fields not sourced from store: %+v", got)
+	}
+	if got := byName["falcon"]; got.TaskID != "TASK-1" || got.SessionID != "session-falcon" {
+		t.Fatalf("falcon session fields not sourced from agent sessions: %+v", got)
 	}
 	if got := byName["nova"]; got.Role != "plan" || got.Status != "idle" || got.Workspace != "Test" {
 		t.Fatalf("nova not sourced from store: %+v", got)
@@ -547,6 +574,45 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 	}
 	if got := counted.daemon.getCalls; got != 0 {
 		t.Fatalf("daemon Get calls = %d, want no workspace summary daemon reads", got)
+	}
+}
+
+func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "WS1",
+		Name:         "operator",
+		Kind:         string(domain.RoleKindInteractive),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range []store.AgentCreate{
+		{WorkspaceKey: "WS1", Name: "lead-a", RoleName: "lead"},
+		{WorkspaceKey: "WS1", Name: "operator-a", RoleName: "operator"},
+		{WorkspaceKey: "WS1", Name: "task-a", RoleName: "task"},
+	} {
+		if _, err := st.Agents().Create(ctx, agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	data := collectMonitorStoreData(ctx, st, "WS1")
+	got := map[string]string{}
+	for _, agent := range data.Agents {
+		got[agent.Name] = agent.RoleKind
+	}
+	if got["lead-a"] != string(domain.RoleKindInteractive) {
+		t.Fatalf("lead-a role_kind = %q, want interactive", got["lead-a"])
+	}
+	if got["operator-a"] != string(domain.RoleKindInteractive) {
+		t.Fatalf("operator-a role_kind = %q, want interactive", got["operator-a"])
+	}
+	if got["task-a"] != string(domain.RoleKindWorker) {
+		t.Fatalf("task-a role_kind = %q, want worker", got["task-a"])
 	}
 }
 

@@ -46,7 +46,6 @@ func TestAgentService_ValidateAgentName(t *testing.T) {
 		badNames := []string{
 			"agent one",     // space
 			"agent/one",     // slash
-			"agent.one",     // dot
 			"../etc/passwd", // path traversal
 			"agent@foo!",    // special chars
 		}
@@ -67,7 +66,9 @@ func TestAgentService_ValidateAgentName(t *testing.T) {
 		}
 		svc := svcimpl.NewAgentService(gitOps, nil, nil, nil)
 
-		validNames := []string{"alpha", "test-agent", "agent_1", "ABC", "a-b_c-123"}
+		// "agent.one" is a fleet-db name — dots are now accepted by the read
+		// endpoints, aligned with the create/store charset.
+		validNames := []string{"alpha", "test-agent", "agent_1", "ABC", "a-b_c-123", "agent.one"}
 		for _, name := range validNames {
 			_, err := svc.GetDiffStat(ctx, "ws", name)
 			if err != nil {
@@ -119,7 +120,7 @@ func TestAgentService_GenerateTerminalToken(t *testing.T) {
 
 	t.Run("nil termAuth returns ErrUnavailable", func(t *testing.T) {
 		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, nil, nil)
-		_, err := svc.GenerateTerminalToken(ctx, "agent1", "user1")
+		_, err := svc.GenerateTerminalToken(ctx, "test-ws", "agent1", "user1")
 		requireServiceError(t, err, service.KindUnavailable)
 	})
 
@@ -131,7 +132,7 @@ func TestAgentService_GenerateTerminalToken(t *testing.T) {
 		defer ta.Stop()
 
 		svc := svcimpl.NewAgentService(&mockGitOps{}, nil, ta, nil)
-		token, err := svc.GenerateTerminalToken(ctx, "agent1", "user1")
+		token, err := svc.GenerateTerminalToken(ctx, "test-ws", "agent1", "user1")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -154,11 +155,11 @@ func TestAgentService_GetLog(t *testing.T) {
 
 	t.Run("line clamping zero becomes default", func(t *testing.T) {
 		// Create a temporary log file to exercise the clamping logic.
-		home, err := os.UserHomeDir()
-		if err != nil {
-			t.Fatalf("UserHomeDir: %v", err)
-		}
-		logDir := filepath.Join(home, ".loom", "logs", "test-clamp-ws", "agents")
+		configDir := t.TempDir()
+		t.Setenv("LOOM_CONFIG_DIR", configDir)
+		t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
+
+		logDir := filepath.Join(configDir, ".loom", "logs", "test-clamp-ws", "agents")
 		if err := os.MkdirAll(logDir, 0o755); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
 		}
@@ -171,7 +172,6 @@ func TestAgentService_GetLog(t *testing.T) {
 		if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
-		defer os.RemoveAll(filepath.Join(home, ".loom", "logs", "test-clamp-ws"))
 
 		result, err := svc.GetLog(ctx, "test-clamp-ws", "clamp-agent", 0, 0)
 		if err != nil {
@@ -184,11 +184,11 @@ func TestAgentService_GetLog(t *testing.T) {
 	})
 
 	t.Run("line clamping exceeds max", func(t *testing.T) {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			t.Fatalf("UserHomeDir: %v", err)
-		}
-		logDir := filepath.Join(home, ".loom", "logs", "test-clampmax-ws", "agents")
+		configDir := t.TempDir()
+		t.Setenv("LOOM_CONFIG_DIR", configDir)
+		t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "")
+
+		logDir := filepath.Join(configDir, ".loom", "logs", "test-clampmax-ws", "agents")
 		if err := os.MkdirAll(logDir, 0o755); err != nil {
 			t.Fatalf("MkdirAll: %v", err)
 		}
@@ -201,7 +201,6 @@ func TestAgentService_GetLog(t *testing.T) {
 		if err := os.WriteFile(logFile, []byte(content), 0o644); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
-		defer os.RemoveAll(filepath.Join(home, ".loom", "logs", "test-clampmax-ws"))
 
 		result, err := svc.GetLog(ctx, "test-clampmax-ws", "clampmax-agent", 10000+5000, 0)
 		if err != nil {

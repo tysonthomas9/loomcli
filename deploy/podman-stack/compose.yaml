@@ -1,0 +1,232 @@
+# Local resource-capped podman stack emulating the DISTRIBUTED Loom topology
+# (RUNTIME-AND-DEPLOYMENT.md T3/T4 shape) for real e2e platform testing:
+#
+#   redis -> fleet-auth-seed -> fleet-db -> loom-serve -> worker / stub-upstream
+#
+# Startup is healthcheck-ordered (depends_on conditions); fleet-db MUST be
+# ready before loom serve starts or serve falls back to spawning an embedded
+# fleet-db subprocess (see README "ordering"). Every container carries
+# explicit memory / cpu / pids caps — fork-bomb history; nothing runs
+# uncapped. Budget table in README.md.
+#
+# Build images first: ./build.sh  (host-cross-compiled Go binaries, podman
+# build). Secrets come from ./.env (gitignored), generated per-run by
+# loomcli/scripts/test-podman-stack.sh — never committed, never echoed.
+#
+# Port exposure policy: loopback-only, and ONLY what the host-side driver
+# script must reach — loom serve (the product surface under test), fleet-db
+# (admin workspace seeding + negative auth assertions), stub-upstream
+# (/__requests verification). Workers and redis are reachable solely on the
+# private stack network.
+
+name: ${LOOM_STACK_PROJECT:-loom-podman-stack}
+
+networks:
+  loom-stack:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+  loom-data:
+    driver: local
+  loom-work:
+    driver: local
+
+services:
+  redis:
+    image: docker.io/library/redis:7-alpine
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "192mb"
+      - "--maxmemory-policy"
+      - "noeviction"
+    networks: [loom-stack]
+    volumes:
+      - redis-data:/data
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # One-shot seeder: provisions the fleet-db API key + global admin role
+  # directly in Redis (the only bootstrap path that needs no prior admin
+  # credential), then exits 0. fleet-db gates on its completion.
+  fleet-auth-seed:
+    image: docker.io/library/redis:7-alpine
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks: [loom-stack]
+    restart: "no"
+    environment:
+      LOOM_FLEET_DB_API_KEY: ${LOOM_FLEET_DB_API_KEY:?missing - run scripts/test-podman-stack.sh or copy env.template to .env and fill}
+      FLEET_SEED_ACTOR: ${FLEET_SEED_ACTOR:-loom-serve@podman-stack.local}
+      FLEET_SEED_ROLE: ${FLEET_SEED_ROLE:-admin}
+    volumes:
+      - ./seed/seed-fleet-auth.sh:/seed-fleet-auth.sh:ro
+    entrypoint: ["sh", "/seed-fleet-auth.sh"]
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 32
+
+  fleet-db:
+    image: localhost/loom-stack/fleet-db:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+      fleet-auth-seed:
+        condition: service_completed_successfully
+    command:
+      - "--redis-addr"
+      - "redis:6379"
+      - "--addr"
+      - ":8080"
+    environment:
+      FLEET_AUTH_ENABLED: "true"
+      FLEET_AUTH_DEV_MODE: "false"
+      FLEET_AUTHZ_ENABLED: "true"
+      FLEET_LOG_LEVEL: ${FLEET_LOG_LEVEL:-info}
+      FLEET_LOG_FORMAT: json
+    networks: [loom-stack]
+    ports:
+      - "127.0.0.1:${LOOM_STACK_FLEET_DB_PORT:-18280}:8080"
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 10s
+
+  loom-serve:
+    image: localhost/loom-stack/loom-serve:latest
+    depends_on:
+      fleet-db:
+        condition: service_healthy
+    command: ["serve"]
+    environment:
+      # --- bind / surface ---
+      LOOM_SERVER_PORT: "8080"
+      LOOM_BIND_ADDR: 0.0.0.0
+      LOOM_FRONTEND_URL: ${LOOM_STACK_FRONTEND_URL:-http://127.0.0.1:18282}
+      # Workspace key the serve entrypoint seeds a local state-cache path for so
+      # the `loom worker` plane can register (see serve-entrypoint.sh).
+      LOOM_STACK_WORKSPACE: ${LOOM_STACK_WORKSPACE:-PODSTACK}
+      # --- fleet-db (MUST be up first; see README ordering note) ---
+      LOOM_ISSUE_BACKEND: fleetdb
+      LOOM_FLEET_DB_URL: http://fleet-db:8080
+      LOOM_FLEET_DB_API_KEY: ${LOOM_FLEET_DB_API_KEY}
+      LOOM_FLEET_DB_ACTOR: ${FLEET_SEED_ACTOR:-loom-serve@podman-stack.local}
+      # --- fleet coordination over the shared redis ---
+      LOOM_FLEET_MODE: "true"
+      LOOM_REDIS_ADDR: redis:6379
+      LOOM_FLEET_API_KEY: ${LOOM_FLEET_API_KEY}
+      LOOM_WORKER_TOKEN: ${LOOM_WORKER_TOKEN}
+      # --- driver executor + task workers (embedded loops) ---
+      LOOM_DRIVER_EXECUTOR: "1"
+      LOOM_DRIVER_TASK_WORKER_CONCURRENCY: ${LOOM_DRIVER_TASK_WORKER_CONCURRENCY:-2}
+      LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS: ${LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS:-2}
+      # Token-only posture: no legacy node-wide bearer / lease identity in
+      # workflow envs. Runs authenticate with LOOM_RUN_TOKEN exclusively.
+      LOOM_DRIVER_LEGACY_AUTH_ENV: "0"
+      LOOM_RUN_TOKEN_SIGNING_KEY: ${LOOM_RUN_TOKEN_SIGNING_KEY}
+      # Sandbox: empty = process launcher; this capped container is the
+      # isolation boundary. "container" requires nested podman (native
+      # Linux hosts only — not macOS podman machine). See README.
+      LOOM_DRIVER_SANDBOX: ${LOOM_STACK_DRIVER_SANDBOX:-}
+      # --- A1 github-review-agent: codex-backed review TaskRun ---
+      # The embedded driver executor (above) runs the review TaskRun in THIS
+      # container. The codex CLI it spawns reads auth from the sanitized
+      # writable mirror the entrypoint builds from the read-only host ~/.codex
+      # mount (see serve-entrypoint.sh mirror_codex_rw + the volumes below).
+      #
+      # LOOM_DRIVER_TASK_RUNNER_CMD_JSON wraps the runner in `env CODEX_HOME=…`
+      # because the task bridge strips CODEX_* from the runner's inherited env
+      # (internal/driver/env.go subprocessEnvSensitive); the wrapper re-injects
+      # the writable CODEX_HOME for the runner and the codex child it spawns.
+      # Empty default = no codex runner wired (e.g. the acceptance suite, which
+      # overrides this with its deterministic stub in compose.e2e.yaml); the A1
+      # multi-container driver sets it to the codex runner command.
+      LOOM_DRIVER_TASK_RUNNER_CMD_JSON: ${LOOM_STACK_TASK_RUNNER_CMD_JSON:-}
+      LOOM_STACK_CODEX_RW_DIR: ${LOOM_STACK_CODEX_RW_DIR:-/home/node/.codex-rw}
+      # Flue agent model for codex-backed runs (passes the env allowlist —
+      # internal/driver/env.go subprocessEnvAllowExact). Empty default keeps
+      # non-A1 stacks unchanged.
+      LOOM_FLUE_AGENT_MODEL: ${LOOM_STACK_FLUE_AGENT_MODEL:-}
+      # --- connectors ---
+      LOOM_CONNECTOR_VAULT_KEY: ${LOOM_CONNECTOR_VAULT_KEY}
+    networks: [loom-stack]
+    ports:
+      - "127.0.0.1:${LOOM_STACK_SERVE_PORT:-18282}:8080"
+    volumes:
+      - loom-data:/home/node/.loom
+      - loom-work:/work
+      # The A1 codex review runner needs the host ~/.codex mounted read-only at
+      # /home/node/.codex (the entrypoint mirrors it into a writable CODEX_HOME,
+      # never mutating the host copy). That bind is supplied by the A1-only
+      # overlay compose.codex.yaml (layered by the multi-container review
+      # driver), NOT here — the base stack and the acceptance suite must boot
+      # without a host ~/.codex dependency.
+    mem_limit: 2g
+    cpus: 2.0
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+
+  # Remote worker(s): same binary, `loom worker` route. Scale with
+  #   podman compose up -d --scale worker=2
+  # Restarts on failure because the workspace it registers against is
+  # created by the driver script slightly after serve turns healthy.
+  worker:
+    image: localhost/loom-stack/loom-worker:latest
+    depends_on:
+      loom-serve:
+        condition: service_healthy
+    environment:
+      LOOM_WORKER_CONTROL_PLANE: http://loom-serve:8080
+      LOOM_WORKER_WORKSPACE: ${LOOM_STACK_WORKSPACE:-PODSTACK}
+      LOOM_WORKER_BACKEND: ${LOOM_STACK_WORKER_BACKEND:-}
+      LOOM_WORKER_TOKEN: ${LOOM_WORKER_TOKEN}
+      # LOOM_WORKER_AGENT is derived per-replica from the container hostname
+      # by worker-entrypoint.sh unless set here.
+    networks: [loom-stack]
+    restart: on-failure:10
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+
+  stub-upstream:
+    image: localhost/loom-stack/stub-upstream:latest
+    environment:
+      STUB_WEBHOOK_SECRET: ${LOOM_STACK_STUB_SECRET:-}
+      STUB_MAX_REQUESTS: "200"
+    networks: [loom-stack]
+    ports:
+      - "127.0.0.1:${LOOM_STACK_STUB_PORT:-18299}:8080"
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s

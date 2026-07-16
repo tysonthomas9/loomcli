@@ -20,15 +20,17 @@
 }
 
 .input {
+  /* Aether search: pill, slightly-elevated fill, amber focus ring */
   width: 100%;
-  padding: 6px 12px;
+  height: 36px;
+  padding: 0 14px;
   padding-left: 34px; /* icon offset */
   font-family: var(--font-family-base);
   font-size: 14px;
   color: var(--color-text-primary);
-  background-color: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  background-color: var(--color-bg-active);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-full);
   transition:
     border-color var(--transition-fast),
     background-color var(--transition-fast),
@@ -53,13 +55,12 @@
   background-color: var(--color-bg-hover);
 }
 
-/* Focus state */
+/* Focus state — Aether amber focus border */
 .input:focus {
   outline: none;
-  border-color: var(--color-primary);
-  background-color: var(--color-bg);
-  box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--color-primary) 20%, transparent);
+  border-color: var(--color-warning);
+  background-color: var(--color-bg-active);
+  box-shadow: none;
 }
 
 .searchInput:focus-within .icon {

@@ -5,13 +5,17 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
+import { HtmlDesignRenderer } from "./HtmlDesignRenderer";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import styles from "./DesignPanel.module.css";
 
 export interface DesignPanelProps {
   /** Markdown design content */
   content: string | null | undefined;
+  /** Durable format from FleetDB artifact metadata. */
+  format?: "markdown" | "html" | string | undefined;
   /** Additional CSS class name */
   className?: string;
 }
@@ -22,18 +26,40 @@ interface Section {
 }
 
 /**
- * Split markdown content into sections delimited by H2 headings.
+ * Match an HTML `<h2>...</h2>` heading occupying a whole line.
+ * Captures the inner content (which may contain nested inline tags).
+ */
+const HTML_H2_RE = /^\s*<h2(?:\s[^>]*)?>(.*?)<\/h2>\s*$/i;
+
+/**
+ * Extract a section heading from a line, recognizing both the Markdown
+ * `## ` syntax and a whole-line HTML `<h2>` element.
+ */
+function matchHeading(line: string): string | null {
+  const mdMatch = line.match(/^## (.+?)\s*$/);
+  if (mdMatch) {
+    return mdMatch[1] ?? "";
+  }
+  const htmlMatch = line.match(HTML_H2_RE);
+  if (htmlMatch) {
+    return (htmlMatch[1] ?? "").replace(/<[^>]+>/g, "").trim();
+  }
+  return null;
+}
+
+/**
+ * Split Markdown or HTML design content into sections delimited by H2s.
  * Content before the first H2 becomes a section with an empty heading.
  */
-function splitIntoSections(markdown: string): Section[] {
+export function splitIntoSections(markdown: string): Section[] {
   const lines = markdown.split("\n");
   const sections: Section[] = [];
   let currentHeading = "";
   let currentLines: string[] = [];
 
   for (const line of lines) {
-    const h2Match = line.match(/^## (.+?)\s*$/);
-    if (h2Match) {
+    const heading = matchHeading(line);
+    if (heading !== null) {
       // Save previous section if it has content
       if (currentLines.length > 0 || currentHeading) {
         sections.push({
@@ -41,7 +67,7 @@ function splitIntoSections(markdown: string): Section[] {
           content: currentLines.join("\n").trim(),
         });
       }
-      currentHeading = h2Match[1] ?? "";
+      currentHeading = heading;
       currentLines = [];
     } else {
       currentLines.push(line);
@@ -65,6 +91,7 @@ function splitIntoSections(markdown: string): Section[] {
  */
 export function DesignPanel({
   content,
+  format,
   className,
 }: DesignPanelProps): JSX.Element {
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -72,16 +99,23 @@ export function DesignPanel({
     () => new Set(),
   );
 
+  // Compatibility only for legacy inline HTML that predates format metadata.
+  const renderAsHTML =
+    format === "html" ||
+    (!format &&
+      /^\s*<(?:h[1-6]|p|ul|ol|div|section|table|pre|svg|figure)\b/i.test(
+        content ?? "",
+      ));
   const sections = useMemo(
-    () => (content ? splitIntoSections(content) : []),
-    [content],
+    () => (content && !renderAsHTML ? splitIntoSections(content) : []),
+    [content, renderAsHTML],
   );
-
   const hasH2Sections = sections.some((s) => s.heading !== "");
 
   // Reset collapsed sections when content changes (e.g., different issue selected)
   useEffect(() => {
     setCollapsedSections(new Set());
+    setIsFullscreen(false);
   }, [content]);
 
   // Body scroll lock for fullscreen mode — save and restore previous value
@@ -109,9 +143,13 @@ export function DesignPanel({
     return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [isFullscreen]);
 
-  const handleToggleFullscreen = useCallback(() => {
-    setIsFullscreen((prev) => !prev);
-  }, []);
+  const handleToggleFullscreen = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+      setIsFullscreen((prev) => !prev);
+    },
+    [],
+  );
 
   const handleToggleSection = useCallback((index: number) => {
     setCollapsedSections((prev) => {
@@ -164,7 +202,7 @@ export function DesignPanel({
     );
   }
 
-  return (
+  const panel = (
     <div className={rootClassName} data-testid="design-panel">
       <div className={styles.designHeader}>
         <h3 className={styles.designTitle}>Design</h3>
@@ -192,66 +230,74 @@ export function DesignPanel({
         </button>
       </div>
       <div className={styles.scrollContainer}>
-        {hasH2Sections
-          ? sections.map((section, index) => {
-              if (!section.heading) {
-                // Content before first H2 — render without collapse
-                return section.content ? (
-                  <MarkdownRenderer
-                    key={`preamble-${index}`}
-                    content={section.content}
-                  />
-                ) : null;
-              }
-
-              const isExpanded = !collapsedSections.has(index);
-              return (
-                <div
-                  key={`section-${index}`}
-                  data-testid="design-panel-section"
-                >
-                  <button
-                    type="button"
-                    className={styles.sectionHeader}
-                    onClick={() => handleToggleSection(index)}
-                    aria-expanded={isExpanded}
-                  >
-                    <span className={styles.sectionHeadingText}>
-                      {section.heading}
-                    </span>
-                    <svg
-                      className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ""}`}
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      aria-hidden="true"
-                    >
-                      <path
-                        d="M6 4l4 4-4 4"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                  {isExpanded && section.content && (
-                    <div className={styles.sectionContent}>
-                      <MarkdownRenderer content={section.content} />
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          : // No H2 headings — render as single block
-            sections.map((section, index) =>
-              section.content ? (
+        {renderAsHTML ? (
+          <HtmlDesignRenderer content={content} />
+        ) : hasH2Sections ? (
+          sections.map((section, index) => {
+            if (!section.heading) {
+              // Content before first H2 — render without collapse
+              return section.content ? (
                 <MarkdownRenderer
-                  key={`block-${index}`}
+                  key={`preamble-${index}`}
                   content={section.content}
                 />
-              ) : null,
-            )}
+              ) : null;
+            }
+
+            const isExpanded = !collapsedSections.has(index);
+            return (
+              <div key={`section-${index}`} data-testid="design-panel-section">
+                <button
+                  type="button"
+                  className={styles.sectionHeader}
+                  onClick={() => handleToggleSection(index)}
+                  aria-expanded={isExpanded}
+                >
+                  <span className={styles.sectionHeadingText}>
+                    {section.heading}
+                  </span>
+                  <svg
+                    className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ""}`}
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M6 4l4 4-4 4"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                {isExpanded && section.content && (
+                  <div className={styles.sectionContent}>
+                    <MarkdownRenderer content={section.content} />
+                  </div>
+                )}
+              </div>
+            );
+          })
+        ) : (
+          sections.map((section, index) =>
+            section.content ? (
+              <MarkdownRenderer
+                key={`block-${index}`}
+                content={section.content}
+              />
+            ) : null,
+          )
+        )}
       </div>
     </div>
   );
+
+  // Portal fullscreen to document.body so fixed positioning isn't clipped by
+  // the issue panel's transform/overflow ancestors.
+  if (isFullscreen) {
+    return createPortal(panel, document.body);
+  }
+
+  return panel;
 }

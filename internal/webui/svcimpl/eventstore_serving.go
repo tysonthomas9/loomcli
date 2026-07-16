@@ -41,11 +41,7 @@ func eventStoreHasTranscript(store *sessions.Store, sessionID string) bool {
 // loom's serving DTO. The public fields are identical; the wrapper's internal
 // Source/NativeID/SchemaVersion are not part of loom's Event.
 func loomEvent(e hwtranscript.Event) transcript.Event {
-	return transcript.Event{
-		Seq: e.Seq, Timestamp: e.Timestamp, Role: e.Role, Type: e.Type, Text: e.Text,
-		ToolName: e.ToolName, ToolUseID: e.ToolUseID, ToolInput: e.ToolInput,
-		Output: e.Output, UUID: e.UUID,
-	}
+	return transcript.FromWrapper(e)
 }
 
 // eventStoreParentEvents returns the PARENT-conversation events (empty

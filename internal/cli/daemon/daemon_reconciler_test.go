@@ -1,7 +1,13 @@
 package daemon
 
 import (
+	"context"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestDiffAgents_NoChanges(t *testing.T) {
@@ -19,6 +25,45 @@ func TestDiffAgents_NoChanges(t *testing.T) {
 	if len(modified) != 0 {
 		t.Errorf("expected 0 modified, got %d", len(modified))
 	}
+}
+
+func TestIncludeRoleConfigChanges_ReconcilesAssignedAgents(t *testing.T) {
+	agents := []AgentEntry{{Worktree: "agent1", Role: "operator"}}
+
+	t.Run("worker to interactive drains worker", func(t *testing.T) {
+		oldRoles := map[string]RoleConfig{"operator": {Kind: "worker", PromptFile: "worker.md"}}
+		newRoles := map[string]RoleConfig{"operator": {Kind: "interactive", PromptFile: "worker.md"}}
+		got := includeRoleConfigChanges(oldRoles, newRoles, agents, agents, nil)
+		if len(got) != 1 || got[0].Worktree != "agent1" {
+			t.Fatalf("modified = %#v, want agent1", got)
+		}
+	})
+
+	t.Run("interactive to worker starts worker", func(t *testing.T) {
+		oldRoles := map[string]RoleConfig{"operator": {Kind: "interactive", PromptFile: "worker.md"}}
+		newRoles := map[string]RoleConfig{"operator": {Kind: "worker", PromptFile: "worker.md"}}
+		got := includeRoleConfigChanges(oldRoles, newRoles, agents, agents, nil)
+		if len(got) != 1 || got[0].Worktree != "agent1" {
+			t.Fatalf("modified = %#v, want agent1", got)
+		}
+	})
+
+	t.Run("worker prompt change restarts worker", func(t *testing.T) {
+		oldRoles := map[string]RoleConfig{"operator": {Kind: "worker", PromptFile: "old.md"}}
+		newRoles := map[string]RoleConfig{"operator": {Kind: "worker", PromptFile: "new.md"}}
+		got := includeRoleConfigChanges(oldRoles, newRoles, agents, agents, nil)
+		if len(got) != 1 || got[0].Worktree != "agent1" {
+			t.Fatalf("modified = %#v, want agent1", got)
+		}
+	})
+
+	t.Run("interactive prompt change does not touch daemon", func(t *testing.T) {
+		oldRoles := map[string]RoleConfig{"operator": {Kind: "interactive", PromptFile: "old.md"}}
+		newRoles := map[string]RoleConfig{"operator": {Kind: "interactive", PromptFile: "new.md"}}
+		if got := includeRoleConfigChanges(oldRoles, newRoles, agents, agents, nil); len(got) != 0 {
+			t.Fatalf("modified = %#v, want none", got)
+		}
+	})
 }
 
 func TestDiffAgents_Added(t *testing.T) {
@@ -356,6 +401,103 @@ func TestComputeConfigHash_AgentChanges(t *testing.T) {
 	h2 := computeConfigHash(dc2)
 	if h1 == h2 {
 		t.Error("expected different hashes when agents differ")
+	}
+}
+
+func TestModifiedAgentsToDrain_DefersActiveEphemeralTask(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "ws",
+		Name:         "worker",
+		RoleName:     "task",
+		Mode:         domain.AgentModeEphemeral,
+	}); err != nil {
+		t.Fatalf("create worker: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "ws",
+		SessionID:    "sess-1",
+		AgentID:      "worker",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	d := &Daemon{
+		sup: &supervisor.Supervisor{
+			WorkspaceID: "ws",
+		},
+		store: st,
+	}
+
+	got := d.modifiedAgentsToDrain([]AgentEntry{{
+		Worktree:     "worker",
+		Role:         "task",
+		Mode:         domain.AgentModeEphemeral,
+		DesiredState: domain.AgentDesiredRunning,
+	}})
+	if len(got) != 0 {
+		t.Fatalf("modifiedAgentsToDrain returned %d entries, want 0 while ephemeral task is active", len(got))
+	}
+}
+
+func TestModifiedAgentsToDrain_DrainsCompletedEphemeralTask(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "ws",
+		Name:         "worker",
+		RoleName:     "task",
+		Mode:         domain.AgentModeEphemeral,
+	}); err != nil {
+		t.Fatalf("create worker: %v", err)
+	}
+	stopped := domain.AgentStateStopped
+	if _, err := st.Agents().Update(ctx, "ws", "worker", store.AgentUpdate{State: &stopped}); err != nil {
+		t.Fatalf("stop worker: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "ws",
+		SessionID:    "sess-1",
+		AgentID:      "worker",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create completed session: %v", err)
+	}
+
+	d := &Daemon{
+		sup: &supervisor.Supervisor{
+			WorkspaceID: "ws",
+		},
+		store: st,
+	}
+
+	entries := []AgentEntry{{
+		Worktree:     "worker",
+		Role:         "task",
+		Mode:         domain.AgentModeEphemeral,
+		DesiredState: domain.AgentDesiredStopped,
+	}}
+	got := d.modifiedAgentsToDrain(entries)
+	if len(got) != 1 || got[0].Worktree != "worker" {
+		t.Fatalf("modifiedAgentsToDrain = %#v, want completed worker to drain", got)
+	}
+}
+
+func TestReconcilerLiveAgentCommandStatusTreatsEmptyAsLive(t *testing.T) {
+	if !liveAgentCommandStatus("") {
+		t.Fatal("empty agent command status should be live for legacy fleet-db rows")
+	}
+	if !liveAgentCommandStatus(domain.AgentCommandAcked) {
+		t.Fatal("acked agent command status should be live")
+	}
+	if liveAgentCommandStatus(domain.AgentCommandSucceeded) {
+		t.Fatal("succeeded agent command status should not be live")
 	}
 }
 

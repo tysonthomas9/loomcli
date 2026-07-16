@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	storepkg "github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 
@@ -28,14 +29,10 @@ func testSessionWorkspaceStore(t *testing.T, dir string) storepkg.Store {
 	if _, err := st.Workspaces().Create(context.Background(), storepkg.WorkspaceCreate{Key: "test-ws", Name: "test-ws"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if err := bootstrap.WithStateLock(func() error {
-		sc, err := bootstrap.LoadStateCache()
-		if err != nil {
-			return err
-		}
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		sc.Workspaces["test-ws"] = bootstrap.WorkspaceLocalState{Path: dir}
 		sc.LastWorkspace = "test-ws"
-		return bootstrap.SaveStateCache(sc)
+		return nil
 	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
@@ -317,7 +314,7 @@ func TestSessionRouteMigration_WorkspaceScopedTranscriptEndpoint(t *testing.T) {
 	if err := os.WriteFile(nativePath, payload, 0o600); err != nil {
 		t.Fatalf("write native: %v", err)
 	}
-	if err := sessStore.SyncNativeTranscript(sess.SessionID(), nativePath); err != nil {
+	if err := sessStore.SyncNativeTranscript(sess.SessionID(), nativePath, sessions.TranscriptFormatRaw); err != nil {
 		t.Fatalf("SyncNativeTranscript: %v", err)
 	}
 

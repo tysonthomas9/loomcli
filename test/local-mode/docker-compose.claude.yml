@@ -1,0 +1,37 @@
+# Claude override for the local-mode dogfood stack.
+#
+# Usage:
+#   make local-mode-claude-up
+#
+# Auth: mounts the host CLAUDE_HOME (default ~/.claude) read-only at /claude-host;
+# the entrypoint copies .credentials.json into the container's writable /root/.claude.
+#
+# macOS gotcha: Claude Code stores the LIVE OAuth token in the macOS Keychain, and
+# ~/.claude/.credentials.json is often a STALE copy (expired token -> 401 in the
+# container). Export the live token into a fresh, podman-shared CLAUDE_HOME first:
+#   mkdir -p ~/.claude-loom-fresh
+#   security find-generic-password -s "Claude Code-credentials" -w \
+#     > ~/.claude-loom-fresh/.credentials.json
+#   LOCAL_MODE_CLAUDE_HOME=~/.claude-loom-fresh make local-mode-claude-up
+# (Put it under $HOME, not /tmp: the podman macOS VM shares /Users, not /tmp.)
+
+services:
+  loom-local:
+    image: ${LOCAL_MODE_LOOM_CLAUDE_IMAGE:-loomcli-local-mode-loom-claude:latest}
+    build:
+      args:
+        INSTALL_CLAUDE: "true"
+        CLAUDE_CLI_VERSION: "${LOCAL_MODE_CLAUDE_CLI_VERSION:-latest}"
+    environment:
+      LOOM_BACKEND: claude
+      LOOM_LOCAL_MODE_BACKEND: claude
+      LOOM_LOCAL_MODE_PLAN_AGENT: claude-planner
+      LOOM_LOCAL_MODE_CODE_AGENT: claude-coder
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: LOCALMODE-2
+      LOOM_LOCAL_MODE_CODE_TASK_ID: LOCALMODE-3
+      # Phase U (opt-in): route the daemon execution leaf through the bundled TS
+      # runner. Default empty = the Go path. Enable with:
+      #   LOOM_DAEMON_LEAF=ts make local-mode-claude-up
+      LOOM_DAEMON_LEAF: "${LOOM_DAEMON_LEAF:-}"
+    volumes:
+      - ${LOCAL_MODE_CLAUDE_HOME:-${HOME}/.claude}:/claude-host:ro

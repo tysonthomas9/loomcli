@@ -36,7 +36,10 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	ap.Mu.Unlock()
 
 	agentBackend := s.GetEffectiveBackend(ap)
-	cmd := buildAgentExecCmd(ap, agentBackend, epicID)
+	cmd, err := buildAgentExecCmd(ap, agentBackend, epicID)
+	if err != nil {
+		return nil, err
+	}
 
 	cmd.Dir = ap.WorktreePath
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -80,7 +83,18 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
-func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) *exec.Cmd {
+// loomExecutablePath resolves the loom binary that agent workers re-exec.
+// It is a seam for tests: under `go test`, os.Executable() is the test binary
+// itself, so spawning it would recursively run the whole test suite — every
+// spawned "agent" spawns more agents (fork bomb). Tests override this to a
+// harmless stub; see TestMain in main_test.go.
+var loomExecutablePath = os.Executable
+
+func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) (*exec.Cmd, error) {
+	loomPath, err := loomExecutablePath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve loom executable: %w", err)
+	}
 	if BuiltInRoles[ap.Entry.Role] {
 		args := []string{ap.Entry.Role, ap.WorktreePath, "--auto", "--daemon-mode"}
 		if backend != "" {
@@ -89,10 +103,14 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) *exec.Cmd {
 		if epicID != "" {
 			args = append(args, "--parent", epicID)
 		}
-		return exec.Command("loom", args...) //nolint:gosec // G204: intentional loom subprocess launch
+		return exec.Command(loomPath, args...), nil //nolint:gosec // G204: intentional loom subprocess launch
 	}
 
-	args := []string{"agent", ap.WorktreePath, "--prompt", ap.RoleConfig.PromptFile, "--auto", "--daemon-mode"}
+	promptFile := strings.TrimSpace(ap.RoleConfig.PromptFile)
+	if promptFile == "" {
+		return nil, fmt.Errorf("custom role %q missing prompt_file", ap.Entry.Role)
+	}
+	args := []string{"agent", ap.WorktreePath, "--prompt", promptFile, "--auto", "--daemon-mode"}
 	if ap.RoleConfig.TaskFilter != "" {
 		args = append(args, "--task-filter", ap.RoleConfig.TaskFilter)
 	}
@@ -102,7 +120,7 @@ func buildAgentExecCmd(ap *AgentProcess, backend, epicID string) *exec.Cmd {
 	if epicID != "" {
 		args = append(args, "--parent", epicID)
 	}
-	return exec.Command("loom", args...) //nolint:gosec // G204: intentional loom subprocess launch
+	return exec.Command(loomPath, args...), nil //nolint:gosec // G204: intentional loom subprocess launch
 }
 
 // appendRoleEnv adds role constraint env vars (allowed/denied tools, read-only, repo).
@@ -161,6 +179,7 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	}
 	leaseID := ap.AgentLeaseID
 	leaseToken := ap.AgentLeaseToken
+	parentSessionID := ap.ParentSessionID
 	ownershipLeaseID := ap.OwnershipLeaseID
 	ownershipFencingToken := ap.OwnershipFencingToken
 	ap.Mu.Unlock()
@@ -175,6 +194,9 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 			fmt.Sprintf("LOOM_AGENT_LEASE_ID=%s", leaseID),
 			fmt.Sprintf("LOOM_AGENT_LEASE_TOKEN=%s", leaseToken),
 		)
+	}
+	if parentSessionID != "" {
+		env = append(env, fmt.Sprintf("LOOM_ORCHESTRATOR_SESSION_ID=%s", parentSessionID))
 	}
 	if ownershipLeaseID != "" {
 		env = append(env,

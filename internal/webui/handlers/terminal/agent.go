@@ -110,7 +110,8 @@ func HandleGetAgentTerminalToken(svc service.AgentService) http.HandlerFunc {
 			userID = identity.UserID
 		}
 
-		token, err := svc.GenerateTerminalToken(r.Context(), agentName, userID)
+		wsID := middleware.WorkspaceFromContext(r.Context())
+		token, err := svc.GenerateTerminalToken(r.Context(), wsID, agentName, userID)
 		if err != nil {
 			var svcErr *service.ServiceError
 			status := http.StatusInternalServerError
@@ -245,17 +246,18 @@ func validateAgentWSRequest(w http.ResponseWriter, r *http.Request, manager *web
 	}
 
 	token := r.URL.Query().Get("token")
-	userID, err := auth.ValidateToken(token, agentLogTokenScope(agentName))
+	wsID := middleware.WorkspaceFromContext(r.Context())
+	userID, err := auth.ValidateToken(token, agentLogTokenScope(agentName), wsID)
 	if err != nil {
 		handler.WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
 			"success": false,
 			"error":   "terminal authentication failed",
 		})
-		slog.Warn("agent terminal auth failed", "agent", agentName, "err", err)
+		slog.Warn("agent terminal auth failed", "agent", agentName, "workspace", wsID, "err", err)
 		return "", false
 	}
 	if userID != "" {
-		slog.Info("agent terminal authenticated", "agent", agentName, "user_id", userID)
+		slog.Info("agent terminal authenticated", "agent", agentName, "workspace", wsID, "user_id", userID)
 	}
 	return agentName, true
 }

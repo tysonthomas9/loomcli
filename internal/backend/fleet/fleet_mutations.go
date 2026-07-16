@@ -12,6 +12,13 @@ import (
 // --- Dependency operations ---
 
 func (b *FleetBackend) AddDependency(ctx context.Context, params backend.DepAddParams) error {
+	if err := b.postDependency(ctx, params); err != nil {
+		return err
+	}
+	return b.waitForDependencyState(ctx, "AddDependency", params.FromID, params.ToID, true)
+}
+
+func (b *FleetBackend) postDependency(ctx context.Context, params backend.DepAddParams) error {
 	// fleet-db mounts dependency routes at /issues/{id}/deps (abbreviated)
 	// and its AddDependencyRequest names the dep kind "type" (not
 	// "dep_type"). Path + body tweaked to match.
@@ -26,7 +33,7 @@ func (b *FleetBackend) AddDependency(ctx context.Context, params backend.DepAddP
 	if _, err := b.exec(ctx, "AddDependency", "POST", "/issues/"+url.PathEscape(params.FromID)+"/deps", req); err != nil {
 		return err
 	}
-	return b.waitForDependencyState(ctx, "AddDependency", params.FromID, params.ToID, true)
+	return nil
 }
 
 func (b *FleetBackend) RemoveDependency(ctx context.Context, params backend.DepRemoveParams) error {

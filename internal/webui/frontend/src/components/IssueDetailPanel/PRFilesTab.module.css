@@ -1,0 +1,169 @@
+/**
+ * PRFilesTab styles — the design's pr-files / pr-filelist / pr-diffview
+ * two-pane layout on loom's dark skin.
+ */
+
+.wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.message {
+  padding: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* "Files changed N · +a −d" bar (design pr-actionbar). */
+.actionBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.filesLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.filesCount {
+  min-width: 22px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.stats {
+  display: inline-flex;
+  gap: 10px;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+}
+
+.add {
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.del {
+  color: var(--color-danger);
+  font-weight: 700;
+}
+
+/* Two panes: 240px file rail + flexible diff view (design pr-files). */
+.panes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.fileList {
+  flex: 0 0 240px;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-chrome);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fileRow:hover {
+  background: var(--color-bg-hover);
+}
+
+.fileRow[data-active] {
+  background: var(--color-bg-active);
+}
+
+.fileName {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileStat {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+}
+
+/* A/M/D/R badges (design badge-A/M/D). */
+.badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  border-radius: 4px;
+}
+
+.badge[data-status="A"] {
+  background: var(--color-success);
+}
+
+.badge[data-status="M"] {
+  background: var(--color-warning);
+  color: #171717;
+}
+
+.badge[data-status="D"] {
+  background: var(--color-danger);
+}
+
+.badge[data-status="R"] {
+  background: var(--color-primary);
+}
+
+.diffView {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 16px 18px;
+}
+
+.monoTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text);
+  word-break: break-all;
+}

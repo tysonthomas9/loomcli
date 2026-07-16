@@ -132,7 +132,7 @@ export interface FilterBarProps {
   /** Callback when repo selection changes */
   onRepoChange?: (repos: string[]) => void;
   /** Visual variant */
-  variant?: "header" | "panel";
+  variant?: "header" | "panel" | "menu";
   /** Testing id for the root element */
   testId?: string;
 }

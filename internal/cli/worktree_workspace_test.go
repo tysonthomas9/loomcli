@@ -13,6 +13,7 @@ import (
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 // setupWorkspaceConfig seeds the FleetDB-backed workspace projection and the
@@ -82,7 +83,13 @@ func setupWorkspaceConfig(t *testing.T, cfg *LoomConfig) {
 		}
 	}
 
-	if err := bootstrap.SaveStateCache(state); err != nil {
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		sc.LastWorkspace = state.LastWorkspace
+		for k, v := range state.Workspaces {
+			sc.Workspaces[k] = v
+		}
+		return nil
+	}); err != nil {
 		t.Fatalf("save state cache: %v", err)
 	}
 	if _, err := cfgpkg.TestingPrimeConfigCacheFromStore(ctx, st); err != nil {
@@ -166,6 +173,8 @@ func TestNewResolver_WorkspaceMode(t *testing.T) {
 }
 
 func TestNewResolver_WorkspaceMode_NoExplicitWorkspace(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	cfg := &LoomConfig{
 		Workspaces: map[string]WorkspaceConfig{
 			"zebra": {Path: "/tmp/z"},
@@ -184,6 +193,8 @@ func TestNewResolver_WorkspaceMode_NoExplicitWorkspace(t *testing.T) {
 }
 
 func TestNewResolver_InfersWorkspaceFromCWD(t *testing.T) {
+	testutil.ClearLoomEnv(t)
+
 	alphaDir := t.TempDir()
 	betaDir := t.TempDir()
 	childDir := filepath.Join(betaDir, "repo")

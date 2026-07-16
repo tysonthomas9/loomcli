@@ -33,7 +33,7 @@ func TestGenerateAndValidateToken_Success(t *testing.T) {
 	defer ta.Stop()
 
 	session := "test-session"
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -48,7 +48,7 @@ func TestGenerateAndValidateToken_Success(t *testing.T) {
 		t.Fatalf("token should have format payload.signature, got %d parts", len(parts))
 	}
 
-	if _, err := ta.ValidateToken(token, session); err != nil {
+	if _, err := ta.ValidateToken(token, session, "test-workspace"); err != nil {
 		t.Errorf("ValidateToken() error = %v, want nil", err)
 	}
 }
@@ -59,12 +59,12 @@ func TestValidateToken_WrongSession(t *testing.T) {
 	ta := newTestTerminalAuth()
 	defer ta.Stop()
 
-	token, err := ta.GenerateToken("session-a", "")
+	token, err := ta.GenerateToken("session-a", "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 
-	_, err = ta.ValidateToken(token, "session-b")
+	_, err = ta.ValidateToken(token, "session-b", "test-workspace")
 	if err == nil {
 		t.Fatal("ValidateToken() error = nil, want session mismatch error")
 	}
@@ -80,18 +80,18 @@ func TestValidateToken_Reuse(t *testing.T) {
 	defer ta.Stop()
 
 	session := "reuse-test"
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 
 	// First use: success
-	if _, err := ta.ValidateToken(token, session); err != nil {
+	if _, err := ta.ValidateToken(token, session, "test-workspace"); err != nil {
 		t.Fatalf("first ValidateToken() error = %v, want nil", err)
 	}
 
 	// Second use: must fail
-	_, err = ta.ValidateToken(token, session)
+	_, err = ta.ValidateToken(token, session, "test-workspace")
 	if err == nil {
 		t.Fatal("second ValidateToken() error = nil, want 'token already used'")
 	}
@@ -107,7 +107,7 @@ func TestValidateToken_TamperedSignature(t *testing.T) {
 	defer ta.Stop()
 
 	session := "tamper-sig"
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -120,7 +120,7 @@ func TestValidateToken_TamperedSignature(t *testing.T) {
 	// Flip a character in the signature to tamper with it
 	tampered := parts[0] + "." + "AAAA" + parts[1][4:]
 
-	_, err = ta.ValidateToken(tampered, session)
+	_, err = ta.ValidateToken(tampered, session, "test-workspace")
 	if err == nil {
 		t.Fatal("ValidateToken() error = nil for tampered signature, want error")
 	}
@@ -136,7 +136,7 @@ func TestValidateToken_TamperedPayload(t *testing.T) {
 	defer ta.Stop()
 
 	session := "tamper-payload"
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -168,7 +168,7 @@ func TestValidateToken_TamperedPayload(t *testing.T) {
 	tampered := modifiedB64 + "." + parts[1]
 
 	// Validate with the original session - signature won't match
-	_, err = ta.ValidateToken(tampered, session)
+	_, err = ta.ValidateToken(tampered, session, "test-workspace")
 	if err == nil {
 		t.Fatal("ValidateToken() error = nil for tampered payload, want error")
 	}
@@ -177,7 +177,7 @@ func TestValidateToken_TamperedPayload(t *testing.T) {
 	}
 
 	// Validate with the hacked session - signature still won't match
-	_, err = ta.ValidateToken(tampered, "hacked-session")
+	_, err = ta.ValidateToken(tampered, "hacked-session", "test-workspace")
 	if err == nil {
 		t.Fatal("ValidateToken() error = nil for tampered payload with matching session, want error")
 	}
@@ -196,12 +196,12 @@ func TestValidateToken_Expired(t *testing.T) {
 	session := "expired-test"
 
 	// Generate a valid token and validate immediately — should succeed
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 
-	_, err = ta.ValidateToken(token, session)
+	_, err = ta.ValidateToken(token, session, "test-workspace")
 	if err != nil {
 		t.Fatalf("ValidateToken() should succeed for fresh token: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestValidateToken_Malformed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := ta.ValidateToken(tt.token, "any-session")
+			_, err := ta.ValidateToken(tt.token, "any-session", "test-workspace")
 			if err == nil {
 				t.Errorf("ValidateToken(%q) = nil, want error", tt.token)
 			} else if tt.want != "" && !strings.Contains(err.Error(), tt.want) {
@@ -269,18 +269,18 @@ func TestSingleUse_EnforcesNonceReplay(t *testing.T) {
 	defer ta.Stop()
 
 	session := "replay-test"
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 
 	// First use: success
-	if _, err := ta.ValidateToken(token, session); err != nil {
+	if _, err := ta.ValidateToken(token, session, "test-workspace"); err != nil {
 		t.Fatalf("first ValidateToken() should succeed: %v", err)
 	}
 
 	// Second use: must fail
-	_, err = ta.ValidateToken(token, session)
+	_, err = ta.ValidateToken(token, session, "test-workspace")
 	if err == nil {
 		t.Fatal("second ValidateToken() should fail (token already used)")
 	}
@@ -304,7 +304,7 @@ func TestConcurrentGenerateToken(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			token, err := ta.GenerateToken("concurrent-session", "")
+			token, err := ta.GenerateToken("concurrent-session", "test-workspace", "")
 			tokens[idx] = token
 			errs[idx] = err
 		}(i)
@@ -339,7 +339,7 @@ func TestConcurrentValidateToken(t *testing.T) {
 	defer ta.Stop()
 
 	session := "concurrent-validate"
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -352,7 +352,7 @@ func TestConcurrentValidateToken(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			_, results[idx] = ta.ValidateToken(token, session)
+			_, results[idx] = ta.ValidateToken(token, session, "test-workspace")
 		}(i)
 	}
 
@@ -380,11 +380,11 @@ func TestNewTerminalAuth_StartsCleanly(t *testing.T) {
 	defer ta.Stop()
 
 	// Verify it works end-to-end
-	token, err := ta.GenerateToken("init-test", "")
+	token, err := ta.GenerateToken("init-test", "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
-	if _, err := ta.ValidateToken(token, "init-test"); err != nil {
+	if _, err := ta.ValidateToken(token, "init-test", "test-workspace"); err != nil {
 		t.Errorf("ValidateToken() error = %v", err)
 	}
 }
@@ -405,11 +405,11 @@ func TestNewTerminalAuth_UniqueSecrets(t *testing.T) {
 	defer ta2.Stop()
 
 	// A token from ta1 should not validate against ta2 (different secrets)
-	token, err := ta1.GenerateToken("cross-test", "")
+	token, err := ta1.GenerateToken("cross-test", "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
-	_, err = ta2.ValidateToken(token, "cross-test")
+	_, err = ta2.ValidateToken(token, "cross-test", "test-workspace")
 	if err == nil {
 		t.Error("token from ta1 should not validate against ta2 (different secrets)")
 	}
@@ -422,12 +422,12 @@ func TestGenerateToken_DifferentTokensPerCall(t *testing.T) {
 	defer ta.Stop()
 
 	session := "unique-test"
-	tok1, err := ta.GenerateToken(session, "")
+	tok1, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("first GenerateToken() error = %v", err)
 	}
 
-	tok2, err := ta.GenerateToken(session, "")
+	tok2, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("second GenerateToken() error = %v", err)
 	}
@@ -448,6 +448,7 @@ func TestHandleTerminalToken_ValidSession(t *testing.T) {
 	handler := hterminal.HandleTerminalToken(terminal.NewTerminalService(ta, nil, nil, nil, nil, time.Now()))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/token?session=my-session", nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-workspace"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -475,7 +476,7 @@ func TestHandleTerminalToken_ValidSession(t *testing.T) {
 	}
 
 	// The returned token should be valid for the same session
-	if _, err := ta.ValidateToken(token, "my-session"); err != nil {
+	if _, err := ta.ValidateToken(token, "my-session", "test-workspace"); err != nil {
 		t.Errorf("returned token should be valid: %v", err)
 	}
 }
@@ -615,12 +616,13 @@ func TestHandleTerminalWS_AuthValidToken(t *testing.T) {
 	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})
 
 	session := "auth-valid"
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?session="+session+"&token="+token, nil)
+	req = req.WithContext(middleware.WithWorkspace(req.Context(), "test-workspace"))
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -675,7 +677,7 @@ func TestHandleTerminalWS_AuthReusedTokenFails(t *testing.T) {
 	handler := hterminal.HandleTerminalWS(manager, ta, nil, "", nil, nil, nil, time.Time{})
 
 	session := "reuse-ws"
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
@@ -684,6 +686,7 @@ func TestHandleTerminalWS_AuthReusedTokenFails(t *testing.T) {
 
 	// First request: uses the token (will fail at WS upgrade, but auth passes)
 	req1 := httptest.NewRequest(http.MethodGet, url, nil)
+	req1 = req1.WithContext(middleware.WithWorkspace(req1.Context(), "test-workspace"))
 	w1 := httptest.NewRecorder()
 	handler.ServeHTTP(w1, req1)
 
@@ -693,6 +696,7 @@ func TestHandleTerminalWS_AuthReusedTokenFails(t *testing.T) {
 
 	// Second request: same token should be rejected as already used
 	req2 := httptest.NewRequest(http.MethodGet, url, nil)
+	req2 = req2.WithContext(middleware.WithWorkspace(req2.Context(), "test-workspace"))
 	w2 := httptest.NewRecorder()
 	handler.ServeHTTP(w2, req2)
 
@@ -711,12 +715,12 @@ func TestValidateToken_WrongSecret(t *testing.T) {
 	defer ta2.Stop()
 
 	session := "cross-secret"
-	token, err := ta1.GenerateToken(session, "")
+	token, err := ta1.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 
-	_, err = ta2.ValidateToken(token, session)
+	_, err = ta2.ValidateToken(token, session, "test-workspace")
 	if err == nil {
 		t.Fatal("ValidateToken() with wrong secret should fail")
 	}
@@ -786,12 +790,12 @@ func TestGenerateAndValidateToken_WithUserID(t *testing.T) {
 	defer ta.Stop()
 
 	session := "uid-test"
-	token, err := ta.GenerateToken(session, "user-123")
+	token, err := ta.GenerateToken(session, "test-workspace", "user-123")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 
-	userID, err := ta.ValidateToken(token, session)
+	userID, err := ta.ValidateToken(token, session, "test-workspace")
 	if err != nil {
 		t.Fatalf("ValidateToken() error = %v", err)
 	}
@@ -807,12 +811,12 @@ func TestGenerateAndValidateToken_EmptyUserID(t *testing.T) {
 	defer ta.Stop()
 
 	session := "no-uid-test"
-	token, err := ta.GenerateToken(session, "")
+	token, err := ta.GenerateToken(session, "test-workspace", "")
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
 
-	userID, err := ta.ValidateToken(token, session)
+	userID, err := ta.ValidateToken(token, session, "test-workspace")
 	if err != nil {
 		t.Fatalf("ValidateToken() error = %v", err)
 	}

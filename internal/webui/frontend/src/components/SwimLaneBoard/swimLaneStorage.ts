@@ -1,3 +1,24 @@
+const COMPACT_COLUMNS_KEY = "kanban-compact-columns";
+
+/**
+ * Load compact-columns preference from scoped localStorage.
+ */
+export function loadCompactColumns(wsId: string | null): boolean {
+  if (!wsId) return false;
+  return wsGet(wsId, COMPACT_COLUMNS_KEY) === "true";
+}
+
+/**
+ * Save compact-columns preference to scoped localStorage.
+ */
+export function saveCompactColumns(
+  compactColumns: boolean,
+  wsId: string | null,
+): void {
+  if (!wsId) return;
+  wsSet(wsId, COMPACT_COLUMNS_KEY, String(compactColumns));
+}
+
 /**
  * Persistence helpers for SwimLaneBoard collapsed-lane state.
  * Uses scoped localStorage keyed by workspace and groupBy field.

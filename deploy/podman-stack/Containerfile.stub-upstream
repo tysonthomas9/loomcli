@@ -1,0 +1,16 @@
+# Stub upstream for connector-egress tests: a tiny node http server that
+# records every request it receives and can replay them to the test driver
+# via GET /__requests. Workflows / connector deliveries inside the stack
+# target http://stub-upstream:8080.
+#
+# Build context: the staging dir assembled by build.sh (stub-upstream/).
+
+FROM docker.io/library/node:22-slim
+
+COPY stub-upstream/server.mjs /opt/stub/server.mjs
+
+ENV NODE_ENV=production
+USER node:node
+EXPOSE 8080
+
+ENTRYPOINT ["node", "/opt/stub/server.mjs"]

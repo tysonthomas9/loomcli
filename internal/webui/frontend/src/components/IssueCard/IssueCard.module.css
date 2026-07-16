@@ -4,25 +4,28 @@
  */
 
 .issueCard {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  display: block;
+  width: 100%;
+  min-width: 220px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 11px;
   background-color: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgb(17 24 39 / 7%);
+  border-radius: 8px;
+  box-shadow: none;
   cursor: default;
+  text-align: left;
+  overflow: hidden;
   transition:
-    box-shadow 0.15s ease,
     border-color var(--transition-fast),
-    background-color var(--transition-fast);
+    transform 0.12s ease;
 }
 
-/* Hover state for all cards */
+/* Hover state for all cards — Aether: lift + amber border */
 .issueCard:hover {
-  box-shadow: 0 4px 10px rgb(17 24 39 / 12%);
-  border-color: var(--color-border-hover);
+  border-color: var(--color-warning);
+  transform: translateY(-2px);
 }
 
 /* Interactive state when onClick is provided */
@@ -30,8 +33,33 @@
   cursor: pointer;
 }
 
+.issueCard[data-draggable="true"] {
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.issueCard[data-draggable="true"]:active,
+.issueCard[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+.issueCard[data-optimistic="pending"] {
+  animation: issue-card-optimistic-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes issue-card-optimistic-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .issueCard[role="button"]:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-bg-card);
 }
 
 .issueCard[role="button"]:focus {
@@ -55,41 +83,87 @@
   box-shadow: 0 0 0 1px var(--color-primary);
 }
 
-.header {
+.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.icons {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+/* Clipboard / variant chrome — reveal on hover so the resting card stays compact */
+.hoverReveal {
+  display: none;
+}
+
+.issueCard:hover .hoverReveal,
+.issueCard:focus-visible .hoverReveal {
+  display: inline-flex;
 }
 
 .id {
   font-family: var(--font-family-mono);
-  font-size: 0.7rem;
-  color: #9aa3af;
+  font-size: 0.6875rem; /* 11px — Aether ticket key */
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--color-text-tertiary);
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.typeIcon {
-  display: inline-flex;
+.copyIdButton {
+  display: none;
   flex-shrink: 0;
-  width: 14px;
-  height: 14px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  line-height: 0;
+  border-radius: var(--radius-sm);
+}
+
+.copyIdButton:hover {
+  color: var(--color-text-secondary);
+}
+
+.copyIdButton:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.ticketVariantIcon {
+  flex-shrink: 0;
+  color: inherit;
 }
 
 .priorityBadge {
   flex-shrink: 0;
   padding: 2px 6px;
   font-size: 0.7rem;
-  font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-bold);
   line-height: 1;
-  border-radius: 7px;
+  border-radius: 5px;
   color: var(--color-text-primary);
   border: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
 }
 
-/* Priority-specific badge colors (class-based for CSS Modules compatibility) */
+/* Priority-specific badge colors (class-based for CSS Modules compatibility).
+ * Light-background priorities (P1 amber, P2 yellow, P3 blue) use fixed dark
+ * text for legibility in BOTH themes (var(--color-text) is light in dark mode,
+ * which fails WCAG on these warm backgrounds). Dark-bg priorities keep white. */
 .priority0 {
   background-color: var(--color-priority-0);
   color: #ffffff;
@@ -98,18 +172,20 @@
 
 .priority1 {
   background-color: var(--color-priority-1);
-  color: #ffffff;
+  color: #171717;
   border-color: transparent;
 }
 
 .priority2 {
   background-color: var(--color-priority-2);
-  color: var(--color-text); /* Dark text for WCAG AA contrast */
+  color: #171717;
+  border-color: transparent;
 }
 
 .priority3 {
   background-color: var(--color-priority-3);
-  color: var(--color-text-primary);
+  color: #171717;
+  border-color: transparent;
 }
 
 .priority4 {
@@ -157,11 +233,12 @@
 }
 
 .title {
-  margin: 0;
-  font-size: 1rem;
+  margin: 14px 0;
+  font-size: 13px;
   font-weight: 400;
-  color: var(--color-text, #111827);
-  line-height: var(--line-height-normal);
+  color: var(--color-text-primary);
+  line-height: 1.4;
+  min-height: 36px;
   /* Truncate to 2 lines */
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -242,10 +319,12 @@
 }
 
 /* =================================
- * Review type badge styling
+ * Quarantined badge styling
+ * Shown on blocked issues carrying the loom:quarantined label —
+ * distinguishes a daemon-quarantined card from a dependency-blocked one
  * ================================= */
 
-.reviewTypeBadge {
+.quarantinedBadge {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -256,18 +335,29 @@
   line-height: 1;
   border-radius: var(--radius-sm);
   background-color: var(--color-warning-bg);
-  color: var(--color-text);
+  color: var(--color-warning);
+}
+
+/* =================================
+ * Review type badge styling
+ * ================================= */
+
+.reviewTypeBadge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  border-radius: 5px;
+  border: 1.4px solid transparent;
 }
 
 .reviewTypeBadge .reviewIcon {
   font-size: 0.7em;
   line-height: 1;
-}
-
-/* Plan review - needs plan approval */
-.reviewPlan {
-  background-color: var(--color-warning-bg);
-  color: var(--color-text);
 }
 
 /* Code review - needs code approval */
@@ -276,7 +366,7 @@
   color: var(--color-text);
 }
 
-/* Needs help - blocked and needs human assistance */
+/* Needs help - blocked and needs review */
 .reviewHelp {
   background-color: var(--color-danger-bg);
   color: var(--color-text);
@@ -352,24 +442,33 @@
  * Shows repo badge below title in multi-repo workspaces
  * ================================= */
 
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.footerLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 .ownerBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--color-text-muted);
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+  font-weight: 700;
+  /* Aether ticket assignee avatar: neutral card2 circle, not a vivid chip. */
+  color: var(--color-text-secondary);
   background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
   border-radius: 50%;
   flex-shrink: 0;
-}
-
-.cardFooter {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding-top: var(--space-1);
-  border-top: 1px solid color-mix(in srgb, var(--color-border) 40%, transparent);
 }

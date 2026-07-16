@@ -30,7 +30,11 @@ vi.mock("@/components", () => ({
     <div data-testid="error-boundary">{children}</div>
   ),
   IssueTable: (props: Record<string, unknown>) => (
-    <div data-testid="issue-table" data-sortable={String(props.sortable)} />
+    <div
+      data-testid="issue-table"
+      data-sortable={String(props.sortable)}
+      data-group-by-epic={String(props.groupByEpic)}
+    />
   ),
   BulkActionToolbar: () => <div data-testid="bulk-action-toolbar" />,
 }));
@@ -68,6 +72,13 @@ describe("TablePage", () => {
     render(<TablePage />);
     expect(
       screen.getByTestId("issue-table").getAttribute("data-sortable"),
+    ).toBe("true");
+  });
+
+  it("groups the list view by epic", () => {
+    render(<TablePage />);
+    expect(
+      screen.getByTestId("issue-table").getAttribute("data-group-by-epic"),
     ).toBe("true");
   });
 });

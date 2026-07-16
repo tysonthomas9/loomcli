@@ -4,9 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 func TestGetWorkspaceRuntimeDir_NoWorkspaceConfig(t *testing.T) {
+	testutil.ClearLoomEnv(t)
 	// No config file → no workspace config → returns "."
 	ResetWorkspaceRuntimeDirCache()
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
@@ -18,6 +21,7 @@ func TestGetWorkspaceRuntimeDir_NoWorkspaceConfig(t *testing.T) {
 }
 
 func TestGetWorkspaceRuntimeDir_HonorsRuntimeDirEnv(t *testing.T) {
+	testutil.ClearLoomEnv(t)
 	ResetWorkspaceRuntimeDirCache()
 	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", "/tmp/loom-runtime")
 
@@ -28,6 +32,7 @@ func TestGetWorkspaceRuntimeDir_HonorsRuntimeDirEnv(t *testing.T) {
 }
 
 func TestGetWorkspaceRuntimeDir_Workspace(t *testing.T) {
+	testutil.ClearLoomEnv(t)
 	// Config with workspace and default_workspace set → returns workspace path
 	ResetWorkspaceRuntimeDirCache()
 
@@ -49,6 +54,7 @@ func TestGetWorkspaceRuntimeDir_Workspace(t *testing.T) {
 }
 
 func TestGetWorkspaceRuntimeDir_NoExplicitWorkspace(t *testing.T) {
+	testutil.ClearLoomEnv(t)
 	// Config with workspaces but no explicit runtime workspace → returns "."
 	ResetWorkspaceRuntimeDirCache()
 
@@ -67,6 +73,7 @@ func TestGetWorkspaceRuntimeDir_NoExplicitWorkspace(t *testing.T) {
 }
 
 func TestGetWorkspaceRuntimeDir_InfersWorkspaceFromCWD(t *testing.T) {
+	testutil.ClearLoomEnv(t)
 	ResetWorkspaceRuntimeDirCache()
 
 	alphaDir := t.TempDir()
@@ -91,6 +98,7 @@ func TestGetWorkspaceRuntimeDir_InfersWorkspaceFromCWD(t *testing.T) {
 }
 
 func TestGetWorkspaceRuntimeDir_HonorsEnvWorkspace(t *testing.T) {
+	testutil.ClearLoomEnv(t)
 	ResetWorkspaceRuntimeDirCache()
 
 	cfg := &LoomConfig{
@@ -110,6 +118,7 @@ func TestGetWorkspaceRuntimeDir_HonorsEnvWorkspace(t *testing.T) {
 }
 
 func TestGetWorkspaceRuntimeDir_ConfigError(t *testing.T) {
+	testutil.ClearLoomEnv(t)
 	// Invalid config file → returns "."
 	ResetWorkspaceRuntimeDirCache()
 
@@ -126,6 +135,7 @@ func TestGetWorkspaceRuntimeDir_ConfigError(t *testing.T) {
 }
 
 func TestGetWorkspaceRuntimeDir_Cache(t *testing.T) {
+	testutil.ClearLoomEnv(t)
 	// Call twice → same result (sync.Once caches)
 	ResetWorkspaceRuntimeDirCache()
 
@@ -158,6 +168,7 @@ func TestGetWorkspaceRuntimeDir_Cache(t *testing.T) {
 }
 
 func TestResetWorkspaceRuntimeDirCache(t *testing.T) {
+	testutil.ClearLoomEnv(t)
 	// First call with workspace config
 	ResetWorkspaceRuntimeDirCache()
 

@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 //go:embed prompts/*.md
@@ -24,6 +25,7 @@ var promptFS embed.FS
 // promptTemplateData holds all template context fields for prompt rendering.
 type promptTemplateData struct {
 	AgentName         string
+	Role              string
 	WorkspaceBlock    string
 	EpicScope         string
 	SafetyBlock       string
@@ -37,6 +39,26 @@ type promptTemplateData struct {
 	TargetBranch      string
 	ConflictList      string
 	PushRef           string
+	DesignFormat      string
+}
+
+// resolveDesignFormat returns the design output format for planner prompts.
+// Only an explicit workspace setting of "html" switches the format; anything
+// else (nil workspace, empty, "markdown", unrecognized values) falls back to
+// "markdown" so plan generation never breaks on bad data.
+func resolveDesignFormat(workspace *config.WorkspaceConfig) string {
+	if workspace != nil && workspace.DesignFormat == "html" {
+		return "html"
+	}
+	return "markdown"
+}
+
+// BuiltinInteractivePrompt is a selectable built-in terminal-agent prompt.
+type BuiltinInteractivePrompt = domain.BuiltinInteractivePrompt
+
+// BuiltinInteractivePrompts returns the built-in interactive terminal prompts.
+func BuiltinInteractivePrompts() []BuiltinInteractivePrompt {
+	return domain.BuiltinInteractivePrompts()
 }
 
 // renderPrompt loads a template by name, checks for per-project override,
@@ -155,24 +177,51 @@ You are running in a parallel multi-agent environment. Follow these rules strict
 `
 }
 
-// buildTestStep returns the backend-aware test step content.
-func buildTestStep(backendName string) string {
+// backendCapabilities describes which prompt features a backend supports.
+// Builders branch on these capability fields rather than comparing backend
+// names, so adding a backend or capability only requires updating
+// capabilitiesFor.
+type backendCapabilities struct {
+	// supportsSubagentSpawn indicates the backend can spawn subagents via the
+	// Task tool (used for test-writing and code-review steps).
+	supportsSubagentSpawn bool
+	// supportsInspectReview indicates the backend supports the dedicated
+	// inspect-reviewer subagent step.
+	supportsInspectReview bool
+}
+
+// capabilitiesFor resolves a backend name to its prompt capabilities.
+// This is the single place backend names are mapped to capabilities.
+func capabilitiesFor(backendName string) backendCapabilities {
 	if backendName == "claude" {
+		return backendCapabilities{
+			supportsSubagentSpawn: true,
+			supportsInspectReview: true,
+		}
+	}
+	return backendCapabilities{}
+}
+
+// buildTestStep returns the capability-aware test step content.
+func buildTestStep(caps backendCapabilities) string {
+	if caps.supportsSubagentSpawn {
 		return `### Step 5: Write Tests (spawn agent)
 - Use the Task tool to spawn an agent to write tests
 - Prompt: 'Write unit tests for the changes made in [files]. Follow existing test patterns in the codebase.'
 - Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- For Go suites, isolate config state: run 'LOOM_CONFIG_DIR=$(mktemp -d) go test ./...' (or use scripts/test.sh, which isolates automatically)
 - If tests fail, fix the code or tests until they pass`
 	}
 	return `### Step 5: Write Tests
 - Write unit tests for your changes, following existing test patterns in the codebase
 - Verify tests pass by running the test command (e.g., 'go test ./...' or 'npm test')
+- For Go suites, isolate config state: run 'LOOM_CONFIG_DIR=$(mktemp -d) go test ./...' (or use scripts/test.sh, which isolates automatically)
 - If tests fail, fix the code or tests until they pass`
 }
 
-// buildReviewStep returns the backend-aware review step content.
-func buildReviewStep(backendName string) string {
-	if backendName == "claude" {
+// buildReviewStep returns the capability-aware review step content.
+func buildReviewStep(caps backendCapabilities) string {
+	if caps.supportsSubagentSpawn {
 		return `### Step 6: Code Review (spawn agent)
 - Use the Task tool with subagent_type='feature-dev:code-reviewer'
 - Prompt: 'Review the changes for this task. Check for bugs, security issues, code quality, and adherence to project conventions.'
@@ -184,9 +233,10 @@ func buildReviewStep(backendName string) string {
 - Document and fix all issues found`
 }
 
-// buildInspectReviewStep returns the inspect-reviewer step for Claude backends.
-func buildInspectReviewStep(backendName string) string {
-	if backendName == "claude" {
+// buildInspectReviewStep returns the inspect-reviewer step for backends that
+// support it.
+func buildInspectReviewStep(caps backendCapabilities) string {
+	if caps.supportsInspectReview {
 		return `### Step 6b: Inspect Review (spawn agent)
 - Use the Agent tool with subagent_type='inspect-reviewer'
 - Prompt: 'Review the latest commit on the current branch. Check for bugs, logic errors, security vulnerabilities, and code quality issues.'
@@ -218,6 +268,7 @@ func GeneratePlanningPrompt(agentName string, workspace *config.WorkspaceConfig,
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		ReadyJSON:      readyJSON,
 		ReadyFallback:  readyFallback,
+		DesignFormat:   resolveDesignFormat(workspace),
 	})
 
 	// Inject the prior-attempt checkpoint as a FALLBACK — skipped when a session
@@ -242,6 +293,7 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 		epicScope = fmt.Sprintf("\n**Epic scope: %s** — You MUST only select tasks from this epic. Do not work on tasks from other epics.\n", parentID)
 	}
 
+	caps := capabilitiesFor(backendName)
 	prompt := renderPrompt("task", promptTemplateData{
 		AgentName:         agentName,
 		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
@@ -249,9 +301,9 @@ func GenerateTaskPrompt(agentName string, workspace *config.WorkspaceConfig, par
 		SafetyBlock:       buildSafetyGuardrailsBlock(),
 		ReadyJSON:         readyJSON,
 		ReadyFallback:     readyFallback,
-		TestStep:          buildTestStep(backendName),
-		ReviewStep:        buildReviewStep(backendName),
-		InspectReviewStep: buildInspectReviewStep(backendName),
+		TestStep:          buildTestStep(caps),
+		ReviewStep:        buildReviewStep(caps),
+		InspectReviewStep: buildInspectReviewStep(caps),
 	})
 
 	// Inject the prior-attempt checkpoint as a FALLBACK — skipped when a session
@@ -268,6 +320,7 @@ func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.Wor
 		WorkspaceBlock: buildWorkspaceContextBlock(workspace),
 		SafetyBlock:    buildSafetyGuardrailsBlock(),
 		TaskID:         taskID,
+		DesignFormat:   resolveDesignFormat(workspace),
 	})
 	return injectCheckpointIfNotResuming(prompt)
 }
@@ -275,14 +328,15 @@ func GenerateFleetPlanningPrompt(agentName, taskID string, workspace *config.Wor
 // GenerateFleetTaskPrompt creates the prompt for a fleet implementation agent with a pre-assigned task.
 // Fleet workers receive their task from the Fleet API and skip task selection/claiming.
 func GenerateFleetTaskPrompt(agentName, taskID string, workspace *config.WorkspaceConfig, backendName string) string {
+	caps := capabilitiesFor(backendName)
 	prompt := renderPrompt("fleet_task", promptTemplateData{
 		AgentName:         agentName,
 		WorkspaceBlock:    buildWorkspaceContextBlock(workspace),
 		SafetyBlock:       buildSafetyGuardrailsBlock(),
 		TaskID:            taskID,
-		TestStep:          buildTestStep(backendName),
-		ReviewStep:        buildReviewStep(backendName),
-		InspectReviewStep: buildInspectReviewStep(backendName),
+		TestStep:          buildTestStep(caps),
+		ReviewStep:        buildReviewStep(caps),
+		InspectReviewStep: buildInspectReviewStep(caps),
 	})
 	return injectCheckpointIfNotResuming(prompt)
 }
@@ -309,6 +363,93 @@ func GenerateLeadPrompt() string {
 	return renderPrompt("lead", promptTemplateData{
 		SafetyBlock: buildSafetyGuardrailsBlock(),
 	})
+}
+
+// GenerateTerminalPrompt creates the base prompt for the interactive terminal
+// agent runtime. Empty promptFile preserves the built-in lead prompt; a custom
+// prompt file replaces that base and still receives the terminal safety rules.
+func GenerateTerminalPrompt(promptFile string) (string, error) {
+	promptFile = strings.TrimSpace(promptFile)
+	if promptFile == "" {
+		return GenerateLeadPrompt(), nil
+	}
+	if strings.HasPrefix(promptFile, "builtin:") {
+		id := strings.TrimSpace(strings.TrimPrefix(promptFile, "builtin:"))
+		if !isBuiltinInteractivePrompt(id) {
+			return "", fmt.Errorf("unknown built-in interactive prompt %q", id)
+		}
+		return renderPrompt(id, terminalPromptTemplateData()), nil
+	}
+	path, err := resolveTerminalPromptPath(promptFile)
+	if err != nil {
+		return "", err
+	}
+	agentName, role := terminalPromptIdentity()
+	prompt, err := LoadPromptTemplate(path, PromptData{
+		AgentName:    agentName,
+		WorktreeName: agentName,
+		Role:         role,
+	})
+	if err != nil {
+		return "", err
+	}
+	return prompt + "\n\n" + buildSafetyGuardrailsBlock(), nil
+}
+
+// GenerateTerminalPromptText uses literal inline text as the terminal-agent
+// base prompt and appends the standard safety guardrails exactly once. Inline
+// text is intentionally not parsed as a Go template.
+func GenerateTerminalPromptText(text string) (string, error) {
+	return text + "\n\n" + buildSafetyGuardrailsBlock(), nil
+}
+
+func isBuiltinInteractivePrompt(id string) bool {
+	return domain.IsBuiltinInteractivePrompt(id)
+}
+
+func terminalPromptTemplateData() promptTemplateData {
+	agentName, role := terminalPromptIdentity()
+	return promptTemplateData{
+		AgentName:   agentName,
+		Role:        role,
+		SafetyBlock: buildSafetyGuardrailsBlock(),
+	}
+}
+
+func terminalPromptIdentity() (agentName, role string) {
+	agentName = strings.TrimSpace(os.Getenv("LOOM_AGENT_NAME"))
+	if agentName == "" {
+		agentName = "lead"
+	}
+	role = strings.TrimSpace(os.Getenv("LOOM_AGENT_ROLE"))
+	if role == "" {
+		role = "lead"
+	}
+	return agentName, role
+}
+
+func resolveTerminalPromptPath(promptFile string) (string, error) {
+	promptFile = strings.TrimSpace(promptFile)
+	if filepath.IsAbs(promptFile) {
+		return promptFile, nil
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		candidate := filepath.Join(cwd, promptFile)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("resolve prompt file %q relative to cwd: %w", promptFile, statErr)
+		}
+	}
+	if ws, err := config.ResolveActiveWorkspace(); err == nil && ws != nil && strings.TrimSpace(ws.Path) != "" {
+		candidate := filepath.Join(ws.Path, promptFile)
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			return candidate, nil
+		} else if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("resolve prompt file %q relative to workspace %q: %w", promptFile, ws.Path, statErr)
+		}
+	}
+	return "", fmt.Errorf("prompt file %q not found relative to current directory or active workspace root", promptFile)
 }
 
 // injectCheckpointIfNotResuming adds the prior-attempt checkpoint to the prompt

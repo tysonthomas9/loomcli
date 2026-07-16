@@ -7,8 +7,8 @@ Follow this workflow EXACTLY for ONE task.
 {{ .WorkspaceBlock }}{{ .EpicScope }}{{ .SafetyBlock }}
 ### Step 1: Select ONE Task for Planning
 - Run this command to find tasks needing planning (no design yet OR needs revision):
-  {{ .ReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((.design == null or .design == "") or ((.labels // []) | index("needs-revision"))) | "\(.id) [\(.priority)] \(.title)"'
-- If jq fails, fallback: Run '{{ .ReadyFallback }}' and manually SKIP epics and tasks that already have a --design field (unless they have the 'needs-revision' label)
+  {{ .ReadyJSON }} | jq -r '.[] | select(.status == "open") | select((.issue_type == "epic") | not) | select((((.has_design // false) == false) and ((.design_artifact_id // "") == "") and ((.design // "") == "")) or ((.labels // []) | index("needs-revision"))) | "\(.id) [\(.priority)] \(.title)"'
+- If jq fails, fallback: Run '{{ .ReadyFallback }}' and manually SKIP epics and tasks that already have a design (the `has_design` flag, artifact reference, or inline body), unless they have the 'needs-revision' label
 - SKIP any task already 'in_progress' by checking 'loom data list --status in_progress'
 - IGNORE existing assignees - if status is 'open', the task is available to claim
 - Pick the HIGHEST PRIORITY task (P0 > P1 > P2 > P3 > P4)
@@ -48,7 +48,7 @@ Understand the big picture before designing a piece of it:
 #### 2b. Read Sibling Task Designs
 
 Check what other tasks in this epic have already decided:
-- Run: `loom data list --parent <epic-id> --output json | jq -r '.[] | select(.design and .design != "") | "\(.id) \(.title)"'`
+- Run: `loom data list --parent <epic-id> --output json | jq -r '.[] | select((.has_design == true) or ((.design_artifact_id // "") != "") or ((.design // "") != "")) | "\(.id) \(.title)"'`
 - For each sibling that has a design, run `loom data show <sibling-id>` and read its design
 - Extract and note:
   - **Naming conventions**: sentinel values, fallback constants, key prefixes
@@ -82,6 +82,12 @@ Then run a **repo-wide grep** for the primary pattern you're changing (e.g., the
 
 ### Step 3: Create a Detailed Plan
 Write a comprehensive plan that includes:
+{{- if eq .DesignFormat "html"}}
+
+**Design format: HTML.** Author the design as semantic HTML instead of Markdown: `<h2>` for section headings, `<p>` for prose, `<ul>`/`<li>` for lists, and `<pre><code>` for code or commands. Produce the same sections listed below (Summary, Technical Approach, Files to Create, Files to Modify, Dependencies, Edge Cases & Error Handling, Testing Strategy, etc.). Do NOT include an `<html>`, `<head>`, or `<body>` wrapper, and do NOT use inline styles or scripts.
+
+**Visual diagrams (use your judgment).** When a diagram would materially clarify the design — system architecture, component relationships, data/control flow, a state machine, or a sequence — embed a self-contained inline `<svg>` figure at the relevant point; the board renders SVG. Keep it simple and legible: use elements like `<rect>`, `<line>`, `<path>`, `<polyline>`, `<circle>`, and `<text>` with presentation attributes (e.g. `fill`, `stroke`, `stroke-width`) rather than a `style=` attribute, and set an explicit `width`, `height`, and `viewBox`. Do NOT use `<script>`, `<img>` or data-URI images, external image links, or mermaid — they will not render. Only include a diagram when it genuinely aids understanding; omit it for simple, mechanical tasks.
+{{- end}}
 
 #### 3a. Summary
 - One paragraph explaining what this task accomplishes
@@ -135,7 +141,7 @@ Write a comprehensive plan that includes:
 ### Step 4: Save the Plan
 Save your plan to the task's design field:
 ```
-loom data update <id> --design="<your complete plan here>"
+loom data update <id> --design="<your complete plan here>" --design-format={{ .DesignFormat }}
 ```
 
 IMPORTANT: Make sure the plan is complete and detailed enough that another agent

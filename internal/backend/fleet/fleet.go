@@ -49,6 +49,7 @@ type apiResponse struct {
 	Success bool              `json:"success"`
 	Data    json.RawMessage   `json:"data,omitempty"`
 	Error   string            `json:"error,omitempty"`
+	Code    string            `json:"code,omitempty"`
 	Meta    map[string]string `json:"-"` // populated from native dialect error.meta
 }
 
@@ -196,7 +197,7 @@ func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 	// Try envelope first.
 	var env apiResponse
 	envErr := json.Unmarshal(body, &env)
-	hasEnvelopeFields := envErr == nil && (env.Success || env.Error != "" || env.Data != nil)
+	hasEnvelopeFields := envErr == nil && (env.Success || env.Error != "" || env.Code != "" || env.Data != nil)
 	if hasEnvelopeFields {
 		return &env, nil
 	}
@@ -221,7 +222,12 @@ func parseFleetResponse(body []byte, statusCode int) (*apiResponse, error) {
 		} `json:"error"`
 	}
 	if json.Unmarshal(body, &errEnv) == nil && errEnv.Error.Message != "" {
-		return &apiResponse{Success: false, Error: errEnv.Error.Message, Meta: errEnv.Error.Meta}, nil
+		return &apiResponse{
+			Success: false,
+			Error:   errEnv.Error.Message,
+			Code:    errEnv.Error.Code,
+			Meta:    errEnv.Error.Meta,
+		}, nil
 	}
 
 	// Last resort: surface the raw body as the error string. If even THAT
@@ -343,6 +349,13 @@ func (b *FleetBackend) Get(ctx context.Context, id string) (*backend.IssueDetail
 	}
 	issue := wire.toIssue()
 	details := types.IssueDetails{Issue: issue}
+	// wire.parent() reads either the "parent_id" or "parent" JSON field;
+	// detailsToDetailData expects *types.IssueDetails.Parent to be set, so
+	// project it across explicitly. Without this, loom data show --output json
+	// returns parent:null even when fleet-db has the relationship recorded.
+	if parent := wire.parent(); parent != "" {
+		details.Parent = &parent
+	}
 	result := detailsToDetailData(&details)
 	result.IssueData.Labels = append([]string(nil), wire.Labels...)
 	result.IssueData.DependencyCount = wire.DependencyCount
@@ -368,16 +381,22 @@ func (b *FleetBackend) List(ctx context.Context, opts backend.ListOpts) ([]backe
 	if err := checkFleetUnsupportedFilters(opts); err != nil {
 		return nil, err
 	}
-	path := "/issues?" + listOptsToQuery(opts)
+	serverOpts := listServerOpts(opts)
+	path := "/issues?" + listOptsToQuery(serverOpts)
 	resp, err := b.exec(ctx, "List", "GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
-	return unmarshalIssueList(resp, "List")
+	issues, err := unmarshalIssueList(resp, "List")
+	if err != nil {
+		return nil, err
+	}
+	return filterListIssues(issues, opts), nil
 }
 
 func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	path := "/issues/ready?" + readyOptsToQuery(opts)
+	serverOpts := readyServerOpts(opts)
+	path := "/issues/ready?" + readyOptsToQuery(serverOpts)
 	resp, err := b.exec(ctx, "Ready", "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -389,24 +408,12 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 	if err != nil {
 		return nil, err
 	}
-	return readyIssuesToData(issues), nil
+	return filterReadyIssues(readyIssuesToData(issues), opts), nil
 }
 
-func (b *FleetBackend) Blocked(ctx context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
-	path := "/issues/blocked?" + blockedOptsToQuery(opts)
-	resp, err := b.exec(ctx, "Blocked", "GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-	if !hasData(resp) {
-		return []backend.IssueData{}, nil
-	}
-	return unmarshalBlockedIssueList(resp.Data, "Blocked")
-}
-
-// Stats builds StatsData from the fleet server's count endpoint with
-// group_by=status. ReadyIssues, EpicsEligibleForClosure, and AverageLeadTime
-// are unavailable until fleet-db adds server-side stats aggregation (fleet-08yg).
+// Stats builds lifecycle counts from fleet-db's status count endpoint and
+// canonical operational counts from FleetDB's computed ready/blocked/deferred
+// views.
 func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 	resp, err := b.exec(ctx, "Stats", "GET", "/issues/count?group_by=status", nil)
 	if err != nil {
@@ -420,16 +427,29 @@ func (b *FleetBackend) Stats(ctx context.Context) (*backend.StatsData, error) {
 		return nil, backend.ErrInternal("Stats", "unmarshal response", err)
 	}
 	groups := countResp.Groups
+	blocked, err := b.Blocked(ctx, backend.BlockedOpts{})
+	if err != nil {
+		return nil, err
+	}
+	deferred, err := b.Deferred(ctx, backend.DeferredOpts{})
+	if err != nil {
+		return nil, err
+	}
+	ready, err := b.Ready(ctx, backend.ReadyOpts{})
+	if err != nil {
+		return nil, err
+	}
 	return &backend.StatsData{
 		TotalIssues:      int(countResp.Total),
 		OpenIssues:       int(groups[string(types.StatusOpen)]),
 		InProgressIssues: int(groups[string(types.StatusInProgress)]),
 		ClosedIssues:     int(groups[string(types.StatusClosed)]),
-		BlockedIssues:    int(groups[string(types.StatusBlocked)]),
-		DeferredIssues:   int(groups[string(types.StatusDeferred)]),
+		BlockedIssues:    len(blocked),
+		DeferredIssues:   len(deferred),
+		ReadyIssues:      len(ready),
 		TombstoneIssues:  int(groups[string(types.StatusTombstone)]),
 		PinnedIssues:     int(groups[string(types.StatusPinned)]),
-		// ReadyIssues, EpicsEligibleForClosure, AverageLeadTime: 0 (fleet-08yg).
+		// EpicsEligibleForClosure, AverageLeadTime: 0 (fleet-08yg).
 		// StatusReview and StatusHooked counts are included in TotalIssues but have
 		// no dedicated StatsData field; they are silently omitted from per-status counts.
 	}, nil
@@ -511,6 +531,22 @@ func (b *FleetBackend) SearchIssues(ctx context.Context, query string, limit int
 // --- Mutation operations ---
 
 func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
+	result, err := b.createIssueOnce(ctx, params)
+	if err != nil && params.ExternalRef != "" && isCreateExternalRefUnsupported(err) {
+		result, err = b.createWithoutExternalRef(ctx, params)
+	}
+	if err != nil {
+		return result, err
+	}
+	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
+		// The issue itself was created; return it alongside the error so
+		// callers that inspect the partial result can still see the ID.
+		return result, err
+	}
+	return result, nil
+}
+
+func (b *FleetBackend) createIssueOnce(ctx context.Context, params backend.CreateParams) (*backend.IssueData, error) {
 	body := createParamsToBody(params)
 	apiResp, statusCode, respHeaders, err := b.doRequestHeaders(ctx, "POST", "/issues", body, params.IdempotencyHeaders())
 	if err != nil {
@@ -528,11 +564,6 @@ func (b *FleetBackend) Create(ctx context.Context, params backend.CreateParams) 
 	}
 	logIdempotencyResponse(respHeaders, issue.ID)
 	result := issueToData(&issue)
-	if err := b.addCreateDependencies(ctx, result.ID, params.Dependencies); err != nil {
-		// The issue itself was created; return it alongside the error so
-		// callers that inspect the partial result can still see the ID.
-		return &result, err
-	}
 	return &result, nil
 }
 
@@ -782,92 +813,6 @@ func parseOptionalFleetTime(raw *string) (time.Time, error) {
 		return t, nil
 	}
 	return time.Time{}, backend.ErrValidation("Update", "defer_until must be RFC3339")
-}
-
-func (b *FleetBackend) applyLabelUpdates(ctx context.Context, id string, params backend.UpdateParams) error {
-	for _, label := range params.AddLabels {
-		if err := b.AddLabel(ctx, id, label); err != nil {
-			return err
-		}
-		if err := b.waitForLabelState(ctx, id, label, true); err != nil {
-			return err
-		}
-	}
-	for _, label := range params.RemoveLabels {
-		if err := b.RemoveLabel(ctx, id, label); err != nil {
-			return err
-		}
-		if err := b.waitForLabelState(ctx, id, label, false); err != nil {
-			return err
-		}
-	}
-	if len(params.SetLabels) == 0 {
-		return nil
-	}
-	current, err := b.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	for _, label := range current.Labels {
-		if !containsString(params.SetLabels, label) {
-			if err := b.RemoveLabel(ctx, id, label); err != nil {
-				return err
-			}
-			if err := b.waitForLabelState(ctx, id, label, false); err != nil {
-				return err
-			}
-		}
-	}
-	for _, label := range params.SetLabels {
-		if !containsString(current.Labels, label) {
-			if err := b.AddLabel(ctx, id, label); err != nil {
-				return err
-			}
-			if err := b.waitForLabelState(ctx, id, label, true); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (b *FleetBackend) waitForLabelState(ctx context.Context, id, label string, wantPresent bool) error {
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	timeout := time.NewTimer(2 * time.Second)
-	defer timeout.Stop()
-
-	var lastErr error
-	for {
-		detail, err := b.Get(ctx, id)
-		if err == nil && detail != nil && containsString(detail.Labels, label) == wantPresent {
-			return nil
-		}
-		if err != nil {
-			lastErr = err
-		}
-
-		select {
-		case <-ctx.Done():
-			return backend.ErrTimeout("Update", "label projection did not settle", ctx.Err())
-		case <-timeout.C:
-			return backend.ErrTimeout("Update", "label projection did not settle", lastErr)
-		case <-ticker.C:
-		}
-	}
-}
-
-func hasLabelUpdate(params backend.UpdateParams) bool {
-	return len(params.AddLabels) > 0 || len(params.RemoveLabels) > 0 || len(params.SetLabels) > 0
-}
-
-func containsString(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
 }
 
 // ClaimIssue atomically claims an issue via the fleet claim endpoint.

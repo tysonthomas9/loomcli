@@ -8,6 +8,7 @@
 import { useState, useCallback, useRef } from "react";
 
 import type { IssueWithDependencyMetadata, DependencyType } from "@/types";
+import { formatStatusLabel } from "@/utils/issue";
 
 import { DependencySearchPicker } from "./DependencySearchPicker";
 import styles from "./DependencySection.module.css";
@@ -260,7 +261,7 @@ export function DependencySection({
                 <span className={styles.dependencyTitle}>{dep.title}</span>
                 {dep.dependency_type && (
                   <span className={styles.dependencyType}>
-                    {dep.dependency_type}
+                    {formatStatusLabel(dep.dependency_type.replace(/-/g, "_"))}
                   </span>
                 )}
                 {!disabled && (

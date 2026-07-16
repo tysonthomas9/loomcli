@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 
-import { render, screen as _screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 
 import "@testing-library/jest-dom";
@@ -343,6 +343,14 @@ describe("IssueTable", () => {
       };
       expect(props.className).toBe("custom-class");
     });
+
+    it("accepts groupByEpic prop", () => {
+      const props: IssueTableProps = {
+        issues: [createMockIssue()],
+        groupByEpic: true,
+      };
+      expect(props.groupByEpic).toBe(true);
+    });
   });
 
   describe("data handling", () => {
@@ -387,6 +395,80 @@ describe("IssueTable", () => {
       expect(props.issues[0]?.assignee).toBeUndefined();
       expect(props.issues[0]?.status).toBeUndefined();
       expect(props.issues[0]?.issue_type).toBeUndefined();
+    });
+  });
+
+  describe("epic grouping", () => {
+    it("renders epic group headers with child tasks underneath", () => {
+      const issues = [
+        createMockIssue({
+          id: "EPIC-1",
+          title: "Checkout flow",
+          issue_type: "epic",
+          priority: 1,
+        }),
+        createMockIssue({
+          id: "TASK-1",
+          title: "Cart layout",
+          parent: "EPIC-1",
+          parent_title: "Checkout flow",
+        }),
+        createMockIssue({
+          id: "TASK-2",
+          title: "Payment form",
+          parent: "EPIC-1",
+          parent_title: "Checkout flow",
+        }),
+      ];
+
+      render(<IssueTable issues={issues} groupByEpic />);
+
+      expect(
+        screen.getByTestId("issue-table-epic-group-EPIC-1"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Checkout flow")).toBeInTheDocument();
+      expect(
+        screen.getByText("2 tasks · 0 done · 0 active · 0 blocked"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("issue-row-TASK-1")).toBeInTheDocument();
+      expect(screen.getByTestId("issue-row-TASK-2")).toBeInTheDocument();
+      expect(screen.queryByTestId("issue-row-EPIC-1")).not.toBeInTheDocument();
+    });
+
+    it("creates synthetic groups for visible tasks when the epic row is filtered out", () => {
+      const issues = [
+        createMockIssue({
+          id: "TASK-1",
+          title: "Cart layout",
+          parent: "EPIC-1",
+          parent_title: "Checkout flow",
+        }),
+      ];
+
+      render(<IssueTable issues={issues} groupByEpic />);
+
+      expect(
+        screen.getByTestId("issue-table-epic-group-EPIC-1"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Checkout flow")).toBeInTheDocument();
+      expect(screen.getByTestId("issue-row-TASK-1")).toBeInTheDocument();
+    });
+
+    it("places issues without a visible parent in an ungrouped section", () => {
+      render(
+        <IssueTable
+          issues={[createMockIssue({ id: "TASK-1", title: "Loose task" })]}
+          groupByEpic
+        />,
+      );
+
+      expect(
+        screen.getByTestId("issue-table-epic-group-ungrouped"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("Issues without a visible parent epic"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("issue-row-TASK-1")).toBeInTheDocument();
     });
   });
 

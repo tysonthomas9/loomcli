@@ -41,6 +41,18 @@ type AgentInvoker interface {
 	InvokeNonInteractive(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error
 }
 
+// TextAnalyzer wraps one-shot text analysis. Callers choose the concrete
+// backend; tests can inject deterministic analyzers without shelling out.
+type TextAnalyzer interface {
+	AnalyzeText(ctx context.Context, workDir, prompt string) (string, error)
+}
+
+type TextAnalyzerFunc func(ctx context.Context, workDir, prompt string) (string, error)
+
+func (f TextAnalyzerFunc) AnalyzeText(ctx context.Context, workDir, prompt string) (string, error) {
+	return f(ctx, workDir, prompt)
+}
+
 // FileSystem wraps file operations.
 type FileSystem interface {
 	ReadFile(path string) ([]byte, error)
@@ -62,6 +74,7 @@ type Deps struct {
 	LookPath     func(file string) (string, error)
 	ExecCtx      ExecContextRunner
 	Agent        AgentInvoker
+	TextAnalyzer TextAnalyzer
 }
 
 // --- default implementations ---

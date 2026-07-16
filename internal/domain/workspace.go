@@ -30,6 +30,7 @@ type Workspace struct {
 	State         WorkspaceState `json:"state,omitempty"`
 	ErrorMessage  string         `json:"error_message,omitempty"`
 	DefaultBranch string         `json:"default_branch,omitempty"`
+	DesignFormat  string         `json:"design_format,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 }

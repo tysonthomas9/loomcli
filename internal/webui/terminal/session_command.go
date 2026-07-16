@@ -29,6 +29,22 @@ func loomExecutableForTerminal() string {
 	return exe
 }
 
+// LoomExecutableForTerminal returns the current loom executable path for
+// terminal launch specs. It falls back to "loom" only when os.Executable
+// itself fails.
+func LoomExecutableForTerminal() string {
+	return loomExecutableForTerminal()
+}
+
+// ShellArgvForCommand converts argv into the shell argv used by PTYManager.
+func ShellArgvForCommand(args []string) []string {
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, shellQuote(arg))
+	}
+	return []string{"-c", strings.Join(quoted, " ")}
+}
+
 func leadCommandForBackend(backend string) string {
 	return fmt.Sprintf("%s lead --backend %s", shellQuote(loomExecutableForTerminal()), backend)
 }

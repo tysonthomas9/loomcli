@@ -16,6 +16,7 @@ import {
   useBackendConfig,
   useBackends,
   useLocalSettings,
+  useWorkspaceDesignFormat,
   useWorkspaceContext,
 } from "@/hooks/workspace";
 import type { BackendInfo } from "@/utils/workspace";
@@ -46,6 +47,9 @@ interface RedisFormState {
   tls: boolean;
 }
 
+type AgentRuntimeDefault = "local" | "daytona";
+type RuntimeCredentialProvider = "daytona" | "github";
+
 const EMPTY_REDIS_FORM: RedisFormState = {
   enabled: false,
   url: "",
@@ -59,7 +63,7 @@ export function SettingsView({
   className,
   onNavigate,
 }: SettingsViewProps): JSX.Element {
-  const { workspaceId } = useWorkspaceContext();
+  const { workspaceId, workspace } = useWorkspaceContext();
   const {
     config,
     isLoading,
@@ -81,10 +85,27 @@ export function SettingsView({
     settings: localSettings,
     isSaving: isSavingLocalSettings,
     error: localSettingsError,
+    updateAgentRuntime,
+    updateLocalTaskRunner,
     updateRedis,
+    updateRuntimeCredentials,
   } = useLocalSettings();
   const redisSettings = localSettings?.fleetdb_redis;
+  const runtimeSettings = localSettings?.agent_runtime;
+  const localTaskRunnerSettings = localSettings?.local_task_runner;
+  const runtimeCredentials = localSettings?.runtime_credentials;
   const [redisForm, setRedisForm] = useState<RedisFormState>(EMPTY_REDIS_FORM);
+  const [agentRuntime, setAgentRuntime] =
+    useState<AgentRuntimeDefault>("local");
+  const [daytonaApiKey, setDaytonaApiKey] = useState("");
+  const [githubToken, setGithubToken] = useState("");
+  const [opencodeModel, setOpencodeModel] = useState("");
+  const persistedDesignFormat = workspace?.design_format ?? "markdown";
+  const [designFormat, setDesignFormat] = useState<"markdown" | "html">(
+    persistedDesignFormat,
+  );
+  const { isSaving: isSavingDesignFormat, updateDesignFormat } =
+    useWorkspaceDesignFormat();
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -111,6 +132,19 @@ export function SettingsView({
       url: "",
     });
   }, [redisSettings]);
+
+  useEffect(() => {
+    if (!runtimeSettings?.default) return;
+    setAgentRuntime(runtimeSettings.default);
+  }, [runtimeSettings?.default]);
+
+  useEffect(() => {
+    setOpencodeModel(localTaskRunnerSettings?.opencode_model ?? "");
+  }, [localTaskRunnerSettings?.opencode_model]);
+
+  useEffect(() => {
+    setDesignFormat(persistedDesignFormat);
+  }, [persistedDesignFormat, workspaceId]);
 
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)
@@ -173,6 +207,23 @@ export function SettingsView({
     } else {
       showToast("Failed to update backend", { type: "error" });
     }
+  };
+
+  const handleDesignFormatSave = async () => {
+    if (
+      !workspaceId ||
+      designFormat === persistedDesignFormat ||
+      isSavingDesignFormat
+    ) {
+      return;
+    }
+    const ok = await updateDesignFormat(designFormat);
+    showToast(
+      ok
+        ? "Design format updated successfully"
+        : "Failed to update design format",
+      { type: ok ? "success" : "error" },
+    );
   };
 
   const handleRestartOnboarding = () => {
@@ -241,6 +292,79 @@ export function SettingsView({
     } else {
       showToast("Failed to save Redis settings", { type: "error" });
     }
+  };
+
+  const handleAgentRuntimeSave = async () => {
+    if (isSavingLocalSettings) return;
+    const ok = await updateAgentRuntime({ default: agentRuntime });
+    showToast(
+      ok ? "Agent runtime settings saved" : "Failed to save agent runtime",
+      {
+        type: ok ? "success" : "error",
+      },
+    );
+  };
+
+  const handleLocalTaskRunnerSave = async () => {
+    if (isSavingLocalSettings) return;
+    const ok = await updateLocalTaskRunner({
+      opencode_model: opencodeModel.trim(),
+    });
+    showToast(
+      ok
+        ? "Local task runner settings saved"
+        : "Failed to save local task runner settings",
+      {
+        type: ok ? "success" : "error",
+      },
+    );
+  };
+
+  const handleRuntimeCredentialSave = async (
+    provider: RuntimeCredentialProvider,
+  ) => {
+    if (isSavingLocalSettings) return;
+    const value =
+      provider === "daytona" ? daytonaApiKey.trim() : githubToken.trim();
+    if (!value) {
+      showToast(
+        provider === "daytona"
+          ? "Enter a Daytona API key to save"
+          : "Enter a GitHub token to save",
+        {
+          type: "error",
+        },
+      );
+      return;
+    }
+    const payload =
+      provider === "daytona"
+        ? { daytona: { api_key: value } }
+        : { github: { token: value } };
+    const ok = await updateRuntimeCredentials(payload);
+    if (ok) {
+      if (provider === "daytona") {
+        setDaytonaApiKey("");
+      } else {
+        setGithubToken("");
+      }
+      showToast("Runtime credentials saved", { type: "success" });
+    } else {
+      showToast("Failed to save runtime credentials", { type: "error" });
+    }
+  };
+
+  const handleRuntimeCredentialClear = async (
+    provider: RuntimeCredentialProvider,
+  ) => {
+    if (isSavingLocalSettings) return;
+    const ok = await updateRuntimeCredentials({ [provider]: { clear: true } });
+    showToast(
+      ok
+        ? `${provider === "daytona" ? "Daytona" : "GitHub"} credential cleared`
+        : `Failed to clear ${provider === "daytona" ? "Daytona" : "GitHub"} credential`,
+      { type: ok ? "success" : "error" },
+    );
   };
 
   return (
@@ -339,6 +463,51 @@ export function SettingsView({
         </div>
       </div>
 
+      {/* Planner Design Format */}
+      <div className={styles.panel} data-testid="design-format-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Planner Design Format</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="design-format-select">
+              Design format
+            </label>
+            <p className={styles.description}>
+              Markdown is portable and remains the default. HTML enables richer
+              layouts and sanitized inline SVG diagrams in issue designs.
+            </p>
+            <select
+              id="design-format-select"
+              className={styles.select}
+              value={designFormat}
+              onChange={(event) =>
+                setDesignFormat(event.target.value as "markdown" | "html")
+              }
+              data-testid="design-format-select"
+            >
+              <option value="markdown">Markdown</option>
+              <option value="html">HTML</option>
+            </select>
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={
+                !workspaceId ||
+                designFormat === persistedDesignFormat ||
+                isSavingDesignFormat
+              }
+              onClick={handleDesignFormatSave}
+              data-testid="design-format-save-button"
+            >
+              {isSavingDesignFormat ? "Saving..." : "Save Design Format"}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Agent Backend Overrides */}
       <div className={styles.panel}>
         <div className={styles.panelHeader}>
@@ -375,6 +544,187 @@ export function SettingsView({
               No per-agent overrides configured.
             </p>
           )}
+        </div>
+      </div>
+
+      {/* Remote runtimes */}
+      <div className={styles.panel} data-testid="remote-runtimes-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Remote runtimes</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <p className={styles.description}>
+            Configure app-triggered task runtimes and Daytona access.
+          </p>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="agent-runtime-select">
+              Run task agents
+            </label>
+            <p className={styles.description}>
+              App-triggered epic runs use this runtime for child task agents.
+            </p>
+            <select
+              id="agent-runtime-select"
+              className={styles.select}
+              value={agentRuntime}
+              onChange={(e) =>
+                setAgentRuntime(e.target.value as AgentRuntimeDefault)
+              }
+              data-testid="agent-runtime-select"
+            >
+              <option value="local">Locally</option>
+              <option value="daytona">On Daytona</option>
+            </select>
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={
+                isSavingLocalSettings ||
+                agentRuntime === (runtimeSettings?.default ?? "local")
+              }
+              onClick={handleAgentRuntimeSave}
+              data-testid="agent-runtime-save-button"
+            >
+              {isSavingLocalSettings ? "Saving..." : "Save Agent Runtime"}
+            </button>
+          </div>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="opencode-model-input">
+              Opencode Model
+            </label>
+            <p className={styles.description}>
+              Used by app-triggered local epic runs when the project backend is
+              opencode.
+            </p>
+            <input
+              id="opencode-model-input"
+              type="text"
+              className={styles.input}
+              value={opencodeModel}
+              onChange={(e) => setOpencodeModel(e.target.value)}
+              placeholder="provider/model"
+              data-testid="opencode-model-input"
+            />
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={
+                isSavingLocalSettings ||
+                opencodeModel.trim() ===
+                  (localTaskRunnerSettings?.opencode_model ?? "")
+              }
+              onClick={handleLocalTaskRunnerSave}
+              data-testid="local-task-runner-save-button"
+            >
+              {isSavingLocalSettings
+                ? "Saving..."
+                : "Save Local Task Runner Settings"}
+            </button>
+          </div>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="daytona-api-key-input">
+              Daytona API Key
+            </label>
+            <input
+              id="daytona-api-key-input"
+              type="password"
+              className={styles.input}
+              value={daytonaApiKey}
+              onChange={(e) => setDaytonaApiKey(e.target.value)}
+              placeholder={
+                runtimeCredentials?.daytona.configured
+                  ? "Saved key unchanged"
+                  : "dtn_..."
+              }
+              data-testid="daytona-api-key-input"
+            />
+            <p className={styles.description}>
+              {runtimeCredentials?.daytona.configured
+                ? "Daytona credential saved"
+                : "No Daytona credential saved"}
+            </p>
+            {runtimeCredentials?.daytona.configured && (
+              <button
+                type="button"
+                className={styles.navButton}
+                disabled={isSavingLocalSettings}
+                onClick={() => handleRuntimeCredentialClear("daytona")}
+                data-testid="daytona-credential-clear-button"
+              >
+                Clear Daytona Key
+              </button>
+            )}
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={isSavingLocalSettings}
+              onClick={() => handleRuntimeCredentialSave("daytona")}
+              data-testid="daytona-credential-save-button"
+            >
+              {isSavingLocalSettings ? "Saving..." : "Save Daytona Credential"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* GitHub */}
+      <div className={styles.panel} data-testid="github-settings-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>GitHub</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <div className={styles.formGroup}>
+            <label className={styles.label} htmlFor="github-token-input">
+              GitHub Token for Runtimes and PR Review
+            </label>
+            <input
+              id="github-token-input"
+              type="password"
+              className={styles.input}
+              value={githubToken}
+              onChange={(e) => setGithubToken(e.target.value)}
+              placeholder={
+                runtimeCredentials?.github.configured
+                  ? "Saved token unchanged"
+                  : "github_pat_..."
+              }
+              data-testid="github-token-input"
+            />
+            <p className={styles.description}>
+              {runtimeCredentials?.github.configured && "Credential saved. "}
+              <span>
+                Used for GitHub PR review and remote runtime provisioning.
+              </span>
+            </p>
+            {runtimeCredentials?.github.configured && (
+              <button
+                type="button"
+                className={styles.navButton}
+                disabled={isSavingLocalSettings}
+                onClick={() => handleRuntimeCredentialClear("github")}
+                data-testid="github-credential-clear-button"
+              >
+                Clear GitHub Token
+              </button>
+            )}
+          </div>
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={isSavingLocalSettings}
+              onClick={() => handleRuntimeCredentialSave("github")}
+              data-testid="github-credential-save-button"
+            >
+              {isSavingLocalSettings ? "Saving..." : "Save GitHub Credential"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -609,28 +959,6 @@ export function SettingsView({
           </div>
         </div>
       </div>
-
-      {/* Observability Navigation */}
-      {onNavigate && (
-        <div className={styles.panel} data-testid="observability-nav-panel">
-          <div className={styles.panelHeader}>
-            <h3 className={styles.panelTitle}>Observability</h3>
-          </div>
-          <div className={styles.panelContent}>
-            <p className={styles.description}>
-              View system metrics and agent activity.
-            </p>
-            <button
-              type="button"
-              className={styles.navButton}
-              onClick={() => onNavigate("observability")}
-              data-testid="observability-nav-button"
-            >
-              Open Observability
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

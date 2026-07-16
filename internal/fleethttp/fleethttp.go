@@ -4,8 +4,8 @@
 // Both target the same fleet-db API and previously duplicated the
 // request-building, auth-header, and error-extraction code.
 //
-// What's shared: header construction (Authorization / X-Fleet-API-Key
-// / X-Actor), request body marshaling, response error-message
+// What's shared: header construction (Authorization / X-API-Key /
+// X-Fleet-API-Key / X-Actor), request body marshaling, response error-message
 // extraction.
 //
 // What's not shared: status→sentinel mapping. The two callers map
@@ -26,8 +26,8 @@ import (
 // Auth holds the optional auth headers fleet-db accepts. Fields default
 // to empty (omitted from the request when zero).
 type Auth struct {
-	BearerToken string // → Authorization: Bearer <token>
-	APIKey      string // → X-API-Key + X-Fleet-API-Key (dual-send)
+	BearerToken string //nolint:gosec // G117: auth header value intentionally carried by request config (→ Authorization: Bearer).
+	APIKey      string //nolint:gosec // G117: fleet-db API key carried by request config; dual-sent as X-API-Key + X-Fleet-API-Key.
 	Actor       string // → X-Actor (used by --auth-dev-mode)
 }
 

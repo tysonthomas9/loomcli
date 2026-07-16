@@ -1,20 +1,63 @@
+use std::{
+    io::{Read, Write},
+    net::{SocketAddr, TcpStream},
+    path::Path,
+    sync::Mutex,
+    time::Duration,
+};
+
 use tauri::{
     menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID},
-    AppHandle, Emitter, Manager, RunEvent, Runtime, Url, WebviewUrl, WebviewWindow,
-    WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime, Url, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
 };
 
 const MENU_NEW_WORKSPACE_WINDOW: &str = "new-workspace-window";
 const MENU_NEW_WORKSPACE_WINDOW_ALT: &str = "new-workspace-window-window-menu";
 const EVENT_NEW_WORKSPACE_WINDOW: &str = "loom:new-workspace-window";
 const PRIMARY_WORKSPACE_WINDOW_LABEL: &str = "main";
+const WORKSPACE_WINDOW_WIDTH: f64 = 1280.0;
+const WORKSPACE_WINDOW_HEIGHT: f64 = 800.0;
+const WORKSPACE_MIN_WIDTH: f64 = 720.0;
+const WORKSPACE_MIN_HEIGHT: f64 = 520.0;
+const STALE_RUNTIME_HEALTH_TIMEOUT: Duration = Duration::from_millis(300);
+
+#[derive(Default)]
+struct WorkspaceRecoveryState {
+    pending_route: Mutex<Option<String>>,
+}
+
+/// True when macOS is running this bundle from a read-only/randomized location
+/// (App Translocation for a quarantined app, or straight off a mounted disk
+/// image). In that state the bundled `loom` sidecar cannot be launched, so the
+/// launcher UI must tell the user to move the app into /Applications instead of
+/// silently failing to start the runtime.
+#[tauri::command]
+fn needs_relocation() -> bool {
+    std::env::current_exe()
+        .map(|path| path_needs_relocation(&path))
+        .unwrap_or(false)
+}
+
+fn path_needs_relocation(path: &Path) -> bool {
+    let path = path.to_string_lossy();
+    path.contains("/AppTranslocation/") || path.starts_with("/Volumes/")
+}
+
+/// JS shim read by the launcher frontend (src/main.ts) before it boots.
+fn relocation_init_script() -> String {
+    format!("window.__LOOM_NEEDS_RELOCATION__ = {};", needs_relocation())
+}
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(WorkspaceRecoveryState::default())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             open_workspace_window,
-            pick_folder
+            pick_folder,
+            needs_relocation,
+            take_workspace_recovery_path
         ])
         .menu(build_menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -49,6 +92,15 @@ fn open_workspace_window<R: Runtime>(
     force_new: bool,
 ) -> Result<(), String> {
     open_workspace_window_native(&app, &runtime_url, force_new).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn take_workspace_recovery_path(state: tauri::State<'_, WorkspaceRecoveryState>) -> Option<String> {
+    state
+        .pending_route
+        .lock()
+        .ok()
+        .and_then(|mut pending| pending.take())
 }
 
 #[tauri::command]
@@ -153,6 +205,9 @@ fn find_submenu_by_text<R: Runtime>(
 
 fn show_primary_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {
+        if matches!(recover_stale_workspace_window(app, &window), Ok(true)) {
+            return;
+        }
         reveal_window(app, &window);
         return;
     }
@@ -166,15 +221,19 @@ fn show_launcher_window<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
 
-    if let Ok(window) = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+    match WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
         .title("Loom")
+        .initialization_script(&relocation_init_script())
         .inner_size(520.0, 300.0)
         .min_inner_size(420.0, 260.0)
         .content_protected(false)
         .focused(true)
         .build()
     {
-        reveal_window(app, &window);
+        Ok(window) => {
+            reveal_window(app, &window);
+        }
+        Err(_) => {}
     }
 }
 
@@ -194,15 +253,113 @@ fn reveal_window<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     schedule_window_reveal(app, window, 2_200);
 }
 
+fn recover_stale_workspace_window<R: Runtime>(
+    app: &AppHandle<R>,
+    window: &WebviewWindow<R>,
+) -> tauri::Result<bool> {
+    let url = window.url()?;
+    let launcher = launcher_url(app)?;
+    if url == launcher {
+        return Ok(false);
+    }
+
+    if !is_loopback_runtime_url(&url) {
+        return Ok(false);
+    }
+
+    if runtime_health_probe(&url, STALE_RUNTIME_HEALTH_TIMEOUT) {
+        return Ok(false);
+    }
+
+    if let Ok(mut pending) = app.state::<WorkspaceRecoveryState>().pending_route.lock() {
+        *pending = Some(workspace_recovery_route(&url));
+    }
+
+    window.navigate(launcher)?;
+    reveal_window(app, window);
+    Ok(true)
+}
+
+fn launcher_url<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Url> {
+    if tauri::is_dev() {
+        if let Some(url) = app.config().build.dev_url.as_ref() {
+            return Ok(url.clone());
+        }
+    }
+    Url::parse("tauri://localhost").map_err(tauri::Error::InvalidUrl)
+}
+
+fn is_loopback_runtime_url(url: &Url) -> bool {
+    loopback_socket_addr(url).is_some()
+}
+
+fn workspace_recovery_route(url: &Url) -> String {
+    // `url.path()` is never empty for an `http://host:port` URL (always "/...").
+    let mut route = url.path().to_string();
+    if let Some(query) = url.query() {
+        route.push('?');
+        route.push_str(query);
+    }
+    if let Some(fragment) = url.fragment() {
+        route.push('#');
+        route.push_str(fragment);
+    }
+    route
+}
+
+fn runtime_health_probe(url: &Url, timeout: Duration) -> bool {
+    let Some(addr) = loopback_socket_addr(url) else {
+        return false;
+    };
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, timeout) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+
+    let request = format!(
+        "GET /api/health HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+        url.authority()
+    );
+    if stream.write_all(request.as_bytes()).is_err() {
+        return false;
+    }
+
+    let mut buf = [0_u8; 128];
+    let Ok(n) = stream.read(&mut buf) else {
+        return false;
+    };
+    if n == 0 {
+        return false;
+    }
+    let response = String::from_utf8_lossy(&buf[..n]);
+    response
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        == Some("200")
+}
+
+/// Single source of truth for "is this a local runtime URL?": an `http` URL with
+/// an explicit port whose host resolves to a loopback address. Returns the
+/// resolved address so callers don't re-parse the host.
+fn loopback_socket_addr(url: &Url) -> Option<SocketAddr> {
+    if url.scheme() != "http" || url.port().is_none() {
+        return None;
+    }
+    url.socket_addrs(|| None)
+        .ok()?
+        .into_iter()
+        .find(|addr| addr.ip().is_loopback())
+}
+
 fn perform_window_reveal<R: Runtime>(app: &AppHandle<R>, window: &WebviewWindow<R>) {
     show_app(app);
     let _ = window.set_content_protected(false);
+    let _ = window.set_position(LogicalPosition::new(80.0, 80.0));
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
-
-    #[cfg(target_os = "macos")]
-    raise_macos_window(window);
 }
 
 fn schedule_window_reveal<R: Runtime>(
@@ -239,25 +396,6 @@ fn activate_app_ignoring_other_apps() {
     ns_app.arrangeInFront(None);
 }
 
-#[cfg(target_os = "macos")]
-fn raise_macos_window<R: Runtime>(window: &WebviewWindow<R>) {
-    let dispatch_window = window.clone();
-    let target_window = window.clone();
-    let _ = dispatch_window.run_on_main_thread(move || {
-        activate_app_ignoring_other_apps();
-        if let Ok(ns_window) = target_window.ns_window() {
-            if !ns_window.is_null() {
-                // SAFETY: ns_window is the AppKit NSWindow pointer returned by Tauri
-                // for this webview window, and this block runs on the main thread.
-                let ns_window = unsafe { &*(ns_window.cast::<objc2_app_kit::NSWindow>()) };
-                ns_window.makeKeyAndOrderFront(None);
-                ns_window.orderFrontRegardless();
-            }
-        }
-        activate_app_ignoring_other_apps();
-    });
-}
-
 fn open_workspace_window_native<R: Runtime>(
     app: &AppHandle<R>,
     runtime_url: &str,
@@ -267,6 +405,7 @@ fn open_workspace_window_native<R: Runtime>(
 
     if !force_new {
         if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {
+            configure_workspace_window(&window)?;
             window.navigate(url)?;
             reveal_window(app, &window);
             return Ok(());
@@ -285,8 +424,8 @@ fn open_workspace_window_native<R: Runtime>(
 
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
         .title("Loom")
-        .inner_size(1280.0, 800.0)
-        .min_inner_size(720.0, 520.0)
+        .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
+        .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
         .content_protected(false)
         .focused(true)
         .build()?;
@@ -307,8 +446,8 @@ fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Re
     );
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
         .title("Loom")
-        .inner_size(1280.0, 800.0)
-        .min_inner_size(720.0, 520.0)
+        .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
+        .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
         .content_protected(false)
         .focused(true)
         .build()?;
@@ -316,9 +455,19 @@ fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Re
     Ok(())
 }
 
+fn configure_workspace_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
+    window.set_min_size(Some(LogicalSize::new(
+        WORKSPACE_MIN_WIDTH,
+        WORKSPACE_MIN_HEIGHT,
+    )))?;
+    window.set_size(LogicalSize::new(
+        WORKSPACE_WINDOW_WIDTH,
+        WORKSPACE_WINDOW_HEIGHT,
+    ))
+}
+
 fn workspace_entry_url(runtime_url: &str) -> tauri::Result<Url> {
-    let base = runtime_url.trim_end_matches('/');
-    Url::parse(&format!("{base}/")).map_err(tauri::Error::InvalidUrl)
+    Url::parse(runtime_url.trim()).map_err(tauri::Error::InvalidUrl)
 }
 
 fn current_workspace_url<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Option<Url>> {
@@ -341,4 +490,143 @@ fn current_time_millis() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        is_loopback_runtime_url, path_needs_relocation, runtime_health_probe, workspace_entry_url,
+        workspace_recovery_route,
+    };
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        path::Path,
+        sync::mpsc,
+        thread,
+        time::Duration,
+    };
+    use tauri::Url;
+
+    #[test]
+    fn detects_app_running_from_mounted_disk_image() {
+        assert!(path_needs_relocation(Path::new(
+            "/Volumes/Loom Agents/Loom Agents.app/Contents/MacOS/loom-desktop"
+        )));
+    }
+
+    #[test]
+    fn detects_app_translocation_path() {
+        assert!(path_needs_relocation(Path::new(
+            "/private/var/folders/xx/AppTranslocation/123/d/Loom Agents.app/Contents/MacOS/loom-desktop"
+        )));
+    }
+
+    #[test]
+    fn allows_applications_path() {
+        assert!(!path_needs_relocation(Path::new(
+            "/Applications/Loom Agents.app/Contents/MacOS/loom-desktop"
+        )));
+    }
+
+    #[test]
+    fn detects_loopback_runtime_urls() {
+        for raw in [
+            "http://127.0.0.1:1234/ws/LOCAL/kanban",
+            "http://localhost:1234/ws/LOCAL/kanban",
+            "http://[::1]:1234/ws/LOCAL/kanban",
+        ] {
+            let url = Url::parse(raw).unwrap();
+            assert!(is_loopback_runtime_url(&url), "{raw}");
+        }
+    }
+
+    #[test]
+    fn rejects_non_runtime_urls() {
+        for raw in [
+            "https://127.0.0.1:1234/ws/LOCAL/kanban",
+            "http://127.0.0.1/ws/LOCAL/kanban",
+            "http://192.168.1.10:1234/ws/LOCAL/kanban",
+            "tauri://localhost",
+        ] {
+            let url = Url::parse(raw).unwrap();
+            assert!(!is_loopback_runtime_url(&url), "{raw}");
+        }
+    }
+
+    #[test]
+    fn preserves_workspace_route_for_recovery() {
+        let url = Url::parse("http://127.0.0.1:4567/ws/DESKTOP/list?search=abc#section").unwrap();
+        assert_eq!(
+            workspace_recovery_route(&url),
+            "/ws/DESKTOP/list?search=abc#section"
+        );
+    }
+
+    #[test]
+    fn workspace_entry_url_preserves_full_route() {
+        let url = workspace_entry_url("http://127.0.0.1:4567/ws/DESKTOP/list?search=abc#section")
+            .unwrap();
+        assert_eq!(
+            url.as_str(),
+            "http://127.0.0.1:4567/ws/DESKTOP/list?search=abc#section"
+        );
+    }
+
+    #[test]
+    fn runtime_health_probe_accepts_http_200() {
+        let (url, request_rx, handle) = one_shot_health_server("200 OK");
+
+        assert!(runtime_health_probe(&url, Duration::from_secs(1)));
+        assert!(request_rx
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .starts_with("GET /api/health "));
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_health_probe_rejects_non_200() {
+        let (url, _request_rx, handle) = one_shot_health_server("503 Service Unavailable");
+
+        assert!(!runtime_health_probe(&url, Duration::from_secs(1)));
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn runtime_health_probe_rejects_refused_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let url = Url::parse(&format!("http://127.0.0.1:{port}/ws/LOCAL/kanban")).unwrap();
+
+        assert!(!runtime_health_probe(&url, Duration::from_millis(100)));
+    }
+
+    fn one_shot_health_server(
+        status: &'static str,
+    ) -> (Url, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = Url::parse(&format!("http://127.0.0.1:{port}/ws/LOCAL/kanban")).unwrap();
+        let (tx, rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0_u8; 512];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let _ = tx.send(request.lines().next().unwrap_or("").to_string());
+            let body = if status.starts_with("200") {
+                r#"{"status":"ok"}"#
+            } else {
+                ""
+            };
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        (url, rx, handle)
+    }
 }

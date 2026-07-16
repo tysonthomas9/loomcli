@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -19,8 +20,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
+)
+
+var (
+	errAgentLaunchSpecMissing    = errors.New("agent terminal launch spec missing")
+	errTerminalLaunchMetaMissing = errors.New("terminal launch metadata missing")
 )
 
 // terminalTracerName is the instrumentation library name for terminal WS
@@ -72,6 +79,10 @@ type terminalWSParams struct {
 	// triggers a 4410 close; the latter proceeds to AttachSession as
 	// normal.
 	serverStartedAt time.Time
+}
+
+type workspacePTYEnsurer interface {
+	EnsureRegistered(wsID, path string) error
 }
 
 // HandleTerminalWS returns a WebSocket handler for terminal relay. It upgrades
@@ -193,7 +204,7 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager w
 		return "", "", false
 	}
 
-	if !authenticateTerminalSession(w, r, auth, session) {
+	if !authenticateTerminalSession(w, r, auth, session, workspace) {
 		return "", "", false
 	}
 
@@ -212,21 +223,21 @@ func validateTerminalWSRequest(w http.ResponseWriter, r *http.Request, manager w
 }
 
 // authenticateTerminalSession validates the one-time terminal token if auth is configured.
-func authenticateTerminalSession(w http.ResponseWriter, r *http.Request, auth *realtime.TerminalAuth, session string) bool {
+func authenticateTerminalSession(w http.ResponseWriter, r *http.Request, auth *realtime.TerminalAuth, session, workspace string) bool {
 	if auth == nil {
 		return true
 	}
 	token := r.URL.Query().Get("token")
-	userID, err := auth.ValidateToken(token, session)
+	userID, err := auth.ValidateToken(token, session, workspace)
 	if err != nil {
 		handler.WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
 			"success": false, "error": "terminal authentication failed",
 		})
-		slog.Warn("terminal auth failed", "session", session, "err", err)
+		slog.Warn("terminal auth failed", "session", session, "workspace", workspace, "err", err)
 		return false
 	}
 	if userID != "" {
-		slog.Info("terminal session authenticated", "session", session, "user_id", userID)
+		slog.Info("terminal session authenticated", "session", session, "workspace", workspace, "user_id", userID)
 	}
 	return true
 }
@@ -256,6 +267,12 @@ func upgradeTerminalWS(w http.ResponseWriter, r *http.Request, patterns []string
 // at ERROR level, so on-call noise doesn't spike on every workspace delete.
 func classifyAttachErr(err error, session, workspace string) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
 	switch {
+	case errors.Is(err, errAgentLaunchSpecMissing):
+		slog.Error("agent terminal metadata missing launch spec", "session", session, "workspace", workspace)
+		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
+	case errors.Is(err, errTerminalLaunchMetaMissing):
+		slog.Error("terminal metadata missing launch spec", "session", session, "workspace", workspace)
+		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
 	case errors.Is(err, webuterminal.ErrPTYMaxSessionsReached):
 		slog.Info("terminal session limit reached", "session", session)
 		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
@@ -273,8 +290,14 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 // is detached (grace period armed); the PTY and child process stay alive.
 func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalWSParams, session, workspace string, initialCols, initialRows uint16) (websocket.StatusCode, string) { //nolint:staticcheck // SA1019: websocket migration tracked separately
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
+	ensureWorkspacePTYRegistered(reqCtx, p, workspace)
 
-	att, reattach, err := p.manager.AttachSession(key, initialCols, initialRows, webuterminal.ArgvForSession(session))
+	launch, err := launchSpecForTerminalSession(reqCtx, p, workspace, session)
+	if err != nil {
+		return classifyAttachErr(err, session, workspace)
+	}
+
+	att, reattach, err := p.manager.AttachSession(key, initialCols, initialRows, launch)
 	if err != nil {
 		return classifyAttachErr(err, session, workspace)
 	}
@@ -321,6 +344,71 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	p.manager.Detach(key, connID)
 
 	return (<-crashCh).WSClose()
+}
+
+func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, workspace string) {
+	if p == nil || workspace == "" {
+		return
+	}
+	ensurer, ok := p.manager.(workspacePTYEnsurer)
+	if !ok {
+		return
+	}
+	// Healing resolve: if the local path is missing from state.json, re-bind it
+	// from an existing on-disk checkout so the PTY can register (otherwise the
+	// attach fails with "workspace unavailable" → the UI shows "Disconnected").
+	path := storeadapter.ResolveOrHealWorkspacePath(ctx, p.store, workspace)
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	if err := ensurer.EnsureRegistered(workspace, path); err != nil {
+		slog.Warn("terminal workspace pty self-heal failed",
+			"workspace", workspace, "path", path, "err", err)
+	}
+}
+
+func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, workspace, session string) (*tabmeta.LaunchSpec, error) {
+	if p.tabMetaStore == nil {
+		if isUUIDTerminalSession(session) {
+			return nil, errTerminalLaunchMetaMissing
+		}
+		return legacyLaunchSpecForSession(session), nil
+	}
+	meta, err := p.tabMetaStore.Get(ctx, workspace, session)
+	if err != nil {
+		return nil, fmt.Errorf("load terminal metadata: %w", err)
+	}
+	if meta == nil {
+		if isUUIDTerminalSession(session) {
+			return nil, errTerminalLaunchMetaMissing
+		}
+		return legacyLaunchSpecForSession(session), nil
+	}
+	if meta.Kind == "agent" {
+		if meta.Launch == nil || (len(meta.Launch.Argv) == 0 && len(meta.Launch.Env) == 0) {
+			return nil, errAgentLaunchSpecMissing
+		}
+		if len(meta.Launch.Argv) == 0 {
+			return nil, errAgentLaunchSpecMissing
+		}
+		return meta.Launch, nil
+	}
+	if meta.Launch != nil && (len(meta.Launch.Argv) > 0 || len(meta.Launch.Env) > 0) {
+		return meta.Launch, nil
+	}
+	return legacyLaunchSpecForSession(session), nil
+}
+
+func isUUIDTerminalSession(session string) bool {
+	return strings.HasPrefix(session, "term_")
+}
+
+func legacyLaunchSpecForSession(session string) *tabmeta.LaunchSpec {
+	argv := webuterminal.ArgvForSession(session)
+	if len(argv) == 0 {
+		return nil
+	}
+	return &tabmeta.LaunchSpec{Argv: argv}
 }
 
 func initialTerminalSizeFromRequest(r *http.Request) (uint16, uint16) {

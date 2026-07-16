@@ -2,8 +2,6 @@ package git
 
 import (
 	"net/http"
-	"path/filepath"
-	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -23,21 +21,6 @@ func respondDiffOK(w http.ResponseWriter, data interface{}) {
 
 func respondDiffError(w http.ResponseWriter, status int, msg string) {
 	handler.WriteJSON(w, status, diffResponse{Success: false, Error: msg})
-}
-
-// validateDiffPath checks that a file path is safe (no traversal, not absolute, not empty).
-func validateDiffPath(p string) bool {
-	if p == "" {
-		return false
-	}
-	if strings.HasPrefix(p, "/") {
-		return false
-	}
-	cleaned := filepath.Clean(p)
-	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return false
-	}
-	return true
 }
 
 // HandleDiffCommits handles GET /api/agents/{name}/diff/commits?limit=N
