@@ -391,6 +391,21 @@ export function PRsPage(): JSX.Element {
     ? rows.find((r) => r.issue?.id === reviewIssue.id)?.pr
     : undefined;
 
+  const reviewPrSubject = useMemo(
+    () => parseReviewPrParam(reviewPrParam),
+    [reviewPrParam],
+  );
+
+  const reviewPrLinkedIssue = useMemo(() => {
+    if (!reviewPrSubject) return undefined;
+    const key =
+      `${reviewPrSubject.owner}/${reviewPrSubject.repo}#${reviewPrSubject.number}`.toLowerCase();
+    return issues.find((issue) => {
+      const issueKey = prKeyFromRef(issue.external_ref);
+      return issueKey != null && issueKey.toLowerCase() === key;
+    });
+  }, [issues, reviewPrSubject]);
+
   if (reviewIssue) {
     return (
       <PRReviewWorkspace
@@ -403,24 +418,9 @@ export function PRsPage(): JSX.Element {
     );
   }
 
-  const reviewPrSubject = useMemo(
-    () => parseReviewPrParam(reviewPrParam),
-    [reviewPrParam],
-  );
-
   const reviewPrRow = reviewPrParam
     ? rows.find((r) => r.pr && prReviewRef(r.pr) === reviewPrParam)
     : undefined;
-
-  const reviewPrLinkedIssue = useMemo(() => {
-    if (!reviewPrSubject) return undefined;
-    const key =
-      `${reviewPrSubject.owner}/${reviewPrSubject.repo}#${reviewPrSubject.number}`.toLowerCase();
-    return issues.find((issue) => {
-      const issueKey = prKeyFromRef(issue.external_ref);
-      return issueKey != null && issueKey.toLowerCase() === key;
-    });
-  }, [issues, reviewPrSubject]);
 
   if (reviewPrParam && (reviewPrRow?.pr || reviewPrSubject)) {
     // Prefer the list-backed PR when available (real title/state). Otherwise

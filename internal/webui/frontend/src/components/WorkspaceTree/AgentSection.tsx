@@ -7,8 +7,11 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 
-import { deleteWorkspaceAgent } from "@/api/workspace/workspace";
-import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
+import {
+  useAgentStoreInstance,
+  useDeleteWorkspaceAgent,
+  useWorkspaceContext,
+} from "@/hooks";
 import { useToast } from "@/hooks/ui";
 import type { LoomAgentStatus } from "@/types";
 import {
@@ -60,6 +63,7 @@ export function AgentSection({
     refetch,
   } = useWorkspaceContext();
   const { showToast } = useToast();
+  const deleteAgent = useDeleteWorkspaceAgent();
   const [agentOrder, setAgentOrder] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<AgentMenuState | null>(null);
   const prsView = activeView === "prs";
@@ -139,14 +143,14 @@ export function AgentSection({
       if (!workspaceId) return;
       setContextMenu(null);
       try {
-        await deleteWorkspaceAgent(workspaceId, name);
+        await deleteAgent(workspaceId, name);
         showToast(`Agent ${name} archived`, { type: "success" });
         refetch();
       } catch {
         showToast("Failed to archive agent", { type: "error" });
       }
     },
-    [refetch, showToast, workspaceId],
+    [deleteAgent, refetch, showToast, workspaceId],
   );
 
   const handleAgentContextMenu = useCallback(

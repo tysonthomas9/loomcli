@@ -181,7 +181,7 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("active")).toBeInTheDocument();
     });
 
-    it("does not surface the kickoff user text in the masthead or transcript", () => {
+    it("surfaces the kickoff user text as the transcript prompt", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [
           createEntry({
@@ -196,8 +196,8 @@ describe("SessionDetailView", () => {
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
-      expect(screen.queryByText("do the thing")).not.toBeInTheDocument();
+      expect(screen.getByText("Prompt")).toBeInTheDocument();
+      expect(screen.getByText("do the thing")).toBeInTheDocument();
       expect(screen.getByText("ok")).toBeInTheDocument();
     });
 
@@ -505,7 +505,7 @@ describe("SessionDetailView", () => {
       expect(screen.getByText("embedded result body")).toBeInTheDocument();
     });
 
-    it("renders subsequent user text as a user-message interjection", () => {
+    it("renders the first real user text as a prompt and later text as an interjection", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [
           createEntry({ seq: 1, role: "user", type: "text", text: "first" }),
@@ -516,13 +516,41 @@ describe("SessionDetailView", () => {
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
-      // Kickoff user text is omitted from the worklog
-      expect(screen.queryByText("first")).not.toBeInTheDocument();
-      expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
+      expect(screen.getByText("Prompt")).toBeInTheDocument();
+      expect(screen.getByText("first")).toBeInTheDocument();
       // Subsequent user text → interjection
       expect(screen.getByTestId("transcript-interjection")).toBeInTheDocument();
       expect(screen.getByText("User message")).toBeInTheDocument();
       expect(screen.getByText("second")).toBeInTheDocument();
+    });
+
+    it("filters known injected context before preserving the real prompt", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "user",
+            type: "text",
+            text: "# AGENTS.md instructions for /repo\n<INSTRUCTIONS>rules</INSTRUCTIONS>",
+          }),
+          createEntry({
+            seq: 2,
+            role: "user",
+            type: "text",
+            text: "Implement the requested change",
+          }),
+          createEntry({ seq: 3, role: "assistant", text: "Done" }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(
+        screen.queryByText(/AGENTS\.md instructions/),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Implement the requested change"),
+      ).toBeInTheDocument();
     });
 
     it("does not render tool_result entries as their own turns", () => {

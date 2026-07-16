@@ -2,10 +2,9 @@
  * SessionDetailView — detail panel for a selected session.
  *
  * Renders the canonical transcript.Event stream as an agent worklog.
- * Assistant responses are turns with inline collapsible tool calls; mid-run
- * user messages render as distinct interjection blocks. The kickoff user
- * text is omitted from the worklog (agent backends often prepend synthetic
- * context as the first user message).
+ * Assistant responses are turns with inline collapsible tool calls; the first
+ * real user request is retained as the prompt and later user messages render as
+ * interjections. Known backend-injected context is filtered explicitly.
  */
 
 import { useMemo, useState } from "react";
@@ -14,6 +13,7 @@ import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 import { formatStatusLabel } from "@/utils/issue";
+import { sessionTotalTokens } from "@/utils/sessionUsage";
 
 import { MarkdownRenderer } from "../sections/MarkdownRenderer";
 import styles from "./SessionsTab.module.css";
@@ -110,13 +110,24 @@ type RenderBlock =
     };
 
 interface GroupedEvents {
+  prompt: { text: string; timestamp?: string } | null;
   blocks: RenderBlock[];
+}
+
+function isSyntheticUserContext(text: string): boolean {
+  const normalized = text.trimStart();
+  return (
+    normalized.startsWith("# AGENTS.md instructions for ") ||
+    normalized.startsWith("<environment_context>") ||
+    normalized.startsWith("<INSTRUCTIONS>")
+  );
 }
 
 /**
  * Walk the event stream and produce render-ready blocks:
- *  - the first user text is omitted (often synthetic agent context)
- *  - subsequent user text messages become "interjection" blocks
+ *  - known backend-injected user context is omitted
+ *  - the first real user text becomes the prompt
+ *  - subsequent real user text messages become "interjection" blocks
  *  - assistant text + tool_use events are grouped into "turn" blocks
  *  - tool_result events are matched to their tool_use by tool_use_id and
  *    rendered inline inside the turn (never as their own block);
@@ -135,7 +146,7 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
     }
   }
 
-  let sawFirstUserText = false;
+  let prompt: GroupedEvents["prompt"] = null;
   const blocks: RenderBlock[] = [];
   let current: Extract<RenderBlock, { kind: "turn" }> | null = null;
   let currentUuid: string | undefined;
@@ -153,11 +164,9 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
     if (e.role === "user" && e.type === "text") {
       const text = (e.text ?? "").trim();
       if (!text) continue;
-      // Omit kickoff user text from the worklog — backends often inject
-      // synthetic context as the first user message, and we no longer
-      // surface a Prompt masthead.
-      if (!sawFirstUserText) {
-        sawFirstUserText = true;
+      if (isSyntheticUserContext(text)) continue;
+      if (!prompt) {
+        prompt = e.timestamp ? { text, timestamp: e.timestamp } : { text };
         continue;
       }
       flushCurrent();
@@ -211,7 +220,7 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
   }
   flushCurrent();
 
-  return { blocks };
+  return { prompt, blocks };
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────
@@ -332,11 +341,7 @@ export function SessionDetailView({
     });
   };
 
-  const totalTokens =
-    (session.input_tokens ?? 0) +
-    (session.output_tokens ?? 0) +
-    (session.cache_read_tokens ?? 0) +
-    (session.cache_write_tokens ?? 0);
+  const totalTokens = sessionTotalTokens(session);
   const runError = runErrorSummary(session);
 
   return (
@@ -476,6 +481,23 @@ export function SessionDetailView({
           )}
           {!transcriptLoading && !transcriptError && entries.length === 0 && (
             <div className={styles.emptyState}>No transcript entries</div>
+          )}
+
+          {grouped.prompt && (
+            <details className={styles.promptBlock} open>
+              <summary className={styles.promptSummary}>
+                <span className={styles.promptLabel}>Prompt</span>
+                {grouped.prompt.timestamp && (
+                  <span className={styles.ts}>
+                    {formatTimestamp(grouped.prompt.timestamp)}
+                  </span>
+                )}
+              </summary>
+              <MarkdownRenderer
+                content={grouped.prompt.text}
+                className={styles.promptBody}
+              />
+            </details>
           )}
 
           {grouped.blocks.map((block) => {

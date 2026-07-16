@@ -63,6 +63,27 @@ func TestEvents_CodexCustomToolCall(t *testing.T) {
 	}
 }
 
+func TestFlattenToolOutputEdgeCases(t *testing.T) {
+	if got := flattenToolOutput(json.RawMessage(`[]`)); got != "" {
+		t.Fatalf("empty output = %q, want empty", got)
+	}
+	if got := flattenToolOutput(json.RawMessage(`{"type":"input_text","text":"done"}`)); got != "done" {
+		t.Fatalf("object output = %q, want done", got)
+	}
+	unknown := `[{"type":"output_image","url":"image.png"}]`
+	if got := flattenToolOutput(json.RawMessage(unknown)); got != unknown {
+		t.Fatalf("unknown structured output = %q, want raw JSON", got)
+	}
+}
+
+func TestNormalizeCustomToolCallsKnowsWebSearch(t *testing.T) {
+	line := []byte(`{"type":"response_item","payload":{"type":"web_search_call","id":"w1"}}`)
+	_, unknown := normalizeCustomToolCalls(line)
+	if len(unknown) != 0 {
+		t.Fatalf("web_search_call reported as schema drift: %v", unknown)
+	}
+}
+
 // Legacy function_call rollouts must be untouched by the normalization pass.
 func TestEvents_CodexLegacyFunctionCallUnaffected(t *testing.T) {
 	const legacy = `{"timestamp":"2026-04-06T17:29:51.064Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"echo hi\"}","call_id":"call_1"}}

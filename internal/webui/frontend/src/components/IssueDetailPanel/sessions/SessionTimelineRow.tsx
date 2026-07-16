@@ -4,6 +4,7 @@
  */
 
 import type { SessionRecord } from "@/types/agent";
+import { sessionTotalTokens } from "@/utils/sessionUsage";
 
 import styles from "./SessionsTab.module.css";
 
@@ -71,11 +72,7 @@ export function SessionTimelineRow({
   isSelected,
   onClick,
 }: SessionTimelineRowProps): JSX.Element {
-  const totalTokens =
-    session.input_tokens +
-    session.output_tokens +
-    (session.cache_read_tokens ?? 0) +
-    (session.cache_write_tokens ?? 0);
+  const totalTokens = sessionTotalTokens(session);
   const errorSummary = runErrorSummary(session);
   const statusLabel = formatRunStatus(session.status);
   const when = formatWhen(session.started_at);

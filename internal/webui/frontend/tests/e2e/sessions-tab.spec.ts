@@ -81,9 +81,7 @@ interface MockSession {
   is_active: boolean;
 }
 
-function createMockSession(
-  overrides: Partial<MockSession> = {},
-): MockSession {
+function createMockSession(overrides: Partial<MockSession> = {}): MockSession {
   return {
     session_id: "sess-001",
     agent_name: "agent-alpha",
@@ -384,45 +382,51 @@ async function setupSessionMocks(
 
   // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript
   // (registered BEFORE broader sessions route to avoid glob collision)
-  await page.route("**/api/workspaces/*/tasks/*/sessions/*/transcript", async (route) => {
-    trackers.transcriptCount.value++;
-    if (options.transcriptError) {
-      await route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "Internal server error" }),
-      });
-      return;
-    }
-    const url = route.request().url();
-    const sessionIdMatch = url.match(/\/sessions\/([^/]+)\/transcript/);
-    const sessionId = sessionIdMatch ? sessionIdMatch[1] : null;
+  await page.route(
+    "**/api/workspaces/*/tasks/*/sessions/*/transcript",
+    async (route) => {
+      trackers.transcriptCount.value++;
+      if (options.transcriptError) {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Internal server error" }),
+        });
+        return;
+      }
+      const url = route.request().url();
+      const sessionIdMatch = url.match(/\/sessions\/([^/]+)\/transcript/);
+      const sessionId = sessionIdMatch ? sessionIdMatch[1] : null;
 
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: ok({ session_id: sessionId, entries: mockTranscript }),
-    });
-  });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: ok({ session_id: sessionId, entries: mockTranscript }),
+      });
+    },
+  );
 
   // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff
   // (registered BEFORE broader sessions route)
-  await page.route("**/api/workspaces/*/tasks/*/sessions/*/diff", async (route) => {
-    trackers.diffCount.value++;
-    if (options.diffError) {
+  await page.route(
+    "**/api/workspaces/*/tasks/*/sessions/*/diff",
+    async (route) => {
+      trackers.diffCount.value++;
+      if (options.diffError) {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Internal server error" }),
+        });
+        return;
+      }
       await route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        body: JSON.stringify({ error: "Internal server error" }),
+        status: 200,
+        contentType: "text/plain",
+        body: mockDiff,
       });
-      return;
-    }
-    await route.fulfill({
-      status: 200,
-      contentType: "text/plain",
-      body: mockDiff,
-    });
-  });
+    },
+  );
 
   // Mock GET /api/workspaces/{ws}/tasks/{taskId}/sessions
   await page.route("**/api/workspaces/*/tasks/*/sessions", async (route) => {
@@ -523,11 +527,12 @@ test.describe("Cost summary display", () => {
   });
 
   test("Shows formatted token total", async ({ page }) => {
-    // Totals include cache tokens (same as detail masthead).
-    // completed: 5000+3000+1000+500=9500
-    // active: 1500+800+1000+500=3800
-    // failed: 500+200+1000+500=2200
-    // total = 15500 → "15.5K"
+    // Provider input totals already include cached input, so cache breakdowns
+    // are not added again.
+    // completed: 5000+3000=8000
+    // active: 1500+800=2300
+    // failed: 500+200=700
+    // total = 11000 → "11.0K"
     await installIssuesMock(page, [mockIssue]);
     await setupBaseMocks(page);
     await setupSessionMocks(page);
@@ -536,7 +541,7 @@ test.describe("Cost summary display", () => {
     await switchToSessionsTab(page);
 
     const tab = page.getByTestId("sessions-tab");
-    await expect(tab).toContainText("15.5K");
+    await expect(tab).toContainText("11.0K");
   });
 
   test("Shows formatted cost total", async ({ page }) => {
@@ -648,14 +653,12 @@ test.describe("Session timeline rendering", () => {
     await openIssuePanel(page, "Issue With Sessions");
     await switchToSessionsTab(page);
 
-    await expect(
-      page.getByTestId("session-row-sess-001"),
-    ).toContainText("agent-alpha");
+    await expect(page.getByTestId("session-row-sess-001")).toContainText(
+      "agent-alpha",
+    );
 
     // Placeholder visible when no session selected
-    await expect(
-      page.getByText("Select a run to view details"),
-    ).toBeVisible();
+    await expect(page.getByText("Select a run to view details")).toBeVisible();
   });
 });
 
@@ -694,9 +697,7 @@ test.describe("Session selection", () => {
     await expect(detail).toContainText("-10");
   });
 
-  test("Clicking a different session updates detail view", async ({
-    page,
-  }) => {
+  test("Clicking a different session updates detail view", async ({ page }) => {
     await installIssuesMock(page, [mockIssue]);
     await setupBaseMocks(page);
     await setupSessionMocks(page);

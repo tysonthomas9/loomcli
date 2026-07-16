@@ -618,6 +618,48 @@
   background: var(--color-panel-bg);
 }
 
+.promptBlock {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-bg-subtle);
+}
+
+.promptSummary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.promptSummary::-webkit-details-marker {
+  display: none;
+}
+
+.promptSummary::before {
+  content: "▸";
+  color: var(--color-text-muted);
+}
+
+.promptBlock[open] .promptSummary::before {
+  content: "▾";
+}
+
+.promptLabel {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+.promptBody.promptBody {
+  padding: 8px 0 0 16px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 /* Turn — a single assistant response (may contain text + tool calls) */
 .turn {
   padding: 14px;

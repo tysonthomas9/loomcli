@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import { useTaskSessions } from "@/hooks/terminal";
 
 import type { SessionRecord } from "@/types/agent";
+import { sessionTotalTokens } from "@/utils/sessionUsage";
 
 import { SessionTimeline, type RunRailSummary } from "./SessionTimeline";
 import { SessionDetailView } from "./SessionDetailView";
@@ -84,11 +85,7 @@ function computeCostSummary(sessions: SessionRecord[]): RunRailSummary {
   let activeSessions = 0;
   let failedSessions = 0;
   for (const s of sessions) {
-    totalTokens +=
-      s.input_tokens +
-      s.output_tokens +
-      (s.cache_read_tokens ?? 0) +
-      (s.cache_write_tokens ?? 0);
+    totalTokens += sessionTotalTokens(s);
     if (s.estimated_cost_usd > 0) {
       totalCost += s.estimated_cost_usd;
     }

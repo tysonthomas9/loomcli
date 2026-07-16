@@ -40,6 +40,7 @@ var knownCodexPayloadTypes = map[string]bool{
 	"function_call_output":    true,
 	"custom_tool_call":        true,
 	"custom_tool_call_output": true,
+	"web_search_call":         true,
 }
 
 // Events parses a Codex rollout JSONL into the canonical event stream
@@ -132,7 +133,7 @@ func rewriteLine(line []byte, unknown map[string]struct{}) []byte {
 		if out, ok := payload["output"]; ok {
 			payload["output"] = jsonBytes(flattenToolOutput(out))
 		}
-	case "message", "reasoning", "function_call", "function_call_output":
+	case "message", "reasoning", "function_call", "function_call_output", "web_search_call":
 		return line // known type; nothing to rewrite
 	default:
 		if pt != "" && !knownCodexPayloadTypes[pt] {
@@ -157,22 +158,34 @@ func rewriteLine(line []byte, unknown map[string]struct{}) []byte {
 }
 
 // flattenToolOutput turns a custom_tool_call_output "output" value into a single
-// string: it joins the .text of an array of content blocks; falls back to a bare
-// string; otherwise returns the raw JSON.
+// string. Known text blocks are joined, empty arrays stay empty, and unknown
+// structured output is preserved as raw JSON rather than silently discarded.
 func flattenToolOutput(raw json.RawMessage) string {
 	var blocks []struct {
 		Text string `json:"text"`
 	}
-	if json.Unmarshal(raw, &blocks) == nil && len(blocks) > 0 {
+	if json.Unmarshal(raw, &blocks) == nil {
+		if len(blocks) == 0 {
+			return ""
+		}
 		var b strings.Builder
 		for _, bl := range blocks {
 			b.WriteString(bl.Text)
 		}
-		return b.String()
+		if b.Len() > 0 {
+			return b.String()
+		}
+		return string(raw)
 	}
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		return s
+	}
+	var block struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &block) == nil && block.Text != "" {
+		return block.Text
 	}
 	return string(raw)
 }

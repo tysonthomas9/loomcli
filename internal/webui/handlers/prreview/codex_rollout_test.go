@@ -60,3 +60,20 @@ func TestFindCodexRolloutPathByGlob(t *testing.T) {
 		t.Fatalf("path = %q, want %q", got, path)
 	}
 }
+
+func TestFindCodexRolloutPathRequiresExactThreadIDSuffix(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	threadID := "thread-123"
+	dir := filepath.Join(home, "sessions", "2026", "07", "15")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nearMatch := filepath.Join(dir, "rollout-2026-07-15T01-39-00-prefix-"+threadID+"-suffix.jsonl")
+	if err := os.WriteFile(nearMatch, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := findCodexRolloutPath(leadcontrol.CodexRuntimeMetadata{ThreadID: threadID}); err == nil {
+		t.Fatal("near-match rollout should not be selected")
+	}
+}

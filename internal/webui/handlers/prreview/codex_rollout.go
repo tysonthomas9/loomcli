@@ -44,7 +44,7 @@ func rolloutPathByGlob(threadID string) string {
 			return nil
 		}
 		name := d.Name()
-		if strings.HasPrefix(name, "rollout-") && strings.Contains(name, threadID) && strings.HasSuffix(name, ".jsonl") {
+		if strings.HasPrefix(name, "rollout-") && strings.HasSuffix(name, "-"+threadID+".jsonl") {
 			found = path
 			return filepath.SkipAll
 		}

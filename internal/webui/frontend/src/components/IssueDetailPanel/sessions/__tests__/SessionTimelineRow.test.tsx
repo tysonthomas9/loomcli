@@ -165,7 +165,7 @@ describe("SessionTimelineRow", () => {
       expect(screen.getByText("15.0K")).toBeInTheDocument();
     });
 
-    it("includes cache tokens in the total", () => {
+    it("does not double-count cache tokens in the total", () => {
       const session = createSession({
         input_tokens: 200,
         output_tokens: 300,
@@ -173,7 +173,7 @@ describe("SessionTimelineRow", () => {
         cache_write_tokens: 100,
       });
       render(<SessionTimelineRow {...defaultProps} session={session} />);
-      expect(screen.getByText("1.0K")).toBeInTheDocument();
+      expect(screen.getByText("500")).toBeInTheDocument();
     });
   });
 

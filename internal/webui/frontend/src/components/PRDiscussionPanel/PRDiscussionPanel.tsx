@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { ReviewerMessage } from "@/api/workspace/prReview";
-import { MarkdownRenderer } from "@/components/IssueDetailPanel/sections/MarkdownRenderer";
+import { MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { TerminalView } from "@/components/TerminalView";
 import { usePRReviewConversation } from "@/hooks/workspace";
 
