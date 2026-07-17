@@ -396,6 +396,8 @@ type fakeHarnessConversation struct {
 	mu                    sync.Mutex
 	sends                 []string
 	stdin                 []byte
+	resizes               [][2]uint16
+	resizeErrs            []error
 	snapshot              wrapper.Snapshot
 	sendErr               error
 	sendBlocksUntilCancel bool
@@ -431,6 +433,18 @@ func (f *fakeHarnessConversation) stdinBytes() []byte {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]byte{}, f.stdin...)
+}
+
+func (f *fakeHarnessConversation) resizeCalls() [][2]uint16 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][2]uint16{}, f.resizes...)
+}
+
+func (f *fakeHarnessConversation) enqueueResizeErrors(errs ...error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resizeErrs = append(f.resizeErrs, errs...)
 }
 
 func (f *fakeHarnessConversation) AcquireControl(context.Context) (func(), error) {
@@ -471,7 +485,17 @@ func (f *fakeHarnessConversation) WriteStdin(p []byte) (int, error) {
 
 func (f *fakeHarnessConversation) AttachOutput(io.Writer) func() { return func() {} }
 
-func (f *fakeHarnessConversation) Resize(uint16, uint16) error { return nil }
+func (f *fakeHarnessConversation) Resize(cols, rows uint16) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resizes = append(f.resizes, [2]uint16{cols, rows})
+	if len(f.resizeErrs) == 0 {
+		return nil
+	}
+	err := f.resizeErrs[0]
+	f.resizeErrs = f.resizeErrs[1:]
+	return err
+}
 
 func (f *fakeHarnessConversation) Snapshot() wrapper.Snapshot {
 	f.mu.Lock()

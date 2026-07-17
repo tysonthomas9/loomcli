@@ -60,7 +60,7 @@ func (c *chatHarnessConversation) AttachOutput(w io.Writer) func() {
 }
 
 func (c *chatHarnessConversation) Resize(cols, rows uint16) error {
-	return c.conv.Wrapper().Resize(cols, rows)
+	return c.conv.Resize(cols, rows)
 }
 
 func (c *chatHarnessConversation) Snapshot() wrapper.Snapshot {

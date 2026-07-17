@@ -117,6 +117,11 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	defer detach()
 	restoreTerminal := forwardHarnessStdin(ctx, cfg, conv)
 	defer restoreTerminal()
+	stopResize := func() {}
+	if shouldForwardHarnessResize(cfg.HarnessName) {
+		stopResize = startHarnessResizeForwarder(ctx, cfg, conv)
+	}
+	defer stopResize()
 
 	watchCtx, cancelWatch := context.WithCancel(ctx)
 	defer cancelWatch()
@@ -127,6 +132,7 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 
 	result, waitErr := conv.Wait()
 
+	stopResize()
 	cancelWatch()
 	cancelDrain()
 	unregister()
@@ -215,19 +221,31 @@ func harnessLeadArgs(cfg HarnessLeadRuntimeConfig) []string {
 	return args
 }
 
-// harnessTerminalSize sizes the virtual PTY to the human terminal once at
-// startup so the wrapper's screen emulator (which drives turn detection) and
-// the mirrored output agree. SIGWINCH is deliberately not forwarded: resizing
-// only the PTY would desync the emulator.
+// harnessTerminalSize sizes the virtual PTY to the human terminal at startup.
+// startHarnessResizeForwarder keeps the wrapper screen emulator and child PTY
+// synchronized with later terminal resizes.
 func harnessTerminalSize(stdout io.Writer) (int, int) {
-	if f, ok := stdout.(*os.File); ok {
-		if fd, ok := harnessFileDescriptor(f); ok {
-			if cols, rows, err := term.GetSize(fd); err == nil && cols > 0 && rows > 0 {
-				return cols, rows
-			}
-		}
+	if cols, rows, ok := currentHarnessTerminalSize(stdout); ok {
+		return int(cols), int(rows)
 	}
 	return harnessDefaultCols, harnessDefaultRows
+}
+
+func currentHarnessTerminalSize(stdout io.Writer) (uint16, uint16, bool) {
+	f, ok := stdout.(*os.File)
+	if !ok {
+		return 0, 0, false
+	}
+	fd, ok := harnessFileDescriptor(f)
+	if !ok {
+		return 0, 0, false
+	}
+	cols, rows, err := term.GetSize(fd)
+	const maxUint16 = int(^uint16(0))
+	if err != nil || cols <= 0 || rows <= 0 || cols > maxUint16 || rows > maxUint16 {
+		return 0, 0, false
+	}
+	return uint16(cols), uint16(rows), true //nolint:gosec // bounds checked above.
 }
 
 func harnessFileDescriptor(f *os.File) (int, bool) {
