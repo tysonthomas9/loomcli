@@ -49,7 +49,31 @@ const wtermState = vi.hoisted(() => {
 const connectionState = vi.hoisted(() => ({
   writeCallbacks: [] as Array<(data: string | Uint8Array) => void>,
   cleanupCount: 0,
+  xtermFitCountsAtConnect: [] as number[],
 }));
+
+const xtermState = vi.hoisted(() => {
+  const state = {
+    fitCount: 0,
+    onReady: null as null | ((handle: unknown) => void),
+    handle: null as unknown as {
+      write: (data: string | Uint8Array) => void;
+      focus: () => void;
+      fit: () => { cols: number; rows: number };
+      scrollToBottom: () => void;
+    },
+  };
+  state.handle = {
+    write: () => {},
+    focus: () => {},
+    fit: () => {
+      state.fitCount += 1;
+      return { cols: 132, rows: 43 };
+    },
+    scrollToBottom: () => {},
+  };
+  return state;
+});
 
 // ── Mock @wterm/react ────────────────────────────────────────────────────────
 //
@@ -103,6 +127,17 @@ vi.mock("@wterm/react", async () => {
 
 vi.mock("@wterm/react/css", () => ({}));
 
+vi.mock("../XTermRenderer", async () => {
+  const React = await import("react");
+
+  function XTermRenderer(props: { onReady: (handle: unknown) => void }) {
+    xtermState.onReady = props.onReady;
+    return React.createElement("div", { "data-testid": "mock-xterm" });
+  }
+
+  return { XTermRenderer };
+});
+
 // ── Mock terminalConnection ──────────────────────────────────────────────────
 //
 // Captures every `write` callback the component hands us. Tests invoke the
@@ -118,6 +153,7 @@ vi.mock("../terminalConnection", () => ({
       setConnState: (s: string) => void,
     ): (() => void) => {
       connectionState.writeCallbacks.push(write);
+      connectionState.xtermFitCountsAtConnect.push(xtermState.fitCount);
       setConnState("connecting");
       const cleanup = () => {
         connectionState.cleanupCount += 1;
@@ -170,6 +206,9 @@ describe("TerminalInstance", () => {
     wtermState.onReadyFiredCount = 0;
     connectionState.writeCallbacks.length = 0;
     connectionState.cleanupCount = 0;
+    connectionState.xtermFitCountsAtConnect.length = 0;
+    xtermState.fitCount = 0;
+    xtermState.onReady = null;
   });
 
   afterEach(() => {
@@ -250,6 +289,28 @@ describe("TerminalInstance", () => {
 
       unmount();
     });
+  });
+
+  it("waits for Claude xterm to fit before opening its first WebSocket", async () => {
+    render(
+      <TerminalInstance
+        sessionName="claude-alpha"
+        backendName="claude"
+        isActive
+      />,
+    );
+    await flushPendingWork();
+
+    expect(connectionState.writeCallbacks).toHaveLength(0);
+    expect(xtermState.onReady).not.toBeNull();
+
+    act(() => {
+      xtermState.onReady?.(xtermState.handle);
+    });
+    await flushPendingWork();
+
+    expect(connectionState.writeCallbacks).toHaveLength(1);
+    expect(connectionState.xtermFitCountsAtConnect).toEqual([1]);
   });
 
   describe("terminal font changes", () => {

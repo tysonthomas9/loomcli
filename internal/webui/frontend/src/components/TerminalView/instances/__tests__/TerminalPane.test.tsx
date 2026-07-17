@@ -23,10 +23,15 @@ import type { TabState } from "@/components/TerminalView/tabs";
 // the stub is created inside it.
 vi.mock("../TerminalInstance", () => ({
   TerminalInstance: forwardRef(function StubTerminalInstance(
-    _props: unknown,
+    props: { backendName?: string },
     _ref: Ref<unknown>,
   ) {
-    return null;
+    return (
+      <div
+        data-testid="terminal-instance-stub"
+        data-backend-name={props.backendName}
+      />
+    );
   }),
 }));
 
@@ -59,6 +64,22 @@ const defaultProps = {
 };
 
 describe("TerminalPane overlay exclusivity", () => {
+  describe("renderer backend routing", () => {
+    it.each(["claude", "shell", "codex", "gemini"])(
+      "forwards the %s backend to TerminalInstance",
+      (backendName) => {
+        render(
+          <TerminalPane {...defaultProps} tab={{ ...baseTab, backendName }} />,
+        );
+
+        expect(screen.getByTestId("terminal-instance-stub")).toHaveAttribute(
+          "data-backend-name",
+          backendName,
+        );
+      },
+    );
+  });
+
   describe("disconnected + reconnecting", () => {
     it("renders the connection overlay and suppresses the background ReconnectingOverlay", () => {
       render(
