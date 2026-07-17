@@ -1,0 +1,7 @@
+diff --git a/local-mode-agent-output.txt b/local-mode-agent-output.txt
+index cd014a3..75f97d7 100644
+--- a/local-mode-agent-output.txt
++++ b/local-mode-agent-output.txt
+@@ -1 +1,2 @@
+ LOCALMODE-3: local mode coder dogfood completed successfully.
++fixture mirror settled

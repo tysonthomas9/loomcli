@@ -1,0 +1,7 @@
+diff --git a/local-mode-agent-output.txt b/local-mode-agent-output.txt
+new file mode 100644
+index 0000000..afdfcca
+--- /dev/null
++++ b/local-mode-agent-output.txt
+@@ -0,0 +1 @@
++LOCALMODE-8 orchestration fixture complete
