@@ -166,6 +166,7 @@ type ExecutionDependencies struct {
 	Workspaces                   store.WorkspaceStore
 	AtomicTaskRunRequests        execution.TaskRunRequestPort
 	AtomicTaskRunClaims          execution.TaskRunClaimPort
+	AtomicTaskRunWorkItemDesign  execution.TaskRunWorkItemDesignPort
 	AtomicTaskRunRequeues        execution.TaskRunRequeuePort
 	AtomicTaskRunRetryExhaustion execution.TaskRunRetryExhaustionPort
 	FleetExecution               fleetdb.ExecutionTransport
@@ -248,7 +249,8 @@ func newExecutionDriverRunDependencies(dependencies ExecutionDependencies) (exec
 func newExecutionTaskRunDependencies(dependencies ExecutionDependencies) (execution.TaskRunDependencies, execution.WorkerDependencies, error) {
 	return NewExecutionTaskRunPorts(ExecutionTaskRunPortDependencies{
 		Requests: dependencies.AtomicTaskRunRequests, Claims: dependencies.AtomicTaskRunClaims,
-		Requeues: dependencies.AtomicTaskRunRequeues, RetryExhaustion: dependencies.AtomicTaskRunRetryExhaustion,
+		WorkItemDesign: dependencies.AtomicTaskRunWorkItemDesign,
+		Requeues:       dependencies.AtomicTaskRunRequeues, RetryExhaustion: dependencies.AtomicTaskRunRetryExhaustion,
 		Nodes: dependencies.Nodes, WorkerProfiles: dependencies.WorkerProfiles,
 	})
 }
@@ -342,6 +344,7 @@ func validateExecutionDependencies(dependencies ExecutionDependencies, issuer *a
 		dependencies.TriggerEvents == nil,
 		dependencies.AtomicTaskRunRequests == nil,
 		dependencies.AtomicTaskRunClaims == nil,
+		dependencies.AtomicTaskRunWorkItemDesign == nil,
 		dependencies.AtomicTaskRunRequeues == nil,
 		dependencies.AtomicTaskRunRetryExhaustion == nil,
 	}

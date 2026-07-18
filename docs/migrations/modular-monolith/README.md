@@ -63,7 +63,7 @@ Phase 3 source implementation establishes active `internal/modules/automation`, 
 Phase 4 implementation activates the Execution and minimal Artifacts
 capability roots and moves the selected TaskRun and DriverRun owner-command
 paths behind the paired FleetDB contract. The current architecture check
-passes all 11 profiles plus the all-files AST check with four active roots, 55
+passes all 11 profiles plus the all-files AST check with four active roots, 56
 required command-ID namespaces, Store `82/71`, 90 handler exceptions, 243
 primary direct-write rows, 86 runtime components, and 103 goroutine
 definitions. The namespace prefixes group the ledger entries; they do not

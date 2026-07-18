@@ -77,7 +77,7 @@ func seedExecutablePromptAgentDriver(t *testing.T, st store.Store) {
 		BundleDigest: "sha256:prompt-agent-test-bundle",
 		Runtime:      "node",
 		Manifest:     map[string]string{"runners": string(runners)},
-		CreatedBy:    "test",
+		CreatedBy:    "system",
 	}); err != nil {
 		t.Fatalf("create prompt-agent driver version fixture: %v", err)
 	}

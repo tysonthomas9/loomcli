@@ -36,6 +36,7 @@ func OperationRules() []authority.OperationRule {
 		authority.Allow(ActionAwait, authority.ClassExecution),
 		authority.Allow(ActionRequestTaskRun, authority.ClassExecution),
 		authority.Allow(ActionClaimTaskRun, authority.ClassSystem),
+		authority.Allow(ActionUpdateTaskRunWorkItemDesign, authority.ClassExecution),
 		authority.Allow(ActionRequeueTaskRun, authority.ClassExecution),
 		authority.Allow(ActionExhaustTaskRunRetries, authority.ClassExecution),
 		authority.Allow(ActionRegisterWorkerNode, authority.ClassSystem),
@@ -73,6 +74,7 @@ type API interface {
 type TaskRunAPI interface {
 	Heartbeat(context.Context, authority.ExecutionAuthority, HeartbeatCommand) (HeartbeatResult, error)
 	AppendLog(context.Context, authority.ExecutionAuthority, AppendLogCommand) (LogEntry, error)
+	UpdateWorkItemDesign(context.Context, authority.ExecutionAuthority, UpdateTaskRunWorkItemDesignCommand) (UpdateTaskRunWorkItemDesignResult, error)
 	Finalize(context.Context, authority.ExecutionAuthority, FinalizeCommand) (FinalizeResult, error)
 }
 

@@ -29,6 +29,10 @@ func (executionTestClaimPort) ClaimTaskRun(context.Context, execution.ClaimTaskR
 	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
 }
 
+func (executionTestClaimPort) UpdateTaskRunWorkItemDesign(context.Context, execution.UpdateTaskRunWorkItemDesignCommand) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrUnavailable
+}
+
 func (executionTestClaimPort) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
 	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
 }
@@ -49,7 +53,8 @@ func executionTestDependencies(t *testing.T, st store.Store) ExecutionDependenci
 		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(),
 		TriggerEvents: st.TriggerEvents(), Workspaces: st.Workspaces(),
 		AtomicTaskRunRequests: executionTestClaimPort{}, AtomicTaskRunClaims: executionTestClaimPort{},
-		AtomicTaskRunRequeues: executionTestClaimPort{}, AtomicTaskRunRetryExhaustion: executionTestClaimPort{},
+		AtomicTaskRunWorkItemDesign: executionTestClaimPort{},
+		AtomicTaskRunRequeues:       executionTestClaimPort{}, AtomicTaskRunRetryExhaustion: executionTestClaimPort{},
 		AllowLegacyStoreAdapters: true,
 	}
 }
@@ -140,6 +145,33 @@ func TestExecutionAuthorityResolversAdmitOnlyRegisteredChildCascadeLanes(t *test
 		t.Context(), "WS", execution.ActionRecoverChildDriverRunCascade, string(execution.DriverExecutorComponentID),
 	); err == nil {
 		t.Fatal("driver executor resolved outcome-only cascade recovery authority")
+	}
+}
+
+func TestExecutionTaskRunAuthorityResolverAllowsExactWorkItemDesignAction(t *testing.T) {
+	capability, err := NewExecutionCapability(executionTestDependencies(t, memstore.New()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := execution.Owner{
+		ResourceKind: execution.ResourceTaskRun, ResourceID: "task-run-1",
+		NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "task-token", FencingToken: 7,
+	}
+	auth, err := capability.TaskRunAuthorityResolver().ResolveTaskRunAuthority(
+		t.Context(), "WS", execution.ActionUpdateTaskRunWorkItemDesign, owner,
+	)
+	if err != nil {
+		t.Fatalf("resolve Work Item design authority: %v", err)
+	}
+	if auth.Action() != execution.ActionUpdateTaskRunWorkItemDesign || auth.ResourceID() != owner.ResourceID {
+		t.Fatalf("resolved authority action=%q resource=%q", auth.Action(), auth.ResourceID())
+	}
+	foreign := owner
+	foreign.ResourceKind = execution.ResourceDriverRun
+	if _, err := capability.TaskRunAuthorityResolver().ResolveTaskRunAuthority(
+		t.Context(), "WS", execution.ActionUpdateTaskRunWorkItemDesign, foreign,
+	); err == nil {
+		t.Fatal("DriverRun owner resolved TaskRun Work Item design authority")
 	}
 }
 

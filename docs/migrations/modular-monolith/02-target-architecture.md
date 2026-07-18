@@ -210,7 +210,7 @@ New required backend behavior is negotiated before adapters become ready. The re
 
 The Execution-owned await dispatcher is always hosted by `loom serve`, so
 every serve profile requires `execution.await_atomic_resume.v1`. Phase 4 adds
-one indivisible, exact 13-key Execution/Artifacts foundation profile:
+one indivisible, exact 14-key Execution/Artifacts foundation profile:
 `artifacts.owner_fenced_lifecycle.v1`,
 `execution.driver_run_child_cascade.v1`,
 `execution.driver_run_child_start.v1`,
@@ -221,6 +221,7 @@ one indivisible, exact 13-key Execution/Artifacts foundation profile:
 `execution.issue_claim_task_run_start.v1`,
 `execution.task_run_lease_fencing.v1`,
 `execution.task_run_log_idempotency.v1`,
+`execution.task_run_work_item_design.v1`,
 `execution.task_run_request.v1`, `execution.task_run_requeue.v1`, and
 `execution.task_run_retry_exhaustion.v1`. Loom requires the complete profile
 before composing the runtime; a partial profile is not a compatibility mode.
@@ -232,7 +233,9 @@ never removes the always-on await or Phase 4 foundation requirements.
 These are deployment-parity gates, not one key per public method. In
 particular, `execution.driver_run_work_item_claim.v1` is advertised only when
 both exact-generation claim and release are usable behind the service boundary;
-the TaskRun claim, lease, request, requeue, and retry-exhaustion keys jointly
+`execution.task_run_work_item_design.v1` is separate because older deployments
+can provide the TaskRun lease family without the owner-fenced Work Item design
+command; the TaskRun claim, lease, request, requeue, and retry-exhaustion keys jointly
 gate the owner-fenced lifecycle and its Work Item terminal policy. The profile
 does not invent separate release or terminal-policy capability names that are
 absent from the code and OpenAPI contract. Redis and Postgres must implement

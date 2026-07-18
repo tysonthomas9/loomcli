@@ -45,11 +45,13 @@ func New(deps routecontracts.Deps, automationModules automationroutes.Modules) [
 		approvals.New(approvals.Config{Store: deps.Store, Awaits: automationModules.EventAwaits}),
 		taskrunapi.NewModule(taskrunapi.Config{
 			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL, LocalSettingsDir: deps.LocalSettingsDir,
-			Execution: deps.ExecutionTaskRuns, Authorities: deps.ExecutionTaskRunAuthorities, Artifacts: deps.Artifacts,
+			IssueBackends: deps.ExecutionIssueBackends,
+			Execution:     deps.ExecutionTaskRuns, Authorities: deps.ExecutionTaskRunAuthorities, Artifacts: deps.Artifacts,
 		}),
 		driverapi.NewModule(driverapi.Config{
 			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL, APIBaseURL: deps.DriverAPIBaseURL,
-			APIToken: deps.DriverAPIToken, RunTokenKey: deps.DriverRunTokenKey,
+			IssueBackends: deps.ExecutionIssueBackends,
+			APIToken:      deps.DriverAPIToken, RunTokenKey: deps.DriverRunTokenKey,
 			LocalSettingsDir: deps.LocalSettingsDir, Dispatcher: deps.Dispatcher,
 			WorkflowEventing: deps.AutomationEventing, EventAwaits: automationModules.EventAwaits,
 			Execution: deps.ExecutionDriverRuns, ExecutionAuthorities: deps.ExecutionDriverRunAuthorities,

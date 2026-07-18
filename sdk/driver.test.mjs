@@ -141,6 +141,33 @@ test("LoomDriverClient.taskRuns.request omits input from the wire when none is g
   });
 });
 
+test("LoomDriverClient.taskRuns.request serializes repoRef at both outgoing placement boundaries", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/exec-task") {
+      return { id: "task-run-1", taskRunId: "task-run-1", taskId: "TASK-1", status: "queued" };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      input: { epicId: "EPIC-1" },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    await client.taskRuns.request({
+      taskId: "TASK-1",
+      runner: "local-task-runner",
+      repoRef: "phase4-terra-ui-repo-fixed",
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "/api/workspaces/WS/driver/exec-task");
+    assert.equal(calls[0].body.repoRef, "phase4-terra-ui-repo-fixed");
+    assert.deepEqual(calls[0].body.sandboxPlacement, {
+      repoRef: "phase4-terra-ui-repo-fixed",
+    });
+  });
+});
+
 test("LoomDriverClient.taskRuns.request replays the exact command after a committed response disconnect", async () => {
   let requestNumber = 0;
   await withDriverServer(async (call) => {

@@ -7,6 +7,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
@@ -26,6 +27,7 @@ type Deps struct {
 	IssueSvc                      service.IssueService
 	Hub                           *realtime.Hub
 	FleetBaseURL                  string
+	ExecutionIssueBackends        func(workspace, actor string) (backend.IssueBackend, error)
 	DriverAPIBaseURL              string
 	DriverAPIToken                string
 	DriverRunTokenKey             []byte

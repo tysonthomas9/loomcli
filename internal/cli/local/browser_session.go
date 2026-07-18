@@ -115,25 +115,11 @@ func createLocalBrowserSession(
 	if doer == nil {
 		return nil, fmt.Errorf("local browser session HTTP client is unavailable")
 	}
-	workspace := ""
-	selectedFromHint := false
-	if requestedWorkspace != nil {
-		workspace = strings.TrimSpace(*requestedWorkspace)
-		if workspace == "" {
-			return nil, fmt.Errorf("explicit browser session workspace must not be empty")
-		}
-	} else {
-		workspace, err = readSelectedWorkspaceHint(dataDir)
-		if err != nil {
-			return nil, err
-		}
-		selectedFromHint = workspace != ""
-	}
-	if workspace == "" {
-		workspace, err = fetchActiveWorkspaceID(ctx, doer, baseURL)
-		if err != nil {
-			return nil, err
-		}
+	workspace, selectedFromHint, err := resolveLocalBrowserSessionWorkspace(
+		ctx, dataDir, baseURL, requestedWorkspace, doer,
+	)
+	if err != nil {
+		return nil, err
 	}
 	credentialDir := filepath.Join(dataDir, ".loom", "operator")
 	token, err := authority.ReadLocalOperatorToken(credentialDir)
@@ -141,15 +127,9 @@ func createLocalBrowserSession(
 		return nil, fmt.Errorf("local browser session authentication: %w", err)
 	}
 
-	payload, err := requestLocalBrowserSessionForWorkspace(ctx, doer, baseURL, workspace, token)
-	var endpointErr *localBrowserSessionEndpointError
-	if err != nil && selectedFromHint && errors.As(err, &endpointErr) && endpointErr.statusCode == http.StatusNotFound {
-		workspace, err = fetchActiveWorkspaceID(ctx, doer, baseURL)
-		if err != nil {
-			return nil, err
-		}
-		payload, err = requestLocalBrowserSessionForWorkspace(ctx, doer, baseURL, workspace, token)
-	}
+	payload, workspace, err := requestLocalBrowserSessionWithHintFallback(
+		ctx, doer, baseURL, workspace, token, selectedFromHint,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +145,54 @@ func createLocalBrowserSession(
 		LaunchCode: payload.LaunchCode,
 		ExpiresAt:  payload.ExpiresAt,
 	}, nil
+}
+
+func resolveLocalBrowserSessionWorkspace(
+	ctx context.Context,
+	dataDir, baseURL string,
+	requestedWorkspace *string,
+	doer localBrowserSessionHTTPDoer,
+) (string, bool, error) {
+	if requestedWorkspace != nil {
+		workspace := strings.TrimSpace(*requestedWorkspace)
+		if workspace == "" {
+			return "", false, fmt.Errorf("explicit browser session workspace must not be empty")
+		}
+		return workspace, false, nil
+	}
+
+	workspace, err := readSelectedWorkspaceHint(dataDir)
+	if err != nil {
+		return "", false, err
+	}
+	selectedFromHint := workspace != ""
+	if workspace == "" {
+		workspace, err = fetchActiveWorkspaceID(ctx, doer, baseURL)
+		if err != nil {
+			return "", false, err
+		}
+	}
+	return workspace, selectedFromHint, nil
+}
+
+func requestLocalBrowserSessionWithHintFallback(
+	ctx context.Context,
+	doer localBrowserSessionHTTPDoer,
+	baseURL, workspace, token string,
+	selectedFromHint bool,
+) (*localBrowserSessionLaunchResponse, string, error) {
+	payload, err := requestLocalBrowserSessionForWorkspace(ctx, doer, baseURL, workspace, token)
+	var endpointErr *localBrowserSessionEndpointError
+	if err == nil || !selectedFromHint || !errors.As(err, &endpointErr) || endpointErr.statusCode != http.StatusNotFound {
+		return payload, workspace, err
+	}
+
+	workspace, err = fetchActiveWorkspaceID(ctx, doer, baseURL)
+	if err != nil {
+		return nil, "", err
+	}
+	payload, err = requestLocalBrowserSessionForWorkspace(ctx, doer, baseURL, workspace, token)
+	return payload, workspace, err
 }
 
 func requestLocalBrowserSessionForWorkspace(

@@ -132,7 +132,8 @@ func (app *Server) buildStoreBackedInfraModules() {
 	unifiedDeps := modbuilder.UnifiedAgentModuleDeps{
 		Store: app.config.Store, AgentSvc: app.agentSvc, IssueSvc: app.issueSvc, Hub: app.hub,
 		FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
-		DriverAPIToken: app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
+		ExecutionIssueBackends: app.config.ExecutionIssueBackends,
+		DriverAPIToken:         app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
 		LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
 		WorkflowCatalog: app.config.WorkflowCatalogAPI,
 	}

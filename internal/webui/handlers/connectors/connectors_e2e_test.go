@@ -272,6 +272,10 @@ func (connectorE2ETaskRunCommands) ClaimTaskRun(context.Context, execution.Claim
 	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
 }
 
+func (connectorE2ETaskRunCommands) UpdateTaskRunWorkItemDesign(context.Context, execution.UpdateTaskRunWorkItemDesignCommand) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrUnavailable
+}
+
 func (connectorE2ETaskRunCommands) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
 	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
 }
@@ -319,7 +323,8 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		WorkerProfiles: h.store.WorkerProfiles(), Agents: h.store.Agents(), Outbox: h.store.Outbox(),
 		Awaits: h.store.Awaits(), TriggerEvents: h.store.TriggerEvents(), Workspaces: h.store.Workspaces(),
 		AtomicTaskRunRequests: taskRunCommands, AtomicTaskRunClaims: taskRunCommands,
-		AtomicTaskRunRequeues: taskRunCommands, AtomicTaskRunRetryExhaustion: taskRunCommands,
+		AtomicTaskRunWorkItemDesign: taskRunCommands,
+		AtomicTaskRunRequeues:       taskRunCommands, AtomicTaskRunRetryExhaustion: taskRunCommands,
 		AllowLegacyStoreAdapters: true,
 	})
 	if err != nil {

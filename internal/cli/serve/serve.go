@@ -272,6 +272,16 @@ func runServe(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Fatalf("failed to compose serve capabilities: %v", err)
 	}
+	// Existing bindings bypass the create-time builtin self-heal. Only an
+	// enabled Automation slice can dispatch those bindings, so refresh after
+	// slice policy has been resolved and before any Automation emitter/runtime
+	// starts. Catalog-disabled and Automation-disabled serve profiles must not
+	// touch their deliberately absent persistence surfaces.
+	if automationCapability != nil {
+		if err := serveadapter.RefreshBoundPromptAgentWorkflows(ctx, storeHandle); err != nil {
+			log.Fatalf("failed to refresh bound prompt-agent workflows: %v", err)
+		}
+	}
 	var issueJournalSource trigger.InternalEventEmitter
 	if automationCapability != nil {
 		awaitResolver := &driverexecutor.ExecutionAwaitResolver{
@@ -687,13 +697,15 @@ func applyStoreHandleServerConfig(
 	cfg.Store = storeHandle.Store
 	gitOps.WithStore(storeHandle.Store)
 	if url := storeHandle.URL(); url != "" {
+		fleetAPIKey := storeHandle.FleetDBClientAPIKey()
 		cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForConfig(
 			url,
-			storeHandle.FleetDBClientAPIKey(),
+			fleetAPIKey,
 			fs.clientCfg.Actor,
 		)
+		cfg.ExecutionIssueBackends = cli.WorkspaceActorIssueBackendForConfig(url, fleetAPIKey)
 		cfg.FleetDBBaseURL = url
-		fs = withStoreFleetConfig(fs, url, storeHandle.FleetDBClientAPIKey())
+		fs = withStoreFleetConfig(fs, url, fleetAPIKey)
 	}
 	cfg.DriverAPIToken = driverAPIToken()
 	cfg.DriverAPIBaseURL = driverAPIBaseURL()

@@ -77,12 +77,16 @@ func TestAppendEmbeddedFleetDBEnvDefaultsAddsWhenMissing(t *testing.T) {
 	if !envHas(env, EnvFleetRedisMinIdleConns+"="+defaultEmbeddedFleetRedisMinIdleConns) {
 		t.Fatalf("missing default %s in env %v", EnvFleetRedisMinIdleConns, env)
 	}
+	if !envHas(env, EnvFleetRateLimitEnabled+"="+defaultEmbeddedFleetRateLimitEnabled) {
+		t.Fatalf("missing default %s in env %v", EnvFleetRateLimitEnabled, env)
+	}
 }
 
 func TestAppendEmbeddedFleetDBEnvDefaultsPreservesConfiguredValues(t *testing.T) {
 	env := appendEmbeddedFleetDBEnvDefaults([]string{
 		EnvFleetRedisPoolSize + "=7",
 		EnvFleetRedisMinIdleConns + "=2",
+		EnvFleetRateLimitEnabled + "=true",
 	})
 
 	if !envHas(env, EnvFleetRedisPoolSize+"=7") {
@@ -91,12 +95,16 @@ func TestAppendEmbeddedFleetDBEnvDefaultsPreservesConfiguredValues(t *testing.T)
 	if !envHas(env, EnvFleetRedisMinIdleConns+"=2") {
 		t.Fatalf("expected configured min idle conns to be preserved in env %v", env)
 	}
+	if !envHas(env, EnvFleetRateLimitEnabled+"=true") {
+		t.Fatalf("expected configured rate-limit setting to be preserved in env %v", env)
+	}
 }
 
 func TestAppendEmbeddedFleetDBEnvDefaultsReplacesEmptyValues(t *testing.T) {
 	env := appendEmbeddedFleetDBEnvDefaults([]string{
 		EnvFleetRedisPoolSize + "=",
 		EnvFleetRedisMinIdleConns + "=   ",
+		EnvFleetRateLimitEnabled + "=",
 	})
 
 	if !envHas(env, EnvFleetRedisPoolSize+"="+defaultEmbeddedFleetRedisPoolSize) {
@@ -104,6 +112,9 @@ func TestAppendEmbeddedFleetDBEnvDefaultsReplacesEmptyValues(t *testing.T) {
 	}
 	if !envHas(env, EnvFleetRedisMinIdleConns+"="+defaultEmbeddedFleetRedisMinIdleConns) {
 		t.Fatalf("expected empty min idle conns to receive default in env %v", env)
+	}
+	if !envHas(env, EnvFleetRateLimitEnabled+"="+defaultEmbeddedFleetRateLimitEnabled) {
+		t.Fatalf("expected empty rate-limit setting to receive default in env %v", env)
 	}
 }
 

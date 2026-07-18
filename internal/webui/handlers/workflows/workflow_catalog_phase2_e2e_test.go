@@ -230,7 +230,12 @@ func (e *workflowCatalogPhase2E2E) startFleetDB() {
 	e.t.Helper()
 	e.t.Setenv(bootstrap.EnvFleetDBBin, e.fleetDBBin)
 	e.t.Setenv("FLEET_RATE_LIMIT_ENABLED", "false")
-	e.t.Setenv("FLEETDB_ISSUE_DESIGN_STORAGE", "inline")
+	// Preserve an explicit mode for later capability E2Es that reuse this real
+	// process harness. Phase 2 itself has no design behavior and retains its
+	// faster inline default when the caller does not select a mode.
+	if strings.TrimSpace(os.Getenv("FLEETDB_ISSUE_DESIGN_STORAGE")) == "" {
+		e.t.Setenv("FLEETDB_ISSUE_DESIGN_STORAGE", "inline")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e.t.Cleanup(cancel)

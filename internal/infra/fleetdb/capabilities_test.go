@@ -37,22 +37,24 @@ func TestRequireCapabilitiesEmptyRequirementsSkipProbe(t *testing.T) {
 	}
 }
 
-func TestPhase4FoundationCapabilitiesIncludesWorkItemClaimProfile(t *testing.T) {
+func TestPhase4FoundationCapabilitiesIncludesWorkItemProfiles(t *testing.T) {
 	t.Parallel()
 
 	got := Phase4FoundationCapabilities()
-	if len(got) != 13 {
-		t.Fatalf("Phase4FoundationCapabilities length = %d, want 13", len(got))
+	if len(got) != 14 {
+		t.Fatalf("Phase4FoundationCapabilities length = %d, want 14", len(got))
 	}
-	found := false
+	found := map[string]bool{}
 	for _, capability := range got {
-		if capability == ExecutionDriverRunWorkItemClaimCapability {
-			found = true
-			break
-		}
+		found[capability] = true
 	}
-	if !found {
-		t.Fatalf("Phase4FoundationCapabilities = %q, missing %q", got, ExecutionDriverRunWorkItemClaimCapability)
+	for _, capability := range []string{
+		ExecutionDriverRunWorkItemClaimCapability,
+		ExecutionTaskRunWorkItemDesignCapability,
+	} {
+		if !found[capability] {
+			t.Fatalf("Phase4FoundationCapabilities = %q, missing %q", got, capability)
+		}
 	}
 }
 

@@ -5641,6 +5641,56 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
         "500": { $ref: "#/components/responses/InternalError" }
 
+  /api/v1/{workspace}/task-runs/{task_run_id}/work-item/design:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/TaskRunID"
+    post:
+      tags: [Task Runs]
+      summary: Atomically update the exact TaskRun Work Item design
+      description: |
+        Strict service-actor-only, design-only owner command. FleetDB derives
+        the Issue identity from the running TaskRun; callers cannot supply an
+        Issue or task ID. The same transaction validates the live TaskRun lease
+        and exact typed Work Item generation, creates or reuses finalized
+        Issue-owned design artifact metadata when managed design storage is
+        enabled, updates only the Issue design representation, appends the
+        audit event, and writes the immutable applied ActionLedger receipt.
+
+        `command_id` is the explicit idempotency key. An exact lost-response
+        retry checks the committed receipt before consulting current lease
+        liveness or writing immutable content. Reusing it with a different
+        owner tuple, body, or format returns 409. In managed artifact mode the
+        response hydrates the current Issue projection from the current artifact pointer.
+        A replay therefore cannot replace a newer design in the response with
+        the older request body. Omitted or empty
+        `design_format` defaults to `markdown`. Empty design bodies are
+        rejected; clearing a design is outside this planner-save command.
+        X-Lease-Token is mandatory, hashed at the API boundary, and never
+        returned.
+      operationId: updateTaskRunWorkItemDesign
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskRunWorkItemDesignUpdateRequest" }
+      responses:
+        "200":
+          description: Work Item design committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskRunWorkItemDesignUpdateResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "410": { $ref: "#/components/responses/Gone" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "503": { $ref: "#/components/responses/InternalError" }
+
   /api/v1/{workspace}/task-runs/{task_run_id}/complete:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -9302,6 +9352,25 @@ components:
         - requeue_task_run
         - start_task_run
         - exhaust_task_run_retries
+        - task_run_work_item_design_update
+        - start_child_driver_run
+        - cascade_child_driver_runs
+        - claim_work_item
+        - release_work_item
+        - update_status
+
+    GenericActionLedgerCreateType:
+      type: string
+      description: Action types accepted by the generic ActionLedger create endpoint. Owner-fenced task_run_work_item_design_update receipts are created only by their atomic command.
+      enum:
+        - close_task
+        - comment
+        - create_pr
+        - merge_pr
+        - request_task_run
+        - requeue_task_run
+        - start_task_run
+        - exhaust_task_run_retries
         - start_child_driver_run
         - cascade_child_driver_runs
         - claim_work_item
@@ -9505,7 +9574,7 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, workflow_catalog.version_lifecycle.v1]
+          example: [artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_work_item_design.v1, workflow_catalog.version_lifecycle.v1]
 
     AutomationErrorResponse:
       type: object
@@ -10905,10 +10974,14 @@ components:
       type: object
       required: [idempotency_key, action_type, target_ref]
       properties:
-        action_id: { type: string }
-        idempotency_key: { type: string }
+        action_id:
+          type: string
+          description: "The task-run-work-item-design-update: prefix is reserved for the atomic TaskRun Work Item design command."
+        idempotency_key:
+          type: string
+          description: "The task-run-work-item-design-update: prefix is reserved for the atomic TaskRun Work Item design command."
         action_type:
-          $ref: "#/components/schemas/ActionLedgerType"
+          $ref: "#/components/schemas/GenericActionLedgerCreateType"
         target_ref: { type: string }
         requested_by: { type: string }
         status:
@@ -11972,6 +12045,65 @@ components:
             - type: "null"
         action: { $ref: "#/components/schemas/ActionLedger" }
         committed: { $ref: "#/components/schemas/TaskRunRetryExhaustionCommit" }
+        replayed: { type: boolean }
+
+    TaskRunWorkItemDesignUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [command_id, node_id, lease_id, fencing_token, design]
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Explicit idempotency key for exact lost-response retries.
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        design:
+          type: string
+          minLength: 1
+          description: Non-empty planner design body, limited to 524288 UTF-8 bytes; this command does not clear designs.
+        design_format:
+          type: string
+          enum: ["", markdown, html]
+          default: markdown
+          description: Omitted or empty values are normalized to markdown.
+
+    TaskRunWorkItemDesignUpdateCommit:
+      type: object
+      additionalProperties: false
+      required: [workspace_key, task_run_id, task_id, design_format, design_sha256, updated_at]
+      properties:
+        workspace_key: { type: string }
+        task_run_id: { type: string }
+        task_id: { type: string }
+        design_format: { type: string, enum: [markdown, html] }
+        design_artifact_id:
+          type: string
+          description: Present when managed artifact design storage committed the representation.
+        design_sha256:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+          description: Digest of the exact committed design body; the body is not copied into the receipt.
+        updated_at:
+          type: string
+          format: date-time
+          description: FleetDB server commit time shared by the action and audit mutation.
+
+    TaskRunWorkItemDesignUpdateResult:
+      type: object
+      additionalProperties: false
+      required: [task_run, issue, action, committed, replayed]
+      properties:
+        task_run:
+          allOf: [{ $ref: "#/components/schemas/TaskRun" }]
+          description: Current TaskRun projection; it may have advanced when this is an exact replay.
+        issue:
+          allOf: [{ $ref: "#/components/schemas/Issue" }]
+          description: Current linked Issue projection. In managed artifact mode its current design artifact pointer is hydrated after the command result is resolved, including on replay.
+        action: { $ref: "#/components/schemas/ActionLedger" }
+        committed: { $ref: "#/components/schemas/TaskRunWorkItemDesignUpdateCommit" }
         replayed: { type: boolean }
 
     DriverRunChildStartRequest:

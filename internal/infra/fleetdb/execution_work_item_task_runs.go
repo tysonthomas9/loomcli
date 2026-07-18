@@ -318,3 +318,153 @@ func executionPersistedCommandTimeMatches(got, want time.Time) bool {
 	return !got.IsZero() && !want.IsZero() &&
 		got.Truncate(time.Microsecond).Equal(want.Truncate(time.Microsecond))
 }
+
+// ExecutionTaskRunWorkItemDesignCommand is FleetDB's exact TaskRun-owner
+// command for updating the design of the Work Item bound by TaskRun.TaskID.
+// LeaseToken is write-only and crosses the wire only in X-Lease-Token; callers
+// cannot select a different Work Item.
+type ExecutionTaskRunWorkItemDesignCommand struct {
+	WorkspaceKey string
+	CommandID    string
+	TaskRunID    string
+	NodeID       string
+	LeaseID      string
+	LeaseToken   string `json:"-"`
+	FencingToken int64
+	Design       string
+	DesignFormat *string
+}
+
+type ExecutionTaskRunWorkItemDesignCommit struct {
+	WorkspaceKey     string    `json:"workspace_key"`
+	TaskRunID        string    `json:"task_run_id"`
+	TaskID           string    `json:"task_id"`
+	DesignFormat     string    `json:"design_format"`
+	DesignArtifactID string    `json:"design_artifact_id"`
+	DesignSHA256     string    `json:"design_sha256"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type ExecutionTaskRunWorkItemDesignResult struct {
+	TaskRun   *domain.TaskRun                      `json:"task_run"`
+	Issue     *ExecutionIssue                      `json:"issue"`
+	Action    *ExecutionActionLedger               `json:"action"`
+	Committed ExecutionTaskRunWorkItemDesignCommit `json:"committed"`
+	Replayed  bool                                 `json:"replayed"`
+}
+
+func (s *executionStore) UpdateTaskRunWorkItemDesign(
+	ctx context.Context,
+	command ExecutionTaskRunWorkItemDesignCommand,
+) (*ExecutionTaskRunWorkItemDesignResult, error) {
+	command, format, err := prepareExecutionTaskRunWorkItemDesignCommand(command)
+	if err != nil {
+		return nil, err
+	}
+	body := struct {
+		CommandID    string  `json:"command_id"`
+		NodeID       string  `json:"node_id"`
+		LeaseID      string  `json:"lease_id"`
+		FencingToken int64   `json:"fencing_token"`
+		Design       string  `json:"design"`
+		DesignFormat *string `json:"design_format,omitempty"`
+	}{
+		CommandID: command.CommandID, NodeID: command.NodeID, LeaseID: command.LeaseID,
+		FencingToken: command.FencingToken, Design: command.Design, DesignFormat: command.DesignFormat,
+	}
+	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/task-runs/" + pathEscape(command.TaskRunID) + "/work-item/design"
+	var result ExecutionTaskRunWorkItemDesignResult
+	if err = s.client.doWithHeaders(ctx, http.MethodPost, path, body, &result, map[string]string{"X-Lease-Token": command.LeaseToken}); err != nil {
+		return nil, mapExecutionTransportError("update TaskRun Work Item design", err)
+	}
+	if !executionTaskRunWorkItemDesignResultMatches(&result, command, format) {
+		return nil, fmt.Errorf("TaskRun Work Item design update returned divergent committed state: %w", ErrExecutionUnavailable)
+	}
+	return &result, nil
+}
+
+func prepareExecutionTaskRunWorkItemDesignCommand(
+	command ExecutionTaskRunWorkItemDesignCommand,
+) (ExecutionTaskRunWorkItemDesignCommand, string, error) {
+	if !executionStringsPresent(
+		command.WorkspaceKey, command.CommandID, command.TaskRunID,
+		command.NodeID, command.LeaseID, command.LeaseToken,
+	) || command.FencingToken <= 0 || strings.TrimSpace(command.Design) == "" {
+		return command, "", fmt.Errorf("execution task-run Work Item design identity and owner are required: %w", ErrExecutionInvalid)
+	}
+	format := "markdown"
+	if command.DesignFormat != nil && strings.TrimSpace(*command.DesignFormat) != "" {
+		format = strings.TrimSpace(*command.DesignFormat)
+	}
+	if format != "markdown" && format != "html" {
+		return command, "", fmt.Errorf("execution task-run Work Item design format is invalid: %w", ErrExecutionInvalid)
+	}
+	command.DesignFormat = &format
+	return command, format, nil
+}
+
+func executionTaskRunWorkItemDesignResultMatches(
+	result *ExecutionTaskRunWorkItemDesignResult,
+	command ExecutionTaskRunWorkItemDesignCommand,
+	format string,
+) bool {
+	if result == nil || result.TaskRun == nil || result.Issue == nil || result.Action == nil {
+		return false
+	}
+	designDigest, designSHA256 := executionTaskRunWorkItemDesignDigest(command.Design)
+	wantResponseRef := executionTaskRunWorkItemDesignResponseRef(
+		result.TaskRun.TaskID, format, designDigest, result.Committed.DesignArtifactID,
+	)
+	return executionTaskRunWorkItemDesignProjectionMatches(result, command, format, designSHA256) &&
+		executionTaskRunWorkItemDesignActionMatches(result, command, wantResponseRef)
+}
+
+func executionTaskRunWorkItemDesignProjectionMatches(
+	result *ExecutionTaskRunWorkItemDesignResult,
+	command ExecutionTaskRunWorkItemDesignCommand,
+	format, designSHA256 string,
+) bool {
+	return executionChecksPass(
+		result.TaskRun.WorkspaceKey == command.WorkspaceKey, result.TaskRun.TaskRunID == command.TaskRunID,
+		strings.TrimSpace(result.TaskRun.TaskID) != "",
+		result.Replayed || (result.TaskRun.NodeID == command.NodeID &&
+			result.TaskRun.LeaseID == command.LeaseID && result.TaskRun.FencingToken == command.FencingToken),
+		result.Replayed || result.TaskRun.Status == domain.TaskRunRunning,
+		result.Issue.Workspace == command.WorkspaceKey, result.Issue.ID == result.TaskRun.TaskID,
+		!result.Issue.UpdatedAt.IsZero(), result.Committed.WorkspaceKey == command.WorkspaceKey,
+		result.Committed.TaskRunID == command.TaskRunID, result.Committed.TaskID == result.TaskRun.TaskID,
+		result.Committed.DesignFormat == format, result.Committed.DesignSHA256 == designSHA256,
+		!result.Committed.UpdatedAt.IsZero(),
+	)
+}
+
+func executionTaskRunWorkItemDesignActionMatches(
+	result *ExecutionTaskRunWorkItemDesignResult,
+	command ExecutionTaskRunWorkItemDesignCommand,
+	wantResponseRef string,
+) bool {
+	wantActionID := "task-run-work-item-design-update:" + command.CommandID
+	return executionChecksPass(
+		result.Action.WorkspaceKey == command.WorkspaceKey, result.Action.ActionID == wantActionID,
+		result.Action.IdempotencyKey == wantActionID, result.Action.ActionType == "task_run_work_item_design_update",
+		result.Action.TargetRef == command.TaskRunID, result.Action.RequestedBy == "node:"+command.NodeID,
+		result.Action.Status == "applied", strings.HasPrefix(result.Action.RequestRef, "sha256:"),
+		result.Action.ResponseRef == wantResponseRef, !result.Action.CreatedAt.IsZero(),
+		result.Committed.UpdatedAt.Equal(result.Action.CreatedAt),
+		result.Action.AppliedAt != nil && result.Action.AppliedAt.Equal(result.Action.CreatedAt),
+	)
+}
+
+func executionTaskRunWorkItemDesignDigest(design string) (string, string) {
+	digest := sha256.Sum256([]byte(design))
+	bare := hex.EncodeToString(digest[:])
+	return bare, "sha256:" + bare
+}
+
+func executionTaskRunWorkItemDesignResponseRef(taskID, format, designDigest, artifactID string) string {
+	responseRef := "issue://" + taskID + "/design?format=" + format + "&sha256=" + designDigest
+	if artifactID != "" {
+		responseRef += "&artifact_id=" + artifactID
+	}
+	return responseRef
+}

@@ -71,6 +71,7 @@ func validTaskRunOwnerEnvelope(owner execution.Owner) bool {
 func taskRunExecutionAction(action authority.Action) bool {
 	switch action {
 	case execution.ActionHeartbeat, execution.ActionAppendLog, execution.ActionFinalize,
+		execution.ActionUpdateTaskRunWorkItemDesign,
 		execution.ActionRequeueTaskRun, execution.ActionExhaustTaskRunRetries,
 		artifacts.ActionDeclare, artifacts.ActionUpload, artifacts.ActionFinalize,
 		artifacts.ActionReference, artifacts.ActionGet, artifacts.ActionList:

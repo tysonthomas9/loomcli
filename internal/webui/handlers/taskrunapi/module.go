@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -81,7 +82,7 @@ type Config struct {
 	// fall back to Store.Artifacts; a nil API fails artifact operations closed.
 	Artifacts artifactsmodule.API
 	// FleetBaseURL is the fleet-db HTTP base URL used to build issue
-	// backends for the read-only task-get op.
+	// backends for exact-task reads. TaskRun mutations use Execution ports.
 	FleetBaseURL string
 	// LocalSettingsDir is the app-local data directory containing sealed
 	// runtime credentials configured from Settings.
@@ -117,6 +118,7 @@ func NewModule(cfg Config) *Module {
 	m.ops = map[string]opHandler{
 		"get":                m.get,
 		"task-get":           m.taskGet,
+		"task-design-update": m.taskDesignUpdate,
 		"heartbeat":          m.heartbeat,
 		"log-append":         m.logAppend,
 		"complete":           m.complete,
@@ -305,6 +307,26 @@ func decodeParams[T any](body []byte) (T, error) {
 	return params, nil
 }
 
+// decodeStrictParams is reserved for operations that cross from
+// model-controlled task harnesses into Work Item projections or commands.
+// Unknown fields fail closed so the TaskRun surface cannot widen implicitly.
+func decodeStrictParams[T any](body []byte) (T, error) {
+	var params T
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&params); err != nil {
+		return params, fmt.Errorf("decode task-run op params: %s: %w", err.Error(), domain.ErrInvalid)
+	}
+	var trailing struct{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("multiple JSON values")
+		}
+		return params, fmt.Errorf("decode task-run op params: %s: %w", err.Error(), domain.ErrInvalid)
+	}
+	return params, nil
+}
+
 func (m *Module) get(ctx context.Context, ws string, id leaseIdentity, _ []byte) (any, error) {
 	run, err := m.verifyLease(ctx, ws, id)
 	if err != nil {
@@ -313,7 +335,13 @@ func (m *Module) get(ctx context.Context, ws string, id leaseIdentity, _ []byte)
 	return driverpkg.TaskRunResultFromDomain(run), nil
 }
 
-func (m *Module) taskGet(ctx context.Context, ws string, id leaseIdentity, _ []byte) (any, error) {
+func (m *Module) taskGet(ctx context.Context, ws string, id leaseIdentity, body []byte) (any, error) {
+	params, err := decodeStrictParams[struct {
+		TaskID string `json:"taskId"`
+	}](body)
+	if err != nil {
+		return nil, err
+	}
 	run, err := m.verifyLease(ctx, ws, id)
 	if err != nil {
 		return nil, err
@@ -322,6 +350,9 @@ func (m *Module) taskGet(ctx context.Context, ws string, id leaseIdentity, _ []b
 	taskID := strings.TrimSpace(run.TaskID)
 	if taskID == "" {
 		return result, nil
+	}
+	if requested := strings.TrimSpace(params.TaskID); requested != "" && requested != taskID {
+		return nil, fmt.Errorf("task %q is outside task run %q: %w", requested, run.TaskRunID, domain.ErrNotOwner)
 	}
 	issueBackend, err := m.issueBackends(ws, taskRunActor(run))
 	if err != nil {
@@ -335,8 +366,56 @@ func (m *Module) taskGet(ctx context.Context, ws string, id leaseIdentity, _ []b
 	return result, nil
 }
 
-// taskRunActor is the audit actor for reads performed on behalf of a task
-// runner.
+type taskDesignUpdateParams struct {
+	RequestID    string  `json:"requestId"`
+	Design       *string `json:"design"`
+	DesignFormat *string `json:"designFormat,omitempty"`
+}
+
+// taskDesignUpdate is the deliberately narrow Execution port used by
+// `loom data update --design [--design-format]` inside a TaskRun. FleetDB's
+// atomic command verifies the owner and derives the Work Item from TaskRun;
+// callers cannot choose another Work Item or smuggle a generic issue field.
+func (m *Module) taskDesignUpdate(ctx context.Context, ws string, id leaseIdentity, body []byte) (any, error) {
+	params, err := decodeStrictParams[taskDesignUpdateParams](body)
+	if err != nil {
+		return nil, err
+	}
+	requestID := strings.TrimSpace(params.RequestID)
+	if requestID == "" {
+		return nil, fmt.Errorf("requestId is required: %w", domain.ErrInvalid)
+	}
+	if params.Design == nil || strings.TrimSpace(*params.Design) == "" {
+		return nil, fmt.Errorf("nonblank design is required: %w", domain.ErrInvalid)
+	}
+	format := "markdown"
+	if params.DesignFormat != nil && strings.TrimSpace(*params.DesignFormat) != "" {
+		format = strings.TrimSpace(*params.DesignFormat)
+	}
+	if format != "markdown" && format != "html" {
+		return nil, fmt.Errorf("designFormat must be markdown or html: %w", domain.ErrInvalid)
+	}
+	params.DesignFormat = &format
+
+	owner, auth, err := m.taskRunAuthority(ctx, ws, execution.ActionUpdateTaskRunWorkItemDesign, id)
+	if err != nil {
+		return nil, fmt.Errorf("authorize task design update: %w", err)
+	}
+	result, err := m.execution.UpdateWorkItemDesign(ctx, auth, execution.UpdateTaskRunWorkItemDesignCommand{
+		WorkspaceKey: ws,
+		RequestID:    requestID,
+		Owner:        owner,
+		Design:       params.Design,
+		DesignFormat: params.DesignFormat,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("update task design: %w", err)
+	}
+	return map[string]any{"taskId": result.WorkItemID, "actionId": result.ActionID, "replayed": result.Replay}, nil
+}
+
+// taskRunActor is the audit actor for exact-task Work Item operations performed
+// on behalf of a task runner.
 func taskRunActor(run *domain.TaskRun) string {
 	if run.DriverRunID != "" {
 		return driverpkg.DriverRunActor(run.DriverRunID)
@@ -582,11 +661,15 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		writeOpError(w, http.StatusUnauthorized, "lease_denied", err.Error(), false)
 	case errors.Is(err, domain.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
+	case errors.Is(err, execution.ErrNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, domain.ErrNotOwner):
 		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
 	case errors.Is(err, domain.ErrInvalidTransition):
 		writeOpError(w, http.StatusConflict, "invalid_transition", err.Error(), false)
-	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, execution.ErrInvalidTransition):
+		writeOpError(w, http.StatusConflict, "invalid_transition", err.Error(), false)
+	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, execution.ErrConflict):
 		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
 	case errors.Is(err, domain.ErrInvalid):
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
@@ -594,7 +677,7 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
 	case errors.Is(err, execution.ErrFenceConflict), errors.Is(err, authority.ErrAdmissionDenied):
 		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
-	case errors.Is(err, artifactsmodule.ErrUnavailable):
+	case errors.Is(err, execution.ErrUnavailable), errors.Is(err, artifactsmodule.ErrUnavailable):
 		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
 	case errors.Is(err, context.DeadlineExceeded):
 		writeOpError(w, http.StatusGatewayTimeout, "timeout", err.Error(), true)

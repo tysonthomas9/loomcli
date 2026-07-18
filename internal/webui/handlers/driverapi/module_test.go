@@ -341,6 +341,10 @@ type testTaskRunClaimPort struct {
 	requestReceipts map[string]execution.RequestTaskRunResult
 }
 
+func (*testTaskRunClaimPort) UpdateTaskRunWorkItemDesign(context.Context, execution.UpdateTaskRunWorkItemDesignCommand) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrUnavailable
+}
+
 func (port *testTaskRunClaimPort) ReplayTaskRunRequest(_ context.Context, command execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
 	port.mu.Lock()
 	defer port.mu.Unlock()
@@ -554,7 +558,8 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
 		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(),
 		Workspaces: st.Workspaces(), AtomicTaskRunRequests: taskRunCommands, AtomicTaskRunClaims: taskRunCommands,
-		AtomicTaskRunRequeues: taskRunCommands, AtomicTaskRunRetryExhaustion: taskRunCommands,
+		AtomicTaskRunWorkItemDesign: taskRunCommands,
+		AtomicTaskRunRequeues:       taskRunCommands, AtomicTaskRunRetryExhaustion: taskRunCommands,
 		AllowLegacyStoreAdapters: true,
 	})
 	if err != nil {

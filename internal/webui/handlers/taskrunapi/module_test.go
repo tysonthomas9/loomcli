@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,6 +37,10 @@ func (executionClaimPortStub) ClaimTaskRun(context.Context, execution.ClaimTaskR
 	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
 }
 
+func (executionClaimPortStub) UpdateTaskRunWorkItemDesign(context.Context, execution.UpdateTaskRunWorkItemDesignCommand) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrUnavailable
+}
+
 func (executionClaimPortStub) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
 	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
 }
@@ -43,8 +49,50 @@ func (executionClaimPortStub) ExhaustTaskRunRetries(context.Context, execution.E
 	return execution.ExhaustTaskRunRetriesResult{}, execution.ErrUnavailable
 }
 
-func executionDependenciesForTaskRunAPITest(t *testing.T, st store.Store) appserve.ExecutionDependencies {
+type taskRunWorkItemDesignPortStub struct {
+	mu       sync.Mutex
+	expected execution.Owner
+	calls    []execution.UpdateTaskRunWorkItemDesignCommand
+	applied  int
+}
+
+func (stub *taskRunWorkItemDesignPortStub) UpdateTaskRunWorkItemDesign(
+	_ context.Context,
+	command execution.UpdateTaskRunWorkItemDesignCommand,
+) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	stub.calls = append(stub.calls, command)
+	if command.WorkspaceKey != "WS" || command.Owner != stub.expected {
+		return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrFenceConflict
+	}
+	stub.applied++
+	return execution.UpdateTaskRunWorkItemDesignResult{
+		WorkItemID: "TASK-1",
+		ActionID:   "task-run-work-item-design-update:" + command.RequestID,
+	}, nil
+}
+
+func (stub *taskRunWorkItemDesignPortStub) snapshot() (int, int, execution.UpdateTaskRunWorkItemDesignCommand) {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	var last execution.UpdateTaskRunWorkItemDesignCommand
+	if len(stub.calls) > 0 {
+		last = stub.calls[len(stub.calls)-1]
+	}
+	return len(stub.calls), stub.applied, last
+}
+
+func executionDependenciesForTaskRunAPITest(
+	t *testing.T,
+	st store.Store,
+	designPorts ...execution.TaskRunWorkItemDesignPort,
+) appserve.ExecutionDependencies {
 	t.Helper()
+	var designs execution.TaskRunWorkItemDesignPort = executionClaimPortStub{}
+	if len(designPorts) > 0 && designPorts[0] != nil {
+		designs = designPorts[0]
+	}
 	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
 	if !ok {
 		t.Fatal("test DriverStep store lacks terminal repair support")
@@ -55,13 +103,14 @@ func executionDependenciesForTaskRunAPITest(t *testing.T, st store.Store) appser
 		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(),
 		TriggerEvents: st.TriggerEvents(), Workspaces: st.Workspaces(),
 		AtomicTaskRunRequests: executionClaimPortStub{}, AtomicTaskRunClaims: executionClaimPortStub{},
-		AtomicTaskRunRequeues: executionClaimPortStub{}, AtomicTaskRunRetryExhaustion: executionClaimPortStub{},
+		AtomicTaskRunWorkItemDesign: designs,
+		AtomicTaskRunRequeues:       executionClaimPortStub{}, AtomicTaskRunRetryExhaustion: executionClaimPortStub{},
 		AllowLegacyStoreAdapters: true,
 	}
 }
 
-// fakeIssueBackend embeds the interface so only Get needs a real
-// implementation; anything else panics loudly.
+// fakeIssueBackend embeds the interface so only the exact-task read needs a
+// real implementation; any mutation attempt panics loudly.
 type fakeIssueBackend struct {
 	backend.IssueBackend
 	task  *backend.IssueDetailData
@@ -76,6 +125,7 @@ type testHarness struct {
 	server  *httptest.Server
 	store   store.Store
 	backend *fakeIssueBackend
+	designs *taskRunWorkItemDesignPortStub
 	module  *Module
 
 	taskRunID string
@@ -101,6 +151,14 @@ func newHarnessWithConfig(t *testing.T, localSettingsDir, runner string) *testHa
 		token:     "lease-token-1",
 		fence:     42,
 	}
+	h.designs = &taskRunWorkItemDesignPortStub{expected: execution.Owner{
+		ResourceKind: execution.ResourceTaskRun,
+		ResourceID:   h.taskRunID,
+		NodeID:       h.nodeID,
+		LeaseID:      h.leaseID,
+		LeaseToken:   h.token,
+		FencingToken: h.fence,
+	}}
 	if _, err := st.TaskRuns().Create(context.Background(), store.TaskRunCreate{
 		WorkspaceKey: "WS",
 		TaskRunID:    h.taskRunID,
@@ -114,7 +172,7 @@ func newHarnessWithConfig(t *testing.T, localSettingsDir, runner string) *testHa
 	}); err != nil {
 		t.Fatalf("Create task run: %v", err)
 	}
-	executionCapability, err := appserve.NewExecutionCapability(executionDependenciesForTaskRunAPITest(t, st))
+	executionCapability, err := appserve.NewExecutionCapability(executionDependenciesForTaskRunAPITest(t, st, h.designs))
 	if err != nil {
 		t.Fatalf("compose Execution capability: %v", err)
 	}
@@ -275,6 +333,83 @@ func TestTaskRunGetAndTaskGet(t *testing.T) {
 	}
 	if h.backend.actor != "task-run:task-run-1" {
 		t.Fatalf("issue backend actor = %q, want task-run scoped actor", h.backend.actor)
+	}
+
+	resp, out = h.postOp(t, "task-get", map[string]any{"taskId": "TASK-2"}, identity{})
+	if resp.StatusCode != http.StatusForbidden || errorCode(t, out) != "not_owner" {
+		t.Fatalf("foreign task-get = %d %v, want 403 not_owner", resp.StatusCode, out)
+	}
+}
+
+func TestTaskRunDesignUpdateIsExactTaskAndFieldRestricted(t *testing.T) {
+	h := newHarness(t)
+	design := "# Plan\n\nShip it."
+	resp, out := h.postOp(t, "task-design-update", map[string]any{
+		"requestId": "design-1", "design": design, "designFormat": "markdown",
+	}, identity{})
+	if resp.StatusCode != http.StatusOK || out["taskId"] != "TASK-1" ||
+		out["actionId"] != "task-run-work-item-design-update:design-1" || out["replayed"] != false {
+		t.Fatalf("design update = %d %v, want TASK-1 success", resp.StatusCode, out)
+	}
+	calls, applied, command := h.designs.snapshot()
+	if calls != 1 || applied != 1 || command.RequestID != "design-1" || command.Owner.ResourceID != h.taskRunID ||
+		command.Design == nil || *command.Design != design || command.DesignFormat == nil || *command.DesignFormat != "markdown" {
+		t.Fatalf("design command = %+v calls=%d applied=%d", command, calls, applied)
+	}
+
+	tests := []struct {
+		name         string
+		body         map[string]any
+		id           identity
+		wantStatus   int
+		wantCode     string
+		wantPortCall bool
+	}{
+		{
+			name: "caller task ID rejected", body: map[string]any{"requestId": "design-foreign", "taskId": "TASK-2", "design": "nope"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "unknown status field", body: map[string]any{"requestId": "design-field", "design": "nope", "status": "closed"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "missing request ID", body: map[string]any{"design": "nope"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "missing design", body: map[string]any{"requestId": "design-missing", "designFormat": "markdown"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "blank design", body: map[string]any{"requestId": "design-blank", "design": "  "},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "invalid format", body: map[string]any{"requestId": "design-format", "design": "nope", "designFormat": "plaintext"},
+			wantStatus: http.StatusBadRequest, wantCode: "invalid",
+		},
+		{
+			name: "expired lease", body: map[string]any{"requestId": "design-stale", "design": "nope"}, id: identity{fence: "41"},
+			wantStatus: http.StatusForbidden, wantCode: "not_owner", wantPortCall: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			beforeCalls, beforeApplied, _ := h.designs.snapshot()
+			resp, decoded := h.postOp(t, "task-design-update", tt.body, tt.id)
+			if resp.StatusCode != tt.wantStatus || errorCode(t, decoded) != tt.wantCode {
+				t.Fatalf("response = %d %v, want %d %s", resp.StatusCode, decoded, tt.wantStatus, tt.wantCode)
+			}
+			afterCalls, afterApplied, _ := h.designs.snapshot()
+			wantCalls := beforeCalls
+			if tt.wantPortCall {
+				wantCalls++
+			}
+			if afterCalls != wantCalls || afterApplied != beforeApplied {
+				t.Fatalf("rejected request calls=%d applied=%d, want calls=%d applied=%d", afterCalls, afterApplied, wantCalls, beforeApplied)
+			}
+		})
 	}
 }
 
@@ -554,6 +689,31 @@ func TestModuleRegisterNilStore(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("nil-store module registered routes: %d", rec.Code)
+	}
+}
+
+func TestExecutionDesignErrorsKeepStableTaskRunAPIStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{name: "not found", err: fmt.Errorf("update task design: %w", execution.ErrNotFound), status: http.StatusNotFound, code: "not_found"},
+		{name: "invalid transition", err: fmt.Errorf("update task design: %w", execution.ErrInvalidTransition), status: http.StatusConflict, code: "invalid_transition"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeDomainOpError(recorder, test.err)
+			var body map[string]any
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode error response: %v", err)
+			}
+			if recorder.Code != test.status || errorCode(t, body) != test.code {
+				t.Fatalf("response = %d %v, want %d %s", recorder.Code, body, test.status, test.code)
+			}
+		})
 	}
 }
 

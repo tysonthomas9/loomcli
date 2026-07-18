@@ -27,7 +27,7 @@ func (stub *retryExhaustionFleetTransportStub) ExhaustTaskRunRetries(
 
 func TestFleetTaskRunRetryExhaustionPortUsesCommittedWorkItemIdentityWithoutCurrentIssue(t *testing.T) {
 	transport := &retryExhaustionFleetTransportStub{result: retryExhaustionFleetResult(nil, false, false)}
-	_, _, _, port, err := NewFleetTaskRunCommandPorts(transport)
+	_, _, _, _, port, err := NewFleetTaskRunCommandPorts(transport)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestFleetTaskRunRetryExhaustionPortReportsCurrentProjectionSeparatelyFromCo
 			transport := &retryExhaustionFleetTransportStub{
 				result: retryExhaustionFleetResult(test.issue, test.committedBlocked, test.replayed),
 			}
-			_, _, _, port, err := NewFleetTaskRunCommandPorts(transport)
+			_, _, _, _, port, err := NewFleetTaskRunCommandPorts(transport)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -128,7 +128,7 @@ func TestFleetTaskRunRetryExhaustionPortRejectsMismatchedWorkItemIdentity(t *tes
 			fixture := retryExhaustionFleetResult(retryExhaustionFleetIssue("in_progress"), false, false)
 			test.edit(fixture)
 			transport := &retryExhaustionFleetTransportStub{result: fixture}
-			_, _, _, port, err := NewFleetTaskRunCommandPorts(transport)
+			_, _, _, _, port, err := NewFleetTaskRunCommandPorts(transport)
 			if err != nil {
 				t.Fatal(err)
 			}

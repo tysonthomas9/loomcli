@@ -176,6 +176,10 @@ export async function run(ctx) {
     runner: "local-task-runner",
     input: requestInput,
   };
+  const sourceRepo = stringValue(claimed && (claimed.sourceRepo || claimed.source_repo));
+  if (sourceRepo) {
+    requestParams.repoRef = sourceRepo;
+  }
   requestParams.closeTask = false;
   try {
     await loom.taskRuns.request(requestParams);
@@ -208,12 +212,32 @@ export async function run(ctx) {
   if (status === "completed") {
     if (isPlanner) {
       // The planner backend writes the design only. The TaskRun terminal receipt
-      // has now retired its live Work Item claim, so this host-owned mutation can
-      // safely hand the card to review. The idempotent read still tolerates an
+      // has now retired its live Work Item claim. Verify the claimed card really
+      // carries that durable output before reporting a design handoff: a child
+      // process exiting successfully is not proof that it persisted the design.
+      let plannedCard;
+      try {
+        plannedCard = (await loom.issues.get({ issueId })) || {};
+      } catch (err) {
+        return loom.needsReview({
+          summary: "prompt-agent: planner TaskRun " + taskRunId
+            + " completed, but the host could not verify a persisted design for "
+            + issueId + ": " + errorMessage(err),
+          errorClass: "prompt_agent_planner_design_read_failed",
+          issueId,
+          taskRunId,
+        });
+      }
+      const hasPersistedDesign = stringValue(plannedCard.design).trim() !== "";
+
+      // The post-terminal lifecycle transition remains host-owned even when the
+      // planner produced no design: move the now-unclaimed card to review and
+      // surface a typed needs-review outcome instead of silently reopening it
+      // into an automatic spend loop. The idempotent handoff still tolerates an
       // older/custom planner that already left the card there.
       let reviewed;
       try {
-        reviewed = await ensureCardInReview(loom, issueId);
+        reviewed = await ensureCardInReview(loom, issueId, plannedCard);
       } catch (err) {
         return loom.needsReview({
           summary: "prompt-agent: planner TaskRun " + taskRunId
@@ -221,6 +245,16 @@ export async function run(ctx) {
           errorClass: "prompt_agent_planner_handoff_failed",
           issueId,
           taskRunId,
+        });
+      }
+      if (!hasPersistedDesign) {
+        return loom.needsReview({
+          summary: "prompt-agent: planner TaskRun " + taskRunId + " completed, but "
+            + issueId + " has no persisted design (handed to " + reviewed + " for review)",
+          errorClass: "prompt_agent_planner_design_missing",
+          issueId,
+          taskRunId,
+          outcome: "design-missing",
         });
       }
       return loom.completed({
@@ -519,8 +553,7 @@ function notMyPhaseSummary(roleName, taskFilter, taskId, hasDesign) {
 // planner may already have moved it; if so we do not double-move. A failed
 // handoff is surfaced to the caller so the DriverRun cannot report completion
 // while the Work Item remains in_progress.
-async function ensureCardInReview(loom, issueId) {
-  const after = (await loom.issues.get({ issueId })) || {};
+async function ensureCardInReview(loom, issueId, after) {
   if (stringValue(after.status) === "review" && stringValue(after.assignee) === "") {
     return "review";
   }

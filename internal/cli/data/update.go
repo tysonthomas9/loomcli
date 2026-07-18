@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 )
@@ -31,11 +32,25 @@ var updateCmd = &cobra.Command{
 	Short: "Update issue fields",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		taskRunClient, active, err := taskRunDataClientFromEnv()
+		if err != nil {
+			return err
+		}
+		if active {
+			design, format, err := taskRunDesignUpdateFromFlags(cmd)
+			if err != nil {
+				return err
+			}
+			if err := taskRunClient.updateDesign(ctx, args[0], design, format); err != nil {
+				return err
+			}
+			return printMessageResult(os.Stdout, "updated "+args[0], outputFormat)
+		}
 		params, fieldsChanged, err := updateParamsFromFlags(cmd)
 		if err != nil {
 			return err
 		}
-		ctx := cmd.Context()
 		ib, err := getIssueBackend(ctx)
 		if err != nil {
 			return err
@@ -58,6 +73,38 @@ var updateCmd = &cobra.Command{
 		}
 		return printMessageResult(os.Stdout, "updated "+args[0], outputFormat)
 	},
+}
+
+// taskRunDesignUpdateFromFlags admits only the one Work Item mutation exposed
+// to a model-controlled TaskRun. Inspecting local flags (rather than enumerating
+// today's other fields) makes future update flags fail closed automatically.
+func taskRunDesignUpdateFromFlags(cmd *cobra.Command) (string, *string, error) {
+	var forbidden []string
+	cmd.LocalNonPersistentFlags().VisitAll(func(flag *pflag.Flag) {
+		if flag.Changed && flag.Name != "design" && flag.Name != "design-format" {
+			forbidden = append(forbidden, "--"+flag.Name)
+		}
+	})
+	if len(forbidden) > 0 {
+		return "", nil, fmt.Errorf("task-run data update only permits --design and optional --design-format; rejected %s", strings.Join(forbidden, ", "))
+	}
+	if !cmd.Flags().Changed("design") {
+		return "", nil, fmt.Errorf("task-run data update requires --design")
+	}
+	if strings.TrimSpace(updateDesign) == "" {
+		return "", nil, fmt.Errorf("task-run data update requires a nonblank --design")
+	}
+	var format *string
+	if cmd.Flags().Changed("design-format") {
+		value := strings.TrimSpace(updateDesignFormat)
+		if value != "" {
+			if err := validateDesignFormat(value); err != nil {
+				return "", nil, err
+			}
+			format = &value
+		}
+	}
+	return updateDesign, format, nil
 }
 
 // updateParamsFromFlags builds UpdateParams from the changed field flags. The

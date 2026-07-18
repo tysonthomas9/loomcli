@@ -15,6 +15,7 @@ function error(code, message) {
 
 function makeLoom(options = {}) {
   const calls = [];
+  let issueReadIndex = 0;
   const record = (name, value) => {
     calls.push({ name, value });
   };
@@ -55,12 +56,17 @@ function makeLoom(options = {}) {
       release: async (params) => call("tasks.release", params, undefined, options.releaseError),
     },
     issues: {
-      get: async (params) => call(
-        "issues.get",
-        params,
-        options.issue === undefined ? { design: "a design", labels: [] } : options.issue,
-        options.issueError,
-      ),
+      get: async (params) => {
+        const readIndex = issueReadIndex;
+        issueReadIndex += 1;
+        const result = Array.isArray(options.issueResults)
+          ? options.issueResults[readIndex]
+          : (options.issue === undefined ? { design: "a design", labels: [] } : options.issue);
+        const failure = Array.isArray(options.issueErrors)
+          ? options.issueErrors[readIndex]
+          : options.issueError;
+        return call("issues.get", params, result, failure);
+      },
       addLabel: async (params) => call("issues.addLabel", params, options.addLabelResult || {}, options.addLabelError),
       update: async (params) => call("issues.update", params, options.updateResult || {}, options.updateError),
     },
@@ -202,6 +208,111 @@ test("a filterless coder closes patch-back work only after the terminal receipt"
     "the host must not close the card before observing the terminal TaskRun receipt",
   );
 });
+
+test("planner completion verifies the persisted design before host review handoff", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "needs_plan",
+    issueResults: [
+      { design: "", labels: [], status: "in_progress", assignee: "driver-run-7" },
+      { design: "persisted planner design", labels: [], status: "in_progress", assignee: "driver-run-7" },
+    ],
+  }, {
+    roleName: "planner",
+    taskId: TASK_ID,
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.outcome, "design-review");
+  assert.match(result.summary, /design handoff/);
+  const request = taskRunRequest(calls);
+  assert.equal(request.input.deliveryMode, "patch-back");
+  const issueReads = named(calls, "issues.get");
+  assert.equal(issueReads.length, 2);
+  assert.deepEqual(one(calls, "issues.update"), {
+    issueId: TASK_ID,
+    status: "review",
+    assignee: "",
+  });
+  assert.ok(callIndex(calls, "taskRuns.await") < calls.indexOf(issueReads[1]));
+  assert.ok(calls.indexOf(issueReads[1]) < callIndex(calls, "issues.update"));
+  none(calls, "tasks.release", "needsReview");
+});
+
+test("planner completion without a persisted design is typed needs_review", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "needs_plan",
+    issueResults: [
+      { design: "", labels: [], status: "in_progress", assignee: "driver-run-7" },
+      { design: "   ", labels: [], status: "in_progress", assignee: "driver-run-7" },
+    ],
+  }, {
+    roleName: "planner",
+    taskId: TASK_ID,
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "prompt_agent_planner_design_missing");
+  assert.equal(result.outcome, "design-missing");
+  assert.doesNotMatch(result.summary, /design handoff/);
+  assert.match(result.summary, /no persisted design/);
+  taskRunRequest(calls);
+  const issueReads = named(calls, "issues.get");
+  assert.equal(issueReads.length, 2);
+  assert.deepEqual(one(calls, "issues.update"), {
+    issueId: TASK_ID,
+    status: "review",
+    assignee: "",
+  });
+  assert.ok(callIndex(calls, "taskRuns.await") < calls.indexOf(issueReads[1]));
+  assert.ok(calls.indexOf(issueReads[1]) < callIndex(calls, "issues.update"));
+  assert.ok(callIndex(calls, "issues.update") < callIndex(calls, "needsReview"));
+  none(calls, "tasks.release", "completed");
+});
+
+test("planner completion with a failed design read is typed needs_review", async () => {
+  const readFailure = error("unavailable", "post-run issue read failed");
+  const { result, calls, caught } = await invoke({
+    taskFilter: "needs_plan",
+    issueResults: [
+      { design: "", labels: [], status: "in_progress", assignee: "driver-run-7" },
+      undefined,
+    ],
+    issueErrors: [undefined, readFailure],
+  }, {
+    roleName: "planner",
+    taskId: TASK_ID,
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "prompt_agent_planner_design_read_failed");
+  assert.doesNotMatch(result.summary, /design handoff/);
+  assert.match(result.summary, /could not verify a persisted design/);
+  assert.match(result.summary, /post-run issue read failed/);
+  taskRunRequest(calls);
+  const issueReads = named(calls, "issues.get");
+  assert.equal(issueReads.length, 2);
+  assert.ok(callIndex(calls, "taskRuns.await") < calls.indexOf(issueReads[1]));
+  assert.ok(calls.indexOf(issueReads[1]) < callIndex(calls, "needsReview"));
+  none(calls, "issues.update", "tasks.release", "completed");
+});
+
+for (const [field, label] of [["sourceRepo", "camelCase"], ["source_repo", "snake_case"]]) {
+  test(`a claimed task's ${label} repository scopes its child TaskRun`, async () => {
+    const { result, calls, caught } = await invoke({
+      claimResult: { id: TASK_ID, [field]: "phase4-terra-ui-repo" },
+    }, {
+      prompt: "one-off prompt",
+      taskId: TASK_ID,
+    });
+
+    assert.equal(caught, undefined);
+    assert.equal(result.disposition, "completed");
+    assert.equal(taskRunRequest(calls).repoRef, "phase4-terra-ui-repo");
+  });
+}
 
 test("a certified TaskRun request conflict releases the typed claim and never awaits", async () => {
   const conflict = error("conflict", "TaskRun request envelope conflicts with its durable slot");

@@ -56,6 +56,22 @@ type taskRunClaimPortStub struct {
 	result  ClaimTaskRunResult
 }
 
+type taskRunWorkItemDesignPortStub struct {
+	command UpdateTaskRunWorkItemDesignCommand
+	result  UpdateTaskRunWorkItemDesignResult
+	err     error
+	calls   int
+}
+
+func (stub *taskRunWorkItemDesignPortStub) UpdateTaskRunWorkItemDesign(
+	_ context.Context,
+	command UpdateTaskRunWorkItemDesignCommand,
+) (UpdateTaskRunWorkItemDesignResult, error) {
+	stub.calls++
+	stub.command = command
+	return stub.result, stub.err
+}
+
 type taskRunRequeuePortStub struct {
 	command RequeueTaskRunCommand
 	result  RequeueTaskRunResult
@@ -117,8 +133,8 @@ func TestRequestTaskRunIsBoundToParentExecutionAuthority(t *testing.T) {
 		t.Fatalf("scheduling query = %+v", scheduling.query)
 	}
 	port.result.ClaimActionID = "driver-run-work-item-claim:other"
-	if _, err := service.RequestTaskRun(context.Background(), issueExecution(t, issuer, ActionRequestTaskRun, parent), command); !errors.Is(err, ErrConflict) {
-		t.Fatalf("divergent claim action error=%v, want conflict", err)
+	if _, err := service.RequestTaskRun(context.Background(), issueExecution(t, issuer, ActionRequestTaskRun, parent), command); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("divergent post-commit receipt error=%v, want unavailable", err)
 	}
 	port.result.ClaimActionID = command.ClaimActionID
 	foreign := parent
@@ -127,8 +143,11 @@ func TestRequestTaskRunIsBoundToParentExecutionAuthority(t *testing.T) {
 	if !errors.Is(err, ErrFenceConflict) {
 		t.Fatalf("foreign parent error = %v, want fence conflict", err)
 	}
-	port.result.Replay = true
-	port.result.Run.RunnerRef = "divergent-on-replay"
+	port.replayResult = port.result
+	port.replayResult.Replay = true
+	port.replayResult.Run = cloneTaskRun(port.result.Run)
+	port.replayResult.Step = cloneTaskRunDriverStep(port.result.Step)
+	port.replayResult.Run.RunnerRef = "divergent-on-replay"
 	if _, err := service.RequestTaskRun(context.Background(), issueExecution(t, issuer, ActionRequestTaskRun, parent), command); !errors.Is(err, ErrConflict) {
 		t.Fatalf("divergent request replay error=%v, want conflict", err)
 	}
@@ -162,13 +181,15 @@ func TestRequestTaskRunReplayBypassesSchedulingDriftAfterCommittedResponseLoss(t
 		TaskRunID: taskRunID, DriverRunID: parent.ResourceID, DriverStepID: stepID,
 		WorkItemID: "TASK-1", ClaimActionID: DriverRunWorkItemClaimActionID(ClaimDriverRunWorkItemRequestID(parent.ResourceID, "TASK-1")),
 		ProviderProfile: "daytona",
-		RuntimeMetadata: map[string]string{"requested_by": "driver"}, RequestedAt: now,
+		RuntimeMetadata: map[string]string{"requested_by": "driver"},
+		Input:           json.RawMessage(`{"taskPrompt":"read <epic-id> & plan","deliveryMode":"patch-back"}`), RequestedAt: now,
 	}
 	committed := RequestTaskRunResult{
 		Run: &TaskRun{
 			WorkspaceKey: "TEST", TaskRunID: taskRunID, DriverRunID: parent.ResourceID,
 			DriverStepID: stepID, WorkItemID: "TASK-1", ProviderProfile: "daytona", Status: StatusQueued,
 			RuntimeMetadata: map[string]string{"requested_by": "driver", "execution_request_id": requestID},
+			Input:           json.RawMessage(`{"deliveryMode":"patch-back","taskPrompt":"read \u003cepic-id\u003e \u0026 plan"}`),
 		},
 		Step: &TaskRunDriverStep{
 			WorkspaceKey: "TEST", StepID: stepID, DriverRunID: parent.ResourceID,
@@ -264,7 +285,7 @@ func TestRequestTaskRunReplayRequiresImmutableOriginalQueuedSnapshot(t *testing.
 		SandboxPlacement: Placement{Provider: "daytona"}, RuntimeMetadata: map[string]string{"requested_by": "driver"},
 		Input: json.RawMessage(`{"prompt":"review"}`), RequestedAt: now,
 	}
-	port := &taskRunRequestPortStub{result: RequestTaskRunResult{
+	port := &taskRunRequestPortStub{replayResult: RequestTaskRunResult{
 		Run: &TaskRun{
 			WorkspaceKey: "TEST", TaskRunID: taskRunID, DriverRunID: parent.ResourceID, DriverStepID: stepID, WorkItemID: "TASK-1",
 			WorkerProfileID: command.WorkerProfileID, Runner: command.Runner, RunnerRef: command.RunnerRef,
@@ -289,29 +310,29 @@ func TestRequestTaskRunReplayRequiresImmutableOriginalQueuedSnapshot(t *testing.
 	if err != nil || run.Status != StatusQueued || run.Owner.LeaseToken != "" {
 		t.Fatalf("queued receipt replay run=%+v err=%v", run, err)
 	}
-	port.result.Run.Status = StatusRunning
-	port.result.Step.Status = "running"
+	port.replayResult.Run.Status = StatusRunning
+	port.replayResult.Step.Status = "running"
 	if _, err := service.RequestTaskRun(context.Background(), auth, command); !errors.Is(err, ErrConflict) {
 		t.Fatalf("mutable lifecycle replay error=%v, want conflict", err)
 	}
-	port.result.Run.Status = StatusQueued
-	port.result.Step.Status = "queued"
-	port.result.Run.RunnerVersionID = "divergent-version"
+	port.replayResult.Run.Status = StatusQueued
+	port.replayResult.Step.Status = "queued"
+	port.replayResult.Run.RunnerVersionID = "divergent-version"
 	if _, err := service.RequestTaskRun(context.Background(), auth, command); !errors.Is(err, ErrConflict) {
 		t.Fatalf("divergent immutable replay error=%v, want conflict", err)
 	}
-	port.result.Run.RunnerVersionID = command.RunnerVersionID
-	port.result.Run.TargetNodeID = "divergent-target"
+	port.replayResult.Run.RunnerVersionID = command.RunnerVersionID
+	port.replayResult.Run.TargetNodeID = "divergent-target"
 	if _, err := service.RequestTaskRun(context.Background(), auth, command); !errors.Is(err, ErrConflict) {
 		t.Fatalf("divergent target replay error=%v, want conflict", err)
 	}
-	port.result.Run.TargetNodeID = command.TargetNodeID
-	port.result.Run.SandboxPlacement = Placement{Provider: "divergent-sandbox"}
+	port.replayResult.Run.TargetNodeID = command.TargetNodeID
+	port.replayResult.Run.SandboxPlacement = Placement{Provider: "divergent-sandbox"}
 	if _, err := service.RequestTaskRun(context.Background(), auth, command); !errors.Is(err, ErrConflict) {
 		t.Fatalf("divergent sandbox replay error=%v, want conflict", err)
 	}
-	port.result.Run.SandboxPlacement = command.SandboxPlacement
-	delete(port.result.Run.RuntimeMetadata, "execution_request_id")
+	port.replayResult.Run.SandboxPlacement = command.SandboxPlacement
+	delete(port.replayResult.Run.RuntimeMetadata, "execution_request_id")
 	if _, err := service.RequestTaskRun(context.Background(), auth, command); !errors.Is(err, ErrConflict) {
 		t.Fatalf("missing request metadata replay error=%v, want conflict", err)
 	}
@@ -339,8 +360,31 @@ func TestRequestTaskRunFirstApplicationStillRequiresQueuedProjection(t *testing.
 		TaskRunID: "task-run-1", DriverRunID: parent.ResourceID, DriverStepID: stepID,
 		WorkItemID: "TASK-1", ClaimActionID: DriverRunWorkItemClaimActionID(ClaimDriverRunWorkItemRequestID(parent.ResourceID, "TASK-1")), RequestedAt: now,
 	})
-	if !errors.Is(err, ErrConflict) {
-		t.Fatalf("non-replay running projection error=%v, want conflict", err)
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("non-replay running projection error=%v, want unavailable", err)
+	}
+}
+
+func TestRequestedTaskRunPayloadMatchesTransportNormalizedJSON(t *testing.T) {
+	command := RequestTaskRunCommand{
+		RequestID: "exec-task:transport-normalized",
+		Input:     json.RawMessage(`{ "taskPrompt": "read <epic-id> & plan", "deliveryMode": "patch-back", "limits": {"max": 9007199254740993, "min": 1} }`),
+	}
+	run := &TaskRun{
+		Input:           json.RawMessage(`{"limits":{"min":1,"max":9007199254740993},"deliveryMode":"patch-back","taskPrompt":"read \u003cepic-id\u003e \u0026 plan"}`),
+		RuntimeMetadata: map[string]string{"execution_request_id": command.RequestID},
+	}
+	if !requestedTaskRunPayloadMatches(run, command) {
+		t.Fatal("transport-normalized JSON escaped the TaskRun request envelope")
+	}
+	run.Input = json.RawMessage(`{"limits":{"min":1,"max":9007199254740992},"deliveryMode":"patch-back","taskPrompt":"read \u003cepic-id\u003e \u0026 plan"}`)
+	if requestedTaskRunPayloadMatches(run, command) {
+		t.Fatal("semantically divergent large integer was accepted")
+	}
+	command.Input = json.RawMessage(`{"value":1e0,"nested":[1.00,9007199254740993]}`)
+	run.Input = json.RawMessage(`{"nested":[1,9007199254740993.0],"value":1.000}`)
+	if !requestedTaskRunPayloadMatches(run, command) {
+		t.Fatal("PostgreSQL JSONB numeric normalization escaped the TaskRun request envelope")
 	}
 }
 
@@ -367,6 +411,111 @@ func TestClaimTaskRunKeepsLeaseCredentialPrivate(t *testing.T) {
 	}
 	if strings.Contains(string(wire), "secret") || strings.Contains(string(wire), "LeaseToken") {
 		t.Fatalf("claim result exposed credential: %s", wire)
+	}
+}
+
+func TestUpdateTaskRunWorkItemDesignIsOwnerFencedAndCanonicalizesFormat(t *testing.T) {
+	owner := Owner{
+		ResourceKind: ResourceTaskRun, ResourceID: "task-run-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 9,
+	}
+	design := "# Plan"
+	format := "  "
+	port := &taskRunWorkItemDesignPortStub{result: UpdateTaskRunWorkItemDesignResult{
+		WorkItemID: "TASK-1", ActionID: "task-run-work-item-design-update:update-1", Replay: true,
+	}}
+	service, issuer := newTestService(t, Dependencies{TaskRuns: TaskRunDependencies{WorkItemDesign: port}})
+	command := UpdateTaskRunWorkItemDesignCommand{
+		WorkspaceKey: "TEST", RequestID: "update-1", Owner: owner, Design: &design, DesignFormat: &format,
+	}
+	result, err := service.UpdateWorkItemDesign(
+		context.Background(), issueExecution(t, issuer, ActionUpdateTaskRunWorkItemDesign, owner), command,
+	)
+	if err != nil {
+		t.Fatalf("UpdateWorkItemDesign: %v", err)
+	}
+	if result.WorkItemID != "TASK-1" || !result.Replay || port.calls != 1 {
+		t.Fatalf("result=%+v calls=%d", result, port.calls)
+	}
+	if port.command.Owner != owner || port.command.Design == nil || *port.command.Design != "# Plan" ||
+		port.command.DesignFormat == nil || *port.command.DesignFormat != "markdown" {
+		t.Fatalf("port command = %+v", port.command)
+	}
+	if port.command.Design == command.Design || port.command.DesignFormat == command.DesignFormat {
+		t.Fatal("caller-owned design pointers were passed directly to the persistence port")
+	}
+
+	foreign := owner
+	foreign.FencingToken++
+	if _, err := service.UpdateWorkItemDesign(
+		context.Background(), issueExecution(t, issuer, ActionUpdateTaskRunWorkItemDesign, foreign), command,
+	); !errors.Is(err, ErrFenceConflict) || port.calls != 1 {
+		t.Fatalf("foreign owner error=%v calls=%d, want fence conflict before port", err, port.calls)
+	}
+}
+
+func TestUpdateTaskRunWorkItemDesignFailsClosedOnInvalidCommandPortAndReceipt(t *testing.T) {
+	owner := Owner{
+		ResourceKind: ResourceTaskRun, ResourceID: "task-run-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 9,
+	}
+	design := "# Plan"
+	command := UpdateTaskRunWorkItemDesignCommand{
+		WorkspaceKey: "TEST", RequestID: "update-1", Owner: owner, Design: &design,
+	}
+	port := &taskRunWorkItemDesignPortStub{result: UpdateTaskRunWorkItemDesignResult{
+		WorkItemID: "TASK-1", ActionID: "task-run-work-item-design-update:update-1",
+	}}
+	service, issuer := newTestService(t, Dependencies{TaskRuns: TaskRunDependencies{WorkItemDesign: port}})
+	auth := issueExecution(t, issuer, ActionUpdateTaskRunWorkItemDesign, owner)
+
+	missingDesign := command
+	missingDesign.Design = nil
+	if _, err := service.UpdateWorkItemDesign(context.Background(), auth, missingDesign); !errors.Is(err, ErrInvalid) || port.calls != 0 {
+		t.Fatalf("missing design error=%v calls=%d", err, port.calls)
+	}
+	emptyDesign := command
+	blank := "  "
+	emptyDesign.Design = &blank
+	if _, err := service.UpdateWorkItemDesign(context.Background(), auth, emptyDesign); !errors.Is(err, ErrInvalid) || port.calls != 0 {
+		t.Fatalf("blank design error=%v calls=%d", err, port.calls)
+	}
+	missingRequest := command
+	missingRequest.RequestID = ""
+	if _, err := service.UpdateWorkItemDesign(context.Background(), auth, missingRequest); !errors.Is(err, ErrInvalid) || port.calls != 0 {
+		t.Fatalf("missing request error=%v calls=%d", err, port.calls)
+	}
+	invalidFormat := command
+	plaintext := "plaintext"
+	invalidFormat.DesignFormat = &plaintext
+	if _, err := service.UpdateWorkItemDesign(context.Background(), auth, invalidFormat); !errors.Is(err, ErrInvalid) || port.calls != 0 {
+		t.Fatalf("invalid format error=%v calls=%d", err, port.calls)
+	}
+	if _, err := service.UpdateWorkItemDesign(
+		context.Background(), issueExecution(t, issuer, ActionHeartbeat, owner), command,
+	); !errors.Is(err, authority.ErrAdmissionDenied) || port.calls != 0 {
+		t.Fatalf("wrong-action error=%v calls=%d", err, port.calls)
+	}
+
+	port.result.WorkItemID = ""
+	if _, err := service.UpdateWorkItemDesign(context.Background(), auth, command); !errors.Is(err, ErrConflict) {
+		t.Fatalf("missing Work Item receipt error=%v, want conflict", err)
+	}
+	port.result.WorkItemID = "TASK-1"
+	port.result.ActionID = ""
+	if _, err := service.UpdateWorkItemDesign(context.Background(), auth, command); !errors.Is(err, ErrConflict) {
+		t.Fatalf("missing action receipt error=%v, want conflict", err)
+	}
+	port.result.ActionID = "task-run-work-item-design-update:unrelated"
+	if _, err := service.UpdateWorkItemDesign(context.Background(), auth, command); !errors.Is(err, ErrConflict) {
+		t.Fatalf("wrong action receipt error=%v, want conflict", err)
+	}
+
+	service, issuer = newTestService(t, Dependencies{})
+	if _, err := service.UpdateWorkItemDesign(
+		context.Background(), issueExecution(t, issuer, ActionUpdateTaskRunWorkItemDesign, owner), command,
+	); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("missing design port error=%v, want unavailable", err)
 	}
 }
 

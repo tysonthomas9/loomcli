@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 
 	_ "embed"
 
@@ -102,8 +100,6 @@ type DriverCatalog interface {
 	Drivers() store.DriverStore
 	DriverVersions() store.DriverVersionStore
 }
-
-var builtinMu sync.Mutex
 
 var builtinWorkflows = map[string]Spec{
 	BuiltinEpicRunnerWorkflowName:        builtinEpicRunnerSpec(),
@@ -211,159 +207,6 @@ func BuiltinWorkflow(name string) (Spec, bool) {
 func IsBuiltinWorkflow(name string) bool {
 	_, ok := BuiltinWorkflow(name)
 	return ok
-}
-
-func EnsureBuiltinWorkflow(ctx context.Context, st DriverCatalog, ws, name string) error {
-	spec, ok := BuiltinWorkflow(name)
-	if !ok {
-		return domain.ErrNotFound
-	}
-
-	builtinMu.Lock()
-	defer builtinMu.Unlock()
-
-	digest := SourceDigest(spec.Files)
-	sourceRef := "builtin://workflows/" + name + "/versions/" + digest
-	freshRunners := workflowRunnerNameSet(spec)
-	reuse, current, reuseMissingRunners, err := builtinReuseDecision(ctx, st, ws, name, freshRunners)
-	if err != nil {
-		return err
-	}
-	if reuse {
-		// Registrations stamped via `loom workflow digest` carry the canonical
-		// SourceDigest and hit this fast path with current == digest. A usable
-		// driver at a different digest (pre-unification stacks, or a different
-		// source revision) is still reused — never rebuilt — but the mismatch is
-		// logged so version drift between the registered builtin and the serve
-		// binary stays visible instead of silent.
-		if current != digest {
-			slog.Warn("builtin digest drift: reusing registered version despite source-digest mismatch",
-				"workflow", name,
-				"workspace", ws,
-				"registered_digest", current,
-				"embedded_digest", digest)
-		}
-		return nil
-	}
-	if _, _, err := BuildAndRegister(ctx, st, BuildAndRegisterOptions{
-		WorkspaceKey:  ws,
-		Name:          name,
-		Entrypoint:    spec.Entrypoint,
-		Files:         spec.Files,
-		Activate:      true,
-		SourceRef:     sourceRef,
-		SourceDigest:  digest,
-		CreatedBy:     "system",
-		WorkDir:       builtinWorkflowWorkDir(),
-		DeriveRunners: true,
-		Trust:         domain.DriverTrustTrusted,
-	}); err != nil {
-		if len(reuseMissingRunners) > 0 {
-			slog.Warn("builtin runner manifest is missing runners and re-register failed; reusing the registered version",
-				"workflow", name,
-				"workspace", ws,
-				"missing_runners", strings.Join(reuseMissingRunners, ","),
-				"err", err.Error())
-			return nil
-		}
-		return fmt.Errorf("register built-in workflow %q: %w", name, err)
-	}
-	return nil
-}
-
-// builtinReuseDecision decides whether the currently-registered builtin can be
-// reused as-is. It returns reuse=true when the active version has a usable
-// bundle on disk AND its manifest declares exactly the current runner set.
-//
-// We deliberately do NOT require the active version's source_digest to equal
-// loom's embedded SourceDigest. A builtin staged out-of-band via `loom driver
-// register` (the epic-runner smoke/e2e stack) records a different digest
-// RECIPE for the SAME source, so demanding an exact match forced a source
-// REBUILD of a perfectly good driver on every webui workflow-run. That rebuild
-// fails closed in a `loom serve` process that has no bundling toolchain
-// (@loom/sdk) on disk, surfacing as a misleading 500 "workflow not found" —
-// while the CLI path (which resolves the same driver first) reused it and
-// worked. Refresh-on-deprecated (§4.6) still fires: a stale/deprecated runner
-// manifest, or a missing bundle, fails this check and re-registers.
-//
-// A manifest declaring only a SUBSET of the fresh runners (e.g. a stack that
-// registered epic-runner with just local-task-runner) is NOT reused as-is: a
-// run requesting a missing runner would pin that version and
-// applyResolvedRunner would reject the child task. missing (non-empty only
-// for such usable-but-subset registrations) tells the caller to re-register —
-// and to fail OPEN onto the still-usable subset version, with a warning, if
-// that rebuild cannot run here (the same toolchain-less serve), rather than
-// failing runs the registered driver can serve.
-//
-// registeredDigest is the active version's recorded source_digest (empty when
-// there is no active version), so the caller can log digest drift on reuse.
-func builtinReuseDecision(ctx context.Context, st DriverCatalog, ws, name string, fresh map[string]struct{}) (reuse bool, registeredDigest string, missing []string, err error) {
-	driverID, err := ResolveDriverID(ctx, st, ws, name)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return false, "", nil, nil
-		}
-		return false, "", nil, err
-	}
-	current, bundleAvailable, manifest, err := activeBuiltInWorkflowState(ctx, st, ws, driverID)
-	if err != nil {
-		return false, "", nil, err
-	}
-	if !bundleAvailable || activeManifestRunnersAreStale(manifest, fresh) {
-		return false, current, nil, nil
-	}
-	if missing = manifestMissingFreshRunners(manifest, fresh); len(missing) > 0 {
-		return false, current, missing, nil
-	}
-	return true, current, nil, nil
-}
-
-func activeBuiltInWorkflowState(ctx context.Context, st DriverCatalog, ws, driverID string) (string, bool, map[string]string, error) {
-	driverRecord, err := st.Drivers().Get(ctx, ws, driverID)
-	if err != nil {
-		return "", false, nil, fmt.Errorf("get built-in workflow driver %q: %w", driverID, err)
-	}
-	if strings.TrimSpace(driverRecord.ActiveVersionID) == "" {
-		return "", false, nil, nil
-	}
-	version, err := st.DriverVersions().Get(ctx, ws, driverRecord.ActiveVersionID)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return "", false, nil, nil
-		}
-		return "", false, nil, fmt.Errorf("get active built-in workflow version %q: %w", driverRecord.ActiveVersionID, err)
-	}
-	return strings.TrimSpace(version.SourceDigest), builtInWorkflowBundleAvailable(version), version.Manifest, nil
-}
-
-func builtInWorkflowBundleAvailable(version *domain.DriverVersion) bool {
-	if version == nil || strings.TrimSpace(version.BundleRef) == "" || filepath.IsAbs(version.BundleRef) {
-		return false
-	}
-	workDir := builtinWorkflowWorkDir()
-	root := filepath.Clean(filepath.Join(workDir, filepath.FromSlash(version.BundleRef)))
-	rel, err := filepath.Rel(workDir, root)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return false
-	}
-	for _, relFile := range []string{"manifest.json", filepath.Join("dist", "server.mjs")} {
-		info, err := os.Stat(filepath.Join(root, relFile))
-		if err != nil || info.IsDir() {
-			return false
-		}
-	}
-	return true
-}
-
-func builtinWorkflowWorkDir() string {
-	if dir := strings.TrimSpace(os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")); dir != "" {
-		return dir
-	}
-	workDir, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return workDir
 }
 
 // BuildBuiltinBundle builds a builtin workflow source tree into destDir and

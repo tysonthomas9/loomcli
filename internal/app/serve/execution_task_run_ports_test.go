@@ -26,6 +26,10 @@ func (*atomicTaskRunPortStub) ClaimTaskRun(context.Context, execution.ClaimTaskR
 	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
 }
 
+func (*atomicTaskRunPortStub) UpdateTaskRunWorkItemDesign(context.Context, execution.UpdateTaskRunWorkItemDesignCommand) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrUnavailable
+}
+
 func (*atomicTaskRunPortStub) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
 	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
 }
@@ -38,13 +42,13 @@ func TestExecutionTaskRunPortsRequireAtomicCommandsWithoutStoreFallback(t *testi
 	st := memstore.New()
 	commands := &atomicTaskRunPortStub{}
 	taskRuns, _, err := NewExecutionTaskRunPorts(ExecutionTaskRunPortDependencies{
-		Requests: commands, Claims: commands, Requeues: commands, RetryExhaustion: commands,
+		Requests: commands, Claims: commands, WorkItemDesign: commands, Requeues: commands, RetryExhaustion: commands,
 		Nodes: st.Nodes(), WorkerProfiles: st.WorkerProfiles(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if taskRuns.Requests != commands || taskRuns.Claims != commands || taskRuns.Requeues != commands || taskRuns.RetryExhaustion != commands {
+	if taskRuns.Requests != commands || taskRuns.Claims != commands || taskRuns.WorkItemDesign != commands || taskRuns.Requeues != commands || taskRuns.RetryExhaustion != commands {
 		t.Fatalf("TaskRun command ports were not retained exactly: %+v", taskRuns)
 	}
 }
@@ -54,7 +58,7 @@ func TestExecutionWorkerNodePortsPreserveDrainAndOwnSchedulingReads(t *testing.T
 	st, _ := setupExecutionTaskRunParent(t, ctx)
 	commands := &atomicTaskRunPortStub{}
 	_, workers, err := NewExecutionTaskRunPorts(ExecutionTaskRunPortDependencies{
-		Requests: commands, Claims: commands, Requeues: commands, RetryExhaustion: commands,
+		Requests: commands, Claims: commands, WorkItemDesign: commands, Requeues: commands, RetryExhaustion: commands,
 		Nodes: st.Nodes(), WorkerProfiles: st.WorkerProfiles(),
 	})
 	if err != nil {
@@ -112,6 +116,9 @@ func TestExecutionWorkerNodePortsPreserveDrainAndOwnSchedulingReads(t *testing.T
 
 type fleetExecutionTransportStub struct {
 	claim                 fleetdb.ExecutionClaimAndStartCommand
+	workItemDesign        fleetdb.ExecutionTaskRunWorkItemDesignCommand
+	workItemDesignResult  *fleetdb.ExecutionTaskRunWorkItemDesignResult
+	workItemDesignErr     error
 	workItemClaim         fleetdb.ExecutionDriverRunWorkItemClaimCommand
 	workItemRelease       fleetdb.ExecutionDriverRunWorkItemReleaseCommand
 	workItemClaimResult   *fleetdb.ExecutionDriverRunWorkItemResult
@@ -120,6 +127,11 @@ type fleetExecutionTransportStub struct {
 
 func (*fleetExecutionTransportStub) RequestTaskRun(context.Context, fleetdb.ExecutionTaskRunRequestCommand) (*fleetdb.ExecutionTaskRunRequestResult, error) {
 	return nil, nil
+}
+
+func (stub *fleetExecutionTransportStub) UpdateTaskRunWorkItemDesign(_ context.Context, command fleetdb.ExecutionTaskRunWorkItemDesignCommand) (*fleetdb.ExecutionTaskRunWorkItemDesignResult, error) {
+	stub.workItemDesign = command
+	return stub.workItemDesignResult, stub.workItemDesignErr
 }
 
 func (stub *fleetExecutionTransportStub) ClaimAndStartTaskRun(_ context.Context, command fleetdb.ExecutionClaimAndStartCommand) (*fleetdb.ExecutionClaimAndStartResult, error) {
@@ -206,6 +218,39 @@ func (*fleetExecutionTransportStub) StartChildDriverRun(context.Context, fleetdb
 
 func (*fleetExecutionTransportStub) CascadeChildDriverRuns(context.Context, fleetdb.ExecutionDriverRunCascadeCommand) (*fleetdb.ExecutionDriverRunCascadeResult, error) {
 	return nil, nil
+}
+
+func TestFleetTaskRunWorkItemDesignPortForwardsOnlyOwnerCommand(t *testing.T) {
+	transport := &fleetExecutionTransportStub{workItemDesignResult: &fleetdb.ExecutionTaskRunWorkItemDesignResult{
+		Committed: fleetdb.ExecutionTaskRunWorkItemDesignCommit{TaskID: "TASK-1"},
+		Action:    &fleetdb.ExecutionActionLedger{ActionID: "task-run-work-item-design-update:design-1"},
+		Replayed:  true,
+	}}
+	_, _, port, _, _, err := NewFleetTaskRunCommandPorts(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	design := "# Plan"
+	format := "markdown"
+	owner := execution.Owner{
+		ResourceKind: execution.ResourceTaskRun, ResourceID: "task-run-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "raw-task-secret", FencingToken: 7,
+	}
+	result, err := port.UpdateTaskRunWorkItemDesign(context.Background(), execution.UpdateTaskRunWorkItemDesignCommand{
+		WorkspaceKey: "WS", RequestID: "design-1", Owner: owner, Design: &design, DesignFormat: &format,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTaskRunWorkItemDesign: %v", err)
+	}
+	if result.WorkItemID != "TASK-1" || result.ActionID != "task-run-work-item-design-update:design-1" || !result.Replay {
+		t.Fatalf("result = %+v", result)
+	}
+	command := transport.workItemDesign
+	if command.WorkspaceKey != "WS" || command.CommandID != "design-1" || command.TaskRunID != owner.ResourceID ||
+		command.NodeID != owner.NodeID || command.LeaseID != owner.LeaseID || command.LeaseToken != owner.LeaseToken ||
+		command.FencingToken != owner.FencingToken || command.Design != design || command.DesignFormat == nil || *command.DesignFormat != format {
+		t.Fatalf("transport command = %+v", command)
+	}
 }
 
 func TestFleetTaskRunClaimPortUsesAtomicTransportAndRetainsTokenOnlyInternally(t *testing.T) {

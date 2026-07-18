@@ -715,6 +715,20 @@ commands:
     retry_restart_behavior: A lost response is resolved by the stable DriverRun identity and exact submitted definition; a divergent duplicate remains a conflict.
     negative_tests: [expired_operator, unauthenticated, wrong_action, wrong_workspace]
     fault_injection_tests: [duplicate_request, lost_response_after_commit]
+  - id: execution.update-task-run-work-item-design
+    phase: 4
+    aggregate_owner: workitems
+    coordinating_owner: execution
+    mechanism_discriminator: task_run_work_item_design
+    instance_owner: workitems
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/task-runs/{task_run_id}/work-item/design"]
+    transaction_or_saga_boundary: One FleetDB command validates the exact live TaskRun owner and generic Lease, derives the immutable TaskRun task ID, and atomically persists only that Work Item design, its managed design-artifact reference, event, and action receipt.
+    idempotency_key: workspace_id:task_run_id:fencing_token:request_id
+    semantic_events_or_read_models: [workitems.design.v1]
+    retry_restart_behavior: Exact command replay returns the original committed design identity; a changed payload under the same request ID or any expired, reclaimed, foreign, or stale-fence owner is rejected without mutating the Work Item.
+    negative_tests: [expired_execution, foreign_task_id, owner_mismatch, stale_fence, unauthenticated, unknown_field, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_reclaim, divergent_request_reuse, duplicate_request, lost_response_after_commit, transaction_rollback]
   - id: execution.update-worker-profile
     phase: 4
     aggregate_owner: execution

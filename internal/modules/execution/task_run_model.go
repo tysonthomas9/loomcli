@@ -133,6 +133,27 @@ type ClaimTaskRunResult struct {
 	Replay   bool
 }
 
+// UpdateTaskRunWorkItemDesignCommand updates only the design fields of the
+// Work Item durably bound to Owner's TaskRun. Design is a pointer so presence
+// is explicit, but planner saves require nonblank content. A nil or blank
+// DesignFormat canonicalizes to markdown.
+type UpdateTaskRunWorkItemDesignCommand struct {
+	WorkspaceKey string
+	RequestID    string
+	Owner        Owner
+	Design       *string
+	DesignFormat *string
+}
+
+// UpdateTaskRunWorkItemDesignResult exposes only the bounded mutation receipt.
+// The Work Item projection and immutable commit remain inside the authoritative
+// adapter, which validates that both belong to the fenced TaskRun.
+type UpdateTaskRunWorkItemDesignResult struct {
+	WorkItemID string
+	ActionID   string
+	Replay     bool
+}
+
 type RequeueTaskRunCommand struct {
 	WorkspaceKey    string
 	RequestID       string

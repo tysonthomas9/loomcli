@@ -79,7 +79,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.AnalysisProfilesEnforced, 11; got != want {
 		t.Fatalf("enforced analysis profiles = %d, want %d", got, want)
 	}
-	if got, want := report.MutationCommands, 55; got != want {
+	if got, want := report.MutationCommands, 56; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 86; got != want {
@@ -197,7 +197,7 @@ func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T)
 		t.Fatalf("Execution action exclusions observed = %v, want all documented exclusions %v", observedExclusions, exclusions)
 	}
 	slices.Sort(want)
-	if gotCount, wantCount := len(got), 34; gotCount != wantCount {
+	if gotCount, wantCount := len(got), 35; gotCount != wantCount {
 		t.Fatalf("Execution mutation commands = %d, want %d; commands = %v", gotCount, wantCount, got)
 	}
 	if !slices.Equal(got, want) {
@@ -372,8 +372,8 @@ func TestCheckedInPhase4ArchitectureContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Commands) != 55 {
-		t.Fatalf("mutation commands = %d, want 55", len(ledger.Commands))
+	if len(ledger.Commands) != 56 {
+		t.Fatalf("mutation commands = %d, want 56", len(ledger.Commands))
 	}
 }
 

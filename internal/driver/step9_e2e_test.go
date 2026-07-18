@@ -69,6 +69,10 @@ func (step9TaskRunClaimPort) ClaimTaskRun(context.Context, execution.ClaimTaskRu
 	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
 }
 
+func (step9TaskRunClaimPort) UpdateTaskRunWorkItemDesign(context.Context, execution.UpdateTaskRunWorkItemDesignCommand) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrUnavailable
+}
+
 func (step9TaskRunClaimPort) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
 	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
 }
@@ -130,7 +134,8 @@ func newStep9Fixture(t *testing.T, trust domain.DriverTrustLevel) *step9Fixture 
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
 		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(),
 		Workspaces: st.Workspaces(), AtomicTaskRunRequests: step9TaskRunClaimPort{}, AtomicTaskRunClaims: step9TaskRunClaimPort{},
-		AtomicTaskRunRequeues: step9TaskRunClaimPort{}, AtomicTaskRunRetryExhaustion: step9TaskRunClaimPort{},
+		AtomicTaskRunWorkItemDesign: step9TaskRunClaimPort{},
+		AtomicTaskRunRequeues:       step9TaskRunClaimPort{}, AtomicTaskRunRetryExhaustion: step9TaskRunClaimPort{},
 		AllowLegacyStoreAdapters: true,
 	})
 	if err != nil {

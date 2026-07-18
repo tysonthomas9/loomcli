@@ -7,14 +7,23 @@ import (
 )
 
 const (
-	ActionRequestTaskRun        authority.Action = "execution.request-task-run"
-	ActionClaimTaskRun          authority.Action = "execution.claim-task-run"
-	ActionRequeueTaskRun        authority.Action = "execution.requeue-task-run"
-	ActionExhaustTaskRunRetries authority.Action = "execution.exhaust-task-run-retries"
-	ActionRegisterWorkerNode    authority.Action = "execution.register-worker-node"
-	ActionHeartbeatWorkerNode   authority.Action = "execution.heartbeat-worker-node"
-	ActionSetWorkerNodeDrain    authority.Action = "execution.set-worker-node-drain"
+	ActionRequestTaskRun              authority.Action = "execution.request-task-run"
+	ActionClaimTaskRun                authority.Action = "execution.claim-task-run"
+	ActionUpdateTaskRunWorkItemDesign authority.Action = "execution.update-task-run-work-item-design"
+	ActionRequeueTaskRun              authority.Action = "execution.requeue-task-run"
+	ActionExhaustTaskRunRetries       authority.Action = "execution.exhaust-task-run-retries"
+	ActionRegisterWorkerNode          authority.Action = "execution.register-worker-node"
+	ActionHeartbeatWorkerNode         authority.Action = "execution.heartbeat-worker-node"
+	ActionSetWorkerNodeDrain          authority.Action = "execution.set-worker-node-drain"
 )
+
+const taskRunWorkItemDesignActionPrefix = "task-run-work-item-design-update:"
+
+// TaskRunWorkItemDesignActionID is the durable receipt identity shared by the
+// Execution application boundary and its FleetDB adapter.
+func TaskRunWorkItemDesignActionID(requestID string) string {
+	return taskRunWorkItemDesignActionPrefix + requestID
+}
 
 // TaskRunRequestAPI is the parent-run surface used by run-scoped exec-task.
 type TaskRunRequestAPI interface {

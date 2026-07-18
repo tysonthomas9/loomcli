@@ -110,6 +110,10 @@ func (awaitE2EClaimPort) ClaimTaskRun(context.Context, execution.ClaimTaskRunCom
 	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
 }
 
+func (awaitE2EClaimPort) UpdateTaskRunWorkItemDesign(context.Context, execution.UpdateTaskRunWorkItemDesignCommand) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrUnavailable
+}
+
 func (awaitE2EClaimPort) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
 	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
 }
@@ -232,7 +236,8 @@ func newAwaitFlowsServer(t *testing.T, st store.Store, runTokenKey []byte) (*htt
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
 		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(), Workspaces: st.Workspaces(),
 		AtomicTaskRunRequests: awaitE2EClaimPort{}, AtomicTaskRunClaims: awaitE2EClaimPort{},
-		AtomicTaskRunRequeues: awaitE2EClaimPort{}, AtomicTaskRunRetryExhaustion: awaitE2EClaimPort{},
+		AtomicTaskRunWorkItemDesign: awaitE2EClaimPort{},
+		AtomicTaskRunRequeues:       awaitE2EClaimPort{}, AtomicTaskRunRetryExhaustion: awaitE2EClaimPort{},
 		AllowLegacyStoreAdapters: true,
 	})
 	if err != nil {

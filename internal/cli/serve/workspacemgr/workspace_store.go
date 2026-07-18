@@ -274,10 +274,19 @@ func materializeAddReposWorktrees(ctx context.Context, resolved []resolvedRepo, 
 	if len(resolved) == 0 {
 		return nil, nil, nil
 	}
-	created, repos, err := addWorktrees(ctx, resolved, wsDir, branch)
+	warningCtx := service.WithCreateWarnings(ctx)
+	created, repos, err := addWorktrees(warningCtx, resolved, wsDir, branch)
 	if err != nil {
 		cleanupAttachedWorktrees(created)
 		return nil, nil, err
+	}
+	if len(created) != len(resolved) {
+		cleanupAttachedWorktrees(created)
+		message := "one or more local repository checkouts could not be materialized"
+		if warnings := service.GetCreateWarnings(warningCtx); len(warnings) > 0 {
+			message = strings.Join(warnings, "; ")
+		}
+		return nil, nil, workspaceerrors.New(workspaceerrors.GitFailed, "attach local repository checkout failed", errors.New(message))
 	}
 	return created, repos, nil
 }
@@ -594,7 +603,11 @@ func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeA
 	if key == "" {
 		return errors.New("save local workspace state: key must not be empty")
 	}
-	if err := bootstrap.MutateWorkspaceLocalState(key, func(local *bootstrap.WorkspaceLocalState) error {
+	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
+		if sc.Workspaces == nil {
+			sc.Workspaces = make(map[string]bootstrap.WorkspaceLocalState)
+		}
+		local := sc.Workspaces[key]
 		local.Path = wsDir
 		if local.Repos == nil {
 			local.Repos = make(map[string]string, len(repos))
@@ -605,12 +618,13 @@ func saveLocalWorkspaceState(key, wsDir string, repos []config.RepoConfig, makeA
 		if local.Agents == nil {
 			local.Agents = make(map[string]bootstrap.AgentLocalState)
 		}
+		sc.Workspaces[key] = local
+		if makeActive {
+			sc.LastWorkspace = key
+		}
 		return nil
 	}); err != nil {
 		return fmt.Errorf("save local workspace state: %w", err)
-	}
-	if makeActive {
-		return bootstrap.SetActiveWorkspaceKey(key)
 	}
 	return nil
 }

@@ -409,6 +409,7 @@ type ExecutionTransport interface {
 	ClaimAndStartTaskRun(context.Context, ExecutionClaimAndStartCommand) (*ExecutionClaimAndStartResult, error)
 	RequeueTaskRunAndResetStep(context.Context, ExecutionTaskRunRequeueCommand) (*ExecutionTaskRunRequeueResult, error)
 	ExhaustTaskRunRetries(context.Context, ExecutionTaskRunRetryExhaustionCommand) (*ExecutionTaskRunRetryExhaustionResult, error)
+	UpdateTaskRunWorkItemDesign(context.Context, ExecutionTaskRunWorkItemDesignCommand) (*ExecutionTaskRunWorkItemDesignResult, error)
 	HeartbeatTaskRun(context.Context, string, string, store.TaskRunHeartbeat) (*domain.TaskRun, error)
 	RequeueTaskRun(context.Context, string, string, store.TaskRunRequeue) (*domain.TaskRun, error)
 	CompleteTaskRun(context.Context, string, string, store.TaskRunComplete) (*domain.TaskRun, error)

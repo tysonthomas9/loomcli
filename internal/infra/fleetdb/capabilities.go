@@ -46,11 +46,15 @@ const (
 	ExecutionTaskRunRequestCapability             = "execution.task_run_request.v1"
 	ExecutionTaskRunRequeueCapability             = "execution.task_run_requeue.v1"
 	ExecutionTaskRunRetryExhaustionCapability     = "execution.task_run_retry_exhaustion.v1"
-	ExecutionDriverRunChildStartCapability        = "execution.driver_run_child_start.v1"
-	ExecutionDriverRunChildCascadeCapability      = "execution.driver_run_child_cascade.v1"
-	ExecutionDriverRunLeaseFencingCapability      = "execution.driver_run_lease_fencing.v1"
-	ExecutionDriverRunWorkItemClaimCapability     = "execution.driver_run_work_item_claim.v1"
-	ExecutionTaskRunLogIdempotencyCapability      = "execution.task_run_log_idempotency.v1"
+	// ExecutionTaskRunWorkItemDesignCapability certifies the exact TaskRun
+	// owner-fenced command that derives run.TaskID and persists its Work Item
+	// design in the same backend transaction as lease/fence validation.
+	ExecutionTaskRunWorkItemDesignCapability  = "execution.task_run_work_item_design.v1"
+	ExecutionDriverRunChildStartCapability    = "execution.driver_run_child_start.v1"
+	ExecutionDriverRunChildCascadeCapability  = "execution.driver_run_child_cascade.v1"
+	ExecutionDriverRunLeaseFencingCapability  = "execution.driver_run_lease_fencing.v1"
+	ExecutionDriverRunWorkItemClaimCapability = "execution.driver_run_work_item_claim.v1"
+	ExecutionTaskRunLogIdempotencyCapability  = "execution.task_run_log_idempotency.v1"
 	// ArtifactsOwnerFencedLifecycleCapability certifies owner-fenced,
 	// idempotent Artifact create/upload/finalize/reference commands.
 	ArtifactsOwnerFencedLifecycleCapability = "artifacts.owner_fenced_lifecycle.v1"
@@ -69,6 +73,7 @@ func Phase4FoundationCapabilities() []string {
 		ExecutionTaskRunRequestCapability,
 		ExecutionTaskRunRequeueCapability,
 		ExecutionTaskRunRetryExhaustionCapability,
+		ExecutionTaskRunWorkItemDesignCapability,
 		ExecutionDriverRunChildStartCapability,
 		ExecutionDriverRunChildCascadeCapability,
 		ExecutionDriverRunLeaseFencingCapability,

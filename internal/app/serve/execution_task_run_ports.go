@@ -13,13 +13,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// ExecutionTaskRunPortDependencies separates the four atomic TaskRun command
+// ExecutionTaskRunPortDependencies separates the atomic TaskRun command
 // ports from the worker registry/query stores. Production supplies every
 // command port from FleetDB's Execution transport; this composition has no
 // generic TaskRun/DriverStep/Event mutation fallback.
 type ExecutionTaskRunPortDependencies struct {
 	Requests        execution.TaskRunRequestPort
 	Claims          execution.TaskRunClaimPort
+	WorkItemDesign  execution.TaskRunWorkItemDesignPort
 	Requeues        execution.TaskRunRequeuePort
 	RetryExhaustion execution.TaskRunRetryExhaustionPort
 	Nodes           store.NodeStore
@@ -27,13 +28,14 @@ type ExecutionTaskRunPortDependencies struct {
 }
 
 func NewExecutionTaskRunPorts(dependencies ExecutionTaskRunPortDependencies) (execution.TaskRunDependencies, execution.WorkerDependencies, error) {
-	if dependencies.Requests == nil || dependencies.Claims == nil || dependencies.Requeues == nil ||
+	if dependencies.Requests == nil || dependencies.Claims == nil || dependencies.WorkItemDesign == nil || dependencies.Requeues == nil ||
 		dependencies.RetryExhaustion == nil || dependencies.Nodes == nil || dependencies.WorkerProfiles == nil {
 		return execution.TaskRunDependencies{}, execution.WorkerDependencies{}, fmt.Errorf("compose TaskRun Execution ports: every narrow dependency is required")
 	}
 	adapter := &executionTaskRunPortsAdapter{dependencies: dependencies}
 	return execution.TaskRunDependencies{
-			Requests: dependencies.Requests, Claims: dependencies.Claims, Requeues: dependencies.Requeues,
+			Requests: dependencies.Requests, Claims: dependencies.Claims, WorkItemDesign: dependencies.WorkItemDesign,
+			Requeues:        dependencies.Requeues,
 			RetryExhaustion: dependencies.RetryExhaustion, Scheduling: adapter,
 		}, execution.WorkerDependencies{
 			Registration: adapter, Heartbeats: adapter, Drain: adapter, Profiles: adapter,
@@ -46,15 +48,16 @@ func NewExecutionTaskRunPorts(dependencies ExecutionTaskRunPortDependencies) (ex
 func NewFleetTaskRunCommandPorts(transport fleetdb.ExecutionTransport) (
 	execution.TaskRunRequestPort,
 	execution.TaskRunClaimPort,
+	execution.TaskRunWorkItemDesignPort,
 	execution.TaskRunRequeuePort,
 	execution.TaskRunRetryExhaustionPort,
 	error,
 ) {
 	if transport == nil {
-		return nil, nil, nil, nil, fmt.Errorf("compose atomic TaskRun commands: Fleet Execution transport required")
+		return nil, nil, nil, nil, nil, fmt.Errorf("compose atomic TaskRun commands: Fleet Execution transport required")
 	}
 	adapter := &fleetTaskRunCommandPort{transport: transport}
-	return adapter, adapter, adapter, adapter, nil
+	return adapter, adapter, adapter, adapter, adapter, nil
 }
 
 // NewFleetTaskRunClaimPort binds the only production TaskRun claim adapter to
@@ -68,6 +71,32 @@ func NewFleetTaskRunClaimPort(transport fleetdb.ExecutionTransport) (execution.T
 
 type fleetTaskRunCommandPort struct {
 	transport fleetdb.ExecutionTransport
+}
+
+func (adapter *fleetTaskRunCommandPort) UpdateTaskRunWorkItemDesign(
+	ctx context.Context,
+	command execution.UpdateTaskRunWorkItemDesignCommand,
+) (execution.UpdateTaskRunWorkItemDesignResult, error) {
+	design := ""
+	if command.Design != nil {
+		design = *command.Design
+	}
+	result, err := adapter.transport.UpdateTaskRunWorkItemDesign(ctx, fleetdb.ExecutionTaskRunWorkItemDesignCommand{
+		WorkspaceKey: command.WorkspaceKey, CommandID: command.RequestID, TaskRunID: command.Owner.ResourceID,
+		NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID, LeaseToken: command.Owner.LeaseToken,
+		FencingToken: command.Owner.FencingToken, Design: design, DesignFormat: command.DesignFormat,
+	})
+	if err != nil {
+		return execution.UpdateTaskRunWorkItemDesignResult{}, mapFleetExecutionPortError(err)
+	}
+	if result == nil || result.Action == nil || strings.TrimSpace(result.Committed.TaskID) == "" {
+		return execution.UpdateTaskRunWorkItemDesignResult{}, execution.ErrConflict
+	}
+	return execution.UpdateTaskRunWorkItemDesignResult{
+		WorkItemID: result.Committed.TaskID,
+		ActionID:   result.Action.ActionID,
+		Replay:     result.Replayed,
+	}, nil
 }
 
 func (adapter *fleetTaskRunCommandPort) ClaimTaskRun(ctx context.Context, command execution.ClaimTaskRunCommand) (execution.ClaimTaskRunResult, error) {

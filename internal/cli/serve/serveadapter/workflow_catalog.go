@@ -111,6 +111,17 @@ type WorkflowCatalogConfig struct {
 	WorkspaceRoleResolver middleware.WorkspaceRoleResolver
 }
 
+// RefreshBoundPromptAgentWorkflows keeps the legacy built-in distribution
+// dependency inside the reviewed Workflow Catalog compatibility adapter. It
+// must run before Automation dispatchers start so an existing binding cannot
+// admit work against a stale embedded prompt-agent version after an upgrade.
+func RefreshBoundPromptAgentWorkflows(ctx context.Context, handle *bootstrap.StoreHandle) error {
+	if handle == nil || handle.Store == nil {
+		return fmt.Errorf("refresh bound prompt-agent workflows: FleetDB Store handle is required")
+	}
+	return workflowdefs.EnsureBoundPromptAgentWorkflows(ctx, handle.Store)
+}
+
 // externalOperatorResolver converts only an identity already verified by the
 // global JWT middleware. The application composition root supplies the issuer
 // and Workflow Catalog's unauthenticated sentinel; this outer adapter retains
@@ -277,7 +288,7 @@ func BuildExecutionCapability(module *WorkflowCatalogModule, handle *bootstrap.S
 	}
 	st := handle.Store
 	executionTransport := handle.FleetDBClient().Execution()
-	requestPort, claimPort, requeuePort, retryExhaustionPort, err := appserve.NewFleetTaskRunCommandPorts(executionTransport)
+	requestPort, claimPort, workItemDesignPort, requeuePort, retryExhaustionPort, err := appserve.NewFleetTaskRunCommandPorts(executionTransport)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +299,8 @@ func BuildExecutionCapability(module *WorkflowCatalogModule, handle *bootstrap.S
 		TriggerEvents:         st.TriggerEvents(),
 		Workspaces:            st.Workspaces(),
 		AtomicTaskRunRequests: requestPort, AtomicTaskRunClaims: claimPort,
-		AtomicTaskRunRequeues: requeuePort, AtomicTaskRunRetryExhaustion: retryExhaustionPort,
+		AtomicTaskRunWorkItemDesign: workItemDesignPort,
+		AtomicTaskRunRequeues:       requeuePort, AtomicTaskRunRetryExhaustion: retryExhaustionPort,
 		FleetExecution: executionTransport,
 	}
 	if module != nil {

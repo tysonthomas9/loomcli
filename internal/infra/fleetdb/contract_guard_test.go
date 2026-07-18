@@ -55,7 +55,7 @@ const (
 // package's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 201
+const expectedClientCallSites = 202
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -250,6 +250,7 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/task-runs/{}/claim-and-start"},
 	{"POST", "/api/v1/{}/task-runs/{}/requeue-and-reset-step"},
 	{"POST", "/api/v1/{}/task-runs/{}/exhaust-retries"},
+	{"POST", "/api/v1/{}/task-runs/{}/work-item/design"},
 	{"POST", "/api/v1/{}/driver-steps/{}/repair-terminal"},
 	{"POST", "/api/v1/{}/driver-runs/{}/children/start"},
 	{"POST", "/api/v1/{}/driver-runs/{}/commands/cascade-children"},

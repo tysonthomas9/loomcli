@@ -38,9 +38,15 @@ const (
 	// interactive local use.
 	EnvFleetRedisPoolSize     = "FLEET_REDIS_POOL_SIZE"
 	EnvFleetRedisMinIdleConns = "FLEET_REDIS_MIN_IDLE_CONNS"
+	// EnvFleetRateLimitEnabled controls FleetDB's global HTTP token bucket.
+	// FleetDB keys that bucket by client IP by default. Every embedded client
+	// connects over the same loopback address, so the production default would
+	// combine unrelated local workers into one self-throttling bucket.
+	EnvFleetRateLimitEnabled = "FLEET_RATE_LIMIT_ENABLED"
 
 	defaultEmbeddedFleetRedisPoolSize     = "100"
 	defaultEmbeddedFleetRedisMinIdleConns = "10"
+	defaultEmbeddedFleetRateLimitEnabled  = "false"
 
 	embeddedFleetDBServiceActor = "loom-local-service"
 	embeddedFleetDBAuthDirName  = "auth"
@@ -644,6 +650,7 @@ func validateFleetDBBinaryPath(path string) error {
 func appendEmbeddedFleetDBEnvDefaults(env []string) []string {
 	env = withDefaultEnv(env, EnvFleetRedisPoolSize, defaultEmbeddedFleetRedisPoolSize)
 	env = withDefaultEnv(env, EnvFleetRedisMinIdleConns, defaultEmbeddedFleetRedisMinIdleConns)
+	env = withDefaultEnv(env, EnvFleetRateLimitEnabled, defaultEmbeddedFleetRateLimitEnabled)
 	return env
 }
 

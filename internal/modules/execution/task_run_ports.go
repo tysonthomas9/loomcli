@@ -5,6 +5,7 @@ import "context"
 type TaskRunDependencies struct {
 	Requests        TaskRunRequestPort
 	Claims          TaskRunClaimPort
+	WorkItemDesign  TaskRunWorkItemDesignPort
 	Requeues        TaskRunRequeuePort
 	RetryExhaustion TaskRunRetryExhaustionPort
 	Scheduling      TaskRunSchedulingQueryPort
@@ -25,6 +26,13 @@ type TaskRunRequestPort interface {
 // TaskRunClaimPort invokes the authoritative claim-and-start transaction.
 type TaskRunClaimPort interface {
 	ClaimTaskRun(context.Context, ClaimTaskRunCommand) (ClaimTaskRunResult, error)
+}
+
+// TaskRunWorkItemDesignPort owns the atomic, owner-fenced update of the Work
+// Item design bound to a running TaskRun. Implementations derive the Work Item
+// from the authoritative TaskRun record; callers never select an Issue ID.
+type TaskRunWorkItemDesignPort interface {
+	UpdateTaskRunWorkItemDesign(context.Context, UpdateTaskRunWorkItemDesignCommand) (UpdateTaskRunWorkItemDesignResult, error)
 }
 
 type TaskRunRequeuePort interface {

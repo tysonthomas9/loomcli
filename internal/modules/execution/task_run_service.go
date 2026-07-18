@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"math/big"
 	"slices"
 	"strings"
 
@@ -41,7 +42,11 @@ func (service *Service) RequestTaskRun(ctx context.Context, auth authority.Execu
 		return nil, err
 	}
 	if err := validateRequestedTaskRunResult(result, command); err != nil {
-		return nil, fmt.Errorf("%w: requested TaskRun escaped parent envelope", ErrConflict)
+		// The authoritative port may have committed before returning a malformed
+		// response. Classify this as ambiguous so callers retain the parent claim
+		// and resolve it through the durable replay receipt instead of issuing a
+		// compensating release against a possibly-live child.
+		return nil, fmt.Errorf("%w: TaskRun request returned an invalid post-commit receipt", ErrUnavailable)
 	}
 	return cloneTaskRun(result.Run), nil
 }
@@ -134,7 +139,7 @@ func requestedTaskRunPayloadMatches(run *TaskRun, command RequestTaskRunCommand)
 		run.RunnerKind != command.RunnerKind || run.RunnerEntrypoint != command.RunnerEntrypoint ||
 		run.RunnerVersionID != command.RunnerVersionID || run.ProviderProfile != command.ProviderProfile ||
 		run.TargetNodeID != command.TargetNodeID || run.RunnerPlacement != command.RunnerPlacement ||
-		run.SandboxPlacement != command.SandboxPlacement || !bytes.Equal(run.Input, command.Input) {
+		run.SandboxPlacement != command.SandboxPlacement || !taskRunJSONInputEqual(run.Input, command.Input) {
 		return false
 	}
 	wantMetadata := cloneExecutionStringMap(command.RuntimeMetadata)
@@ -143,6 +148,95 @@ func requestedTaskRunPayloadMatches(run *TaskRun, command RequestTaskRunCommand)
 	}
 	wantMetadata["execution_request_id"] = command.RequestID
 	return maps.Equal(run.RuntimeMetadata, wantMetadata)
+}
+
+// taskRunJSONInputEqual compares the JSON value rather than its wire bytes.
+// The TaskRun request crosses Loom -> FleetDB -> Loom before this receipt is
+// validated. encoding/json normalizes insignificant whitespace and string
+// escapes, while FleetDB's PostgreSQL immutable receipt is JSONB and may also
+// reorder object keys. Semantic equality matches both certified backends;
+// UseNumber keeps distinct large integer values from collapsing through
+// float64 during comparison.
+func taskRunJSONInputEqual(left, right json.RawMessage) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return len(left) == len(right)
+	}
+	if !json.Valid(left) || !json.Valid(right) {
+		return false
+	}
+	decode := func(raw json.RawMessage) (any, error) {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		var value any
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		return value, nil
+	}
+	leftValue, err := decode(left)
+	if err != nil {
+		return false
+	}
+	rightValue, err := decode(right)
+	return err == nil && taskRunJSONValueEqual(leftValue, rightValue)
+}
+
+func taskRunJSONValueEqual(left, right any) bool {
+	switch left := left.(type) {
+	case nil:
+		return right == nil
+	case bool:
+		right, ok := right.(bool)
+		return ok && left == right
+	case string:
+		right, ok := right.(string)
+		return ok && left == right
+	case json.Number:
+		return taskRunJSONNumberEqual(left, right)
+	case []any:
+		return taskRunJSONArrayEqual(left, right)
+	case map[string]any:
+		return taskRunJSONObjectEqual(left, right)
+	default:
+		return false
+	}
+}
+
+func taskRunJSONNumberEqual(left json.Number, right any) bool {
+	rightNumberText, ok := right.(json.Number)
+	if !ok {
+		return false
+	}
+	leftNumber, leftOK := new(big.Rat).SetString(string(left))
+	rightNumber, rightOK := new(big.Rat).SetString(string(rightNumberText))
+	return leftOK && rightOK && leftNumber.Cmp(rightNumber) == 0
+}
+
+func taskRunJSONArrayEqual(left []any, right any) bool {
+	rightArray, ok := right.([]any)
+	if !ok || len(left) != len(rightArray) {
+		return false
+	}
+	for i := range left {
+		if !taskRunJSONValueEqual(left[i], rightArray[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func taskRunJSONObjectEqual(left map[string]any, right any) bool {
+	rightObject, ok := right.(map[string]any)
+	if !ok || len(left) != len(rightObject) {
+		return false
+	}
+	for key, value := range left {
+		rightValue, ok := rightObject[key]
+		if !ok || !taskRunJSONValueEqual(value, rightValue) {
+			return false
+		}
+	}
+	return true
 }
 
 func taskRunStepMatchesLifecycle(run *TaskRun, step *TaskRunDriverStep, workspace, stepID, driverRunID, taskRunID string) bool {
@@ -301,6 +395,44 @@ func (service *Service) ClaimTaskRun(ctx context.Context, auth authority.SystemA
 	result.Run = cloneTaskRun(result.Run)
 	result.Step = cloneTaskRunDriverStep(result.Step)
 	result.Run.Owner = publicOwner(result.Run.Owner)
+	return result, nil
+}
+
+// UpdateWorkItemDesign delegates the one Work Item mutation admitted to a
+// running TaskRun. The authoritative port resolves the Work Item from the
+// fenced TaskRun; neither this command nor its caller can select another ID.
+func (service *Service) UpdateWorkItemDesign(
+	ctx context.Context,
+	auth authority.ExecutionAuthority,
+	command UpdateTaskRunWorkItemDesignCommand,
+) (UpdateTaskRunWorkItemDesignResult, error) {
+	if err := service.requireOwner(ActionUpdateTaskRunWorkItemDesign, command.WorkspaceKey, command.Owner, auth); err != nil {
+		return UpdateTaskRunWorkItemDesignResult{}, err
+	}
+	if command.Owner.ResourceKind != ResourceTaskRun || strings.TrimSpace(command.RequestID) == "" ||
+		command.Design == nil || strings.TrimSpace(*command.Design) == "" {
+		return UpdateTaskRunWorkItemDesignResult{}, ErrInvalid
+	}
+	format := "markdown"
+	if command.DesignFormat != nil && strings.TrimSpace(*command.DesignFormat) != "" {
+		format = strings.TrimSpace(*command.DesignFormat)
+	}
+	if format != "markdown" && format != "html" {
+		return UpdateTaskRunWorkItemDesignResult{}, ErrInvalid
+	}
+	command.DesignFormat = &format
+	port := service.dependencies.TaskRuns.WorkItemDesign
+	if port == nil {
+		return UpdateTaskRunWorkItemDesignResult{}, ErrUnavailable
+	}
+	result, err := port.UpdateTaskRunWorkItemDesign(ctx, cloneUpdateTaskRunWorkItemDesignCommand(command))
+	if err != nil {
+		return UpdateTaskRunWorkItemDesignResult{}, err
+	}
+	if strings.TrimSpace(result.WorkItemID) == "" || result.WorkItemID != strings.TrimSpace(result.WorkItemID) ||
+		result.ActionID != TaskRunWorkItemDesignActionID(command.RequestID) {
+		return UpdateTaskRunWorkItemDesignResult{}, fmt.Errorf("%w: Work Item design update returned an invalid receipt", ErrConflict)
+	}
 	return result, nil
 }
 
@@ -496,6 +628,18 @@ func cloneClaimTaskRunCommand(command ClaimTaskRunCommand) ClaimTaskRunCommand {
 	command.SupportedProviders = append([]string(nil), command.SupportedProviders...)
 	command.Capabilities = append([]string(nil), command.Capabilities...)
 	command.WorkerProfileIDs = append([]string(nil), command.WorkerProfileIDs...)
+	return command
+}
+
+func cloneUpdateTaskRunWorkItemDesignCommand(command UpdateTaskRunWorkItemDesignCommand) UpdateTaskRunWorkItemDesignCommand {
+	if command.Design != nil {
+		design := *command.Design
+		command.Design = &design
+	}
+	if command.DesignFormat != nil {
+		format := *command.DesignFormat
+		command.DesignFormat = &format
+	}
 	return command
 }
 

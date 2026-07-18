@@ -205,8 +205,8 @@ func TestAddWorktreesSkipsUnrecoverableCheckoutWithWarning(t *testing.T) {
 	if len(created) != 0 {
 		t.Fatalf("created = %v, want no created worktrees", created)
 	}
-	if len(repos) != 1 || repos[0].Path != blockedPath {
-		t.Fatalf("repos = %#v, want intended skipped checkout path", repos)
+	if len(repos) != 0 {
+		t.Fatalf("repos = %#v, want skipped checkout omitted from runnable state", repos)
 	}
 	warnings := service.GetCreateWarnings(ctx)
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "Skipped checkout") {
@@ -265,6 +265,179 @@ func TestStoreBackedAddReposAttachesLocalRepoToEmptyWorkspace(t *testing.T) {
 	}
 	if local.Repos["api"] != filepath.Join(wsPath, "api") {
 		t.Fatalf("local repo path = %q", local.Repos["api"])
+	}
+}
+
+func TestStoreBackedAddReposAttachesCheckedOutExistingDefaultBranch(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	src := initTestGitRepo(t, t.TempDir(), "api")
+	branch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
+	sourceSHA := strings.TrimSpace(gitOutput(t, src, "rev-parse", "HEAD"))
+	addFn := BuildStoreBackedAddRepos(st)
+	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		Repos:       []string{src},
+		Branch:      branch,
+	}); err != nil {
+		t.Fatalf("add checked-out default branch: %v", err)
+	}
+
+	checkout := filepath.Join(wsPath, "api")
+	if got := strings.TrimSpace(gitOutput(t, checkout, "rev-parse", "HEAD")); got != sourceSHA {
+		t.Fatalf("workspace checkout HEAD = %s, want source branch tip %s", got, sourceSHA)
+	}
+	cmd := exec.Command("git", "-C", checkout, "symbolic-ref", "-q", "HEAD") //nolint:norawexec // Real Git fixture verifies detached-HEAD semantics.
+	if err := cmd.Run(); err == nil {
+		t.Fatal("workspace checkout unexpectedly shares the source branch; want detached HEAD")
+	}
+	if got := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current")); got != branch {
+		t.Fatalf("source checkout branch = %q, want unchanged %q", got, branch)
+	}
+
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("load state cache: %v", err)
+	}
+	if got := sc.Workspaces["MY-WS"].Repos["api"]; got != checkout {
+		t.Fatalf("local repo path = %q, want %q", got, checkout)
+	}
+}
+
+func TestStoreBackedAddReposDoesNotPersistSkippedCheckout(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	src := initTestGitRepo(t, t.TempDir(), "api")
+	blockedPath := filepath.Join(wsPath, "api")
+	if err := os.MkdirAll(blockedPath, 0o755); err != nil {
+		t.Fatalf("mkdir blocked checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blockedPath, "keep.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write blocked checkout marker: %v", err)
+	}
+
+	addFn := BuildStoreBackedAddRepos(st)
+	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		Repos:       []string{src},
+		Branch:      "feature-work",
+	}); err == nil {
+		t.Fatal("add repo succeeded despite skipped checkout")
+	}
+	repos, err := st.Repos().List(context.Background(), "MY-WS")
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	if len(repos) != 0 {
+		t.Fatalf("persisted repos = %#v, want none", repos)
+	}
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("load state cache: %v", err)
+	}
+	if _, ok := sc.Workspaces["MY-WS"].Repos["api"]; ok {
+		t.Fatal("state cache persisted the skipped checkout")
+	}
+	if got, err := os.ReadFile(filepath.Join(blockedPath, "keep.txt")); err != nil || string(got) != "keep\n" {
+		t.Fatalf("failed attach modified the pre-existing checkout path: contents=%q err=%v", got, err)
+	}
+	if out := gitOutput(t, src, "branch", "--list", "feature-work"); strings.TrimSpace(out) != "" {
+		t.Fatalf("failed attach left its newly-created branch behind: %q", out)
+	}
+}
+
+func TestStoreBackedAddReposRollsBackPartialLocalAttach(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	firstSrc := initTestGitRepo(t, t.TempDir(), "first")
+	secondSrc := initTestGitRepo(t, t.TempDir(), "second")
+	const branch = "feature-work"
+	runGit(t, secondSrc, "branch", branch)
+	secondBranchSHA := strings.TrimSpace(gitOutput(t, secondSrc, "rev-parse", branch))
+
+	blockedPath := filepath.Join(wsPath, "second")
+	if err := os.MkdirAll(blockedPath, 0o755); err != nil {
+		t.Fatalf("mkdir blocked checkout: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blockedPath, "keep.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write blocked checkout marker: %v", err)
+	}
+
+	addFn := BuildStoreBackedAddRepos(st)
+	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		Repos:       []string{firstSrc, secondSrc},
+		Branch:      branch,
+	}); err == nil {
+		t.Fatal("add repos succeeded despite second checkout being blocked")
+	}
+
+	if _, err := os.Stat(filepath.Join(wsPath, "first")); !os.IsNotExist(err) {
+		t.Fatalf("first checkout was not rolled back, stat err=%v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(blockedPath, "keep.txt")); err != nil || string(got) != "keep\n" {
+		t.Fatalf("failed attach modified the blocked second path: contents=%q err=%v", got, err)
+	}
+
+	repos, err := st.Repos().List(context.Background(), "MY-WS")
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	if len(repos) != 0 {
+		t.Fatalf("persisted repos = %#v, want none", repos)
+	}
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		t.Fatalf("load state cache: %v", err)
+	}
+	if _, ok := sc.Workspaces["MY-WS"].Repos["first"]; ok {
+		t.Fatal("state cache persisted the rolled-back first checkout")
+	}
+	if _, ok := sc.Workspaces["MY-WS"].Repos["second"]; ok {
+		t.Fatal("state cache persisted the skipped second checkout")
+	}
+
+	if out := strings.TrimSpace(gitOutput(t, firstSrc, "branch", "--list", branch)); out != "" {
+		t.Fatalf("rollback left its operation-created branch behind in first repo: %q", out)
+	}
+	if got := strings.TrimSpace(gitOutput(t, secondSrc, "rev-parse", branch)); got != secondBranchSHA {
+		t.Fatalf("pre-existing second repo branch changed or was removed: got %s, want %s", got, secondBranchSHA)
 	}
 }
 

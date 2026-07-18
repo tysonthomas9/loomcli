@@ -162,7 +162,10 @@ func resolveRepoPaths(repoPaths []string) ([]resolvedRepo, error) {
 type createdWorktree struct {
 	origRepoPath string
 	worktreePath string
-	branch       string
+	// branch is non-empty only when this operation created the branch. Existing
+	// healthy branches are checked out detached and must never be deleted by a
+	// later rollback.
+	branch string
 }
 
 // addWorktrees creates git worktrees for each resolved repo in the workspace directory.
@@ -182,7 +185,6 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 				return created, nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("source repo is not usable for %s", repo.name), err)
 			}
 			warnSkippedWorktree(ctx, repo.name, worktreePath, err)
-			repos = append(repos, repoConfig)
 			continue
 		}
 		created = append(created, worktree)
@@ -207,6 +209,7 @@ func createWorkspaceWorktree(repo resolvedRepo, worktreePath, branch string) (cr
 		return createdWorktree{}, err
 	}
 	baseRef := ""
+	createBranch := info.State != gitbranch.StateHealthy
 	if info.State == gitbranch.StateBroken {
 		recoveryBase := workspaceWorktreeRecoveryBase(repo.path, branch)
 		recovery, err := gitbranch.Recover(repo.path, branch, recoveryBase, info)
@@ -214,11 +217,35 @@ func createWorkspaceWorktree(repo resolvedRepo, worktreePath, branch string) (cr
 			return createdWorktree{}, err
 		}
 		baseRef = recovery.BaseSHA
+	} else if info.State == gitbranch.StateHealthy {
+		// A local repo is commonly attached while its default branch is checked
+		// out in the source checkout. Git correctly refuses to check the same
+		// branch out in two worktrees. The workspace checkout is only a safe,
+		// machine-local base for isolated task worktrees, so detach it at the
+		// exact healthy branch tip instead of weakening Git's branch lock.
+		baseRef = info.BaseSHA
 	}
-	if err := addWorkspaceWorktree(repo.path, worktreePath, branch, baseRef); err != nil {
+	createdBranch := ""
+	if createBranch {
+		args := []string{"branch", branch}
+		if baseRef != "" {
+			args = append(args, baseRef)
+		}
+		if _, err := cli.RunGitCommand(repo.path, args...); err != nil {
+			return createdWorktree{}, err
+		}
+		createdBranch = branch
+	}
+	if err := addWorkspaceWorktree(repo.path, worktreePath, branch, baseRef, createBranch); err != nil {
+		// Delete only a branch whose creation just succeeded in this operation.
+		// If another process checked it out in the meantime, Git refuses the
+		// deletion, preserving the concurrent owner's branch.
+		if createdBranch != "" {
+			_, _ = cli.RunGitCommand(repo.path, "branch", "-D", createdBranch)
+		}
 		return createdWorktree{}, err
 	}
-	return createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath, branch: branch}, nil
+	return createdWorktree{origRepoPath: repo.path, worktreePath: worktreePath, branch: createdBranch}, nil
 }
 
 func workspaceWorktreeRecoveryBase(repoPath, targetBranch string) string {
@@ -233,10 +260,15 @@ func workspaceWorktreeRecoveryBase(repoPath, targetBranch string) string {
 	return base
 }
 
-func addWorkspaceWorktree(repoPath, worktreePath, branch, baseRef string) error {
-	args := []string{"worktree", "add", worktreePath, "-b", branch}
-	if baseRef != "" {
-		args = append(args, baseRef)
+func addWorkspaceWorktree(repoPath, worktreePath, branch, baseRef string, createBranch bool) error {
+	args := []string{"worktree", "add"}
+	if createBranch {
+		args = append(args, worktreePath, branch)
+	} else {
+		args = append(args, "--detach", worktreePath)
+		if baseRef != "" {
+			args = append(args, baseRef)
+		}
 	}
 	_, err := cli.RunGitCommand(repoPath, args...)
 	return err
