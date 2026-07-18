@@ -85,27 +85,28 @@ tests:
       - expect: { notText: Something went wrong }
 
   - name: files page renders the explorer toolbar
-    intent: The files route renders the file explorer scaffold (agent selector + filter) on a fresh workspace
+    intent: The files route renders the v3 file explorer scaffold (lens toolbar + tree panel) on a fresh workspace
     steps:
       - open: /ws/E2E-WS/files
       - wait:
           fn: >-
-            !!document.querySelector("input[aria-label='Filter files']")
-      # toolbar anchors only — the body's empty text depends on whether any agent
-      # config exists, which other suites may create; the toolbar is unconditional
-      - expect: { visible: { selector: "input[aria-label='Filter files']" } }
-      - expect: { visible: { selector: "select[aria-label='Select agent']" } }
+            !!document.querySelector("[role=tablist][aria-label='File explorer lens']")
+      # toolbar anchors only — tree contents depend on repo checkout state, which
+      # other suites may alter; the lens toolbar and resize handle are unconditional
+      - expect: { visible: { selector: "[role=tablist][aria-label='File explorer lens']" } }
+      - expect: { visible: { testid: file-tree-resize-handle } }
 
   - name: workspace route loads without crashing
-    intent: The workspace route resolves and keeps the app shell (WorkspacePage renders null for single-repo workspaces by design)
+    intent: The workspace route resolves without crashing; single-repo workspaces redirect to the kanban board by design (stale-bookmark guard)
     steps:
       - open: /ws/E2E-WS/workspace
-      - wait: { url: "**/ws/*/workspace**" }
-      # single-repo: page body is intentionally empty; the sidebar shell proves the
-      # route mounted rather than crashing to the error boundary
+      # single-repo: the app redirects /workspace → kanban once repos load, so the
+      # URL is racy — landing on either the workspace shell or the kanban board
+      # with the sidebar intact proves the route mounted rather than crashing
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=workspace-tree-resize-handle]')
+            !!document.querySelector('[data-testid=workspace-tree-resize-handle]') ||
+            !!document.querySelector('[data-testid=board-toolbar]')
       - expect: { text: REPOS }
       - expect: { count: { testid: workspace-view, equals: 0 } }
       - expect: { notText: Something went wrong }
