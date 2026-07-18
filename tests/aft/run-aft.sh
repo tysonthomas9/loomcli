@@ -204,6 +204,11 @@ if [[ ! -f "$AFT_DIR/dist/cli.js" || ! -d "$AFT_DIR/node_modules" ]]; then
     (cd "$AFT_DIR" && npm install --silent && npm run build --silent)
 fi
 
+# The browser itself gets swept too: verify agent-browser can launch Chrome,
+# self-healing via `agent-browser install` + config repair when it can't (macOS
+# only; no-op on Linux/CI, which provisions its own browser).
+bash "$SCRIPT_DIR/scripts/ensure-agent-browser.sh"
+
 # Same story for flue: the serve-side epic-runner bundle build needs the runtime
 # package's deps. Non-fatal on failure — matching the FLUE_REPO-absent behavior,
 # where agent-flow suites fail with a clear workflow error and everything else runs.

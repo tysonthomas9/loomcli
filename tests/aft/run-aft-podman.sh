@@ -128,6 +128,10 @@ if [[ ! -f "$AFT_DIR/dist/cli.js" || ! -d "$AFT_DIR/node_modules" ]]; then
     (cd "$AFT_DIR" && npm install --silent && npm run build --silent)
 fi
 
+# The browser gets swept too: self-heal agent-browser's Chrome before any suite
+# needs it (macOS only; no-op elsewhere).
+bash "$SCRIPT_DIR/scripts/ensure-agent-browser.sh"
+
 mkdir -p "$REPORT_DIR"
 umask 077
 TMP_ROOT="$(mktemp -d -t loom-aft-podman.XXXXXX)"
