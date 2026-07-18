@@ -34,9 +34,21 @@ func HandleList(agentSvc service.AgentService) http.HandlerFunc {
 func HandleInteractivePrompts() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handler.WriteJSON(w, http.StatusOK, interactivePromptsResponse{
-			Prompts: domain.BuiltinInteractivePrompts(),
+			Prompts: visibleInteractivePrompts(),
 		})
 	}
+}
+
+func visibleInteractivePrompts() []domain.BuiltinInteractivePrompt {
+	prompts := domain.BuiltinInteractivePrompts()
+	out := make([]domain.BuiltinInteractivePrompt, 0, len(prompts))
+	for _, prompt := range prompts {
+		if prompt.Hidden {
+			continue
+		}
+		out = append(out, prompt)
+	}
+	return out
 }
 
 func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {

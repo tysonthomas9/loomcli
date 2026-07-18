@@ -559,25 +559,31 @@ func TestBlockedIssueToData_AllFieldsSet(t *testing.T) {
 	repo := "r"
 	parent := "p"
 	design := "d"
+	designArtifactID := "design-b-2-sha256"
+	designFormat := gen.BlockedIssueDesignFormat("html")
+	hasDesign := true
 	due := now.Add(time.Hour)
 	defer_ := now.Add(2 * time.Hour)
 	b := gen.BlockedIssue{
-		Id:         "b-2",
-		Title:      "Full",
-		Status:     &status,
-		IssueType:  &issueType,
-		Priority:   1,
-		Assignee:   &assignee,
-		Owner:      &owner,
-		Labels:     &labels,
-		SourceRepo: &repo,
-		Parent:     &parent,
-		Design:     &design,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		DueAt:      &due,
-		DeferUntil: &defer_,
-		BlockedBy:  []string{"b-1"},
+		Id:               "b-2",
+		Title:            "Full",
+		Status:           &status,
+		IssueType:        &issueType,
+		Priority:         1,
+		Assignee:         &assignee,
+		Owner:            &owner,
+		Labels:           &labels,
+		SourceRepo:       &repo,
+		Parent:           &parent,
+		Design:           &design,
+		DesignArtifactId: &designArtifactID,
+		DesignFormat:     &designFormat,
+		HasDesign:        &hasDesign,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		DueAt:            &due,
+		DeferUntil:       &defer_,
+		BlockedBy:        []string{"b-1"},
 	}
 	d := blockedIssueToData(b)
 	if d.Status != "open" || d.IssueType != "task" {
@@ -591,6 +597,9 @@ func TestBlockedIssueToData_AllFieldsSet(t *testing.T) {
 	}
 	if d.SourceRepo != "r" || d.Parent != "p" || d.Design != "d" {
 		t.Errorf("more ptrs")
+	}
+	if !d.HasDesign || d.DesignArtifactID != designArtifactID || d.DesignFormat != "html" {
+		t.Errorf("design metadata: %+v", d)
 	}
 	if d.DueAt == nil || !d.DueAt.Equal(due) {
 		t.Errorf("DueAt")

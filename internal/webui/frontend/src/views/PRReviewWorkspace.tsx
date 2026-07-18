@@ -1,9 +1,9 @@
 /**
  * PRReviewWorkspace — the design's full-screen PR Review Workspace
  * (review-ws), GitHub-PR-review style: the file diff is the focus, with a
- * compact identity header (state · branch · resolves), an Approve /
- * Request-changes decision bar, and a review-agent control that can assign
- * an existing agent or create a brand-new PR review agent.
+ * compact identity header (state · branch · resolves), a conversational
+ * reviewer, and a review-agent control that can assign an existing agent or
+ * create a brand-new PR review agent.
  *
  * Fully data-backed:
  *   - Diff: the review agent's real branch diff (PRFilesTab → /agents/{name}/diff/*)
@@ -11,17 +11,19 @@
  *   - New review agent: real createWorkspaceAgent → assign → startAgent
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { applyReviewDecision, updateIssue } from "@/api";
+import { applyReviewDecision, createIssue, updateIssue } from "@/api";
+import { getPullRequestDetail } from "@/api/workspace/prReview";
 import { startAgent } from "@/hooks/api";
 import { CreateAgentModal } from "@/components/CreateAgentModal/CreateAgentModal";
 import {
   buildWorkerByTaskId,
   isWorkerTerminalOpenable,
 } from "@/components/AgentWorkPanel/AgentWorkPanel";
-import { PRFilesTab } from "@/components/IssueDetailPanel";
+import { PRDiscussionPanel } from "@/components/PRDiscussionPanel";
+import { PRCompareDiffPane, PRFilesTab } from "@/components/IssueDetailPanel";
 import { TaskSessionDiffPane } from "@/components/IssueDetailPanel/sessions/TaskSessionDiffPane";
 import {
   useWorkspaceViewData,
@@ -37,11 +39,12 @@ import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import styles from "./PRReviewWorkspace.module.css";
 
 export interface PRReviewWorkspaceProps {
-  issue: Issue;
+  issue?: Issue;
   /** GitHub metadata when the PR list was loaded. */
   pullRequest?: GitPullRequest | undefined;
   /** Return to the PR list. */
   onBack: () => void;
+  onLinkedTicket?: (issueId: string) => void;
 }
 
 /** Agents linked to a task issue (worker, status/task_id match, assignee). */
@@ -88,15 +91,53 @@ export function resolveDiffAgentForIssue(
   return linked[0];
 }
 
+interface PullRequestRepoRef {
+  owner: string;
+  repo: string;
+}
+
+function repoRefFromName(
+  repoName: string | undefined,
+): PullRequestRepoRef | null {
+  const [owner, repo, extra] = repoName?.split("/") ?? [];
+  if (!owner || !repo || extra) return null;
+  return { owner, repo };
+}
+
+function repoRefFromUrl(url: string | undefined): PullRequestRepoRef | null {
+  if (!url) return null;
+
+  try {
+    const parsed = new URL(url);
+    const [owner, repo, marker] = parsed.pathname.split("/").filter(Boolean);
+    if (owner && repo && marker === "pull") {
+      return { owner, repo };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function resolvePullRequestRepo(
+  pullRequest: GitPullRequest | undefined,
+): PullRequestRepoRef | null {
+  return (
+    repoRefFromName(pullRequest?.repo_name) ?? repoRefFromUrl(pullRequest?.url)
+  );
+}
+
 export function PRReviewWorkspace({
   issue,
   pullRequest,
   onBack,
+  onLinkedTicket,
 }: PRReviewWorkspaceProps): JSX.Element {
   const navigate = useNavigate();
-  const { agents, issues, workspaceId } = useWorkspaceViewData();
+  const { agents, issues } = useWorkspaceViewData();
   const { refetch, showToast, handleIssueClick } = useWorkspaceViewActions();
-  const { repos } = useWorkspaceContext();
+  const { repos, workspaceId } = useWorkspaceContext();
 
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -105,18 +146,23 @@ export function PRReviewWorkspace({
   const decisionIntentRef = useRef<{ fingerprint: string; id: string } | null>(
     null,
   );
+  const [headSha, setHeadSha] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const [diffRefreshKey, setDiffRefreshKey] = useState(0);
+  const [creatingTicket, setCreatingTicket] = useState(false);
+  const [discussOpen, setDiscussOpen] = useState(false);
 
   const diffAgent = useMemo(
-    () => resolveDiffAgentForIssue(issue, agents),
+    () => (issue ? resolveDiffAgentForIssue(issue, agents) : undefined),
     [issue, agents],
   );
 
   const reviewer = useMemo(
     () =>
-      issue.assignee
+      issue?.assignee
         ? agents.find((a) => a.name === issue.assignee)
         : undefined,
-    [agents, issue.assignee],
+    [agents, issue?.assignee],
   );
 
   // One-agent-one-job: agents already on a live task are offered disabled.
@@ -127,23 +173,28 @@ export function PRReviewWorkspace({
         t.issue_type !== "epic" &&
         (t.status ?? "open") !== "closed" &&
         t.assignee &&
-        t.id !== issue.id &&
+        t.id !== issue?.id &&
         !m.has(t.assignee)
       ) {
         m.set(t.assignee, t.id);
       }
     }
     return m;
-  }, [issues, issue.id]);
+  }, [issues, issue?.id]);
 
   const prUrl =
     pullRequest?.url ||
-    (isPRUrl(issue.external_ref) ? issue.external_ref : null);
+    (issue && isPRUrl(issue.external_ref) ? issue.external_ref : null);
   const prNumber =
     pullRequest?.number?.toString() ??
     prUrl?.match(/\/pulls?\/(\d+)/)?.[1] ??
     null;
-  const displayTitle = pullRequest?.title || issue.title;
+  const pullRequestRepo = useMemo(
+    () =>
+      resolvePullRequestRepo(pullRequest) ?? repoRefFromUrl(prUrl ?? undefined),
+    [pullRequest, prUrl],
+  );
+  const displayTitle = pullRequest?.title || issue?.title || "Pull request";
   const reviewStateLabel = (() => {
     if (pullRequest?.is_draft) return "Draft";
     if (pullRequest?.state === "MERGED") return "Merged";
@@ -154,7 +205,74 @@ export function PRReviewWorkspace({
     return "Review";
   })();
 
+  useEffect(() => {
+    let ignore = false;
+    const number = prNumber ? Number(prNumber) : NaN;
+    if (!pullRequestRepo || !Number.isFinite(number)) {
+      setHeadSha(null);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const detail = await getPullRequestDetail(
+          workspaceId,
+          pullRequestRepo.owner,
+          pullRequestRepo.repo,
+          number,
+        );
+        if (!ignore) setHeadSha(detail.head_sha);
+      } catch {
+        if (!ignore) setHeadSha(null);
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, [workspaceId, pullRequestRepo, prNumber]);
+
+  // Fetch the PR's authoritative head sha after a stale-subject response and
+  // commit it to state alongside the diff refresh. Returns null when the PR
+  // head can't be determined.
+  const loadHeadSha = useCallback(
+    async (
+      owner: string,
+      repo: string,
+      number: number,
+    ): Promise<string | null> => {
+      try {
+        const detail = await getPullRequestDetail(
+          workspaceId,
+          owner,
+          repo,
+          number,
+        );
+        setHeadSha(detail.head_sha);
+        return detail.head_sha;
+      } catch {
+        setHeadSha(null);
+        return null;
+      }
+    },
+    [workspaceId],
+  );
+
+  const handleStaleSubject = useCallback(async (): Promise<void> => {
+    setStale(true);
+    setDiffRefreshKey((key) => key + 1);
+    const number = prNumber ? Number(prNumber) : NaN;
+    if (pullRequestRepo && Number.isFinite(number)) {
+      await loadHeadSha(pullRequestRepo.owner, pullRequestRepo.repo, number);
+    }
+    showToast(
+      "The PR changed since you loaded it — refreshed. Continue reviewing the latest head.",
+      { type: "warning" },
+    );
+  }, [loadHeadSha, prNumber, pullRequestRepo, showToast]);
+
   const assignReviewer = async (agentName: string): Promise<void> => {
+    if (!issue) return;
     setAgentMenuOpen(false);
     setIsAssigning(true);
     try {
@@ -181,7 +299,47 @@ export function PRReviewWorkspace({
     }
   };
 
+  const createTicket = async (): Promise<void> => {
+    if (!pullRequest) return;
+    setCreatingTicket(true);
+    try {
+      const sourceRepo = pullRequest.source_repo?.trim();
+      const { issue: created } = await createIssue(workspaceId, {
+        title: pullRequest.title,
+        external_ref: pullRequest.url,
+        ...(sourceRepo ? { source_repo: sourceRepo } : {}),
+        issue_type: "task",
+        priority: 3,
+      });
+      try {
+        await updateIssue(workspaceId, created.id, { status: "review" });
+      } catch {
+        showToast(
+          `Ticket ${created.id} created, but moving it to Review failed — set it manually`,
+          { type: "warning" },
+        );
+      }
+      // Refetch before navigating so the freshly-created issue is present in
+      // the issues list when the parent switches to ?review=<newId> (matches
+      // App.handleCreateIssueSuccess). Without this the review gate misses the
+      // not-yet-loaded issue and bounces back to the PR queue.
+      await refetch();
+      showToast(`Created ${created.id} for this pull request`);
+      onLinkedTicket?.(created.id);
+    } catch (err) {
+      showToast(
+        err instanceof Error ? err.message : "Failed to create ticket",
+        {
+          type: "error",
+        },
+      );
+    } finally {
+      setCreatingTicket(false);
+    }
+  };
+
   const decide = async (decision: "approve" | "changes"): Promise<void> => {
+    if (!issue) return;
     setIsDeciding(true);
     try {
       const action = decision === "approve" ? "approve" : "request_changes";
@@ -220,7 +378,13 @@ export function PRReviewWorkspace({
     }
   };
 
+  const canDiscussPR = Boolean(pullRequestRepo && prNumber);
   const freeAgents = agents.filter((a) => !busyAgentTask.has(a.name));
+  const showDiscussion =
+    discussOpen &&
+    pullRequestRepo &&
+    prNumber &&
+    Number.isFinite(Number(prNumber));
 
   return (
     <div className={styles.workspace} data-testid="pr-review-workspace">
@@ -239,7 +403,7 @@ export function PRReviewWorkspace({
             <h1 className={styles.title}>{displayTitle}</h1>
             <p className={styles.meta}>
               <span className={styles.stateTag}>{reviewStateLabel}</span>
-              <code className={styles.metaMono}>{issue.id}</code>
+              {issue && <code className={styles.metaMono}>{issue.id}</code>}
               {diffAgent?.branch && (
                 <span className={styles.branch}>
                   <code className={styles.metaMono}>{diffAgent.branch}</code>
@@ -255,155 +419,235 @@ export function PRReviewWorkspace({
                   #{prNumber} ↗
                 </a>
               )}
-              <button
-                type="button"
-                className={styles.ticketLink}
-                onClick={() => handleIssueClick(issue)}
-              >
-                Open ticket
-              </button>
+              {issue && (
+                <button
+                  type="button"
+                  className={styles.ticketLink}
+                  onClick={() => handleIssueClick(issue)}
+                >
+                  Open ticket
+                </button>
+              )}
             </p>
           </div>
           <div className={styles.spacer} />
 
           {/* Review agent control: reviewer chip, or assign/create menu. */}
-          {reviewer ? (
-            <button
-              type="button"
-              className={styles.reviewerChip}
-              onClick={() =>
-                navigate(
-                  `/ws/${encodeURIComponent(workspaceId)}/agents?agent=${encodeURIComponent(reviewer.name)}`,
-                )
-              }
-              title={`Open ${reviewer.name}'s workspace`}
-            >
-              <span
-                className={styles.reviewerAvatar}
-                style={{
-                  backgroundColor: getAvatarColor(reviewer.name),
-                  color: shouldUseWhiteText(getAvatarColor(reviewer.name))
-                    ? "#fff"
-                    : "#171717",
-                }}
-              >
-                {reviewer.name.charAt(0).toUpperCase()}
-              </span>
-              Reviewing: {reviewer.name} →
-            </button>
-          ) : (
-            <div className={styles.agentControl}>
+          {issue ? (
+            reviewer ? (
               <button
                 type="button"
-                className={styles.agentButton}
-                disabled={isAssigning}
-                aria-haspopup="menu"
-                aria-expanded={agentMenuOpen}
-                onClick={() => setAgentMenuOpen((v) => !v)}
-                data-testid="review-agent-button"
+                className={styles.reviewerChip}
+                onClick={() =>
+                  navigate(
+                    `/ws/${encodeURIComponent(workspaceId)}/agents?agent=${encodeURIComponent(reviewer.name)}`,
+                  )
+                }
+                title={`Open ${reviewer.name}'s workspace`}
               >
-                {isAssigning ? "Assigning…" : "Review agent ▾"}
+                <span
+                  className={styles.reviewerAvatar}
+                  style={{
+                    backgroundColor: getAvatarColor(reviewer.name),
+                    color: shouldUseWhiteText(getAvatarColor(reviewer.name))
+                      ? "#fff"
+                      : "#171717",
+                  }}
+                >
+                  {reviewer.name.charAt(0).toUpperCase()}
+                </span>
+                Reviewing: {reviewer.name} →
               </button>
-              {agentMenuOpen && (
-                <div className={styles.agentMenu} role="menu">
-                  <div className={styles.agentMenuHead}>
-                    ASSIGN A REVIEW AGENT
+            ) : (
+              <div className={styles.agentControl}>
+                <button
+                  type="button"
+                  className={styles.agentButton}
+                  disabled={isAssigning}
+                  aria-haspopup="menu"
+                  aria-expanded={agentMenuOpen}
+                  onClick={() => setAgentMenuOpen((v) => !v)}
+                  data-testid="review-agent-button"
+                >
+                  {isAssigning ? "Assigning…" : "Review agent ▾"}
+                </button>
+                {agentMenuOpen && (
+                  <div className={styles.agentMenu} role="menu">
+                    <div className={styles.agentMenuHead}>
+                      ASSIGN A REVIEW AGENT
+                    </div>
+                    {agents.map((a) => {
+                      const busyOn = busyAgentTask.get(a.name);
+                      return (
+                        <button
+                          key={a.name}
+                          type="button"
+                          role="menuitem"
+                          className={styles.agentOption}
+                          disabled={Boolean(busyOn)}
+                          title={
+                            busyOn ? `Already on ${busyOn}` : `Assign ${a.name}`
+                          }
+                          onClick={() => void assignReviewer(a.name)}
+                        >
+                          {a.name}
+                          {busyOn && (
+                            <span className={styles.agentBusy}>on task</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {agents.length > 0 && freeAgents.length === 0 && (
+                      <p className={styles.agentEmpty}>
+                        All agents are busy — create a fresh one.
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.agentCreate}
+                      onClick={() => {
+                        setAgentMenuOpen(false);
+                        setCreateOpen(true);
+                      }}
+                      data-testid="new-review-agent"
+                    >
+                      ＋ New review agent…
+                    </button>
                   </div>
-                  {agents.map((a) => {
-                    const busyOn = busyAgentTask.get(a.name);
-                    return (
-                      <button
-                        key={a.name}
-                        type="button"
-                        role="menuitem"
-                        className={styles.agentOption}
-                        disabled={Boolean(busyOn)}
-                        title={
-                          busyOn ? `Already on ${busyOn}` : `Assign ${a.name}`
-                        }
-                        onClick={() => void assignReviewer(a.name)}
-                      >
-                        {a.name}
-                        {busyOn && (
-                          <span className={styles.agentBusy}>on task</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                  {agents.length > 0 && freeAgents.length === 0 && (
-                    <p className={styles.agentEmpty}>
-                      All agents are busy — create a fresh one.
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={styles.agentCreate}
-                    onClick={() => {
-                      setAgentMenuOpen(false);
-                      setCreateOpen(true);
-                    }}
-                    data-testid="new-review-agent"
-                  >
-                    ＋ New review agent…
-                  </button>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )
+          ) : (
+            <button
+              type="button"
+              className={styles.agentButton}
+              data-testid="pr-create-ticket"
+              disabled={creatingTicket}
+              onClick={() => void createTicket()}
+            >
+              {creatingTicket ? "Creating ticket…" : "＋ Create ticket"}
+            </button>
+          )}
+
+          {/* Conversational reviewer: start a codex agent checked out at the PR
+              head and open its terminal. Available for any resolvable PR. */}
+          {canDiscussPR && (
+            <button
+              type="button"
+              className={styles.agentButton}
+              data-testid="pr-discuss-button"
+              onClick={() => setDiscussOpen((v) => !v)}
+              title="Open a PR-aware review discussion"
+            >
+              Discuss PR
+            </button>
           )}
 
           {/* Decision bar (design rw-decision, adapted to real statuses). */}
-          <button
-            type="button"
-            className={styles.changesButton}
-            disabled={isDeciding}
-            onClick={() => void decide("changes")}
-          >
-            ✗ Request changes
-          </button>
-          <button
-            type="button"
-            className={styles.approveButton}
-            disabled={isDeciding}
-            onClick={() => void decide("approve")}
-          >
-            ✓ Approve
-          </button>
+          {issue && (
+            <>
+              <button
+                type="button"
+                className={styles.changesButton}
+                disabled={isDeciding}
+                onClick={() => void decide("changes")}
+              >
+                ✗ Request changes
+              </button>
+              <button
+                type="button"
+                className={styles.approveButton}
+                disabled={isDeciding}
+                onClick={() => void decide("approve")}
+              >
+                ✓ Approve
+              </button>
+            </>
+          )}
         </div>
+        {stale && (
+          <div
+            className={styles.staleBanner}
+            data-testid="pr-review-stale-banner"
+          >
+            <span>
+              This PR was updated after you opened it. The diff was refreshed
+              {headSha ? " at the latest head" : ""} — continue reviewing the
+              updated PR.
+            </span>
+            <button type="button" onClick={() => setStale(false)}>
+              Dismiss
+            </button>
+          </div>
+        )}
       </header>
 
       {/* The focus: full-bleed file diff (design DiffPane). */}
-      <div className={styles.diffArea}>
-        {diffAgent ? (
-          <PRFilesTab
-            agent={diffAgent}
-            isActive
-            emptyFallback={
-              <TaskSessionDiffPane
-                taskId={issue.id}
-                worktreeAgentName={diffAgent.name}
-              />
-            }
+      <div
+        className={
+          showDiscussion
+            ? `${styles.diffArea} ${styles.diffAreaSplit}`
+            : styles.diffArea
+        }
+      >
+        <div className={styles.diffPane}>
+          {diffAgent && issue ? (
+            <PRFilesTab
+              key={diffRefreshKey}
+              agent={diffAgent}
+              isActive
+              emptyFallback={
+                <TaskSessionDiffPane
+                  taskId={issue.id}
+                  worktreeAgentName={diffAgent.name}
+                />
+              }
+            />
+          ) : pullRequest && pullRequestRepo ? (
+            <PRCompareDiffPane
+              workspaceId={workspaceId}
+              owner={pullRequestRepo.owner}
+              repo={pullRequestRepo.repo}
+              number={pullRequest.number}
+              refreshKey={diffRefreshKey}
+            />
+          ) : issue ? (
+            <TaskSessionDiffPane taskId={issue.id} />
+          ) : (
+            <div className={styles.diffEmpty}>
+              No diff available for this pull request.
+            </div>
+          )}
+        </div>
+        {showDiscussion && (
+          <PRDiscussionPanel
+            workspaceId={workspaceId}
+            owner={pullRequestRepo.owner}
+            repo={pullRequestRepo.repo}
+            number={Number(prNumber)}
+            onClose={() => setDiscussOpen(false)}
+            onStaleSubject={handleStaleSubject}
           />
-        ) : (
-          <TaskSessionDiffPane taskId={issue.id} />
         )}
       </div>
 
       {/* Real agent creation, seeded as a PR review agent; on success the
           new agent is assigned this PR and started on it. */}
-      <CreateAgentModal
-        isOpen={createOpen}
-        workspaceId={workspaceId}
-        repos={repos}
-        defaultName={`review-${issue.id.toLowerCase()}`}
-        defaultRoleName="task"
-        onClose={() => setCreateOpen(false)}
-        onSuccess={(agent) => {
-          setCreateOpen(false);
-          void assignReviewer(agent.name);
-        }}
-      />
+      {issue && (
+        <CreateAgentModal
+          isOpen={createOpen}
+          workspaceId={workspaceId}
+          repos={repos}
+          defaultName={`review-${issue.id.toLowerCase()}`}
+          defaultRoleName="task"
+          onClose={() => setCreateOpen(false)}
+          onSuccess={(agent) => {
+            setCreateOpen(false);
+            void assignReviewer(agent.name);
+          }}
+        />
+      )}
     </div>
   );
 }

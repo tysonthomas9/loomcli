@@ -24,8 +24,8 @@ const (
 
 // buildConnectorDispatcher wires the connector egress choke point for the
 // driver-op module: the workspace store's connector/grant/audit stores, the
-// AES-256-GCM vault keyed by LOOM_CONNECTOR_VAULT_KEY, and the provider
-// registry on a timeout-bounded HTTP client.
+// AES-256-GCM vault keyed by the explicit env override or the persisted local
+// settings key file, and the provider registry on a timeout-bounded HTTP client.
 //
 // It returns nil — connector egress fails closed with a structured
 // "unavailable" error — when serve has no store or no usable vault key:
@@ -35,7 +35,7 @@ func (app *Server) buildConnectorDispatcher() *connector.Dispatcher {
 	if app.config.Store == nil {
 		return nil
 	}
-	vault, err := connector.NewVaultFromEnv()
+	vault, err := connector.NewVaultFromEnvOrKeyFile(app.config.LocalSettingsDir)
 	if err != nil {
 		return nil
 	}

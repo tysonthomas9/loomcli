@@ -16,6 +16,15 @@ type WorkspaceListItem struct {
 	Pool      *PoolStats `json:"pool,omitempty"`
 }
 
+const (
+	WorkspaceDesignFormatMarkdown = "markdown"
+	WorkspaceDesignFormatHTML     = "html"
+)
+
+func ValidWorkspaceDesignFormat(format string) bool {
+	return format == WorkspaceDesignFormatMarkdown || format == WorkspaceDesignFormatHTML
+}
+
 // JobStore is implemented by WorkspaceJobStore for async workspace creation.
 type JobStore interface {
 	Start(req WorkspaceCreateRequest, createFn WorkspaceCreateFn) string
@@ -75,4 +84,8 @@ type WorkspaceService interface {
 	// Caller must pre-validate the backend name (isValidBackend).
 	// Returns refreshed workspace data.
 	PatchWorkspaceBackend(ctx context.Context, wsID string, backend string) (*ops.WorkspaceData, error)
+
+	// PatchWorkspaceDesignFormat updates the workspace's planner design output
+	// and rendering format. Valid values are markdown and html.
+	PatchWorkspaceDesignFormat(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error)
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -52,6 +53,7 @@ type ServerConfig struct {
 	PoolSize            int
 	CORSEnabled         bool
 	CORSOrigins         []string
+	FrontendOrigins     []string // Explicit public frontend origins; used to constrain open local file access
 	ShutdownTimeout     time.Duration
 	MaxPortAttempts     int
 	TerminalCmd         string
@@ -64,21 +66,22 @@ type ServerConfig struct {
 	// expected steady state, not a degraded one.
 	FleetClient           bool
 	FleetRedis            *fleet.RedisConfig
-	FleetJWTKey           []byte                      // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
-	FleetAPIKey           string                      // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
-	HSTSEnabled           bool                        // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
-	ExtAuthURL            string                      // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
-	ExtAuthIssuer         string                      // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
-	ExtAuthAudience       string                      // Expected JWT audience (validated against "aud" claim; defaults to "loom")
-	ExtAuthAllowInsecure  bool                        // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
-	MonitorHandlers       MonitorHandlers             // Pre-built handlers for monitor/metrics endpoints (injected by cli)
-	GitOps                ops.GitOps                  // Git operations interface (optional; nil disables git endpoints)
-	FileOps               ops.FileOps                 // File operations interface (optional; nil disables file endpoints)
-	WorkspaceDeleteFn     func(name string) error     // Workspace deletion function; nil = deletion unavailable
-	WorkspaceCreateFn     service.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
-	WorkspaceAddReposFn   service.WorkspaceAddReposFn // Attach local repos to an existing workspace; nil = unavailable
-	InitialWorkspaceID    string                      // Stable key of the initial workspace
-	WorkspaceIDResolverFn WorkspaceIDResolverFn       // Resolves workspace name → UUID; nil = no resolution available
+	FleetJWTKey           []byte                           // Pre-provisioned JWT signing key for fleet auth (optional; if nil, server generates one)
+	FleetAPIKey           string                           // Pre-shared API key for fleet worker registration (required for fleet register endpoint)
+	HSTSEnabled           bool                             // Whether to send Strict-Transport-Security header (use when behind TLS-terminating proxy)
+	ExtAuthURL            string                           // Auth service base URL (e.g., "https://auth.loomcli.com"); empty = open mode
+	ExtAuthIssuer         string                           // Expected JWT issuer (validated against "iss" claim; defaults to ExtAuthURL)
+	ExtAuthAudience       string                           // Expected JWT audience (validated against "aud" claim; defaults to "loom")
+	ExtAuthAllowInsecure  bool                             // Allow HTTP for non-loopback --auth-url (escape hatch for Docker networks)
+	WorkspaceRoleResolver middleware.WorkspaceRoleResolver // Authorizes an identity for one canonical workspace; required for remote file access
+	MonitorHandlers       MonitorHandlers                  // Pre-built handlers for monitor/metrics endpoints (injected by cli)
+	GitOps                ops.GitOps                       // Git operations interface (optional; nil disables git endpoints)
+	FileOps               ops.FileOps                      // File operations interface (optional; nil disables file endpoints)
+	WorkspaceDeleteFn     func(name string) error          // Workspace deletion function; nil = deletion unavailable
+	WorkspaceCreateFn     service.WorkspaceCreateFn        // Workspace creation function; nil = creation unavailable
+	WorkspaceAddReposFn   service.WorkspaceAddReposFn      // Attach local repos to an existing workspace; nil = unavailable
+	InitialWorkspaceID    string                           // Stable key of the initial workspace
+	WorkspaceIDResolverFn WorkspaceIDResolverFn            // Resolves workspace name → UUID; nil = no resolution available
 	// Store is the unified state store for workspaces, repos, agents, roles,
 	// and daemon profiles. Local and distributed modes both use this store
 	// as the authoritative workspace/config source.

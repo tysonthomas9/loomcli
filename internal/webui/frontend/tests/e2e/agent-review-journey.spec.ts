@@ -489,8 +489,8 @@ async function setupAgentMocks(page: Page) {
     },
   );
 
-  // Files tree (root)
-  await page.route("**/workspaces/*/agents/ember/files/tree", async (route) => {
+  // Files tree
+  await page.route("**/workspaces/*/files/tree?*", async (route) => {
     const url = new URL(route.request().url());
     const path = url.searchParams.get("path") ?? "";
     if (path === "src") {
@@ -508,30 +508,8 @@ async function setupAgentMocks(page: Page) {
     }
   });
 
-  // Files tree with query param
-  await page.route(
-    "**/workspaces/*/agents/ember/files/tree?*",
-    async (route) => {
-      const url = new URL(route.request().url());
-      const path = url.searchParams.get("path") ?? "";
-      if (path === "src") {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(mockFileTreeSrc),
-        });
-      } else {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(mockFileTreeRoot),
-        });
-      }
-    },
-  );
-
   // File content
-  await page.route("**/workspaces/*/agents/ember/files?*", async (route) => {
+  await page.route("**/workspaces/*/files?*", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

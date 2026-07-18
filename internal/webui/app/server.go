@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
+	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
@@ -46,8 +47,9 @@ type Server struct {
 	corsConfig middleware.CORSConfig
 
 	// HTTP routing
-	mux       *http.ServeMux
-	wsModules []wsModule // workspace-scoped route modules (registered on wsMux)
+	mux                 *http.ServeMux
+	wsModules           []wsModule // workspace-scoped route modules (registered on wsMux)
+	connectorDispatcher *connector.Dispatcher
 
 	// Connection pools
 	pool      appinfra.Pool // may be nil if daemon unavailable at startup
@@ -112,10 +114,16 @@ type Server struct {
 	// Pre-built top-level handlers (built by handlermux.BuildHandlers)
 	handlers *handlermux.Handlers
 
+	prReviewCredentialSeeds credentialSeedInvalidator
+
 	// startedAt captures server-process boot time. Used to distinguish
 	// "tab metadata from a prior server process" (PTY is gone) from
 	// "tab metadata just created in this process" (PTY about to spawn).
 	startedAt time.Time
+}
+
+type credentialSeedInvalidator interface {
+	InvalidateCredentialSeeds()
 }
 
 // buildHandlers constructs all top-level HTTP handlers from the current dependency

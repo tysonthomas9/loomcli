@@ -56,6 +56,11 @@ type HarnessLeadRuntimeConfig struct {
 	BinaryPath string
 	Args       []string
 	Env        []string
+	// HarnessSessionID is the harness's own session id when the launch args
+	// pin one (claude --session-id <uuid>). Persisted with the starting
+	// metadata so transcript readers can locate the harness's log from boot;
+	// empty means the watcher's TUI scrape is the only source.
+	HarnessSessionID string
 
 	Stdin  io.Reader
 	Stdout io.Writer
@@ -91,12 +96,14 @@ func RunHarnessLeadRuntime(ctx context.Context, cfg HarnessLeadRuntimeConfig) er
 	}
 
 	runtime := HarnessRuntimeMetadata{
-		Provider:      cfg.Backend,
-		HarnessName:   cfg.HarnessName,
-		ChatSessionID: conv.ChatSessionID(),
-		PID:           conv.PID(),
-		Status:        RuntimeStatusStarting,
-		Controlled:    true,
+		Provider:         cfg.Backend,
+		HarnessName:      cfg.HarnessName,
+		ChatSessionID:    conv.ChatSessionID(),
+		HarnessSessionID: cfg.HarnessSessionID,
+		PID:              conv.PID(),
+		Status:           RuntimeStatusStarting,
+		Controlled:       true,
+		StartedAt:        time.Now().UTC(),
 	}
 	if err := UpdateHarnessRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
 		cfg.Logger.Warn("failed to persist harness runtime metadata", "err", err)

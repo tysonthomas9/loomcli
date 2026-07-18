@@ -34,9 +34,10 @@ func IsOpen(issue backend.IssueData) bool {
 	return issue.Status == "open"
 }
 
-// HasDesign returns true if the issue has a non-empty design field.
+// HasDesign supports both legacy inline bodies and artifact-backed collection
+// projections, where the large body is deliberately omitted.
 func HasDesign(issue backend.IssueData) bool {
-	return issue.Design != ""
+	return issue.HasDesign || issue.Design != "" || issue.DesignArtifactID != ""
 }
 
 // HasNeedsRevision returns true if the issue has the needs-revision label.

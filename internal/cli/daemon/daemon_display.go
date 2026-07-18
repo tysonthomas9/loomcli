@@ -104,6 +104,29 @@ func printAgentBranchInfo(agent DaemonAgentStatus) {
 	fmt.Println(branchLine)
 }
 
+// printQuarantinedTasks prints the quarantined-task section of daemon status.
+// Empty for most daemons; a pending (write-failed) entry keeps retrying via
+// the supervisor sweep and is flagged rather than hidden.
+func printQuarantinedTasks(tasks []supervisor.QuarantinedTaskInfo) {
+	if len(tasks) == 0 {
+		return
+	}
+	fmt.Println("")
+	fmt.Println("Quarantined tasks:")
+	for _, qt := range tasks {
+		line := fmt.Sprintf("  %s  kills: %d", qt.TaskID, qt.Count)
+		if qt.LastKillReason != "" {
+			line += fmt.Sprintf("  last: %s", qt.LastKillReason)
+		}
+		if qt.WriteFailed {
+			line += "  [WRITE FAILED - retrying]"
+		} else if !qt.QuarantinedAt.IsZero() {
+			line += fmt.Sprintf("  quarantined: %s", qt.QuarantinedAt.Format(time.RFC3339))
+		}
+		fmt.Println(line)
+	}
+}
+
 // formatDaemonDuration formats a duration in a human-readable way for daemon status.
 // <1s -> "<1s", <1m -> "Ns", <1h -> "Nm Ns", >=1h -> "Nh Nm".
 func formatDaemonDuration(d time.Duration) string {

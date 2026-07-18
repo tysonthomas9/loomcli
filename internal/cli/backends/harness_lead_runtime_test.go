@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 )
 
@@ -33,8 +35,14 @@ func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
 	if captured.Backend != "claude" || captured.BinaryPath != "claude" {
 		t.Fatalf("captured config = %+v, want claude backend/binary", captured)
 	}
-	if len(captured.Args) != 1 || captured.Args[0] != "--dangerously-skip-permissions" {
-		t.Fatalf("captured args = %#v", captured.Args)
+	if len(captured.Args) != 3 || captured.Args[0] != "--session-id" || captured.Args[2] != "--dangerously-skip-permissions" {
+		t.Fatalf("captured args = %#v, want [--session-id <uuid> --dangerously-skip-permissions]", captured.Args)
+	}
+	if captured.HarnessSessionID == "" || captured.HarnessSessionID != captured.Args[1] {
+		t.Fatalf("HarnessSessionID = %q, want the --session-id value %q", captured.HarnessSessionID, captured.Args[1])
+	}
+	if uuid.Validate(captured.HarnessSessionID) != nil {
+		t.Fatalf("HarnessSessionID = %q, want a valid UUID", captured.HarnessSessionID)
 	}
 	if captured.WorkDir != "/repo" || captured.Prompt != "prompt" {
 		t.Fatalf("captured workdir/prompt = %q/%q", captured.WorkDir, captured.Prompt)

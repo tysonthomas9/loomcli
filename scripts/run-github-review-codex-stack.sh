@@ -197,26 +197,6 @@ ensure_image() {
   exit 1
 }
 
-# source_digest — same digest scheme the slack stack uses (path NUL source
-# NUL), across the github-review-agent and sibling review task runner sources.
-source_digest() {
-  node -e '
-const crypto = require("node:crypto");
-const fs = require("node:fs");
-const hash = crypto.createHash("sha256");
-for (const pair of process.argv.slice(1)) {
-  const [name, file] = pair.split("=", 2);
-  hash.update(name);
-  hash.update(Buffer.from([0]));
-  hash.update(fs.readFileSync(file));
-  hash.update(Buffer.from([0]));
-}
-console.log("sha256:" + hash.digest("hex"));
-' \
-    "workflows/github-review-agent.ts=${REVIEW_WORKFLOW_SOURCE}" \
-    "workflows/github-review-task-runner.ts=${REVIEW_TASK_RUNNER_SOURCE}"
-}
-
 # write_review_dist packages the workflow and its sibling runner into one
 # native Flue-style dist. The server dispatches by FLUE_CLI_NAME, so the same
 # bundle can run the driver workflow or the named task runner via the generic
@@ -316,13 +296,18 @@ register_review_workflow() {
   local build_dir digest
   build_dir="$(mktemp -d "${TMPDIR:-/tmp}/loom-github-review-dist.XXXXXX")"
   write_review_dist "$build_dir"
-  digest="$(source_digest)"
 
   log "registering builtin ${A1_WORKFLOW_NAME} workflow"
   # The container is recreated fresh each run (podman rm -f then run), so the
   # dist dir never pre-exists; mkdir -p is enough and we avoid any `rm`.
   podman exec "$CONTAINER" mkdir -p "$CONTAINER_REVIEW_DIST"
   podman cp "${build_dir}/." "${CONTAINER}:${CONTAINER_REVIEW_DIST}/"
+  # Canonical source digest over the STAGED sources (workflows.SourceDigest via
+  # the container's loom binary) — attests the bytes this registration ships;
+  # see the slack stack script for the full rationale.
+  digest="$(podman exec "$CONTAINER" loom workflow digest "$A1_WORKFLOW_NAME" \
+    --file "workflows/github-review-agent.ts=${CONTAINER_REVIEW_DIST}/workflows/github-review-agent.mjs" \
+    --file "workflows/github-review-task-runner.ts=${CONTAINER_REVIEW_DIST}/workflows/github-review-task-runner.mjs")"
   podman exec \
     -w "$CONTAINER_DRIVER_WORKDIR" \
     -e LOOM_CONFIG_DIR=/root/.loom-config \

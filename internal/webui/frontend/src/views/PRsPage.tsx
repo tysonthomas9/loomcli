@@ -77,8 +77,15 @@ function matchesFilter(row: PullRequestRow, filter: PRFilter): boolean {
   }
 }
 
-function groupKeyFor(row: PullRequestRow, mode: GroupMode): string {
-  if (mode === "repo") return row.pr?.repo_name || row.issue?.repo || "No repo";
+export function groupKeyFor(row: PullRequestRow, mode: GroupMode): string {
+  if (mode === "repo") {
+    if (row.pr) {
+      return (
+        row.pr.source_repo || row.pr.repo_name || row.issue?.repo || "No repo"
+      );
+    }
+    return row.issue?.repo || "No repo";
+  }
   if (mode === "epic") return row.issue?.parent_title || "No epic";
   return "";
 }
@@ -111,6 +118,10 @@ export function rowState(row: PullRequestRow): { label: string; key: string } {
   return { label: "Review", key: "review" };
 }
 
+export function prReviewRef(pr: GitPullRequest): string | null {
+  return pr.repo_name && pr.number ? `${pr.repo_name}#${pr.number}` : null;
+}
+
 /**
  * Build the review queue: loom issues first (status=review or PR-linked),
  * enriched with GitHub metadata by owner/repo#number; then unlinked GitHub
@@ -137,9 +148,11 @@ export function buildPullRequestRows(
     rows.push(pr ? { issue, pr } : { issue });
   }
 
+  const emittedKeys = new Set(linkedKeys);
   for (const pr of pullRequests) {
     const key = prKeyFromRef(pr.url);
-    if (key && linkedKeys.has(key)) continue;
+    if (key && emittedKeys.has(key)) continue;
+    if (key) emittedKeys.add(key);
     rows.push({ pr });
   }
 
@@ -199,18 +212,20 @@ export function PRsPage(): JSX.Element {
   const [groupMode, setGroupMode] = useState<GroupMode>("none");
   const [searchParams, setSearchParams] = useSearchParams();
   const reviewId = searchParams.get("review");
+  const reviewPrParam = searchParams.get("review-pr");
 
   const rows = useMemo(
     () => buildPullRequestRows(issues, pullRequests),
     [issues, pullRequests],
   );
 
-  // GitHub metadata is an enrichment: a fetch error or per-repo warning
-  // degrades to a banner while loom-backed rows keep rendering.
+  // GitHub metadata is an enrichment: a fetch error or a warning (e.g. the
+  // connector fell back to local gh, or a per-repo issue) degrades to a banner
+  // while loom-backed rows keep rendering. Warnings are already self-describing.
   const githubWarning = error
     ? `GitHub metadata unavailable: ${error.message}`
     : warnings.length > 0
-      ? `GitHub metadata incomplete: ${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
+      ? `${warnings[0]}${warnings.length > 1 ? ` (+${warnings.length - 1} more)` : ""}`
       : null;
 
   const openCount = useMemo(() => rows.filter(isOpenRow).length, [rows]);
@@ -253,6 +268,11 @@ export function PRsPage(): JSX.Element {
       return;
     }
     if (row.pr) {
+      const ref = prReviewRef(row.pr);
+      if (ref) {
+        setSearchParams({ "review-pr": ref });
+        return;
+      }
       window.open(row.pr.url, "_blank", "noopener,noreferrer");
     }
   };
@@ -343,6 +363,24 @@ export function PRsPage(): JSX.Element {
         issue={reviewIssue}
         {...(reviewPr ? { pullRequest: reviewPr } : {})}
         onBack={() => setSearchParams({}, { replace: true })}
+      />
+    );
+  }
+
+  const reviewPrRow = reviewPrParam
+    ? rows.find((r) => r.pr && prReviewRef(r.pr) === reviewPrParam)
+    : undefined;
+
+  if (reviewPrParam && reviewPrRow?.pr) {
+    // If a hand-edited/bookmarked ?review-pr points at a PR that DOES have a
+    // linked ticket, render it issue-linked so we don't offer "Create ticket"
+    // on an already-ticketed PR (which would make a duplicate).
+    return (
+      <PRReviewWorkspace
+        pullRequest={reviewPrRow.pr}
+        {...(reviewPrRow.issue ? { issue: reviewPrRow.issue } : {})}
+        onBack={() => setSearchParams({}, { replace: true })}
+        onLinkedTicket={(issueId) => setSearchParams({ review: issueId })}
       />
     );
   }

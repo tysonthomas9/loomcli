@@ -23,6 +23,7 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 		wantKind   backend.ErrorKind
 	}{
 		{"400 validation", 400, apiResponse{Error: "bad input"}, backend.KindValidation},
+		{"422 validation", 422, apiResponse{Error: "parent issue not found"}, backend.KindValidation},
 		{"401 auth", 401, apiResponse{Error: "unauthorized"}, backend.KindUnavailable},
 		{"403 forbidden", 403, apiResponse{Error: "forbidden"}, backend.KindUnavailable},
 		{"404 not found", 404, apiResponse{Error: "issue not found"}, backend.KindNotFound},
@@ -42,6 +43,35 @@ func TestClassifyHTTPError_StatusCodes(t *testing.T) {
 				t.Fatalf("expected kind %s, got %v", tt.wantKind, err)
 			}
 		})
+	}
+}
+
+func TestClassifyHTTPErrorUsesStructuredCode(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     apiResponse
+		wantKind backend.ErrorKind
+	}{
+		{"validation", apiResponse{Code: "validation_failed", Error: "parent issue not found"}, backend.KindValidation},
+		{"conflict", apiResponse{Code: "not_claimable", Error: "issue cannot be claimed"}, backend.KindConflict},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := classifyHTTPError("Create", 422, tt.body)
+			if !backend.IsKind(err, tt.wantKind) {
+				t.Fatalf("expected kind %s, got %v", tt.wantKind, err)
+			}
+		})
+	}
+}
+
+func TestParseFleetResponsePreservesNativeErrorCode(t *testing.T) {
+	response, err := parseFleetResponse([]byte(`{"error":{"code":"validation_failed","message":"bad parent"}}`), 422)
+	if err != nil {
+		t.Fatalf("parse response: %v", err)
+	}
+	if response.Code != "validation_failed" {
+		t.Fatalf("code = %q, want validation_failed", response.Code)
 	}
 }
 

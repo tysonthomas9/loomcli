@@ -74,6 +74,17 @@ func init() {
 	leadCmd.Flags().StringVar(&leadPromptFile, "prompt", "", "Path to terminal-agent prompt template")
 }
 
+// leadStartupPrompt picks the lead runtime's boot prompt. A role prompt_file
+// supplied via --prompt wins, otherwise inline role prompt and default lead
+// prompt resolution happen in that order.
+func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration) (string, error) {
+	prompt, err := generateLeadTerminalPrompt(ctx, registration)
+	if err != nil {
+		return "", err
+	}
+	return applyLeadPromptContext(prompt), nil
+}
+
 func runLead(cmd *cobra.Command, args []string) {
 	// Get current working directory
 	workDir, err := os.Getwd()
@@ -104,14 +115,13 @@ func runLead(cmd *cobra.Command, args []string) {
 	defer registration.Finalize()
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
-	prompt, err := generateLeadTerminalPrompt(context.Background(), registration)
+	prompt, err := leadStartupPrompt(context.Background(), registration)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading terminal prompt: %v\n", err)
 		fmt.Fprintf(os.Stderr, "\nDropping into a shell. Fix the prompt file and run 'loom lead' to retry.\n\n")
 		execShell(workDir)
 		return
 	}
-	prompt = applyLeadPromptContext(prompt)
 
 	// Invoke agent interactively (no agent name needed - lead mode doesn't claim tasks).
 	// Backends with a controlled runtime (codex app-server, harness-wrapper PTY

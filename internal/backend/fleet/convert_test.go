@@ -47,7 +47,8 @@ func TestFleetIssueWire_FieldDriftGuard(t *testing.T) {
 	canonical := map[string]bool{
 		"id": true, "title": true, "status": true, "priority": true,
 		"kind": true, "assignee": true, "owner": true, "labels": true,
-		"repo_canonical": true, "parent": true, "design": true, "description": true,
+		"repo_canonical": true, "parent": true, "design": true,
+		"design_artifact_id": true, "design_format": true, "has_design": true, "description": true,
 		"acceptance_criteria": true, "notes": true, "external_ref": true,
 		"created_at": true, "created_by": true, "updated_at": true,
 		"due_at": true, "defer_until": true, "closed_at": true,
@@ -140,19 +141,21 @@ func TestFleetIssueWire_RoundTrip(t *testing.T) {
 func TestIssueToData(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	issue := &types.Issue{
-		ID:         "test-123",
-		Title:      "Test Issue",
-		Status:     types.StatusOpen,
-		Priority:   2,
-		IssueType:  types.TypeTask,
-		Assignee:   "agent-1",
-		Owner:      "owner@example.com",
-		Labels:     []string{"bug", "urgent"},
-		SourceRepo: "repo-1",
-		Design:     "some design",
-		Notes:      "BLOCKED: waiting on upstream",
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:               "test-123",
+		Title:            "Test Issue",
+		Status:           types.StatusOpen,
+		Priority:         2,
+		IssueType:        types.TypeTask,
+		Assignee:         "agent-1",
+		Owner:            "owner@example.com",
+		Labels:           []string{"bug", "urgent"},
+		SourceRepo:       "repo-1",
+		Design:           "some design",
+		HasDesign:        true,
+		DesignArtifactID: "design-test-123-hash",
+		Notes:            "BLOCKED: waiting on upstream",
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 
 	d := issueToData(issue)
@@ -179,6 +182,21 @@ func TestIssueToData(t *testing.T) {
 	// needs-attention state works without a detail fetch (regression guard).
 	if d.Notes != "BLOCKED: waiting on upstream" {
 		t.Errorf("Notes = %q, want %q", d.Notes, "BLOCKED: waiting on upstream")
+	}
+	if !d.HasDesign || d.DesignArtifactID != "design-test-123-hash" {
+		t.Errorf("design reference = (%v, %q), want (true, %q)", d.HasDesign, d.DesignArtifactID, "design-test-123-hash")
+	}
+}
+
+func TestFleetIssueWireArtifactDesignReference(t *testing.T) {
+	var wire fleetIssueWithCountsWire
+	err := json.Unmarshal([]byte(`{"id":"FLEET-1","title":"Artifact design","type":"task","has_design":true,"design_artifact_id":"design-fleet-1-hash","design_format":"html"}`), &wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := wire.toIssueData()
+	if d.Design != "" || !d.HasDesign || d.DesignArtifactID != "design-fleet-1-hash" || d.DesignFormat != "html" {
+		t.Fatalf("artifact design projection = %#v", d)
 	}
 }
 

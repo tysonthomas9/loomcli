@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -242,6 +243,63 @@ func TestGetChangedFilesPreservesPorcelainPaths(t *testing.T) {
 		if files[i] != want[i] {
 			t.Fatalf("files = %#v, want %#v", files, want)
 		}
+	}
+}
+
+func TestParsePorcelainStatusPreservesXYCodes(t *testing.T) {
+	t.Parallel()
+
+	input := strings.Join([]string{
+		"UU conflicted.go",
+		"?? new-file.go",
+		" M modified.go",
+		"A  added.go",
+		" D deleted.go",
+		"R  old-name.go -> new-name.go",
+	}, "\n") + "\n"
+
+	got := ParsePorcelainStatus(input)
+	want := PorcelainStatus{
+		"conflicted.go": "UU",
+		"new-file.go":   "??",
+		"modified.go":   " M",
+		"added.go":      "A ",
+		"deleted.go":    " D",
+		"new-name.go":   "R ",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ParsePorcelainStatus() = %#v, want %#v", got, want)
+	}
+}
+
+func TestGetPorcelainStatusListsFilesInUntrackedDirectories(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	runGitCommand(t, dir, "init", "-b", "main")
+	if err := os.MkdirAll(filepath.Join(dir, "newdir", "nested"), 0755); err != nil {
+		t.Fatalf("mkdir newdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "newdir", "file.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("write file.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "newdir", "nested", "file.txt"), []byte("hello\n"), 0644); err != nil {
+		t.Fatalf("write nested file: %v", err)
+	}
+
+	got, err := GetPorcelainStatus(dir)
+	if err != nil {
+		t.Fatalf("GetPorcelainStatus() error: %v", err)
+	}
+	want := PorcelainStatus{
+		"newdir/file.go":         "??",
+		"newdir/nested/file.txt": "??",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetPorcelainStatus() = %#v, want %#v", got, want)
+	}
+	if _, ok := got["newdir/"]; ok {
+		t.Fatalf("GetPorcelainStatus() included collapsed directory entry: %#v", got)
 	}
 }
 
