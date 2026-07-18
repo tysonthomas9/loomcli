@@ -9,6 +9,14 @@ FRONTEND_DIR="$REPO_ROOT/internal/webui/frontend"
 REPORT_DIR="$SCRIPT_DIR/reports"
 BUILD_SCRIPT="$STACK_DIR/build.sh"
 
+# Optional machine-local overrides (untracked; see .gitignore) so make targets
+# work without per-invocation env vars. Entries use `: "${VAR:=value}"` form so
+# explicitly exported env still wins over the file.
+if [[ -f "$SCRIPT_DIR/local.env" ]]; then
+    # shellcheck source=/dev/null
+    . "$SCRIPT_DIR/local.env"
+fi
+
 : "${AFT_DIR:=$REPO_ROOT/../testing-app}"
 : "${AFT_TIMEOUT:=600000}"
 

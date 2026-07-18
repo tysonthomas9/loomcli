@@ -11,6 +11,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# Optional machine-local overrides (untracked; see .gitignore) so `make test-aft`
+# works without per-invocation env vars. Write entries in `: "${VAR:=value}"` form
+# so explicitly exported env still wins over the file.
+if [[ -f "$SCRIPT_DIR/local.env" ]]; then
+    # shellcheck source=/dev/null
+    . "$SCRIPT_DIR/local.env"
+fi
+
 : "${E2E_PORT:=8090}"
 : "${E2E_FRONTEND_PORT:=3100}"
 # fleet-db must include the driver-runs domain (Engine B / epic-runner); prefer a
