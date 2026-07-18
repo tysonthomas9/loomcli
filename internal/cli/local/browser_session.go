@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -45,6 +47,14 @@ type localBrowserSessionLaunchResponse struct {
 	ExpiresAt  string `json:"expires_at"`
 }
 
+type localBrowserSessionEndpointError struct {
+	statusCode int
+}
+
+func (err *localBrowserSessionEndpointError) Error() string {
+	return fmt.Sprintf("local browser session endpoint returned HTTP %d", err.statusCode)
+}
+
 var browserSessionCmd = &cobra.Command{
 	Use:    "browser-session",
 	Short:  "Create a one-time trusted Desktop browser session",
@@ -68,14 +78,36 @@ func runBrowserSession(cmd *cobra.Command, _ []string) error {
 	if status == nil || !status.Healthy || status.Runtime == nil {
 		return fmt.Errorf("local browser session requires a healthy local runtime")
 	}
-	result, err := createLocalBrowserSession(cmd.Context(), dataDir, status.Runtime.URL, localBrowserSessionClient)
+	var requestedWorkspace *string
+	if cmd.Flags().Changed("workspace") {
+		value, flagErr := cmd.Flags().GetString("workspace")
+		if flagErr != nil {
+			return fmt.Errorf("read explicit browser session workspace: %w", flagErr)
+		}
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("explicit browser session workspace must not be empty")
+		}
+		requestedWorkspace = &value
+	}
+	result, err := createLocalBrowserSession(
+		cmd.Context(),
+		dataDir,
+		status.Runtime.URL,
+		requestedWorkspace,
+		localBrowserSessionClient,
+	)
 	if err != nil {
 		return err
 	}
 	return writeJSON(cmd.OutOrStdout(), result)
 }
 
-func createLocalBrowserSession(ctx context.Context, dataDir, runtimeURL string, doer localBrowserSessionHTTPDoer) (*localBrowserSessionOutput, error) {
+func createLocalBrowserSession(
+	ctx context.Context,
+	dataDir, runtimeURL string,
+	requestedWorkspace *string,
+	doer localBrowserSessionHTTPDoer,
+) (*localBrowserSessionOutput, error) {
 	baseURL, err := validateLocalBrowserRuntimeURL(runtimeURL)
 	if err != nil {
 		return nil, err
@@ -83,9 +115,25 @@ func createLocalBrowserSession(ctx context.Context, dataDir, runtimeURL string, 
 	if doer == nil {
 		return nil, fmt.Errorf("local browser session HTTP client is unavailable")
 	}
-	workspace, err := fetchActiveWorkspaceID(ctx, doer, baseURL)
-	if err != nil {
-		return nil, err
+	workspace := ""
+	selectedFromHint := false
+	if requestedWorkspace != nil {
+		workspace = strings.TrimSpace(*requestedWorkspace)
+		if workspace == "" {
+			return nil, fmt.Errorf("explicit browser session workspace must not be empty")
+		}
+	} else {
+		workspace, err = readSelectedWorkspaceHint(dataDir)
+		if err != nil {
+			return nil, err
+		}
+		selectedFromHint = workspace != ""
+	}
+	if workspace == "" {
+		workspace, err = fetchActiveWorkspaceID(ctx, doer, baseURL)
+		if err != nil {
+			return nil, err
+		}
 	}
 	credentialDir := filepath.Join(dataDir, ".loom", "operator")
 	token, err := authority.ReadLocalOperatorToken(credentialDir)
@@ -93,8 +141,15 @@ func createLocalBrowserSession(ctx context.Context, dataDir, runtimeURL string, 
 		return nil, fmt.Errorf("local browser session authentication: %w", err)
 	}
 
-	endpoint := baseURL + "/api/workspaces/" + url.PathEscape(workspace) + "/operator-sessions/launch"
-	payload, err := requestLocalBrowserSession(ctx, doer, endpoint, token)
+	payload, err := requestLocalBrowserSessionForWorkspace(ctx, doer, baseURL, workspace, token)
+	var endpointErr *localBrowserSessionEndpointError
+	if err != nil && selectedFromHint && errors.As(err, &endpointErr) && endpointErr.statusCode == http.StatusNotFound {
+		workspace, err = fetchActiveWorkspaceID(ctx, doer, baseURL)
+		if err != nil {
+			return nil, err
+		}
+		payload, err = requestLocalBrowserSessionForWorkspace(ctx, doer, baseURL, workspace, token)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +167,32 @@ func createLocalBrowserSession(ctx context.Context, dataDir, runtimeURL string, 
 	}, nil
 }
 
+func requestLocalBrowserSessionForWorkspace(
+	ctx context.Context,
+	doer localBrowserSessionHTTPDoer,
+	baseURL, workspace, token string,
+) (*localBrowserSessionLaunchResponse, error) {
+	endpoint := baseURL + "/api/workspaces/" + url.PathEscape(workspace) + "/operator-sessions/launch"
+	return requestLocalBrowserSession(ctx, doer, endpoint, token)
+}
+
+func readSelectedWorkspaceHint(dataDir string) (string, error) {
+	payload, err := os.ReadFile(filepath.Join(dataDir, "state.json")) //nolint:gosec // dataDir is the validated local runtime directory.
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read selected workspace hint: %w", err)
+	}
+	var state struct {
+		LastWorkspace string `json:"last_workspace"`
+	}
+	if err := json.Unmarshal(payload, &state); err != nil {
+		return "", fmt.Errorf("decode selected workspace hint: %w", err)
+	}
+	return strings.TrimSpace(state.LastWorkspace), nil
+}
+
 func requestLocalBrowserSession(ctx context.Context, doer localBrowserSessionHTTPDoer, endpoint, token string) (*localBrowserSessionLaunchResponse, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
@@ -126,7 +207,7 @@ func requestLocalBrowserSession(ctx context.Context, doer localBrowserSessionHTT
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusCreated {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, localBrowserSessionResponseLimit))
-		return nil, fmt.Errorf("local browser session endpoint returned HTTP %d", response.StatusCode)
+		return nil, &localBrowserSessionEndpointError{statusCode: response.StatusCode}
 	}
 	var payload localBrowserSessionLaunchResponse
 	decoder := json.NewDecoder(io.LimitReader(response.Body, localBrowserSessionResponseLimit+1))
