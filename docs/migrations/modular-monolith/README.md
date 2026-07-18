@@ -1,9 +1,9 @@
 # Modular Monolith Migration
 
-- **Status:** INTERIM — Phase 4 implementation active; the current architecture check passes, while the paired contract, aggregate gates, source-bound proof, performance run, and packaged Desktop evidence remain pending
-- **Date:** 2026-07-16
+- **Status:** Phase 4 complete; Phase 5 has not started
+- **Date:** 2026-07-18
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
-- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, and the in-progress [Phase 4 record](09-phase-4-decisions-and-evidence.md) from Loom base `1353e2faf` with FleetDB base `f1c4e1119`
+- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, and final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at validated Loom product head `53cbe2577` with FleetDB `afb688768`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
 
 ## Decision summary
@@ -60,7 +60,7 @@ Phase 2 is complete with an active `internal/modules/workflowcatalog` root. Loom
 
 Phase 3 source implementation establishes active `internal/modules/automation`, named webhook and system-event application workflows, durable Redis/Postgres admission, cron, retry, manual-dispatch, run-outcome, and generic await-notification operations, plus four named runtime-host registrations across Automation and Execution. Its security closeout makes generic await resolution and parent-run resumption one Execution-owned Redis/Postgres command, reserves the complete `run.finished` provenance lane across admission/live dispatch/historical catch-up, and negotiates the always-required `execution.await_atomic_resume.v1` deployment key before runtime loops start. The architecture graph is ratcheted to `completed_phase: 3`, and the mutation ledger records all 14 public Automation mutations alongside the three Workflow Catalog lifecycle commands. Architecture and focused Go checks, public route/CLI and signed-webhook E2Es, the pinned-count performance proof, the OpenAPI checksum, checkout-scoped generic plus webhook local-mode verifiers, the authenticated local-browser create/activate/manual-run/history journey, and the targeted Playwright local-operator suite pass. That UI run also drove the Redis/Postgres effective-trust parity correction and malformed-approval hardening. The final post-correction FleetDB gate passes at 78.0% coverage, and the final Loom aggregate gate passes against the exact paired FleetDB binary and matching source under a clean HOME/runtime environment. GPT-5.6 Terra review is separately not recorded because exporting the local screenshots to an external model awaits explicit informed approval; this is not a product failure. The baseline retains both the self-reference-free pre-commit measurement and a post-commit audit bound to Loom `7f95b9bf1` and FleetDB `f1c4e1119`.
 
-Phase 4 implementation activates the Execution and minimal Artifacts
+Phase 4 is complete. It activates the Execution and minimal Artifacts
 capability roots and moves the selected TaskRun and DriverRun owner-command
 paths behind the paired FleetDB contract. The current architecture check
 passes all 11 profiles plus the all-files AST check with four active roots, 56
@@ -69,13 +69,21 @@ primary direct-write rows, 86 runtime components, and 103 goroutine
 definitions. The namespace prefixes group the ledger entries; they do not
 replace the per-entry aggregate and coordinating-owner declarations. The
 separate `internal/driver` ratchet freezes its remaining 10 rows across 11
-sites without relabeling their owners. The checked-in Execution
-supervisor-disabled row is green, but that row proves only its declared
-deterministic plan/coder lane; it does not authorize physical supervisor
-deletion or stand in for the Phase 6 full matrix. The final paired contract,
-aggregate gates, source-bound supervisor-disabled rerun, measured product
-performance, implementation commit identities, and packaged Desktop evidence
-remain pending. See the [Phase 4 record](09-phase-4-decisions-and-evidence.md).
+sites without relabeling their owners. The paired OpenAPI snapshots are
+byte-identical at SHA-256
+`26ed930bc527c3815742c8b4c7a0ba5267bdc91c585ddc9f78483d9373303482`.
+FleetDB and Loom aggregate gates pass against the exact paired FleetDB source
+and binary. The source-bound supervisor-disabled row passes with fresh
+planner/coder tasks, persisted design, transcripts and diff, zero automatic
+agent definitions, daemon processes, or daemon sockets, and clean teardown.
+The 30-sample artifact-backed design path measured p50 `11.796 ms`, p95
+`14.784 ms`, and exactly three Loom-to-FleetDB requests per sample. The exact
+packaged Desktop at Loom `53cbe2577` completed a real GPT-5.6 Terra
+planner/coder journey and the unavailable-backend fail-closed journey, after
+which Codex was restored as the project default. The immutable final validation
+snapshot records those results at Loom `53cbe2577` and FleetDB `afb688768`.
+Physical supervisor deletion remains Phase 6 work, and Phase 5 has not started.
+See the [Phase 4 record](09-phase-4-decisions-and-evidence.md).
 
 ## Approved architecture decisions
 

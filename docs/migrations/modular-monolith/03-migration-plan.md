@@ -1,6 +1,6 @@
 # Migration Plan
 
-- **Status:** INTERIM — Phase 4 implementation active; the architecture check passes, while paired contract, gates, source proof, performance, and packaged Desktop validation remain pending
+- **Status:** Phase 4 complete; Phase 5 has not started
 - **Strategy:** Incremental vertical extraction aligned with active product work; no standalone big-bang reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -156,13 +156,16 @@ awaits explicit informed approval; this is not a product failure.
 
 ## Phase 4 — Execution replacement and supervisor-disabled operation
 
-**INTERIM — implementation and product validation active:** Execution and the
-minimal Artifacts lifecycle are active in the capability graph, and the current
-source-bound architecture check passes. The retained Phase 4 pre-commit
-validation snapshot is provisional; the final paired OpenAPI contract,
-aggregate gates, source-bound supervisor-disabled rerun, measured product
-performance, implementation commit identities, and packaged Desktop positive
-and fail-closed evidence remain pending. See the [Phase 4 record](09-phase-4-decisions-and-evidence.md).
+**Complete:** Execution and the minimal Artifacts lifecycle are active in the
+capability graph. The architecture check, byte-identical paired OpenAPI
+contract, FleetDB and Loom aggregate gates, source-bound supervisor-disabled
+rerun, measured artifact-backed design path, and exact packaged Desktop
+positive/fail-closed journeys pass at validated product heads Loom
+`53cbe2577` and FleetDB `afb688768`. The original Phase 4 pre-commit snapshot
+remains an immutable provisional historical record and the final
+`phase4-execution-validation-53cbe2577` snapshot supersedes it for current
+status. Phase 5 has not started. See the
+[Phase 4 record](09-phase-4-decisions-and-evidence.md).
 
 - Extract the minimal Artifacts `Create`, `Upload`, `Finalize`, `Reference`, `Get`, `List`, and composed `CreateContent` API before Execution starts writing through it; leave unrelated artifact UI/query scope for Phase 7.
 - Establish intent-oriented ports for preflight, claim, launch, classify, recover, and finalize.
@@ -181,6 +184,9 @@ and fail-closed evidence remain pending. See the [Phase 4 record](09-phase-4-dec
 Do not move the supervisor into `internal/modules`. Characterize it, implement replacements in Execution/Interaction/runtime, and prove supervisor-disabled operation. Physical deletion waits for Phase 6.
 
 ## Phase 5 — Agents and Interaction
+
+**Not started.** Phase 4 completion does not activate or partially claim this
+phase.
 
 Begin only after the post-`v5` identity/Role model is stable. First establish the minimal Source Control materialization API and Connectors credential-broker API needed by this phase; leave their remaining UI/query/provider scope for Phase 7.
 

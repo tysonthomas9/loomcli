@@ -1,6 +1,6 @@
 # Target Architecture and Capability Boundaries
 
-- **Status:** INTERIM — target reviewed and approved; Phase 4 implementation is active, the architecture check passes, and final paired evidence is pending
+- **Status:** Target reviewed and approved; Phase 4 complete with paired contract and gates, source-bound proof, measured performance, packaged Desktop journeys, and immutable validation evidence; Phase 5 has not started
 - **Scope:** In-process ownership and dependencies inside `loom serve`, operator CLI transport behavior, and corresponding frontend feature boundaries
 - **Migration:** [Modular Monolith Migration](README.md)
 
