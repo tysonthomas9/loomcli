@@ -121,8 +121,10 @@ else
     log "using current frontend dist"
 fi
 
-if [[ ! -f "$AFT_DIR/dist/cli.js" ]]; then
-    log "building aft in $AFT_DIR"
+# dist/cli.js alone is not enough: it imports from node_modules at runtime (zod
+# etc.), and cleanup tools sweep node_modules while keeping dist.
+if [[ ! -f "$AFT_DIR/dist/cli.js" || ! -d "$AFT_DIR/node_modules" ]]; then
+    log "installing/building aft in $AFT_DIR"
     (cd "$AFT_DIR" && npm install --silent && npm run build --silent)
 fi
 

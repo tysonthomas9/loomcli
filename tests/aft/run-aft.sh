@@ -197,9 +197,24 @@ if [[ -n "${AFT_REAL_BACKEND:-}" ]]; then
     fi
 fi
 
-if [[ ! -f "$AFT_DIR/dist/cli.js" ]]; then
-    echo "[aft] building aft in $AFT_DIR..."
+# dist/cli.js alone is not enough: it imports from node_modules at runtime (zod
+# etc.), and cleanup tools sweep node_modules while keeping dist.
+if [[ ! -f "$AFT_DIR/dist/cli.js" || ! -d "$AFT_DIR/node_modules" ]]; then
+    echo "[aft] installing/building aft in $AFT_DIR..."
     (cd "$AFT_DIR" && npm install --silent && npm run build --silent)
+fi
+
+# Same story for flue: the serve-side epic-runner bundle build needs the runtime
+# package's deps. Non-fatal on failure — matching the FLUE_REPO-absent behavior,
+# where agent-flow suites fail with a clear workflow error and everything else runs.
+if [[ -n "$FLUE_REPO" && ! -d "$FLUE_REPO/packages/runtime/node_modules" ]]; then
+    if command -v pnpm >/dev/null 2>&1; then
+        echo "[aft] flue node_modules missing — running pnpm install in $FLUE_REPO..."
+        (cd "$FLUE_REPO" && pnpm install --frozen-lockfile) \
+            || echo "[aft] flue install failed; agent-flow suites will fail with a workflow error" >&2
+    else
+        echo "[aft] flue node_modules missing and pnpm not on PATH; agent-flow suites will fail with a workflow error" >&2
+    fi
 fi
 
 # The e2e script builds tmp/fleet-db only when MISSING — switching FLEET_DB_REPO (or

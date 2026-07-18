@@ -148,6 +148,15 @@ if [[ "$frontend_needs_build" -eq 1 ]]; then
     )
 fi
 
+# vite preview loads vite.config.ts, which imports vite/@vitejs/plugin-react — so
+# node_modules must exist even when dist is fresh and no build ran (cleanup tools
+# sweep untracked node_modules but keep dist, which otherwise fails the preview
+# with ERR_MODULE_NOT_FOUND long after this point).
+if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
+    echo "[e2e] Frontend node_modules missing — installing..."
+    (cd "$FRONTEND_DIR" && npm ci --prefer-offline)
+fi
+
 # --- 3. Create isolated workspace for E2E tests ---
 # Fresh workspace each run so tests start with a clean database.
 rm -rf "$E2E_WORKSPACE"
