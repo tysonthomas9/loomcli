@@ -837,8 +837,11 @@ func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
 
 // postExitCleanup runs all cleanup steps after agent exits.
 func (s *Supervisor) postExitCleanup(ap *AgentProcess) {
-	// This is a placeholder — actual cleanup is done inside spawnAndWait.
-	// Keeping as a hook point for future steps.
+	// For sandbox agents, fetch the pushed work back into the host worktree,
+	// revoke the scoped credential, and delete the sandbox container.
+	if ap.IsSandbox() {
+		s.cleanupSandbox(ap)
+	}
 }
 
 // sleepBeforeRestart performs interruptible backoff sleep. Returns false if interrupted.

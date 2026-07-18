@@ -59,6 +59,7 @@ type Agent struct {
 	MaxConcurrency int               `json:"max_concurrency,omitempty"`
 	BudgetPolicy   string            `json:"budget_policy,omitempty"`
 	DesiredState   AgentDesiredState `json:"desired_state,omitempty"`
+	Execution      string            `json:"execution,omitempty"` // "" (host) or "sandbox" (run under OpenShell)
 	CreatedAt      time.Time         `json:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at"`
 

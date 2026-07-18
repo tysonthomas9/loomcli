@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"net"
+	"net/http/cgi" //nolint:gosec // G504: serves git http-backend in-test; CVE-2016-5386 applies to Go <1.6.3
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,6 +57,9 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 
 	// Bare remote.
 	runGit(t, root, "init", "--bare", remote)
+	runGit(t, remote, "config", "http.receivepack", "true")
+	remoteServer := serveGitHTTP(t, root)
+	originURL := remoteServer.URL + "/remote.git"
 
 	// Project repo with a .loom marker, on branch "sbx", origin → bare remote.
 	mustMkdir(t, proj)
@@ -65,7 +71,7 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	runGit(t, proj, "checkout", "-b", branch)
 	runGit(t, proj, "add", "-A")
 	runGit(t, proj, "commit", "-m", "seed")
-	runGit(t, proj, "remote", "add", "origin", remote)
+	runGit(t, proj, "remote", "add", "origin", originURL)
 
 	// Fake openshell on PATH.
 	binDir := filepath.Join(root, "bin")
@@ -79,9 +85,9 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	t.Setenv("FAKE_BRANCH", branch)
 
 	// FleetDB connectivity preconditions: isolate config so no real workspace is
-	// resolved, then supply a container-reachable server URL + workspace via env.
+	// resolved, then supply a container-reachable fleet-db URL + workspace via env.
 	t.Setenv("LOOM_CONFIG_DIR", filepath.Join(root, "loomcfg"))
-	t.Setenv("LOOM_SANDBOX_SERVER_URL", "http://host.containers.internal:8080")
+	t.Setenv("LOOM_SANDBOX_FLEETDB_URL", "http://host.containers.internal:8080")
 	t.Setenv("LOOM_WORKSPACE", "ws-test")
 
 	// F1: the sandbox is Linux, so on a non-linux host the upload must be a linux
@@ -91,13 +97,17 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	t.Setenv("LOOM_SANDBOX_LOOM_BIN", loomLinux)
 
 	// Run the real one-shot flow.
-	if err := runSandboxOneshot(SandboxOneshotConfig{
+	exitCode, err := runSandboxOneshot(SandboxOneshotConfig{
 		AgentType:    "task",
 		AgentName:    "falcon",
 		WorktreePath: proj,
 		ParentID:     "epic-9",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("runSandboxOneshot: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("runSandboxOneshot exit code = %d, want 0", exitCode)
 	}
 
 	// 1. The sandbox's pushed work must have been fast-forwarded into the worktree.
@@ -115,7 +125,7 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 		t.Fatalf("fake openshell could not clone the pushed branch:\n%s", log)
 	}
 	// The openshell *argv* log shows the orchestration. The bootstrap's contents
-	// (git clone, --parent, LOOM_SERVER_URL exports, …) live in the uploaded
+	// (git clone, --parent, LOOM_FLEET_DB_URL exports, …) live in the uploaded
 	// bootstrap file — not in any argument — and are covered by the
 	// buildOneshotCommand unit tests.
 	for _, want := range []string{
@@ -123,6 +133,7 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 		"--provider claude",                  // default providers
 		"--provider github",
 		"--auto-providers",
+		"--policy",                    // RW4: auto-generated OPA policy (fleet-db + repo endpoints)
 		"-- true",                     // F2: create runs a trivial command and returns (no shell attach)
 		"sandbox upload loom-falcon-", // uploads (loom binary + bootstrap)
 		"/sandbox/loom",               // loom binary destination
@@ -134,10 +145,11 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 			t.Errorf("openshell invocation missing %q\n--- log ---\n%s", want, log)
 		}
 	}
-	// v0.0.53 constraints: no --upload create flag; "open" → no --policy; one-shot
-	// interactive → no --no-tty; and F3 — the bootstrap is never passed inline, so
-	// `sandbox exec` never receives a multi-line `sh -c` argument.
-	for _, absent := range []string{"--upload", ":/sandbox/bin", "--policy", "--no-tty", "sh -c"} {
+	// v0.0.53 constraints: no --upload create flag; one-shot is interactive → no
+	// --no-tty; and F3 — the bootstrap is never passed inline, so `sandbox exec`
+	// never receives a multi-line `sh -c` argument. (--policy IS expected now:
+	// RW4 auto-generates an OPA policy when none is supplied.)
+	for _, absent := range []string{"--upload", ":/sandbox/bin", "--no-tty", "sh -c"} {
 		if strings.Contains(log, absent) {
 			t.Errorf("unexpected %q in openshell invocations\n%s", absent, log)
 		}
@@ -147,6 +159,31 @@ func TestSandboxOneshot_RoundTrip(t *testing.T) {
 	if n := strings.Count(log, "sandbox delete "); n < 1 {
 		t.Errorf("expected sandbox delete to be invoked, log:\n%s", log)
 	}
+}
+
+func serveGitHTTP(t *testing.T, projectRoot string) *httptest.Server {
+	t.Helper()
+	cmd := exec.Command("git", "--exec-path") //nolint:norawexec // locates git http-backend for the in-test smart HTTP server
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git --exec-path: %v", err)
+	}
+	handler := &cgi.Handler{
+		Path: filepath.Join(strings.TrimSpace(string(out)), "git-http-backend"),
+		Env: []string{
+			"GIT_PROJECT_ROOT=" + projectRoot,
+			"GIT_HTTP_EXPORT_ALL=1",
+		},
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for git HTTP server: %v", err)
+	}
+	srv := httptest.NewUnstartedServer(handler)
+	srv.Listener = listener
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 func runGit(t *testing.T, dir string, args ...string) {

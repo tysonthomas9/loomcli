@@ -75,6 +75,9 @@ func isPublicRoute(method, path string) bool {
 //     the store's fenced task-run checks (taskrunapi)
 //   - /api/auth/: proxied to the BetterAuth service, which handles its own
 //     auth; must bypass the GET-only gate because sign-in/sign-up use POST
+//   - /api/v1/: fleet-db config proxy; forwards the caller's own X-API-Key to
+//     fleet-db, which authorizes via RBAC (a sandboxed agent authenticates to
+//     fleet-db, not to serve). Covers all methods (GET reads + POST/PATCH).
 func hasOwnAuthPrefix(normalizedPath string) bool {
 	for _, prefix := range []string{
 		"/api/fleet/",
@@ -83,6 +86,7 @@ func hasOwnAuthPrefix(normalizedPath string) bool {
 		"/api/driver/",
 		"/api/task-run/",
 		"/api/auth/",
+		"/api/v1/",
 	} {
 		if strings.HasPrefix(normalizedPath, prefix) {
 			return true

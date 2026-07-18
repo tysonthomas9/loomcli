@@ -34,6 +34,7 @@ type agentWire struct {
 	MaxConcurrency   int       `json:"max_concurrency,omitempty"`
 	BudgetPolicy     string    `json:"budget_policy,omitempty"`
 	DesiredState     string    `json:"desired_state,omitempty"`
+	Execution        string    `json:"execution,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 	// Derived, read-only liveness fields fleet-db computes from the
@@ -65,6 +66,7 @@ func (a agentWire) toDomain() *domain.Agent {
 		MaxConcurrency:   a.MaxConcurrency,
 		BudgetPolicy:     a.BudgetPolicy,
 		DesiredState:     domain.AgentDesiredState(a.DesiredState),
+		Execution:        a.Execution,
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        a.UpdatedAt,
 		LiveStatus:       domain.AgentLiveStatus(a.LiveStatus),
@@ -90,6 +92,7 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		MaxConcurrency   int      `json:"max_concurrency,omitempty"`
 		BudgetPolicy     string   `json:"budget_policy,omitempty"`
 		DesiredState     string   `json:"desired_state,omitempty"`
+		Execution        string   `json:"execution,omitempty"`
 	}{
 		Name:             in.Name,
 		RoleName:         in.RoleName,
@@ -105,6 +108,7 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		MaxConcurrency:   in.MaxConcurrency,
 		BudgetPolicy:     in.BudgetPolicy,
 		DesiredState:     string(in.DesiredState),
+		Execution:        in.Execution,
 	}
 	var resp agentWire
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agents", body, &resp); err != nil {
@@ -154,6 +158,7 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 		MaxConcurrency   *int      `json:"max_concurrency,omitempty"`
 		BudgetPolicy     *string   `json:"budget_policy,omitempty"`
 		DesiredState     *string   `json:"desired_state,omitempty"`
+		Execution        *string   `json:"execution,omitempty"`
 	}{
 		RoleName:         patch.RoleName,
 		Auto:             patch.Auto,
@@ -166,6 +171,7 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 		TaskFilter:       patch.TaskFilter,
 		MaxConcurrency:   patch.MaxConcurrency,
 		BudgetPolicy:     patch.BudgetPolicy,
+		Execution:        patch.Execution,
 	}
 	if patch.State != nil {
 		s := string(*patch.State)
