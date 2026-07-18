@@ -39,7 +39,14 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=description-edit-button]')
       - wait: { load: networkidle }
-      - click: { testid: description-edit-button }
+      # even after networkidle the panel body can re-render and swallow the click —
+      # retry the edit click until the textarea actually mounts
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid description-edit-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=description-textarea]')" | grep -q true && exit 0;
+          done; echo "description edit click never opened the editor"; exit 1
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=description-textarea]')
