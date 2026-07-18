@@ -82,6 +82,22 @@ func TestResolveWorkspaceTarget_UnknownName(t *testing.T) {
 	}
 }
 
+func TestResolveWorkspaceTarget_NoLocalPathSuggestsAbsolutePath(t *testing.T) {
+	resolver := testResolver(&LoomConfig{
+		Workspaces: map[string]WorkspaceConfig{
+			"myws": {},
+		},
+	}, "myws")
+
+	_, err := resolveWorkspaceTarget(resolver, "agent", "")
+	if err == nil {
+		t.Fatal("resolveWorkspaceTarget() error = nil, want no-local-path error")
+	}
+	if !strings.Contains(err.Error(), "absolute path") || !strings.Contains(err.Error(), "/sandbox/repo") {
+		t.Fatalf("error = %q, want absolute-path remedy", err)
+	}
+}
+
 func TestResolveAgentTarget_AbsolutePath(t *testing.T) {
 	dir := t.TempDir()
 

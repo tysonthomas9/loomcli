@@ -6,6 +6,7 @@ package cmdstore
 
 import (
 	"context"
+	"errors"
 
 	"go.opentelemetry.io/otel/attribute"
 
@@ -28,6 +29,21 @@ func (t *tracedWorkspaceStore) Create(ctx context.Context, in store.WorkspaceCre
 func (t *tracedWorkspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
 	return traced(ctx, "Workspaces", "Get", func(ctx context.Context) (*domain.Workspace, error) {
 		return t.inner.Get(ctx, key)
+	},
+		attribute.String("loom.workspace", key),
+	)
+}
+
+// GetWorkspaceScoped delegates to the inner store's workspace-scoped fetch when
+// supported (the HTTP/fleetdb store). Implements store.ScopedWorkspaceGetter so
+// the assertion still succeeds through the tracing wrapper.
+func (t *tracedWorkspaceStore) GetWorkspaceScoped(ctx context.Context, key string) (*domain.Workspace, error) {
+	sg, ok := t.inner.(store.ScopedWorkspaceGetter)
+	if !ok {
+		return nil, errors.New("workspace store does not support scoped get")
+	}
+	return traced(ctx, "Workspaces", "GetWorkspaceScoped", func(ctx context.Context) (*domain.Workspace, error) {
+		return sg.GetWorkspaceScoped(ctx, key)
 	},
 		attribute.String("loom.workspace", key),
 	)

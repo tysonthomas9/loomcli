@@ -26,8 +26,8 @@ import (
 // Auth holds the optional auth headers fleet-db accepts. Fields default
 // to empty (omitted from the request when zero).
 type Auth struct {
-	BearerToken string //nolint:gosec // G117: auth header value intentionally carried by request config.
-	APIKey      string //nolint:gosec // G117: fleet-db API key intentionally carried by request config.
+	BearerToken string //nolint:gosec // G117: auth header value intentionally carried by request config (→ Authorization: Bearer).
+	APIKey      string //nolint:gosec // G117: fleet-db API key carried by request config; dual-sent as X-API-Key + X-Fleet-API-Key.
 	Actor       string // → X-Actor (used by --auth-dev-mode)
 }
 
@@ -37,6 +37,9 @@ func (a Auth) Apply(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+a.BearerToken)
 	}
 	if a.APIKey != "" {
+		// Dual-send: fleet-db's production API-key auth (auth.APIKeySource) reads
+		// X-API-Key, while older / loom-serve paths read X-Fleet-API-Key. Send
+		// both so one minted key authenticates everywhere (back-compat + RBAC).
 		req.Header.Set("X-API-Key", a.APIKey)
 		req.Header.Set("X-Fleet-API-Key", a.APIKey)
 	}

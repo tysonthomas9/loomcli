@@ -1,11 +1,30 @@
 package fleet
 
 import (
+	"net/http"
 	"testing"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
+
+// TestSharedTransport_HonorsProxyEnv guards the sandbox-egress fix: a
+// hand-built *http.Transport defaults Proxy to nil (direct dial), so without an
+// explicit Proxy a sandboxed loom bypasses OpenShell's mandatory egress proxy
+// and every fleet-db dial is refused. The proxy resolver must be wired so the
+// transport routes through HTTP_PROXY when one is present.
+func TestSharedTransport_HonorsProxyEnv(t *testing.T) {
+	if sharedTransport.Proxy == nil {
+		t.Fatal("sharedTransport.Proxy is nil — sandbox egress proxy (HTTP_PROXY) will be bypassed")
+	}
+	// The resolver is http.ProxyFromEnvironment; confirm it actually returns a
+	// proxy URL for a plain request. (ProxyFromEnvironment caches the env once
+	// per process, so this asserts the wiring, using whatever env is present.)
+	req, _ := http.NewRequest(http.MethodGet, "http://fleet.example.invalid/api", nil)
+	if _, err := sharedTransport.Proxy(req); err != nil {
+		t.Errorf("sharedTransport.Proxy returned an error: %v", err)
+	}
+}
 
 // TestSharedHTTPClient_SingletonAndTimeout pins three contracts:
 //
