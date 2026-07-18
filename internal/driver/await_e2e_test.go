@@ -35,17 +35,20 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
@@ -76,12 +79,114 @@ var awaitE2ELeaseSeq atomic.Int64
 // awaitFlows is one scenario's harness: a store-backed workspace with a
 // registered workflow driver and the real driver-op + approval HTTP surface.
 type awaitFlows struct {
-	ctx      context.Context
-	st       store.Store
-	ws       string
-	root     string
-	api      *httptest.Server
-	driverID string
+	ctx         context.Context
+	st          store.Store
+	ws          string
+	root        string
+	api         *httptest.Server
+	driverID    string
+	execution   *appserve.ExecutionCapability
+	runTokenKey []byte
+}
+
+func (h *awaitFlows) awaitResolver() store.AtomicAwaitStore {
+	return &driver.ExecutionAwaitResolver{
+		API: h.execution.DriverRunAPI(), Authorities: h.execution.SystemAuthorityResolver(),
+		ComponentID: string(appserve.AwaitEventNotificationComponentID),
+	}
+}
+
+type awaitE2EClaimPort struct{}
+
+func (awaitE2EClaimPort) ReplayTaskRunRequest(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (awaitE2EClaimPort) RequestTaskRun(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (awaitE2EClaimPort) ClaimTaskRun(context.Context, execution.ClaimTaskRunCommand) (execution.ClaimTaskRunResult, error) {
+	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (awaitE2EClaimPort) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
+	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (awaitE2EClaimPort) ExhaustTaskRunRetries(context.Context, execution.ExhaustTaskRunRetriesCommand) (execution.ExhaustTaskRunRetriesResult, error) {
+	return execution.ExhaustTaskRunRetriesResult{}, execution.ErrUnavailable
+}
+
+type awaitE2EDriverRunAPI struct {
+	execution.DriverRunAPI
+	store store.Store
+}
+
+func (api awaitE2EDriverRunAPI) StartChildDriverRun(
+	ctx context.Context,
+	_ authority.ExecutionAuthority,
+	command execution.StartChildDriverRunCommand,
+) (*execution.DriverRun, error) {
+	run, err := driver.StartChildWorkflow(ctx, api.store, driver.StartChildWorkflowOptions{
+		WorkspaceKey: command.WorkspaceKey, ParentRunID: command.Owner.ResourceID,
+		WorkflowName: command.DriverID, Input: command.Payload, IdempotencyKey: command.ChildKey,
+		MaxDepth: command.MaxDepth,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &execution.DriverRun{
+		WorkspaceKey: run.WorkspaceKey, RunID: run.RunID, DriverID: run.DriverID,
+		DriverVersionID: run.DriverVersionID, Entrypoint: run.Entrypoint,
+		SourceKind: run.SourceKind, SourceRef: run.SourceRef, ParentRunID: run.ParentRunID,
+		Status: execution.DriverRunStatus(run.Status), Payload: append(json.RawMessage(nil), run.Payload...),
+	}, nil
+}
+
+func (awaitE2EDriverRunAPI) CascadeChildDriverRuns(
+	_ context.Context,
+	_ authority.ExecutionAuthority,
+	command execution.CascadeChildDriverRunsCommand,
+) (execution.CascadeChildDriverRunsResult, error) {
+	return execution.CascadeChildDriverRunsResult{
+		ActionID: command.RequestID,
+		Committed: &execution.CascadeChildDriverRunsCommit{
+			WorkspaceKey: command.WorkspaceKey, ParentRunID: command.ParentRunID,
+			ParentStatus: command.ParentStatus, Reason: command.Reason,
+			ErrorClass: command.ErrorClass, CascadedAt: command.CascadedAt,
+			MaxDepth: command.MaxDepth,
+		},
+	}, nil
+}
+
+func (awaitE2EDriverRunAPI) RecoverChildDriverRunCascade(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverChildDriverRunCascadeCommand,
+) (execution.CascadeChildDriverRunsResult, error) {
+	return execution.CascadeChildDriverRunsResult{
+		ActionID: command.RequestID,
+		Committed: &execution.CascadeChildDriverRunsCommit{
+			WorkspaceKey: command.WorkspaceKey, ParentRunID: command.ParentRunID,
+			ParentStatus: command.ParentStatus, Reason: command.Reason,
+			ErrorClass: command.ErrorClass, CascadedAt: command.CascadedAt,
+			MaxDepth: command.MaxDepth,
+		},
+	}, nil
+}
+
+type awaitE2EWorkflowCatalog struct {
+	workflowcatalog.API
+	store store.Store
+}
+
+func (catalog awaitE2EWorkflowCatalog) GetDriver(ctx context.Context, workspace, driverRef string) (*workflowcatalog.Driver, error) {
+	return catalog.store.Drivers().Get(ctx, workspace, driverRef)
+}
+
+func (catalog awaitE2EWorkflowCatalog) GetVersion(ctx context.Context, workspace, versionID string) (*workflowcatalog.DriverVersion, error) {
+	return catalog.store.DriverVersions().Get(ctx, workspace, versionID)
 }
 
 func newAwaitFlows(t *testing.T, st store.Store, ws string) *awaitFlows {
@@ -100,18 +205,54 @@ func newAwaitFlows(t *testing.T, st store.Store, ws string) *awaitFlows {
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
-	server := newAwaitFlowsServer(t, st)
-	return &awaitFlows{ctx: ctx, st: st, ws: ws, root: root, api: server, driverID: registered.Driver.DriverID}
+	runTokenKey := bytes.Repeat([]byte{0x5a}, 32)
+	server, executionCapability := newAwaitFlowsServer(t, st, runTokenKey)
+	return &awaitFlows{
+		ctx: ctx, st: st, ws: ws, root: root, api: server,
+		driverID: registered.Driver.DriverID, execution: executionCapability, runTokenKey: runTokenKey,
+	}
 }
 
 // newAwaitFlowsServer mounts the real driver-op + approval HTTP surface over
 // httptest, with a shim that translates the test identity headers into the
 // verified session identity (the production auth middleware's job).
-func newAwaitFlowsServer(t *testing.T, st store.Store) *httptest.Server {
+func newAwaitFlowsServer(t *testing.T, st store.Store, runTokenKey []byte) (*httptest.Server, *appserve.ExecutionCapability) {
 	t.Helper()
+	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
+	if !ok {
+		if client, fleet := st.(*fleetdb.Client); fleet {
+			repairs, ok = any(client.Execution()).(store.TerminalDriverStepRepairStore)
+		}
+	}
+	if !ok {
+		t.Fatal("await E2E store lacks terminal DriverStep repair support")
+	}
+	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
+		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
+		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
+		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(), Workspaces: st.Workspaces(),
+		AtomicTaskRunRequests: awaitE2EClaimPort{}, AtomicTaskRunClaims: awaitE2EClaimPort{},
+		AtomicTaskRunRequeues: awaitE2EClaimPort{}, AtomicTaskRunRetryExhaustion: awaitE2EClaimPort{},
+		AllowLegacyStoreAdapters: true,
+	})
+	if err != nil {
+		t.Fatalf("compose await E2E Execution: %v", err)
+	}
+	awaitResolver := &driver.ExecutionAwaitResolver{
+		API: executionCapability.DriverRunAPI(), Authorities: executionCapability.SystemAuthorityResolver(),
+		ComponentID: string(appserve.AwaitEventNotificationComponentID),
+	}
+	awaitMatcher := trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), awaitResolver)
 	mux := http.NewServeMux()
-	driverapi.NewModule(driverapi.Config{Store: st}).Register(mux)
-	approvals.NewModule(st).Register(mux)
+	driverapi.NewModule(driverapi.Config{
+		Store: st, RunTokenKey: runTokenKey,
+		Execution:            awaitE2EDriverRunAPI{DriverRunAPI: executionCapability.DriverRunAPI(), store: st},
+		ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
+		TaskRunRequests:      executionCapability.TaskRunRequestAPI(), TaskRunRecovery: executionCapability.TaskRunRecoveryAPI(),
+		TaskRuns: executionCapability.TaskRunAPI(), TaskRunAuthorities: executionCapability.TaskRunAuthorityResolver(),
+		WorkflowCatalog: awaitE2EWorkflowCatalog{store: st},
+	}).Register(mux)
+	approvals.New(approvals.Config{Store: st, Awaits: awaitMatcher}).Register(mux)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if user := r.Header.Get(awaitE2EUserHeader); user != "" {
 			identity := middleware.UserIdentity{UserID: user, Email: r.Header.Get(awaitE2EEmailHeader)}
@@ -120,7 +261,7 @@ func newAwaitFlowsServer(t *testing.T, st store.Store) *httptest.Server {
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
-	return server
+	return server, executionCapability
 }
 
 // writeAwaitFlowsBundle writes a minimal verifiable Flue dist bundle; the
@@ -168,10 +309,13 @@ func (h *awaitFlows) createRun(t *testing.T, runID string) *domain.DriverRun {
 // through a single claim->run->settle pass targeting runID.
 func (h *awaitFlows) runExecutorOnce(t *testing.T, node, runID string, runner driver.Runner) *driver.ExecutionResult {
 	t.Helper()
+	driverRuns := awaitE2EDriverRunAPI{DriverRunAPI: h.execution.DriverRunAPI(), store: h.st}
 	result, err := (&driver.Executor{
 		Store: h.st, WorkspaceKey: h.ws, RunID: runID, WorkDir: h.root,
 		NodeID: node, LeaseID: fmt.Sprintf("%s-lease-%d", node, awaitE2ELeaseSeq.Add(1)),
-		Runner: runner, HeartbeatInterval: -1,
+		Runner: runner, HeartbeatInterval: -1, RunTokenKey: h.runTokenKey,
+		Execution: driverRuns, RunOutcomeQueue: h.execution.DriverRunOutcomeAPI(), ExecutionWorkers: h.execution.TaskRunWorkerAPI(),
+		ExecutionAuthorities: h.execution.DriverRunAuthorityResolver(), SystemAuthorities: h.execution.SystemAuthorityResolver(),
 	}).RunOnce(h.ctx)
 	if err != nil {
 		t.Fatalf("RunOnce(%s on %s): %v", runID, node, err)
@@ -201,7 +345,7 @@ func (h *awaitFlows) requireRun(t *testing.T, runID string, status domain.Driver
 // --- HTTP wire helpers -----------------------------------------------------
 
 // driverOp POSTs one driver op with the claimed run's verified identity.
-func (h *awaitFlows) driverOp(t *testing.T, run *domain.DriverRun, op string, body map[string]any) (int, []byte) {
+func (h *awaitFlows) driverOp(t *testing.T, run *domain.DriverRun, runToken, op string, body map[string]any) (int, []byte) {
 	t.Helper()
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -212,11 +356,11 @@ func (h *awaitFlows) driverOp(t *testing.T, run *domain.DriverRun, op string, bo
 	if err != nil {
 		t.Fatalf("build %s request: %v", op, err)
 	}
+	if strings.TrimSpace(runToken) == "" {
+		t.Fatalf("%s runner did not receive a run-scoped bearer token", op)
+	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(driverapi.HeaderDriverRunID, run.RunID)
-	req.Header.Set(driverapi.HeaderDriverNodeID, run.NodeID)
-	req.Header.Set(driverapi.HeaderDriverLeaseID, run.LeaseID)
-	req.Header.Set(driverapi.HeaderDriverFencingToken, strconv.FormatInt(run.FencingToken, 10))
+	req.Header.Set("Authorization", "Bearer "+runToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", op, err)
@@ -246,13 +390,13 @@ type awaitOpResponse struct {
 }
 
 // awaitOp runs one events/await turn for the claimed run.
-func (h *awaitFlows) awaitOp(t *testing.T, run *domain.DriverRun, pattern string, actors []string, timeoutMs int64, index int) awaitOpResponse {
+func (h *awaitFlows) awaitOp(t *testing.T, run *domain.DriverRun, runToken, pattern string, actors []string, timeoutMs int64, index int) awaitOpResponse {
 	t.Helper()
 	body := map[string]any{"pattern": pattern, "timeoutMs": timeoutMs, "awaitIndex": index}
 	if len(actors) > 0 {
 		body["actor"] = actors
 	}
-	status, raw := h.driverOp(t, run, "events/await", body)
+	status, raw := h.driverOp(t, run, runToken, "events/await", body)
 	if status != http.StatusOK {
 		t.Fatalf("events/await = %d: %s", status, raw)
 	}
@@ -264,9 +408,9 @@ func (h *awaitFlows) awaitOp(t *testing.T, run *domain.DriverRun, pattern string
 }
 
 // startChild runs one workflows/start for the claimed run.
-func (h *awaitFlows) startChild(t *testing.T, run *domain.DriverRun, startIndex int) string {
+func (h *awaitFlows) startChild(t *testing.T, run *domain.DriverRun, runToken string, startIndex int) string {
 	t.Helper()
-	status, raw := h.driverOp(t, run, "workflows/start", map[string]any{
+	status, raw := h.driverOp(t, run, runToken, "workflows/start", map[string]any{
 		"workflowName": h.driverID, "input": map[string]any{"n": 1}, "startIndex": startIndex,
 	})
 	if status != http.StatusOK {
@@ -282,9 +426,9 @@ func (h *awaitFlows) startChild(t *testing.T, run *domain.DriverRun, startIndex 
 }
 
 // awaitChild runs one workflows/await for the claimed run.
-func (h *awaitFlows) awaitChild(t *testing.T, run *domain.DriverRun, childRunID string, index int) awaitOpResponse {
+func (h *awaitFlows) awaitChild(t *testing.T, run *domain.DriverRun, runToken, childRunID string, index int) awaitOpResponse {
 	t.Helper()
-	status, raw := h.driverOp(t, run, "workflows/await", map[string]any{
+	status, raw := h.driverOp(t, run, runToken, "workflows/await", map[string]any{
 		"childRunId": childRunID, "timeoutMs": awaitE2ETimeoutMs, "awaitIndex": index,
 	})
 	if status != http.StatusOK {
@@ -338,7 +482,7 @@ func (h *awaitFlows) dispatchEvent(t *testing.T, id, eventType, subject, actor s
 	if err != nil {
 		t.Fatalf("marshal event payload: %v", err)
 	}
-	result, err := (&trigger.AwaitMatcher{Store: h.st}).Dispatch(h.ctx, h.ws, trigger.AwaitDispatchEvent{
+	result, err := trigger.NewAwaitMatcherWithResolver(h.st.Awaits(), h.st.DriverRuns(), h.awaitResolver()).Dispatch(h.ctx, h.ws, trigger.AwaitDispatchEvent{
 		EventID: id, EventType: eventType, SubjectRef: subject, ActorRef: actor, Payload: body,
 	})
 	if err != nil {
@@ -461,7 +605,7 @@ func runAwaitFlowSuite(t *testing.T, newHarness func(t *testing.T) *awaitFlows) 
 // complete with the recorded decision.
 func (h *awaitFlows) approvalGateRunner(t *testing.T, pattern string, approvers []string) driver.Runner {
 	return opRunner{fn: func(req driver.RunRequest) driver.RunResult {
-		resp := h.awaitOp(t, req.Run, pattern, approvers, awaitE2ETimeoutMs, 1)
+		resp := h.awaitOp(t, req.Run, req.RunToken, pattern, approvers, awaitE2ETimeoutMs, 1)
 		switch resp.Status {
 		case driver.AwaitOutcomeSuspended:
 			return suspendedResult()
@@ -510,11 +654,18 @@ func testApprovalGateFlow(t *testing.T, h *awaitFlows) {
 	if _, err := h.st.DriverRuns().Claim(h.ctx, h.ws, "run-gate", "node-thief", "lease-thief"); err == nil {
 		t.Fatal("Claim succeeded on a suspended run, want refusal")
 	}
+	driverRuns := awaitE2EDriverRunAPI{DriverRunAPI: h.execution.DriverRunAPI(), store: h.st}
 	if _, err := (&driver.Executor{Store: h.st, WorkspaceKey: h.ws, RunID: "run-gate", WorkDir: h.root,
-		NodeID: "node-2", Runner: runner, HeartbeatInterval: -1}).RunOnce(h.ctx); !errors.Is(err, driver.ErrNoQueuedRun) {
+		NodeID: "node-2", Runner: runner, HeartbeatInterval: -1,
+		Execution: driverRuns, RunOutcomeQueue: h.execution.DriverRunOutcomeAPI(), ExecutionWorkers: h.execution.TaskRunWorkerAPI(),
+		ExecutionAuthorities: h.execution.DriverRunAuthorityResolver(), SystemAuthorities: h.execution.SystemAuthorityResolver(),
+	}).RunOnce(h.ctx); !errors.Is(err, driver.ErrNoQueuedRun) {
 		t.Fatalf("RunOnce on suspended run err = %v, want ErrNoQueuedRun", err)
 	}
-	recovered, err := (&driver.Executor{Store: h.st, WorkspaceKey: h.ws}).RecoverStaleOnce(h.ctx)
+	recovered, err := (&driver.Executor{
+		Store: h.st, WorkspaceKey: h.ws, Execution: h.execution.DriverRunAPI(),
+		SystemAuthorities: h.execution.SystemAuthorityResolver(),
+	}).RecoverStaleOnce(h.ctx)
 	if err != nil || recovered.Recovered != 0 {
 		t.Fatalf("RecoverStaleOnce = %+v, %v; want zero recovered (suspended runs are not stale)", recovered, err)
 	}
@@ -591,7 +742,7 @@ func testMultiTurnLoopFlow(t *testing.T, h *awaitFlows) {
 	runner := opRunner{fn: func(req driver.RunRequest) driver.RunResult {
 		var texts []string
 		for turn := 1; turn <= 3; turn++ {
-			resp := h.awaitOp(t, req.Run, thread, []string{awaitE2EHumanActor}, awaitE2ETimeoutMs, turn)
+			resp := h.awaitOp(t, req.Run, req.RunToken, thread, []string{awaitE2EHumanActor}, awaitE2ETimeoutMs, turn)
 			if resp.Status == driver.AwaitOutcomeSuspended {
 				invocations = append(invocations, texts)
 				return suspendedResult()
@@ -666,7 +817,7 @@ func testMultiTurnLoopFlow(t *testing.T, h *awaitFlows) {
 			t.Fatalf("invocation %d saw %v, want %v (fast-forward from satisfied history)", i, invocations[i], texts)
 		}
 	}
-	awaits, err := driver.ListRunAwaits(h.ctx, h.st, h.ws, "run-loop")
+	awaits, err := driver.ListRunAwaits(h.ctx, h.st.Awaits(), h.ws, "run-loop")
 	if err != nil || len(awaits) != 3 {
 		t.Fatalf("ListRunAwaits = %d (%v), want the three turn awaits", len(awaits), err)
 	}
@@ -683,9 +834,9 @@ func testMultiTurnLoopFlow(t *testing.T, h *awaitFlows) {
 // run.finished, recording each invocation's child id.
 func (h *awaitFlows) compositionParentRunner(t *testing.T, childIDs *[]string) driver.Runner {
 	return opRunner{fn: func(req driver.RunRequest) driver.RunResult {
-		childID := h.startChild(t, req.Run, 1)
+		childID := h.startChild(t, req.Run, req.RunToken, 1)
 		*childIDs = append(*childIDs, childID)
-		resp := h.awaitChild(t, req.Run, childID, 1)
+		resp := h.awaitChild(t, req.Run, req.RunToken, childID, 1)
 		switch resp.Status {
 		case driver.AwaitOutcomeSuspended:
 			return suspendedResult()
@@ -765,16 +916,16 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 	var childIDs []string
 	suspendedOnChild := false
 	parent := opRunner{fn: func(req driver.RunRequest) driver.RunResult {
-		childID := h.startChild(t, req.Run, 1)
+		childID := h.startChild(t, req.Run, req.RunToken, 1)
 		childIDs = append(childIDs, childID)
-		gateResp := h.awaitOp(t, req.Run, gate, nil, awaitE2ETimeoutMs, 1)
+		gateResp := h.awaitOp(t, req.Run, req.RunToken, gate, nil, awaitE2ETimeoutMs, 1)
 		if gateResp.Status == driver.AwaitOutcomeSuspended {
 			return suspendedResult()
 		}
 		if gateResp.Status != string(domain.AwaitSatisfied) {
 			return failedResult("unexpected gate status " + gateResp.Status)
 		}
-		resp := h.awaitChild(t, req.Run, childID, 2)
+		resp := h.awaitChild(t, req.Run, req.RunToken, childID, 2)
 		if resp.Status == driver.AwaitOutcomeSuspended {
 			suspendedOnChild = true
 			return suspendedResult()
@@ -823,7 +974,7 @@ func testCompositionInlineResolve(t *testing.T, h *awaitFlows) {
 // timeout arm with needs_review.
 func (h *awaitFlows) timeoutArmRunner(t *testing.T, pattern string, timeoutMs int64) driver.Runner {
 	return opRunner{fn: func(req driver.RunRequest) driver.RunResult {
-		resp := h.awaitOp(t, req.Run, pattern, []string{awaitE2EApprover}, timeoutMs, 1)
+		resp := h.awaitOp(t, req.Run, req.RunToken, pattern, []string{awaitE2EApprover}, timeoutMs, 1)
 		switch resp.Status {
 		case driver.AwaitOutcomeSuspended:
 			return suspendedResult()
@@ -858,7 +1009,7 @@ func testTimeoutArmFlow(t *testing.T, h *awaitFlows) {
 	// The sweeper resumes the run with the synthetic timeout event — the
 	// restrictive allow-list does not block the carve-out — and NEVER
 	// terminalizes the run itself.
-	sweeper := &driver.AwaitTimeoutSweeper{Store: h.st, WorkspaceKey: h.ws}
+	sweeper := &driver.AwaitTimeoutSweeper{Store: h.st, Resolver: h.awaitResolver(), WorkspaceKey: h.ws}
 	swept, err := sweeper.RunOnce(h.ctx)
 	if err != nil || swept.TimedOut != 1 {
 		t.Fatalf("sweep = %+v, %v; want one timed-out instance", swept, err)
@@ -883,9 +1034,9 @@ func testTimeoutArmFlow(t *testing.T, h *awaitFlows) {
 // await exactly once, in both interleavings (RULE 5 proof).
 func testTimeoutRaceExactlyOnce(t *testing.T, h *awaitFlows) {
 	pattern := domain.AwaitEventKey("race.event", "subject-1")
-	sweeper := &driver.AwaitTimeoutSweeper{Store: h.st, WorkspaceKey: h.ws}
+	sweeper := &driver.AwaitTimeoutSweeper{Store: h.st, Resolver: h.awaitResolver(), WorkspaceKey: h.ws}
 	runner := opRunner{fn: func(req driver.RunRequest) driver.RunResult {
-		resp := h.awaitOp(t, req.Run, pattern, nil, awaitE2EShortAwait, 1)
+		resp := h.awaitOp(t, req.Run, req.RunToken, pattern, nil, awaitE2EShortAwait, 1)
 		if resp.Status == driver.AwaitOutcomeSuspended {
 			return suspendedResult()
 		}
@@ -955,7 +1106,7 @@ func TestAwaitFlowsDistortedSuspensionReportMemstore(t *testing.T) {
 	h := newAwaitFlows(t, memstore.New(), "WS")
 	pattern := domain.AwaitEventKey("approval", "distorted#1@sha")
 	runner := opRunner{fn: func(req driver.RunRequest) driver.RunResult {
-		resp := h.awaitOp(t, req.Run, pattern, nil, awaitE2ETimeoutMs, 1)
+		resp := h.awaitOp(t, req.Run, req.RunToken, pattern, nil, awaitE2ETimeoutMs, 1)
 		if resp.Status != driver.AwaitOutcomeSuspended {
 			return failedResult("unexpected await status " + resp.Status)
 		}

@@ -97,15 +97,26 @@ func (i *Issuer) IssueExecution(principal VerifiedPrincipal, workspace string, a
 // server-verified node/lease/fence tuple that owned the running execution when
 // the authority was issued.
 func (i *Issuer) IssueExecutionForOwner(principal VerifiedPrincipal, workspace string, action Action, owner ExecutionOwner) (ExecutionAuthority, error) {
-	if strings.TrimSpace(owner.NodeID) == "" || owner.NodeID != strings.TrimSpace(owner.NodeID) ||
+	if !validExecutionResourceKind(owner.ResourceKind) ||
+		strings.TrimSpace(owner.ResourceID) == "" || owner.ResourceID != strings.TrimSpace(owner.ResourceID) ||
+		strings.TrimSpace(owner.NodeID) == "" || owner.NodeID != strings.TrimSpace(owner.NodeID) ||
 		strings.TrimSpace(owner.LeaseID) == "" || owner.LeaseID != strings.TrimSpace(owner.LeaseID) || owner.FencingToken <= 0 {
-		return ExecutionAuthority{}, fmt.Errorf("%w: execution owner node, lease, and positive fence are required", ErrInvalidScope)
+		return ExecutionAuthority{}, fmt.Errorf("%w: execution owner resource, node, lease, and positive fence are required", ErrInvalidScope)
 	}
 	value, err := i.issue(principal, ClassExecution, workspace, action, "")
 	if err != nil {
 		return ExecutionAuthority{}, err
 	}
 	return ExecutionAuthority{grant: value, owner: owner}, nil
+}
+
+func validExecutionResourceKind(kind ExecutionResourceKind) bool {
+	switch kind {
+	case ExecutionResourceDriverRun, ExecutionResourceTaskRun:
+		return true
+	default:
+		return false
+	}
 }
 
 // IssueSession derives a session authority for one exact workspace/action.

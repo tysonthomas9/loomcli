@@ -1,5 +1,8 @@
 package driver
 
+// Legacy TaskRun event/outbox helpers remain test-only while the
+// characterization suite proves parity with Execution-owned convergence.
+
 import (
 	"context"
 	"fmt"
@@ -22,8 +25,7 @@ import (
 // taskRunEventContext carries hook-site extras that are not derivable
 // from the run row itself.
 type taskRunEventContext struct {
-	EpicID     string
-	LeaseToken string
+	EpicID string
 }
 
 // appendTaskRunEvent records one lifecycle event in the append-only
@@ -49,7 +51,6 @@ func appendTaskRunEvent(ctx context.Context, s store.Store, run *domain.TaskRun,
 		ErrorMessage:   firstNonEmpty(completion.ErrorMessage, run.ErrorMessage),
 		LogsRef:        run.LogsRef,
 		ArtifactsRef:   run.ArtifactsRef,
-		LeaseToken:     evctx.LeaseToken,
 		OccurredAt:     time.Now().UTC(),
 	}
 	if typ == domain.TaskRunEventRequeued {

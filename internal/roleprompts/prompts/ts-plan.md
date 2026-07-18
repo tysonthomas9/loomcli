@@ -57,13 +57,12 @@ Save your complete plan to the task's design field:
 loom data update "$LOOM_TASK_ID" --design="<your complete plan here>"
 ```
 
-### Step 5: Move the Task to Review
-Hand the task off for review and clear the assignee:
-```
-loom data update "$LOOM_TASK_ID" --status review --assignee=""
-```
-Review-status tasks are held out of the ready queue until a human (or the review
-lane) approves them back to `open` for implementation.
+### Step 5: Return the Design to the Workflow Host
+Do NOT change the task's status, assignee, or claim. The workflow host owns that
+execution boundary: after your TaskRun commits its terminal receipt, it moves
+the task to `review`, clears the live execution claim, and hands the design to
+the review lane. Changing lifecycle fields from inside the running TaskRun is
+rejected so an operator command cannot split the Work Item from its TaskRun.
 
 ### CRITICAL: STOP — DO NOT IMPLEMENT
 After Step 5 you are DONE:
@@ -71,7 +70,7 @@ After Step 5 you are DONE:
 - Do NOT commit, push, publish, or open a pull request — you produced a design,
   not code.
 - Do NOT run `loom data close`, `loom stack publish`, or pick up another task.
-- Do NOT clear or re-claim the task; simply return a concise summary of the
-  design you wrote and EXIT.
+- Do NOT update the task status or assignee, and do NOT clear or re-claim the
+  task; simply return a concise summary of the design you wrote and EXIT.
 
 Your job was ONLY to create the plan. Implementation happens in a separate run.

@@ -68,19 +68,19 @@ func awaitE2EPendingComposition(t *testing.T, st *memstore.Store, parentRunID, c
 	}); err != nil {
 		t.Fatalf("create child: %v", err)
 	}
-	outcome, _, err := driver.AwaitChildWorkflow(ctx, st, driver.AwaitChildWorkflowOptions{
-		WorkspaceKey: routerE2EWS, RunID: parent.RunID,
-		NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
-		ChildRunID: childRunID, TimeoutMs: time.Minute.Milliseconds(), AwaitIndex: 1,
+	key := domain.AwaitInstanceKey(parentRunID, 1)
+	registered, err := st.Awaits().RegisterAwaitAndCheck(ctx, routerE2EWS, store.AwaitRegistration{
+		InstanceKey: key, RunID: parentRunID, Pattern: driver.RunFinishedSubjectKey(childRunID),
+		ActorAllow: []string{driver.RunFinishedActor}, Deadline: time.Now().Add(time.Minute),
 	})
-	if err != nil || outcome == nil || outcome.Status != driver.AwaitOutcomeSuspended {
-		t.Fatalf("AwaitChildWorkflow = %+v, %v; want suspended", outcome, err)
+	if err != nil || registered == nil || registered.Satisfied {
+		t.Fatalf("RegisterAwaitAndCheck = %+v, %v; want pending", registered, err)
 	}
-	if outcome.Instance == nil || len(outcome.Instance.ActorAllow) != 1 ||
-		outcome.Instance.ActorAllow[0] != driver.RunFinishedActor {
-		t.Fatalf("composition await = %+v; want actor allow %q", outcome.Instance, driver.RunFinishedActor)
+	if _, err := st.DriverRuns().Suspend(ctx, routerE2EWS, parentRunID,
+		parent.NodeID, parent.LeaseID, parent.FencingToken, key); err != nil {
+		t.Fatalf("Suspend composition parent: %v", err)
 	}
-	return outcome.Instance.InstanceKey
+	return key
 }
 
 func postSignedRunFinishedSpoof(t *testing.T, mux *http.ServeMux, deliveryID, childRunID string) *httptest.ResponseRecorder {

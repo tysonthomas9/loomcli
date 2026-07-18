@@ -118,13 +118,21 @@ export async function run(ctx) {
       claimed: false,
     });
   }
-  const card = (await loom.issues.get({ issueId })) || {};
-
   // 2c. WS2b post-claim gate for the cron / run-now / explicit path (or a stale
   //     event with no hasDesign): check the phase against the REAL card and, on
   //     mismatch, hand the claim back so the true owner (planner vs coder) can
   //     take it — parking it under our lease would starve them until TTL.
-  if (!gatedByEvent && isGatingFilter(taskFilter)) {
+  if (isGatingFilter(taskFilter)) {
+    let card;
+    try {
+      card = (await loom.issues.get({ issueId })) || {};
+    } catch (err) {
+      // The claim is already durable. A failed follow-up read must return that
+      // exact typed generation before surfacing the read error; otherwise the
+      // task looks owned until its lock TTL even though no child was requested.
+      await releaseClaimAfterError(loom, issueId, "read the claimed task", err);
+      throw err;
+    }
     const cardHasDesign = stringValue(card.design) !== "";
     if (!phaseAllows(taskFilter, cardHasDesign, cardLabels(card))) {
       await unclaimTask(loom, issueId);
@@ -149,8 +157,11 @@ export async function run(ctx) {
   //    filesystem origin; GitHub/http/ssh origins therefore keep today's
   //    patch-back behavior. Planner runs opt out because their deliverable is
   //    issue design/status data, not a reviewable code branch.
-  //    A planner run passes closeTask=false so the worker leaves the card in
-  //    design+review instead of closing it (the coder path keeps the default).
+  //    Every role run passes closeTask=false. The trusted runner may return the
+  //    typed needs_revision disposition, and the workflow host must observe the
+  //    terminal receipt before deciding close vs review vs re-plan. This also
+  //    means an interrupted host fails safe in Fleet's non-closing terminal
+  //    state, never with a falsely closed card.
   const taskRunId = "promptagent-" + (stringValue(loom.driverRunId) || "run") + "-" + issueId;
   const requestInput = { taskPrompt: prompt, openPullRequest: false };
   requestInput.deliveryMode = isPlanner ? "patch-back" : "local-branch";
@@ -165,23 +176,21 @@ export async function run(ctx) {
     runner: "local-task-runner",
     input: requestInput,
   };
-  if (isPlanner) {
-    requestParams.closeTask = false;
-  }
+  requestParams.closeTask = false;
   try {
     await loom.taskRuns.request(requestParams);
   } catch (e) {
-    if (isConflictError(e)) {
-      // Already enqueued by THIS run (deterministic per-run id) — a durable
-      // resume re-executed the request step. The task-run exists; await it.
-    } else {
-      // Dispatch failed AFTER we claimed. Hand the task back in a re-fireable
-      // state before failing, or it parks in in_progress limbo under a dead
-      // run where no task.ready can ever fire again (the 2026-07-07 approve
-      // bug's second half).
-      await unclaimTask(loom, issueId);
-      throw e;
+    if (!isAmbiguousTaskRunRequestError(e)) {
+      // A certified pre-commit rejection can safely hand the task back. An
+      // ambiguous timeout/disconnect/internal response may follow a committed
+      // TaskRun receipt, so it must retain the claim instead of creating an
+      // open Work Item with a queued child.
+      // Exact durable request replay is resolved inside the SDK/service before
+      // returning. A 409 here is therefore a real lineage/envelope conflict,
+      // not evidence that a resumable child exists; never await a phantom run.
+      await releaseClaimAfterError(loom, issueId, "request the TaskRun", e);
     }
+    throw e;
   }
 
   const result = await loom.taskRuns.await({ taskRunId, timeoutMs: numberValue(input.timeoutMs, 20 * 60 * 1000) });
@@ -193,15 +202,27 @@ export async function run(ctx) {
   const delivery = stringValue(meta.delivery);
   const localBranch = stringValue(meta.local_branch);
   const headSha = stringValue(meta.head_sha);
+  const taskOutcome = stringValue(meta.task_outcome);
 
   // 4. Report the outcome.
   if (status === "completed") {
     if (isPlanner) {
-      // The planner backend writes the design (and may already move the card to
-      // review) itself via `loom data update` (Decision 2). Reconcile: ensure
-      // the card lands in review, but do NOT double-move if the agent already
-      // did. closeTask=false kept it out of the terminal done state.
-      const reviewed = await ensureCardInReview(loom, issueId);
+      // The planner backend writes the design only. The TaskRun terminal receipt
+      // has now retired its live Work Item claim, so this host-owned mutation can
+      // safely hand the card to review. The idempotent read still tolerates an
+      // older/custom planner that already left the card there.
+      let reviewed;
+      try {
+        reviewed = await ensureCardInReview(loom, issueId);
+      } catch (err) {
+        return loom.needsReview({
+          summary: "prompt-agent: planner TaskRun " + taskRunId
+            + " completed, but the host could not hand " + issueId + " to review: " + errorMessage(err),
+          errorClass: "prompt_agent_planner_handoff_failed",
+          issueId,
+          taskRunId,
+        });
+      }
       return loom.completed({
         summary: "prompt-agent: " + issueId + " planned via " + (runBackend || "backend")
           + " (design handoff, status=" + reviewed + ")",
@@ -212,12 +233,10 @@ export async function run(ctx) {
         outcome: "design-review",
       });
     }
-    // Coder outcome: the serve task worker auto-closes the card on task success
-    // (task_worker.go default), so a completed run transitions claimed -> done.
-    // For local-branch delivery, the pushed branch is the review artifact. Reopen
-    // the terminal card first (the SDK routes closed->open through fleet-db's
-    // reopen endpoint), then stamp review + external_ref in the exact S2 shape
-    // the local review lane consumes.
+    // Coder outcome: closeTask=false kept lifecycle authority with this host.
+    // For local-branch delivery, the pushed branch is the review artifact; stamp
+    // review + external_ref only after the terminal receipt retired the typed
+    // generation. Patch-back completion is closed explicitly below.
     if (delivery === "local_branch") {
       if (!localBranch || !headSha) {
         return loom.needsReview({
@@ -257,6 +276,17 @@ export async function run(ctx) {
         external_ref: externalRef,
       });
     }
+    try {
+      await closeTerminalCard(loom, issueId);
+    } catch (err) {
+      return loom.needsReview({
+        summary: "prompt-agent: task-run " + taskRunId + " completed, but the host could not close "
+          + issueId + ": " + errorMessage(err),
+        errorClass: "prompt_agent_coder_handoff_failed",
+        issueId,
+        taskRunId,
+      });
+    }
     return loom.completed({
       summary: "prompt-agent: " + issueId + " completed via " + (runBackend || "backend")
         + " (files_changed=" + (filesChanged || "0") + ", patch_back=" + (patchBack || "n/a") + ")",
@@ -267,9 +297,27 @@ export async function run(ctx) {
       filesChanged,
     });
   }
+  // Cancellation retires the typed generation and atomically releases the Work
+  // Item to open+unassigned. Reconcile that state and the typed needs-revision
+  // label after the terminal receipt. A failed TaskRun is different: retry
+  // exhaustion atomically blocks its Work Item, and reopening it here would
+  // erase that safety policy and create an automatic spend loop.
+  if (status === "cancelled") {
+    try {
+      await releaseTerminalCard(loom, issueId, taskOutcome);
+    } catch (err) {
+      return loom.needsReview({
+        summary: "prompt-agent: task-run " + taskRunId + " for " + issueId + " ended " + status
+          + ", but the host could not reconcile the terminal card: " + errorMessage(err),
+        errorClass: "prompt_agent_terminal_handoff_failed",
+        taskRunId,
+      });
+    }
+  }
   return loom.needsReview({
     summary: "prompt-agent: task-run " + taskRunId + " for " + issueId + " ended " + status
-      + (result && result.error_message ? " - " + stringValue(result.error_message) : ""),
+      + (result && result.error_message ? " - " + stringValue(result.error_message) : "")
+      + (status === "cancelled" ? " (returned to open+unassigned)" : " (left blocked for review)"),
     errorClass: stringValue(result && (result.error_class || result.errorClass)) || "prompt_agent_task_failed",
     taskRunId,
   });
@@ -349,6 +397,17 @@ function isConflictError(e) {
   return message.indexOf("not ready or already claimed") >= 0 || message.indexOf("already claimed") >= 0;
 }
 
+function isAmbiguousTaskRunRequestError(e) {
+  switch (stringValue(e && e.code)) {
+    case "timeout":
+    case "unavailable":
+    case "internal":
+      return true;
+    default:
+      return false;
+  }
+}
+
 // resolveTargetTaskId reads the claim target from the flat input (input.taskId,
 // cron/manual) or the InternalSource envelope of a task-ready event
 // (input.event.taskId, then input.event.id as a fallback for a raw issue
@@ -380,12 +439,13 @@ function isGatingFilter(taskFilter) {
 // phaseAllows applies the role/phase predicate against a task's design state:
 //   needs_plan (planner) — proceed only when there is NO design yet, OR the card
 //     is flagged needs-revision (a rejected design to redo);
-//   has_design (coder)   — proceed only when a design is present.
+//   has_design (coder)   — proceed only when a design is present and is NOT
+//     flagged needs-revision (the planner owns that rework phase).
 // A non-gating filter always allows.
 function phaseAllows(taskFilter, hasDesign, labels) {
   const hasRevision = labelList(labels).includes("needs-revision");
   if (taskFilter === "needs_plan") return hasDesign !== true || hasRevision;
-  if (taskFilter === "has_design") return hasDesign === true;
+  if (taskFilter === "has_design") return hasDesign === true && !hasRevision;
   return true;
 }
 
@@ -405,25 +465,45 @@ function cardLabels(card) {
   return card ? labelList(card.labels) : [];
 }
 
-// unclaimTask genuinely returns a claimed task to the ready pool. Order
-// matters and both halves are required: the release op frees only the
-// OPERATIONAL LOCK (fleet ReleaseIssueLock is documented "without changing its
-// status or assignee"), so a bare release leaves the card in_progress — not
-// ready, no task.ready re-fire, invisible limbo. Restore status to open FIRST
-// (while we still hold the lock), which also journals an issue.update that
-// re-fires task.ready for the rightful phase owner; then release the lock so
-// they can claim. Best-effort on both: worst case falls back to lease TTL.
+// unclaimTask returns the typed DriverRun Work Item claim to the ready pool.
+// The release command atomically restores open+unassigned, clears the exact
+// claim generation, releases the actor lock, and records the durable action.
+// A generic issue.update is intentionally forbidden while that generation is
+// live. Release failure is authoritative: callers must not claim a successful
+// handback while the Work Item remains owned.
 async function unclaimTask(loom, issueId) {
+  await loom.tasks.release({ taskId: issueId });
+}
+
+// releaseClaimAfterError preserves both halves of a post-claim failure. When
+// typed release succeeds the caller rethrows the original operation error. If
+// release itself fails, surface that authoritative cleanup failure with the
+// original cause in the message rather than pretending the Work Item is free.
+async function releaseClaimAfterError(loom, issueId, operation, originalError) {
   try {
-    await loom.issues.update({ issueId, status: "open" });
-  } catch (_statusErr) {
-    // best-effort: the release below still frees the lock
+    await unclaimTask(loom, issueId);
+  } catch (releaseError) {
+    throw new Error("prompt-agent: failed to " + operation + " for " + issueId
+      + " (" + errorMessage(originalError) + ") and typed release also failed: "
+      + errorMessage(releaseError));
   }
-  try {
-    await loom.tasks.release({ taskId: issueId });
-  } catch (_releaseErr) {
-    // best-effort: fall back to TTL expiry, don't mask the caller's outcome
+}
+
+// releaseTerminalCard runs only after taskRuns.await returned a terminal
+// non-success result. Fleet has retired the exact typed generation at that
+// point, so this host-owned lifecycle handoff is no longer fenced.
+async function releaseTerminalCard(loom, issueId, taskOutcome) {
+  // If this is the validated needs_revision disposition, make the label
+  // idempotently host-owned as well. The agent may already have written richer
+  // notes/content, but it never owns status or assignee transitions.
+  if (taskOutcome === "needs_revision") {
+    await loom.issues.addLabel({ issueId, label: "needs-revision" });
   }
+  await loom.issues.update({ issueId, status: "open", assignee: "" });
+}
+
+async function closeTerminalCard(loom, issueId) {
+  await loom.issues.update({ issueId, status: "closed", assignee: "" });
 }
 
 // notMyPhaseSummary is the honest skip summary for a phase mismatch — the run
@@ -434,30 +514,25 @@ function notMyPhaseSummary(roleName, taskFilter, taskId, hasDesign) {
     + " hasDesign=" + String(hasDesign) + " — skipped, no dispatch";
 }
 
-// ensureCardInReview reconciles a completed planner run's card to review. The
-// planner backend may have already moved it via `loom data update --status
-// review`; if so we do NOT double-move. Best-effort: a failure leaves the card
-// as-is (closeTask=false already kept it out of the terminal done state).
+// ensureCardInReview reconciles a completed planner run's card to review after
+// the TaskRun terminal receipt retires its live Work Item claim. An older/custom
+// planner may already have moved it; if so we do not double-move. A failed
+// handoff is surfaced to the caller so the DriverRun cannot report completion
+// while the Work Item remains in_progress.
 async function ensureCardInReview(loom, issueId) {
-  try {
-    const after = (await loom.issues.get({ issueId })) || {};
-    if (stringValue(after.status) === "review") {
-      return "review";
-    }
-    await loom.issues.update({ issueId, status: "review" });
+  const after = (await loom.issues.get({ issueId })) || {};
+  if (stringValue(after.status) === "review" && stringValue(after.assignee) === "") {
     return "review";
-  } catch (_err) {
-    return "unchanged";
   }
+  await loom.issues.update({ issueId, status: "review", assignee: "" });
+  return "review";
 }
 
 // stampLocalBranchReview performs the S2 handoff for local review. The task
-// worker has already closed the coder card on success, so the first update must
-// reopen it before the second update can set review + external_ref. This is not
+// worker deliberately left the coder card open on success. This is not
 // best-effort: without the stamp, WS5 has no published ref to review.
 async function stampLocalBranchReview(loom, issueId, externalRef) {
-  await loom.issues.update({ issueId, status: "open" });
-  await loom.issues.update({ issueId, status: "review", externalRef });
+  await loom.issues.update({ issueId, status: "review", assignee: "", externalRef });
 }
 
 function stringValue(v) {

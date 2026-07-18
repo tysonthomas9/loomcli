@@ -121,33 +121,56 @@ func (app *Server) buildInfraModules() {
 	}
 
 	if storeBacked {
-		app.connectorDispatcher = app.buildConnectorDispatcher()
-		unifiedDeps := modbuilder.UnifiedAgentModuleDeps{
-			Store: app.config.Store, AgentSvc: app.agentSvc, IssueSvc: app.issueSvc, Hub: app.hub,
-			FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
-			DriverAPIToken: app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
-			LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
-		}
-		if capability := app.config.AutomationCapability; capability != nil {
-			unifiedDeps.AutomationBindings = capability.BindingOperations()
-			unifiedDeps.WorkflowBinding = capability.WorkflowBinding()
-			unifiedDeps.AutomationAudit = capability.AuditQueries()
-			unifiedDeps.AutomationWebhook = capability.WebhookWorkflow()
-			unifiedDeps.AutomationEventing = capability.WorkflowEventing()
-			unifiedDeps.AutomationOperator = capability.OperatorAuthorityResolver()
-		}
-		app.wsModules = append(app.wsModules, modbuilder.NewUnifiedAgentModules(unifiedDeps)...)
-		prReviewModule := modbuilder.NewPRReviewModule(
-			app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
-		)
-		app.prReviewCredentialSeeds = prReviewModule
-		app.wsModules = append(app.wsModules, prReviewModule)
-	} else {
-		// Without a store there is no connector-backed prreview module, so
-		// keep the gh-backed pull-request list route available.
-		app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
-		if app.config.AgentControlFn != nil {
-			app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
-		}
+		app.buildStoreBackedInfraModules()
+		return
+	}
+	app.buildStorelessInfraModules()
+}
+
+func (app *Server) buildStoreBackedInfraModules() {
+	app.connectorDispatcher = app.buildConnectorDispatcher()
+	unifiedDeps := modbuilder.UnifiedAgentModuleDeps{
+		Store: app.config.Store, AgentSvc: app.agentSvc, IssueSvc: app.issueSvc, Hub: app.hub,
+		FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
+		DriverAPIToken: app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
+		LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
+		WorkflowCatalog: app.config.WorkflowCatalogAPI,
+	}
+	if capability := app.config.ArtifactsCapability; capability != nil {
+		unifiedDeps.Artifacts = capability.ArtifactsAPI()
+	}
+	if capability := app.config.AutomationCapability; capability != nil {
+		unifiedDeps.AutomationBindings = capability.BindingOperations()
+		unifiedDeps.WorkflowBinding = capability.WorkflowBinding()
+		unifiedDeps.AutomationAudit = capability.AuditQueries()
+		unifiedDeps.AutomationWebhook = capability.WebhookWorkflow()
+		unifiedDeps.AutomationEventing = capability.WorkflowEventing()
+		unifiedDeps.AutomationOperator = capability.OperatorAuthorityResolver()
+	}
+	if capability := app.config.ExecutionCapability; capability != nil {
+		unifiedDeps.ExecutionTaskRuns = capability.TaskRunAPI()
+		unifiedDeps.ExecutionTaskRunRequests = capability.TaskRunRequestAPI()
+		unifiedDeps.ExecutionTaskRunRecovery = capability.TaskRunRecoveryAPI()
+		unifiedDeps.ExecutionTaskRunAuthorities = capability.TaskRunAuthorityResolver()
+		unifiedDeps.ExecutionWorkerProfiles = capability.WorkerProfileAPI()
+		unifiedDeps.ExecutionDriverRuns = capability.DriverRunAPI()
+		unifiedDeps.ExecutionDriverRunAuthorities = capability.DriverRunAuthorityResolver()
+		unifiedDeps.ExecutionSystemAuthorities = capability.SystemAuthorityResolver()
+		unifiedDeps.ExecutionOperator = capability.OperatorAuthorityResolver()
+	}
+	app.wsModules = append(app.wsModules, modbuilder.NewUnifiedAgentModules(unifiedDeps)...)
+	prReviewModule := modbuilder.NewPRReviewModule(
+		app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
+	)
+	app.prReviewCredentialSeeds = prReviewModule
+	app.wsModules = append(app.wsModules, prReviewModule)
+}
+
+func (app *Server) buildStorelessInfraModules() {
+	// Without a store there is no connector-backed prreview module, so
+	// keep the gh-backed pull-request list route available.
+	app.wsModules = append(app.wsModules, githandlers.NewPullRequestListModule(app.agentSvc))
+	if app.config.AgentControlFn != nil {
+		app.wsModules = append(app.wsModules, webui.NewAgentControlModule(app.config.AgentControlFn))
 	}
 }

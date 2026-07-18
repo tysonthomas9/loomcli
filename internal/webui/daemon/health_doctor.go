@@ -1,4 +1,4 @@
-package webui
+package daemon
 
 import (
 	"context"
@@ -8,13 +8,12 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // HealthDoctor monitors workspace daemon circuit breakers and resets breakers
 // that are stuck in an unhealthy state.
 type HealthDoctor struct {
-	multiPool *daemon.MultiPool
+	multiPool *MultiPool
 	wsPathsFn func() (map[string]string, error) // wsID → filesystem path
 	logger    *slog.Logger
 
@@ -52,7 +51,7 @@ func DefaultHealthDoctorConfig() HealthDoctorConfig {
 
 // NewHealthDoctor creates a health doctor that monitors all workspace pools.
 func NewHealthDoctor(
-	multiPool *daemon.MultiPool,
+	multiPool *MultiPool,
 	wsPathsFn func() (map[string]string, error),
 	logger *slog.Logger,
 	cfg HealthDoctorConfig,
@@ -113,7 +112,7 @@ func (hd *HealthDoctor) checkAllWorkspaces(ctx context.Context) {
 			continue
 		}
 
-		pp, ok := pool.(*daemon.ProtectedPool)
+		pp, ok := pool.(*ProtectedPool)
 		if !ok {
 			continue // not a protected pool, skip
 		}
@@ -123,7 +122,7 @@ func (hd *HealthDoctor) checkAllWorkspaces(ctx context.Context) {
 }
 
 // checkWorkspace checks a single workspace's breaker and triggers restart if stuck.
-func (hd *HealthDoctor) checkWorkspace(ctx context.Context, wsID string, pp *daemon.ProtectedPool) {
+func (hd *HealthDoctor) checkWorkspace(ctx context.Context, wsID string, pp *ProtectedPool) {
 	state := pp.BreakerState()
 
 	hd.mu.Lock()
@@ -157,7 +156,7 @@ func (hd *HealthDoctor) markHealthy(wsID string, w *breakerWatch) {
 }
 
 // handleUnhealthy processes an open/half-open breaker, resetting it if stuck past threshold.
-func (hd *HealthDoctor) handleUnhealthy(ctx context.Context, wsID string, pp *daemon.ProtectedPool, w *breakerWatch, state circuitbreaker.State) {
+func (hd *HealthDoctor) handleUnhealthy(ctx context.Context, wsID string, pp *ProtectedPool, w *breakerWatch, state circuitbreaker.State) {
 	now := time.Now()
 
 	if w.unhealthySince.IsZero() {
@@ -184,7 +183,7 @@ func (hd *HealthDoctor) handleUnhealthy(ctx context.Context, wsID string, pp *da
 }
 
 // attemptRestart runs a restart cycle, updating watch state and logging outcomes.
-func (hd *HealthDoctor) attemptRestart(ctx context.Context, wsID string, pp *daemon.ProtectedPool, w *breakerWatch, state circuitbreaker.State, stuckDuration time.Duration, now time.Time) {
+func (hd *HealthDoctor) attemptRestart(ctx context.Context, wsID string, pp *ProtectedPool, w *breakerWatch, state circuitbreaker.State, stuckDuration time.Duration, now time.Time) {
 	hd.logger.Warn("circuit breaker stuck, attempting recovery",
 		"component", "health_doctor",
 		"workspace", wsID,

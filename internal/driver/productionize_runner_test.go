@@ -42,6 +42,7 @@ func TestHostBridgeTaskExecutorFailsClosedOnInvalidResult(t *testing.T) {
 			executor := HostBridgeTaskExecutor{
 				Store:        st,
 				WorktreePath: repo.dir,
+				APIBaseURL:   testTaskRunAPIURL,
 				Command:      hostBridgeHelperCommand(t, tc.mode, base, "unused-patch"),
 			}
 			result, err := executor.ExecuteTask(ctx, hostBridgeTaskExecRequest())
@@ -430,7 +431,7 @@ setInterval(() => {}, 1000);
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-1"
 	req.RunnerTrustLevel = domain.DriverTrustTrusted
-	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}).ExecuteTask(ctx, req)
+	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree, APIBaseURL: testTaskRunAPIURL}).ExecuteTask(ctx, req)
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}
@@ -520,7 +521,7 @@ setInterval(() => {}, 1000);
 	req.RunnerEntrypoint = "local-task-runner"
 	req.RunnerVersionID = "driver-version-1"
 	req.RunnerTrustLevel = domain.DriverTrustTrusted
-	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree}).ExecuteTask(ctx, req)
+	result, err := (HostBridgeTaskExecutor{Store: st, WorktreePath: worktree, APIBaseURL: testTaskRunAPIURL}).ExecuteTask(ctx, req)
 	if err != nil {
 		t.Fatalf("ExecuteTask: %v", err)
 	}

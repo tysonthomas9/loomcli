@@ -1,6 +1,6 @@
 # Target Architecture and Capability Boundaries
 
-- **Status:** Reviewed and approved — implementation begins in Phase 2
+- **Status:** INTERIM — target reviewed and approved; Phase 4 implementation is active, the architecture check passes, and final paired evidence is pending
 - **Scope:** In-process ownership and dependencies inside `loom serve`, operator CLI transport behavior, and corresponding frontend feature boundaries
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -28,7 +28,7 @@ Activity, history, usage, and observability are read projections—not another w
 | Record or invariant | Sole write owner | Cross-capability rule |
 |---|---|---|
 | Workspace, Repository | Workspace | Source Control receives references; it does not rewrite catalog records |
-| Issue, dependency, status, comment | Work Items | Execution requests claim/finish through an explicit atomic fleet-db command |
+| Issue, dependency, status, comment | Work Items | Execution coordinates claim/release/finish through explicit atomic fleet-db commands that bind the exact `ClaimActionID` generation; it does not become the Work Items policy owner |
 | Agent, Role, desired state, AgentOwnershipLease | Agents | Other capabilities retain IDs or immutable projections only |
 | Driver, DriverVersion, trust state | Workflow Catalog | Automation resolves an activated version through the catalog API |
 | TriggerBinding, Event, Delivery | Automation | Webhooks enter only Automation ingestion |
@@ -36,18 +36,31 @@ Activity, history, usage, and observability are read projections—not another w
 | AgentSession, TerminalSession, AgentLease, inbox, current lead-delivery Outbox | Interaction | Session records remain distinct from batch execution records; NodeID is an opaque placement reference |
 | Worktree, stack lineage/publication state | Source Control | Workspace owns catalog/configuration; Source Control owns materialization mechanics |
 | Connector, Grant, secret/audit state | Connectors | Callers request granted actions; plaintext credentials never cross the public API |
-| Artifact | Artifacts | Execution/Interaction request create/finalize and retain references; neither writes Artifact storage directly |
+| Artifact | Artifacts | Execution/Interaction use the Artifacts `Create`, `Upload`, `Finalize`, `Reference`, `Get`, `List`, or composed `CreateContent` surface and retain references; neither writes Artifact storage directly |
 | Generic fleet-db Lease | Per instance: `agent_service` → Agents; `driver_run`/`task_run` → Execution; `terminal` → Interaction; `artifact_upload` → Artifacts | The shared table/API is a concurrency mechanism, not an aggregate owner. Loom exposes only owner-scoped ports; fleet-db validates workspace, discriminator, resource, holder, token, and fence and rejects cross-resource heartbeat/release |
 | ActionLedger | Execution | Records idempotent run-side-effect intent/result only. Execution is its sole writer and invokes Work Items or Source Control owner commands for the actual comment/status/PR mutation |
 | Activity/history/usage | Read projection only | May combine Execution and Interaction DTOs; never merges their persistence aggregates |
 | PlatformEvent/general mutation journal | fleet-db mechanism/read projection | Loom capabilities consume it; no Loom capability writes it as a product aggregate |
-| AgentCommand | Interaction, transitional | Retained only while lead/session daemon dependencies exist; task dispatch moves to Execution and the legacy record is then deleted |
+| AgentCommand | Interaction, transitional | Retained only for lead/session/interactive daemon command delivery. Batch DriverRun/TaskRun dispatch moves to Execution without granting Execution write ownership of this record; delete it only after the remaining Interaction dependencies retire in Phase 6 |
 | DaemonProfile | Legacy tombstone | No target module; retired with the daemon after parity and dependency removal |
 | `<Workflow>ProcessState` | Its named `app/<workflow>` process manager | Coordination only: idempotency key, durable step/retry state, and terminal result; it cannot mirror or mutate a participating aggregate |
 
 `DriverRun` and `AgentSession` intentionally remain different aggregates. They have different identity, payload, lifecycle, and fencing semantics. A shared activity DTO is acceptable; a shared table or generic execution repository is not.
 
-Do not publish one generic Lease abstraction until task-run fencing is normalized. Driver-run fencing uses a monotonic sequence; task-run fencing currently derives from wall-clock nanoseconds. Separate types must state their actual guarantee in the interim.
+DriverRun and TaskRun fences are both backend-assigned and monotonic, but they
+come from distinct fencing namespaces/sequences. They are comparable only
+inside their own aggregate owner tuple and must never be converted, compared
+across resource kinds, or exposed as one interchangeable generic Lease token.
+Separate types state that guarantee even though both use an integer wire shape.
+
+A DriverRun Work Item claim returns the exact `ClaimActionID` that identifies
+the mutable claim generation. TaskRun request persists that ID in its immutable
+request receipt. Heartbeat, requeue, retry exhaustion, completion, and release
+recover and validate the same generation; an ordinary Issue lifecycle write or
+generic release cannot bypass it. A terminal command retires only its own
+generation and actor lock. If a successor generation already exists, the stale
+TaskRun may terminalize its own Execution records but cannot clear or rewrite
+the successor Work Item state.
 
 ## Component model
 
@@ -195,7 +208,36 @@ Polymorphic persistence mechanisms do not erase ownership. For the generic Lease
 
 New required backend behavior is negotiated before adapters become ready. The required fleet-db endpoint is `GET /api/v1/capabilities`, returning an API revision and versioned capability keys. Advertised keys describe the **running deployment**, not merely compiled code: the active Redis/Postgres backend, registered routes, feature configuration, authenticated boundary, and required storage implementation must make the operation usable. Loom derives its required key set from the capability slices enabled in its own configuration, checks those keys during readiness, and reports the exact missing keys. A 404 from an older fleet-db is an explicit incompatibility for a new Loom that requires the key; failure is not deferred until the first mutation. Old Loom continues to work against new fleet-db, and no generic mutation fallback is allowed.
 
-The Execution-owned await dispatcher is always hosted by `loom serve`, so every serve profile requires `execution.await_atomic_resume.v1`. That key certifies Redis/Postgres parity for registration, lookup, deadline indexing, owner-fenced suspend/resume, generic atomic resolve-and-resume, and the run-outcome compatibility command. Enabling Workflow Catalog additionally requires `workflow_catalog.version_lifecycle.v1`; enabling Automation additionally requires `automation.trigger_admission.v1`. Disabling Catalog or Automation never removes the always-on Execution requirement.
+The Execution-owned await dispatcher is always hosted by `loom serve`, so
+every serve profile requires `execution.await_atomic_resume.v1`. Phase 4 adds
+one indivisible, exact 13-key Execution/Artifacts foundation profile:
+`artifacts.owner_fenced_lifecycle.v1`,
+`execution.driver_run_child_cascade.v1`,
+`execution.driver_run_child_start.v1`,
+`execution.driver_run_lease_fencing.v1`,
+`execution.driver_run_work_item_claim.v1`,
+`execution.driver_step_terminal_repair.v1`,
+`execution.issue_claim_next_task_run_start.v1`,
+`execution.issue_claim_task_run_start.v1`,
+`execution.task_run_lease_fencing.v1`,
+`execution.task_run_log_idempotency.v1`,
+`execution.task_run_request.v1`, `execution.task_run_requeue.v1`, and
+`execution.task_run_retry_exhaustion.v1`. Loom requires the complete profile
+before composing the runtime; a partial profile is not a compatibility mode.
+Enabling Workflow Catalog additionally requires
+`workflow_catalog.version_lifecycle.v1`; enabling Automation additionally
+requires `automation.trigger_admission.v1`. Disabling Catalog or Automation
+never removes the always-on await or Phase 4 foundation requirements.
+
+These are deployment-parity gates, not one key per public method. In
+particular, `execution.driver_run_work_item_claim.v1` is advertised only when
+both exact-generation claim and release are usable behind the service boundary;
+the TaskRun claim, lease, request, requeue, and retry-exhaustion keys jointly
+gate the owner-fenced lifecycle and its Work Item terminal policy. The profile
+does not invent separate release or terminal-policy capability names that are
+absent from the code and OpenAPI contract. Redis and Postgres must implement
+the same `ClaimActionID` generation and terminal outcomes before the existing
+umbrella keys count as supported.
 
 ## Authority boundary
 
@@ -291,4 +333,4 @@ Do not create feature npm packages or microfrontends. Package distribution does 
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Current-state evidence](01-current-state.md) · Next: [Migration plan](03-migration-plan.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Current-state evidence](01-current-state.md) · Next: [Migration plan](03-migration-plan.md) · [Phase 4 evidence](09-phase-4-decisions-and-evidence.md)

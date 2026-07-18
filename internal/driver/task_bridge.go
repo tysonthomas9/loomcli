@@ -13,6 +13,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -45,14 +47,18 @@ func isLocalTaskRunner(req TaskExecRequest) bool {
 }
 
 type HostBridgeTaskExecutor struct {
-	Store        store.Store
-	WorktreePath string
-	Command      []string
-	// APIBaseURL, when set, is exported to the spawned task runner as
+	Store store.Store
+	// Artifacts is the sole production mutation surface for task-run artifacts.
+	// Store remains for session, worktree, and other documented read paths; a
+	// missing Artifacts API fails artifact-producing execution closed.
+	Artifacts           artifactsmodule.API
+	ArtifactAuthorities execution.TaskRunAuthorityResolver
+	WorktreePath        string
+	Command             []string
+	// APIBaseURL is required and exported to the spawned task runner as
 	// LOOM_TASK_RUN_API_URL: the serve-hosted task-run API the runner SDK
-	// targets with its per-task-run lease token instead of dialing fleet-db
-	// with deployment credentials (the bridge env already blocks
-	// LOOM_FLEET_DB_* inheritance; this gives runners the sanctioned path).
+	// targets with its per-task-run lease token. Direct FleetDB runner access
+	// is intentionally unsupported.
 	APIBaseURL string
 	// LocalSettingsDir points at the desktop-local settings directory. When set,
 	// only local-task-runner receives non-secret local runner settings and the
@@ -170,6 +176,9 @@ type flueTaskSession struct {
 }
 
 func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
+	if !taskProviderIsNoop(opts.ProviderProfile) && strings.TrimSpace(e.APIBaseURL) == "" {
+		return opts, fmt.Errorf("task runner requires the loom serve task-run API URL: %w", domain.ErrInvalid)
+	}
 	if taskRunHasNamedRunner(opts) {
 		if err := refuseUntrustedTaskRunnerPreflight(opts); err != nil {
 			return opts, err
@@ -203,6 +212,9 @@ func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts 
 func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecRequest) (result TaskExecResult, err error) {
 	if taskProviderIsNoop(req.ProviderProfile) {
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
+	}
+	if strings.TrimSpace(e.APIBaseURL) == "" {
+		return TaskExecResult{}, fmt.Errorf("task runner requires the loom serve task-run API URL: %w", domain.ErrInvalid)
 	}
 	if result, refused := refuseUntrustedTaskRunnerExecution(req); refused {
 		return result, nil
@@ -851,58 +863,6 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 		return result, nil
 	}
 	return e.applyPatchBack(ctx, baseRef, patch, result)
-}
-
-func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte) (*domain.Artifact, string, error) {
-	artifactID := firstNonEmpty(runner.PatchArtifactID, runner.PatchArtifactIDCamel)
-	if artifactID == "" {
-		artifactID = "patch-" + req.TaskRunID
-	}
-	summary := firstNonEmpty(runner.PatchSummary, runner.PatchSummaryCamel, "task patch")
-	mimeType := firstNonEmpty(runner.PatchMIMEType, runner.PatchMIMETypeCamel, "text/x-diff")
-	baseRef := firstNonEmpty(runner.PatchBaseRef, runner.PatchBaseRefCamel, runner.BaseRef, runner.BaseRefCamel)
-	metadata := map[string]string{
-		"driver_run_id":            req.DriverRunID,
-		"runner":                   req.Runner,
-		"runner_ref":               req.RunnerRef,
-		"runner_kind":              req.RunnerKind,
-		"runner_entrypoint":        req.RunnerEntrypoint,
-		"runner_driver_version_id": req.RunnerVersionID,
-		"provider_profile":         req.ProviderProfile,
-	}
-	if baseRef != "" {
-		metadata["patch_base_ref"] = baseRef
-	}
-	if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
-		WorkspaceKey:    req.WorkspaceKey,
-		ArtifactID:      artifactID,
-		TaskID:          req.TaskID,
-		OwnerType:       "task_run",
-		OwnerID:         req.TaskRunID,
-		Type:            "patch",
-		Summary:         summary,
-		MIMEType:        mimeType,
-		Visibility:      firstNonEmpty(runner.PatchVisibility, runner.PatchVisibilityCamel),
-		RedactionStatus: firstNonEmpty(runner.PatchRedactionStatus, runner.PatchRedactionStatusAlt),
-		DurableStatus:   "declared",
-		Metadata:        metadata,
-	}); err != nil {
-		return nil, "", fmt.Errorf("create patch artifact: %w", err)
-	}
-	uploaded, err := e.Store.Artifacts().UploadContent(ctx, req.WorkspaceKey, artifactID, store.ArtifactContentUpload{
-		Body:     bytes.NewReader(patch),
-		MIMEType: mimeType,
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("upload patch artifact: %w", err)
-	}
-	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
-		ContentHash: &uploaded.ContentHash,
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("finalize patch artifact: %w", err)
-	}
-	return finalized, baseRef, nil
 }
 
 func (e HostBridgeTaskExecutor) applyPatchBack(ctx context.Context, baseRef string, patch []byte, result TaskExecResult) (TaskExecResult, error) {

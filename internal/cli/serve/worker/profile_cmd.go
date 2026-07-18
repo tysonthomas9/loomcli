@@ -9,8 +9,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -40,10 +43,11 @@ var workerProfileCmd = &cobra.Command{
 }
 
 var workerProfileAddCmd = &cobra.Command{
-	Use:   "add <PROFILE_ID>",
-	Short: "Create a worker profile",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkerProfileAdd,
+	Use:               "add <PROFILE_ID>",
+	Short:             "Create a worker profile",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkerProfileAdd,
 }
 
 var workerProfileListCmd = &cobra.Command{
@@ -74,8 +78,9 @@ var workerProfileSetCmd = &cobra.Command{
   labels        comma-separated list
   capabilities  comma-separated list
   metadata      comma-separated key=value list`,
-	Args: cobra.ExactArgs(3),
-	RunE: runWorkerProfileSet,
+	Args:              cobra.ExactArgs(3),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkerProfileSet,
 }
 
 var workerProfileUnsetCmd = &cobra.Command{
@@ -89,15 +94,17 @@ var workerProfileUnsetCmd = &cobra.Command{
   labels
   capabilities
   metadata`,
-	Args: cobra.ExactArgs(2),
-	RunE: runWorkerProfileUnset,
+	Args:              cobra.ExactArgs(2),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkerProfileUnset,
 }
 
 var workerProfileRemoveCmd = &cobra.Command{
-	Use:   "remove <PROFILE_ID>",
-	Short: "Delete a worker profile",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkerProfileRemove,
+	Use:               "remove <PROFILE_ID>",
+	Short:             "Delete a worker profile",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkerProfileRemove,
 }
 
 func initWorkerProfileCommands() {
@@ -124,36 +131,30 @@ func initWorkerProfileCommands() {
 	workerCmd.AddCommand(workerProfileCmd)
 }
 
-func runWorkerProfileAdd(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		metadata, err := parseWorkerProfileMetadata(workerProfileAddMetadata)
-		if err != nil {
-			return err
-		}
-		enabled := !workerProfileAddDisabled
-		in := store.WorkerProfileCreate{
-			WorkspaceKey: ws,
-			ProfileID:    args[0],
-			Name:         workerProfileAddName,
-			Role:         workerProfileAddRole,
-			Backend:      workerProfileAddBackend,
-			Repos:        workerProfileAddRepos,
-			ParentEpic:   workerProfileAddParentEpic,
-			Labels:       workerProfileAddLabels,
-			Capabilities: workerProfileAddCapabilities,
-			Enabled:      &enabled,
-			Metadata:     metadata,
-		}
-		if workerProfileAddMaxPriority >= 0 {
-			in.MaxPriority = &workerProfileAddMaxPriority
-		}
-		profile, err := h.Store.WorkerProfiles().Create(ctx, in)
-		if err != nil {
-			return fmt.Errorf("create worker profile: %w", err)
-		}
-		fmt.Printf("Created worker profile %s/%s\n", profile.WorkspaceKey, profile.ProfileID)
-		return nil
-	})
+func runWorkerProfileAdd(cmd *cobra.Command, args []string) error {
+	metadata, err := parseWorkerProfileMetadata(workerProfileAddMetadata)
+	if err != nil {
+		return err
+	}
+	enabled := !workerProfileAddDisabled
+	command := execution.CreateWorkerProfileCommand{
+		ProfileID: args[0], Name: workerProfileAddName, Role: workerProfileAddRole, Backend: workerProfileAddBackend,
+		Repos: workerProfileAddRepos, ParentEpic: workerProfileAddParentEpic, Labels: workerProfileAddLabels,
+		Capabilities: workerProfileAddCapabilities, Enabled: &enabled, Metadata: metadata,
+	}
+	if workerProfileAddMaxPriority >= 0 {
+		command.MaxPriority = &workerProfileAddMaxPriority
+	}
+	client, err := managementapi.New(cmd.Context(), "loom worker profile add")
+	if err != nil {
+		return err
+	}
+	profile, err := client.CreateWorkerProfile(cmd.Context(), command)
+	if err != nil {
+		return fmt.Errorf("create worker profile: %w", err)
+	}
+	fmt.Printf("Created worker profile %s/%s\n", profile.WorkspaceKey, profile.ProfileID)
+	return nil
 }
 
 func runWorkerProfileList(_ *cobra.Command, _ []string) error {
@@ -199,44 +200,50 @@ func runWorkerProfileShow(_ *cobra.Command, args []string) error {
 	})
 }
 
-func runWorkerProfileSet(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		profileID, key, value := args[0], args[1], args[2]
-		patch, err := buildWorkerProfilePatch(key, value, false)
-		if err != nil {
-			return err
-		}
-		if _, err := h.Store.WorkerProfiles().Update(ctx, ws, profileID, patch); err != nil {
-			return fmt.Errorf("update worker profile: %w", err)
-		}
-		fmt.Printf("Set %s/%s.%s = %s\n", ws, profileID, key, value)
-		return nil
-	})
+func runWorkerProfileSet(cmd *cobra.Command, args []string) error {
+	profileID, key, value := args[0], args[1], args[2]
+	patch, err := buildWorkerProfilePatch(key, value, false)
+	if err != nil {
+		return err
+	}
+	client, err := managementapi.New(cmd.Context(), "loom worker profile set")
+	if err != nil {
+		return err
+	}
+	if _, err := client.UpdateWorkerProfile(cmd.Context(), profileID, patch); err != nil {
+		return fmt.Errorf("update worker profile: %w", err)
+	}
+	fmt.Printf("Set %s/%s.%s = %s\n", client.Workspace(), profileID, key, value)
+	return nil
 }
 
-func runWorkerProfileUnset(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		profileID, key := args[0], args[1]
-		patch, err := buildWorkerProfilePatch(key, "", true)
-		if err != nil {
-			return err
-		}
-		if _, err := h.Store.WorkerProfiles().Update(ctx, ws, profileID, patch); err != nil {
-			return fmt.Errorf("update worker profile: %w", err)
-		}
-		fmt.Printf("Cleared %s/%s.%s\n", ws, profileID, key)
-		return nil
-	})
+func runWorkerProfileUnset(cmd *cobra.Command, args []string) error {
+	profileID, key := args[0], args[1]
+	patch, err := buildWorkerProfilePatch(key, "", true)
+	if err != nil {
+		return err
+	}
+	client, err := managementapi.New(cmd.Context(), "loom worker profile unset")
+	if err != nil {
+		return err
+	}
+	if _, err := client.UpdateWorkerProfile(cmd.Context(), profileID, patch); err != nil {
+		return fmt.Errorf("update worker profile: %w", err)
+	}
+	fmt.Printf("Cleared %s/%s.%s\n", client.Workspace(), profileID, key)
+	return nil
 }
 
-func runWorkerProfileRemove(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		if err := h.Store.WorkerProfiles().Delete(ctx, ws, args[0]); err != nil {
-			return fmt.Errorf("remove worker profile: %w", err)
-		}
-		fmt.Printf("Removed worker profile %s/%s\n", ws, args[0])
-		return nil
-	})
+func runWorkerProfileRemove(cmd *cobra.Command, args []string) error {
+	client, err := managementapi.New(cmd.Context(), "loom worker profile remove")
+	if err != nil {
+		return err
+	}
+	if err := client.DeleteWorkerProfile(cmd.Context(), args[0]); err != nil {
+		return fmt.Errorf("remove worker profile: %w", err)
+	}
+	fmt.Printf("Removed worker profile %s/%s\n", client.Workspace(), args[0])
+	return nil
 }
 
 func printWorkerProfile(p *domain.WorkerProfile) {
@@ -265,22 +272,22 @@ func printWorkerProfile(p *domain.WorkerProfile) {
 	fmt.Printf("Enabled:      %t\n", p.Enabled)
 }
 
-func buildWorkerProfilePatch(key, value string, unset bool) (store.WorkerProfileUpdate, error) {
+func buildWorkerProfilePatch(key, value string, unset bool) (execution.WorkerProfilePatch, error) {
 	switch key {
 	case "name", "role", "backend", "parent_epic", "enabled", "max_priority":
 		return buildWorkerProfileScalarPatch(key, value, unset)
 	case "repos", "labels", "capabilities", "metadata":
 		return buildWorkerProfileListPatch(key, value, unset)
 	default:
-		var patch store.WorkerProfileUpdate
+		var patch execution.WorkerProfilePatch
 		return patch, fmt.Errorf("unsupported worker profile field %q", key)
 	}
 }
 
 // buildWorkerProfileScalarPatch handles the scalar worker profile fields
 // (strings, bools, ints) for buildWorkerProfilePatch.
-func buildWorkerProfileScalarPatch(key, value string, unset bool) (store.WorkerProfileUpdate, error) {
-	var patch store.WorkerProfileUpdate
+func buildWorkerProfileScalarPatch(key, value string, unset bool) (execution.WorkerProfilePatch, error) {
+	var patch execution.WorkerProfilePatch
 	switch key {
 	case "name":
 		if unset {
@@ -324,8 +331,8 @@ func buildWorkerProfileScalarPatch(key, value string, unset bool) (store.WorkerP
 
 // buildWorkerProfileListPatch handles the list- and map-valued worker
 // profile fields for buildWorkerProfilePatch.
-func buildWorkerProfileListPatch(key, value string, unset bool) (store.WorkerProfileUpdate, error) {
-	var patch store.WorkerProfileUpdate
+func buildWorkerProfileListPatch(key, value string, unset bool) (execution.WorkerProfilePatch, error) {
+	var patch execution.WorkerProfilePatch
 	switch key {
 	case "repos":
 		list := splitWorkerProfileList(value)

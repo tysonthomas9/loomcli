@@ -10,7 +10,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	locsettings "github.com/tysonthomas9/loomcli/internal/webui/handlers/localsettings"
@@ -100,13 +99,6 @@ func NewDiffModule(agentSvc service.AgentService, diffSvc service.DiffService) i
 // NewFileModule creates the file operations module.
 func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAccessConfig) interface{ Register(*http.ServeMux) } {
 	return misc.NewModule(fileSvc, accessCfg...)
-}
-
-// NewApprovalsModule creates the await approval-resolution module
-// (POST /api/workspaces/{ws}/approvals; the actor is always the verified
-// session identity, never request data).
-func NewApprovalsModule(st store.Store) interface{ Register(*http.ServeMux) } {
-	return approvals.NewModule(st)
 }
 
 // NewPRReviewModule creates the connector-backed pull request review module.

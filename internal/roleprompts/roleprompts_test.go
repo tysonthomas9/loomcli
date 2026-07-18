@@ -26,8 +26,11 @@ func TestDefaultBodiesHonorTSContract(t *testing.T) {
 	}
 
 	planBody, _ := DefaultPromptBody("plan")
-	if !containsAll(planBody, "loom data update", "--design", "--status review") {
-		t.Fatal("plan body must persist the design and move the card to review via loom data update")
+	if !containsAll(planBody, "loom data update", "--design", "workflow host", "moves", "review") {
+		t.Fatal("plan body must persist the design and leave the review transition to the workflow host")
+	}
+	if strings.Contains(planBody, "--status review") || strings.Contains(planBody, "--assignee=\"\"") {
+		t.Fatal("plan body must not mutate lifecycle fields while its TaskRun claim is live")
 	}
 	if !containsAll(planBody, "Do NOT", "loom stack publish") {
 		t.Fatal("plan body must prohibit stacked publish")
@@ -44,6 +47,12 @@ func TestDefaultBodiesHonorTSContract(t *testing.T) {
 	}
 	if !containsAll(taskBody, "Do NOT run", "loom data close") {
 		t.Fatal("task body must prohibit closing the task itself")
+	}
+	if !containsAll(taskBody, "LOOM_TASK_OUTCOME_FILE", `"disposition":"needs_revision"`, "workflow host", "open/unassigned") {
+		t.Fatal("task body must use the typed needs-revision outcome and leave lifecycle to the workflow host")
+	}
+	if strings.Contains(taskBody, "--status open") || strings.Contains(taskBody, "--assignee") {
+		t.Fatal("task body must not mutate status or assignee while its typed TaskRun claim is live")
 	}
 }
 

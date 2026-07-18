@@ -5,6 +5,7 @@
 // camelCase JSON and structured errors.
 
 const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+const TASK_RUN_REQUEST_MAX_ATTEMPTS = 2;
 
 // DriverApiError carries the structured v2 error envelope:
 // {code, message, retryable} plus the HTTP status.
@@ -346,7 +347,6 @@ export class LoomDriverClient {
       runnerId: input.runnerId || "",
       driverStepId: input.driverStepId || "",
       capabilities: stringList(input.capabilities),
-      leaseToken: input.leaseToken || pickEnv(this.env, "LOOM_TASK_RUN_LEASE_TOKEN") || pickEnv(this.env, "LOOM_RUNNER_LEASE_TOKEN"),
       deferCompletion: true,
     };
     const repoRef = input.repoRef || input.repo_ref || (input.sandboxPlacement && (input.sandboxPlacement.repoRef || input.sandboxPlacement.repo_ref));
@@ -368,7 +368,22 @@ export class LoomDriverClient {
     if (input.closeTask !== undefined && input.closeTask !== null) {
       params.closeTask = booleanInput(input.closeTask);
     }
-    const result = await this.#httpCall("exec-task", { ...params, enqueueOnly: true }, { rawKeys: ["input", "closeTask"] });
+    let response;
+    for (let attempt = 1; attempt <= TASK_RUN_REQUEST_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        response = await this.#httpCall("exec-task", { ...params, enqueueOnly: true }, { rawKeys: ["input", "closeTask"] });
+        break;
+      } catch (err) {
+        // A timeout, disconnect, or invalid 2xx body may happen after Fleet
+        // committed the immutable TaskRun request receipt. Replay the exact
+        // same command once before exposing the error; callers must never
+        // interpret an ambiguous transport failure as proof of no commit.
+        if (!taskRunRequestMayHaveCommitted(err) || attempt === TASK_RUN_REQUEST_MAX_ATTEMPTS) {
+          throw err;
+        }
+      }
+    }
+    const result = sanitizeTaskRunResult(response);
     rememberTaskRunResult(this, result || {});
     return result;
   }
@@ -378,7 +393,7 @@ export class LoomDriverClient {
     if (!taskRunId) {
       throw new Error("taskRuns.get requires taskRunId");
     }
-    return this.#httpCall("task-run-get", { taskRunId: String(taskRunId) });
+    return sanitizeTaskRunResult(await this.#httpCall("task-run-get", { taskRunId: String(taskRunId) }));
   }
 
   async awaitTaskRun(input = {}) {
@@ -434,7 +449,6 @@ export class LoomDriverClient {
       reason: input.reason || "",
       completionId: input.completionId || "",
       leaseToken:
-        input.leaseToken || remembered?.leaseToken ||
         pickEnv(this.env, "LOOM_TASK_RUN_LEASE_TOKEN") || pickEnv(this.env, "LOOM_RUNNER_LEASE_TOKEN"),
       logsRef: input.logsRef || remembered?.logsRef || "",
       artifactsRef: input.artifactsRef || remembered?.artifactsRef || "",
@@ -947,6 +961,20 @@ function envelopeRetryable(envelope) {
   return Boolean(envelope?.retryable);
 }
 
+function taskRunRequestMayHaveCommitted(err) {
+  if (!(err instanceof DriverApiError)) {
+    return false;
+  }
+  switch (String(err.code || "")) {
+    case "timeout":
+    case "unavailable":
+    case "internal":
+      return true;
+    default:
+      return false;
+  }
+}
+
 // watchHttpError maps a non-OK watch response onto DriverApiError using the
 // structured {code, message, retryable} envelope when present. Without an
 // envelope, 5xx/429 default to retryable so transient proxy errors reconnect.
@@ -1060,6 +1088,7 @@ function watchDelay(ms, signal) {
 }
 
 function rememberTaskRunResult(client, result = {}) {
+	result = sanitizeTaskRunResult(result);
   const runId = result.taskRunId || result.id || "";
   const taskId = result.taskId || "";
   if (runId) {
@@ -1068,6 +1097,19 @@ function rememberTaskRunResult(client, result = {}) {
   if (taskId) {
     client.taskRunResultsByTaskId.set(String(taskId), result);
   }
+}
+
+// TaskRun lease tokens belong only to the worker that claimed the run. Strip
+// legacy server fields defensively so generic workflow results and remembered
+// polling state cannot turn a watch/request response into a bearer credential.
+function sanitizeTaskRunResult(result = {}) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+  const sanitized = { ...result };
+  delete sanitized.leaseToken;
+  delete sanitized.lease_token;
+  return sanitized;
 }
 
 function pickEnv(env, key) {

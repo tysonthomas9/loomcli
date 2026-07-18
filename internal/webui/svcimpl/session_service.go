@@ -263,6 +263,7 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 			SessionRecord: sessionRecordFromAgentSession(rec),
 			IsActive:      isActiveAgentSession(rec.Status),
 		}
+		fillExecutionEvidence(&item, rec.Metadata)
 		fillControlPlaneArtifactFlags(&item, stores, rec)
 		items = append(items, item)
 	}
@@ -270,6 +271,20 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 		return items[i].StartedAt.After(items[j].StartedAt)
 	})
 	return items, nil
+}
+
+func fillExecutionEvidence(item *service.SessionListItem, metadata map[string]string) {
+	if item == nil || metadata == nil {
+		return
+	}
+	item.RuntimeStrategy = metadata["runtime_strategy"]
+	item.DeliveryMode = metadata["delivery"]
+	item.PatchBackStatus = metadata["patch_back_status"]
+	item.LogsRef = metadata["logs_ref"]
+	item.LocalBranch = metadata["local_branch"]
+	item.HeadSHA = firstNonEmptySessionValue(metadata["head_sha"], metadata["github_head_sha"], metadata["patch_back_head_sha"])
+	item.GitHubBranch = metadata["github_branch"]
+	item.GitHubPRURL = metadata["github_pr_url"]
 }
 
 // fillControlPlaneArtifactFlags sets HasTranscript/HasDiff from on-disk truth when a

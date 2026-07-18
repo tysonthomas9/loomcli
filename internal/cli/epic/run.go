@@ -16,13 +16,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
@@ -59,8 +56,9 @@ Today this is a single subcommand:
 }
 
 var epicRunCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Drain an epic by running the epic-runner workflow",
+	Use:               "run",
+	Short:             "Drain an epic by running the epic-runner workflow",
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
 	Long: `Queue or run the epic-runner workflow for an epic.
 
 The command records a durable DriverRun for a workflow. Lead assignment,
@@ -68,6 +66,16 @@ preflight, and child-task orchestration are handled by the workflow itself. By
 default the built-in epic-runner workflow is used; pass --workflow to run
 another registered workflow with the same payload shape.`,
 	RunE: runEpicRun,
+}
+
+type epicRunManagement interface {
+	Workspace() string
+	SubmitDriverRun(context.Context, managementapi.SubmitDriverRunRequest) (*domain.DriverRun, error)
+	GetDriverRun(context.Context, string) (*domain.DriverRun, error)
+}
+
+var newEpicRunManagementClient = func(ctx context.Context) (epicRunManagement, error) {
+	return managementapi.New(ctx, "loom epic run")
 }
 
 func init() {
@@ -91,16 +99,6 @@ func init() {
 	cli.RegisterCommand(epicCmd)
 }
 
-// runnerNeedsLocalPreflight reports whether the requested runner resolves to
-// the local task runner and therefore must be fail-closed preflighted before
-// queuing. An empty/whitespace runner resolves to local-task-runner downstream
-// (epic-runner.ts defaults it, matching the webui's runnerIsLocal), so it is
-// gated identically; daytona/other explicit runners are not.
-func runnerNeedsLocalPreflight(runner string) bool {
-	r := strings.TrimSpace(runner)
-	return r == "" || r == runtimepreflight.LocalTaskRunnerEntrypoint
-}
-
 //nolint:funlen // The command wires validation, queueing, optional projection, execution, and post-drain publish.
 func runEpicRun(cmd *cobra.Command, _ []string) error {
 	if err := validateEpicRunFlags(); err != nil {
@@ -110,29 +108,11 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := signalContext(cmd.Context())
 	defer cancel()
 
-	handle, err := cmdstore.OpenStore(ctx)
+	management, err := newEpicRunManagementClient(ctx)
 	if err != nil {
-		return fmt.Errorf("open store: %w", err)
+		return err
 	}
-	defer func() { _ = handle.Close() }()
-
-	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
-	if err != nil {
-		return fmt.Errorf("resolve workspace: %w", err)
-	}
-
-	// Fail-closed BEFORE queuing: the local task runner shells out to the
-	// resolved backend CLI, so if its binary/auth is missing the run would
-	// fail deep in the worker (or worse, fake-complete). Only gate the local
-	// runner; daytona/other explicit runners run their own runtime. An empty
-	// runner resolves to the local-task-runner downstream (epic-runner.ts
-	// defaults it, matching the webui's runnerIsLocal), so it must be
-	// preflighted identically.
-	if runnerNeedsLocalPreflight(runRunner) {
-		if err := runtimepreflight.PreflightLocalTaskRunner(ctx, handle.Store, ws); err != nil {
-			return err
-		}
-	}
+	ws := management.Workspace()
 
 	workflowName := epicRunWorkflow()
 
@@ -143,6 +123,11 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	// sandboxed runners that cannot read the host stack store.
 	var stackProj *EpicStackProjection
 	if runStackedPRs && !runDryRun {
+		handle, openErr := cmdstore.OpenStore(ctx)
+		if openErr != nil {
+			return fmt.Errorf("open store for stack projection: %w", openErr)
+		}
+		defer func() { _ = handle.Close() }()
 		if proj, perr := projectEpicStackForRun(ctx, handle, ws, runParent, runID, runRepoURL, runBaseBranch); perr != nil {
 			fmt.Printf("[epic-run] WARN: stack projection skipped (tasks will base on the repo default branch): %v\n", perr)
 		} else {
@@ -164,7 +149,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	run, err := queueEpicWorkflowRun(ctx, handle.Store, ws, workflowName, runID, payload)
+	run, err := queueEpicWorkflowRun(ctx, management, workflowName, runID, payload)
 	if err != nil {
 		return err
 	}
@@ -173,7 +158,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	if runDetach && !runDryRun {
 		return nil
 	}
-	if err := executeWorkflowRun(ctx, handle.Store, ws, run.RunID); err != nil {
+	if err := executeWorkflowRun(ctx, management, run.RunID); err != nil {
 		return err
 	}
 
@@ -189,22 +174,10 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func queueEpicWorkflowRun(ctx context.Context, st store.Store, ws, workflowName, runID string, payload json.RawMessage) (*domain.DriverRun, error) {
-	if err := ensureWorkflow(ctx, st, ws, workflowName); err != nil {
-		return nil, err
-	}
-	driverID, err := workflowdefs.ResolveDriverID(ctx, st, ws, workflowName)
-	if err != nil {
-		return nil, fmt.Errorf("resolve workflow %q: %w", workflowName, err)
-	}
-	run, err := driverpkg.CreateDriverRun(ctx, st, driverpkg.RunOptions{
-		WorkspaceKey: ws,
-		DriverID:     driverID,
-		EpicID:       runParent,
-		RunID:        runID,
-		SourceKind:   "cli",
-		SourceRef:    "loom epic run",
-		Payload:      payload,
+func queueEpicWorkflowRun(ctx context.Context, management epicRunManagement, workflowName, runID string, payload json.RawMessage) (*domain.DriverRun, error) {
+	run, err := management.SubmitDriverRun(ctx, managementapi.SubmitDriverRunRequest{
+		CLICommand: "epic-run", DriverRef: workflowName, RunID: runID,
+		Entrypoint: "run", EpicID: runParent, Payload: payload,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create epic workflow run: %w", err)
@@ -280,42 +253,33 @@ func printDryRunPayload(payload json.RawMessage) {
 	fmt.Printf("[epic-run] DRY-RUN would queue workflow %s with payload:\n%s\n", epicRunWorkflow(), pretty.String())
 }
 
-func ensureWorkflow(ctx context.Context, st store.Store, ws, workflowName string) error {
-	if _, err := workflowdefs.ResolveDriverID(ctx, st, ws, workflowName); err == nil {
-		return nil
-	} else if workflowName != workflowdefs.BuiltinEpicRunnerWorkflowName {
-		return fmt.Errorf("resolve workflow %q: %w", workflowName, err)
+func executeWorkflowRun(ctx context.Context, management epicRunManagement, runID string) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		run, err := management.GetDriverRun(ctx, runID)
+		if err != nil {
+			return fmt.Errorf("observe workflow run %s: %w", runID, err)
+		}
+		if run == nil || strings.TrimSpace(run.RunID) == "" {
+			return fmt.Errorf("observe workflow run %s returned no state", runID)
+		}
+		if run.Status.IsTerminal() {
+			fmt.Printf("[epic-run] workflow run %s finished: %s\n", runID, run.Status)
+			if run.Summary != "" {
+				fmt.Printf("[epic-run] %s\n", run.Summary)
+			}
+			if run.Status == domain.DriverRunFailed {
+				return fmt.Errorf("epic workflow run %s failed: %s", runID, run.Summary)
+			}
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
-	return workflowdefs.EnsureBuiltinWorkflow(ctx, st, ws, workflowName)
-}
-
-func executeWorkflowRun(ctx context.Context, st store.Store, ws, runID string) error {
-	workDir, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("resolve work dir: %w", err)
-	}
-	result, err := (&driverpkg.Executor{
-		Store:             st,
-		WorkspaceKey:      ws,
-		RunID:             runID,
-		WorkDir:           workDir,
-		NodeID:            runNodeID,
-		HeartbeatInterval: -1,
-	}).RunOnce(ctx)
-	if err != nil {
-		return fmt.Errorf("execute workflow run %s: %w", runID, err)
-	}
-	if result == nil || result.Final == nil {
-		return fmt.Errorf("execute workflow run %s returned no final state", runID)
-	}
-	fmt.Printf("[epic-run] workflow run %s finished: %s\n", runID, result.Final.Status)
-	if result.Final.Summary != "" {
-		fmt.Printf("[epic-run] %s\n", result.Final.Summary)
-	}
-	if result.Final.Status == domain.DriverRunFailed {
-		return fmt.Errorf("epic workflow run %s failed: %s", runID, result.Final.Summary)
-	}
-	return nil
 }
 
 func epicRunWorkflow() string {

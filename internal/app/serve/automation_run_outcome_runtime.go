@@ -7,6 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -33,35 +34,38 @@ func (component *runOutcomeRuntimeComponent) RunOnce(ctx context.Context, now ti
 	return component.reconciler.RunOnce(ctx, now)
 }
 
-// NewRunOutcomeRuntimeRegistration composes Execution's durable terminal
-// outcome consumer as a base platform component. Automation publication is an
-// optional second leg; composition-await recovery remains registered when
-// Automation and Workflow Catalog are disabled.
-func NewRunOutcomeRuntimeRegistration(
-	driverRuns store.DriverRunStore,
+func NewRunOutcomeRuntimeRegistrationWithExecution(
 	awaits store.AwaitStore,
 	triggerEvents store.TriggerEventStore,
 	workspacesStore store.WorkspaceStore,
 	publisher driver.RunOutcomePublisher,
 	workspace string,
+	api execution.DriverRunAPI,
+	queue execution.DriverRunOutcomeAPI,
+	authorities execution.SystemAuthorityResolver,
 ) (platformruntime.Registration, error) {
-	if driverRuns == nil || awaits == nil || triggerEvents == nil {
-		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: required dependency is unavailable")
+	if api == nil || queue == nil || authorities == nil {
+		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: Execution await and queue APIs are unavailable")
 	}
-	outbox, ok := driverRuns.(store.DriverRunOutcomeStore)
-	if !ok {
-		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: DriverRun store lacks durable outcome capability")
+	resolver := &driver.ExecutionAwaitResolver{
+		API: api, Authorities: authorities, ComponentID: driver.RunOutcomeAwaitComponentID,
+	}
+	if awaits == nil || triggerEvents == nil || workspacesStore == nil {
+		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: required dependency is unavailable")
 	}
 	journal, ok := triggerEvents.(store.TriggerEventAppender)
 	if !ok {
 		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: TriggerEvent store lacks base event journal capability")
 	}
-	notifier, err := driver.NewRunOutcomeAwaitNotifier(awaits)
+	notifier, err := driver.NewRunOutcomeAwaitNotifierWithResolver(awaits, resolver)
 	if err != nil {
 		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: %w", err)
 	}
 	workspaces := driver.RunOutcomeWorkspaceLister(newAutomationWorkspaceLister(workspacesStore))
-	reconciler, err := driver.NewRunOutcomeReconciler(outbox, notifier, journal, publisher, workspace, workspaces)
+	reconciler, err := driver.NewRunOutcomeReconcilerWithExecution(
+		queue, notifier, journal, publisher, workspace, workspaces, api, authorities,
+		string(execution.DriverRunOutcomeComponentID),
+	)
 	if err != nil {
 		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: %w", err)
 	}

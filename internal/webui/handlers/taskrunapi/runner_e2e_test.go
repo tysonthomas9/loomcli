@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -35,7 +36,19 @@ if (!process.env.LOOM_TASK_RUN_API_URL) {
   process.exit(2);
 }
 
-const client = TaskRunClient.fromEnv(process.env);
+const upstreamFetch = globalThis.fetch;
+let loseNextLogResponse = true;
+const client = TaskRunClient.fromEnv(process.env, {
+  fetch: async (url, init) => {
+    const response = await upstreamFetch(url, init);
+    if (loseNextLogResponse && new URL(url).pathname.endsWith("/task-run/log-append")) {
+      loseNextLogResponse = false;
+      await response.arrayBuffer();
+      throw new Error("simulated lost log-append response");
+    }
+    return response;
+  },
+});
 if (!client.serveMode) {
   console.error("client did not select the serve transport");
   process.exit(2);
@@ -47,7 +60,27 @@ if (run.taskRunId !== client.taskRunId) {
   process.exit(2);
 }
 await client.heartbeat({ runtimeMetadata: { phase: "working" } });
-await client.logs.append({ stream: "stdout", text: "working\n" });
+const logAppend = {
+  requestId: "working-log-" + client.taskRunId,
+  stream: "stdout",
+  text: "working\n",
+  timestamp: new Date().toISOString(),
+};
+let responseLost = false;
+try {
+  await client.logs.append(logAppend);
+} catch (error) {
+  responseLost = error?.message === "simulated lost log-append response";
+}
+if (!responseLost) {
+  console.error("log append response-loss injection did not fire");
+  process.exit(2);
+}
+const replayedLog = await client.logs.append(logAppend);
+if (replayedLog.sequence !== 1) {
+  console.error("log append replay mismatch: " + JSON.stringify(replayedLog));
+  process.exit(2);
+}
 const artifact = await client.artifacts.declare({
   id: "artifact-" + client.taskRunId,
   type: "patch",
@@ -92,12 +125,23 @@ func TestBridgeRunnerCompletesTaskRunViaServeSurface(t *testing.T) {
 		Status:       domain.TaskRunRunning,
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
+		LeaseToken:   "lease-token-e2e",
 		FencingToken: 42,
 	}); err != nil {
 		t.Fatalf("create task run: %v", err)
 	}
 	mux := http.NewServeMux()
-	NewModule(Config{Store: st}).Register(mux)
+	executionCapability, err := appserve.NewExecutionCapability(executionDependenciesForTaskRunAPITest(t, st))
+	if err != nil {
+		t.Fatalf("compose Execution capability: %v", err)
+	}
+	module := NewModule(Config{
+		Store: st, Execution: executionCapability.TaskRunAPI(),
+		Authorities: executionCapability.TaskRunAuthorityResolver(),
+	})
+	artifactsAPI := newTaskRunArtifactAPIForTest(module)
+	module.artifacts = artifactsAPI
+	module.Register(mux)
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
@@ -107,10 +151,12 @@ func TestBridgeRunnerCompletesTaskRunViaServeSurface(t *testing.T) {
 	}
 
 	executor := driverpkg.HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: t.TempDir(),
-		Command:      []string{node, script},
-		APIBaseURL:   server.URL,
+		Store:               st,
+		Artifacts:           artifactsAPI,
+		ArtifactAuthorities: executionCapability.TaskRunAuthorityResolver(),
+		WorktreePath:        t.TempDir(),
+		Command:             []string{node, script},
+		APIBaseURL:          server.URL,
 	}
 	result, err := executor.ExecuteTask(ctx, driverpkg.TaskExecRequest{
 		WorkspaceKey:    "WS",

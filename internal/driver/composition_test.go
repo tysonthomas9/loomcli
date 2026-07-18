@@ -58,7 +58,7 @@ func finishRunAs(t *testing.T, st *memstore.Store, runID string, status domain.D
 	if err != nil {
 		t.Fatalf("Claim %s: %v", runID, err)
 	}
-	final, err := (&Executor{Store: st, WorkspaceKey: "WS"}).finish(ctx, claimed,
+	final, err := testExecutor(st, Executor{Store: st, WorkspaceKey: "WS"}).finish(ctx, claimed, "driver-token",
 		RunResult{Status: status, Summary: "finished as " + string(status), ErrorClass: errorClassFor(status)})
 	if err != nil {
 		t.Fatalf("finish %s: %v", runID, err)
@@ -320,7 +320,7 @@ func TestAwaitChildWorkflowConcurrentFinishNoLostWakeup(t *testing.T) {
 		}, 1)
 		go func() {
 			<-start
-			_, finishError := (&Executor{Store: st, WorkspaceKey: "WS"}).finish(t.Context(), claimed,
+			_, finishError := testExecutor(st, Executor{Store: st, WorkspaceKey: "WS"}).finish(t.Context(), claimed, "driver-token",
 				RunResult{Status: domain.DriverRunCompleted, Summary: "done"})
 			finishErr <- finishError
 		}()
@@ -447,7 +447,7 @@ func TestCascadeCancelChildren(t *testing.T) {
 
 	// Parent terminalizes through the executor finish path.
 	publisher := &recordingRunOutcomePublisher{}
-	final, err := (&Executor{Store: st, WorkspaceKey: "WS", RunOutcomes: publisher}).finish(ctx, parent,
+	final, err := testExecutor(st, Executor{Store: st, WorkspaceKey: "WS", RunOutcomes: publisher}).finish(ctx, parent, "driver-token",
 		RunResult{Status: domain.DriverRunFailed, Summary: "parent failed"})
 	if err != nil || final.Status != domain.DriverRunFailed {
 		t.Fatalf("finish parent = %+v, %v", final, err)
@@ -526,11 +526,11 @@ func TestExecutorObservesCancelRequest(t *testing.T) {
 	}
 
 	runner := &blockingRunner{started: make(chan struct{})}
-	exec := &Executor{
+	exec := testExecutor(st, Executor{
 		Store: st, WorkspaceKey: "TEST", WorkDir: root,
 		NodeID: "node-1", LeaseID: "lease-1", Runner: runner,
 		HeartbeatInterval: 5 * time.Millisecond,
-	}
+	})
 	done := make(chan error, 1)
 	var result *ExecutionResult
 	go func() {

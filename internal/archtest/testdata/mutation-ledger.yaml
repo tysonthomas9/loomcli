@@ -1,6 +1,62 @@
 schema_version: 1
 status: reviewed
 commands:
+  - id: artifacts.declare
+    phase: 4
+    aggregate_owner: artifacts
+    coordinating_owner: execution
+    mechanism_discriminator: artifact:task_run
+    instance_owner: artifacts
+    accepted_authority: [execution]
+    durable_commands: [fleetdb.declare_execution_artifact.v1]
+    transaction_or_saga_boundary: FleetDB verifies the exact TaskRun owner resource, holder, lease, and fence while idempotently reserving the Artifact identity in one owner command.
+    idempotency_key: workspace_id:task_run_id:artifact_id:declare
+    semantic_events_or_read_models: [artifacts.lifecycle.v1]
+    retry_restart_behavior: An exact retry returns the declared Artifact; a changed definition under the same identity is a terminal conflict and never falls back to generic Artifact create.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit]
+  - id: artifacts.finalize
+    phase: 4
+    aggregate_owner: artifacts
+    coordinating_owner: execution
+    mechanism_discriminator: artifact:task_run
+    instance_owner: artifacts
+    accepted_authority: [execution]
+    durable_commands: [fleetdb.finalize_execution_artifact.v1]
+    transaction_or_saga_boundary: FleetDB validates staged content, expected revision, and the exact TaskRun owner fence before one CAS transition publishes immutable finalized metadata.
+    idempotency_key: workspace_id:task_run_id:artifact_id:content_hash:finalize
+    semantic_events_or_read_models: [artifacts.lifecycle.v1]
+    retry_restart_behavior: Exact command-receipt replay returns the original finalized Artifact snapshot even after later owner or projection changes. Loom retries the same deterministic command ID through a bounded 128-revision window ending at the current Artifact revision to find that receipt; divergent metadata or content under the same identity conflicts without rewriting the Artifact.
+    negative_tests: [content_mismatch, expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_finalize, duplicate_request, lost_response_after_commit]
+  - id: artifacts.reference
+    phase: 4
+    aggregate_owner: artifacts
+    coordinating_owner: execution
+    mechanism_discriminator: artifact_reference:task_run
+    instance_owner: artifacts
+    accepted_authority: [execution]
+    durable_commands: [fleetdb.reference_execution_artifact.v1]
+    transaction_or_saga_boundary: One FleetDB transaction verifies the exact TaskRun owner fence and expected Artifact revision, requires finalized state, inserts the immutable reference and command receipt, and increments the Artifact revision.
+    idempotency_key: workspace_id:task_run_id:node_id:lease_id:fencing_token:artifact_id:reference_kind:target_ref
+    semantic_events_or_read_models: [artifacts.reference.v1]
+    retry_restart_behavior: Loom retries the same deterministic command ID through a bounded 128-revision window ending at the current Artifact revision until FleetDB replays the original immutable receipt; a changed kind or target is a different command and cannot redirect the reference.
+    negative_tests: [artifact_not_finalized, divergent_reference_result, expired_execution, owner_mismatch, stale_fence, stale_revision, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit, response_validation]
+  - id: artifacts.upload
+    phase: 4
+    aggregate_owner: artifacts
+    coordinating_owner: execution
+    mechanism_discriminator: artifact_upload:task_run
+    instance_owner: artifacts
+    accepted_authority: [execution]
+    durable_commands: [fleetdb.upload_execution_artifact.v1]
+    transaction_or_saga_boundary: FleetDB verifies the exact TaskRun owner fence and expected Artifact revision before writing a content-addressed object, then attaches its URI and digest with an owner-fenced revision CAS; a losing race can leave only an unreferenced object eligible for garbage collection.
+    idempotency_key: workspace_id:task_run_id:artifact_id:content_hash:upload
+    semantic_events_or_read_models: [artifacts.lifecycle.v1]
+    retry_restart_behavior: Exact command-receipt replay returns the original uploaded Artifact snapshot without rewriting content. The deterministic identity binds the content digest, MIME type, and size; different bytes or metadata under that identity conflict without a separate upload lease.
+    negative_tests: [content_mismatch, expired_execution, owner_mismatch, stale_fence, stale_revision, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [content_write_before_metadata, duplicate_request, lost_response_after_commit]
   - id: automation.admit-event
     phase: 3
     aggregate_owner: automation
@@ -197,6 +253,482 @@ commands:
     retry_restart_behavior: Repeating an identical owner-matched patch converges; an owner change or ordinary binding command fails closed.
     negative_tests: [expired_operator, immutable_binding_id, mismatched_agent_service_owner, ordinary_binding_authority, unauthenticated, wrong_action, wrong_workspace]
     fault_injection_tests: [duplicate_request, persistence_failure, response_validation]
+  - id: execution.append-log
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: task_run_log
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/task-runs/{task_run_id}/logs"]
+    transaction_or_saga_boundary: FleetDB atomically validates the current TaskRun owner, allocates one durable per-run sequence, and stores the request ID, timestamp, payload fingerprint, and immutable log-entry receipt in the same transition.
+    idempotency_key: workspace_id:task_run_id:request_id
+    semantic_events_or_read_models: [execution.task_run_log.v1]
+    retry_restart_behavior: Exact request replay returns the original sequence and timestamp without appending duplicate text; divergent level, message, timestamp, or owner intent under the same request ID conflicts.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_append, divergent_request_reuse, duplicate_request, lost_response_after_commit]
+  - id: execution.await-driver-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: await:driver_run
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/awaits/register-and-check", "POST /api/v1/{workspace}/driver-runs/{run_id}/resume", "POST /api/v1/{workspace}/driver-runs/{run_id}/suspend"]
+    transaction_or_saga_boundary: FleetDB atomically registers and checks the Await, then Execution owner-fenced suspension and the persisted satisfied-state probe form the restartable close of the registration race.
+    idempotency_key: workspace_id:driver_run_id:await_instance_key
+    semantic_events_or_read_models: [execution.await.v1, execution.driver_run.v1]
+    retry_restart_behavior: Registration replay returns the same Await; an already-satisfied registration or post-suspend satisfied probe resumes the same DriverRun without consuming another await index.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_event, duplicate_request, process_stop_after_registration, process_stop_after_suspend]
+  - id: execution.cascade-child-driver-runs
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_child_cascade
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/commands/cascade-children"]
+    transaction_or_saga_boundary: One FleetDB child-lifecycle command validates the exact parent owner and atomically persists the bounded descendant terminal and cancellation-request set plus its action receipt.
+    idempotency_key: workspace_id:parent_run_id:parent_fence:request_id
+    semantic_events_or_read_models: [execution.driver_run.v1]
+    retry_restart_behavior: The receipt freezes the affected descendant ID sets and cascade intent, while replay re-reads and returns those descendants' current projections so later legitimate lifecycle advancement is not hidden; divergent payload under the same request conflicts.
+    negative_tests: [composition_depth_exceeded, cycle_detected, expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_descendant_finish, duplicate_request, lost_response_after_commit]
+  - id: execution.claim-await-event-notifications
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: await_event_notification_claim
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/await-event-notifications/claim"]
+    transaction_or_saga_boundary: Execution fixes the bounded batch size and claim lease; one FleetDB command atomically leases due or expired await-event notification rows and increments each durable attempt.
+    idempotency_key: "lease-based: workspace_id:event_id is owned by claim_id only until claim_until; there is no exact claim replay receipt"
+    semantic_events_or_read_models: [execution.await_event_notification.v1]
+    retry_restart_behavior: Retrying after a lost claim response before claim_until returns no row because the first lease is still authoritative; a registered Execution component reclaims it with a new claim and incremented attempt only after lease expiry, without bypassing persisted backoff.
+    negative_tests: [expired_system_authority, oversized_limit, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [claim_before_lease_expiry_returns_empty, process_stop_after_claim, restart_reclaim_after_lease_expiry]
+  - id: execution.claim-driver-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_claim
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/claim"]
+    transaction_or_saga_boundary: The registered Driver executor invokes FleetDB's one DriverRun claim transition, which assigns the requested node and lease identity and advances the fence.
+    idempotency_key: workspace_id:run_id:lease_id:request_id
+    semantic_events_or_read_models: [execution.driver_run.v1]
+    retry_restart_behavior: Exact request replay returns the immutable original claim receipt; a competing lease, divergent claimant, or non-queued live request conflicts instead of overwriting ownership.
+    negative_tests: [expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_claimants, lost_response_after_commit]
+  - id: execution.claim-driver-run-outcomes
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_outcome_claim
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-run-outcomes/claim"]
+    transaction_or_saga_boundary: Execution fixes the bounded batch size and claim lease; one FleetDB command atomically leases due or expired immutable terminal DriverRun outcomes and increments each durable attempt.
+    idempotency_key: "lease-based: workspace_id:driver_run_id is owned by claim_id only until claim_until; there is no exact claim replay receipt"
+    semantic_events_or_read_models: [execution.driver_run_outcome.v1]
+    retry_restart_behavior: Retrying after a lost claim response before claim_until returns no row because the first lease is still authoritative; after lease expiry or persisted retry time a new claim increments the attempt, while downstream work reuses the deterministic run.finished identity.
+    negative_tests: [expired_system_authority, oversized_limit, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [claim_before_lease_expiry_returns_empty, process_stop_after_claim, restart_reclaim_after_lease_expiry]
+  - id: execution.claim-driver-run-work-item
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_work_item_claim
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/work-items/{task_id}/claim"]
+    transaction_or_saga_boundary: One FleetDB transaction validates the exact live parent DriverRun owner, claims the Work Item as the server-derived driver-run actor, projects the Issue, and commits the action receipt.
+    idempotency_key: workspace_id:run_id:task_id:request_id
+    semantic_events_or_read_models: [workitems.claim.v1]
+    retry_restart_behavior: Exact request replay returns the immutable original claim receipt; a different parent owner, claim actor, Work Item, or command payload conflicts.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, task_not_ready, unauthenticated, wrong_action, wrong_claim_actor, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_claimants, duplicate_request, lost_response_after_commit, transaction_rollback]
+  - id: execution.claim-task-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: issue_claim_and_task_run_start
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/task-runs/claim-next-and-start", "POST /api/v1/{workspace}/task-runs/{task_run_id}/claim-and-start"]
+    transaction_or_saga_boundary: One FleetDB command atomically selects an eligible queued TaskRun when no exact ID is supplied, claims its Work Item, starts the TaskRun, projects its DriverStep, creates the mandatory Lease and monotonic fence, and records the action receipt.
+    idempotency_key: workspace_id:request_id; the immutable receipt captures the selected task_run_id, while an exact-ID claim also binds workspace_id:task_run_id:request_id
+    semantic_events_or_read_models: [execution.task_run.v1, workitems.claim.v1]
+    retry_restart_behavior: Duplicate or lost-response replay returns the same TaskRun owner and action receipt; a competing claimant cannot reuse the lease token or fence.
+    negative_tests: [expired_system_authority, lease_missing, task_not_ready, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_claimants, duplicate_request, lost_response_after_commit, transaction_rollback]
+  - id: execution.complete-await-event-notification
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: await_event_notification_completion
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/await-event-notifications/complete"]
+    transaction_or_saga_boundary: One FleetDB owner-checked command marks the exact claimed notification delivered only after its idempotent await dispatch or permanent quarantine decision succeeds.
+    idempotency_key: workspace_id:event_id:claim_id:complete
+    semantic_events_or_read_models: [execution.await_event_notification.v1]
+    retry_restart_behavior: Exact completion replay is idempotent; a lost response never permits another claim owner to complete or redirect the notification.
+    negative_tests: [claim_owner_mismatch, expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_completion, lost_response_after_commit]
+  - id: execution.complete-driver-run-outcome
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_outcome_completion
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-run-outcomes/complete"]
+    transaction_or_saga_boundary: One FleetDB owner-checked command marks the exact terminal outcome delivered only after child-cascade recovery, base journaling, await notification, and optional Automation publication converge.
+    idempotency_key: workspace_id:driver_run_id:claim_id:complete
+    semantic_events_or_read_models: [execution.driver_run_outcome.v1]
+    retry_restart_behavior: Exact completion replay is idempotent; a lost response replays deterministic downstream identities and cannot let another claim owner acknowledge the row.
+    negative_tests: [claim_owner_mismatch, expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_completion, lost_response_after_commit]
+  - id: execution.converge-task-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: task_run_terminal_convergence
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-steps/{step_id}/repair-terminal", "POST /api/v1/{workspace}/outbox", "POST /api/v1/{workspace}/task-run-events"]
+    transaction_or_saga_boundary: The runtime repeatedly scans durable terminal TaskRuns and idempotently ensures the terminal event, linked DriverStep projection, and deduplicated Interaction notification as three state-backed convergence legs.
+    idempotency_key: workspace_id:task_run_id:terminal_status
+    semantic_events_or_read_models: [execution.driver_step.v1, execution.task_run_event.v1, interaction.lead_notification.v1]
+    retry_restart_behavior: A stop after any leg is safe because deterministic event, repair request, and outbox dedupe identities let the next scan resume from the terminal TaskRun source.
+    negative_tests: [expired_system_authority, invalid_terminal_source, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [process_stop_after_event, process_stop_after_notification, process_stop_after_step_repair]
+  - id: execution.create-worker-profile
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: worker_profile
+    instance_owner: execution
+    accepted_authority: [operator]
+    durable_commands: ["POST /api/v1/{workspace}/worker-profiles"]
+    transaction_or_saga_boundary: The authenticated management route validates one complete scheduling profile and invokes FleetDB's single WorkerProfile create operation.
+    idempotency_key: workspace_id:profile_id:canonical_definition
+    semantic_events_or_read_models: [execution.worker_profile.v1]
+    retry_restart_behavior: Repeating the desired definition converges on the stable profile identity; a divergent duplicate remains a conflict and concurrent AgentService references are serialized by FleetDB.
+    negative_tests: [expired_operator, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit]
+  - id: execution.delete-worker-profile
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: worker_profile
+    instance_owner: execution
+    accepted_authority: [operator]
+    durable_commands: ["DELETE /api/v1/{workspace}/worker-profiles/{profile_id}"]
+    transaction_or_saga_boundary: The authenticated management route invokes FleetDB's single WorkerProfile delete operation for the exact workspace and profile identity.
+    idempotency_key: workspace_id:profile_id:absent
+    semantic_events_or_read_models: [execution.worker_profile.v1]
+    retry_restart_behavior: Retry converges on absence; an unknown or already-removed profile is handled by the route's explicit not-found contract rather than a different mutation path.
+    negative_tests: [expired_operator, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [lost_response_after_commit, repeated_delete]
+  - id: execution.exhaust-task-run-retries
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: task_run_retry_exhaustion
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/task-runs/{task_run_id}/exhaust-retries"]
+    transaction_or_saga_boundary: One owner-fenced FleetDB command atomically terminalizes the TaskRun, projects the DriverStep, blocks the linked Work Item, releases the Lease, appends the event, and records the receipt.
+    idempotency_key: workspace_id:task_run_id:fencing_token:attempt:request_id
+    semantic_events_or_read_models: [execution.task_run.v1, workitems.status.v1]
+    retry_restart_behavior: Exact replay returns the committed exhaustion receipt; changed retry budget, result, or owner fence conflicts.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, transaction_rollback]
+  - id: execution.finalize
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: task_run_terminal
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/task-runs/{task_run_id}/complete"]
+    transaction_or_saga_boundary: FleetDB verifies the exact owner tuple and required finalized Artifacts, then atomically terminalizes TaskRun and DriverStep, applies the Work Item outcome, emits its event, and releases the Lease.
+    idempotency_key: workspace_id:task_run_id:completion_id
+    semantic_events_or_read_models: [execution.task_run.v1, workitems.outcome.v1]
+    retry_restart_behavior: Completion ID replay returns the original terminal result; a stale fence or changed completion payload cannot alter the outcome.
+    negative_tests: [artifact_not_finalized, expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, mid_transaction_failure, recovery_race]
+  - id: execution.finalize-driver-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_terminal
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/finish"]
+    transaction_or_saga_boundary: FleetDB validates the exact running DriverRun owner and applies one terminal finish transition, producing the durable outcome consumed by reconcilers.
+    idempotency_key: workspace_id:run_id:fencing_token:request_id
+    semantic_events_or_read_models: [execution.driver_run.v1, execution.driver_run_outcome.v1]
+    retry_restart_behavior: Exact request replay returns the immutable original finish receipt and outcome identity; a different terminal result or superseded fence conflicts.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, outcome_enqueue_failure]
+  - id: execution.heartbeat
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: task_run_lease
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/task-runs/{task_run_id}/heartbeat"]
+    transaction_or_saga_boundary: One backend transaction or script compares the TaskRun owner tuple and monotonically fenced Lease, then updates both heartbeat expiries together.
+    idempotency_key: workspace_id:task_run_id:lease_id:fencing_token:heartbeat_at
+    semantic_events_or_read_models: [execution.liveness.v1]
+    retry_restart_behavior: Same-owner retries converge on the latest heartbeat while a reclaimed fence is permanently rejected.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_reclaim, duplicate_request, lease_write_failure, task_run_write_failure]
+  - id: execution.heartbeat-driver-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_lease
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/heartbeat"]
+    transaction_or_saga_boundary: The DriverRun owner adapter invokes FleetDB's single owner-and-fence checked heartbeat transition for the active run lease.
+    idempotency_key: "state-based: workspace_id:run_id:lease_id:fencing_token"
+    semantic_events_or_read_models: [execution.liveness.v1]
+    retry_restart_behavior: Same-owner heartbeats converge on current liveness state; a reclaimed lease or newer fence permanently rejects the old owner.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_reclaim, duplicate_request]
+  - id: execution.heartbeat-worker-node
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: worker_node_liveness
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/nodes/{node_id}/heartbeat"]
+    transaction_or_saga_boundary: A registered worker runtime invokes FleetDB's single Node heartbeat operation with the bounded Execution-owned TTL.
+    idempotency_key: "state-based: workspace_id:node_id"
+    semantic_events_or_read_models: [execution.worker_node.v1]
+    retry_restart_behavior: Repeated heartbeat calls move liveness forward without creating another Node; an unknown runtime component cannot obtain authority.
+    negative_tests: [expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit]
+  - id: execution.recover-child-driver-run-cascade
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_child_cascade_recovery
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/commands/recover-child-cascade"]
+    transaction_or_saga_boundary: The registered outcome reconciler invokes the same atomic bounded child-cascade transition with system recovery authority and a deterministic parent outcome identity.
+    idempotency_key: workspace_id:parent_run_id:terminal_status:request_id
+    semantic_events_or_read_models: [execution.driver_run.v1]
+    retry_restart_behavior: Restart reuses the deterministic cascade identity until the outcome queue can be acknowledged. The receipt freezes affected IDs and intent, but replay returns their current projections; changed terminal provenance conflicts.
+    negative_tests: [expired_system_authority, invalid_parent_status, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_request, live_recovery_race, lost_response_after_commit]
+  - id: execution.recover-driver-runs
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: stale_driver_run
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/recover-stale"]
+    transaction_or_saga_boundary: The registered Driver executor supplies a bounded stale cutoff and FleetDB rechecks liveness before atomically terminalizing each still-stale DriverRun.
+    idempotency_key: "state-based: workspace_id:stale_before"
+    semantic_events_or_read_models: [execution.driver_run.v1, execution.recovery.v1]
+    retry_restart_behavior: Repeating the same cutoff skips fresh or already-terminal runs and returns the current recovered ID set; a concurrent heartbeat wins.
+    negative_tests: [expired_system_authority, fresh_heartbeat, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_request, heartbeat_race, lost_response_after_commit]
+  - id: execution.recover-stale-child-task-runs
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: stale_task_run:driver_run_owner
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/recover-stale-tasks"]
+    transaction_or_saga_boundary: The parent DriverRun owner invokes FleetDB's per-run stale TaskRun recovery command, which rechecks heartbeat and fence and atomically repairs the linked records and lease.
+    idempotency_key: workspace_id:driver_run_id:stale_before
+    semantic_events_or_read_models: [execution.recovery.v1, execution.task_run.v1]
+    retry_restart_behavior: Deterministic cutoff replay returns or skips the same recovered children; a fresh heartbeat or successor fence wins.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, heartbeat_race, lost_response_after_commit]
+  - id: execution.register-worker-node
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: worker_node_registration
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/nodes"]
+    transaction_or_saga_boundary: A registered worker runtime invokes FleetDB's single Node registration operation with the Execution-owned identity and bounded liveness metadata.
+    idempotency_key: "state-based: workspace_id:node_id"
+    semantic_events_or_read_models: [execution.worker_node.v1]
+    retry_restart_behavior: A lost response is resolved through the stable Node identity; replay updates the same registration rather than creating a second runtime owner.
+    negative_tests: [expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit]
+  - id: execution.release-driver-run-work-item
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_work_item_release
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/work-items/{task_id}/release"]
+    transaction_or_saga_boundary: One FleetDB transaction validates the exact live parent DriverRun owner and original claim action, releases only that actor's unbound Work Item lock, projects release semantics, and commits the action receipt.
+    idempotency_key: workspace_id:run_id:task_id:claim_action_id:request_id
+    semantic_events_or_read_models: [workitems.claim.v1]
+    retry_restart_behavior: Exact request replay returns the immutable original release receipt; a different claim action, parent owner, actor, or TaskRun-bound claim conflicts.
+    negative_tests: [claim_action_mismatch, expired_execution, owner_mismatch, stale_fence, task_run_bound_claim, unauthenticated, wrong_action, wrong_claim_actor, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, task_run_bind_race, transaction_rollback]
+  - id: execution.repair-terminal-driver-step
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_step_terminal_repair
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-steps/{step_id}/repair-terminal"]
+    transaction_or_saga_boundary: FleetDB re-reads the committed terminal TaskRun and atomically repairs only its linked DriverStep projection, rejecting a mismatched source or nonterminal state.
+    idempotency_key: workspace_id:step_id:task_run_id:terminal_status
+    semantic_events_or_read_models: [execution.driver_step.v1]
+    retry_restart_behavior: The terminal TaskRun is the durable source and identical repair replay converges on the same DriverStep; a conflicting terminal projection is rejected.
+    negative_tests: [expired_system_authority, invalid_terminal_source, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_terminal_update, duplicate_request, lost_response_after_commit]
+  - id: execution.request-task-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: task_run_request
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/task-runs/request"]
+    transaction_or_saga_boundary: One parent-owner-fenced FleetDB command atomically persists the queued TaskRun, linked DriverStep, queued event, and deterministic action receipt.
+    idempotency_key: workspace_id:driver_run_id:step_id:request_id
+    semantic_events_or_read_models: [execution.driver_step.v1, execution.task_run.v1]
+    retry_restart_behavior: Exact request replay returns the committed TaskRun and step identities; changed task input or a successor parent fence conflicts.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, transaction_rollback]
+  - id: execution.requeue-task-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: task_run_retry
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/task-runs/{task_run_id}/requeue-and-reset-step"]
+    transaction_or_saga_boundary: One owner-fenced FleetDB command atomically requeues the TaskRun, resets its linked DriverStep, releases the current Lease, appends the retry event, and records the receipt.
+    idempotency_key: workspace_id:task_run_id:fencing_token:attempt:request_id
+    semantic_events_or_read_models: [execution.driver_step.v1, execution.task_run.v1]
+    retry_restart_behavior: Exact replay returns the committed retry receipt; changed attempt, retry reason, or superseded owner fence conflicts.
+    negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, transaction_rollback]
+  - id: execution.resolve-driver-await
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: await_event_resolution
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/awaits/resolve-and-resume"]
+    transaction_or_saga_boundary: One trusted FleetDB command atomically resolves the exact event Await and resumes its suspended parent DriverRun when the durable match is still valid.
+    idempotency_key: workspace_id:await_id:event_id
+    semantic_events_or_read_models: [execution.await.v1, execution.driver_run.v1]
+    retry_restart_behavior: Event and Await identity make duplicate delivery idempotent; an already-resolved Await cannot resume the parent twice or consume a different event.
+    negative_tests: [expired_system_authority, invalid_event_match, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_event, lost_response_after_commit, resume_race]
+  - id: execution.retry-await-event-notification
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: await_event_notification_retry
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/await-event-notifications/retry"]
+    transaction_or_saga_boundary: Execution derives capped exponential backoff and UTF-8-safe bounded error text; one FleetDB owner-checked command releases the exact claim at that retry time.
+    idempotency_key: "state-based: workspace_id:event_id:current_claim_id; a successful retry clears the claim and has no exact replay receipt"
+    semantic_events_or_read_models: [execution.await_event_notification.v1]
+    retry_restart_behavior: The persisted retry time survives restart and gates the next claim. If the retry response is lost, repeating the same retry observes the already-cleared claim as an ownership conflict; recovery comes from reclaiming the durable pending row when available_at is due, not from replaying the retry response.
+    negative_tests: [claim_owner_mismatch, expired_system_authority, invalid_attempt, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [process_stop_after_retry, restart_reclaim_at_persisted_time]
+  - id: execution.retry-driver-run-outcome
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_outcome_retry
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-run-outcomes/retry"]
+    transaction_or_saga_boundary: Execution derives capped exponential backoff and UTF-8-safe bounded error text; one FleetDB owner-checked command releases the exact terminal-outcome claim at that retry time.
+    idempotency_key: "state-based: workspace_id:driver_run_id:current_claim_id; a successful retry clears the claim and has no exact replay receipt"
+    semantic_events_or_read_models: [execution.driver_run_outcome.v1]
+    retry_restart_behavior: The persisted retry time survives restart and gates the next claim. If the retry response is lost, repeating the same retry observes the already-cleared claim as an ownership conflict; later reclamation resumes downstream work under deterministic cascade, journal, Await, and Automation identities.
+    negative_tests: [claim_owner_mismatch, expired_system_authority, invalid_attempt, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [process_stop_after_retry, restart_reclaim_at_persisted_time]
+  - id: execution.set-worker-node-drain
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: worker_node_drain
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["PATCH /api/v1/{workspace}/nodes/{node_id}"]
+    transaction_or_saga_boundary: A registered worker runtime invokes FleetDB's single Node update operation to persist the exact draining state used by scheduling admission.
+    idempotency_key: workspace_id:node_id:draining
+    semantic_events_or_read_models: [execution.worker_node.v1]
+    retry_restart_behavior: Repeating the requested drain state converges on the same Node projection; an unknown component cannot mutate another runtime's state.
+    negative_tests: [expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, scheduling_race]
+  - id: execution.start-child-driver-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_child_start
+    instance_owner: execution
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/children/start"]
+    transaction_or_saga_boundary: One parent-owner-fenced FleetDB command validates the persisted lineage graph and atomically creates the deterministic child DriverRun and action receipt.
+    idempotency_key: workspace_id:parent_run_id:child_key:request_id
+    semantic_events_or_read_models: [execution.driver_run.v1]
+    retry_restart_behavior: Exact replay returns the same child identity; a cycle, depth overflow, changed child definition, or successor parent fence conflicts.
+    negative_tests: [composition_depth_exceeded, cycle_detected, expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [concurrent_child_start, duplicate_request, lost_response_after_commit]
+  - id: execution.submit-driver-run
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_submission
+    instance_owner: execution
+    accepted_authority: [operator]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs"]
+    transaction_or_saga_boundary: The authenticated submission route validates the workflow reference and invokes FleetDB's single DriverRun create operation with a stable run identity.
+    idempotency_key: workspace_id:run_id:request_id
+    semantic_events_or_read_models: [execution.driver_run.v1]
+    retry_restart_behavior: A lost response is resolved by the stable DriverRun identity and exact submitted definition; a divergent duplicate remains a conflict.
+    negative_tests: [expired_operator, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit]
+  - id: execution.update-worker-profile
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: worker_profile
+    instance_owner: execution
+    accepted_authority: [operator]
+    durable_commands: ["PATCH /api/v1/{workspace}/worker-profiles/{profile_id}"]
+    transaction_or_saga_boundary: The authenticated management route validates one bounded scheduling-profile patch and invokes FleetDB's single WorkerProfile update operation.
+    idempotency_key: "state-based: workspace_id:profile_id:desired_patch"
+    semantic_events_or_read_models: [execution.worker_profile.v1]
+    retry_restart_behavior: Repeating the desired patch converges on the current profile projection; conflicting concurrent changes remain visible through the resulting persisted state rather than replaying a stale snapshot.
+    negative_tests: [expired_operator, invalid_patch, unauthenticated, wrong_action, wrong_workspace]
+    fault_injection_tests: [concurrent_update, duplicate_request, lost_response_after_commit]
   - id: workflowcatalog.activate-version
     phase: 2B
     aggregate_owner: workflowcatalog

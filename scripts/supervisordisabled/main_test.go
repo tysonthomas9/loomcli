@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -379,6 +380,38 @@ func TestOSExecutorStripsAmbientRuntimeSelectors(t *testing.T) {
 	}
 	if got["PWD"] != workDir {
 		t.Fatalf("runner-owned PWD = %q, want %q", got["PWD"], workDir)
+	}
+}
+
+func TestProofEnvironmentOverridesAreExplicitAndValidated(t *testing.T) {
+	sourceRoot := t.TempDir()
+	got, err := proofEnvironmentOverrides(sourceRoot, "4380", "4382", "4383")
+	if err != nil {
+		t.Fatalf("proofEnvironmentOverrides: %v", err)
+	}
+	want := map[string]string{
+		"LOCAL_MODE_FLEETDB_SOURCE_ROOT": sourceRoot,
+		"LOCAL_MODE_FLEETDB_PORT":        "4380",
+		"LOCAL_MODE_API_PORT":            "4382",
+		"LOCAL_MODE_UI_PORT":             "4383",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("overrides = %#v, want %#v", got, want)
+	}
+
+	for _, test := range []struct {
+		name           string
+		fleet, api, ui string
+	}{
+		{name: "invalid", fleet: "abc", api: "4382", ui: "4383"},
+		{name: "privileged", fleet: "80", api: "4382", ui: "4383"},
+		{name: "duplicate", fleet: "4380", api: "4380", ui: "4383"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := proofEnvironmentOverrides(sourceRoot, test.fleet, test.api, test.ui); err == nil {
+				t.Fatal("proofEnvironmentOverrides returned nil error")
+			}
+		})
 	}
 }
 

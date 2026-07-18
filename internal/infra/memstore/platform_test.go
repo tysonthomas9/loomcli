@@ -470,6 +470,43 @@ func TestTaskRunClaimQueuedAssignsPlacementAndHonorsProfileCapacity(t *testing.T
 	}
 }
 
+func TestTaskRunClaimQueuedHonorsExplicitTargetNode(t *testing.T) {
+	ctx := t.Context()
+	s := New()
+	for _, nodeID := range []string{"node-wrong", "node-target"} {
+		if _, err := s.Nodes().Create(ctx, store.NodeCreate{
+			WorkspaceKey: "WS", NodeID: nodeID, RuntimeProvider: domain.RuntimeProviderLocal,
+			DrainState: domain.NodeDrainActive, TTL: time.Minute,
+		}); err != nil {
+			t.Fatalf("Create node %s: %v", nodeID, err)
+		}
+	}
+	created, err := s.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "WS", TaskRunID: "task-run-targeted", TaskID: "WS-TARGET",
+		TargetNodeID: "node-target", Status: domain.TaskRunQueued,
+	})
+	if err != nil {
+		t.Fatalf("Create targeted TaskRun: %v", err)
+	}
+	if created.NodeID != "" || created.TargetNodeID != "node-target" {
+		t.Fatalf("queued TaskRun owner=%q target=%q", created.NodeID, created.TargetNodeID)
+	}
+	if _, err := s.TaskRuns().ClaimQueued(ctx, "WS", store.TaskRunClaim{
+		TaskRunID: created.TaskRunID, NodeID: "node-wrong", LeaseID: "lease-wrong",
+	}); !errors.Is(err, domain.ErrInvalidTransition) {
+		t.Fatalf("wrong-node claim error = %v, want invalid transition", err)
+	}
+	claimed, err := s.TaskRuns().ClaimQueued(ctx, "WS", store.TaskRunClaim{
+		TaskRunID: created.TaskRunID, NodeID: "node-target", LeaseID: "lease-target",
+	})
+	if err != nil {
+		t.Fatalf("target-node claim: %v", err)
+	}
+	if claimed.NodeID != "node-target" || claimed.TargetNodeID != "node-target" || claimed.Status != domain.TaskRunRunning {
+		t.Fatalf("claimed TaskRun = %+v", claimed)
+	}
+}
+
 func TestPlatformRecoverStaleDriverRunsFailsStaleRunsAndReleasesAdmission(t *testing.T) {
 	ctx := t.Context()
 	s := New()
@@ -792,24 +829,39 @@ func TestPlatformDriverRunAndTaskRunLifecycle(t *testing.T) {
 	}); !errors.Is(err, domain.ErrNotOwner) {
 		t.Fatalf("Heartbeat task run wrong owner err = %v, want ErrNotOwner", err)
 	}
-	firstLog, err := s.TaskRuns().AppendLog(ctx, "WS", "task-run-1", store.TaskRunLogAppend{
+	logTimestamp := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	firstAppend := store.TaskRunLogAppend{
+		RequestID:    "task-run-log-1",
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: taskRun.FencingToken,
 		Stream:       "stderr",
 		Text:         "warning\n",
-	})
+		Timestamp:    logTimestamp,
+	}
+	firstLog, err := s.TaskRuns().AppendLog(ctx, "WS", "task-run-1", firstAppend)
 	if err != nil {
 		t.Fatalf("AppendLog first: %v", err)
 	}
 	if firstLog.Sequence != 1 || firstLog.Stream != "stderr" || firstLog.Text != "warning\n" {
 		t.Fatalf("first log = %+v, want stderr warning", firstLog)
 	}
+	replayedLog, err := s.TaskRuns().AppendLog(ctx, "WS", "task-run-1", firstAppend)
+	if err != nil || replayedLog.Sequence != firstLog.Sequence {
+		t.Fatalf("AppendLog replay = %+v err=%v, want committed sequence %d", replayedLog, err, firstLog.Sequence)
+	}
+	conflictingAppend := firstAppend
+	conflictingAppend.Text = "different\n"
+	if _, err := s.TaskRuns().AppendLog(ctx, "WS", "task-run-1", conflictingAppend); !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("AppendLog conflicting replay err = %v, want ErrConflict", err)
+	}
 	secondLog, err := s.TaskRuns().AppendLog(ctx, "WS", "task-run-1", store.TaskRunLogAppend{
+		RequestID:    "task-run-log-2",
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: taskRun.FencingToken,
 		Text:         "default stream\n",
+		Timestamp:    logTimestamp.Add(time.Second),
 	})
 	if err != nil {
 		t.Fatalf("AppendLog second: %v", err)
@@ -825,10 +877,12 @@ func TestPlatformDriverRunAndTaskRunLifecycle(t *testing.T) {
 		t.Fatalf("logs after sequence 1 = %+v, want second log", logs)
 	}
 	if _, err := s.TaskRuns().AppendLog(ctx, "WS", "task-run-1", store.TaskRunLogAppend{
+		RequestID:    "task-run-log-wrong-owner",
 		NodeID:       "node-2",
 		LeaseID:      "lease-1",
 		FencingToken: taskRun.FencingToken,
 		Text:         "bad owner\n",
+		Timestamp:    logTimestamp.Add(2 * time.Second),
 	}); !errors.Is(err, domain.ErrNotOwner) {
 		t.Fatalf("AppendLog wrong owner err = %v, want ErrNotOwner", err)
 	}
@@ -861,11 +915,16 @@ func TestPlatformDriverRunAndTaskRunLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finish task run: %v", err)
 	}
+	if replayedAfterFinish, err := s.TaskRuns().AppendLog(ctx, "WS", "task-run-1", firstAppend); err != nil || replayedAfterFinish.Sequence != firstLog.Sequence {
+		t.Fatalf("AppendLog replay after finish = %+v err=%v, want committed sequence %d", replayedAfterFinish, err, firstLog.Sequence)
+	}
 	if _, err := s.TaskRuns().AppendLog(ctx, "WS", "task-run-1", store.TaskRunLogAppend{
+		RequestID:    "task-run-log-late",
 		NodeID:       "node-1",
 		LeaseID:      "lease-1",
 		FencingToken: taskRun.FencingToken,
 		Text:         "late\n",
+		Timestamp:    logTimestamp.Add(3 * time.Second),
 	}); !errors.Is(err, domain.ErrInvalidTransition) {
 		t.Fatalf("AppendLog terminal err = %v, want ErrInvalidTransition", err)
 	}

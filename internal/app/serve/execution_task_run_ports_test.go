@@ -1,0 +1,341 @@
+package serve
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+type atomicTaskRunPortStub struct{}
+
+func (*atomicTaskRunPortStub) ReplayTaskRunRequest(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (*atomicTaskRunPortStub) RequestTaskRun(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (*atomicTaskRunPortStub) ClaimTaskRun(context.Context, execution.ClaimTaskRunCommand) (execution.ClaimTaskRunResult, error) {
+	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (*atomicTaskRunPortStub) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
+	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (*atomicTaskRunPortStub) ExhaustTaskRunRetries(context.Context, execution.ExhaustTaskRunRetriesCommand) (execution.ExhaustTaskRunRetriesResult, error) {
+	return execution.ExhaustTaskRunRetriesResult{}, execution.ErrUnavailable
+}
+
+func TestExecutionTaskRunPortsRequireAtomicCommandsWithoutStoreFallback(t *testing.T) {
+	st := memstore.New()
+	commands := &atomicTaskRunPortStub{}
+	taskRuns, _, err := NewExecutionTaskRunPorts(ExecutionTaskRunPortDependencies{
+		Requests: commands, Claims: commands, Requeues: commands, RetryExhaustion: commands,
+		Nodes: st.Nodes(), WorkerProfiles: st.WorkerProfiles(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskRuns.Requests != commands || taskRuns.Claims != commands || taskRuns.Requeues != commands || taskRuns.RetryExhaustion != commands {
+		t.Fatalf("TaskRun command ports were not retained exactly: %+v", taskRuns)
+	}
+}
+
+func TestExecutionWorkerNodePortsPreserveDrainAndOwnSchedulingReads(t *testing.T) {
+	ctx := context.Background()
+	st, _ := setupExecutionTaskRunParent(t, ctx)
+	commands := &atomicTaskRunPortStub{}
+	_, workers, err := NewExecutionTaskRunPorts(ExecutionTaskRunPortDependencies{
+		Requests: commands, Claims: commands, Requeues: commands, RetryExhaustion: commands,
+		Nodes: st.Nodes(), WorkerProfiles: st.WorkerProfiles(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := execution.RegisterWorkerNodeCommand{
+		WorkspaceKey: "WS", RequestID: "register-node-1", NodeID: "worker-node-1", OwnerActor: "loom",
+		RuntimeProvider: "local", Labels: []string{"task-worker"}, Capabilities: []string{"local-noop", "repo"},
+		ToolInventory: []string{"loom"}, TTL: time.Minute, RegisteredAt: time.Now().UTC(),
+	}
+	if _, err := workers.Registration.RegisterWorkerNode(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workers.Drain.SetWorkerNodeDrain(ctx, execution.SetWorkerNodeDrainCommand{
+		WorkspaceKey: "WS", RequestID: "drain-node-1", NodeID: command.NodeID,
+		DrainState: execution.WorkerNodeDraining, ChangedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Registration refreshes inventory but must not silently reactivate a
+	// deliberately draining worker.
+	node, err := workers.Registration.RegisterWorkerNode(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node.DrainState != execution.WorkerNodeDraining {
+		t.Fatalf("registration reset drain state to %q", node.DrainState)
+	}
+	if _, err := workers.Heartbeats.HeartbeatWorkerNode(ctx, execution.HeartbeatWorkerNodeCommand{
+		WorkspaceKey: "WS", RequestID: "heartbeat-node-1", NodeID: command.NodeID,
+		TTL: time.Minute, HeartbeatAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adapter := workers.Registration.(*executionTaskRunPortsAdapter)
+	scheduling, err := adapter.CheckTaskRunScheduling(ctx, execution.TaskRunSchedulingQuery{
+		WorkspaceKey: "WS", TargetNodeID: command.NodeID, ProviderProfile: "local-noop", RequiredFeatures: []string{"repo"},
+	})
+	if err != nil || scheduling.Schedulable || scheduling.ReasonCode != "no_live_capable_node" {
+		t.Fatalf("draining scheduling=%+v err=%v", scheduling, err)
+	}
+	if _, err := workers.Drain.SetWorkerNodeDrain(ctx, execution.SetWorkerNodeDrainCommand{
+		WorkspaceKey: "WS", RequestID: "activate-node-1", NodeID: command.NodeID,
+		DrainState: execution.WorkerNodeActive, ChangedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scheduling, err = adapter.CheckTaskRunScheduling(ctx, execution.TaskRunSchedulingQuery{
+		WorkspaceKey: "WS", TargetNodeID: command.NodeID, ProviderProfile: "local-noop", RequiredFeatures: []string{"repo"},
+	})
+	if err != nil || !scheduling.Schedulable {
+		t.Fatalf("active scheduling=%+v err=%v", scheduling, err)
+	}
+}
+
+type fleetExecutionTransportStub struct {
+	claim                 fleetdb.ExecutionClaimAndStartCommand
+	workItemClaim         fleetdb.ExecutionDriverRunWorkItemClaimCommand
+	workItemRelease       fleetdb.ExecutionDriverRunWorkItemReleaseCommand
+	workItemClaimResult   *fleetdb.ExecutionDriverRunWorkItemResult
+	workItemReleaseResult *fleetdb.ExecutionDriverRunWorkItemResult
+}
+
+func (*fleetExecutionTransportStub) RequestTaskRun(context.Context, fleetdb.ExecutionTaskRunRequestCommand) (*fleetdb.ExecutionTaskRunRequestResult, error) {
+	return nil, nil
+}
+
+func (stub *fleetExecutionTransportStub) ClaimAndStartTaskRun(_ context.Context, command fleetdb.ExecutionClaimAndStartCommand) (*fleetdb.ExecutionClaimAndStartResult, error) {
+	stub.claim = command
+	taskRunID := command.TaskRunID
+	if taskRunID == "" {
+		taskRunID = "task-run-next"
+	}
+	return &fleetdb.ExecutionClaimAndStartResult{
+		TaskRun: &domain.TaskRun{
+			WorkspaceKey: command.WorkspaceKey, TaskRunID: taskRunID, DriverRunID: "run-1", DriverStepID: "step-1",
+			TaskID: "TASK-1", Status: domain.TaskRunRunning, NodeID: command.NodeID, LeaseID: command.LeaseID, FencingToken: 7,
+		},
+		DriverStep: &domain.DriverStep{
+			WorkspaceKey: command.WorkspaceKey, StepID: "step-1", DriverRunID: "run-1",
+			TaskRunID: taskRunID, Status: domain.DriverStepRunning, ActionLedgerID: "task-run-start:" + command.CommandID,
+		},
+		Issue: &fleetdb.ExecutionIssue{ID: "TASK-1"},
+		Action: &fleetdb.ExecutionActionLedger{
+			WorkspaceKey: command.WorkspaceKey, ActionID: "task-run-start:" + command.CommandID,
+			ActionType: "start_task_run", IdempotencyKey: "task-run-start:" + command.CommandID, TargetRef: taskRunID,
+		},
+		Replayed: true,
+	}, nil
+}
+
+func (*fleetExecutionTransportStub) HeartbeatTaskRun(context.Context, string, string, store.TaskRunHeartbeat) (*domain.TaskRun, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) RequeueTaskRun(context.Context, string, string, store.TaskRunRequeue) (*domain.TaskRun, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) CompleteTaskRun(context.Context, string, string, store.TaskRunComplete) (*domain.TaskRun, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) AppendTaskRunLog(context.Context, string, string, store.TaskRunLogAppend) (*domain.TaskRunLogEntry, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) RequeueTaskRunAndResetStep(context.Context, fleetdb.ExecutionTaskRunRequeueCommand) (*fleetdb.ExecutionTaskRunRequeueResult, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) ExhaustTaskRunRetries(context.Context, fleetdb.ExecutionTaskRunRetryExhaustionCommand) (*fleetdb.ExecutionTaskRunRetryExhaustionResult, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) ClaimDriverRun(context.Context, fleetdb.ExecutionDriverRunClaimCommand) (*domain.DriverRun, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) HeartbeatDriverRun(context.Context, fleetdb.ExecutionDriverRunHeartbeatCommand) (*domain.DriverRun, error) {
+	return nil, nil
+}
+
+func (stub *fleetExecutionTransportStub) ClaimDriverRunWorkItem(_ context.Context, command fleetdb.ExecutionDriverRunWorkItemClaimCommand) (*fleetdb.ExecutionDriverRunWorkItemResult, error) {
+	stub.workItemClaim = command
+	return stub.workItemClaimResult, nil
+}
+
+func (stub *fleetExecutionTransportStub) ReleaseDriverRunWorkItem(_ context.Context, command fleetdb.ExecutionDriverRunWorkItemReleaseCommand) (*fleetdb.ExecutionDriverRunWorkItemResult, error) {
+	stub.workItemRelease = command
+	return stub.workItemReleaseResult, nil
+}
+
+func (*fleetExecutionTransportStub) SuspendDriverRun(context.Context, fleetdb.ExecutionDriverRunSuspendCommand) (*domain.DriverRun, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) FinalizeDriverRun(context.Context, fleetdb.ExecutionDriverRunFinalizeCommand) (*domain.DriverRun, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) RecoverStaleChildTaskRuns(context.Context, fleetdb.ExecutionDriverRunStaleTaskRecoveryCommand) (*fleetdb.ExecutionDriverRunStaleTaskRecoveryResult, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) StartChildDriverRun(context.Context, fleetdb.ExecutionDriverRunChildStartCommand) (*fleetdb.ExecutionDriverRunChildStartResult, error) {
+	return nil, nil
+}
+
+func (*fleetExecutionTransportStub) CascadeChildDriverRuns(context.Context, fleetdb.ExecutionDriverRunCascadeCommand) (*fleetdb.ExecutionDriverRunCascadeResult, error) {
+	return nil, nil
+}
+
+func TestFleetTaskRunClaimPortUsesAtomicTransportAndRetainsTokenOnlyInternally(t *testing.T) {
+	transport := &fleetExecutionTransportStub{}
+	port, err := NewFleetTaskRunClaimPort(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := port.ClaimTaskRun(context.Background(), execution.ClaimTaskRunCommand{
+		WorkspaceKey: "WS", RequestID: "claim-1", TaskRunID: "task-run-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "secret", LeaseTTL: time.Minute, ClaimedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport.claim.LeaseToken != "secret" || result.Run.Owner.LeaseToken != "secret" ||
+		result.Step == nil || result.Step.TaskRunID != "task-run-1" || !result.Replay {
+		t.Fatalf("transport=%+v result=%+v", transport.claim, result)
+	}
+}
+
+func TestFleetTaskRunClaimPortPreservesClaimNextAndLinkedStep(t *testing.T) {
+	transport := &fleetExecutionTransportStub{}
+	port, err := NewFleetTaskRunClaimPort(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := port.ClaimTaskRun(context.Background(), execution.ClaimTaskRunCommand{
+		WorkspaceKey: "WS", RequestID: "claim-next-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "secret", LeaseTTL: time.Minute, ClaimedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport.claim.TaskRunID != "" || result.Run == nil || result.Run.TaskRunID != "task-run-next" ||
+		result.Step == nil || result.Step.TaskRunID != result.Run.TaskRunID || result.Step.Status != "running" {
+		t.Fatalf("transport=%+v result=%+v", transport.claim, result)
+	}
+}
+
+func TestFleetDriverRunWorkItemPortForwardsOpaqueOwnerAndClaimAction(t *testing.T) {
+	now := time.Now().UTC()
+	appliedAt := now
+	claimRequestID := execution.ClaimDriverRunWorkItemRequestID("run-1", "TASK-1")
+	claimActionID := execution.DriverRunWorkItemClaimActionID(claimRequestID)
+	transport := &fleetExecutionTransportStub{workItemClaimResult: &fleetdb.ExecutionDriverRunWorkItemResult{
+		Issue: &fleetdb.ExecutionIssue{Workspace: "WS", ID: "TASK-1", Status: "in_progress", Assignee: "driver-run:run-1", UpdatedAt: now},
+		Action: &fleetdb.ExecutionActionLedger{
+			WorkspaceKey: "WS", ActionID: claimActionID, IdempotencyKey: claimActionID,
+			ActionType: "claim_work_item", TargetRef: "TASK-1", RequestedBy: "driver-run:run-1", Status: "applied",
+			CreatedAt: now, AppliedAt: &appliedAt,
+		},
+	}}
+	port, err := newFleetDriverRunCommandPort(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := execution.Owner{
+		ResourceKind: execution.ResourceDriverRun, ResourceID: "run-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "raw-secret", FencingToken: 7,
+	}
+	result, err := port.ClaimDriverRunWorkItem(context.Background(), execution.ClaimDriverRunWorkItemCommand{
+		WorkspaceKey: "WS", RequestID: claimRequestID, Owner: owner, WorkItemID: "TASK-1", ClaimTTL: time.Minute, ClaimedAt: now,
+	})
+	if err != nil || result.Action == nil || result.Action.ActionID != claimActionID {
+		t.Fatalf("claim result=%+v err=%v", result, err)
+	}
+	if transport.workItemClaim.LeaseToken != "raw-secret" || transport.workItemClaim.FencingToken != 7 ||
+		transport.workItemClaim.RunID != "run-1" || transport.workItemClaim.TaskID != "TASK-1" {
+		t.Fatalf("claim transport command=%+v", transport.workItemClaim)
+	}
+
+	releaseAt := now.Add(time.Minute)
+	transport.workItemReleaseResult = &fleetdb.ExecutionDriverRunWorkItemResult{
+		Issue:  &fleetdb.ExecutionIssue{Workspace: "WS", ID: "TASK-1", Status: "open", UpdatedAt: releaseAt},
+		Action: &fleetdb.ExecutionActionLedger{WorkspaceKey: "WS", ActionID: "release-action"},
+	}
+	releaseRequestID := execution.ReleaseDriverRunWorkItemRequestID("run-1", "TASK-1")
+	if _, err := port.ReleaseDriverRunWorkItem(context.Background(), execution.ReleaseDriverRunWorkItemCommand{
+		WorkspaceKey: "WS", RequestID: releaseRequestID, Owner: owner, WorkItemID: "TASK-1",
+		ClaimActionID: claimActionID, ReleasedAt: releaseAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if transport.workItemRelease.LeaseToken != "raw-secret" || transport.workItemRelease.ClaimActionID != claimActionID ||
+		transport.workItemRelease.CommandID != releaseRequestID {
+		t.Fatalf("release transport command=%+v", transport.workItemRelease)
+	}
+}
+
+func TestExecutionTaskRunSnapshotPreservesQueuedTargetNodeWithoutInventingOwner(t *testing.T) {
+	snapshot, err := executionTaskRunSnapshot(&domain.TaskRun{
+		WorkspaceKey: "WS", TaskRunID: "task-run-targeted", DriverRunID: "run-1",
+		TaskID: "TASK-1", Status: domain.TaskRunQueued, TargetNodeID: "target-node-1",
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.TargetNodeID != "target-node-1" || snapshot.Owner != (execution.Owner{}) {
+		t.Fatalf("queued snapshot target=%q owner=%+v", snapshot.TargetNodeID, snapshot.Owner)
+	}
+}
+
+func setupExecutionTaskRunParent(t *testing.T, ctx context.Context) (*memstore.Store, *domain.DriverRun) {
+	t.Helper()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver", OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", VersionID: "version-1", DriverID: "driver-1", Version: 1,
+		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle", ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parent, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: "WS", RunID: "run-1", DriverID: "driver-1", DriverVersionID: "version-1",
+		SourceKind: "manual", SourceRef: "test", IdempotencyKey: "run-request-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err = st.DriverRuns().Claim(ctx, "WS", parent.RunID, "driver-node", "driver-lease")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st, parent
+}

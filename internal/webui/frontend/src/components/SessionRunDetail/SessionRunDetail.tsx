@@ -71,6 +71,23 @@ function formatDuration(s: number | undefined): string {
   return `${m}m ${rem.toFixed(0)}s`;
 }
 
+function evidenceLabel(value: string | undefined): string {
+  return (value ?? "").replace(/_/g, " ").trim();
+}
+
+function safeExternalURL(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+      return parsed.toString();
+    }
+  } catch {
+    // Invalid or relative metadata is not an external navigation target.
+  }
+  return null;
+}
+
 function runErrorSummary(session: SessionRecord): string | null {
   if (session.last_error) return session.last_error;
   if (session.error_class) return session.error_class;
@@ -350,6 +367,17 @@ export function SessionRunDetail({
     (session.cache_read_tokens ?? 0) +
     (session.cache_write_tokens ?? 0);
   const runError = runErrorSummary(session);
+  const executionBranch = session.local_branch || session.github_branch;
+  const githubPRURL = safeExternalURL(session.github_pr_url);
+  const hasExecutionEvidence = Boolean(
+    session.runtime_strategy ||
+    session.delivery ||
+    session.patch_back_status ||
+    session.logs_ref ||
+    executionBranch ||
+    session.head_sha ||
+    githubPRURL,
+  );
 
   return (
     <div className={styles.detail} data-testid="session-detail-view">
@@ -443,6 +471,77 @@ export function SessionRunDetail({
             </div>
           )}
         </div>
+        {hasExecutionEvidence && (
+          <div
+            className={styles.statRow}
+            data-testid="session-execution-evidence"
+          >
+            {session.runtime_strategy && (
+              <div className={styles.stat}>
+                <div className={styles.statLabel}>Runtime</div>
+                <div
+                  className={styles.statValue}
+                  title={session.runtime_strategy}
+                >
+                  {evidenceLabel(session.runtime_strategy)}
+                </div>
+              </div>
+            )}
+            {session.delivery && (
+              <div className={styles.stat}>
+                <div className={styles.statLabel}>Delivery</div>
+                <div className={styles.statValue} title={session.delivery}>
+                  {evidenceLabel(session.delivery)}
+                </div>
+              </div>
+            )}
+            {session.patch_back_status && (
+              <div className={styles.stat}>
+                <div className={styles.statLabel}>Patch back</div>
+                <div className={styles.statValue}>
+                  {evidenceLabel(session.patch_back_status)}
+                </div>
+              </div>
+            )}
+            {executionBranch && (
+              <div className={styles.stat}>
+                <div className={styles.statLabel}>Branch</div>
+                <div className={styles.statValue} title={executionBranch}>
+                  {executionBranch}
+                </div>
+              </div>
+            )}
+            {session.head_sha && (
+              <div className={styles.stat}>
+                <div className={styles.statLabel}>Head</div>
+                <div className={styles.statValue} title={session.head_sha}>
+                  {session.head_sha.slice(0, 12)}
+                </div>
+              </div>
+            )}
+            {session.logs_ref && (
+              <div className={styles.stat}>
+                <div className={styles.statLabel}>Logs</div>
+                <div className={styles.statValue} title={session.logs_ref}>
+                  {session.logs_ref}
+                </div>
+              </div>
+            )}
+            {githubPRURL && (
+              <div className={styles.stat}>
+                <div className={styles.statLabel}>Pull request</div>
+                <a
+                  className={styles.statValue}
+                  href={githubPRURL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open PR
+                </a>
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {session.files_touched && session.files_touched.length > 0 && (

@@ -670,8 +670,10 @@ paths:
       description: |
         Closes multiple issues in a single request.
 
-        **Atomicity:** Best-effort. Attempts all closures; issues that are
-        already closed are skipped (not counted as errors).
+        **Atomicity:** Non-atomic and ordered. Issues are closed in request
+        order; already-closed issues are skipped. Processing stops at the
+        first other error, so earlier IDs may already be closed when an active
+        typed TaskRun generation produces a 409 conflict.
 
         **Limits:** No explicit limit on the number of issue IDs.
       operationId: batchCloseIssues
@@ -688,6 +690,8 @@ paths:
           description: Issues closed (best-effort)
         "400":
           $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "413":
           $ref: "#/components/responses/BodyTooLarge"
         "500":
@@ -717,7 +721,11 @@ paths:
     patch:
       tags: [Issues]
       summary: Update issue
-      description: Partial update. Only provided fields are changed.
+      description: |
+        Partial update. Only provided fields are changed. Content-only edits,
+        including design edits, remain allowed while a typed TaskRun is active.
+        A status mutation returns 409 while the issue has an active typed
+        TaskRun claim generation.
       operationId: updateIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -738,6 +746,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "413":
           $ref: "#/components/responses/BodyTooLarge"
         "500":
@@ -748,7 +758,10 @@ paths:
       summary: Delete issue
       description: |
         Deletes the issue and all associated data (indexes, dependencies, comments).
-        Returns 409 `already_claimed` while a live worker holds the issue claim.
+        Returns 409 while a live worker or typed TaskRun claim generation owns
+        the issue. Typed terminal commands retire their mutable generation and
+        actor lock, after which ordinary post-terminal deletion is allowed;
+        the permanent DriverRun/WorkItem-to-TaskRun execution evidence remains.
       operationId: deleteIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -774,7 +787,7 @@ paths:
         Closes a single issue. Idempotent: closing an already-closed issue
         returns 200 with the current issue (no error), matching batch/close's
         per-item no-op semantics. Use batch/close for closing multiple issues
-        at once.
+        at once. Returns 409 while a typed TaskRun claim generation is active.
       operationId: closeIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -793,6 +806,8 @@ paths:
                 $ref: "#/components/schemas/Issue"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -805,7 +820,8 @@ paths:
       tags: [Issues]
       summary: Reopen issue
       description: |
-        Reopens a closed issue. Returns 409 if the issue is not closed.
+        Reopens a closed issue. Returns 409 if the issue is not closed or a
+        typed TaskRun claim generation is active.
       operationId: reopenIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -833,7 +849,8 @@ paths:
       summary: Defer issue
       description: |
         Defers an issue until a specified time. The issue will be excluded from
-        the ready queue until `defer_until` has passed.
+        the ready queue until `defer_until` has passed. Returns 409 while a
+        typed TaskRun claim generation is active.
       operationId: deferIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -859,6 +876,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -872,7 +891,8 @@ paths:
       summary: Undefer issue
       description: |
         Removes the deferral from an issue, making it immediately eligible
-        for the ready queue (if unblocked and unassigned).
+        for the ready queue (if unblocked and unassigned). Returns 409 while a
+        typed TaskRun claim generation is active.
       operationId: undeferIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -907,7 +927,8 @@ paths:
       summary: Claim issue
       description: |
         Atomically acquires a lock on the issue for the actor. Transitions
-        the issue to in_progress status and sets the assignee.
+        the issue to in_progress status and sets the assignee. Returns 409 while
+        a typed TaskRun claim generation is active.
       operationId: claimIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -952,7 +973,8 @@ paths:
       summary: Assign issue
       description: |
         Sets or clears an issue assignee without claiming a work lock. Use the
-        claim endpoint for in_progress work ownership.
+        claim endpoint for in_progress work ownership. Returns 409 while a
+        typed TaskRun claim generation is active.
       operationId: assignIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -973,6 +995,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1014,7 +1038,9 @@ paths:
         Releases only the distributed claim lock without changing the issue's
         status or assignee. Used by supervisors to drop the lock after the
         agent has already transitioned the issue. Idempotent: a missing lock
-        returns 204.
+        returns 204. Returns 409 when a different actor holds the generic lock
+        or while an active typed TaskRun generation owns the issue; only the
+        owning typed terminal command may retire that generation.
       operationId: releaseIssueLock
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -1022,7 +1048,7 @@ paths:
         "204":
           description: Lock released (or already absent)
         "409":
-          description: A different actor holds the lock
+          description: A different actor holds the lock or an active typed TaskRun generation owns the issue
           content:
             application/json:
               schema:
@@ -1042,6 +1068,8 @@ paths:
       description: |
         Releases a previously claimed issue back to open status. Clears the
         assignee and makes the issue available in the ready queue again.
+        Returns 409 while a typed TaskRun claim generation is active; the
+        owning typed terminal command must retire that generation first.
       operationId: releaseIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -4090,6 +4118,9 @@ paths:
     post:
       tags: [Action Ledger]
       summary: Create an idempotent action ledger record
+      description: >-
+        Service-actor-only execution journal mutation. Human bearer and
+        developer API-key identities are rejected.
       operationId: createActionLedger
       requestBody:
         required: true
@@ -4106,6 +4137,8 @@ paths:
                 $ref: "#/components/schemas/ActionLedger"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
     get:
@@ -4165,6 +4198,9 @@ paths:
     post:
       tags: [Action Ledger]
       summary: Complete a pending action ledger record
+      description: >-
+        Service-actor-only execution journal mutation. Human bearer and
+        developer API-key identities are rejected.
       operationId: completeActionLedger
       requestBody:
         required: true
@@ -4181,6 +4217,8 @@ paths:
                 $ref: "#/components/schemas/ActionLedger"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -4211,6 +4249,8 @@ paths:
                 $ref: "#/components/schemas/DriverRun"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -4222,6 +4262,13 @@ paths:
     post:
       tags: [Driver Runs]
       summary: Create a driver run
+      description: >-
+        Authenticated operator submission. The idempotency_key is the durable
+        request identity: exact replay returns the original committed DriverRun
+        snapshot even after its lifecycle advances, while reuse for divergent
+        run intent returns 409. Creation and its lifecycle event commit
+        atomically. This endpoint creates root runs only; composed children must
+        use the owner-fenced /driver-runs/{run_id}/children/start command.
       operationId: createDriverRun
       requestBody:
         required: true
@@ -4296,6 +4343,8 @@ paths:
     post:
       tags: [Driver Runs]
       summary: Recover stale running driver runs
+      description: Registered runtime-host service command; human bearer and
+        developer API-key identities are rejected.
       operationId: recoverStaleDriverRuns
       requestBody:
         required: true
@@ -4575,7 +4624,13 @@ paths:
     post:
       tags: [Driver Runs]
       summary: Claim a queued driver run
+      description: >-
+        Registered-runtime service command. Human bearer and developer API-key
+        identities are rejected. The raw lease token is required, hashed at the
+        API boundary, and never returned.
       operationId: claimDriverRun
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -4591,6 +4646,8 @@ paths:
                 $ref: "#/components/schemas/DriverRun"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -4603,7 +4660,12 @@ paths:
     post:
       tags: [Driver Runs]
       summary: Heartbeat a running driver run
+      description: >-
+        Service-actor-only owner command. The raw lease token is required,
+        hashed at the API boundary, and never returned.
       operationId: heartbeatDriverRun
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -4631,7 +4693,12 @@ paths:
     post:
       tags: [Driver Runs]
       summary: Finish a running driver run
+      description: >-
+        Service-actor-only owner command. The raw lease token is required,
+        hashed at the API boundary, and never returned.
       operationId: finishDriverRun
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -4661,7 +4728,12 @@ paths:
     post:
       tags: [Driver Runs]
       summary: Recover stale task runs owned by a driver run
+      description: >-
+        Service-actor-only parent-owner command. The raw lease token is
+        required, hashed at the API boundary, and never returned.
       operationId: recoverStaleTaskRuns
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -4684,6 +4756,204 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/v1/{workspace}/driver-runs/{run_id}/work-items/{task_id}/claim:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverRunID"
+      - $ref: "#/components/parameters/TaskID"
+    post:
+      tags: [Driver Runs]
+      summary: Atomically claim a work item for an owned driver run
+      description: >-
+        Validates the live DriverRun owner tuple and derives the issue actor as
+        driver-run:{run_id} in the same transaction that claims the issue and
+        commits an applied ActionLedger receipt. The caller cannot supply the
+        issue actor. Requires an authenticated service actor.
+      operationId: claimDriverRunWorkItem
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverRunWorkItemClaimRequest" }
+      responses:
+        "200":
+          description: Work-item claim committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverRunWorkItemCommandResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/driver-runs/{run_id}/work-items/{task_id}/release:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverRunID"
+      - $ref: "#/components/parameters/TaskID"
+    post:
+      tags: [Driver Runs]
+      summary: Atomically release a work item owned by a driver run
+      description: >-
+        Validates the live DriverRun owner tuple and the exact claim action.
+        A claim already bound to a TaskRun cannot be released. The release is
+        immutable and idempotent and requires an authenticated service actor.
+      operationId: releaseDriverRunWorkItem
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverRunWorkItemReleaseRequest" }
+      responses:
+        "200":
+          description: Work-item release committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverRunWorkItemCommandResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/driver-runs/{run_id}/task-runs/request:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverRunID"
+    post:
+      tags: [Task Runs]
+      summary: Atomically request a queued task run under an owned driver run
+      description: >-
+        Commits the queued TaskRun, linked DriverStep, queued event, and applied
+        ActionLedger receipt in one parent-owner-fenced transaction. The route
+        is registered only for stores implementing the atomic request port and
+        requires an authenticated service actor.
+      operationId: requestTaskRunAtomic
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskRunRequestAtomicRequest" }
+      responses:
+        "200":
+          description: Task run request committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskRunRequestAtomicResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/driver-runs/{run_id}/children/start:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverRunID"
+    post:
+      tags: [Driver Runs]
+      summary: Atomically start a deterministic child driver run
+      description: >-
+        Validates the live parent owner and persisted lineage graph in the same
+        transaction that creates the queued child, lifecycle event, and applied
+        action receipt. Pre-upgrade Redis lineage depths are backfilled in that
+        transaction. Requires an authenticated service actor.
+      operationId: startChildDriverRunAtomic
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverRunChildStartRequest" }
+      responses:
+        "200":
+          description: Child run committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverRunChildStartResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/driver-runs/{run_id}/commands/cascade-children:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverRunID"
+    post:
+      tags: [Driver Runs]
+      summary: Atomically cascade a terminal parent to its child runs
+      description: >-
+        Live owner lane. Queued descendants are cancelled recursively, running
+        descendants receive a durable cancellation request, and terminal or
+        suspended descendants form traversal boundaries. Callers cannot select
+        the system-recovery lane through this request. Requires an authenticated
+        service actor.
+      operationId: cascadeChildDriverRunsAtomic
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverRunCascadeRequest" }
+      responses:
+        "200":
+          description: Cascade committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverRunCascadeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/driver-runs/{run_id}/commands/recover-child-cascade:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverRunID"
+    post:
+      tags: [Driver Runs]
+      summary: Recover a terminal parent's deterministic child cascade
+      description: >-
+        System-recovery lane used by the durable DriverRun outcome reconciler.
+        The request shape contains no live owner and converges on the same
+        immutable cascade receipt as the live lane. Requires a dedicated
+        authenticated service permission.
+      operationId: recoverChildDriverRunCascadeAtomic
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverRunCascadeRecoveryRequest" }
+      responses:
+        "200":
+          description: Cascade recovered or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverRunCascadeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
   /api/v1/{workspace}/driver-runs/{run_id}/steps:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -4691,6 +4961,11 @@ paths:
     post:
       tags: [Driver Steps]
       summary: Create a driver step under a driver run
+      description: >-
+        Deprecated rolling-compatibility write for older Loom deployments.
+        Service actor only; it is excluded from Phase 4 capability readiness.
+        New execution code uses the atomic TaskRun request command.
+      deprecated: true
       operationId: createDriverRunStep
       requestBody:
         required: true
@@ -4750,6 +5025,11 @@ paths:
     post:
       tags: [Driver Steps]
       summary: Create a driver step
+      description: >-
+        Deprecated rolling-compatibility write for older Loom deployments.
+        Service actor only; it is excluded from Phase 4 capability readiness.
+        New execution code uses the atomic TaskRun request command.
+      deprecated: true
       operationId: createDriverStep
       requestBody:
         required: true
@@ -4826,6 +5106,12 @@ paths:
     patch:
       tags: [Driver Steps]
       summary: Update a driver step
+      description: >-
+        Deprecated rolling-compatibility write for older Loom deployments.
+        Service actor only; it is excluded from Phase 4 capability readiness.
+        New execution code uses atomic request, retry, exhaustion, completion,
+        and terminal-repair commands.
+      deprecated: true
       operationId: updateDriverStep
       requestBody:
         required: true
@@ -4849,12 +5135,56 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/v1/{workspace}/driver-steps/{step_id}/repair-terminal:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverStepID"
+    post:
+      tags: [Driver Steps]
+      summary: Repair a terminal driver step from its committed task run
+      description: >-
+        System-only convergence command for a terminal TaskRun whose parent
+        DriverStep projection was interrupted. Requires an authenticated
+        service actor with the dedicated repair permission. Repeating an
+        identical command_id returns replayed=true; conflicting reuse is
+        rejected.
+      operationId: repairTerminalDriverStep
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverStepTerminalRepairRequest"
+      responses:
+        "200":
+          description: Terminal driver step repaired or idempotently replayed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverStepTerminalRepairResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /api/v1/{workspace}/task-runs:
     parameters:
       - $ref: "#/components/parameters/Workspace"
     post:
       tags: [Task Runs]
       summary: Create a task run
+      description: >-
+        Deprecated rolling-compatibility write for older Loom deployments.
+        Service actor only; it does not certify TaskRun plus DriverStep request
+        atomicity and is excluded from Phase 4 capability readiness. This port
+        accepts standalone TaskRuns only: driver_run_id, driver_step_id, and
+        runtime_metadata.execution_request_id are rejected. New execution code
+        uses driver-runs/{run_id}/task-runs/request.
+      deprecated: true
       operationId: createTaskRun
       requestBody:
         required: true
@@ -4871,6 +5201,8 @@ paths:
                 $ref: "#/components/schemas/TaskRun"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -4915,7 +5247,19 @@ paths:
     post:
       tags: [Task Runs]
       summary: Claim a queued task run
+      description: >-
+        Deprecated compatibility claim. Service actor only. Atomically creates
+        the TaskRun generic Lease and assigns a monotonic fencing token, but it
+        does not perform the Phase 4 Issue-claim plus TaskRun-start transaction.
+        X-Lease-Token is mandatory; new execution code uses claim-and-start or
+        claim-next-and-start.
+      deprecated: true
       operationId: claimQueuedTaskRun
+      parameters:
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -4929,6 +5273,94 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TaskRun"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/{workspace}/task-runs/claim-next-and-start:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Task Runs]
+      summary: Atomically claim the next eligible issue and start its task run
+      description: >-
+        Registered-runtime service command; human bearer and developer API-key
+        identities are rejected. It selects the oldest eligible queued TaskRun
+        and atomically applies the
+        same Issue claim, Lease creation, fencing-token assignment, DriverStep
+        transition, and ActionLedger commit as the ID-addressed command.
+        Returns 204 when no eligible TaskRun exists. X-Lease-Token is
+        mandatory and is stored only as a hash.
+      operationId: claimNextIssueAndStartTaskRun
+      parameters:
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskRunClaimAndStartRequest"
+      responses:
+        "200":
+          description: Next eligible Issue claimed and TaskRun started, or idempotent result replayed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunClaimAndStartResult"
+        "204":
+          description: No eligible queued TaskRun exists
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/{workspace}/task-runs/{task_run_id}/claim-and-start:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/TaskRunID"
+    post:
+      tags: [Task Runs]
+      summary: Atomically claim an issue and start its queued task run
+      description: >-
+        Registered-runtime service command; human bearer and developer API-key
+        identities are rejected. In one backend transaction, it validates the
+        queued TaskRun and claimable
+        Issue, assigns the TaskRun owner and monotonic fencing token, creates
+        its generic task_run Lease, claims the Issue, and records the applied
+        ActionLedger entry. Repeating the same command_id and payload returns
+        the committed result with replayed=true; conflicting command reuse is
+        rejected. X-Lease-Token is mandatory and is stored only as a hash.
+      operationId: claimIssueAndStartTaskRun
+      parameters:
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskRunClaimAndStartRequest"
+      responses:
+        "200":
+          description: Issue claimed and TaskRun started, or idempotent result replayed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskRunClaimAndStartResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "403":
@@ -4963,13 +5395,12 @@ paths:
     post:
       tags: [Task Runs]
       summary: Append a task run log entry
+      description: >-
+        Service-actor-only owner command. The raw lease token is required,
+        hashed at the API boundary, and never returned.
       operationId: appendTaskRunLog
       parameters:
-        - name: X-Lease-Token
-          in: header
-          required: false
-          description: Required when the TaskRun lease is backed by a generic task_run lease.
-          schema: { type: string }
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -5024,13 +5455,14 @@ paths:
     post:
       tags: [Task Runs]
       summary: Finish a task run
+      description: >-
+        Deprecated compatibility terminal write. Service actor only; new
+        execution code uses complete or exhaust-retries so all linked
+        projections converge under the Phase 4 contract.
+      deprecated: true
       operationId: finishTaskRun
       parameters:
-        - name: X-Lease-Token
-          in: header
-          required: false
-          description: Required when the TaskRun lease is backed by a generic task_run lease.
-          schema: { type: string }
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -5060,13 +5492,12 @@ paths:
     post:
       tags: [Task Runs]
       summary: Heartbeat a running task run
+      description: >-
+        Service-actor-only owner command. The raw lease token is required,
+        hashed at the API boundary, and never returned.
       operationId: heartbeatTaskRun
       parameters:
-        - name: X-Lease-Token
-          in: header
-          required: false
-          description: Required when the TaskRun lease is backed by a generic task_run lease.
-          schema: { type: string }
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -5096,13 +5527,14 @@ paths:
     post:
       tags: [Task Runs]
       summary: Requeue a running task run
+      description: >-
+        Deprecated compatibility retry write. Service actor only; it does not
+        certify the atomic linked DriverStep reset and receipt provided by
+        requeue-and-reset-step, which new execution code must use.
+      deprecated: true
       operationId: requeueTaskRun
       parameters:
-        - name: X-Lease-Token
-          in: header
-          required: false
-          description: Required when the TaskRun lease is backed by a generic task_run lease.
-          schema: { type: string }
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -5125,6 +5557,90 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/v1/{workspace}/task-runs/{task_run_id}/requeue-and-reset-step:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/TaskRunID"
+    post:
+      tags: [Task Runs]
+      summary: Atomically requeue a task run and reset its linked driver step
+      description: >-
+        Service-actor-only owner-fenced retry command that commits the queued
+        TaskRun projection, linked queued DriverStep, queued event, action, and
+        immutable retry receipt together. X-Lease-Token is mandatory, hashed
+        at the API boundary, and never returned.
+      operationId: requeueTaskRunAndResetStep
+      parameters:
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskRunRequeueAtomicRequest" }
+      responses:
+        "200":
+          description: Retry projection committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskRunRequeueAtomicResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/task-runs/{task_run_id}/exhaust-retries:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/TaskRunID"
+    post:
+      tags: [Task Runs]
+      summary: Atomically exhaust task-run retries and conditionally block its linked task
+      description: |
+        Service-actor-only owner-fenced terminal command. FleetDB atomically
+        commits the failed TaskRun, TaskRun lease release, completion receipt,
+        terminal event, and applied action. If the TaskRun's exact durable Work
+        Item generation is still current, the same transaction also blocks and
+        unassigns that Issue. If a successor generation won, the stale TaskRun
+        still terminalizes its own Execution records but cannot rewrite the
+        successor Issue. A defensively deleted Issue is returned as `null`.
+
+        The action response reference is the canonical immutable applied
+        outcome; `committed.issue_blocked` is derived from it on replay.
+        `issue` is the current Issue projection and may legitimately have
+        advanced. `finished_at` is the
+        execution occurrence time, while mutable projection, action, and
+        receipt timestamps use FleetDB's non-regressing server commit time.
+        X-Lease-Token is mandatory, hashed at the API boundary, and never
+        returned.
+      operationId: exhaustTaskRunRetriesAtomic
+      parameters:
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskRunRetryExhaustionRequest" }
+      responses:
+        "200":
+          description: Retry exhaustion committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskRunRetryExhaustionResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
   /api/v1/{workspace}/task-runs/{task_run_id}/complete:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -5132,13 +5648,28 @@ paths:
     post:
       tags: [Task Runs]
       summary: Complete a task run through the v2 acceptance contract
+      description: |
+        Service-actor-only owner command. The raw lease token is required,
+        hashed at the API boundary, and never returned. FleetDB atomically
+        commits TaskRun terminal state, TaskRun lease release, Work Item and
+        audit mutations, artifact acceptance validation, and the immutable
+        completion receipt. DriverStep terminal repair and TaskRun terminal
+        event and notification convergence are separate durable legs.
+
+        The first accepted request binds `completion_id` to the normalized
+        request path, owner tuple, and payload. An exact retry returns the
+        original immutable completion result before consulting current run or
+        lease state. Reusing that ID with a different normalized request
+        returns 409 conflict.
+
+        Receipts written before request fingerprints were introduced retain
+        their legacy same-TaskRun replay rule: the same workspace,
+        `completion_id`, and `task_run_id` return the stored result, while
+        cross-TaskRun reuse returns 409. FleetDB does not synthesize a v1
+        fingerprint because old receipts did not persist every v1 intent field.
       operationId: completeTaskRun
       parameters:
-        - name: X-Lease-Token
-          in: header
-          required: false
-          description: Required when the TaskRun lease is backed by a generic task_run lease.
-          schema: { type: string }
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -5147,7 +5678,7 @@ paths:
               $ref: "#/components/schemas/CompleteTaskRunRequest"
       responses:
         "200":
-          description: Task run completion accepted
+          description: Task run completion accepted or exactly replayed
           content:
             application/json:
               schema:
@@ -5170,6 +5701,9 @@ paths:
     post:
       tags: [Task Run Events]
       summary: Append a task run event
+      description: >-
+        Service-actor-only execution journal mutation. Human bearer and
+        developer API-key identities are rejected.
       operationId: appendTaskRunEvent
       requestBody:
         required: true
@@ -5186,6 +5720,8 @@ paths:
                 $ref: "#/components/schemas/TaskRunEvent"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     get:
       tags: [Task Run Events]
       summary: List task run events after a cursor
@@ -5223,6 +5759,9 @@ paths:
     post:
       tags: [Outbox]
       summary: Create an outbox record
+      description: >-
+        Service-actor-only notification journal mutation. Human bearer and
+        developer API-key identities are rejected.
       operationId: createOutboxRecord
       requestBody:
         required: true
@@ -5239,6 +5778,8 @@ paths:
                 $ref: "#/components/schemas/OutboxRecord"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /api/v1/{workspace}/outbox/due:
     parameters:
@@ -5292,6 +5833,9 @@ paths:
     post:
       tags: [Outbox]
       summary: Record an outbox dispatch result
+      description: >-
+        Service-actor-only notification journal mutation. Human bearer and
+        developer API-key identities are rejected.
       operationId: updateOutboxResult
       requestBody:
         required: true
@@ -5308,6 +5852,8 @@ paths:
                 $ref: "#/components/schemas/OutboxRecord"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -5323,10 +5869,10 @@ paths:
       tags: [Awaits]
       summary: Atomically register an await or satisfy it from the event journal
       description: >-
-        The single registration entry point (RULE 2): one call either replays
-        a recorded resolution, satisfies the await against an
-        already-journaled event, or leaves it pending. There is deliberately no
-        separate check or register endpoint.
+        Service-actor-only runtime command. The single registration entry point
+        (RULE 2) either replays a recorded resolution, satisfies the await
+        against an already-journaled event, or leaves it pending. There is
+        deliberately no separate check or register endpoint.
       operationId: registerAwaitAndCheck
       requestBody:
         required: true
@@ -5343,6 +5889,8 @@ paths:
                 $ref: "#/components/schemas/RegisterAwaitResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /api/v1/{workspace}/awaits:
     parameters:
@@ -5514,6 +6062,7 @@ paths:
         resolve-system. New dispatchers use the atomic resolve-and-resume
         command instead. Idempotent: an already-terminal await returns
         resume=false.
+      deprecated: true
       operationId: resolveAwait
       requestBody:
         required: true
@@ -5548,6 +6097,7 @@ paths:
         or cancelled exclusively; satisfied stays on the actor-predicated
         resolve route. New timeout dispatchers use the atomic
         resolve-and-resume command.
+      deprecated: true
       operationId: resolveAwaitSystem
       requestBody:
         required: true
@@ -5577,11 +6127,14 @@ paths:
       tags: [Awaits]
       summary: Suspend a running driver run on its await instance
       description: >-
-        running -> suspended_awaiting_event, owner-fenced, releasing the
-        executor slot. 409 driver_run_already_resumed means the await
-        resolved inside the pending->suspend window — do not suspend, continue
-        inline.
+        Service-actor-only owner command. The raw lease token is required and
+        hashed at the API boundary. The running -> suspended_awaiting_event
+        transition releases the executor slot. 409 driver_run_already_resumed
+        means the await resolved inside the pending->suspend window; do not
+        suspend and continue inline.
       operationId: suspendDriverRun
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
       requestBody:
         required: true
         content:
@@ -5619,6 +6172,7 @@ paths:
         ordinal, preserving old-Loom pending->suspend behavior without letting
         delayed retries move execution backward. New dispatchers use the
         atomic resolve-and-resume command.
+      deprecated: true
       operationId: resumeDriverRun
       requestBody:
         required: true
@@ -5815,6 +6369,9 @@ paths:
     post:
       tags: [ControlPlane]
       summary: Register a runtime node
+      description: >-
+        Service-actor-only runtime registration. Human bearer and developer
+        API-key identities are rejected.
       operationId: registerNode
       requestBody:
         required: true
@@ -5831,6 +6388,8 @@ paths:
                 $ref: "#/components/schemas/Node"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     get:
       tags: [ControlPlane]
       summary: List runtime nodes
@@ -5863,6 +6422,9 @@ paths:
     patch:
       tags: [ControlPlane]
       summary: Update a runtime node
+      description: >-
+        Service-actor-only runtime mutation. Human bearer and developer
+        API-key identities are rejected.
       operationId: updateNode
       requestBody:
         required: true
@@ -5877,6 +6439,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Node"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -5887,6 +6451,9 @@ paths:
     post:
       tags: [ControlPlane]
       summary: Heartbeat a runtime node
+      description: >-
+        Service-actor-only runtime heartbeat. Human bearer and developer
+        API-key identities are rejected.
       operationId: heartbeatNode
       parameters:
         - name: ttl_seconds
@@ -5902,6 +6469,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Node"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -6109,6 +6678,12 @@ paths:
     post:
       tags: [ControlPlane]
       summary: Create artifact metadata
+      description: >-
+        Deprecated service-only rolling-compatibility write for older
+        daemon/session artifact producers. It is not owner fenced and is
+        excluded from artifacts.owner_fenced_lifecycle.v1. Execution callers
+        use artifact-commands/create.
+      deprecated: true
       operationId: createArtifact
       requestBody:
         required: true
@@ -6123,6 +6698,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Artifact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
     get:
       tags: [ControlPlane]
       summary: List artifact metadata
@@ -6167,6 +6748,273 @@ paths:
               schema:
                 $ref: "#/components/schemas/ListArtifactsResponse"
 
+  /api/v1/{workspace}/artifact-commands/create:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [ControlPlane]
+      summary: Create a TaskRun-owned artifact through an owner-fenced command
+      description: >-
+        Service-actor-only owner command. The raw lease token is required,
+        hashed at the API boundary, and never returned. Exact command replay
+        returns the original committed snapshot after later lifecycle changes.
+      operationId: createArtifactCommand
+      parameters:
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArtifactCreateCommand"
+      responses:
+        "201":
+          description: Artifact command committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactCommandResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/{workspace}/artifacts/{artifact_id}/commands/upload:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/ArtifactID"
+    post:
+      tags: [ControlPlane]
+      summary: Upload TaskRun-owned artifact bytes with owner fencing and revision CAS
+      description: >-
+        Service actor only. The raw lease token is hashed at the API boundary
+        and never returned. A bounded retry body is hashed and checked against
+        an immutable command receipt before the content store or live owner is
+        consulted; exact replay returns the original committed snapshot and
+        divergent same-ID replay conflicts. On first application, at most 64
+        MiB is written to the configured content-addressed store before the
+        resulting URI, size, and digest are committed through the atomic
+        owner-fenced metadata command. A concurrent owner or revision change
+        can leave only an unreferenced content-addressed object eligible for
+        garbage collection; stale authority cannot attach it to the Artifact.
+        The request Content-Type is persisted as the Artifact MIME type and is
+        part of the immutable command fingerprint, so exact retries must send
+        the same media type as well as the same bytes.
+      operationId: uploadArtifactCommand
+      parameters:
+        - name: X-Command-ID
+          in: header
+          required: true
+          schema: { type: string, maxLength: 128 }
+        - name: X-Task-Run-ID
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Node-ID
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Lease-ID
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Fencing-Token
+          in: header
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: X-Expected-Revision
+          in: header
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          "*/*":
+            schema:
+              type: string
+              format: binary
+              maxLength: 67108864
+      responses:
+        "200":
+          description: Content and metadata command committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactCommandResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413":
+          description: Artifact content exceeds 64 MiB
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/v1/{workspace}/artifacts/{artifact_id}/commands/finalize:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/ArtifactID"
+    post:
+      tags: [ControlPlane]
+      summary: Finalize an artifact with owner fencing and revision CAS
+      description: >-
+        Service-actor-only owner command. An immutable command receipt is
+        checked before content verification or live owner state; exact replay
+        returns the original committed snapshot after later lifecycle changes,
+        while divergent same-ID replay conflicts.
+      operationId: finalizeArtifactCommand
+      parameters:
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArtifactFinalizeCommand" }
+      responses:
+        "200":
+          description: Finalize command committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactCommandResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/{workspace}/artifacts/{artifact_id}/commands/reference:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/ArtifactID"
+    post:
+      tags: [ControlPlane]
+      summary: Create an immutable artifact reference with owner fencing and revision CAS
+      description: >-
+        Service-actor-only owner command. Exact command replay returns the
+        original committed Artifact and immutable reference snapshots after
+        later lifecycle changes.
+      operationId: referenceArtifactCommand
+      parameters:
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArtifactReferenceCommand" }
+      responses:
+        "200":
+          description: Reference command committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactCommandResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/{workspace}/task-runs/{task_run_id}/artifacts:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/TaskRunID"
+    get:
+      tags: [ControlPlane]
+      summary: List artifacts through a live TaskRun owner fence
+      description: >-
+        Service actor only.
+        Validates the TaskRun, Node, Lease ID, secret token, and fencing token,
+        then returns only Artifacts owned by that TaskRun. This read never
+        changes Artifact revision.
+      operationId: listTaskRunArtifacts
+      parameters:
+        - name: X-Node-ID
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Lease-ID
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Fencing-Token
+          in: header
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+        - name: type
+          in: query
+          schema: { type: string }
+        - name: durable_status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ArtifactDurableStatus"
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Owner-fenced Artifact list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ListArtifactsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/{workspace}/task-runs/{task_run_id}/artifacts/{artifact_id}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/TaskRunID"
+      - $ref: "#/components/parameters/ArtifactID"
+    get:
+      tags: [ControlPlane]
+      summary: Get an artifact through a live TaskRun owner fence
+      description: >-
+        Service actor only.
+        Validates the TaskRun, Node, Lease ID, secret token, and fencing token,
+        then returns the TaskRun-owned Artifact without changing its revision.
+      operationId: getTaskRunArtifact
+      parameters:
+        - name: X-Node-ID
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Lease-ID
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Lease-Token
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Fencing-Token
+          in: header
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        "200":
+          description: Owner-fenced Artifact
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Artifact" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /api/v1/{workspace}/artifacts/{artifact_id}:
     parameters:
       - $ref: "#/components/parameters/Workspace"
@@ -6182,9 +7030,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Artifact"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     patch:
       tags: [ControlPlane]
       summary: Update artifact metadata
+      description: >-
+        Deprecated service-only rolling-compatibility write. It is not owner
+        fenced and is excluded from artifacts.owner_fenced_lifecycle.v1.
+      deprecated: true
       operationId: updateArtifact
       requestBody:
         required: true
@@ -6199,6 +7055,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Artifact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /api/v1/{workspace}/artifacts/{artifact_id}/content:
     parameters:
@@ -6229,6 +7093,10 @@ paths:
     put:
       tags: [ControlPlane]
       summary: Upload artifact bytes
+      description: >-
+        Deprecated service-only rolling-compatibility write. It is not owner
+        fenced and is excluded from artifacts.owner_fenced_lifecycle.v1.
+      deprecated: true
       operationId: uploadArtifactContent
       requestBody:
         required: true
@@ -6244,6 +7112,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Artifact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /api/v1/{workspace}/artifacts/{artifact_id}/finalize:
     parameters:
@@ -6252,6 +7128,10 @@ paths:
     post:
       tags: [ControlPlane]
       summary: Finalize artifact metadata after upload
+      description: >-
+        Deprecated service-only rolling-compatibility write. It is not owner
+        fenced and is excluded from artifacts.owner_fenced_lifecycle.v1.
+      deprecated: true
       operationId: finalizeArtifact
       requestBody:
         required: true
@@ -6266,6 +7146,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Artifact"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /api/v1/{workspace}/agent-sessions/{session_id}/leases:
     parameters:
@@ -7144,6 +8032,17 @@ components:
         type: string
         example: alice
 
+    XLeaseToken:
+      name: X-Lease-Token
+      in: header
+      required: true
+      description: >-
+        Raw owner lease credential. The server hashes it at the API boundary;
+        it is never persisted in plaintext or returned in a response.
+      schema:
+        type: string
+        minLength: 1
+
     XIdempotencyKey:
       name: X-Idempotency-Key
       in: header
@@ -7376,6 +8275,15 @@ components:
       in: path
       required: true
       description: Driver run identifier.
+      schema:
+        type: string
+        minLength: 1
+
+    TaskID:
+      name: task_id
+      in: path
+      required: true
+      description: Work-item issue identifier.
       schema:
         type: string
         minLength: 1
@@ -7782,13 +8690,18 @@ components:
 
     UpdateIssueRequest:
       type: object
-      description: Partial update. Only provided fields are changed.
+      description: |
+        Partial update. Only provided fields are changed. Content fields may be
+        edited during typed execution; status changes are fenced while its
+        claim generation is active.
       properties:
         title:
           type: string
           maxLength: 500
         description:
           type: string
+        status:
+          $ref: "#/components/schemas/Status"
         priority:
           type: integer
           minimum: 0
@@ -7846,8 +8759,9 @@ components:
       type: object
       required: [issue_ids]
       description: |
-        Batch close request. Best-effort semantics: attempts all closures,
-        issues already closed are skipped.
+        Non-atomic ordered batch close request. Already-closed issues are
+        skipped; processing stops at the first other error, and earlier IDs
+        may already be closed.
       properties:
         issue_ids:
           type: array
@@ -8379,7 +9293,20 @@ components:
 
     ActionLedgerType:
       type: string
-      enum: [close_task, comment, create_pr, merge_pr, start_task_run, update_status]
+      enum:
+        - close_task
+        - comment
+        - create_pr
+        - merge_pr
+        - request_task_run
+        - requeue_task_run
+        - start_task_run
+        - exhaust_task_run_retries
+        - start_child_driver_run
+        - cascade_child_driver_runs
+        - claim_work_item
+        - release_work_item
+        - update_status
 
     DriverRunStatus:
       type: string
@@ -8578,7 +9505,7 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [automation.trigger_admission.v1, execution.await_atomic_resume.v1, workflow_catalog.version_lifecycle.v1]
+          example: [artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, workflow_catalog.version_lifecycle.v1]
 
     AutomationErrorResponse:
       type: object
@@ -10044,7 +10971,7 @@ components:
 
     DriverRun:
       type: object
-      required: [workspace_key, run_id, driver_id, driver_version_id, status, created_at, updated_at]
+      required: [workspace_key, run_id, driver_id, driver_version_id, status, lineage_depth, created_at, updated_at]
       properties:
         workspace_key: { type: string }
         run_id: { type: string }
@@ -10072,8 +10999,13 @@ components:
         parent_run_id:
           type: string
           description: >-
-            Composition link to the spawning workflow run (cancel cascade);
-            empty = detached. Orthogonal to epic_id.
+            Composition link assigned only by the owner-fenced
+            /driver-runs/{run_id}/children/start command; empty identifies a
+            root or detached run. Orthogonal to epic_id.
+        lineage_depth:
+          type: integer
+          minimum: 1
+          description: One for a root run and exactly one greater than its parent for each composition edge.
         await_instance_key:
           type: string
           description: Await instance the run is (or was last) suspended on.
@@ -10081,6 +11013,14 @@ components:
           type: string
           format: date-time
           nullable: true
+        cancel_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Durable cooperative-cancellation marker for a running descendant.
+        cancel_requested_reason:
+          type: string
+          description: Parent terminal-cascade reason associated with cancel_requested_at.
         resume_source_event_id:
           type: string
           description: Event that resolved the await and resumed the run.
@@ -10109,6 +11049,7 @@ components:
 
     CreateDriverRunRequest:
       type: object
+      additionalProperties: false
       required: [run_id, driver_id, driver_version_id]
       properties:
         run_id: { type: string }
@@ -10118,7 +11059,6 @@ components:
         source_kind: { type: string }
         source_ref: { type: string }
         epic_id: { type: string }
-        parent_run_id: { type: string }
         trigger_binding_id:
           type: string
           description: >-
@@ -10343,8 +11283,10 @@ components:
 
     ClaimDriverRunRequest:
       type: object
-      required: [node_id, lease_id]
+      additionalProperties: false
+      required: [request_id, node_id, lease_id]
       properties:
+        request_id: { type: string, minLength: 1, maxLength: 128 }
         node_id: { type: string }
         lease_id: { type: string }
 
@@ -10352,13 +11294,16 @@ components:
       allOf:
         - $ref: "#/components/schemas/DriverRunOwnerRequest"
         - type: object
-          required: [status]
+          required: [request_id, status]
           properties:
+            request_id: { type: string, minLength: 1, maxLength: 128 }
             status:
               type: string
               enum: [completed, failed, needs_review, cancelled]
             summary: { type: string }
             error_class: { type: string }
+            output:
+              $ref: "#/components/schemas/StringMap"
 
     RecoverStaleDriverRunsRequest:
       type: object
@@ -10403,7 +11348,13 @@ components:
 
     RecoverStaleTaskRunsRequest:
       type: object
+      additionalProperties: false
+      required: [request_id, node_id, lease_id, fencing_token]
       properties:
+        request_id: { type: string, minLength: 1, maxLength: 128 }
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
         stale_before:
           type: string
           format: date-time
@@ -10577,6 +11528,29 @@ components:
           minimum: 1
           description: Required with node_id and lease_id when the parent driver run is claimed.
 
+    DriverStepTerminalRepairRequest:
+      type: object
+      additionalProperties: false
+      required: [command_id, driver_run_id, task_run_id, status]
+      properties:
+        command_id:
+          type: string
+          maxLength: 128
+        driver_run_id: { type: string }
+        task_run_id: { type: string }
+        status:
+          type: string
+          enum: [completed, failed, skipped]
+        output_ref: { type: string }
+
+    DriverStepTerminalRepairResult:
+      type: object
+      required: [driver_step, replayed]
+      properties:
+        driver_step:
+          $ref: "#/components/schemas/DriverStep"
+        replayed: { type: boolean }
+
     TaskRunPlacement:
       type: object
       properties:
@@ -10606,8 +11580,14 @@ components:
       properties:
         workspace_key: { type: string }
         task_run_id: { type: string }
-        driver_run_id: { type: string }
-        driver_step_id: { type: string }
+        driver_run_id:
+          type: string
+          deprecated: true
+          description: Rejected on this compatibility port; use RequestTaskRun.
+        driver_step_id:
+          type: string
+          deprecated: true
+          description: Rejected on this compatibility port; use RequestTaskRun.
         task_id: { type: string }
         worker_profile_id: { type: string }
         runner: { type: string }
@@ -10616,6 +11596,8 @@ components:
         runner_entrypoint: { type: string }
         runner_driver_version_id: { type: string }
         provider_profile: { type: string }
+        target_node_id: { type: string }
+        attempt: { type: integer, minimum: 0 }
         status:
           $ref: "#/components/schemas/TaskRunStatus"
         node_id: { type: string }
@@ -10640,6 +11622,7 @@ components:
         estimated_cost_usd: { type: number, format: double, minimum: 0 }
         runtime_metadata:
           $ref: "#/components/schemas/StringMap"
+          description: execution_request_id is reserved and rejected on this port.
         next_eligible_at: { type: string, format: date-time }
         started_at: { type: string, format: date-time }
         last_heartbeat: { type: string, format: date-time }
@@ -10658,6 +11641,12 @@ components:
       properties:
         workspace_key: { type: string }
         completion_id: { type: string }
+        request_fingerprint:
+          type: string
+          description: >-
+            SHA-256 identity of the normalized request bound to this immutable
+            receipt. Empty only for a pre-fingerprint legacy receipt, which
+            retains same-TaskRun replay compatibility.
         task_run_id: { type: string }
         task_id: { type: string }
         status:
@@ -10738,6 +11727,350 @@ components:
         sandbox_placement:
           $ref: "#/components/schemas/TaskRunPlacement"
 
+    TaskRunClaimAndStartRequest:
+      type: object
+      required: [command_id, node_id, lease_id]
+      properties:
+        command_id:
+          type: string
+          maxLength: 128
+        node_id: { type: string }
+        runner_id: { type: string }
+        lease_id: { type: string }
+        claim_ttl_seconds:
+          type: integer
+          minimum: 1
+          description: Defaults to 300 seconds when omitted or zero.
+        supported_providers:
+          type: array
+          items: { type: string }
+        capabilities:
+          type: array
+          items: { type: string }
+        worker_profile_ids:
+          type: array
+          items: { type: string }
+        runner_placement:
+          $ref: "#/components/schemas/TaskRunPlacement"
+        sandbox_placement:
+          $ref: "#/components/schemas/TaskRunPlacement"
+
+    TaskRunClaimAndStartResult:
+      type: object
+      required: [task_run, driver_step, issue, action, replayed]
+      properties:
+        task_run:
+          $ref: "#/components/schemas/TaskRun"
+        driver_step:
+          $ref: "#/components/schemas/DriverStep"
+        issue:
+          $ref: "#/components/schemas/Issue"
+        action:
+          $ref: "#/components/schemas/ActionLedger"
+        replayed:
+          type: boolean
+
+    DriverRunWorkItemClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [command_id, node_id, lease_id, fencing_token, claimed_at]
+      properties:
+        command_id: { type: string, maxLength: 128 }
+        node_id: { type: string }
+        lease_id: { type: string }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        claim_ttl_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 9223372036
+          description: Optional claim TTL; omission selects FleetDB's bounded default.
+        claimed_at: { type: string, format: date-time }
+
+    DriverRunWorkItemReleaseRequest:
+      type: object
+      additionalProperties: false
+      required: [command_id, node_id, lease_id, fencing_token, claim_action_id, released_at]
+      properties:
+        command_id: { type: string, maxLength: 128 }
+        node_id: { type: string }
+        lease_id: { type: string }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        claim_action_id: { type: string }
+        released_at: { type: string, format: date-time }
+
+    DriverRunWorkItemCommandResult:
+      type: object
+      required: [issue, action, replayed]
+      properties:
+        issue: { $ref: "#/components/schemas/Issue" }
+        action: { $ref: "#/components/schemas/ActionLedger" }
+        replayed: { type: boolean }
+
+    TaskRunRequestAtomicRequest:
+      type: object
+      additionalProperties: false
+      required: [command_id, task_run_id, driver_step_id, task_id, claim_action_id, node_id, lease_id, fencing_token, requested_at]
+      properties:
+        command_id: { type: string, maxLength: 128 }
+        task_run_id: { type: string }
+        driver_step_id: { type: string }
+        task_id: { type: string }
+        claim_action_id: { type: string }
+        node_id: { type: string }
+        lease_id: { type: string }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        worker_profile_id: { type: string }
+        runner: { type: string }
+        runner_ref: { type: string }
+        runner_kind: { type: string }
+        runner_entrypoint: { type: string }
+        runner_driver_version_id: { type: string }
+        provider_profile: { type: string }
+        target_node_id: { type: string }
+        required_capabilities:
+          type: array
+          items: { type: string }
+        runner_placement: { $ref: "#/components/schemas/TaskRunPlacement" }
+        sandbox_placement: { $ref: "#/components/schemas/TaskRunPlacement" }
+        runtime_metadata: { $ref: "#/components/schemas/StringMap" }
+        input:
+          description: Optional JSON payload delivered verbatim to the runner.
+          nullable: true
+        requested_at: { type: string, format: date-time }
+        replay_only:
+          type: boolean
+          description: Read-only exact receipt probe; returns 404 when no request receipt exists.
+
+    TaskRunRequestAtomicResult:
+      type: object
+      required: [driver_step, task_run, action, claim_action_id, committed_task_run_status, committed_driver_step_status, replayed]
+      properties:
+        driver_step: { $ref: "#/components/schemas/DriverStep" }
+        task_run: { $ref: "#/components/schemas/TaskRun" }
+        action: { $ref: "#/components/schemas/ActionLedger" }
+        claim_action_id: { type: string }
+        committed_task_run_status: { $ref: "#/components/schemas/TaskRunStatus" }
+        committed_driver_step_status: { $ref: "#/components/schemas/DriverStepStatus" }
+        replayed: { type: boolean }
+
+    TaskRunRequeueAtomicRequest:
+      type: object
+      additionalProperties: false
+      required: [command_id, node_id, lease_id, fencing_token, requeued_at]
+      properties:
+        command_id: { type: string, maxLength: 128 }
+        node_id: { type: string }
+        lease_id: { type: string }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        runtime_metadata: { $ref: "#/components/schemas/StringMap" }
+        logs_ref: { type: string }
+        artifacts_ref: { type: string }
+        error_class: { type: string }
+        error_message: { type: string }
+        requeued_at: { type: string, format: date-time }
+        next_eligible_at: { type: string, format: date-time }
+
+    TaskRunRequeueCommit:
+      type: object
+      required: [workspace_key, task_run_id, driver_run_id, driver_step_id, task_id, attempt, status, driver_step_status, requeued_at]
+      properties:
+        workspace_key: { type: string }
+        task_run_id: { type: string }
+        driver_run_id: { type: string }
+        driver_step_id: { type: string }
+        task_id: { type: string }
+        attempt: { type: integer, minimum: 0 }
+        status: { $ref: "#/components/schemas/TaskRunStatus" }
+        driver_step_status: { $ref: "#/components/schemas/DriverStepStatus" }
+        runtime_metadata: { $ref: "#/components/schemas/StringMap" }
+        logs_ref: { type: string }
+        artifacts_ref: { type: string }
+        error_class: { type: string }
+        error_message: { type: string }
+        requeued_at: { type: string, format: date-time }
+        next_eligible_at: { type: string, format: date-time }
+
+    TaskRunRequeueAtomicResult:
+      type: object
+      required: [task_run, driver_step, action, committed, replayed]
+      properties:
+        task_run: { $ref: "#/components/schemas/TaskRun" }
+        driver_step: { $ref: "#/components/schemas/DriverStep" }
+        action: { $ref: "#/components/schemas/ActionLedger" }
+        committed: { $ref: "#/components/schemas/TaskRunRequeueCommit" }
+        replayed: { type: boolean }
+
+    TaskRunRetryExhaustionRequest:
+      type: object
+      additionalProperties: false
+      required: [command_id, node_id, lease_id, fencing_token, attempt, max_attempts, error_class, error_message, finished_at]
+      properties:
+        command_id: { type: string, maxLength: 128 }
+        node_id: { type: string }
+        lease_id: { type: string }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        attempt: { type: integer, minimum: 1 }
+        max_attempts: { type: integer, minimum: 1 }
+        exit_code: { type: integer, nullable: true }
+        logs_ref: { type: string }
+        artifacts_ref: { type: string }
+        required_artifact_ids:
+          type: array
+          items: { type: string }
+        require_artifacts: { type: boolean }
+        input_tokens: { type: integer, format: int64, minimum: 0 }
+        output_tokens: { type: integer, format: int64, minimum: 0 }
+        cache_read_tokens: { type: integer, format: int64, minimum: 0 }
+        cache_write_tokens: { type: integer, format: int64, minimum: 0 }
+        estimated_cost_usd: { type: number, format: double, minimum: 0 }
+        runtime_metadata: { $ref: "#/components/schemas/StringMap" }
+        error_class: { type: string }
+        error_message: { type: string }
+        finished_at: { type: string, format: date-time }
+
+    TaskRunRetryExhaustionCommit:
+      type: object
+      required: [workspace_key, task_run_id, task_id, status, issue_blocked, attempt, max_attempts, require_artifacts, error_class, error_message, finished_at]
+      properties:
+        workspace_key: { type: string }
+        task_run_id: { type: string }
+        task_id: { type: string }
+        status: { $ref: "#/components/schemas/TaskRunStatus" }
+        issue_blocked:
+          type: boolean
+          description: True only when this command blocked the exact linked Issue generation; false when a successor was preserved or the Issue was defensively absent.
+        attempt: { type: integer, minimum: 1 }
+        max_attempts: { type: integer, minimum: 1 }
+        exit_code: { type: integer, nullable: true }
+        logs_ref: { type: string }
+        artifacts_ref: { type: string }
+        required_artifact_ids:
+          type: array
+          items: { type: string }
+        require_artifacts: { type: boolean }
+        input_tokens: { type: integer, format: int64, minimum: 0 }
+        output_tokens: { type: integer, format: int64, minimum: 0 }
+        cache_read_tokens: { type: integer, format: int64, minimum: 0 }
+        cache_write_tokens: { type: integer, format: int64, minimum: 0 }
+        estimated_cost_usd: { type: number, format: double, minimum: 0 }
+        runtime_metadata: { $ref: "#/components/schemas/StringMap" }
+        error_class: { type: string }
+        error_message: { type: string }
+        finished_at: { type: string, format: date-time }
+
+    TaskRunRetryExhaustionResult:
+      type: object
+      description: The immutable exhaustion outcome plus the current linked Issue projection, when it still exists.
+      required: [task_run, issue, action, committed, replayed]
+      properties:
+        task_run: { $ref: "#/components/schemas/TaskRun" }
+        issue:
+          description: Current linked Issue projection; null only when the Issue is defensively absent.
+          oneOf:
+            - $ref: "#/components/schemas/Issue"
+            - type: "null"
+        action: { $ref: "#/components/schemas/ActionLedger" }
+        committed: { $ref: "#/components/schemas/TaskRunRetryExhaustionCommit" }
+        replayed: { type: boolean }
+
+    DriverRunChildStartRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, node_id, lease_id, fencing_token, child_key, child_run_id, driver_id, driver_version_id, payload, max_depth, requested_at]
+      properties:
+        request_id: { type: string }
+        node_id: { type: string }
+        lease_id: { type: string }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        child_key: { type: string }
+        child_run_id: { type: string }
+        driver_id: { type: string }
+        driver_version_id: { type: string }
+        payload:
+          description: Exact JSON child payload.
+        max_depth: { type: integer, minimum: 1 }
+        requested_at: { type: string, format: date-time }
+
+    DriverRunChildStartResult:
+      type: object
+      required: [parent, child, parent_depth, child_depth, action, action_id, replay]
+      properties:
+        parent: { $ref: "#/components/schemas/DriverRun" }
+        child: { $ref: "#/components/schemas/DriverRun" }
+        parent_depth: { type: integer, minimum: 1 }
+        child_depth: { type: integer, minimum: 2 }
+        action: { $ref: "#/components/schemas/ActionLedger" }
+        action_id: { type: string }
+        replay: { type: boolean }
+
+    DriverRunCascadeRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, node_id, lease_id, fencing_token, parent_status, reason, error_class, cascaded_at, max_depth]
+      properties:
+        request_id: { type: string }
+        node_id: { type: string }
+        lease_id: { type: string }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        parent_status:
+          type: string
+          enum: [completed, failed, needs_review, cancelled]
+        reason: { type: string }
+        error_class: { type: string }
+        cascaded_at: { type: string, format: date-time }
+        max_depth: { type: integer, minimum: 1 }
+
+    DriverRunCascadeRecoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [request_id, parent_status, reason, error_class, cascaded_at, max_depth]
+      properties:
+        request_id: { type: string }
+        parent_status:
+          type: string
+          enum: [completed, failed, needs_review, cancelled]
+        reason: { type: string }
+        error_class: { type: string }
+        cascaded_at: { type: string, format: date-time }
+        max_depth: { type: integer, minimum: 1 }
+
+    DriverRunCascadeCommit:
+      type: object
+      required: [workspace_key, parent_run_id, parent_status, reason, error_class, cascaded_at, max_depth, cancelled_run_ids, cancel_requested_run_ids, action_id]
+      properties:
+        workspace_key: { type: string }
+        parent_run_id: { type: string }
+        parent_status:
+          type: string
+          enum: [completed, failed, needs_review, cancelled]
+        reason: { type: string }
+        error_class: { type: string }
+        cascaded_at: { type: string, format: date-time }
+        max_depth: { type: integer, minimum: 1 }
+        cancelled_run_ids:
+          type: array
+          items: { type: string }
+        cancel_requested_run_ids:
+          type: array
+          items: { type: string }
+        action_id: { type: string }
+
+    DriverRunCascadeResult:
+      type: object
+      required: [cancelled_runs, cancel_requested_runs, committed, action, action_id, replay]
+      properties:
+        cancelled_runs:
+          type: array
+          items: { $ref: "#/components/schemas/DriverRun" }
+        cancel_requested_runs:
+          type: array
+          items: { $ref: "#/components/schemas/DriverRun" }
+        committed: { $ref: "#/components/schemas/DriverRunCascadeCommit" }
+        action: { $ref: "#/components/schemas/ActionLedger" }
+        action_id: { type: string }
+        replay: { type: boolean }
+
     ListTaskRunsResponse:
       type: object
       required: [task_runs, count]
@@ -10815,6 +12148,7 @@ components:
 
     CompleteTaskRunRequest:
       type: object
+      additionalProperties: false
       required: [completion_id, status]
       properties:
         completion_id: { type: string }
@@ -10844,6 +12178,10 @@ components:
         error_message: { type: string }
         close_task: { type: boolean }
         close_reason: { type: string }
+        finished_at:
+          type: string
+          format: date-time
+          description: Explicit completion time. When omitted, FleetDB uses server commit time.
 
     CompleteTaskRunResponse:
       type: object
@@ -10858,13 +12196,14 @@ components:
 
     TaskRunLogEntry:
       type: object
-      required: [workspace_key, task_run_id, sequence, stream, text, timestamp, created_at]
+      required: [workspace_key, task_run_id, sequence, request_id, stream, text, timestamp, created_at]
       properties:
         workspace_key: { type: string }
         task_run_id: { type: string }
         sequence:
           type: integer
           format: int64
+        request_id: { type: string }
         stream: { type: string }
         text: { type: string }
         node_id: { type: string }
@@ -10877,8 +12216,10 @@ components:
 
     AppendTaskRunLogRequest:
       type: object
-      required: [text]
+      additionalProperties: false
+      required: [request_id, node_id, lease_id, fencing_token, text, timestamp]
       properties:
+        request_id: { type: string, minLength: 1, maxLength: 128 }
         node_id: { type: string }
         lease_id: { type: string }
         fencing_token:
@@ -10930,7 +12271,6 @@ components:
         error_message: { type: string }
         logs_ref: { type: string }
         artifacts_ref: { type: string }
-        lease_token: { type: string }
         occurred_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
 
@@ -10957,7 +12297,6 @@ components:
         error_message: { type: string }
         logs_ref: { type: string }
         artifacts_ref: { type: string }
-        lease_token: { type: string }
         occurred_at: { type: string, format: date-time }
 
     ListTaskRunEventsResponse:
@@ -11220,11 +12559,12 @@ components:
 
     SuspendDriverRunRequest:
       type: object
+      additionalProperties: false
       required: [node_id, lease_id, fencing_token, await_instance_key]
       properties:
         node_id: { type: string }
         lease_id: { type: string }
-        fencing_token: { type: integer, format: int64 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
         await_instance_key: { type: string }
 
     ResumeDriverRunRequest:
@@ -11736,7 +13076,7 @@ components:
 
     Artifact:
       type: object
-      required: [workspace_key, artifact_id, type, durable_status, created_at, updated_at]
+      required: [workspace_key, artifact_id, type, durable_status, revision, created_at, updated_at]
       properties:
         workspace_key: { type: string }
         artifact_id:   { type: string }
@@ -11766,6 +13106,10 @@ components:
         metadata:
           type: object
           additionalProperties: { type: string }
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
         finalized_at:
           type: string
           format: date-time
@@ -11868,6 +13212,107 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Artifact" }
         count: { type: integer }
+
+    ArtifactCommandOwner:
+      type: object
+      required: [command_id, task_run_id, node_id, lease_id, fencing_token]
+      properties:
+        command_id: { type: string, maxLength: 128 }
+        task_run_id: { type: string }
+        node_id: { type: string }
+        lease_id: { type: string }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+
+    ArtifactCreateCommand:
+      allOf:
+        - $ref: "#/components/schemas/ArtifactCommandOwner"
+        - type: object
+          required: [artifact_id, type]
+          properties:
+            artifact_id: { type: string }
+            session_id: { type: string }
+            task_id: { type: string }
+            type: { type: string }
+            uri: { type: string }
+            summary: { type: string }
+            mime_type: { type: string }
+            size_bytes: { type: integer, format: int64, minimum: 0 }
+            checksum: { type: string }
+            content_hash: { type: string }
+            visibility: { type: string }
+            redaction_status: { type: string }
+            metadata:
+              type: object
+              additionalProperties: { type: string }
+
+    ArtifactFinalizeCommand:
+      allOf:
+        - $ref: "#/components/schemas/ArtifactCommandOwner"
+        - type: object
+          required: [expected_revision, uri, size_bytes]
+          properties:
+            expected_revision: { type: integer, format: int64, minimum: 1 }
+            uri: { type: string }
+            summary: { type: string }
+            mime_type: { type: string }
+            size_bytes: { type: integer, format: int64, minimum: 0 }
+            checksum: { type: string }
+            content_hash: { type: string }
+            visibility: { type: string }
+            redaction_status: { type: string }
+            metadata:
+              type: object
+              additionalProperties: { type: string }
+
+    ArtifactReferenceCommand:
+      allOf:
+        - $ref: "#/components/schemas/ArtifactCommandOwner"
+        - type: object
+          required: [expected_revision, kind, target_ref]
+          properties:
+            expected_revision: { type: integer, format: int64, minimum: 1 }
+            kind: { type: string }
+            target_ref: { type: string }
+
+    ArtifactReference:
+      type: object
+      required: [workspace_key, reference_id, artifact_id, owner_type, owner_id, kind, target_ref, created_at]
+      properties:
+        workspace_key: { type: string }
+        reference_id: { type: string }
+        artifact_id: { type: string }
+        owner_type: { $ref: "#/components/schemas/ArtifactOwnerType" }
+        owner_id: { type: string }
+        kind: { type: string }
+        target_ref: { type: string }
+        created_at: { type: string, format: date-time }
+
+    ArtifactCommandType:
+      type: string
+      enum: [artifact_create, artifact_upload, artifact_finalize, artifact_reference]
+
+    ArtifactCommandReceipt:
+      type: object
+      description: Artifacts-owned idempotency receipt committed atomically with an artifact lifecycle command.
+      required: [workspace_key, command_id, artifact_id, command_type, request_fingerprint, artifact_revision, committed_at]
+      properties:
+        workspace_key: { type: string }
+        command_id: { type: string, maxLength: 128 }
+        artifact_id: { type: string }
+        command_type: { $ref: "#/components/schemas/ArtifactCommandType" }
+        request_fingerprint: { type: string }
+        artifact_revision: { type: integer, format: int64, minimum: 1 }
+        reference_id: { type: string }
+        committed_at: { type: string, format: date-time }
+
+    ArtifactCommandResult:
+      type: object
+      required: [artifact, receipt, replayed]
+      properties:
+        artifact: { $ref: "#/components/schemas/Artifact" }
+        reference: { $ref: "#/components/schemas/ArtifactReference" }
+        receipt: { $ref: "#/components/schemas/ArtifactCommandReceipt" }
+        replayed: { type: boolean }
 
     AgentLease:
       type: object

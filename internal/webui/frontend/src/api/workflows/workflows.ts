@@ -61,10 +61,14 @@ export async function startWorkflowRun(
   workflowName: string,
   payload: unknown,
 ): Promise<WorkflowRun> {
-  return post<WorkflowRun>(
-    wsUrl(workspaceId, `/workflows/${encodeURIComponent(workflowName)}`),
-    payload,
+  const path = wsUrl(
+    workspaceId,
+    `/workflows/${encodeURIComponent(workflowName)}`,
   );
+  const options = localOperatorRequestOptions(workspaceId);
+  return options
+    ? post<WorkflowRun>(path, payload, options)
+    : post<WorkflowRun>(path, payload);
 }
 
 export async function getWorkflowRun(

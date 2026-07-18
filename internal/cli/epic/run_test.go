@@ -2,86 +2,89 @@ package epic
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-// TestRunnerNeedsLocalPreflight pins the R4 gate: the local task runner must be
-// preflighted, and an empty/whitespace runner resolves to local-task-runner
-// downstream so it must be gated identically (it previously slipped through the
-// exact-string match). Explicit non-local runners are NOT gated.
-func TestRunnerNeedsLocalPreflight(t *testing.T) {
-	cases := []struct {
-		name   string
-		runner string
-		want   bool
-	}{
-		{"explicit local", runtimepreflight.LocalTaskRunnerEntrypoint, true},
-		{"empty resolves to local", "", true},
-		{"whitespace resolves to local", "   ", true},
-		{"local with surrounding space", "  local-task-runner  ", true},
-		{"explicit daytona not gated", "daytona", false},
-		{"other explicit runner not gated", "openshell", false},
+type epicRunManagementStub struct {
+	workspace string
+	requests  []managementapi.SubmitDriverRunRequest
+	states    []*domain.DriverRun
+	getErr    error
+}
+
+func (stub *epicRunManagementStub) Workspace() string { return stub.workspace }
+
+func (stub *epicRunManagementStub) SubmitDriverRun(
+	_ context.Context,
+	request managementapi.SubmitDriverRunRequest,
+) (*domain.DriverRun, error) {
+	stub.requests = append(stub.requests, request)
+	return &domain.DriverRun{
+		WorkspaceKey: stub.workspace, RunID: request.RunID,
+		DriverID: request.DriverRef, DriverVersionID: "version-1",
+		Status: domain.DriverRunQueued, EpicID: request.EpicID,
+		Payload: append(json.RawMessage(nil), request.Payload...),
+	}, nil
+}
+
+func (stub *epicRunManagementStub) GetDriverRun(context.Context, string) (*domain.DriverRun, error) {
+	if stub.getErr != nil {
+		return nil, stub.getErr
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := runnerNeedsLocalPreflight(tc.runner); got != tc.want {
-				t.Fatalf("runnerNeedsLocalPreflight(%q) = %v, want %v", tc.runner, got, tc.want)
-			}
-		})
+	if len(stub.states) == 0 {
+		return nil, nil
 	}
+	state := stub.states[0]
+	stub.states = stub.states[1:]
+	return state, nil
 }
 
-// daemonGetterStub satisfies the surface PreflightLocalTaskRunner needs so the
-// gated branch can be exercised without a full store.
-type daemonGetterStub struct{ backend string }
-
-func (s daemonGetterStub) Daemon() store.DaemonProfileStore {
-	return daemonProfileStoreStub(s)
-}
-
-type daemonProfileStoreStub struct{ backend string }
-
-func (s daemonProfileStoreStub) Get(context.Context, string) (*domain.DaemonProfile, error) {
-	return &domain.DaemonProfile{AgentBackend: s.backend}, nil
-}
-
-func (s daemonProfileStoreStub) Upsert(context.Context, *domain.DaemonProfile) (*domain.DaemonProfile, error) {
-	return &domain.DaemonProfile{AgentBackend: s.backend}, nil
-}
-
-// TestEmptyRunnerPreflightsFailClosed proves that when the gate fires for an
-// empty runner, the same fail-closed preflight runs (backend CLI/auth missing
-// stops the run) — i.e. `--runner ""` is no longer a silent bypass.
-func TestEmptyRunnerPreflightsFailClosed(t *testing.T) {
-	restore := runtimepreflight.SetHealthCheckerForTest(func(string) (backends.HealthStatus, bool) {
-		return backends.HealthStatus{Installed: false, APIKeySet: false, Message: "binary not found on PATH"}, true
-	})
-	defer restore()
-
-	for _, runner := range []string{"", "   ", runtimepreflight.LocalTaskRunnerEntrypoint} {
-		if !runnerNeedsLocalPreflight(runner) {
-			t.Fatalf("runner %q must be gated for preflight", runner)
-		}
-		err := runtimepreflight.PreflightLocalTaskRunner(context.Background(), daemonGetterStub{}, "TEST")
-		if err == nil {
-			t.Fatalf("runner %q: missing backend must fail closed", runner)
-		}
-		if !strings.Contains(err.Error(), "local_backend_unavailable") {
-			t.Fatalf("runner %q: error = %v, want local_backend_unavailable", runner, err)
-		}
+func TestQueueEpicWorkflowRunUsesServerStampedManagementSubmission(t *testing.T) {
+	originalParent := runParent
+	runParent = "EPIC-1"
+	t.Cleanup(func() { runParent = originalParent })
+	management := &epicRunManagementStub{workspace: "TEST"}
+	run, err := queueEpicWorkflowRun(
+		context.Background(), management, "epic-runner", "run-explicit", json.RawMessage(`{"runner":"daytona"}`),
+	)
+	if err != nil {
+		t.Fatalf("queueEpicWorkflowRun: %v", err)
+	}
+	if run.RunID != "run-explicit" || len(management.requests) != 1 {
+		t.Fatalf("run=%#v requests=%#v", run, management.requests)
+	}
+	request := management.requests[0]
+	if request.CLICommand != "epic-run" || request.DriverRef != "epic-runner" || request.RunID != "run-explicit" ||
+		request.Entrypoint != "run" || request.EpicID != "EPIC-1" || string(request.Payload) != `{"runner":"daytona"}` {
+		t.Fatalf("management submission = %#v", request)
 	}
 }
 
-// TestExplicitNonLocalRunnerSkipsPreflight confirms the gate does not fire for a
-// non-local runner, so its own runtime owns readiness.
-func TestExplicitNonLocalRunnerSkipsPreflight(t *testing.T) {
-	if runnerNeedsLocalPreflight("daytona") {
-		t.Fatal("daytona must not trigger local preflight")
+func TestExecuteWorkflowRunObservesTerminalManagementState(t *testing.T) {
+	management := &epicRunManagementStub{states: []*domain.DriverRun{{
+		RunID: "run-1", Status: domain.DriverRunCompleted, Summary: "done",
+	}}}
+	if err := executeWorkflowRun(context.Background(), management, "run-1"); err != nil {
+		t.Fatalf("executeWorkflowRun: %v", err)
+	}
+}
+
+func TestExecuteWorkflowRunReturnsFailedStateOrReadError(t *testing.T) {
+	failed := &epicRunManagementStub{states: []*domain.DriverRun{{
+		RunID: "run-1", Status: domain.DriverRunFailed, Summary: "boom",
+	}}}
+	if err := executeWorkflowRun(context.Background(), failed, "run-1"); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("failed execute error = %v", err)
+	}
+	want := errors.New("management unavailable")
+	unavailable := &epicRunManagementStub{getErr: want}
+	if err := executeWorkflowRun(context.Background(), unavailable, "run-1"); !errors.Is(err, want) {
+		t.Fatalf("read error = %v, want %v", err, want)
 	}
 }

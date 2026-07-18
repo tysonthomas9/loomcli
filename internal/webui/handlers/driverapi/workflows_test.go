@@ -121,6 +121,7 @@ func runHeaders(run *domain.DriverRun) map[string]string {
 		HeaderDriverRunID:        run.RunID,
 		HeaderDriverNodeID:       run.NodeID,
 		HeaderDriverLeaseID:      run.LeaseID,
+		HeaderDriverLeaseToken:   "driver-test-token",
 		HeaderDriverFencingToken: fmt.Sprintf("%d", run.FencingToken),
 	}
 }
@@ -217,9 +218,13 @@ func TestDriverAPIWorkflowsAwaitTerminalChildInline(t *testing.T) {
 	ctx := context.Background()
 	childID := startChildViaAPI(t, h, "fast")
 
+	driverRuns := testDriverRunExecution{DriverRunAPI: h.execution.DriverRunAPI(), store: h.store}
 	if _, err := (&driverpkg.Executor{
 		Store: h.store, WorkspaceKey: "WS", RunID: childID,
 		WorkDir: t.TempDir(), HeartbeatInterval: -1,
+		Execution: driverRuns, RunOutcomeQueue: h.execution.DriverRunOutcomeAPI(),
+		ExecutionWorkers:     h.execution.TaskRunWorkerAPI(),
+		ExecutionAuthorities: h.execution.DriverRunAuthorityResolver(), SystemAuthorities: h.execution.SystemAuthorityResolver(),
 	}).RunOnce(ctx); err != nil {
 		t.Fatalf("run child to terminal state: %v", err)
 	}

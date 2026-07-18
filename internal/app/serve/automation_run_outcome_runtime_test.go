@@ -11,14 +11,41 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+type runOutcomeRuntimeTestExecution struct {
+	execution.DriverRunAPI
+}
+
+func (runOutcomeRuntimeTestExecution) RecoverChildDriverRunCascade(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverChildDriverRunCascadeCommand,
+) (execution.CascadeChildDriverRunsResult, error) {
+	return execution.CascadeChildDriverRunsResult{
+		ActionID: command.RequestID,
+		Committed: &execution.CascadeChildDriverRunsCommit{
+			WorkspaceKey: command.WorkspaceKey, ParentRunID: command.ParentRunID,
+			ParentStatus: command.ParentStatus, Reason: command.Reason,
+			ErrorClass: command.ErrorClass, CascadedAt: command.CascadedAt,
+			MaxDepth: command.MaxDepth,
+		},
+	}, nil
+}
+
 func TestNewRunOutcomeRuntimeRegistrationDoesNotRequireAutomationPublisher(t *testing.T) {
 	st := memstore.New()
-	registration, err := NewRunOutcomeRuntimeRegistration(
-		st.DriverRuns(), st.Awaits(), st.TriggerEvents(), st.Workspaces(), nil, "WS",
+	capability, err := NewExecutionCapability(executionTestDependencies(t, st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, err := NewRunOutcomeRuntimeRegistrationWithExecution(
+		st.Awaits(), st.TriggerEvents(), st.Workspaces(), nil, "WS",
+		runOutcomeRuntimeTestExecution{DriverRunAPI: capability.DriverRunAPI()},
+		capability.DriverRunOutcomeAPI(), capability.SystemAuthorityResolver(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -91,8 +118,14 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	registration, err := NewRunOutcomeRuntimeRegistration(
-		st.DriverRuns(), st.Awaits(), st.TriggerEvents(), st.Workspaces(), publisher, workspace,
+	capability, err := NewExecutionCapability(executionTestDependencies(t, st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, err := NewRunOutcomeRuntimeRegistrationWithExecution(
+		st.Awaits(), st.TriggerEvents(), st.Workspaces(), publisher, workspace,
+		runOutcomeRuntimeTestExecution{DriverRunAPI: capability.DriverRunAPI()},
+		capability.DriverRunOutcomeAPI(), capability.SystemAuthorityResolver(),
 	)
 	if err != nil {
 		t.Fatal(err)

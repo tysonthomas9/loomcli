@@ -2,6 +2,8 @@ package workflows
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -29,11 +35,31 @@ const (
 )
 
 type Module struct {
-	store store.Store
+	store             store.Store
+	catalog           workflowcatalog.API
+	execution         execution.DriverRunAPI
+	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
 }
 
-func NewModule(st store.Store) *Module {
-	return &Module{store: st}
+type Config struct {
+	Store             store.Store
+	Catalog           workflowcatalog.API
+	Execution         execution.DriverRunAPI
+	OperatorAuthority workflowcataloghttp.OperatorAuthorityResolver
+}
+
+// NewModule accepts Config in production. The store-only form remains a
+// read-only/test compatibility constructor, but never enables DriverRun
+// mutation: every submission must cross the typed Execution boundary.
+func NewModule(input any) *Module {
+	switch value := input.(type) {
+	case Config:
+		return &Module{store: value.Store, catalog: value.Catalog, execution: value.Execution, operatorAuthority: value.OperatorAuthority}
+	case store.Store:
+		return &Module{store: value}
+	default:
+		return &Module{}
+	}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
@@ -48,9 +74,276 @@ func (m *Module) Register(mux *http.ServeMux) {
 	// mutation paths it must not self-heal a driver, so it uses ResolveDriver.
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/runs", m.listWorkflowRuns)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}", m.createWorkflowRun)
+	mux.HandleFunc("POST /api/workspaces/{ws}/execution/driver-runs", m.createDriverRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}", m.getRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/events", m.getRunEvents)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}/stream", m.streamRunEvents)
+}
+
+type createDriverRunRequest struct {
+	CLICommand      string          `json:"cli_command"`
+	DriverRef       string          `json:"driver_ref"`
+	DriverVersionID string          `json:"driver_version_id,omitempty"`
+	RunID           string          `json:"run_id,omitempty"`
+	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
+	Entrypoint      string          `json:"entrypoint,omitempty"`
+	EpicID          string          `json:"epic_id,omitempty"`
+	Payload         json.RawMessage `json:"payload"`
+}
+
+func decodeDriverRunSubmission(w http.ResponseWriter, r *http.Request) (createDriverRunRequest, string, string, bool) {
+	var request createDriverRunRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRunPayloadBytes))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid DriverRun submission JSON")
+		return createDriverRunRequest{}, "", "", false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "DriverRun submission must contain exactly one JSON object")
+		return createDriverRunRequest{}, "", "", false
+	}
+	workspace := strings.TrimSpace(r.PathValue("ws"))
+	driverRef := strings.TrimSpace(request.DriverRef)
+	if workspace == "" || driverRef == "" {
+		writeError(w, http.StatusBadRequest, "workspace and driver_ref are required")
+		return createDriverRunRequest{}, "", "", false
+	}
+	return request, workspace, driverRef, true
+}
+
+// createDriverRun is the authenticated standalone-CLI submission boundary.
+// It resolves driver/version reads through Workflow Catalog and delegates the
+// only mutation to Execution; no CLI caller opens Store or mints operator
+// authority locally.
+func (m *Module) createDriverRun(w http.ResponseWriter, r *http.Request) {
+	request, workspace, driverRef, ok := decodeDriverRunSubmission(w, r)
+	if !ok {
+		return
+	}
+	if m.catalog == nil || m.execution == nil || m.operatorAuthority == nil {
+		writeDomainError(w, execution.ErrUnavailable, "Workflow Catalog and Execution submission capabilities are unavailable")
+		return
+	}
+	sourceRef, err := driverRunCLISourceRef(request.CLICommand)
+	if err != nil {
+		writeDomainError(w, err, "invalid DriverRun CLI provenance")
+		return
+	}
+	driverTarget, version, ok := m.resolveDriverRunSubmissionTarget(w, r, workspace, driverRef, sourceRef, request.DriverVersionID)
+	if !ok {
+		return
+	}
+	payload, ok := m.prepareDriverRunPayload(w, r, workspace, sourceRef, driverTarget, request.Payload)
+	if !ok {
+		return
+	}
+	auth, err := m.operatorAuthority.ResolveOperatorAuthority(r, workspace, execution.ActionSubmitDriverRun)
+	if err != nil {
+		writeDomainError(w, err, "resolve DriverRun submit authority failed")
+		return
+	}
+	runID, requestID, entrypoint := driverRunSubmissionIdentity(r, workspace, driverTarget.DriverID, request)
+	sourceRef, epicID := m.driverRunSourceAndEpic(r.Context(), workspace, driverTarget.DriverID, sourceRef, request.EpicID, payload)
+	snapshot, err := m.execution.SubmitDriverRun(r.Context(), auth, execution.SubmitDriverRunCommand{
+		WorkspaceKey: workspace, RequestID: requestID, RunID: runID,
+		DriverID: driverTarget.DriverID, DriverVersionID: version.VersionID,
+		Entrypoint: entrypoint, SourceKind: "cli", SourceRef: sourceRef,
+		EpicID:  epicID,
+		Payload: payload,
+	})
+	if err != nil {
+		writeDomainError(w, err, "submit DriverRun failed")
+		return
+	}
+	run, err := driver.LegacyDriverRunSnapshot(snapshot)
+	if err != nil {
+		writeDomainError(w, err, "map DriverRun submission result failed")
+		return
+	}
+	handler.WriteJSON(w, http.StatusAccepted, run)
+}
+
+func (m *Module) driverRunSourceAndEpic(
+	ctx context.Context,
+	workspace, driverID, sourceRef, epicID string,
+	payload json.RawMessage,
+) (string, string) {
+	if sourceRef == "loom workflow run" {
+		sourceRef = m.resolveManualWorkflowRunSourceRef(ctx, workspace, driverID)
+	}
+	epicID = strings.TrimSpace(epicID)
+	if epicID == "" {
+		epicID = driver.DriverRunPayloadEpicID(payload)
+	}
+	return sourceRef, epicID
+}
+
+func (m *Module) prepareDriverRunPayload(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspace, sourceRef string,
+	driverTarget *workflowcatalog.Driver,
+	raw json.RawMessage,
+) (json.RawMessage, bool) {
+	payload := append(json.RawMessage(nil), raw...)
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	if !json.Valid(payload) {
+		writeError(w, http.StatusBadRequest, "payload must be valid JSON")
+		return nil, false
+	}
+	if !workflowSubmissionPreparesBuiltin(sourceRef) {
+		return payload, true
+	}
+	workflowName := strings.TrimSpace(driverTarget.Name)
+	if workflowName == "" {
+		workflowName = strings.TrimSpace(driverTarget.DriverID)
+	}
+	if err := m.preflightRunnerForRun(r.Context(), workspace, workflowName, payload); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
+	return payload, true
+}
+
+func driverRunSubmissionIdentity(
+	r *http.Request,
+	workspace, driverID string,
+	request createDriverRunRequest,
+) (string, string, string) {
+	runID := strings.TrimSpace(request.RunID)
+	requestID := strings.TrimSpace(request.IdempotencyKey)
+	if requestID == "" {
+		requestID = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	}
+	if runID == "" && requestID != "" {
+		runID = workflowSubmissionRunID(workspace, driverID, requestID)
+	}
+	if runID == "" {
+		runID = fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
+	}
+	if requestID == "" {
+		requestID = runID
+	}
+	entrypoint := strings.TrimSpace(request.Entrypoint)
+	if entrypoint == "" {
+		entrypoint = driver.EntrypointRun
+	}
+	return runID, requestID, entrypoint
+}
+
+func (m *Module) resolveDriverRunSubmissionTarget(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspace, driverRef, sourceRef, requestedVersionID string,
+) (*workflowcatalog.Driver, *workflowcatalog.DriverVersion, bool) {
+	driverTarget, err := m.catalog.GetDriver(r.Context(), workspace, driverRef)
+	if errors.Is(err, workflowcatalog.ErrNotFound) && workflowSubmissionPreparesBuiltin(sourceRef) &&
+		workflowdefs.IsBuiltinWorkflow(driverRef) && m.store != nil {
+		// Workflow distribution remains a bounded Phase-5 compatibility lane.
+		// Preserve the established builtin self-heal here, then return to the
+		// public Catalog read and typed Execution mutation boundaries.
+		if _, prepareErr := m.resolveWorkflowTarget(r.Context(), workspace, driverRef); prepareErr != nil {
+			writeDomainError(w, prepareErr, "prepare builtin DriverRun target failed")
+			return nil, nil, false
+		}
+		driverTarget, err = m.catalog.GetDriver(r.Context(), workspace, driverRef)
+	}
+	if err != nil {
+		writeDomainError(w, err, "resolve DriverRun target failed")
+		return nil, nil, false
+	}
+	if driverTarget == nil {
+		writeDomainError(w, workflowcatalog.ErrInvalidPersistedState, "Workflow Catalog returned no DriverRun target")
+		return nil, nil, false
+	}
+
+	versionID := strings.TrimSpace(requestedVersionID)
+	var version *workflowcatalog.DriverVersion
+	if versionID != "" {
+		requested, ok := m.resolveRequestedDriverRunVersion(w, r, workspace, driverRef, versionID)
+		if !ok {
+			return nil, nil, false
+		}
+		driverTarget = requested.Driver
+		version = requested.Version
+	} else {
+		if driverTarget.Status != workflowcatalog.DriverStatusActive {
+			writeDomainError(w, domain.ErrInvalid, "DriverRun target is not active")
+			return nil, nil, false
+		}
+		version, err = m.catalog.GetVersion(r.Context(), workspace, strings.TrimSpace(driverTarget.ActiveVersionID))
+		if err != nil {
+			writeDomainError(w, err, "resolve DriverRun version failed")
+			return nil, nil, false
+		}
+	}
+	if version == nil || version.DriverID != driverTarget.DriverID ||
+		version.ValidationStatus != workflowcatalog.DriverVersionValidationPassed {
+		writeDomainError(w, domain.ErrInvalid, "DriverRun version is not a passed version for the target driver")
+		return nil, nil, false
+	}
+	return driverTarget, version, true
+}
+
+func (m *Module) resolveRequestedDriverRunVersion(
+	w http.ResponseWriter,
+	r *http.Request,
+	workspace, driverRef, versionID string,
+) (*workflowcatalog.RequestedVersion, bool) {
+	catalogAuth, err := m.operatorAuthority.ResolveOperatorAuthority(r, workspace, workflowcatalog.ActionResolveRequestedVersion)
+	if err != nil {
+		writeDomainError(w, err, "resolve requested DriverRun version authority failed")
+		return nil, false
+	}
+	requested, err := m.catalog.ResolveRequestedVersion(r.Context(), catalogAuth, workspace, driverRef, versionID)
+	if err != nil {
+		writeDomainError(w, err, "resolve requested DriverRun version failed")
+		return nil, false
+	}
+	if requested == nil || requested.Driver == nil || requested.Version == nil {
+		writeDomainError(w, workflowcatalog.ErrInvalidPersistedState, "Workflow Catalog returned no requested DriverRun version")
+		return nil, false
+	}
+	return requested, true
+}
+
+func driverRunCLISourceRef(command string) (string, error) {
+	switch strings.TrimSpace(command) {
+	case "driver-run":
+		return "loom driver run", nil
+	case "workflow-run":
+		return "loom workflow run", nil
+	case "epic-run":
+		return "loom epic run", nil
+	default:
+		return "", fmt.Errorf("unknown cli_command %q: %w", command, domain.ErrInvalid)
+	}
+}
+
+func workflowSubmissionPreparesBuiltin(sourceRef string) bool {
+	switch strings.TrimSpace(sourceRef) {
+	case "loom workflow run", "loom epic run":
+		return true
+	default:
+		return false
+	}
+}
+
+// resolveManualWorkflowRunSourceRef preserves connector grant resolution for
+// `loom workflow run`: a bound workflow stamps its binding route key; an
+// unbound workflow retains the plain CLI provenance label.
+func (m *Module) resolveManualWorkflowRunSourceRef(ctx context.Context, workspace, driverID string) string {
+	if m == nil || m.store == nil {
+		return "loom workflow run"
+	}
+	bindings, err := m.store.TriggerBindings().List(ctx, workspace, store.TriggerBindingFilter{DriverID: driverID, Limit: 1})
+	if err == nil && len(bindings) > 0 && bindings[0] != nil && strings.TrimSpace(bindings[0].RouteKey) != "" {
+		return bindings[0].RouteKey
+	}
+	return "loom workflow run"
 }
 
 type workflowSummary struct {
@@ -261,7 +554,7 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ws := r.PathValue("ws")
 	name := strings.TrimSpace(r.PathValue("name"))
-	driverID, err := m.resolveWorkflowDriverID(r.Context(), ws, name)
+	target, err := m.resolveWorkflowTarget(r.Context(), ws, name)
 	if err != nil {
 		slog.Error("createWorkflowRun: resolveWorkflowDriverID failed", "ws", ws, "workflow", name, "err", err.Error())
 		// A genuine not-found is the ONLY case that is a 404 "workflow not found".
@@ -283,15 +576,7 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	run, err := driver.CreateDriverRun(r.Context(), m.store, driver.RunOptions{
-		WorkspaceKey:   ws,
-		DriverID:       driverID,
-		EpicID:         driver.DriverRunPayloadEpicID(payload),
-		IdempotencyKey: strings.TrimSpace(r.Header.Get("Idempotency-Key")),
-		SourceKind:     "api",
-		SourceRef:      r.URL.Path,
-		Payload:        payload,
-	})
+	run, err := m.submitWorkflowRun(r, ws, target, payload)
 	if err != nil {
 		writeDomainError(w, err, "create workflow run failed")
 		return
@@ -299,12 +584,63 @@ func (m *Module) createWorkflowRun(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusAccepted, run)
 }
 
+func (m *Module) submitWorkflowRun(r *http.Request, workspace string, target *domain.Driver, payload json.RawMessage) (*domain.DriverRun, error) {
+	if target == nil {
+		return nil, domain.ErrNotFound
+	}
+	if m.execution == nil {
+		return nil, fmt.Errorf("execution submit API is unavailable: %w", execution.ErrUnavailable)
+	}
+	if m.operatorAuthority == nil {
+		return nil, fmt.Errorf("execution operator authority is unavailable: %w", execution.ErrUnavailable)
+	}
+	auth, err := m.operatorAuthority.ResolveOperatorAuthority(r, workspace, execution.ActionSubmitDriverRun)
+	if err != nil {
+		return nil, err
+	}
+	requestID := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	runID := fmt.Sprintf("run-%d", time.Now().UTC().UnixNano())
+	if requestID == "" {
+		requestID = runID
+	} else {
+		// A client can lose the accepted response and retry later. Bind the
+		// persisted identity to the stable request key so the replay presents
+		// the exact same RunID to Execution instead of conflicting with the
+		// already-created run.
+		runID = workflowSubmissionRunID(workspace, target.DriverID, requestID)
+	}
+	snapshot, err := m.execution.SubmitDriverRun(r.Context(), auth, execution.SubmitDriverRunCommand{
+		WorkspaceKey: workspace, RequestID: requestID, RunID: runID,
+		DriverID: target.DriverID, DriverVersionID: target.ActiveVersionID,
+		Entrypoint: driver.EntrypointRun, SourceKind: "api", SourceRef: r.URL.Path,
+		EpicID: driver.DriverRunPayloadEpicID(payload), Payload: payload,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return driver.LegacyDriverRunSnapshot(snapshot)
+}
+
+func workflowSubmissionRunID(workspace, targetID, requestID string) string {
+	digest := sha256.Sum256([]byte(strings.Join([]string{
+		"loom-workflow-submit",
+		strings.TrimSpace(workspace),
+		strings.TrimSpace(targetID),
+		strings.TrimSpace(requestID),
+	}, "\x00")))
+	return "run-" + hex.EncodeToString(digest[:16])
+}
+
 func (m *Module) resolveWorkflowDriverID(ctx context.Context, ws, name string) (string, error) {
-	drv, err := workflowdefs.EnsureAndResolveDriver(ctx, m.store, ws, name)
+	drv, err := m.resolveWorkflowTarget(ctx, ws, name)
 	if err != nil {
 		return "", err
 	}
 	return drv.DriverID, nil
+}
+
+func (m *Module) resolveWorkflowTarget(ctx context.Context, ws, name string) (*domain.Driver, error) {
+	return workflowdefs.EnsureAndResolveDriver(ctx, m.store, ws, name)
 }
 
 func (m *Module) getRun(w http.ResponseWriter, r *http.Request) {
@@ -471,9 +807,44 @@ func writeError(w http.ResponseWriter, status int, message string) {
 // writeDomainError handles this package's one extra sentinel (event reads on a
 // store without event support → 501), then defers to the shared domain mapper.
 func writeDomainError(w http.ResponseWriter, err error, fallback string) {
-	if errors.Is(err, store.ErrDriverRunEventsUnavailable) {
+	switch {
+	case errors.Is(err, store.ErrDriverRunEventsUnavailable):
 		writeError(w, http.StatusNotImplemented, err.Error())
-		return
+	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
+		errors.Is(err, authority.ErrInvalidPrincipal),
+		errors.Is(err, authority.ErrInvalidOperatorToken),
+		errors.Is(err, authority.ErrPrincipalExpired),
+		errors.Is(err, authority.ErrOpaqueAuthority):
+		writeError(w, http.StatusUnauthorized, "authentication required")
+	case errors.Is(err, authority.ErrAdmissionDenied),
+		errors.Is(err, authority.ErrWorkspaceMismatch),
+		errors.Is(err, authority.ErrPrincipalClass),
+		errors.Is(err, authority.ErrActionNotAllowed),
+		errors.Is(err, workflowcatalog.ErrWrongWorkspace):
+		writeError(w, http.StatusForbidden, "forbidden")
+	case errors.Is(err, execution.ErrInvalid),
+		errors.Is(err, execution.ErrPreflightFailed),
+		errors.Is(err, execution.ErrUnschedulable),
+		errors.Is(err, workflowcatalog.ErrInvalid):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, execution.ErrNotFound),
+		errors.Is(err, workflowcatalog.ErrNotFound):
+		writeError(w, http.StatusNotFound, fallback)
+	case errors.Is(err, execution.ErrConflict),
+		errors.Is(err, execution.ErrFenceConflict),
+		errors.Is(err, execution.ErrInvalidTransition),
+		errors.Is(err, workflowcatalog.ErrVersionOwnership),
+		errors.Is(err, workflowcatalog.ErrStaleRevision):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, workflowcatalog.ErrVersionNotValidated),
+		errors.Is(err, workflowcatalog.ErrVersionNotApproved):
+		writeError(w, http.StatusPreconditionFailed, err.Error())
+	case errors.Is(err, execution.ErrUnavailable),
+		errors.Is(err, workflowcatalog.ErrUnavailable):
+		writeError(w, http.StatusServiceUnavailable, fallback)
+	case errors.Is(err, workflowcatalog.ErrInvalidPersistedState):
+		writeError(w, http.StatusBadGateway, fallback)
+	default:
+		handler.WriteDomainError(w, err, fallback)
 	}
-	handler.WriteDomainError(w, err, fallback)
 }

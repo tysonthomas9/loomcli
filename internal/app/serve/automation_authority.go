@@ -176,6 +176,7 @@ func (provider *automationExecutionAuthorityProvider) AuthorityForVerifiedRun(
 		return authority.ExecutionAuthority{}, err
 	}
 	return provider.issuer.IssueExecutionForOwner(principal, workspace, automation.ActionAdmitEvent, authority.ExecutionOwner{
+		ResourceKind: authority.ExecutionResourceDriverRun, ResourceID: runID,
 		NodeID: parent.NodeID, LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
 	})
 }

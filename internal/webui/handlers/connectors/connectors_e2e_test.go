@@ -34,6 +34,7 @@ import (
 	"testing"
 	"time"
 
+	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/app/webhookingestion"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
@@ -41,6 +42,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
@@ -191,6 +193,9 @@ type e2eHarness struct {
 	nodeID  string
 	leaseID string
 	fence   int64
+
+	runTokenKey []byte
+	runToken    string
 }
 
 // connectorE2EAdmission is test-only compatibility wiring for this legacy
@@ -250,9 +255,38 @@ func (connectorE2EAuthorityProvider) AuthorityForVerifiedWebhook(context.Context
 	return authority.WebhookAuthority{}, nil
 }
 
+// connectorE2ETaskRunCommands fills the unrelated atomic TaskRun ports that
+// the production Execution composition requires. This connector journey never
+// invokes them; returning ErrUnavailable keeps an accidental call fail-closed.
+type connectorE2ETaskRunCommands struct{}
+
+func (connectorE2ETaskRunCommands) ReplayTaskRunRequest(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (connectorE2ETaskRunCommands) RequestTaskRun(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (connectorE2ETaskRunCommands) ClaimTaskRun(context.Context, execution.ClaimTaskRunCommand) (execution.ClaimTaskRunResult, error) {
+	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (connectorE2ETaskRunCommands) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
+	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (connectorE2ETaskRunCommands) ExhaustTaskRunRetries(context.Context, execution.ExhaustTaskRunRetriesCommand) (execution.ExhaustTaskRunRetriesResult, error) {
+	return execution.ExhaustTaskRunRetriesResult{}, execution.ErrUnavailable
+}
+
 func newE2EHarness(t *testing.T) *e2eHarness {
 	t.Helper()
-	h := &e2eHarness{store: memstore.New(), github: newFakeGitHub(t)}
+	h := &e2eHarness{
+		store:       memstore.New(),
+		github:      newFakeGitHub(t),
+		runTokenKey: bytes.Repeat([]byte{0x51}, 32),
+	}
 
 	vault, err := connector.NewVault(bytes.Repeat([]byte{0x42}, 32))
 	if err != nil {
@@ -274,9 +308,29 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		Vault:      h.vault,
 		Providers:  registry,
 	}
+	repairs, ok := h.store.DriverSteps().(store.TerminalDriverStepRepairStore)
+	if !ok {
+		t.Fatal("test DriverStep store lacks terminal repair support")
+	}
+	taskRunCommands := connectorE2ETaskRunCommands{}
+	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
+		TaskRuns: h.store.TaskRuns(), DriverRuns: h.store.DriverRuns(), DriverSteps: h.store.DriverSteps(),
+		TerminalStepRepairs: repairs, TaskRunEvents: h.store.TaskRunEvents(), Nodes: h.store.Nodes(),
+		WorkerProfiles: h.store.WorkerProfiles(), Agents: h.store.Agents(), Outbox: h.store.Outbox(),
+		Awaits: h.store.Awaits(), TriggerEvents: h.store.TriggerEvents(), Workspaces: h.store.Workspaces(),
+		AtomicTaskRunRequests: taskRunCommands, AtomicTaskRunClaims: taskRunCommands,
+		AtomicTaskRunRequeues: taskRunCommands, AtomicTaskRunRetryExhaustion: taskRunCommands,
+		AllowLegacyStoreAdapters: true,
+	})
+	if err != nil {
+		t.Fatalf("new Execution capability: %v", err)
+	}
 
 	mux := http.NewServeMux()
-	driverapi.NewModule(driverapi.Config{Store: h.store, Dispatcher: dispatcher}).Register(mux)
+	driverapi.NewModule(driverapi.Config{
+		Store: h.store, Dispatcher: dispatcher, RunTokenKey: h.runTokenKey,
+		Execution: executionCapability.DriverRunAPI(), ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
+	}).Register(mux)
 	workflow, err := webhookingestion.New(
 		webhooks.NewCompatibilityVerifier(webhooks.CompatibilityVerifierConfig{
 			Bindings: h.store.TriggerBindings(), Connectors: h.store.Connectors(),
@@ -396,8 +450,9 @@ func (h *e2eHarness) postGitHubWebhook(t *testing.T, deliveryID, secret string, 
 	return h.do(t, req)
 }
 
-// dispatchOp posts one connector-dispatch driver op under the claimed run's
-// identity headers, exactly as the flue SDK does over the run-scoped surface.
+// dispatchOp posts one connector-dispatch driver op with only the claimed
+// run's bearer token, exactly as the current flue SDK does. The server derives
+// the run/node/lease/fence owner tuple; no legacy identity header is sent.
 func (h *e2eHarness) dispatchOp(t *testing.T, body map[string]any) (int, []byte) {
 	t.Helper()
 	payload, err := json.Marshal(body)
@@ -410,10 +465,7 @@ func (h *e2eHarness) dispatchOp(t *testing.T, body map[string]any) (int, []byte)
 		t.Fatalf("new dispatch request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(driverapi.HeaderDriverRunID, h.runID)
-	req.Header.Set(driverapi.HeaderDriverNodeID, h.nodeID)
-	req.Header.Set(driverapi.HeaderDriverLeaseID, h.leaseID)
-	req.Header.Set(driverapi.HeaderDriverFencingToken, fmt.Sprintf("%d", h.fence))
+	req.Header.Set("Authorization", "Bearer "+h.runToken)
 	return h.do(t, req)
 }
 
@@ -455,6 +507,22 @@ func (h *e2eHarness) claimRun(t *testing.T, runID string) {
 	h.nodeID = claimed.NodeID
 	h.leaseID = claimed.LeaseID
 	h.fence = claimed.FencingToken
+	leaseToken, err := driver.DeriveDriverRunLeaseToken(
+		h.runTokenKey, e2eWorkspace, h.runID, h.nodeID, h.leaseID,
+	)
+	if err != nil {
+		t.Fatalf("derive DriverRun lease token: %v", err)
+	}
+	h.runToken, err = driver.MintRunToken(driver.RunTokenClaims{
+		WorkspaceKey: e2eWorkspace, RunID: h.runID, NodeID: h.nodeID,
+		LeaseID: h.leaseID, FencingToken: h.fence,
+	}, h.runTokenKey, time.Hour)
+	if err != nil {
+		t.Fatalf("mint DriverRun token: %v", err)
+	}
+	if leaseToken == "" {
+		t.Fatal("derived DriverRun lease token is empty")
+	}
 }
 
 // primaryRunID extracts deliveries[0].driver_run_id from a 202 dispatch body.

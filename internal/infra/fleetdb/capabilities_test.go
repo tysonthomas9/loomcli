@@ -37,6 +37,25 @@ func TestRequireCapabilitiesEmptyRequirementsSkipProbe(t *testing.T) {
 	}
 }
 
+func TestPhase4FoundationCapabilitiesIncludesWorkItemClaimProfile(t *testing.T) {
+	t.Parallel()
+
+	got := Phase4FoundationCapabilities()
+	if len(got) != 13 {
+		t.Fatalf("Phase4FoundationCapabilities length = %d, want 13", len(got))
+	}
+	found := false
+	for _, capability := range got {
+		if capability == ExecutionDriverRunWorkItemClaimCapability {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Phase4FoundationCapabilities = %q, missing %q", got, ExecutionDriverRunWorkItemClaimCapability)
+	}
+}
+
 func TestRequireCapabilitiesAcceptsNormalizedAdvertisedKeys(t *testing.T) {
 	t.Parallel()
 

@@ -17,7 +17,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -31,11 +34,49 @@ const (
 )
 
 type approvalsHarness struct {
-	store  *memstore.Store
-	server *httptest.Server
+	store        *memstore.Store
+	server       *httptest.Server
+	executionAPI *recordingExecutionDriverRuns
 }
 
 func newApprovalsHarness(t *testing.T) *approvalsHarness {
+	return newApprovalsHarnessWithExecution(t, true)
+}
+
+type recordingExecutionDriverRuns struct {
+	execution.DriverRunAPI
+	resolver     store.AtomicAwaitStore
+	resolveCalls int
+}
+
+func (api *recordingExecutionDriverRuns) ResolveDriverAwait(
+	ctx context.Context,
+	_ authority.SystemAuthority,
+	command execution.ResolveDriverAwaitCommand,
+) error {
+	api.resolveCalls++
+	return api.resolver.ResolveAwaitAndResume(
+		ctx,
+		command.WorkspaceKey,
+		command.InstanceKey,
+		command.EventID,
+		command.Payload,
+		command.Actor,
+	)
+}
+
+type approvalsSystemAuthorities struct{}
+
+func (approvalsSystemAuthorities) ResolveExecutionSystemAuthority(
+	context.Context,
+	string,
+	authority.Action,
+	string,
+) (authority.SystemAuthority, error) {
+	return authority.SystemAuthority{}, nil
+}
+
+func newApprovalsHarnessWithExecution(t *testing.T, executionAvailable bool) *approvalsHarness {
 	t.Helper()
 	st := memstore.New()
 	ctx := context.Background()
@@ -55,8 +96,23 @@ func newApprovalsHarness(t *testing.T) *approvalsHarness {
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
 	}
+	var (
+		awaits       AwaitDispatcher
+		executionAPI *recordingExecutionDriverRuns
+	)
+	if executionAvailable {
+		atomicAwaits, ok := st.Awaits().(store.AtomicAwaitStore)
+		if !ok {
+			t.Fatalf("memstore awaits %T does not implement store.AtomicAwaitStore", st.Awaits())
+		}
+		executionAPI = &recordingExecutionDriverRuns{resolver: atomicAwaits}
+		resolver := &driver.ExecutionAwaitResolver{
+			API: executionAPI, Authorities: approvalsSystemAuthorities{}, ComponentID: "test-approvals",
+		}
+		awaits = trigger.NewAwaitMatcherWithResolver(st.Awaits(), st.DriverRuns(), resolver)
+	}
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	New(Config{Store: st, Awaits: awaits}).Register(mux)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if user := r.Header.Get(testUserHeader); user != "" {
 			identity := middleware.UserIdentity{UserID: user, Email: r.Header.Get(testEmailHeader)}
@@ -65,7 +121,7 @@ func newApprovalsHarness(t *testing.T) *approvalsHarness {
 		mux.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
-	return &approvalsHarness{store: st, server: server}
+	return &approvalsHarness{store: st, server: server, executionAPI: executionAPI}
 }
 
 // suspendedRun creates, claims and suspends a run pending on pattern with the
@@ -119,19 +175,19 @@ func (h *approvalsHarness) pendingCompositionAwait(t *testing.T, parentRunID, ch
 	}); err != nil {
 		t.Fatalf("Create composition child: %v", err)
 	}
-	outcome, _, err := driver.AwaitChildWorkflow(ctx, h.store, driver.AwaitChildWorkflowOptions{
-		WorkspaceKey: approvalsTestWS, RunID: parent.RunID, NodeID: parent.NodeID,
-		LeaseID: parent.LeaseID, FencingToken: parent.FencingToken,
-		ChildRunID: childRunID, TimeoutMs: time.Minute.Milliseconds(), AwaitIndex: 1,
+	key := domain.AwaitInstanceKey(parentRunID, 1)
+	registered, err := h.store.Awaits().RegisterAwaitAndCheck(ctx, approvalsTestWS, store.AwaitRegistration{
+		InstanceKey: key, RunID: parentRunID, Pattern: driver.RunFinishedSubjectKey(childRunID),
+		ActorAllow: []string{driver.RunFinishedActor}, Deadline: time.Now().Add(time.Minute),
 	})
-	if err != nil || outcome == nil || outcome.Status != driver.AwaitOutcomeSuspended {
-		t.Fatalf("AwaitChildWorkflow = %+v, %v; want suspended", outcome, err)
+	if err != nil || registered == nil || registered.Satisfied {
+		t.Fatalf("RegisterAwaitAndCheck = %+v, %v; want pending", registered, err)
 	}
-	if outcome.Instance == nil || len(outcome.Instance.ActorAllow) != 1 ||
-		outcome.Instance.ActorAllow[0] != driver.RunFinishedActor {
-		t.Fatalf("composition await = %+v, want actorAllow [%q]", outcome.Instance, driver.RunFinishedActor)
+	if _, err := h.store.DriverRuns().Suspend(ctx, approvalsTestWS, parentRunID,
+		parent.NodeID, parent.LeaseID, parent.FencingToken, key); err != nil {
+		t.Fatalf("Suspend composition parent: %v", err)
 	}
-	return domain.AwaitInstanceKey(parentRunID, 1)
+	return key
 }
 
 type approvalCall struct {
@@ -187,6 +243,21 @@ func TestApprovalRequiresVerifiedSession(t *testing.T) {
 	}
 	if events := h.journalEvents(t); len(events) != 0 {
 		t.Fatalf("journal = %d events after anonymous approval, want none", len(events))
+	}
+}
+
+func TestApprovalFailsClosedWithoutExecutionAwaitResolver(t *testing.T) {
+	h := newApprovalsHarnessWithExecution(t, false)
+	resp, decoded := h.post(t, approvalCall{
+		user: "user-alice", email: "alice@example.com",
+		body: map[string]any{"subjectRef": "acme/widgets#7@shaA"},
+	})
+	errorBody, _ := decoded["error"].(map[string]any)
+	if resp.StatusCode != http.StatusServiceUnavailable || errorBody["code"] != "unavailable" {
+		t.Fatalf("response = %d %v, want 503 unavailable", resp.StatusCode, decoded)
+	}
+	if events := h.journalEvents(t); len(events) != 0 {
+		t.Fatalf("journal = %d events without Execution resolver, want none", len(events))
 	}
 }
 
@@ -307,6 +378,12 @@ func TestApprovalResolvesAndResumesEligibleAwait(t *testing.T) {
 	if decoded["status"] != DecisionApproved || decoded["actor"] != "alice@example.com" ||
 		decoded["pendingMatched"] != float64(1) {
 		t.Fatalf("response = %v, want approved by alice with one pending match", decoded)
+	}
+	if h.executionAPI == nil {
+		t.Fatal("Execution API probe is nil")
+	}
+	if h.executionAPI.resolveCalls != 1 {
+		t.Fatalf("Execution ResolveDriverAwait calls = %d, want exactly one", h.executionAPI.resolveCalls)
 	}
 	eventID, _ := decoded["eventId"].(string)
 	if !strings.HasPrefix(eventID, "approval-") {

@@ -15,7 +15,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -35,6 +38,36 @@ type AutomationCapability interface {
 	WorkflowBinding() *workflowbinding.Workflow
 	WorkflowEventing() *workfloweventing.Workflow
 	OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver
+}
+
+// ExecutionCapability is the narrow active Phase 4 composition handle. Web
+// adapters receive intent APIs and exact-purpose authority resolvers only;
+// the shared issuer, admission registry, and persistence adapters stay in
+// app/serve.
+type ExecutionCapability interface {
+	TaskRunAPI() execution.TaskRunAPI
+	TaskRunRequestAPI() execution.TaskRunRequestAPI
+	TaskRunWorkerAPI() execution.TaskRunWorkerAPI
+	TaskRunSchedulingAPI() execution.TaskRunSchedulingAPI
+	WorkerProfileAPI() execution.WorkerProfileAPI
+	TaskRunConvergenceAPI() execution.TaskRunConvergenceAPI
+	TaskRunConvergenceSource() execution.TaskRunConvergenceSource
+	TaskRunRecoveryAPI() execution.TaskRunRecoveryAPI
+	TaskRunRecoveryScopes() execution.TaskRunRecoveryScopePort
+	TaskRunAuthorityResolver() execution.TaskRunAuthorityResolver
+	DriverRunAPI() execution.DriverRunAPI
+	AwaitEventNotificationAPI() execution.AwaitEventNotificationAPI
+	DriverRunOutcomeAPI() execution.DriverRunOutcomeAPI
+	DriverRunAuthorityResolver() execution.DriverRunAuthorityResolver
+	SystemAuthorityResolver() execution.SystemAuthorityResolver
+	OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver
+}
+
+// ArtifactsCapability is the narrow owner-fenced lifecycle handle published
+// by serve composition. Web modules receive only the module API, never the
+// low-level FleetDB transport or the process-wide Store mutation surface.
+type ArtifactsCapability interface {
+	ArtifactsAPI() artifacts.API
 }
 
 const (
@@ -95,6 +128,7 @@ type ServerConfig struct {
 	// module. Web UI composition only registers it; it never receives the
 	// capability's persistence adapter or low-level FleetDB client.
 	WorkflowCatalogModule   interface{ Register(*http.ServeMux) }
+	WorkflowCatalogAPI      workflowcatalog.API
 	AutomationCapability    AutomationCapability
 	MonitorHandlers         MonitorHandlers             // Pre-built handlers for monitor/metrics endpoints (injected by cli)
 	GitOps                  ops.GitOps                  // Git operations interface (optional; nil disables git endpoints)
@@ -126,8 +160,10 @@ type ServerConfig struct {
 	FleetClientActor     string                                               // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
 	FleetDBBaseURL       string                                               // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
 	DriverAPIToken       string                                               // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
-	DriverAPIBaseURL     string                                               // This serve process's own driver/task-run API base URL, exported to task runners as LOOM_TASK_RUN_API_URL; empty keeps runners on the legacy direct-fleet-db env
+	DriverAPIBaseURL     string                                               // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
 	DriverRunTokenKey    []byte                                               // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
+	ExecutionCapability  ExecutionCapability                                  // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
+	ArtifactsCapability  ArtifactsCapability                                  // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
 	DaemonStartupFn      func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
 	Logger               *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN            string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)

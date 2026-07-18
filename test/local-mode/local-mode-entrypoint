@@ -35,6 +35,18 @@ case "$AGENT_BACKEND" in
 esac
 PLAN_AGENT="${LOOM_LOCAL_MODE_PLAN_AGENT:-$DEFAULT_PLAN_AGENT}"
 CODE_AGENT="${LOOM_LOCAL_MODE_CODE_AGENT:-$DEFAULT_CODE_AGENT}"
+TS_PLAN_AGENT_NAME="${LOOM_LOCAL_MODE_TS_PLAN_AGENT_NAME:-Local mode TS planner}"
+TS_CODE_AGENT_NAME="${LOOM_LOCAL_MODE_TS_CODE_AGENT_NAME:-Local mode TS coder}"
+TS_PLAN_ROLE="${LOOM_LOCAL_MODE_TS_PLAN_ROLE:-local-mode-ts-plan}"
+TS_CODE_ROLE="${LOOM_LOCAL_MODE_TS_CODE_ROLE:-local-mode-ts-task}"
+TS_PLAN_BINDING="${LOOM_LOCAL_MODE_TS_PLAN_BINDING:-local-mode-ts-planner}"
+TS_CODE_BINDING="${LOOM_LOCAL_MODE_TS_CODE_BINDING:-local-mode-ts-coder}"
+PLAN_AGENT_RECORD_ID=""
+CODE_AGENT_RECORD_ID=""
+OPERATOR_BEARER=""
+FLEET_API_BASE="${LOOM_FLEET_DB_URL:-http://fleet-db:8080}"
+FLEET_API_KEY="${LOOM_FLEET_DB_API_KEY:-}"
+FLEET_API_ACTOR="${LOOM_FLEET_DB_ACTOR:-local-mode-harness@fixture.local}"
 PLAN_TASK_ID=""
 CODE_TASK_ID=""
 PLAN_TASK_TITLE="${LOOM_LOCAL_MODE_PLAN_TASK_TITLE:-Local mode planner dogfood} [run:${RUN_ID}]"
@@ -187,6 +199,37 @@ http_post_json() {
   wget -qO- --timeout=5 --tries=1 --header="Content-Type: application/json" --post-data="$body" "$url"
 }
 
+http_request_json() {
+  method="$1"
+  url="$2"
+  body="${3:-}"
+  bearer="${4:-}"
+  args=(-fsS --max-time 180 -X "$method" -H "Accept: application/json" -H "Content-Type: application/json")
+  if [ "$bearer" != "" ]; then
+    args+=(-H "Authorization: Bearer ${bearer}")
+  fi
+  if [ "$body" != "" ]; then
+    args+=(--data "$body")
+  fi
+  curl "${args[@]}" "$url"
+}
+
+fleet_request_json() {
+  method="$1"
+  url="$2"
+  body="${3:-}"
+  if [ "$FLEET_API_KEY" = "" ]; then
+    echo "[local-mode] FATAL: LOOM_FLEET_DB_API_KEY is required for authenticated FleetDB setup" >&2
+    return 1
+  fi
+  args=(-fsS --max-time 180 -X "$method" -H "Accept: application/json" -H "Content-Type: application/json"
+    -H "Authorization: Bearer ${FLEET_API_KEY}" -H "X-API-Key: ${FLEET_API_KEY}" -H "X-Actor: ${FLEET_API_ACTOR}")
+  if [ "$body" != "" ]; then
+    args+=(--data "$body")
+  fi
+  curl "${args[@]}" "$url"
+}
+
 wait_for_url() {
   url="$1"
   label="$2"
@@ -257,6 +300,16 @@ create_workspace() {
   fi
   configure_origin_remote "$WORKSPACE_REPO"
   push_current_branch "$WORKSPACE_REPO"
+}
+
+prepare_ts_patchback_repo() {
+  # prompt-agent asks coder runs for local-branch delivery. This deterministic
+  # execution proof needs the persisted diff/patch-back artifact instead, so the
+  # disposable TS-plane fixture deliberately has no publish remote. The runner's
+  # explicit fallback then returns a patch for the host bridge to apply and audit.
+  if git -C "$WORKSPACE_REPO" remote get-url origin >/dev/null 2>&1; then
+    git -C "$WORKSPACE_REPO" remote remove origin
+  fi
 }
 
 create_agent_worktree() {
@@ -391,6 +444,120 @@ prepare_daytona_credentials() {
 
 issues_api() {
   printf 'http://127.0.0.1:%s/api/workspaces/%s' "$LOOM_PORT" "$WORKSPACE"
+}
+
+mint_local_operator_bearer() {
+  operator_token="${WORKSPACE_ROOT}/.loom/operator/operator.token"
+  deadline=$((SECONDS + 60))
+  while [ ! -s "$operator_token" ]; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "[local-mode] FATAL: loom serve did not publish its local operator credential" >&2
+      return 1
+    fi
+    sleep 1
+  done
+  durable_bearer="$(cat "$operator_token")"
+  launch="$(http_request_json POST "$(issues_api)/operator-sessions/launch" '{}' "$durable_bearer")" || {
+    echo "[local-mode] FATAL: could not create a local operator launch" >&2
+    return 1
+  }
+  launch_code="$(printf '%s' "$launch" | jq -r '.launch_code // empty')"
+  if [ "$launch_code" = "" ]; then
+    echo "[local-mode] FATAL: local operator launch omitted launch_code" >&2
+    return 1
+  fi
+  exchange_body="$(jq -cn --arg launch_code "$launch_code" '{launch_code:$launch_code}')"
+  session="$(http_request_json POST "$(issues_api)/operator-sessions/exchange" "$exchange_body")" || {
+    echo "[local-mode] FATAL: could not exchange the local operator launch" >&2
+    return 1
+  }
+  OPERATOR_BEARER="$(printf '%s' "$session" | jq -r --arg workspace "$WORKSPACE" 'select(.workspace == $workspace and .token_type == "Bearer") | .access_token // empty')"
+  if [ "$OPERATOR_BEARER" = "" ]; then
+    echo "[local-mode] FATAL: local operator exchange returned an invalid session" >&2
+    return 1
+  fi
+}
+
+prompt_agent_by_name() {
+  name="$1"
+  http_get "$(issues_api)/agents" |
+    jq -c --arg name "$name" '[.data[]? | select(.kind == "prompt" and .name == $name)] | if length == 1 then .[0] else empty end'
+}
+
+seed_prompt_agent() {
+  name="$1"
+  role="$2"
+  binding="$3"
+  task_filter="$4"
+  prompt="$5"
+
+  record="$(prompt_agent_by_name "$name")"
+  if [ "$record" = "" ]; then
+    body="$(jq -cn \
+      --arg name "$name" \
+      --arg backend "$AGENT_BACKEND" \
+      --arg role "$role" \
+      --arg binding "$binding" \
+      --arg task_filter "$task_filter" \
+      --arg prompt "$prompt" \
+      '{kind:"prompt",name:$name,backend:$backend,behavior:{role_name:$role,role_create:{description:"Deterministic supervisor-disabled execution proof",prompt:$prompt,prompt_filename:($role + ".md"),task_filter:$task_filter,backend:$backend}},trigger:{source_kind:"internal",binding_id:$binding,event_type_patterns:["internal.task.ready"]},enabled:true}')"
+    record="$(http_request_json POST "$(issues_api)/agents" "$body" "$OPERATOR_BEARER")" || {
+      echo "[local-mode] FATAL: public API failed to create prompt agent ${name}" >&2
+      return 1
+    }
+    echo "[local-mode] public API created prompt agent ${name}" >&2
+  else
+    echo "[local-mode] public API prompt agent ${name} already exists" >&2
+  fi
+
+  if ! printf '%s' "$record" | jq -e \
+    --arg role "$role" --arg binding "$binding" '
+      .kind == "prompt" and .enabled == true and .behavior.role_name == $role and
+      any(.bindings[]?; .binding_id == $binding and .source_kind == "internal" and
+        .enabled == true and (.event_type_patterns | index("internal.task.ready") != null))
+    ' >/dev/null; then
+    echo "[local-mode] FATAL: prompt agent ${name} does not match its requested role/binding" >&2
+    printf '%s\n' "$record" >&2
+    return 1
+  fi
+  SEED_AGENT_ID="$(printf '%s' "$record" | jq -r '.id // empty')"
+  if [ "$SEED_AGENT_ID" = "" ]; then
+    echo "[local-mode] FATAL: prompt agent ${name} response omitted id" >&2
+    return 1
+  fi
+}
+
+seed_ts_prompt_agents() {
+  mint_local_operator_bearer
+
+  # The task-run host resolves the local runner backend from the durable
+  # workspace profile. Configure that profile through FleetDB's authenticated
+  # public API: localdogfood is a harness-only backend and is intentionally not
+  # added to the production backend dropdown accepted by Loom's UI endpoint.
+  # A daemon profile is configuration data only; this does not launch a daemon
+  # or create any PID/socket/control artifact (the negative verifier proves it).
+  backend_body="$(jq -cn --arg backend "$AGENT_BACKEND" '{agent_backend:$backend}')"
+  backend_profile="$(fleet_request_json PATCH "${FLEET_API_BASE%/}/api/v1/${WORKSPACE}/daemon" "$backend_body")" || {
+    echo "[local-mode] FATAL: public FleetDB API failed to configure workspace backend ${AGENT_BACKEND}" >&2
+    return 1
+  }
+  if ! printf '%s' "$backend_profile" | jq -e --arg workspace "$WORKSPACE" --arg backend "$AGENT_BACKEND" \
+    '.workspace_key == $workspace and .agent_backend == $backend' >/dev/null; then
+    echo "[local-mode] FATAL: public FleetDB API returned an invalid workspace backend profile" >&2
+    printf '%s\n' "$backend_profile" >&2
+    return 1
+  fi
+  echo "[local-mode] public FleetDB API configured workspace backend ${AGENT_BACKEND}" >&2
+
+  seed_prompt_agent "$TS_PLAN_AGENT_NAME" "$TS_PLAN_ROLE" "$TS_PLAN_BINDING" "needs_plan" \
+    'LOOM_LOCALDOGFOOD_PHASE=plan
+Write an approved implementation design for the assigned task and make no repository changes. Do not change status or assignee; the workflow host moves it to review after the terminal receipt.'
+  PLAN_AGENT_RECORD_ID="$SEED_AGENT_ID"
+  seed_prompt_agent "$TS_CODE_AGENT_NAME" "$TS_CODE_ROLE" "$TS_CODE_BINDING" "has_design" \
+    'LOOM_LOCALDOGFOOD_PHASE=task
+Implement the approved task by changing and committing local-mode-agent-output.txt. Do not close or release the task; the workflow host owns terminalization.'
+  CODE_AGENT_RECORD_ID="$SEED_AGENT_ID"
+  echo "[local-mode] TS prompt agents are active before task creation: ${PLAN_AGENT_RECORD_ID}, ${CODE_AGENT_RECORD_ID}"
 }
 
 issue_json_field() {
@@ -558,19 +725,24 @@ seed_tasks() {
   link_parent_child "$PLAN_TASK_ID" "$epic_id"
   link_parent_child "$CODE_TASK_ID" "$epic_id"
 
-  # Extra board fixtures so the kanban shows multiple columns under the epic lane.
-  seed_issue_by_title_if_missing "Document local-mode runbook" \
-    "$(printf '{"title":"Document local-mode runbook","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","owner":"local-mode","description":"Add troubleshooting notes for Podman machine failures."}' "$epic_id")"
-  seed_issue_by_title_if_missing "Exercise epic swimlane UI" \
-    "$(printf '{"title":"Exercise epic swimlane UI","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","assignee":"%s","owner":"local-mode","description":"Verify epic grouping on the kanban board."}' "$epic_id" "$PLAN_AGENT")"
-  seed_issue_by_title_if_missing "Backlog grooming placeholder" \
-    "$(printf '{"title":"Backlog grooming placeholder","issue_type":"task","priority":4,"parent":"%s","status":"deferred","source_repo":"source-repo","owner":"local-mode","description":"Deferred task for backlog column demo."}' "$epic_id")"
+  # The deterministic TS proof creates only its two manifest-owned tasks. Extra
+  # ready fixtures would correctly fan out through both bindings but add unrelated
+  # DriverRuns to the acceptance evidence. Keep the richer board on the legacy
+  # supervised profile where it already belongs.
+  if ! plane_is_ts; then
+    seed_issue_by_title_if_missing "Document local-mode runbook" \
+      "$(printf '{"title":"Document local-mode runbook","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","owner":"local-mode","description":"Add troubleshooting notes for Podman machine failures."}' "$epic_id")"
+    seed_issue_by_title_if_missing "Exercise epic swimlane UI" \
+      "$(printf '{"title":"Exercise epic swimlane UI","issue_type":"task","priority":2,"parent":"%s","source_repo":"source-repo","assignee":"%s","owner":"local-mode","description":"Verify epic grouping on the kanban board."}' "$epic_id" "$PLAN_AGENT")"
+    seed_issue_by_title_if_missing "Backlog grooming placeholder" \
+      "$(printf '{"title":"Backlog grooming placeholder","issue_type":"task","priority":4,"parent":"%s","status":"deferred","source_repo":"source-repo","owner":"local-mode","description":"Deferred task for backlog column demo."}' "$epic_id")"
 
-  swim_id="$(find_issue_id_by_title "Exercise epic swimlane UI" "task")"
-  if [ -n "$swim_id" ] && [ "$(issue_json_field "$swim_id" status)" = "open" ]; then
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsS --max-time 5 -X PATCH -H "Content-Type: application/json" \
-        --data '{"status":"in_progress"}' "$(issues_api)/issues/${swim_id}" >/dev/null 2>&1 || true
+    swim_id="$(find_issue_id_by_title "Exercise epic swimlane UI" "task")"
+    if [ -n "$swim_id" ] && [ "$(issue_json_field "$swim_id" status)" = "open" ]; then
+      if command -v curl >/dev/null 2>&1; then
+        curl -fsS --max-time 5 -X PATCH -H "Content-Type: application/json" \
+          --data '{"status":"in_progress"}' "$(issues_api)/issues/${swim_id}" >/dev/null 2>&1 || true
+      fi
     fi
   fi
 }
@@ -596,11 +768,20 @@ write_run_manifest() {
     --arg started_at "$RUN_STARTED_AT" \
     --arg workspace "$WORKSPACE" \
     --arg backend "$AGENT_BACKEND" \
+    --arg plane "$LOCAL_MODE_PLANE" \
+    --arg plan_agent_record_id "$PLAN_AGENT_RECORD_ID" \
+    --arg code_agent_record_id "$CODE_AGENT_RECORD_ID" \
+    --arg plan_agent_name "$TS_PLAN_AGENT_NAME" \
+    --arg code_agent_name "$TS_CODE_AGENT_NAME" \
+    --arg plan_agent_role "$TS_PLAN_ROLE" \
+    --arg code_agent_role "$TS_CODE_ROLE" \
+    --arg plan_binding_id "$TS_PLAN_BINDING" \
+    --arg code_binding_id "$TS_CODE_BINDING" \
     --arg plan_task_id "$PLAN_TASK_ID" \
     --arg code_task_id "$CODE_TASK_ID" \
     --arg plan_task_title "$PLAN_TASK_TITLE" \
     --arg code_task_title "$CODE_TASK_TITLE" \
-    '{checkout_id:$checkout_id,source_root:$source_root,compose_project:$compose_project,run_id:$run_id,started_at:$started_at,workspace:$workspace,backend:$backend,plan_task_id:$plan_task_id,code_task_id:$code_task_id,plan_task_title:$plan_task_title,code_task_title:$code_task_title}' \
+    '{checkout_id:$checkout_id,source_root:$source_root,compose_project:$compose_project,run_id:$run_id,started_at:$started_at,workspace:$workspace,backend:$backend,plane:$plane,plan_agent_record_id:$plan_agent_record_id,code_agent_record_id:$code_agent_record_id,plan_agent_name:$plan_agent_name,code_agent_name:$code_agent_name,plan_agent_role:$plan_agent_role,code_agent_role:$code_agent_role,plan_binding_id:$plan_binding_id,code_binding_id:$code_binding_id,plan_task_id:$plan_task_id,code_task_id:$code_task_id,plan_task_title:$plan_task_title,code_task_title:$code_task_title}' \
     > "$manifest_tmp"
   chmod 600 "$manifest_tmp"
   mv "$manifest_tmp" "$RUN_MANIFEST"
@@ -737,6 +918,7 @@ create_source_repo
 create_workspace
 if plane_is_ts; then
   echo "[local-mode] plane=ts: skipping Go role-agent seeding (${PLAN_AGENT}/${CODE_AGENT}) and their worktrees; the TS/workflow plane owns the task queue"
+  prepare_ts_patchback_repo
 else
   create_agent_worktree "$PLAN_AGENT"
   create_agent_worktree "$CODE_AGENT"
@@ -745,6 +927,7 @@ trust_codex_local_mode_paths
 plane_is_ts || register_agents
 start_serve
 capture_run_started_at
+plane_is_ts && seed_ts_prompt_agents
 seed_tasks
 write_run_manifest
 
@@ -755,4 +938,9 @@ echo "[local-mode] epic lane:    $(find_epic_id)"
 echo "[local-mode] planner task: ${PLAN_TASK_ID}"
 echo "[local-mode] coder task:   ${CODE_TASK_ID}"
 
-run_daemon_manager
+if plane_is_ts; then
+  echo "[local-mode] plane=ts: daemon manager disabled; waiting on loom serve"
+  wait "$serve_pid"
+else
+  run_daemon_manager
+fi

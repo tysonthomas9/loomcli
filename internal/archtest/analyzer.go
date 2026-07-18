@@ -149,6 +149,16 @@ func loadRepositoryManifests(directory string) (repositoryManifests, error) {
 	if err := result.directWrites.ValidateCompletedPhase(result.graph.CompletedPhase); err != nil {
 		return repositoryManifests{}, err
 	}
+	// directory is the repository-owned architecture-manifest directory chosen
+	// by the analyzer entrypoint; this fixed relative suffix cannot be supplied
+	// by an HTTP request or other untrusted product input.
+	contract, err := os.ReadFile(filepath.Join(directory, "..", "..", "infra", "fleetdb", "testdata", "fleetdb-openapi.yaml")) //nolint:gosec // G304: checked-in analyzer fixture path.
+	if err != nil {
+		return repositoryManifests{}, fmt.Errorf("read vendored FleetDB OpenAPI for MM-2 compatibility: %w", err)
+	}
+	if err := validateWorkflowCatalogLifecyclePatchExtension(result.graph.CompletedPhase, result.directWrites, contract); err != nil {
+		return repositoryManifests{}, err
+	}
 	return result, nil
 }
 

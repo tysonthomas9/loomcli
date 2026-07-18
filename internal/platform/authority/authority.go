@@ -136,9 +136,21 @@ type ExecutionAuthority struct {
 	executionMarker executionAuthorityMarker
 }
 
+// ExecutionResourceKind identifies the exact fenced runtime resource owned by
+// an execution authority. DriverRun and TaskRun deliberately remain distinct
+// until TaskRun fencing has the same durable guarantees as DriverRun fencing.
+type ExecutionResourceKind string
+
+const (
+	ExecutionResourceDriverRun ExecutionResourceKind = "driver_run"
+	ExecutionResourceTaskRun   ExecutionResourceKind = "task_run"
+)
+
 // ExecutionOwner is the verified lease/fence tuple bound to an execution
 // authority. It is server-derived and never accepted from a request wire.
 type ExecutionOwner struct {
+	ResourceKind ExecutionResourceKind
+	ResourceID   string
 	NodeID       string
 	LeaseID      string
 	FencingToken int64
@@ -180,6 +192,12 @@ func (a ExecutionAuthority) Subject() string      { return a.grant.subject }
 func (a ExecutionAuthority) Workspace() string    { return a.grant.workspace }
 func (a ExecutionAuthority) Action() Action       { return a.grant.action }
 func (a ExecutionAuthority) ExpiresAt() time.Time { return a.grant.expiresAt }
+
+// ResourceKind returns the server-verified execution resource discriminator.
+func (a ExecutionAuthority) ResourceKind() ExecutionResourceKind { return a.owner.ResourceKind }
+
+// ResourceID returns the server-verified DriverRun or TaskRun identifier.
+func (a ExecutionAuthority) ResourceID() string { return a.owner.ResourceID }
 
 // NodeID returns the server-verified execution owner node.
 func (a ExecutionAuthority) NodeID() string { return a.owner.NodeID }

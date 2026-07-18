@@ -374,6 +374,7 @@ type TaskRun struct {
 	RunnerEntrypoint string           `json:"runner_entrypoint,omitempty"`
 	RunnerVersionID  string           `json:"runner_driver_version_id,omitempty"`
 	ProviderProfile  string           `json:"provider_profile,omitempty"`
+	TargetNodeID     string           `json:"target_node_id,omitempty"`
 	Status           TaskRunStatus    `json:"status"`
 	NodeID           string           `json:"node_id,omitempty"`
 	LeaseID          string           `json:"lease_id,omitempty"`

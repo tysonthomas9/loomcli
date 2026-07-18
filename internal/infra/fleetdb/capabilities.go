@@ -33,7 +33,49 @@ const (
 	// back to separate resolve/resume writes, even when the Catalog and
 	// Automation slices are disabled.
 	ExecutionAwaitAtomicResumeCapability = "execution.await_atomic_resume.v1"
+	// ExecutionTaskRunLeaseFencingCapability certifies atomic TaskRun claim,
+	// generic-Lease creation/release, and monotonic owner fencing across the
+	// running backend. Phase 4 Execution has no unfenced compatibility path.
+	ExecutionTaskRunLeaseFencingCapability = "execution.task_run_lease_fencing.v1"
+	// ExecutionIssueClaimTaskRunStartCapability certifies the coordinating
+	// command that claims one Work Item and starts its TaskRun in the same
+	// Redis transaction or PostgreSQL transaction, including replay fencing.
+	ExecutionIssueClaimTaskRunStartCapability     = "execution.issue_claim_task_run_start.v1"
+	ExecutionIssueClaimNextTaskRunStartCapability = "execution.issue_claim_next_task_run_start.v1"
+	ExecutionDriverStepTerminalRepairCapability   = "execution.driver_step_terminal_repair.v1"
+	ExecutionTaskRunRequestCapability             = "execution.task_run_request.v1"
+	ExecutionTaskRunRequeueCapability             = "execution.task_run_requeue.v1"
+	ExecutionTaskRunRetryExhaustionCapability     = "execution.task_run_retry_exhaustion.v1"
+	ExecutionDriverRunChildStartCapability        = "execution.driver_run_child_start.v1"
+	ExecutionDriverRunChildCascadeCapability      = "execution.driver_run_child_cascade.v1"
+	ExecutionDriverRunLeaseFencingCapability      = "execution.driver_run_lease_fencing.v1"
+	ExecutionDriverRunWorkItemClaimCapability     = "execution.driver_run_work_item_claim.v1"
+	ExecutionTaskRunLogIdempotencyCapability      = "execution.task_run_log_idempotency.v1"
+	// ArtifactsOwnerFencedLifecycleCapability certifies owner-fenced,
+	// idempotent Artifact create/upload/finalize/reference commands.
+	ArtifactsOwnerFencedLifecycleCapability = "artifacts.owner_fenced_lifecycle.v1"
 )
+
+// Phase4FoundationCapabilities is the complete indivisible Execution and
+// Artifacts deployment profile. Await atomic resume is an older always-on
+// invariant and is intentionally required separately by serve.
+func Phase4FoundationCapabilities() []string {
+	return []string{
+		ArtifactsOwnerFencedLifecycleCapability,
+		ExecutionIssueClaimTaskRunStartCapability,
+		ExecutionTaskRunLeaseFencingCapability,
+		ExecutionIssueClaimNextTaskRunStartCapability,
+		ExecutionDriverStepTerminalRepairCapability,
+		ExecutionTaskRunRequestCapability,
+		ExecutionTaskRunRequeueCapability,
+		ExecutionTaskRunRetryExhaustionCapability,
+		ExecutionDriverRunChildStartCapability,
+		ExecutionDriverRunChildCascadeCapability,
+		ExecutionDriverRunLeaseFencingCapability,
+		ExecutionDriverRunWorkItemClaimCapability,
+		ExecutionTaskRunLogIdempotencyCapability,
+	}
+}
 
 // CapabilityIncompatibilityKind identifies why the running FleetDB deployment
 // cannot satisfy the capabilities required by the enabled Loom slices.

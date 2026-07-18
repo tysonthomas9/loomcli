@@ -2,7 +2,6 @@ package serve
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -51,6 +50,8 @@ const driverExecutorAllWorkspaces = "*"
 const envLoomDriverTaskWorkerConcurrency = "LOOM_DRIVER_TASK_WORKER_CONCURRENCY"
 const envLoomDriverTaskRunMaxAttempts = "LOOM_DRIVER_TASK_RUN_MAX_ATTEMPTS"
 const envLoomDriverStaleTaskMaxAge = "LOOM_DRIVER_STALE_TASK_MAX_AGE"
+const envLoomAwaitSweepInterval = "LOOM_AWAIT_SWEEP_INTERVAL"
+const envLoomAwaitSweepBatch = "LOOM_AWAIT_SWEEP_BATCH"
 const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
 const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
 const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
@@ -245,9 +246,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	if err := workspacemgr.EnsurePromptAgentIdentityRecords(ctx, storeHandle.Store); err != nil {
 		slog.Warn("prompt-agent identity backfill failed", "err", err)
 	}
-	startStaleTaskSweeper(ctx, storeHandle.Store)
 	startOutboxDispatcher(ctx, storeHandle.Store)
-	startAwaitTimeoutSweeper(ctx, storeHandle.Store)
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForConfig(
 		storeHandle.URL(),
 		storeHandle.FleetDBClientAPIKey(),
@@ -275,21 +274,38 @@ func runServe(cmd *cobra.Command, args []string) {
 	}
 	var issueJournalSource trigger.InternalEventEmitter
 	if automationCapability != nil {
+		awaitResolver := &driverexecutor.ExecutionAwaitResolver{
+			API:         cfg.ExecutionCapability.DriverRunAPI(),
+			Authorities: cfg.ExecutionCapability.SystemAuthorityResolver(),
+			ComponentID: "serve-await-event-notifications",
+		}
 		issueJournalSource = serveadapter.NewAutomationIssueJournalEmitter(
 			automationCapability.IssueJournalEmitter(),
-			&trigger.AwaitMatcher{Store: storeHandle.Store},
+			trigger.NewAwaitMatcherWithResolver(storeHandle.Store.Awaits(), storeHandle.Store.DriverRuns(), awaitResolver),
 		)
 	}
 	var runOutcomes driverexecutor.RunOutcomePublisher
 	if automationCapability != nil {
 		runOutcomes = automationCapability.RunOutcomePublisher()
 	}
-	startDriverExecutorIfEnabled(ctx, storeHandle.Store, runOutcomes)
 	startIssueJournalBridge(ctx, storeHandle.Store, issueLookup, issueJournalSource)
+	executionPasses, err := buildExecutionRuntimePasses(storeHandle.Store, runOutcomes, cfg.ExecutionCapability, cfg.ArtifactsCapability)
+	if err != nil {
+		log.Fatalf("failed to compose Execution compatibility passes: %v", err)
+	}
+	executionRuntime, err := serveadapter.BuildExecutionRuntimeContributor(
+		executionPasses,
+		cfg.ExecutionCapability,
+		driverAutomationWorkspaceScope(),
+		time.Duration(boundedIntEnv(envLoomAwaitSweepInterval, 30, 3600))*time.Second,
+	)
+	if err != nil {
+		log.Fatalf("failed to compose Execution runtime: %v", err)
+	}
 	runtimeHost, err := serveadapter.BuildServeRuntimeHost(
 		storeHandle.Store.DriverRuns(), storeHandle.Store.Awaits(),
 		storeHandle.Store.TriggerEvents(), storeHandle.Store.Workspaces(),
-		runOutcomes, driverAutomationWorkspaceScope(), automationCapability,
+		runOutcomes, driverAutomationWorkspaceScope(), cfg.ExecutionCapability, executionRuntime, automationCapability,
 	)
 	if err != nil {
 		log.Fatalf("failed to compose platform runtime: %v", err)
@@ -372,64 +388,17 @@ func openServeStore(ctx context.Context, fs fleetState) (*bootstrap.StoreHandle,
 	return cmdstore.OpenStoreWithCapabilities(ctx, required)
 }
 
-func startDriverExecutorIfEnabled(ctx context.Context, st store.Store, runOutcomes driverexecutor.RunOutcomePublisher) {
-	if !driverExecutorEnabled() || st == nil {
-		return
-	}
-	workDir, err := os.Getwd()
-	if err != nil {
-		slog.Error("driver executor disabled: cannot resolve work dir", "err", err)
-		return
-	}
-	executor, ok := buildDriverExecutor(st, workDir, runOutcomes)
-	if !ok {
-		return
-	}
-	taskWorkerConcurrency := driverTaskWorkerConcurrency()
-	taskRunMaxAttempts := driverTaskRunMaxAttempts()
-	taskWorker := &driverexecutor.TaskWorker{
-		Store: st,
-		// Share the executor's resolved claim scope (LOOM_DRIVER_EXECUTOR_WORKSPACE
-		// or LOOM_WORKSPACE): a task worker scoped to one workspace while its
-		// driver runs span every workspace would leave TaskRuns queued the same
-		// way the run executor did.
-		WorkspaceKey:     executor.WorkspaceKey,
-		WorkDir:          workDir,
-		NodeID:           executor.NodeID,
-		RunnerID:         os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
-		MaxAttempts:      taskRunMaxAttempts,
-		APIBaseURL:       driverAPIBaseURL(),
-		LocalSettingsDir: bootstrap.LoomDir(),
-	}
-	go func() {
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			if recovered, err := executor.RecoverStaleOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Error("driver executor stale recovery failed", "err", err)
-			} else if recovered != nil && recovered.Recovered > 0 {
-				slog.Info("driver executor recovered stale driver runs", "count", recovered.Recovered)
-			}
-			_, err := executor.RunOnce(ctx)
-			if err != nil && !errors.Is(err, driverexecutor.ErrNoQueuedRun) && !errors.Is(err, context.Canceled) {
-				slog.Error("driver executor run failed", "err", err)
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
-	startDriverTaskWorkers(ctx, taskWorker, taskWorkerConcurrency)
-}
-
 // buildDriverExecutor assembles serve's DriverRun executor, resolving the
 // workflow sandbox launcher (SB2): LOOM_DRIVER_SANDBOX=container runs
 // workflow bundles in rootless containers; the default stays the local
 // node-process launcher. An invalid sandbox configuration disables the
 // executor (fail closed) rather than silently degrading isolation.
-func buildDriverExecutor(st store.Store, workDir string, runOutcomes driverexecutor.RunOutcomePublisher) (*driverexecutor.Executor, bool) {
+func buildDriverExecutor(
+	st store.Store,
+	workDir string,
+	runOutcomes driverexecutor.RunOutcomePublisher,
+	executionCapability webui.ExecutionCapability,
+) (*driverexecutor.Executor, bool) {
 	sandboxLauncher, err := driverexecutor.ResolveSandboxLauncher()
 	if err != nil {
 		slog.Error("driver executor disabled: invalid sandbox configuration", "err", err)
@@ -455,6 +424,13 @@ func buildDriverExecutor(st store.Store, workDir string, runOutcomes driverexecu
 		SandboxLauncher: sandboxLauncher,
 		RunOutcomes:     runOutcomes,
 	}
+	if executionCapability != nil {
+		executor.Execution = executionCapability.DriverRunAPI()
+		executor.RunOutcomeQueue = executionCapability.DriverRunOutcomeAPI()
+		executor.ExecutionWorkers = executionCapability.TaskRunWorkerAPI()
+		executor.ExecutionAuthorities = executionCapability.DriverRunAuthorityResolver()
+		executor.SystemAuthorities = executionCapability.SystemAuthorityResolver()
+	}
 	workspaceScope := executor.WorkspaceKey
 	if workspaceScope == "" {
 		workspaceScope = "*all*"
@@ -467,30 +443,6 @@ func buildDriverExecutor(st store.Store, workDir string, runOutcomes driverexecu
 
 // startDriverTaskWorkers launches the local TaskRun worker claim loops, one
 // goroutine per concurrency slot, each with a distinct runner identity.
-func startDriverTaskWorkers(ctx context.Context, template *driverexecutor.TaskWorker, concurrency int) {
-	for i := 0; i < concurrency; i++ {
-		worker := *template
-		if worker.RunnerID == "" {
-			worker.RunnerID = fmt.Sprintf("loom-serve-task-worker-%d", i+1)
-		}
-		go func() {
-			ticker := time.NewTicker(1 * time.Second)
-			defer ticker.Stop()
-			for {
-				_, err := worker.RunOnce(ctx)
-				if err != nil && !errors.Is(err, driverexecutor.ErrNoQueuedTaskRun) && !errors.Is(err, context.Canceled) {
-					slog.Error("driver task worker run failed", "err", err)
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-				}
-			}
-		}()
-	}
-}
-
 // driverAPIBaseURL is the loopback URL of this serve process's driver-op
 // HTTP API, exported to driver runtimes as LOOM_DRIVER_API_URL. Driver
 // runtimes are local children of the executor, so loopback is always
@@ -726,6 +678,29 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 // cannot be type-asserted back to issue-journal, run-outcome, or runtime ports.
 type automationWebCapabilityView struct{ webui.AutomationCapability }
 
+func applyStoreHandleServerConfig(
+	cfg *webui.ServerConfig,
+	fs fleetState,
+	storeHandle *bootstrap.StoreHandle,
+	gitOps *opsimpl.GitOpsImpl,
+) fleetState {
+	cfg.Store = storeHandle.Store
+	gitOps.WithStore(storeHandle.Store)
+	if url := storeHandle.URL(); url != "" {
+		cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForConfig(
+			url,
+			storeHandle.FleetDBClientAPIKey(),
+			fs.clientCfg.Actor,
+		)
+		cfg.FleetDBBaseURL = url
+		fs = withStoreFleetConfig(fs, url, storeHandle.FleetDBClientAPIKey())
+	}
+	cfg.DriverAPIToken = driverAPIToken()
+	cfg.DriverAPIBaseURL = driverAPIBaseURL()
+	cfg.DriverRunTokenKey = driverRunTokenKey()
+	return fs
+}
+
 func buildServerConfig(
 	monitorHandlers webui.MonitorHandlers,
 	fs fleetState,
@@ -737,20 +712,7 @@ func buildServerConfig(
 
 	cfg := buildCoreServerConfig(monitorHandlers, gitOps, resolvedBackend)
 	if storeHandle != nil {
-		cfg.Store = storeHandle.Store
-		gitOps.WithStore(storeHandle.Store)
-		if url := storeHandle.URL(); url != "" {
-			cfg.IssueBackendFn = cli.WorkspaceAwareIssueBackendForConfig(
-				url,
-				storeHandle.FleetDBClientAPIKey(),
-				fs.clientCfg.Actor,
-			)
-			cfg.FleetDBBaseURL = url
-			fs = withStoreFleetConfig(fs, url, storeHandle.FleetDBClientAPIKey())
-		}
-		cfg.DriverAPIToken = driverAPIToken()
-		cfg.DriverAPIBaseURL = driverAPIBaseURL()
-		cfg.DriverRunTokenKey = driverRunTokenKey()
+		fs = applyStoreHandleServerConfig(&cfg, fs, storeHandle, gitOps)
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
@@ -761,10 +723,19 @@ func buildServerConfig(
 	var automationCapability *serveadapter.AutomationCapability
 	if module != nil {
 		cfg.WorkflowCatalogModule = module
+		cfg.WorkflowCatalogAPI = module.CatalogAPI()
 		automationCapability = module.AutomationCapability()
 		if automationCapability != nil {
 			cfg.AutomationCapability = automationWebCapabilityView{AutomationCapability: automationCapability}
 		}
+	}
+	if storeHandle != nil {
+		executionCapability, artifactsCapability, capabilityErr := serveadapter.BuildExecutionAndArtifactsCapabilities(module, storeHandle)
+		if capabilityErr != nil {
+			return webui.ServerConfig{}, nil, capabilityErr
+		}
+		cfg.ExecutionCapability = executionCapability
+		cfg.ArtifactsCapability = artifactsCapability
 	}
 	applyCORSConfig(&cfg)
 	return cfg, automationCapability, nil

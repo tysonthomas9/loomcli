@@ -41,6 +41,17 @@ type workflowManagementFixture struct {
 	rejectedClass   authority.Class
 }
 
+type workflowManagementRunRequest struct {
+	CLICommand      string          `json:"cli_command"`
+	DriverRef       string          `json:"driver_ref"`
+	DriverVersionID string          `json:"driver_version_id,omitempty"`
+	RunID           string          `json:"run_id,omitempty"`
+	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
+	Entrypoint      string          `json:"entrypoint,omitempty"`
+	EpicID          string          `json:"epic_id,omitempty"`
+	Payload         json.RawMessage `json:"payload"`
+}
+
 func setupWorkflowManagementFixture(t *testing.T) *workflowManagementFixture {
 	t.Helper()
 	fixture := &workflowManagementFixture{
@@ -137,6 +148,36 @@ func (f *workflowManagementFixture) serveHTTP(w http.ResponseWriter, r *http.Req
 	}
 
 	switch {
+	case r.Method == http.MethodPost && r.URL.Path == workspacePrefix+"/execution/driver-runs":
+		var request workflowManagementRunRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeWorkflowManagementTestJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+			return
+		}
+		if request.DriverRef != f.driver.DriverID {
+			writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "workflow not found"})
+			return
+		}
+		versionID := strings.TrimSpace(request.DriverVersionID)
+		if versionID == "" {
+			versionID = f.driver.ActiveVersionID
+		}
+		if f.versions[versionID] == nil {
+			writeWorkflowManagementTestJSON(w, http.StatusNotFound, map[string]string{"error": "version not found"})
+			return
+		}
+		runID := strings.TrimSpace(request.RunID)
+		if runID == "" {
+			runID = "run-management-1"
+		}
+		writeWorkflowManagementTestJSON(w, http.StatusAccepted, &domain.DriverRun{
+			WorkspaceKey: workflowManagementTestWorkspace, RunID: runID,
+			DriverID: f.driver.DriverID, DriverVersionID: versionID,
+			Entrypoint: request.Entrypoint, SourceKind: "cli", SourceRef: "loom workflow run",
+			EpicID: request.EpicID, IdempotencyKey: request.IdempotencyKey,
+			Status: domain.DriverRunQueued, Payload: append(json.RawMessage(nil), request.Payload...),
+		})
+		return
 	case r.Method == http.MethodGet && r.URL.Path == workspacePrefix+"/workflow-catalog/drivers":
 		if f.listBareDriver {
 			writeWorkflowManagementTestJSON(w, http.StatusOK, map[string]any{"drivers": []*domain.Driver{f.driver}})

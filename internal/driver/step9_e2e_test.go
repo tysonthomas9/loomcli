@@ -33,9 +33,12 @@ import (
 	"testing"
 	"time"
 
+	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 )
@@ -49,6 +52,49 @@ type step9Fixture struct {
 	st   store.Store
 	root string
 	reg  *driver.RegisterFlueResult
+	exec *appserve.ExecutionCapability
+}
+
+type step9TaskRunClaimPort struct{}
+
+func (step9TaskRunClaimPort) ReplayTaskRunRequest(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (step9TaskRunClaimPort) RequestTaskRun(context.Context, execution.RequestTaskRunCommand) (execution.RequestTaskRunResult, error) {
+	return execution.RequestTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (step9TaskRunClaimPort) ClaimTaskRun(context.Context, execution.ClaimTaskRunCommand) (execution.ClaimTaskRunResult, error) {
+	return execution.ClaimTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (step9TaskRunClaimPort) RequeueTaskRun(context.Context, execution.RequeueTaskRunCommand) (execution.RequeueTaskRunResult, error) {
+	return execution.RequeueTaskRunResult{}, execution.ErrUnavailable
+}
+
+func (step9TaskRunClaimPort) ExhaustTaskRunRetries(context.Context, execution.ExhaustTaskRunRetriesCommand) (execution.ExhaustTaskRunRetriesResult, error) {
+	return execution.ExhaustTaskRunRetriesResult{}, execution.ErrUnavailable
+}
+
+type step9DriverRunAPI struct {
+	execution.DriverRunAPI
+}
+
+func (step9DriverRunAPI) CascadeChildDriverRuns(
+	_ context.Context,
+	_ authority.ExecutionAuthority,
+	command execution.CascadeChildDriverRunsCommand,
+) (execution.CascadeChildDriverRunsResult, error) {
+	return execution.CascadeChildDriverRunsResult{ActionID: command.RequestID}, nil
+}
+
+func (step9DriverRunAPI) RecoverChildDriverRunCascade(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverChildDriverRunCascadeCommand,
+) (execution.CascadeChildDriverRunsResult, error) {
+	return execution.CascadeChildDriverRunsResult{ActionID: command.RequestID}, nil
 }
 
 func newStep9Fixture(t *testing.T, trust domain.DriverTrustLevel) *step9Fixture {
@@ -75,7 +121,22 @@ func newStep9Fixture(t *testing.T, trust domain.DriverTrustLevel) *step9Fixture 
 	if err != nil {
 		t.Fatalf("RegisterFlueDriver: %v", err)
 	}
-	return &step9Fixture{ctx: ctx, st: st, root: root, reg: reg}
+	repairs, ok := st.DriverSteps().(store.TerminalDriverStepRepairStore)
+	if !ok {
+		t.Fatal("step9 memstore lacks terminal DriverStep repair support")
+	}
+	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
+		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
+		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
+		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(),
+		Workspaces: st.Workspaces(), AtomicTaskRunRequests: step9TaskRunClaimPort{}, AtomicTaskRunClaims: step9TaskRunClaimPort{},
+		AtomicTaskRunRequeues: step9TaskRunClaimPort{}, AtomicTaskRunRetryExhaustion: step9TaskRunClaimPort{},
+		AllowLegacyStoreAdapters: true,
+	})
+	if err != nil {
+		t.Fatalf("compose step9 Execution: %v", err)
+	}
+	return &step9Fixture{ctx: ctx, st: st, root: root, reg: reg, exec: executionCapability}
 }
 
 // step9WriteFlueDist writes the minimal registrable built-Flue dist. The
@@ -107,17 +168,22 @@ func (f *step9Fixture) queueRun(t *testing.T, runID, epicID string) {
 
 func (f *step9Fixture) executor(runID string, launcher driver.SandboxLauncher) *driver.Executor {
 	return &driver.Executor{
-		Store:             f.st,
-		WorkspaceKey:      "TEST",
-		RunID:             runID,
-		WorkDir:           f.root,
-		NodeID:            "step9-node",
-		LeaseID:           "step9-lease-" + runID,
-		HeartbeatInterval: -1,
-		APIBaseURL:        "http://127.0.0.1:7777",
-		APIToken:          "node-shared-static-bearer",
-		RunTokenKey:       step9TokenKey,
-		SandboxLauncher:   launcher,
+		Store:                f.st,
+		WorkspaceKey:         "TEST",
+		RunID:                runID,
+		WorkDir:              f.root,
+		NodeID:               "step9-node",
+		LeaseID:              "step9-lease-" + runID,
+		HeartbeatInterval:    -1,
+		APIBaseURL:           "http://127.0.0.1:7777",
+		APIToken:             "node-shared-static-bearer",
+		RunTokenKey:          step9TokenKey,
+		SandboxLauncher:      launcher,
+		Execution:            step9DriverRunAPI{DriverRunAPI: f.exec.DriverRunAPI()},
+		RunOutcomeQueue:      f.exec.DriverRunOutcomeAPI(),
+		ExecutionWorkers:     f.exec.TaskRunWorkerAPI(),
+		ExecutionAuthorities: f.exec.DriverRunAuthorityResolver(),
+		SystemAuthorities:    f.exec.SystemAuthorityResolver(),
 	}
 }
 
@@ -342,9 +408,10 @@ func newStep9TwoRuns(t *testing.T) *step9TwoRuns {
 	rig.runA = rig.claimRunWithTaskRun(t, "run-a", "TEST-A", "node-a", "lease-a")
 	rig.runB = rig.claimRunWithTaskRun(t, "run-b", "TEST-B", "node-b", "lease-b")
 	module := driverapi.NewModule(driverapi.Config{
-		Store:       f.st,
-		APIToken:    "ops-static-token",
-		RunTokenKey: step9TokenKey,
+		Store: f.st, APIToken: "ops-static-token", RunTokenKey: step9TokenKey,
+		Execution: f.exec.DriverRunAPI(), ExecutionAuthorities: f.exec.DriverRunAuthorityResolver(),
+		TaskRunRequests: f.exec.TaskRunRequestAPI(), TaskRunRecovery: f.exec.TaskRunRecoveryAPI(),
+		TaskRuns: f.exec.TaskRunAPI(), TaskRunAuthorities: f.exec.TaskRunAuthorityResolver(),
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)

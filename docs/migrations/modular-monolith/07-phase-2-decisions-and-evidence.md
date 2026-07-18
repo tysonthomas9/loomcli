@@ -94,11 +94,41 @@ The packaged Desktop launcher keeps the durable operator credential in the sidec
 
 ### Fleet-first compatibility exception
 
-FleetDB retains one bounded old-Loom skew path while Fleet deploys before Loom. The generic Driver `PATCH` may carry the legacy approval metadata and activation fields in one authenticated request, so it does not require a separately committed prior-approval command. It still requires `workflow_catalog.version_lifecycle`, exact same-driver ownership, passed validation, and canonical metadata; new Loom never calls this path and uses only the three intent routes above.
+FleetDB retains one bounded generic Driver `PATCH` lifecycle path while Fleet
+deploys before Loom. The request may carry legacy approval metadata and
+activation fields in one authenticated operation, so it does not require a
+separately committed prior-approval command. It still requires
+`workflow_catalog.version_lifecycle`, exact same-driver ownership, passed
+validation, and canonical metadata. The Workflow Catalog HTTP and management
+CLI lifecycle clients use only the three intent routes above.
 
 | Exception | Owner | Removal issue | Expiry |
 |---|---|---|---|
-| Authenticated generic Driver `PATCH` approval/activation compatibility | `workflow-catalog-lane` | `MM-2-LEGACY-DRIVER-LIFECYCLE-PATCH` | Remove no later than Phase 4, after two Fleet-first deployment waves enforce a new-Loom minimum. |
+| Authenticated generic Driver `PATCH` approval/activation compatibility | `workflow-catalog-lane` | `MM-2-LEGACY-DRIVER-LIFECYCLE-PATCH` | Phase 5 is the last permitted milestone under the explicit Phase 4 extension below. |
+
+**Phase 4 audit correction and MM-6 extension (recorded after the Phase 4
+audit on 2026-07-17):** the Phase 2 wording that “new
+Loom never calls this path” was too broad. The new lifecycle HTTP and CLI
+clients do not call it, but current native Flue registration still activates
+through `internal/driver/approval.go` and `internal/driver/register.go`, with
+production entry callers in `internal/workflows/workflows.go` and
+`internal/cli/driver/driver_cmd.go`. Re-registering an untrusted bundle also
+uses the generic Driver update to demote trust. Removing the Fleet lane in
+Phase 4 would therefore break built-in workflow startup and `loom driver
+register --activate` rather than merely ending old-version skew.
+
+The exception receives one final migration wave through Phase 5 under
+`workflow-catalog-lane`. Phase 5 must move native authoring, activation, and
+trust demotion through the Workflow Catalog command/authority surface and the
+authenticated management boundary, then remove the lifecycle fields and
+approval deltas from FleetDB's generic Driver `PATCH`. Until then, the lane
+remains fail-closed behind lifecycle permission, same-driver version
+ownership, passed validation, canonical digest/metadata checks, and atomic
+approval deltas; Developer authority remains denied. The architecture gate
+freezes the current Workflow Catalog-owned `internal/driver` write set at four
+rows/four sites and requires both deprecated compatibility markers in the
+vendored FleetDB OpenAPI. Marking Phase 5 complete while either side remains
+is a hard failure.
 
 The strict “prior durable approval before activation” invariant therefore applies to the new `ActivateVersion` intent route. This compatibility exception is not evidence that generic whole-record mutation remains an allowed module port.
 

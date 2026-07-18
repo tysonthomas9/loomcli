@@ -94,7 +94,6 @@ export interface LoomTaskSelector {
   taskRunId?: string;
   reason?: string;
   completionId?: string;
-  leaseToken?: string;
   logsRef?: string;
   artifactsRef?: string;
   artifactIds?: string[];
@@ -130,6 +129,25 @@ export interface LoomTaskClaimReadyInput extends LoomEpicInput {
   limit?: number;
 }
 
+/**
+ * A task claimed by the current DriverRun. claimActionId is the immutable
+ * Execution action that must be carried into TaskRun requests and release.
+ */
+export interface LoomClaimedTask extends Record<string, unknown> {
+  id: string;
+  title?: string;
+  status?: string;
+  priority?: number;
+  issueType?: string;
+  assignee?: string;
+  labels?: string[];
+  sourceRepo?: string;
+  parent?: string;
+  claimedBy?: string;
+  claimedAt?: string;
+  claimActionId: string;
+}
+
 export interface LoomTaskDiffResult {
   taskId: string;
   externalRef: string;
@@ -161,7 +179,6 @@ export interface LoomTaskRunRequest {
   nodeId?: string;
   runnerId?: string;
   capabilities?: string[];
-  leaseToken?: string;
   repoRef?: string;
   repo_ref?: string;
   sandboxPlacement?: {
@@ -483,9 +500,9 @@ export declare class LoomDriverClient {
     message(input?: LoomAgentMessageInput): Promise<Record<string, unknown> | null>;
   };
   readonly tasks: {
-    claimReady(input?: LoomTaskClaimReadyInput): Promise<Record<string, unknown> | null>;
+    claimReady(input?: LoomTaskClaimReadyInput): Promise<LoomClaimedTask | null>;
     /** Claim one SPECIFIC ready task by id; rejects DriverApiError code "conflict" when not ready or already claimed. */
-    claim(input: LoomTaskClaimInput | string): Promise<Record<string, unknown> | null>;
+    claim(input: LoomTaskClaimInput | string): Promise<LoomClaimedTask | null>;
     /** Bounded diff for a review card stamped external_ref="local-branch:<branch>@<sha>". */
     diff(input: LoomTaskSelector | string): Promise<LoomTaskDiffResult | null>;
     complete(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
@@ -545,8 +562,8 @@ export declare class LoomDriverClient {
     logsRef?: string;
     artifactsRef?: string;
   }): LoomDriverResult;
-  claimReady(input?: LoomTaskClaimReadyInput): Promise<Record<string, unknown> | null>;
-  claimTask(input?: LoomTaskClaimInput | string): Promise<Record<string, unknown> | null>;
+  claimReady(input?: LoomTaskClaimReadyInput): Promise<LoomClaimedTask | null>;
+  claimTask(input?: LoomTaskClaimInput | string): Promise<LoomClaimedTask | null>;
   getEpic(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   epicSnapshot(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   watchEpic(input?: LoomEpicWatchInput): AsyncGenerator<LoomEpicWatchEvent, void, undefined>;

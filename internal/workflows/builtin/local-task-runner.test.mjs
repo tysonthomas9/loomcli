@@ -34,6 +34,9 @@ if (process.env.FAKE_WRITE_FILE) {
     : path.join(process.cwd(), process.env.FAKE_WRITE_FILE);
   fs.writeFileSync(target, "hello from fake backend\\n");
 }
+if (process.env.FAKE_TASK_OUTCOME && process.env.LOOM_TASK_OUTCOME_FILE) {
+  fs.writeFileSync(process.env.LOOM_TASK_OUTCOME_FILE, process.env.FAKE_TASK_OUTCOME);
+}
 if (process.env.FAKE_STREAM_ERROR) {
   process.stdout.write(JSON.stringify({ type: "error", error: { message: process.env.FAKE_STREAM_ERROR } }) + "\\n");
   process.exit(exit);
@@ -91,12 +94,14 @@ const ENV_KEYS = [
   "LOOM_GEMINI_BIN",
   "LOOM_OPENCODE_BIN",
   "LOOM_CURSOR_BIN",
+  "LOOM_LOCALDOGFOOD_BIN",
   "LOOM_TASK_RUN_REQUEST_JSON",
   "FAKE_EXIT_CODE",
   "FAKE_WRITE_FILE",
   "FAKE_STREAM_ERROR",
   "FAKE_STDIN_FILE",
   "FAKE_USAGE_TOKENS",
+  "FAKE_TASK_OUTCOME",
   "FLEET_DB_URL",
   "LOOM_FLEET_DB_URL",
   "GITHUB_TOKEN",
@@ -206,6 +211,7 @@ describe("local-task-runner pure helpers", () => {
     assert.deepEqual(backendArgs("cursor", "/w", "P"), [
       "-p", "--output-format", "stream-json", "--force", "P",
     ]);
+    assert.deepEqual(backendArgs("localdogfood", "/w", "P"), ["invoke"]);
   });
 
   it("claude argv carries budget+effort: default $50, override, 0 opts out, invalid falls back", () => {
@@ -657,9 +663,109 @@ describe("local-task-runner fail-closed classes", () => {
     assert.equal(out.runtimeMetadata.stream_error, "model rejected request");
     assert.match(out.errorMessage, /model rejected request/);
   });
+
+  it("accepts the typed needs_revision outcome without completing the Work Item", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_TASK_OUTCOME = JSON.stringify({
+      version: 1,
+      disposition: "needs_revision",
+      summary: "The reviewed design references an API that no longer exists.",
+    });
+    const out = await run();
+    assert.equal(out.status, "cancelled");
+    assert.equal(out.exitCode, 0);
+    assert.equal(out.errorClass, "task_needs_revision");
+    assert.equal(out.runtimeMetadata.task_outcome, "needs_revision");
+    assert.equal(out.runtimeMetadata.phase, "needs_revision");
+    assert.match(out.errorMessage, /API that no longer exists/);
+  });
+
+  it("does not accept a needs_revision outcome from a backend that exits nonzero", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "7";
+    process.env.FAKE_TASK_OUTCOME = JSON.stringify({
+      version: 1,
+      disposition: "needs_revision",
+      summary: "marker written before the backend crashed",
+    });
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.exitCode, 7);
+    assert.equal(out.errorClass, "local_agent_failed");
+    assert.equal(out.runtimeMetadata.task_outcome, undefined);
+  });
+
+  it("does not accept a needs_revision outcome from a fatal stream result", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "opencode";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_OPENCODE_BIN = fakeBin;
+    process.env.FAKE_STREAM_ERROR = "provider rejected the turn";
+    process.env.FAKE_TASK_OUTCOME = JSON.stringify({
+      version: 1,
+      disposition: "needs_revision",
+      summary: "untrusted after fatal stream error",
+    });
+    const out = await run();
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_agent_failed");
+    assert.equal(out.runtimeMetadata.task_outcome, undefined);
+    assert.match(out.errorMessage, /provider rejected the turn/);
+  });
+
+  for (const [name, value] of [
+    ["malformed JSON", "{"],
+    ["unknown disposition", JSON.stringify({ version: 1, disposition: "complete", summary: "no" })],
+    ["extra field", JSON.stringify({ version: 1, disposition: "needs_revision", summary: "reason", status: "open" })],
+    ["empty summary", JSON.stringify({ version: 1, disposition: "needs_revision", summary: "" })],
+  ]) {
+    it(`fails closed for a ${name} task outcome`, async () => {
+      process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+      process.env.LOOM_WORKTREE_PATH = worktree;
+      process.env.LOOM_CODEX_BIN = fakeBin;
+      process.env.FAKE_TASK_OUTCOME = value;
+      const out = await run();
+      assert.equal(out.status, "failed");
+      assert.equal(out.exitCode, 1);
+      assert.equal(out.errorClass, "local_task_outcome_invalid");
+      assert.equal(out.runtimeMetadata.phase, "local_task_outcome_invalid");
+    });
+  }
 });
 
 describe("local-task-runner success", () => {
+  it("runs the deterministic localdogfood executable with the role prompt on stdin", async () => {
+    const promptFile = path.join(tmpRoot, "localdogfood-prompt.txt");
+    process.env.LOOM_TASK_RUNNER_BACKEND = "localdogfood";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_LOCALDOGFOOD_BIN = fakeStdinBin;
+    process.env.FAKE_STDIN_FILE = promptFile;
+    process.env.FAKE_WRITE_FILE = "local-mode-agent-output.txt";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-localdogfood",
+      task_id: "T-localdogfood",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { taskPrompt: "LOOM_LOCALDOGFOOD_PHASE=task\nMake the deterministic fixture change." },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "completed");
+    assert.equal(out.exitCode, 0);
+    assert.equal(out.runtimeMetadata.backend, "localdogfood");
+    assert.equal(out.runtimeMetadata.runtime_strategy, "local-cli-localdogfood");
+    assert.equal(
+      fs.readFileSync(promptFile, "utf8"),
+      "LOOM_LOCALDOGFOOD_PHASE=task\nMake the deterministic fixture change.",
+    );
+    assert.ok(out.patch.includes("local-mode-agent-output.txt"));
+    assert.ok(out.transcript_entries.some((entry) => entry.role === "assistant"));
+  });
+
   it("completes when the CLI exits 0 and captures the patch + transcript", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;

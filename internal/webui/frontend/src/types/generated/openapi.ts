@@ -3461,6 +3461,14 @@ export interface components {
       has_transcript: boolean;
       has_diff: boolean;
       last_error?: string;
+      runtime_strategy?: string;
+      delivery?: string;
+      patch_back_status?: string;
+      logs_ref?: string;
+      local_branch?: string;
+      head_sha?: string;
+      github_branch?: string;
+      github_pr_url?: string;
     };
     /** @description Single transcript entry from a session */
     TranscriptEntry: {

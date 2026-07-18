@@ -6867,6 +6867,22 @@ components:
           type: boolean
         last_error:
           type: string
+        runtime_strategy:
+          type: string
+        delivery:
+          type: string
+        patch_back_status:
+          type: string
+        logs_ref:
+          type: string
+        local_branch:
+          type: string
+        head_sha:
+          type: string
+        github_branch:
+          type: string
+        github_pr_url:
+          type: string
 
     TranscriptEntry:
       type: object

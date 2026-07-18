@@ -40,6 +40,30 @@ type runManifest struct {
 	CodeTaskName string `json:"code_task_title"`
 }
 
+func TestLocalModeTSPromptsLeaveLifecycleToHost(t *testing.T) {
+	raw, err := os.ReadFile("local-mode-entrypoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	for _, want := range []string{
+		"Do not change status or assignee; the workflow host moves it to review after the terminal receipt.",
+		"Do not close or release the task; the workflow host owns terminalization.",
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("local-mode TS prompt missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"move it to review, and make no repository changes",
+		"and complete the task.",
+	} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("local-mode TS prompt still delegates lifecycle mutation: %q", forbidden)
+		}
+	}
+}
+
 func TestLocalModeEntrypointProvenanceCreatesAndAcceptsMarker(t *testing.T) {
 	configDir := t.TempDir()
 	want := provenanceMarker{

@@ -37,7 +37,10 @@ function toJsonResult(value) {
 // Local task runner: runs the user-selected backend CLI over a prepared worktree.
 //
 // This is NOT the Flue agent runtime — it execFiles the same backend CLIs that
-// loom's local/agent tooling uses (claude/codex/opencode/gemini/cursor) directly,
+// loom's local/agent tooling uses (claude/codex/opencode/gemini/cursor) directly.
+// The checked-in local-mode harness additionally supplies `localdogfood`, a
+// deterministic executable backend used to prove orchestration without model
+// auth or spend. It follows the same fail-closed binary/exit-code contract,
 // mirroring the Go arg builders in internal/cli/backends/backend_*.go. It returns
 // `completed` ONLY when the CLI exits 0; every other outcome (unsupported backend,
 // missing worktree, missing binary, nonzero/spawn failure) fails closed with a real
@@ -55,6 +58,7 @@ const SUPPORTED = {
   opencode: "opencode",
   gemini: "gemini",
   cursor: "cursor-agent", // the headless agent CLI; `cursor` is the IDE launcher
+  localdogfood: "localdogfood", // deterministic executable shipped only by local-mode
 };
 
 // STREAM_JSON_BACKENDS get first-class stream-json -> canonical transcript_entries.
@@ -163,6 +167,13 @@ export async function run(ctx = {}) {
   let stackInfo = null;
   let localBranchInfo = null;
   let prFailure = null;
+  // A backend may discover that the reviewed design is fundamentally invalid.
+  // It cannot mutate Work Item lifecycle while the typed TaskRun generation is
+  // live, and free-form stdout is not a trustworthy terminal protocol. Give it
+  // a per-invocation, runner-owned file channel instead; only the exact schema
+  // validated below can alter the TaskRun disposition.
+  const taskOutcomeChannel = createTaskOutcomeChannel();
+  let taskOutcome = null;
   try {
     let result;
     try {
@@ -170,6 +181,7 @@ export async function run(ctx = {}) {
         cwd: execWorktree,
         input: usesStdinPrompt ? prompt : undefined,
         live: true,
+        env: { ...process.env, LOOM_TASK_OUTCOME_FILE: taskOutcomeChannel.file },
       });
     } catch (error) {
       return failed("local_agent_failed", `failed to spawn ${backend} CLI: ${errorMessage(error)}`, {
@@ -184,6 +196,12 @@ export async function run(ctx = {}) {
     exitCode = result.code;
     stdout = result.stdout;
     stderr = result.stderr;
+    taskOutcome = readTaskOutcome(taskOutcomeChannel.file);
+    if (taskOutcome) {
+      logs.push(taskOutcome.invalid
+        ? "task outcome rejected: " + taskOutcome.invalid
+        : "task outcome reported: " + taskOutcome.disposition);
+    }
 
     logs.push(`${backend} CLI exit=${exitCode}`);
     if (stdout.trim()) {
@@ -270,6 +288,7 @@ export async function run(ctx = {}) {
     if (isolated) {
       await removeIsolatedWorktree(worktree, isolated.path, logs);
     }
+    cleanupTaskOutcomeChannel(taskOutcomeChannel);
   }
 
   // Fail closed when PR delivery was requested but could not be completed.
@@ -308,6 +327,12 @@ export async function run(ctx = {}) {
   // For the backends that expose no cost we leave estimated_cost_usd unset (unknown)
   // rather than fabricate a token x rate guess for an unknown/unpriceable model.
   const streamFailure = streamFailureMessage(backend, stdout);
+  const acceptedTaskOutcome = taskOutcome && !taskOutcome.invalid && exitCode === 0 && !streamFailure
+    ? taskOutcome
+    : null;
+  if (taskOutcome && !taskOutcome.invalid && !acceptedTaskOutcome) {
+    logs.push("task outcome ignored because the backend did not finish cleanly");
+  }
 
   const metadata = stringMetadata({
     task_runner: "local-task-runner",
@@ -330,6 +355,10 @@ export async function run(ctx = {}) {
   });
   if (streamFailure) {
     metadata.stream_error = streamFailure;
+  }
+  if (acceptedTaskOutcome) {
+    metadata.task_outcome = acceptedTaskOutcome.disposition;
+    metadata.task_outcome_summary = acceptedTaskOutcome.summary;
   }
 
   if (stackInfo) {
@@ -354,6 +383,46 @@ export async function run(ctx = {}) {
     metadata.delivery = "pull_request_skipped_no_changes";
   } else {
     metadata.delivery = "patch_back";
+  }
+
+  if (taskOutcome && taskOutcome.invalid) {
+    return {
+      status: "failed",
+      exitCode: 1,
+      errorClass: "local_task_outcome_invalid",
+      errorMessage: taskOutcome.invalid,
+      logs: logs.join("\n") + "\n",
+      logsRef: "logs://" + taskRunId,
+      ...taskUsage,
+      transcript_entries: transcriptEntries,
+      patch: patchInfo.patch,
+      base_ref: baseRef,
+      patch_base_ref: baseRef,
+      runtimeMetadata: { ...metadata, phase: "local_task_outcome_invalid" },
+    };
+  }
+
+  if (acceptedTaskOutcome && acceptedTaskOutcome.disposition === "needs_revision") {
+    const needsRevision = {
+      // Intentional cancellation is terminal and non-retryable at the worker:
+      // the backend ran successfully, but the implementation TaskRun must not
+      // close a Work Item whose design needs another planner pass.
+      status: "cancelled",
+      exitCode: 0,
+      errorClass: "task_needs_revision",
+      errorMessage: acceptedTaskOutcome.summary,
+      logs: logs.join("\n") + "\n",
+      logsRef: "logs://" + taskRunId,
+      ...taskUsage,
+      transcript_entries: transcriptEntries,
+      runtimeMetadata: { ...metadata, phase: "needs_revision" },
+    };
+    if (!(prInfo || stackInfo || localBranchInfo || stacked)) {
+      needsRevision.patch = patchInfo.patch;
+      needsRevision.base_ref = baseRef;
+      needsRevision.patch_base_ref = baseRef;
+    }
+    return needsRevision;
   }
 
   if (exitCode !== 0 || streamFailure) {
@@ -463,6 +532,63 @@ function dirExists(filePath) {
   }
 }
 
+const TASK_OUTCOME_MAX_BYTES = 16 * 1024;
+const TASK_OUTCOME_SUMMARY_MAX_CHARS = 2000;
+
+// createTaskOutcomeChannel allocates outside the repository so the protocol
+// file can never leak into a patch/commit. The child receives only the exact
+// file path via LOOM_TASK_OUTCOME_FILE; the runner owns validation and cleanup.
+function createTaskOutcomeChannel() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loom-task-outcome-"));
+  return { dir, file: path.join(dir, "outcome.json") };
+}
+
+function cleanupTaskOutcomeChannel(channel) {
+  if (!channel || !channel.dir) return;
+  try {
+    fs.rmSync(channel.dir, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup: the directory contains no credentials or repo data.
+  }
+}
+
+// readTaskOutcome is deliberately a closed enum. Unknown/malformed content is
+// an explicit fail-closed result, while absence means ordinary task completion.
+function readTaskOutcome(filePath) {
+  let stat;
+  try {
+    stat = fs.lstatSync(filePath);
+  } catch (err) {
+    if (err && err.code === "ENOENT") return null;
+    return { invalid: "cannot inspect LOOM_TASK_OUTCOME_FILE: " + errorMessage(err) };
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    return { invalid: "LOOM_TASK_OUTCOME_FILE must be a regular file" };
+  }
+  if (stat.size < 2 || stat.size > TASK_OUTCOME_MAX_BYTES) {
+    return { invalid: "LOOM_TASK_OUTCOME_FILE size must be between 2 and " + TASK_OUTCOME_MAX_BYTES + " bytes" };
+  }
+  let value;
+  try {
+    value = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (err) {
+    return { invalid: "LOOM_TASK_OUTCOME_FILE is not valid JSON: " + errorMessage(err) };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)
+      || value.version !== 1 || value.disposition !== "needs_revision") {
+    return { invalid: "task outcome must be {version:1, disposition:\"needs_revision\", summary:string}" };
+  }
+  const keys = Object.keys(value).sort();
+  if (keys.join(",") !== "disposition,summary,version") {
+    return { invalid: "task outcome contains unsupported fields" };
+  }
+  const summary = typeof value.summary === "string" ? value.summary.trim() : "";
+  if (!summary || summary.length > TASK_OUTCOME_SUMMARY_MAX_CHARS) {
+    return { invalid: "task outcome summary must contain 1-" + TASK_OUTCOME_SUMMARY_MAX_CHARS + " characters" };
+  }
+  return { disposition: "needs_revision", summary };
+}
+
 // DefaultMaxBudgetUSD mirrors internal/cli/backends/backend_claude.go.
 const DEFAULT_MAX_BUDGET_USD = 50.0;
 
@@ -534,6 +660,11 @@ export function backendArgs(backend, worktree, prompt) {
     case "cursor":
       // defaultCursorNonInteractiveInvoker: -p --output-format stream-json --force <prompt>.
       return ["-p", "--output-format", "stream-json", "--force", prompt];
+    case "localdogfood":
+      // The deterministic local-mode executable selects planner/coder behavior
+      // from a marker in the prompt delivered over stdin. Keeping the prompt out
+      // of argv matches the headless codex/OpenCode path and avoids shell parsing.
+      return ["invoke"];
     default:
       return [prompt];
   }
@@ -543,7 +674,7 @@ export function backendArgs(backend, worktree, prompt) {
 // rather than as a positional argument. OpenCode (harnessInvocation.Prompt) and
 // headless codex (trailing "-") both read the prompt from stdin.
 function backendUsesStdinPrompt(backend) {
-  return backend === "opencode" || backend === "codex";
+  return backend === "opencode" || backend === "codex" || backend === "localdogfood";
 }
 
 function resolveModel(backend) {

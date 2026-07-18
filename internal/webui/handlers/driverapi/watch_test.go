@@ -250,6 +250,9 @@ func TestWatchEpicSnapshotFirstThenEvents(t *testing.T) {
 		if event["type"] != wantTypes[i] {
 			t.Fatalf("event %d type = %v, want %s", i, event["type"], wantTypes[i])
 		}
+		if _, leaked := event["leaseToken"]; leaked || strings.Contains(frame.data, "lease_token") {
+			t.Fatalf("event %d exposed a task-run lease credential: %s", i, frame.data)
+		}
 	}
 
 	// Events appended while connected are streamed too.
@@ -260,6 +263,9 @@ func TestWatchEpicSnapshotFirstThenEvents(t *testing.T) {
 	}
 	if frame.id != strconvInt64(seq3) {
 		t.Fatalf("live event id = %q, want %d", frame.id, seq3)
+	}
+	if event := decodeWatchData(t, frame); event["leaseToken"] != nil || strings.Contains(frame.data, "lease_token") {
+		t.Fatalf("live event exposed a task-run lease credential: %s", frame.data)
 	}
 }
 

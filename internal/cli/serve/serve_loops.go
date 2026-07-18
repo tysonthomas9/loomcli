@@ -10,6 +10,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -17,42 +18,75 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	"github.com/tysonthomas9/loomcli/internal/webui"
 )
 
-// startStaleTaskSweeper launches the always-on server-side stale TaskRun
-// sweeper. Unlike the driver executor it is NOT gated behind
-// LOOM_DRIVER_EXECUTOR: stale-task fault recovery is server policy, so it
-// runs whenever serve has a store. Workflows must not call recoverStale
-// themselves.
-func startStaleTaskSweeper(ctx context.Context, st store.Store) {
+func validateExecutionRuntimePassCapabilities(
+	st store.Store,
+	executionCapability webui.ExecutionCapability,
+	artifactsCapability webui.ArtifactsCapability,
+) error {
 	if st == nil {
-		return
+		return fmt.Errorf("compose Execution compatibility passes: store is required")
 	}
-	sweeper := &driverexecutor.StaleTaskSweeper{
-		Store:        st,
-		WorkspaceKey: driverAutomationWorkspaceScope(),
-		MaxAge:       driverStaleTaskMaxAge(),
+	if executionCapability == nil || executionCapability.DriverRunAPI() == nil ||
+		executionCapability.DriverRunAuthorityResolver() == nil || executionCapability.SystemAuthorityResolver() == nil {
+		return fmt.Errorf("compose Execution compatibility passes: DriverRun API and authority resolvers are required")
 	}
-	slog.Info("Stale task sweeper enabled", "workspace", sweeper.WorkspaceKey, "max_age", sweeper.MaxAge)
-	go func() {
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			if result, err := sweeper.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Error("stale task sweeper failed", "err", err)
-			} else if result != nil && result.Recovered > 0 {
-				slog.Info("stale task sweeper recovered stale task runs", "count", result.Recovered, "task_run_ids", result.RecoveredTaskRunIDs)
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
+	if artifactsCapability == nil || artifactsCapability.ArtifactsAPI() == nil {
+		return fmt.Errorf("compose Execution compatibility passes: Artifacts API is required")
+	}
+	return nil
+}
+
+// buildExecutionRuntimePasses is the bounded Phase-4 compatibility adapter
+// for legacy driver helpers that still require the composite Store. It stays
+// in an existing CLI composition seam rather than widening Execution's owner
+// APIs or creating another composite Store consumer.
+func buildExecutionRuntimePasses(
+	st store.Store,
+	runOutcomes driverexecutor.RunOutcomePublisher,
+	executionCapability webui.ExecutionCapability,
+	artifactsCapability webui.ArtifactsCapability,
+) (serveadapter.ExecutionRuntimePasses, error) {
+	if err := validateExecutionRuntimePassCapabilities(st, executionCapability, artifactsCapability); err != nil {
+		return serveadapter.ExecutionRuntimePasses{}, err
+	}
+	awaitTimeoutSweeper := &driverexecutor.AwaitTimeoutSweeper{
+		Store: st, WorkspaceKey: driverAutomationWorkspaceScope(),
+		Resolver:   serveadapter.NewAwaitTimeoutExecutionResolver(executionCapability),
+		BatchLimit: boundedIntEnv(envLoomAwaitSweepBatch, driverexecutor.DefaultAwaitTimeoutSweepBatch, 500),
+	}
+	passes := serveadapter.ExecutionRuntimePasses{
+		AwaitTimeouts: serveadapter.BuildAwaitTimeoutRuntimePass(awaitTimeoutSweeper.RunOnce),
+	}
+	if !driverExecutorEnabled() {
+		return passes, nil
+	}
+	workDir, err := os.Getwd()
+	if err != nil {
+		return serveadapter.ExecutionRuntimePasses{}, fmt.Errorf("compose Execution driver executor: resolve work dir: %w", err)
+	}
+	executor, ok := buildDriverExecutor(st, workDir, runOutcomes, executionCapability)
+	if !ok {
+		return serveadapter.ExecutionRuntimePasses{}, fmt.Errorf("compose Execution driver executor: sandbox configuration rejected")
+	}
+	passes.DriverExecutor = serveadapter.BuildDriverExecutorRuntimePass(executor)
+	taskWorkerTemplate := driverexecutor.TaskWorker{
+		Store: st, WorkspaceKey: executor.WorkspaceKey, WorkDir: workDir,
+		Artifacts: artifactsCapability.ArtifactsAPI(),
+		NodeID:    executor.NodeID, RunnerID: os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
+		MaxAttempts: driverTaskRunMaxAttempts(), APIBaseURL: driverAPIBaseURL(),
+		LocalSettingsDir: bootstrap.LoomDir(), Execution: executionCapability.TaskRunWorkerAPI(),
+		TaskRunAuthorities: executionCapability.TaskRunAuthorityResolver(),
+		Convergence:        executionCapability.TaskRunConvergenceAPI(), ExecutionAuthorities: executionCapability.SystemAuthorityResolver(),
+	}
+	passes.TaskWorkers = serveadapter.BuildTaskWorkerRuntimePasses(taskWorkerTemplate, driverTaskWorkerConcurrency())
+	return passes, nil
 }
 
 // startOutboxDispatcher launches the always-on server-side outbox delivery
@@ -77,49 +111,6 @@ func startOutboxDispatcher(ctx context.Context, st store.Store) {
 				slog.Error("outbox dispatcher failed", "err", err)
 			} else if delivered > 0 {
 				slog.Info("outbox dispatcher delivered notifications", "count", delivered)
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
-}
-
-// startAwaitTimeoutSweeper launches the always-on await deadline sweeper
-// (RULE 5 enforcement, AW8): past-deadline await instances are resolved with
-// a synthetic timeout event and their runs re-queued onto the workflow's
-// timeout arm — the sweeper never terminalizes a run itself. Like the
-// delivery sweeper it is NOT gated behind LOOM_DRIVER_EXECUTOR — await
-// expiry is server policy. LOOM_AWAIT_SWEEP_INTERVAL tunes the interval in
-// seconds (default 30, capped at one hour); LOOM_AWAIT_SWEEP_BATCH the
-// per-workspace ListDueAwaitDeadlines page (default 50, capped at 500).
-func startAwaitTimeoutSweeper(ctx context.Context, st store.Store) {
-	if st == nil {
-		return
-	}
-	const (
-		envLoomAwaitSweepInterval = "LOOM_AWAIT_SWEEP_INTERVAL"
-		envLoomAwaitSweepBatch    = "LOOM_AWAIT_SWEEP_BATCH"
-	)
-	sweeper := &driverexecutor.AwaitTimeoutSweeper{
-		Store:        st,
-		WorkspaceKey: driverAutomationWorkspaceScope(),
-		BatchLimit:   boundedIntEnv(envLoomAwaitSweepBatch, driverexecutor.DefaultAwaitTimeoutSweepBatch, 500),
-	}
-	interval := time.Duration(boundedIntEnv(envLoomAwaitSweepInterval, 30, 3600)) * time.Second
-	slog.Info("Await timeout sweeper enabled", "workspace", sweeper.WorkspaceKey, "interval", interval, "batch", sweeper.BatchLimit)
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			if result, err := sweeper.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Error("await timeout sweeper failed", "err", err)
-			} else if result != nil && result.TimedOut+result.ResumeDeferred > 0 {
-				slog.Info("await timeout sweeper resolved due awaits",
-					"timed_out", result.TimedOut, "resume_deferred", result.ResumeDeferred,
-					"instance_keys", result.TimedOutInstanceKeys)
 			}
 			select {
 			case <-ctx.Done():

@@ -6,14 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+const maxHostBridgeArtifactFileBytes int64 = 64 << 20
 
 func (r bridgeTaskRunnerResult) finalizedArtifacts() []bridgeArtifact {
 	switch {
@@ -32,8 +37,8 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req
 	if len(artifacts) == 0 {
 		return result, nil
 	}
-	if e.Store == nil {
-		return TaskExecResult{}, fmt.Errorf("store required for runner artifact registration: %w", domain.ErrInvalid)
+	if e.Artifacts == nil {
+		return TaskExecResult{}, fmt.Errorf("artifacts capability required for runner artifact registration: %w", artifactsmodule.ErrUnavailable)
 	}
 	artifactIDs := normalizeArtifactIDs(result.ArtifactIDs)
 	for i, artifact := range artifacts {
@@ -64,17 +69,7 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req
 }
 
 func (e HostBridgeTaskExecutor) registerRunnerArtifact(ctx context.Context, req TaskExecRequest, artifact bridgeArtifact, artifactID, uri string) (*domain.Artifact, error) {
-	metadata := cloneStringMap(artifact.Metadata)
-	if metadata == nil {
-		metadata = map[string]string{}
-	}
-	metadata["driver_run_id"] = req.DriverRunID
-	metadata["runner"] = req.Runner
-	metadata["runner_ref"] = req.RunnerRef
-	metadata["runner_kind"] = req.RunnerKind
-	metadata["runner_entrypoint"] = req.RunnerEntrypoint
-	metadata["runner_driver_version_id"] = req.RunnerVersionID
-	metadata["provider_profile"] = req.ProviderProfile
+	metadata := runnerArtifactMetadataWithSource(req, artifact.Metadata)
 	contentHash := firstNonEmpty(artifact.ContentHash, artifact.ContentHashCamel, artifact.Checksum)
 	checksum := firstNonEmpty(artifact.Checksum, contentHash)
 	mimeType := firstNonEmpty(artifact.MIMEType, artifact.MIMETypeCamel)
@@ -82,23 +77,25 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifact(ctx context.Context, req 
 	summary := artifact.Summary
 	visibility := artifact.Visibility
 	redactionStatus := firstNonEmpty(artifact.RedactionStatus, artifact.RedactionStatusAlt)
-	if _, err := e.Store.Artifacts().Create(ctx, store.ArtifactCreate{
-		WorkspaceKey:    req.WorkspaceKey,
-		ArtifactID:      artifactID,
-		TaskID:          req.TaskID,
-		OwnerType:       "task_run",
-		OwnerID:         req.TaskRunID,
-		Type:            firstNonEmpty(artifact.Type, "artifact"),
-		Summary:         summary,
-		MIMEType:        mimeType,
-		Visibility:      visibility,
-		RedactionStatus: redactionStatus,
-		DurableStatus:   "declared",
-		Metadata:        metadata,
-	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+	service := e.Artifacts
+	owner := artifactExecutionOwnerForTask(req)
+	declareAuth, err := e.artifactAuthority(ctx, req, artifactsmodule.ActionDeclare)
+	if err != nil {
+		return nil, fmt.Errorf("authorize runner artifact %q declaration: %w", artifactID, err)
+	}
+	if _, err := service.Create(ctx, declareAuth, owner, artifactsmodule.CreateCommand{
+		ArtifactID: artifactID, TaskID: req.TaskID, Type: firstNonEmpty(artifact.Type, "artifact"),
+		Summary: summary, MIMEType: mimeType, Visibility: visibility,
+		RedactionStatus: redactionStatus, Metadata: metadata,
+	}); err != nil && !errors.Is(err, artifactsmodule.ErrAlreadyExists) {
 		return nil, fmt.Errorf("create runner artifact %q: %w", artifactID, err)
 	}
-	finalized, err := e.Store.Artifacts().Finalize(ctx, req.WorkspaceKey, artifactID, store.ArtifactFinalize{
+	finalizeAuth, err := e.artifactAuthority(ctx, req, artifactsmodule.ActionFinalize)
+	if err != nil {
+		return nil, fmt.Errorf("authorize runner artifact %q finalization: %w", artifactID, err)
+	}
+	_, err = service.Finalize(ctx, finalizeAuth, owner, artifactsmodule.FinalizeCommand{
+		ArtifactID:      artifactID,
 		URI:             &uri,
 		Summary:         optionalString(summary),
 		MIMEType:        optionalString(mimeType),
@@ -112,7 +109,30 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifact(ctx context.Context, req 
 	if err != nil {
 		return nil, fmt.Errorf("finalize runner artifact %q: %w", artifactID, err)
 	}
-	return finalized, nil
+	referenceAuth, err := e.artifactAuthority(ctx, req, artifactsmodule.ActionReference)
+	if err != nil {
+		return nil, fmt.Errorf("authorize runner artifact %q reference: %w", artifactID, err)
+	}
+	referenced, err := service.Reference(ctx, referenceAuth, owner, taskOutputReference(req, artifactID))
+	if err != nil {
+		return nil, fmt.Errorf("reference runner artifact %q: %w", artifactID, err)
+	}
+	return artifactDomainFromModule(referenced.Artifact), nil
+}
+
+func runnerArtifactMetadataWithSource(req TaskExecRequest, source map[string]string) map[string]string {
+	metadata := cloneStringMap(source)
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["driver_run_id"] = req.DriverRunID
+	metadata["runner"] = req.Runner
+	metadata["runner_ref"] = req.RunnerRef
+	metadata["runner_kind"] = req.RunnerKind
+	metadata["runner_entrypoint"] = req.RunnerEntrypoint
+	metadata["runner_driver_version_id"] = req.RunnerVersionID
+	metadata["provider_profile"] = req.ProviderProfile
+	return metadata
 }
 
 func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context, req TaskExecRequest, session *flueTaskSession, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
@@ -211,30 +231,188 @@ func (e HostBridgeTaskExecutor) runnerFileOrInlineBytes(inline []byte, filePath,
 	if err != nil {
 		return nil, err
 	}
-	content, err := os.ReadFile(path) //nolint:gosec // constrained by safeRunnerPath.
+	content, err := readHostBridgeArtifactFile(path, label)
+	if err != nil {
+		return nil, err
+	}
+	return content, nil
+}
+
+func readHostBridgeArtifactFile(path, label string) ([]byte, error) {
+	file, err := os.Open(path) //nolint:gosec // caller constrains the path to the task worktree.
 	if err != nil {
 		return nil, fmt.Errorf("read %s file: %w", label, err)
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat %s file: %w", label, err)
+	}
+	if info.Size() > maxHostBridgeArtifactFileBytes {
+		return nil, fmt.Errorf("%s file exceeds %d-byte artifact limit: %w", label, maxHostBridgeArtifactFileBytes, domain.ErrInvalid)
+	}
+
+	content, err := io.ReadAll(io.LimitReader(file, maxHostBridgeArtifactFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s file: %w", label, err)
+	}
+	if int64(len(content)) > maxHostBridgeArtifactFileBytes {
+		return nil, fmt.Errorf("%s file exceeds %d-byte artifact limit: %w", label, maxHostBridgeArtifactFileBytes, domain.ErrInvalid)
 	}
 	return content, nil
 }
 
 func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req TaskExecRequest, sessionID, artifactID, artifactType, summary, mimeType string, content []byte) (*domain.Artifact, error) {
-	if e.Store == nil {
-		return nil, fmt.Errorf("store required for %s artifact finalization: %w", artifactType, domain.ErrInvalid)
+	if e.Artifacts == nil {
+		return nil, fmt.Errorf("artifacts capability required for %s artifact finalization: %w", artifactType, artifactsmodule.ErrUnavailable)
 	}
-	return store.UploadContentArtifact(ctx, e.Store.Artifacts(), store.ArtifactCreate{
-		WorkspaceKey:  req.WorkspaceKey,
-		ArtifactID:    artifactID,
-		SessionID:     sessionID,
-		TaskID:        req.TaskID,
-		OwnerType:     "task_run",
-		OwnerID:       req.TaskRunID,
-		Type:          artifactType,
-		Summary:       summary,
-		MIMEType:      mimeType,
-		DurableStatus: "declared",
-		Metadata:      runnerArtifactMetadata(req),
-	}, content)
+	authorities, err := e.artifactContentAuthorities(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("authorize %s artifact finalization: %w", artifactType, err)
+	}
+	result, err := e.Artifacts.CreateContent(ctx, authorities, artifactExecutionOwnerForTask(req), artifactsmodule.CreateCommand{
+		ArtifactID: artifactID, SessionID: sessionID, TaskID: req.TaskID, Type: artifactType,
+		Summary: summary, MIMEType: mimeType, Metadata: runnerArtifactMetadata(req),
+	}, content, taskOutputReference(req, artifactID))
+	if err != nil {
+		return nil, artifactDomainErrorForBridge(err)
+	}
+	return artifactDomainFromModule(result.Artifact), nil
+}
+
+// createPatchArtifact routes patch persistence through the Artifacts-owned
+// retry-safe content lifecycle. The execution owner tuple is validated before
+// the compatibility adapter can touch the legacy store.
+func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, patch []byte) (*domain.Artifact, string, error) {
+	if e.Artifacts == nil {
+		return nil, "", fmt.Errorf("artifacts capability required for patch artifact finalization: %w", artifactsmodule.ErrUnavailable)
+	}
+	artifactID := firstNonEmpty(runner.PatchArtifactID, runner.PatchArtifactIDCamel)
+	if artifactID == "" {
+		artifactID = "patch-" + req.TaskRunID
+	}
+	summary := firstNonEmpty(runner.PatchSummary, runner.PatchSummaryCamel, "task patch")
+	mimeType := firstNonEmpty(runner.PatchMIMEType, runner.PatchMIMETypeCamel, "text/x-diff")
+	baseRef := firstNonEmpty(runner.PatchBaseRef, runner.PatchBaseRefCamel, runner.BaseRef, runner.BaseRefCamel)
+	metadata := runnerArtifactMetadata(req)
+	if baseRef != "" {
+		metadata["patch_base_ref"] = baseRef
+	}
+	authorities, err := e.artifactContentAuthorities(ctx, req)
+	if err != nil {
+		return nil, "", fmt.Errorf("authorize patch artifact finalization: %w", err)
+	}
+	result, err := e.Artifacts.CreateContent(ctx, authorities, artifactExecutionOwnerForTask(req), artifactsmodule.CreateCommand{
+		ArtifactID:      artifactID,
+		TaskID:          req.TaskID,
+		Type:            "patch",
+		Summary:         summary,
+		MIMEType:        mimeType,
+		Visibility:      firstNonEmpty(runner.PatchVisibility, runner.PatchVisibilityCamel),
+		RedactionStatus: firstNonEmpty(runner.PatchRedactionStatus, runner.PatchRedactionStatusAlt),
+		Metadata:        metadata,
+	}, patch, taskOutputReference(req, artifactID))
+	if err != nil {
+		return nil, "", fmt.Errorf("create patch artifact: %w", artifactDomainErrorForBridge(err))
+	}
+	return artifactDomainFromModule(result.Artifact), baseRef, nil
+}
+
+func (e HostBridgeTaskExecutor) artifactAuthority(
+	ctx context.Context,
+	req TaskExecRequest,
+	action authority.Action,
+) (authority.ExecutionAuthority, error) {
+	if e.ArtifactAuthorities == nil {
+		return authority.ExecutionAuthority{}, fmt.Errorf("TaskRun authority resolver required: %w", artifactsmodule.ErrUnavailable)
+	}
+	return e.ArtifactAuthorities.ResolveTaskRunAuthority(ctx, req.WorkspaceKey, action, execution.Owner{
+		ResourceKind: execution.ResourceTaskRun,
+		ResourceID:   req.TaskRunID,
+		NodeID:       req.NodeID,
+		LeaseID:      req.LeaseID,
+		LeaseToken:   req.LeaseToken,
+		FencingToken: req.FencingToken,
+	})
+}
+
+func (e HostBridgeTaskExecutor) artifactContentAuthorities(ctx context.Context, req TaskExecRequest) (artifactsmodule.ContentAuthorities, error) {
+	var result artifactsmodule.ContentAuthorities
+	actions := []struct {
+		action authority.Action
+		assign func(authority.ExecutionAuthority)
+	}{
+		{artifactsmodule.ActionDeclare, func(value authority.ExecutionAuthority) { result.Declare = value }},
+		{artifactsmodule.ActionGet, func(value authority.ExecutionAuthority) { result.Get = value }},
+		{artifactsmodule.ActionUpload, func(value authority.ExecutionAuthority) { result.Upload = value }},
+		{artifactsmodule.ActionFinalize, func(value authority.ExecutionAuthority) { result.Finalize = value }},
+		{artifactsmodule.ActionReference, func(value authority.ExecutionAuthority) { result.Reference = value }},
+	}
+	for _, operation := range actions {
+		value, err := e.artifactAuthority(ctx, req, operation.action)
+		if err != nil {
+			return artifactsmodule.ContentAuthorities{}, err
+		}
+		operation.assign(value)
+	}
+	return result, nil
+}
+
+func taskOutputReference(req TaskExecRequest, artifactID string) artifactsmodule.ReferenceCommand {
+	return artifactsmodule.ReferenceCommand{
+		ArtifactID: artifactID,
+		Kind:       "task-output",
+		TargetRef:  "task-run://" + req.TaskRunID + "/output",
+	}
+}
+
+func artifactExecutionOwnerForTask(req TaskExecRequest) artifactsmodule.ExecutionOwner {
+	return artifactsmodule.ExecutionOwner{
+		WorkspaceKey: req.WorkspaceKey,
+		TaskRunID:    req.TaskRunID,
+		NodeID:       req.NodeID,
+		LeaseID:      req.LeaseID,
+		LeaseToken:   req.LeaseToken,
+		FencingToken: req.FencingToken,
+	}
+}
+
+func artifactDomainFromModule(artifact *artifactsmodule.Artifact) *domain.Artifact {
+	if artifact == nil {
+		return nil
+	}
+	return &domain.Artifact{
+		WorkspaceKey: artifact.WorkspaceKey, ArtifactID: artifact.ArtifactID, SessionID: artifact.SessionID,
+		TaskID: artifact.TaskID, OwnerType: string(artifact.OwnerType), OwnerID: artifact.OwnerID,
+		Type: artifact.Type, URI: artifact.URI, Summary: artifact.Summary, MIMEType: artifact.MIMEType,
+		SizeBytes: artifact.SizeBytes, Checksum: artifact.Checksum, ContentHash: artifact.ContentHash,
+		Visibility: artifact.Visibility, RedactionStatus: artifact.RedactionStatus,
+		DurableStatus: string(artifact.DurableStatus), Metadata: artifact.Metadata,
+		FinalizedAt: artifact.FinalizedAt, CreatedAt: artifact.CreatedAt, UpdatedAt: artifact.UpdatedAt,
+	}
+}
+
+func artifactDomainErrorForBridge(err error) error {
+	if err == nil {
+		return nil
+	}
+	var mapped error
+	switch {
+	case errors.Is(err, artifactsmodule.ErrNotFound):
+		mapped = domain.ErrNotFound
+	case errors.Is(err, artifactsmodule.ErrAlreadyExists):
+		mapped = domain.ErrAlreadyExists
+	case errors.Is(err, artifactsmodule.ErrNotOwner):
+		mapped = domain.ErrNotOwner
+	case errors.Is(err, artifactsmodule.ErrInvalidTransition):
+		mapped = domain.ErrInvalidTransition
+	case errors.Is(err, artifactsmodule.ErrInvalid):
+		mapped = domain.ErrInvalid
+	default:
+		return err
+	}
+	return errors.Join(mapped, err)
 }
 
 func runnerArtifactMetadata(req TaskExecRequest) map[string]string {
@@ -339,9 +517,9 @@ func (e HostBridgeTaskExecutor) readPatch(ctx context.Context, r bridgeTaskRunne
 	if err != nil {
 		return nil, err
 	}
-	patch, err := os.ReadFile(path) //nolint:gosec // constrained by safePatchPath.
+	patch, err := readHostBridgeArtifactFile(path, "patch")
 	if err != nil {
-		return nil, fmt.Errorf("read patch file: %w", err)
+		return nil, err
 	}
 	return patch, ctx.Err()
 }

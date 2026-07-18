@@ -3,6 +3,15 @@ set -eu
 
 cmd="${1:-}"
 
+# `loom claim` establishes the local CLI identity used by subsequent issue
+# mutations. A workflow TaskRun still needs that compatibility lock while the
+# deterministic backend is running, but the lock files are runner bookkeeping,
+# not product output. Remove them before the parent snapshots the worktree so a
+# planner remains patch-free and a coder diff contains only its implementation.
+if [ "${LOOM_TASK_RUN_ID:-}" != "" ]; then
+  trap 'rm -f .agent.lock .agent.lock.flock' EXIT
+fi
+
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
@@ -19,22 +28,56 @@ write_transcript() {
   printf '{"type":"assistant","timestamp":"%s","message":{"content":[{"type":"text","text":"%s"}]}}\n' "$ts" "$escaped" >> "${dir}/agent_transcript.jsonl"
 }
 
+persist_planner_design() {
+  task_id="$1"
+  design="$2"
+
+  if [ "${LOOM_TASK_RUN_ID:-}" = "" ]; then
+    loom data update "$task_id" --design "$design" --status review
+    return
+  fi
+
+  # `loom data update` is a store-oriented CLI. In a workflow TaskRun's
+  # isolated worktree it has no local fleet-db binary, whereas the running Loom
+  # server is the public execution boundary already used for task claims.
+  server="${LOOM_SERVER_URL:-http://127.0.0.1:8080}"
+  # The TaskRun owns the live Work Item generation. Persist content only here;
+  # prompt-agent moves the card to review after the terminal receipt retires
+  # that generation.
+  body="$(jq -cn --arg design "$design" '{design:$design}')"
+  response="$(curl -fsS --max-time 30 -X PATCH -H 'Accept: application/json' -H 'Content-Type: application/json' \
+    --data "$body" "${server%/}/api/workspaces/${LOOM_WORKSPACE:-LOCALMODE}/issues/${task_id}")"
+  if ! printf '%s' "$response" | jq -e --arg id "$task_id" \
+    '.success == true and .data.id == $id and .data.has_design == true' >/dev/null; then
+    echo "[localdogfood] planner public issue update returned invalid state" >&2
+    printf '%s\n' "$response" >&2
+    return 1
+  fi
+}
+
 run_planner() {
-  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${LOOM_WORKSPACE:-LOCALMODE}-2}}"
+  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_TASK_ID:-${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${LOOM_WORKSPACE:-LOCALMODE}-2}}}"
   agent="${LOOM_AGENT_NAME:-local-planner}"
   design="Approved design: local mode planner verified the supervised run loop. The coder should append a short result to local-mode-agent-output.txt, commit it, and close the task."
 
   echo "[localdogfood] planner ${agent} handling ${task_id}"
   write_transcript "Planner ${agent} claimed ${task_id}."
-  loom claim "$task_id" || true
+  echo "[localdogfood] planner establishing CLI claim identity for ${task_id}"
+  loom claim "$task_id" 2>&1 || true
   sleep "${LOOM_LOCAL_MODE_STEP_DELAY:-2}"
-  loom data update "$task_id" --design "$design" --status review
-  write_transcript "Planner ${agent} wrote design and moved ${task_id} to review."
-  loom complete
+  echo "[localdogfood] planner persisting design for ${task_id}"
+  persist_planner_design "$task_id" "$design" 2>&1
+  echo "[localdogfood] planner persisted design for ${task_id}; workflow host will move it to review"
+  write_transcript "Planner ${agent} wrote the design; the workflow host will move ${task_id} to review after TaskRun completion."
+  # A task-run is finalized by the serve task worker after this executable exits.
+  # The legacy daemon path still needs the explicit completion notification.
+  if [ "${LOOM_TASK_RUN_ID:-}" = "" ]; then
+    loom complete
+  fi
 }
 
 run_coder() {
-  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_LOCAL_MODE_CODE_TASK_ID:-${LOOM_WORKSPACE:-LOCALMODE}-3}}"
+  task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_TASK_ID:-${LOOM_LOCAL_MODE_CODE_TASK_ID:-${LOOM_WORKSPACE:-LOCALMODE}-3}}}"
   agent="${LOOM_AGENT_NAME:-local-coder}"
   output_file="local-mode-agent-output.txt"
 
@@ -52,9 +95,11 @@ run_coder() {
 
   git add "$output_file"
   git commit -m "Local mode dogfood implementation (${task_id})" || true
-  loom data close "$task_id" --session "${LOOM_SESSION_ID:-}" --reason "Local mode dogfood implementation completed."
   write_transcript "Coder ${agent} committed ${output_file} and closed ${task_id}."
-  loom complete
+  if [ "${LOOM_TASK_RUN_ID:-}" = "" ]; then
+    loom data close "$task_id" --session "${LOOM_SESSION_ID:-}" --reason "Local mode dogfood implementation completed."
+    loom complete
+  fi
 }
 
 run_interactive() {
@@ -77,6 +122,14 @@ case "$cmd" in
     if [ "${LOOM_AGENT_ROLE:-}" != "" ]; then
       run_interactive
     else
+      # local-task-runner sends the configured role prompt over stdin. A stable
+      # marker makes the deterministic backend choose the same planner/coder leaf
+      # that the role TaskFilter selected before dispatch. Legacy daemon calls
+      # carry LOOM_ROLE/LOOM_AGENT_NAME and do not need stdin.
+      prompt=""
+      if [ "${LOOM_TASK_RUN_ID:-}" != "" ]; then
+        prompt="$(cat)"
+      fi
       case "${LOOM_ROLE:-}" in
         plan)
           run_planner
@@ -85,9 +138,15 @@ case "$cmd" in
           run_coder
           ;;
         *)
-          case "${LOOM_AGENT_NAME:-}" in
-            *planner*) run_planner ;;
-            *) run_coder ;;
+          case "$prompt" in
+            *LOOM_LOCALDOGFOOD_PHASE=plan*) run_planner ;;
+            *LOOM_LOCALDOGFOOD_PHASE=task*) run_coder ;;
+            *)
+              case "${LOOM_AGENT_NAME:-}" in
+                *planner*) run_planner ;;
+                *) run_coder ;;
+              esac
+              ;;
           esac
           ;;
       esac

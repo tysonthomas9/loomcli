@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 
 import { DriverApiError, WorkflowSuspended, createLoomDriverClient, isWorkflowSuspended } from "./driver.js";
 
-test("LoomDriverClient sends camelCase task run requests and remembers child task lease over HTTP", async () => {
+test("LoomDriverClient sends camelCase task run requests without exposing a worker lease", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/exec-task") {
       return {
@@ -33,6 +33,7 @@ test("LoomDriverClient sends camelCase task run requests and remembers child tas
         LOOM_DRIVER_LEASE_ID: "lease-1",
         LOOM_DRIVER_FENCING_TOKEN: "7",
         LOOM_DRIVER_API_URL: apiUrl,
+        LOOM_TASK_RUN_LEASE_TOKEN: "same-run-token",
       },
     });
 
@@ -44,7 +45,8 @@ test("LoomDriverClient sends camelCase task run requests and remembers child tas
       capabilities: ["repo"],
     });
     assert.equal(result.status, "completed");
-    await client.tasks.complete("TASK-1");
+	assert.equal(result.leaseToken, undefined);
+    await client.tasks.complete({ taskId: "TASK-1", leaseToken: "caller-controlled-token" });
 
     assert.equal(calls.length, 2);
     assert.equal(calls[0].url, "/api/workspaces/WS/driver/exec-task");
@@ -68,7 +70,7 @@ test("LoomDriverClient sends camelCase task run requests and remembers child tas
     assert.deepEqual(calls[1].body, {
       taskId: "TASK-1",
       taskRunId: "task-run-1",
-      leaseToken: "lease-token-1",
+      leaseToken: "same-run-token",
       logsRef: "logs://task-run-1",
       artifactsRef: "artifacts://task-run-1",
       artifactIds: ["artifact-1"],
@@ -136,6 +138,33 @@ test("LoomDriverClient.taskRuns.request omits input from the wire when none is g
     assert.equal(calls.length, 1);
     assert.equal(Object.hasOwn(calls[0].body, "input"), false, "no input key when caller omits it");
     assert.equal(Object.hasOwn(calls[0].body, "closeTask"), false, "no closeTask key when caller omits it");
+  });
+});
+
+test("LoomDriverClient.taskRuns.request replays the exact command after a committed response disconnect", async () => {
+  let requestNumber = 0;
+  await withDriverServer(async (call) => {
+    if (call.url !== "/api/workspaces/WS/driver/exec-task") {
+      return notFound();
+    }
+    requestNumber += 1;
+    if (requestNumber === 1) {
+      // Model: Fleet committed its immutable request receipt, then the public
+      // response connection disappeared before the SDK could read it.
+      return { destroySocket: true };
+    }
+    return { id: "task-run-1", taskRunId: "task-run-1", taskId: "TASK-1", status: "queued", replayed: true };
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      input: { epicId: "EPIC-1" },
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "run-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    const result = await client.taskRuns.request({ taskId: "TASK-1", taskRunId: "task-run-1", runner: "local-task-runner" });
+    assert.equal(result.taskRunId, "task-run-1");
+    assert.equal(result.replayed, true);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[1].body, calls[0].body, "lost-response retry must preserve exact request identity");
   });
 });
 
@@ -343,7 +372,7 @@ test("LoomDriverClient task request enqueues and await polls terminal result", a
   });
 });
 
-test("LoomDriverClient can complete one child while another child is still polling", async () => {
+test("LoomDriverClient can observe one child while another child is still polling", async () => {
   const events = [];
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/exec-task") {
@@ -364,13 +393,8 @@ test("LoomDriverClient can complete one child while another child is still polli
         id: call.body.taskRunId,
         taskRunId: call.body.taskRunId,
         taskId: task,
-        leaseToken: "token-" + task,
         status: "completed",
       };
-    }
-    if (call.url === "/api/workspaces/WS/driver/complete-task") {
-      events.push("complete-" + call.body.taskId);
-      return { id: call.body.taskId, status: "completed" };
     }
     return notFound();
   }, async ({ apiUrl }) => {
@@ -383,28 +407,23 @@ test("LoomDriverClient can complete one child while another child is still polli
       },
     });
 
-    async function requestAwaitAndComplete(taskId) {
+    async function requestAndAwait(taskId) {
       const queued = await client.taskRuns.request({ taskId, runner: "local-task-runner" });
-      const result = await client.taskRuns.await({ taskRunId: queued.taskRunId, pollMs: 10, timeoutMs: 1000 });
-      await client.tasks.complete({
-        taskId,
-        taskRunId: result.taskRunId,
-        leaseToken: result.leaseToken,
-      });
+      return client.taskRuns.await({ taskRunId: queued.taskRunId, pollMs: 10, timeoutMs: 1000 });
     }
 
     await Promise.all([
-      requestAwaitAndComplete("FAST"),
-      requestAwaitAndComplete("SLOW"),
+      requestAndAwait("FAST").then(() => events.push("observed-FAST")),
+      requestAndAwait("SLOW").then(() => events.push("observed-SLOW")),
     ]);
 
     assert.ok(events.includes("poll-start-FAST"), "FAST task should poll");
     assert.ok(events.includes("poll-start-SLOW"), "SLOW task should poll");
-    assert.ok(events.includes("complete-FAST"), "FAST task should complete");
+    assert.ok(events.includes("observed-FAST"), "FAST task should be observed terminal");
     assert.ok(events.includes("poll-end-SLOW"), "SLOW task should finish polling");
     assert.ok(
-      events.indexOf("complete-FAST") < events.indexOf("poll-end-SLOW"),
-      "FAST completion should not wait for SLOW polling; events: " + events.join(",")
+      events.indexOf("observed-FAST") < events.indexOf("poll-end-SLOW"),
+      "FAST observation should not wait for SLOW polling; events: " + events.join(",")
     );
   });
 });
@@ -1310,6 +1329,10 @@ async function withDriverServer(handler, fn) {
     };
     calls.push(call);
     const result = await handler(call, calls);
+    if (result && result.destroySocket === true) {
+      req.socket.destroy();
+      return;
+    }
     const statusCode = result && typeof result.statusCode === "number" ? result.statusCode : 200;
     const responseBody = result && Object.hasOwn(result, "body") ? result.body : result;
     res.statusCode = statusCode;

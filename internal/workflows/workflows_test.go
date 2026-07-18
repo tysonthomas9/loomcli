@@ -85,7 +85,7 @@ func TestBuiltinEpicRunnerWorkflowIsWatchDriven(t *testing.T) {
 		`case "taskRunCompleted":`,
 		`case "taskRunFailed":`,
 		`case "taskRunCancelled":`,
-		"completeChildTask(loom, data)",
+		"completed.push(taskId)",
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("built-in epic-runner source missing watch-driven loop element %q", want)
@@ -98,6 +98,8 @@ func TestBuiltinEpicRunnerWorkflowIsWatchDriven(t *testing.T) {
 		"setTimeout",
 		"intervalSeconds",
 		"intervalMs",
+		"completeChildTask",
+		"data.leaseToken",
 	} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("built-in epic-runner source still has polling-loop machinery %q", forbidden)
@@ -416,12 +418,11 @@ func TestBuildAndRegisterCustomSourceWithRealFlue(t *testing.T) {
 	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, result.Version); got != domain.DriverTrustTrusted {
 		t.Fatalf("approved version trust = %q, want trusted", got)
 	}
-	run, err := driverpkg.CreateDriverRun(ctx, st, driverpkg.RunOptions{
-		WorkspaceKey:    "CUSTOM",
-		DriverID:        result.Driver.DriverID,
-		DriverVersionID: result.Version.VersionID,
-		RunID:           "run-custom-preview",
-		Payload:         json.RawMessage(`{"marker":"custom-marker"}`),
+	run, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: "CUSTOM", RunID: "run-custom-preview",
+		DriverID: result.Driver.DriverID, DriverVersionID: result.Version.VersionID,
+		Entrypoint: driverpkg.EntrypointRun, SourceKind: "test", SourceRef: "workflow fixture",
+		Payload: json.RawMessage(`{"marker":"custom-marker"}`),
 	})
 	if err != nil {
 		t.Fatalf("CreateDriverRun preview: %v", err)

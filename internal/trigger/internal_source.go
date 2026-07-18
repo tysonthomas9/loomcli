@@ -182,6 +182,10 @@ var _ InternalEventEmitter = (*InternalSource)(nil)
 // plus Store is ready to use; safe for concurrent use.
 type InternalSource struct {
 	Store store.Store
+	// AwaitResolver is the explicitly injected Execution mutation port used by
+	// the legacy loopback await fast path. Nil keeps event emission available
+	// but makes await resolution fail closed.
+	AwaitResolver store.AtomicAwaitStore
 	// HopDepthCap overrides the structural guard's cap when positive;
 	// otherwise LOOM_TRIGGER_HOP_DEPTH_CAP, then
 	// DefaultInternalEventHopDepthCap apply.
@@ -292,7 +296,7 @@ func marshalInternalEnvelope(origin domain.TriggerEventOrigin, hopDepth int, ev 
 // the run.finished lifecycle lane runs its own journal-anchored matcher pass
 // (internal/driver) so composition is independent of binding configuration.
 func (s *InternalSource) dispatchAwaits(ctx context.Context, ws, eventID, eventType string, origin domain.TriggerEventOrigin, ev InternalEvent) {
-	matcher := &AwaitMatcher{Store: s.Store, Logger: s.Logger}
+	matcher := &AwaitMatcher{Store: s.Store, AtomicResolver: s.AwaitResolver, Logger: s.Logger}
 	if _, err := matcher.Dispatch(ctx, ws, AwaitDispatchEvent{
 		EventID:    eventID,
 		EventType:  eventType,

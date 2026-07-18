@@ -3153,6 +3153,7 @@ type SessionResponse struct {
 	Backend          string     `json:"backend"`
 	CacheReadTokens  int64      `json:"cache_read_tokens"`
 	CacheWriteTokens int64      `json:"cache_write_tokens"`
+	Delivery         *string    `json:"delivery,omitempty"`
 	DurationS        *float64   `json:"duration_s,omitempty"`
 	EndedAt          *time.Time `json:"ended_at,omitempty"`
 	EpicId           *string    `json:"epic_id,omitempty"`
@@ -3161,16 +3162,23 @@ type SessionResponse struct {
 	ExitCode         int        `json:"exit_code"`
 	FilesChanged     int        `json:"files_changed"`
 	FilesTouched     *[]string  `json:"files_touched,omitempty"`
+	GithubBranch     *string    `json:"github_branch,omitempty"`
+	GithubPrUrl      *string    `json:"github_pr_url,omitempty"`
 	HasDiff          bool       `json:"has_diff"`
 	HasTranscript    bool       `json:"has_transcript"`
+	HeadSha          *string    `json:"head_sha,omitempty"`
 	InputTokens      int64      `json:"input_tokens"`
 	IsActive         bool       `json:"is_active"`
 	LastError        *string    `json:"last_error,omitempty"`
 	LinesAdded       int        `json:"lines_added"`
 	LinesRemoved     int        `json:"lines_removed"`
+	LocalBranch      *string    `json:"local_branch,omitempty"`
+	LogsRef          *string    `json:"logs_ref,omitempty"`
 	Model            *string    `json:"model,omitempty"`
 	OutputTokens     int64      `json:"output_tokens"`
+	PatchBackStatus  *string    `json:"patch_back_status,omitempty"`
 	Phase            *string    `json:"phase,omitempty"`
+	RuntimeStrategy  *string    `json:"runtime_strategy,omitempty"`
 	SessionId        string     `json:"session_id"`
 	StartedAt        time.Time  `json:"started_at"`
 	Status           string     `json:"status"`

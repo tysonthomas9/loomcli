@@ -1,4 +1,4 @@
-package webui
+package daemon
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 func TestHealthDoctor_BackoffDuration(t *testing.T) {
@@ -34,7 +33,7 @@ func TestHealthDoctor_BackoffDuration(t *testing.T) {
 
 func TestHealthDoctor_ClosedBreakerNoAction(t *testing.T) {
 	// A healthy breaker should not trigger recovery.
-	mp := daemon.NewMultiPool(func(ctx context.Context) string { return "ws1" }, 2)
+	mp := NewMultiPool(func(ctx context.Context) string { return "ws1" }, 2)
 	pool := newTestProtectedPool(t)
 	if err := mp.Register("ws1", pool); err != nil {
 		t.Fatal(err)
@@ -59,7 +58,7 @@ func TestHealthDoctor_ClosedBreakerNoAction(t *testing.T) {
 }
 
 func TestHealthDoctor_DetectsStuckBreaker(t *testing.T) {
-	mp := daemon.NewMultiPool(func(ctx context.Context) string { return "ws1" }, 2)
+	mp := NewMultiPool(func(ctx context.Context) string { return "ws1" }, 2)
 
 	// Create a breaker that will immediately trip.
 	breaker := circuitbreaker.NewBreaker("test", circuitbreaker.Config{
@@ -68,18 +67,18 @@ func TestHealthDoctor_DetectsStuckBreaker(t *testing.T) {
 		HalfOpenMaxProbes: 1,
 	})
 	// Trip the breaker.
-	_ = breaker.Execute(func() error { return daemon.ErrDaemonNotRunning })
+	_ = breaker.Execute(func() error { return ErrDaemonNotRunning })
 
 	if breaker.GetState() != circuitbreaker.StateOpen {
 		t.Fatalf("breaker should be open, got %v", breaker.GetState())
 	}
 
 	socketPath := t.TempDir() + "/test.sock"
-	rawPool, err := daemon.NewConnectionPool(socketPath, 2)
+	rawPool, err := NewConnectionPool(socketPath, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool := daemon.NewProtectedPool(rawPool, breaker)
+	pool := NewProtectedPool(rawPool, breaker)
 	if err := mp.Register("ws1", pool); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +109,7 @@ func TestHealthDoctor_DetectsStuckBreaker(t *testing.T) {
 }
 
 func TestHealthDoctor_ClearsOnRecovery(t *testing.T) {
-	mp := daemon.NewMultiPool(func(ctx context.Context) string { return "ws1" }, 2)
+	mp := NewMultiPool(func(ctx context.Context) string { return "ws1" }, 2)
 	pool := newTestProtectedPool(t)
 	if err := mp.Register("ws1", pool); err != nil {
 		t.Fatal(err)
@@ -144,10 +143,10 @@ func TestHealthDoctor_ClearsOnRecovery(t *testing.T) {
 }
 
 // newTestProtectedPool creates a ProtectedPool with a healthy (closed) breaker for testing.
-func newTestProtectedPool(t *testing.T) *daemon.ProtectedPool {
+func newTestProtectedPool(t *testing.T) *ProtectedPool {
 	t.Helper()
 	socketPath := t.TempDir() + "/test.sock"
-	rawPool, err := daemon.NewConnectionPool(socketPath, 2)
+	rawPool, err := NewConnectionPool(socketPath, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,5 +154,5 @@ func newTestProtectedPool(t *testing.T) *daemon.ProtectedPool {
 		FailureThreshold: 5,
 		OpenTimeout:      30 * time.Second,
 	})
-	return daemon.NewProtectedPool(rawPool, breaker)
+	return NewProtectedPool(rawPool, breaker)
 }

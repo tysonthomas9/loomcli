@@ -233,6 +233,7 @@ describe("AgentsPage", () => {
           leadName: "lead-1",
           requestedBy: "ui",
           runner: "local-task-runner",
+          deliveryMode: "patch-back",
         },
       );
     });
@@ -302,6 +303,7 @@ describe("AgentsPage", () => {
           leadName: "lead-1",
           requestedBy: "ui",
           runner: "local-task-runner",
+          deliveryMode: "pull-request",
           repoUrl: "https://github.com/tyson/sandbox.git",
           baseBranch: "develop",
           openPullRequest: true,
@@ -339,6 +341,7 @@ describe("AgentsPage", () => {
           leadName: "lead-1",
           requestedBy: "ui",
           runner: "daytona-task-runner",
+          deliveryMode: "pull-request",
           repoUrl: "https://github.com/tyson/sandbox.git",
           baseBranch: "develop",
           openPullRequest: true,

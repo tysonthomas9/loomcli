@@ -1,14 +1,14 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** Reviewed — Phase 3 architecture enforcement and paired-gate evidence complete
+- **Status:** INTERIM — Phase 4 architecture activation is in source and the current architecture check passes; paired contract, gates, source proof, performance, and packaged Desktop evidence remain pending
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
-**Phase 3 status:** Analyzer `1.0.0` strictly validates the approved graph and baseline, enforces all four release and seven tag/race profiles plus the all-files AST pass, rejects undeclared module roots/edges and cycles, and detects forbidden signature/type leakage. The current ratchets are 88 semantic composite-Store files, 77 outside composition, 91 plural-handler imports (42 denied-root and 49 legacy-service exceptions), and 226 type-resolved direct-write rows across 249 call sites. Two capability roots are active, the mutation ledger contains 17 commands, all six performance records are measured, and no architecture decision is pending. The runtime inventory contains 85 components, including 56 ticker sites and 58 managed components, with exact default-deny dispositions for 107 in-scope non-test goroutine launch definitions. The supervisor-disabled manifest remains intentionally RED; Phase 3 does not relabel that completed failure contract as supervisor-disabled functionality.
+**Phase 4 status:** Analyzer `1.0.0` enforces all four release and seven tag/race profiles plus the all-files AST pass, rejects undeclared module roots/edges and cycles, and detects forbidden signature/type leakage. Workflow Catalog, Automation, Execution, and minimal Artifacts roots are active at `completed_phase: 4`, and the mutation ledger contains 55 required command-ID namespaces grouped by prefix: three `workflowcatalog.*`, 14 `automation.*`, four `artifacts.*`, and 34 `execution.*`. Those prefix counts are not aggregate-ownership counts; each ledger row's `aggregate_owner`, `coordinating_owner`, and `instance_owner` remain authoritative. The current architecture check passes with 82 composite-Store files, 71 outside composition, 90 legacy handler-import exceptions, 243 primary direct-write rows across 265 sites, and a separate 10-row/11-site `internal/driver` digest ratchet. Runtime evidence names 86 components, 53 ticker sites, 58 managed components, and 103 in-scope non-test goroutine launch definitions. The Execution supervisor-disabled row is green in the manifest, but only a successful source-bound `make test-supervisor-disabled` run counts as product proof; it is not the Phase 6 deletion gate.
 
 ## Architecture source of truth
 
-Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog and Automation are now `active`, `completed_phase` is `3`, and the ledger records the 14 Automation mutations plus the three Workflow Catalog lifecycle commands. The baseline retains the immutable Phase 2 snapshot, the self-reference-free Phase 3 base-plus-diff measurement, and a separate post-commit audit bound to the core Loom/FleetDB implementation commits. The graph declares:
+Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog, Automation, Execution, and Artifacts are now `active`, `completed_phase` is `4`, and the ledger records the complete 55-namespace inventory selected through Phase 4. The baseline retains the immutable Phase 2 snapshot, the self-reference-free Phase 3 base-plus-diff measurement, and the Phase 3 post-commit audit. Its retained Phase 4 pre-commit snapshot is explicitly provisional and is not the final paired source/contract record; current-source status comes from the live architecture check. A new immutable final snapshot is appended only after the paired contract and required product evidence actually run. The graph declares:
 
 - every capability root;
 - allowed capability-to-capability import, synchronous command/query, and durable event edges;
@@ -21,6 +21,13 @@ Phase 1 established the checks in `internal/archtest/testdata/capability-graph.y
 The human ownership tables in [02-target-architecture.md](02-target-architecture.md) and the machine graph change together. An import exception without an ownership decision is not accepted.
 
 The `internal/workflows` legacy-path expiry is explicitly extended from Phase 3 to Phase 5 under `workflow-distribution-lane`. It cannot truthfully expire in Phase 3: the package still mixes embedded source authoring/catalog duties with trusted global-runner resolution, and 16 checked-in Go callers remain. The graph records the rationale, Workflow Catalog and Execution replacement roots, and the exact sorted caller list; `TestLegacyWorkflowsExtensionMatchesCurrentCallers` fails if that evidence drifts. Phase 5 is the last permitted milestone under this review, not a silent waiver.
+
+Phase 4 also freezes the remaining mixed `internal/driver` mutation sites as a
+content-addressed legacy ratchet until Phase 6 completion. The baseline records exact
+10 rows, 11 call sites, capability-owner distribution, and a SHA-256 digest. This is
+containment evidence, not a claim that cross-capability driver code became
+Execution-owned merely because Execution is now active; any drift fails until
+the remaining lanes move to their actual owners or the Phase 6 path expires.
 
 ## Go dependency gates
 
@@ -58,7 +65,9 @@ The analyzer must reject:
 
 Store the baseline as machine-readable data with commit SHA and analyzer version.
 
-The existing handler depguard rule needs a controlled correction: it targets `**/handler/**`, while current production handlers live under `internal/webui/handlers/**`. The corrected rule must:
+The handler depguard rule was corrected from singular `**/handler/**` coverage
+to the current `**/handlers/**` and future
+`**/internal/modules/*/httpapi/**` adapter paths. The enforced rule:
 
 - cover existing plural handlers and future `modules/*/httpapi` adapters;
 - direct migrated handlers to capability public APIs;
@@ -67,7 +76,7 @@ The existing handler depguard rule needs a controlled correction: it targets `**
 
 ## Coupling ratchets
 
-Initialize these ratchets from the [Phase 0 integration baseline](00-phase-0-baseline.md) and check the remaining machine-readable inventories into tooling before the first extraction:
+These ratchets were initialized from the [Phase 0 integration baseline](00-phase-0-baseline.md), checked into the machine-readable inventories, and are enforced on every extraction:
 
 | Measure | Rule |
 |---|---|
@@ -107,8 +116,11 @@ Required properties:
 7. A process manager owns only a durable coordination record through its own port: idempotency key, step states, retry state, and terminal result.
 8. Execution alone writes ActionLedger entries; Work Items and Source Control execute their own product commands and return an outcome reference.
 9. Loom verifies the resource-specific owner and typed authority before its owner-scoped Lease adapter runs; fleet-db separately validates workspace, discriminator, resource, holder, token, fence, and transition. The shared service credential is not treated as proof of in-process capability identity.
+10. A DriverRun Work Item claim returns one exact `ClaimActionID` generation. TaskRun request receipts retain it, and release, liveness, retry, and terminal commands must validate it without consulting mutable lineage as authority. A stale command never clears a successor generation.
+11. Typed TaskRun terminal policy is backend-parity behavior: close closes/unassigns; successful non-close completion reviews/unassigns; cancelled or non-blocking failure opens/unassigns; retry exhaustion or explicit block blocks/unassigns. TaskRun/Lease/Work Item transition is atomic, while DriverStep repair and terminal-event convergence use their separately declared durable paths.
+12. Artifact finalize and reference lost-response replay use the same deterministic command ID across a bounded 128-revision window ending at the current revision; the bound and divergent-reuse conflict behavior require tests.
 
-Atomic fleet-db commands require backend transaction, CAS-conflict, concurrent update, duplicate retry, and lost-response retry tests. Workflow approve/unapprove/activate and execution claim/finalize use this test class when they are implemented as single durable commands.
+Atomic fleet-db commands require backend transaction, CAS-conflict, concurrent update, duplicate retry, and lost-response retry tests. Workflow approve/unapprove/activate and Execution claim/finalize use this test class as single durable commands.
 
 For any flow implemented as a process manager, fault injection should terminate the process between every durable step of:
 
@@ -146,7 +158,7 @@ Workflow approve/unapprove/activate and every grant-write path require negative 
 - One failing reconciler does not stall unrelated reconcilers.
 - Restart/recovery tests prove idempotency.
 - Supervisor retirement requires the replacement for every retained feature and a green `make test-supervisor-disabled` backed by `test/modular-monolith/supervisor-disabled-matrix.yaml` before deletion.
-- Task-run and driver-run fencing keep their distinct guarantees until normalization is complete.
+- TaskRun and DriverRun fencing are each backend-assigned and monotonic, but remain in distinct namespaces and are never compared or converted across resource kinds.
 
 ## Frontend architecture gates
 
@@ -170,8 +182,8 @@ Rules:
 
 `check:dir-size` currently reports five violations and is not included in `check:arch`:
 
-- `src/utils`: 29 direct TS files;
-- `src/hooks/workspace`: 23;
+- `src/utils`: 30 direct TS files;
+- `src/hooks/workspace`: 24;
 - `src/components/FileExplorer`: 22;
 - `src/components/AgentDetailPanel`: 18;
 - `src/hooks/ui`: 17.
@@ -210,6 +222,7 @@ Frontend proof per extracted route:
 - Fleet-db service/storage/API/OpenAPI tests and Loom handwritten-client/adapter tests pass.
 - The paired PR records companion SHA and vendored-spec checksum.
 - `GET /api/v1/capabilities` contract tests cover supported, missing-key, unsupported-version, and old-backend 404 responses for every supported Redis/Postgres and enabled/disabled route/configuration profile; a key is advertised only when the running deployment can execute it.
+- The exact 13-key Phase 4 foundation list in the target architecture stays synchronized with Loom and FleetDB constants. Existing umbrella keys cover the implemented method families: `execution.driver_run_work_item_claim.v1` requires both exact-generation claim and release, and the TaskRun keys require Redis/Postgres parity for owner fencing and terminal Work Item policy. Do not add documentary release/terminal capability names that do not exist in code and OpenAPI.
 - New Loom fails readiness with the exact missing capability key against old fleet-db; no generic mutation fallback is allowed.
 - Composition tests prove Loom derives required keys from its enabled slices, one low-level fleet-db transport client is shared by narrow capability/app adapters, and that client is never injected into a module or workflow core.
 - Negative authority tests cover every entry surface.
@@ -305,7 +318,7 @@ The modular-monolith migration is complete only when:
 - all product mutations go through owner commands or a declared cross-aggregate coordinating command;
 - polymorphic Lease instances and ActionLedger writes follow their declared owner/discriminator rules;
 - standalone mutating CLI paths use the authenticated management API rather than direct Store/FleetDB access;
-- the SDK runner's direct-fleet-db fallback is removed or proved equivalent to the Execution owner command and lease-fenced authority contract;
+- the SDK runner's direct-FleetDB fallback is removed and absence of `LOOM_TASK_RUN_API_URL` fails closed;
 - every cross-capability write is atomic or recoverable;
 - every mutation has explicit authority coverage;
 - lifecycle components are runtime-host managed;
@@ -316,4 +329,4 @@ The modular-monolith migration is complete only when:
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Migration plan](03-migration-plan.md) · [Phase 3 evidence](08-phase-3-decisions-and-evidence.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Migration plan](03-migration-plan.md) · [Phase 4 evidence](09-phase-4-decisions-and-evidence.md)

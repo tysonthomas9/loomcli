@@ -5,15 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/driver/taskworktree"
 	"github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -313,12 +310,9 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if taskRunID == "" {
 		return TaskWorktree{}, fmt.Errorf("task run id required: %w", domain.ErrInvalid)
 	}
-	local, err := loadWorkspaceLocalState(workspaceKey)
+	local, err := taskworktree.Open(workspaceKey)
 	if err != nil {
 		return TaskWorktree{}, err
-	}
-	if strings.TrimSpace(local.Path) == "" {
-		return TaskWorktree{}, fmt.Errorf("workspace %q has no local path in loom state", workspaceKey)
 	}
 
 	repos, err := r.Store.Repos().List(ctx, workspaceKey)
@@ -334,38 +328,17 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if err != nil {
 		return TaskWorktree{}, err
 	}
-	repoPath, err := r.ensureRepoCheckout(ctx, workspaceKey, local, selected)
+	target, err := local.Prepare(ctx, selected, taskRunID, func() string {
+		return r.baseBranchForTask(ctx, workspaceKey, selected, req)
+	})
 	if err != nil {
 		return TaskWorktree{}, err
-	}
-	target, err := localworkspace.TaskRunWorktreePath(local.Path, selected.Name, taskRunID)
-	if err != nil {
-		return TaskWorktree{}, err
-	}
-	baseBranch := r.baseBranchForTask(ctx, workspaceKey, selected, req)
-	if err := localworkspace.EnsureDetachedGitWorktreeFromBranch(repoPath, target, repoRemote(selected), baseBranch); err != nil {
-		return TaskWorktree{}, fmt.Errorf("ensure task run worktree for repo %q: %w", selected.Name, err)
 	}
 	return TaskWorktree{
 		Path:         target,
 		RepoName:     selected.Name,
 		SourceRepoID: firstNonEmpty(selected.SourceRepoID, selected.Name),
 	}, nil
-}
-
-func loadWorkspaceLocalState(workspaceKey string) (bootstrap.WorkspaceLocalState, error) {
-	sc, err := bootstrap.LoadStateCache()
-	if err != nil {
-		return bootstrap.WorkspaceLocalState{}, fmt.Errorf("load local workspace state: %w", err)
-	}
-	if sc == nil || sc.Workspaces == nil {
-		return bootstrap.WorkspaceLocalState{}, fmt.Errorf("workspace %q has no local state", workspaceKey)
-	}
-	local, ok := sc.Workspaces[workspaceKey]
-	if !ok {
-		return bootstrap.WorkspaceLocalState{}, fmt.Errorf("workspace %q has no local state", workspaceKey)
-	}
-	return local, nil
 }
 
 func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey string, repos []*domain.Repo, req TaskExecRequest) (*domain.Repo, error) {
@@ -484,48 +457,6 @@ func repoBasename(value string) string {
 	return value
 }
 
-func (r LocalTaskWorktreeResolver) ensureRepoCheckout(ctx context.Context, workspaceKey string, local bootstrap.WorkspaceLocalState, repo *domain.Repo) (string, error) {
-	if repo == nil {
-		return "", fmt.Errorf("repo required: %w", domain.ErrInvalid)
-	}
-	repoPath := strings.TrimSpace(localworkspace.RepoPath(local, repo.Name))
-	if repoPath == "" {
-		var err error
-		repoPath, err = localworkspace.RepoCheckoutPath(local.Path, repo.Name)
-		if err != nil {
-			return "", err
-		}
-	}
-	if isGitCheckout(repoPath) {
-		return repoPath, nil
-	}
-	if _, err := os.Stat(repoPath); err == nil {
-		return "", fmt.Errorf("repo %q path %s is not a git checkout", repo.Name, repoPath)
-	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("stat repo %q path %s: %w", repo.Name, repoPath, err)
-	}
-	if strings.TrimSpace(repo.RemoteURL) == "" {
-		return "", fmt.Errorf("repo %q has no local checkout at %s and no remote URL to clone", repo.Name, repoPath)
-	}
-	if err := localworkspace.CloneRepoTo(ctx, repo.RemoteURL, repoPath); err != nil {
-		return "", err
-	}
-	if err := localworkspace.RememberRepoPath(workspaceKey, repo.Name, repoPath); err != nil {
-		return "", fmt.Errorf("remember repo path: %w", err)
-	}
-	return repoPath, nil
-}
-
-func isGitCheckout(path string) bool {
-	if strings.TrimSpace(path) == "" {
-		return false
-	}
-	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
-		return true
-	}
-	return false
-}
-
 // baseBranchForTask returns the git ref the task's worktree should be cut from.
 // With no lineage lookup wired (or no lineage for the task) it returns the repo
 // default branch — byte-identical to the pre-stacking behavior. With lineage, it
@@ -558,13 +489,6 @@ func (r LocalTaskWorktreeResolver) baseBranchForTask(ctx context.Context, worksp
 		return strings.TrimSpace(ref)
 	}
 	return fallback
-}
-
-func repoRemote(repo *domain.Repo) string {
-	if repo == nil || strings.TrimSpace(repo.Remote) == "" {
-		return "origin"
-	}
-	return strings.TrimSpace(repo.Remote)
 }
 
 func repoDefaultBranch(repo *domain.Repo) string {

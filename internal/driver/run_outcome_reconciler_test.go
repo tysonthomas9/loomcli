@@ -10,8 +10,47 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+type runOutcomeCascadeProbe struct {
+	execution.DriverRunAPI
+	commands []execution.RecoverChildDriverRunCascadeCommand
+	err      error
+}
+
+func (probe *runOutcomeCascadeProbe) RecoverChildDriverRunCascade(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverChildDriverRunCascadeCommand,
+) (execution.CascadeChildDriverRunsResult, error) {
+	probe.commands = append(probe.commands, command)
+	if probe.err != nil {
+		return execution.CascadeChildDriverRunsResult{}, probe.err
+	}
+	return execution.CascadeChildDriverRunsResult{ActionID: command.RequestID}, nil
+}
+
+type runOutcomeCascadeAuthorityProbe struct {
+	action      authority.Action
+	componentID string
+	delegate    execution.SystemAuthorityResolver
+}
+
+func (probe *runOutcomeCascadeAuthorityProbe) ResolveExecutionSystemAuthority(
+	ctx context.Context,
+	workspace string,
+	action authority.Action,
+	componentID string,
+) (authority.SystemAuthority, error) {
+	if action == execution.ActionRecoverChildDriverRunCascade {
+		probe.action = action
+		probe.componentID = componentID
+	}
+	return probe.delegate.ResolveExecutionSystemAuthority(ctx, workspace, action, componentID)
+}
 
 func TestRunOutcomeReconcilerFailureRestartConvergesWithoutDuplicate(t *testing.T) {
 	st := memstore.New()
@@ -97,13 +136,64 @@ func TestRunOutcomeReconcilerFailureRestartConvergesWithoutDuplicate(t *testing.
 	}
 }
 
-func TestRunOutcomeRetryDelayIsBounded(t *testing.T) {
-	if got := runOutcomeRetryDelay(1); got != time.Second {
-		t.Fatalf("attempt 1 delay = %s", got)
+func TestRunOutcomeReconcilerRecoversFinalizeBeforeCascadeCrash(t *testing.T) {
+	st, outbox, _, finishedAt := setupDurableCompositionOutcome(t)
+	notifier, err := NewRunOutcomeAwaitNotifier(st.Awaits())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := runOutcomeRetryDelay(100); got != 5*time.Minute {
-		t.Fatalf("attempt 100 delay = %s", got)
+	journal := st.TriggerEvents().(store.TriggerEventAppender)
+	queue, queueAuthorities, err := testRunOutcomeQueue(outbox)
+	if err != nil {
+		t.Fatal(err)
 	}
+	authorities := &runOutcomeCascadeAuthorityProbe{delegate: queueAuthorities}
+	responseLost := &runOutcomeCascadeProbe{err: errors.New("response lost before cascade acknowledgement")}
+	first, err := NewRunOutcomeReconcilerWithExecution(
+		queue, notifier, journal, nil, "WS", nil, responseLost, authorities,
+		string(execution.DriverRunOutcomeComponentID),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstNow := finishedAt.Add(time.Millisecond)
+	if err := first.RunOnce(t.Context(), firstNow); err == nil {
+		t.Fatal("lost cascade response returned nil")
+	}
+	if len(responseLost.commands) != 1 {
+		t.Fatalf("cascade attempts = %d, want 1", len(responseLost.commands))
+	}
+	command := responseLost.commands[0]
+	if command.ParentRunID != "child" || command.ParentStatus != execution.DriverRunCompleted ||
+		command.RequestID != execution.CascadeChildDriverRunsRequestID("child", execution.DriverRunCompleted) ||
+		!command.CascadedAt.Equal(finishedAt) || command.MaxDepth != DefaultCompositionMaxDepth {
+		t.Fatalf("recovery command = %+v", command)
+	}
+	if command.Reason != childDriverRunCascadeReason(domain.DriverRunCompleted) || command.ErrorClass != childDriverRunCascadeErrorClass {
+		t.Fatalf("recovery policy = reason %q class %q", command.Reason, command.ErrorClass)
+	}
+	if authorities.action != execution.ActionRecoverChildDriverRunCascade ||
+		authorities.componentID != string(execution.DriverRunOutcomeComponentID) {
+		t.Fatalf("authority = action %q component %q", authorities.action, authorities.componentID)
+	}
+
+	// A fresh process retries the same durable action identity, then may
+	// complete the outcome row. This is the finalize -> crash recovery proof.
+	replayed := &runOutcomeCascadeProbe{}
+	restarted, err := NewRunOutcomeReconcilerWithExecution(
+		queue, notifier, journal, nil, "WS", nil, replayed, authorities,
+		string(execution.DriverRunOutcomeComponentID),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.RunOnce(t.Context(), firstNow.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if len(replayed.commands) != 1 || replayed.commands[0].RequestID != command.RequestID {
+		t.Fatalf("replayed cascade commands = %+v, want request %q", replayed.commands, command.RequestID)
+	}
+	assertNoClaimableRunOutcomes(t, outbox, firstNow.Add(time.Hour))
 }
 
 func TestRunOutcomeReconcilerRecoversCompositionWithoutSynchronousEmitOrAutomation(t *testing.T) {

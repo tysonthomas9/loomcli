@@ -42,6 +42,25 @@ func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	}
 }
 
+func TestHostBridgeTaskExecutorRequiresTaskRunAPIURL(t *testing.T) {
+	t.Run("preflight", func(t *testing.T) {
+		_, err := (HostBridgeTaskExecutor{Command: []string{"unused"}}).PreflightTaskProvider(
+			context.Background(),
+			TaskRunRequestOptions{ProviderProfile: "codex-default"},
+		)
+		if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "task runner requires the loom serve task-run API URL") {
+			t.Fatalf("PreflightTaskProvider error = %v, want missing task-run API URL", err)
+		}
+	})
+
+	t.Run("execute", func(t *testing.T) {
+		_, err := (HostBridgeTaskExecutor{Command: []string{"unused"}}).ExecuteTask(context.Background(), hostBridgeTaskExecRequest())
+		if !errors.Is(err, domain.ErrInvalid) || !strings.Contains(err.Error(), "task runner requires the loom serve task-run API URL") {
+			t.Fatalf("ExecuteTask error = %v, want missing task-run API URL", err)
+		}
+	})
+}
+
 func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) {
 	settingsDir := t.TempDir()
 	credential, err := runtimesettings.SealRuntimeCredential(settingsDir, runtimesettings.RuntimeCredentialProviderGitHub, "settings-token", time.Now())
@@ -92,9 +111,12 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	patch := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: repo.dir,
-		Command:      hostBridgeHelperCommand(t, "success", base, patch),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        repo.dir,
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "success", base, patch),
 	}
 	result, err := executor.ExecuteTask(ctx, hostBridgeTaskExecRequest())
 	if err != nil {
@@ -133,9 +155,12 @@ func TestHostBridgeTaskExecutorPreservesFinalizedPatchArtifactOnConflict(t *test
 	patch := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: repo.dir,
-		Command:      hostBridgeHelperCommand(t, "success", base, patch),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        repo.dir,
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "success", base, patch),
 	}
 	result, err := executor.ExecuteTask(ctx, hostBridgeTaskExecRequest())
 	if err != nil {
@@ -168,9 +193,12 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 	base := repo.commitFile("file.txt", "old\n", "base")
 	patch := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: repo.dir,
-		Command:      hostBridgeHelperCommand(t, "success", base, patch),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        repo.dir,
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "success", base, patch),
 	}
 
 	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
@@ -212,6 +240,7 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 		CompletionID:        "complete-task-run-1",
 		NodeID:              stored.NodeID,
 		LeaseID:             stored.LeaseID,
+		LeaseToken:          outcome.LeaseToken,
 		FencingToken:        stored.FencingToken,
 		Status:              domain.TaskRunCompleted,
 		ExitCode:            &exitCode,
@@ -233,9 +262,12 @@ func TestHostBridgeTaskExecutorThroughRequestTaskRun(t *testing.T) {
 func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: t.TempDir(),
-		Command:      hostBridgeHelperCommand(t, "artifact", "unused-base", "unused-patch"),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        t.TempDir(),
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "artifact", "unused-base", "unused-patch"),
 	}
 
 	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
@@ -277,6 +309,7 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 		CompletionID:        "complete-finalized-artifact-task-run-1",
 		NodeID:              stored.NodeID,
 		LeaseID:             stored.LeaseID,
+		LeaseToken:          outcome.LeaseToken,
 		FencingToken:        stored.FencingToken,
 		Status:              domain.TaskRunCompleted,
 		ExitCode:            &exitCode,
@@ -293,9 +326,12 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: t.TempDir(),
-		Command:      hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        t.TempDir(),
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
 	}
 
 	outcome, err := RequestTaskRunWithResult(ctx, st, TaskRunRequestOptions{
@@ -381,9 +417,12 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 func TestHostBridgeTaskExecutorReusesOutputArtifactsOnRetry(t *testing.T) {
 	ctx, st, _ := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
-		Store:        st,
-		WorktreePath: t.TempDir(),
-		Command:      hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        t.TempDir(),
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
 	}
 	req := hostBridgeTaskExecRequest()
 	req.RunnerKind = RunnerKindFlueWorkflow
@@ -441,6 +480,7 @@ func TestHostBridgeTaskExecutorRunsNodeModuleThroughGenericInvoker(t *testing.T)
 	req.Input = json.RawMessage(`{"message":"hello"}`)
 	executor := HostBridgeTaskExecutor{
 		WorktreePath: worktree,
+		APIBaseURL:   testTaskRunAPIURL,
 		Command:      []string{"node", genericTaskRunnerInvokerPath(t)},
 	}
 	result, err := executor.ExecuteTask(ctx, req)
@@ -489,7 +529,7 @@ func TestStackScriptsUseGenericTaskRunnerInvoker(t *testing.T) {
 }
 
 func TestHostBridgeTaskExecutorPreflightsBuiltInFlueWorkflowWithoutCommand(t *testing.T) {
-	executor := HostBridgeTaskExecutor{}
+	executor := HostBridgeTaskExecutor{APIBaseURL: testTaskRunAPIURL}
 	if _, err := executor.PreflightTaskProvider(context.Background(), TaskRunRequestOptions{
 		Runner:           "daytona-task-runner",
 		RunnerKind:       RunnerKindFlueWorkflow,
@@ -509,7 +549,8 @@ func TestHostBridgeTaskExecutorPreflightsBuiltInFlueWorkflowWithoutCommand(t *te
 func TestHostBridgeTaskExecutorRefusesUntrustedNamedRunner(t *testing.T) {
 	ranPath := filepath.Join(t.TempDir(), "ran")
 	executor := HostBridgeTaskExecutor{
-		Command: []string{"sh", "-c", "printf ran > \"$1\"; printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'", "sh", ranPath},
+		APIBaseURL: testTaskRunAPIURL,
+		Command:    []string{"sh", "-c", "printf ran > \"$1\"; printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'", "sh", ranPath},
 	}
 	req := hostBridgeTaskExecRequest()
 	req.Runner = "local-task-runner"
@@ -629,6 +670,7 @@ setInterval(() => {}, 1000);
 	executor := HostBridgeTaskExecutor{
 		Store:        st,
 		WorktreePath: worktree,
+		APIBaseURL:   testTaskRunAPIURL,
 		Command:      []string{"node", genericTaskRunnerInvokerPath(t)},
 	}
 	result, err := executor.ExecuteTask(ctx, req)
@@ -653,6 +695,7 @@ setInterval(() => {}, 1000);
 	directResult, err := (HostBridgeTaskExecutor{
 		Store:        st,
 		WorktreePath: worktree,
+		APIBaseURL:   testTaskRunAPIURL,
 	}).ExecuteTask(ctx, directReq)
 	if err != nil {
 		t.Fatalf("direct ExecuteTask: %v", err)

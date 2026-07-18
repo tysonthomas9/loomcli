@@ -35,6 +35,11 @@ LOCAL_MODE_COMPOSE_UP_FLAGS ?= --build
 # or production FleetDB deployment.
 LOCAL_MODE_FLEETDB_API_KEY ?= loom-local-mode-test-only-admin-key-v1
 LOCAL_MODE_FLEETDB_ADMIN_ACTOR ?= local-mode-harness@fixture.local
+# The supervisor-disabled proof owns an isolated host-port tuple so its clean
+# environment cannot collide with the normal 828x dogfood stack.
+SUPERVISOR_DISABLED_FLEETDB_PORT ?= 8380
+SUPERVISOR_DISABLED_API_PORT ?= 8382
+SUPERVISOR_DISABLED_UI_PORT ?= 8383
 # Override this when validating a paired FleetDB feature worktree. The default
 # preserves the long-standing sibling-repository layout.
 LOCAL_MODE_FLEETDB_SOURCE_ROOT ?= $(abspath test/local-mode/../../../fleet-db)
@@ -112,13 +117,18 @@ test-builtin-workflows:
 test-characterization:
 	@go run ./test/modular-monolith/characterization
 
-# Phase 1 supervisor-disabled contract. Declared-red rows are reported without
-# provisioning and deliberately keep this proof target failing until replaced.
+# Phase 4 supervisor-disabled execution contract. Validation is provisioning-free;
+# the full target runs the deterministic Compose row and always tears it down.
 check-supervisor-disabled:
 	@go run ./scripts/supervisordisabled --manifest test/modular-monolith/supervisor-disabled-matrix.yaml --validate
 
 test-supervisor-disabled:
-	@go run ./scripts/supervisordisabled --manifest test/modular-monolith/supervisor-disabled-matrix.yaml
+	@go run ./scripts/supervisordisabled \
+		--manifest test/modular-monolith/supervisor-disabled-matrix.yaml \
+		--fleetdb-source-root "$(LOCAL_MODE_FLEETDB_SOURCE_ROOT)" \
+		--fleetdb-port "$(SUPERVISOR_DISABLED_FLEETDB_PORT)" \
+		--api-port "$(SUPERVISOR_DISABLED_API_PORT)" \
+		--ui-port "$(SUPERVISOR_DISABLED_UI_PORT)"
 
 # Daemon-lifecycle failure-mode harness (crash/hang/slow backends + a
 # happy-path scaffold). Requires `loom serve` running on
@@ -214,8 +224,9 @@ fleetdb-empty-down:
 	fi; \
 	$$compose -f test/fleetdb/docker-compose.empty.yml down -v --remove-orphans
 
-# Start the local-mode dogfood stack: fleet-db, loom serve, workspace daemon
-# manager, a deterministic planner/coder backend, and the Web UI.
+# Start the local-mode dogfood stack: fleet-db, loom serve, a deterministic
+# planner/coder backend, and the Web UI. The default profile retains the workspace
+# daemon manager; LOOM_LOCAL_MODE_PLANE=ts uses only trigger-driven prompt agents.
 local-mode-frontend-dist:
 	@if [ ! -f "$(FRONTEND_DIR)/dist/index.html" ]; then \
 	  echo "Web UI dist is missing; building it once on the host..."; \
@@ -331,8 +342,11 @@ local-mode-logs:
 local-mode-verify:
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	manifest="$$( $$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local sh -c 'cat "$${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"' )"; \
-	LOCAL_MODE_RUN_MANIFEST_JSON="$$manifest" test/local-mode/verify-local-mode.sh
+	manifest="$$( $$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local sh -c 'manifest="$${LOCAL_MODE_RUN_MANIFEST:-/tmp/loom-local-mode-run.json}"; attempt=0; while [ ! -s "$$manifest" ]; do attempt=$$((attempt + 1)); if [ "$$attempt" -ge 120 ]; then echo "timed out waiting for local-mode run manifest: $$manifest" >&2; exit 1; fi; sleep 1; done; cat "$$manifest"' )"; \
+	LOCAL_MODE_RUN_MANIFEST_JSON="$$manifest" test/local-mode/verify-local-mode.sh; \
+	if [ "$${LOOM_LOCAL_MODE_PLANE:-}" = "ts" ]; then \
+	  $$compose $(LOCAL_MODE_COMPOSE_ARGS) exec -T loom-local verify-supervisor-disabled; \
+	fi
 
 # Verify role-based task routing for UI-registered plan/task agents against a
 # running stack: seeds a no-design task (must go to the plan agent) and a
@@ -738,8 +752,8 @@ help:
 	@echo "  make test-integration-race-cover - Run integration tests with race + coverage"
 	@echo "  make test-coverage     - Run Go tests with coverage threshold"
 	@echo "  make test-characterization - Run the Phase 1 modular-monolith characterization matrix"
-	@echo "  make check-supervisor-disabled - Validate the Phase 1 supervisor-disabled matrix without provisioning"
-	@echo "  make test-supervisor-disabled - Run the supervisor-disabled proof matrix (Phase 1 row is red)"
+	@echo "  make check-supervisor-disabled - Validate the Phase 4 supervisor-disabled matrix without provisioning"
+	@echo "  make test-supervisor-disabled - Run the deterministic supervisor-disabled execution proof"
 	@echo "  make test-frontend-coverage - Run frontend tests with coverage threshold"
 	@echo "  make test-forkwatch    - Run tests under a fork-bomb/process-leak watchdog (PKG=./path/...)"
 	@echo "  make check-no-raw-exec - Check for raw exec.Command in unit tests"

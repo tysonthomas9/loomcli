@@ -15,15 +15,379 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
+
+type workflowRunSubmissionStub struct {
+	execution.DriverRunAPI
+	commands []execution.SubmitDriverRunCommand
+}
+
+type workflowRunCatalogStub struct {
+	workflowcatalog.API
+	driver                *workflowcatalog.Driver
+	version               *workflowcatalog.DriverVersion
+	getDriverErr          error
+	requestedErr          error
+	getVersionCalls       int
+	requestedVersionCalls int
+}
+
+func (stub *workflowRunCatalogStub) GetDriver(context.Context, string, string) (*workflowcatalog.Driver, error) {
+	return stub.driver, stub.getDriverErr
+}
+
+func (stub *workflowRunCatalogStub) GetVersion(context.Context, string, string) (*workflowcatalog.DriverVersion, error) {
+	stub.getVersionCalls++
+	return stub.version, nil
+}
+
+func (stub *workflowRunCatalogStub) ResolveRequestedVersion(
+	context.Context,
+	authority.OperatorAuthority,
+	string,
+	string,
+	string,
+) (*workflowcatalog.RequestedVersion, error) {
+	stub.requestedVersionCalls++
+	if stub.requestedErr != nil {
+		return nil, stub.requestedErr
+	}
+	return &workflowcatalog.RequestedVersion{Driver: stub.driver, Version: stub.version}, nil
+}
+
+type workflowRunCaptureExecution struct {
+	execution.DriverRunAPI
+	command execution.SubmitDriverRunCommand
+}
+
+func (stub *workflowRunCaptureExecution) SubmitDriverRun(
+	_ context.Context,
+	_ authority.OperatorAuthority,
+	command execution.SubmitDriverRunCommand,
+) (*execution.DriverRun, error) {
+	stub.command = command
+	return &execution.DriverRun{
+		WorkspaceKey: command.WorkspaceKey, RunID: command.RunID,
+		DriverID: command.DriverID, DriverVersionID: command.DriverVersionID,
+		Entrypoint: command.Entrypoint, SourceKind: command.SourceKind, SourceRef: command.SourceRef,
+		EpicID: command.EpicID, Status: execution.DriverRunQueued,
+		Owner:          execution.Owner{ResourceKind: execution.ResourceDriverRun, ResourceID: command.RunID},
+		IdempotencyKey: command.RequestID, Payload: append(json.RawMessage(nil), command.Payload...),
+	}, nil
+}
+
+type workflowRunStoreTestExecution struct {
+	execution.DriverRunAPI
+	store store.Store
+}
+
+func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
+	ctx context.Context,
+	_ authority.OperatorAuthority,
+	command execution.SubmitDriverRunCommand,
+) (*execution.DriverRun, error) {
+	run, err := adapter.store.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey: command.WorkspaceKey, RunID: command.RunID,
+		DriverID: command.DriverID, DriverVersionID: command.DriverVersionID,
+		Entrypoint: command.Entrypoint, SourceKind: command.SourceKind, SourceRef: command.SourceRef,
+		EpicID: command.EpicID, ParentRunID: command.ParentRunID, TriggerBindingID: command.TriggerBindingID,
+		IdempotencyKey: command.RequestID, Payload: append(json.RawMessage(nil), command.Payload...),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &execution.DriverRun{
+		WorkspaceKey: run.WorkspaceKey, RunID: run.RunID, DriverID: run.DriverID,
+		DriverVersionID: run.DriverVersionID, Entrypoint: run.Entrypoint,
+		SourceKind: run.SourceKind, SourceRef: run.SourceRef, EpicID: run.EpicID,
+		ParentRunID: run.ParentRunID, TriggerBindingID: run.TriggerBindingID,
+		Status:         execution.DriverRunStatus(run.Status),
+		Owner:          execution.Owner{ResourceKind: execution.ResourceDriverRun, ResourceID: run.RunID},
+		IdempotencyKey: run.IdempotencyKey, Payload: append(json.RawMessage(nil), run.Payload...),
+		CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt,
+	}, nil
+}
+
+func newWorkflowTestModule(st store.Store) *Module {
+	return NewModule(Config{
+		Store: st, Execution: workflowRunStoreTestExecution{store: st}, OperatorAuthority: workflowOperatorAuthorityStub{},
+	})
+}
+
+func (stub *workflowRunSubmissionStub) SubmitDriverRun(
+	_ context.Context,
+	_ authority.OperatorAuthority,
+	command execution.SubmitDriverRunCommand,
+) (*execution.DriverRun, error) {
+	stub.commands = append(stub.commands, command)
+	if len(stub.commands) == 1 {
+		// Model a durable create whose response was lost before the caller saw
+		// the accepted snapshot. The next HTTP call is the client replay.
+		return nil, errors.New("simulated lost response")
+	}
+	return &execution.DriverRun{
+		WorkspaceKey:    command.WorkspaceKey,
+		RunID:           command.RunID,
+		DriverID:        command.DriverID,
+		DriverVersionID: command.DriverVersionID,
+		Entrypoint:      command.Entrypoint,
+		SourceKind:      command.SourceKind,
+		SourceRef:       command.SourceRef,
+		EpicID:          command.EpicID,
+		Status:          execution.DriverRunQueued,
+		Owner:           execution.Owner{ResourceKind: execution.ResourceDriverRun, ResourceID: command.RunID},
+		IdempotencyKey:  command.RequestID,
+		Payload:         append(json.RawMessage(nil), command.Payload...),
+	}, nil
+}
+
+type workflowOperatorAuthorityStub struct{}
+
+func (workflowOperatorAuthorityStub) ResolveOperatorAuthority(
+	*http.Request,
+	string,
+	authority.Action,
+) (authority.OperatorAuthority, error) {
+	return authority.OperatorAuthority{}, nil
+}
+
+type workflowRecordingOperatorAuthorityStub struct {
+	actions []authority.Action
+	err     error
+}
+
+func (stub *workflowRecordingOperatorAuthorityStub) ResolveOperatorAuthority(
+	_ *http.Request,
+	_ string,
+	action authority.Action,
+) (authority.OperatorAuthority, error) {
+	stub.actions = append(stub.actions, action)
+	return authority.OperatorAuthority{}, stub.err
+}
+
+func TestCreateDriverRunDelegatesResolvedSubmissionToExecution(t *testing.T) {
+	const body = `{
+		"driver_ref":"demo",
+		"driver_version_id":"version-preview",
+		"run_id":"run-explicit",
+		"idempotency_key":"request-explicit",
+		"entrypoint":"preview",
+		"cli_command":"workflow-run",
+		"epic_id":"epic-explicit",
+		"payload":{"epicId":"epic-payload","nested":{"ok":true}}
+	}`
+	submissions := &workflowRunCaptureExecution{}
+	catalog := &workflowRunCatalogStub{
+		driver: &workflowcatalog.Driver{
+			WorkspaceKey: "TEST", DriverID: "driver-demo", Name: "demo",
+			ActiveVersionID: "version-active", Status: workflowcatalog.DriverStatusDraft,
+		},
+		version: &workflowcatalog.DriverVersion{
+			WorkspaceKey: "TEST", DriverID: "driver-demo", VersionID: "version-preview",
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		},
+	}
+	resolver := &workflowRecordingOperatorAuthorityStub{}
+	mux := http.NewServeMux()
+	NewModule(Config{
+		Catalog: catalog, Execution: submissions, OperatorAuthority: resolver,
+	}).Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/execution/driver-runs", stringsReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
+	}
+	command := submissions.command
+	if command.WorkspaceKey != "TEST" || command.DriverID != "driver-demo" || command.DriverVersionID != "version-preview" {
+		t.Fatalf("resolved target = %#v", command)
+	}
+	if command.RunID != "run-explicit" || command.RequestID != "request-explicit" ||
+		command.Entrypoint != "preview" || command.SourceKind != "cli" || command.SourceRef != "loom workflow run" ||
+		command.EpicID != "epic-explicit" {
+		t.Fatalf("preserved submission envelope = %#v", command)
+	}
+	if got, want := string(command.Payload), `{"epicId":"epic-payload","nested":{"ok":true}}`; got != want {
+		t.Fatalf("payload = %s, want %s", got, want)
+	}
+	if catalog.requestedVersionCalls != 1 || catalog.getVersionCalls != 0 {
+		t.Fatalf("requested resolver calls=%d raw GetVersion calls=%d", catalog.requestedVersionCalls, catalog.getVersionCalls)
+	}
+	if len(resolver.actions) != 2 || resolver.actions[0] != workflowcatalog.ActionResolveRequestedVersion ||
+		resolver.actions[1] != execution.ActionSubmitDriverRun {
+		t.Fatalf("authority actions = %v", resolver.actions)
+	}
+}
+
+func TestCreateDriverRunFailsClosedWithoutCapabilityDependencies(t *testing.T) {
+	mux := http.NewServeMux()
+	NewModule(Config{}).Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/execution/driver-runs", stringsReader(`{"cli_command":"driver-run","driver_ref":"demo","payload":{}}`))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d body=%s, want 503", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateDriverRunRejectsTrailingJSON(t *testing.T) {
+	mux := http.NewServeMux()
+	NewModule(Config{}).Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/execution/driver-runs", stringsReader(
+		`{"cli_command":"driver-run","driver_ref":"demo","payload":{}} {"second":true}`,
+	))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateDriverRunDeniesWrongWorkspaceOrActionAuthority(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "wrong workspace", err: authority.ErrWorkspaceMismatch},
+		{name: "action denied", err: authority.ErrActionNotAllowed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			submissions := &workflowRunCaptureExecution{}
+			catalog := &workflowRunCatalogStub{
+				driver: &workflowcatalog.Driver{
+					WorkspaceKey: "TEST", DriverID: "driver-demo", Name: "demo",
+					ActiveVersionID: "version-active", Status: workflowcatalog.DriverStatusActive,
+				},
+				version: &workflowcatalog.DriverVersion{
+					WorkspaceKey: "TEST", DriverID: "driver-demo", VersionID: "version-active",
+					ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+				},
+			}
+			resolver := &workflowRecordingOperatorAuthorityStub{err: test.err}
+			mux := http.NewServeMux()
+			NewModule(Config{Catalog: catalog, Execution: submissions, OperatorAuthority: resolver}).Register(mux)
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/execution/driver-runs", stringsReader(
+				`{"cli_command":"driver-run","driver_ref":"demo","payload":{}}`,
+			))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d body=%s, want 403", rec.Code, rec.Body.String())
+			}
+			if submissions.command.RunID != "" {
+				t.Fatalf("Execution was called after denied authority: %#v", submissions.command)
+			}
+		})
+	}
+}
+
+func TestCreateDriverRunServerStampsWorkflowBindingSourceRef(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	const workspace, driverID, versionID = "TEST", "driver-demo", "version-active"
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: workspace, Name: workspace}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: workspace, DriverID: driverID, Name: "demo",
+		Status: domain.DriverStatusActive, ActiveVersionID: versionID,
+	}); err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
+	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: workspace, DriverID: driverID, VersionID: versionID, Version: 1,
+		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("create driver version: %v", err)
+	}
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: workspace, BindingID: "binding-demo", Name: "binding-demo",
+		SourceKind: store.CronSourceKind, DriverID: driverID, DriverVersionID: versionID,
+		Schedule: "*/10 * * * *", Enabled: true,
+	}); err != nil {
+		t.Fatalf("create trigger binding: %v", err)
+	}
+	catalog := &workflowRunCatalogStub{
+		driver: &workflowcatalog.Driver{
+			WorkspaceKey: workspace, DriverID: driverID, Name: "demo",
+			ActiveVersionID: versionID, Status: workflowcatalog.DriverStatusActive,
+		},
+		version: &workflowcatalog.DriverVersion{
+			WorkspaceKey: workspace, DriverID: driverID, VersionID: versionID,
+			ValidationStatus: workflowcatalog.DriverVersionValidationPassed,
+		},
+	}
+	submissions := &workflowRunCaptureExecution{}
+	mux := http.NewServeMux()
+	NewModule(Config{
+		Store: st, Catalog: catalog, Execution: submissions, OperatorAuthority: workflowOperatorAuthorityStub{},
+	}).Register(mux)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/execution/driver-runs", stringsReader(
+		`{"cli_command":"workflow-run","driver_ref":"demo","payload":{"runner":"daytona-task-runner"}}`,
+	))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body=%s, want 202", rec.Code, rec.Body.String())
+	}
+	if got := submissions.command.SourceRef; got != "cron:binding-demo" {
+		t.Fatalf("Execution SourceRef = %q, want server-resolved binding route", got)
+	}
+}
+
+func TestCreateWorkflowRunLostResponseRetryKeepsRunIdentity(t *testing.T) {
+	ctx := context.Background()
+	st := seededWorkflowStore(t, ctx)
+	submissions := &workflowRunSubmissionStub{}
+	mux := http.NewServeMux()
+	NewModule(Config{
+		Store: st, Execution: submissions, OperatorAuthority: workflowOperatorAuthorityStub{},
+	}).Register(mux)
+
+	const requestID = "workflow-retry-1"
+	post := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo", stringsReader(`{"nested":{"ok":true}}`))
+		req.Header.Set("Idempotency-Key", requestID)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+	if first := post(); first.Code != http.StatusInternalServerError {
+		t.Fatalf("first status = %d body=%s, want simulated lost response", first.Code, first.Body.String())
+	}
+	second := post()
+	if second.Code != http.StatusAccepted {
+		t.Fatalf("retry status = %d body=%s, want 202", second.Code, second.Body.String())
+	}
+	if len(submissions.commands) != 2 {
+		t.Fatalf("submission calls = %d, want 2", len(submissions.commands))
+	}
+	wantRunID := workflowSubmissionRunID("TEST", "demo", requestID)
+	for index, command := range submissions.commands {
+		if command.RunID != wantRunID || command.RequestID != requestID {
+			t.Fatalf("command[%d] identity = %q/%q, want %q/%q", index, command.RunID, command.RequestID, wantRunID, requestID)
+		}
+	}
+	var run domain.DriverRun
+	if err := json.Unmarshal(second.Body.Bytes(), &run); err != nil {
+		t.Fatalf("decode retry run: %v", err)
+	}
+	if run.RunID != wantRunID {
+		t.Fatalf("retry run id = %q, want %q", run.RunID, wantRunID)
+	}
+}
 
 func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
 	ctx := context.Background()
 	st := seededWorkflowStore(t, ctx)
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo", stringsReader(`{"nested":{"ok":true},"items":[1,2]}`))
 	rec := httptest.NewRecorder()
@@ -46,7 +410,7 @@ func TestCreateWorkflowRunPassesRawPayload(t *testing.T) {
 
 func TestGetWorkflowSourceReturnsBuiltinFiles(t *testing.T) {
 	mux := http.NewServeMux()
-	NewModule(memstore.New()).Register(mux)
+	newWorkflowTestModule(memstore.New()).Register(mux)
 
 	req := httptest.NewRequest(http.MethodGet,
 		"/api/workspaces/WS/workflows/"+workflowdefs.BuiltinBugFixAgentWorkflowName+"/source", nil)
@@ -71,7 +435,7 @@ func TestGetWorkflowSourceReturnsBuiltinFiles(t *testing.T) {
 
 func TestGetWorkflowSourceUnknownIs404(t *testing.T) {
 	mux := http.NewServeMux()
-	NewModule(memstore.New()).Register(mux)
+	newWorkflowTestModule(memstore.New()).Register(mux)
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/WS/workflows/not-a-workflow/source", nil)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -87,7 +451,7 @@ func TestCreateWorkflowRunRegistersBuiltinEpicRunner(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1","requestedBy":"ui"}`))
 	rec := httptest.NewRecorder()
@@ -157,7 +521,7 @@ func TestCreateWorkflowRunRefreshesStaleBuiltinRunnerManifest(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/"+BuiltinEpicRunnerWorkflowName, stringsReader(`{"epicId":"EPIC-1","requestedBy":"ui"}`))
 	rec := httptest.NewRecorder()
@@ -222,7 +586,7 @@ func TestCreateWorkflowRunPromotesPayloadEpicID(t *testing.T) {
 			ctx := context.Background()
 			st := seededWorkflowStore(t, ctx)
 			mux := http.NewServeMux()
-			NewModule(st).Register(mux)
+			newWorkflowTestModule(st).Register(mux)
 
 			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo", stringsReader(tc.payload))
 			rec := httptest.NewRecorder()
@@ -262,10 +626,9 @@ func TestCreateWorkflowRunPromotesPayloadEpicID(t *testing.T) {
 	}
 }
 
-// driveTerminalTaskRun enqueues a queued task run under the given driver run,
-// registers a worker node, then claims and executes it to a completed terminal
-// transition — the path that resolves the epic via the parent run and creates
-// the lead-task outbox.
+// driveTerminalTaskRun creates a terminal fixture and then invokes the real
+// Execution convergence command. Store writes stay test-only; the production
+// projection and lead-notification policy remains under Execution.
 func driveTerminalTaskRun(t *testing.T, ctx context.Context, st store.Store, driverRunID string) {
 	t.Helper()
 	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
@@ -289,15 +652,135 @@ func driveTerminalTaskRun(t *testing.T, ctx context.Context, st store.Store, dri
 	}); err != nil {
 		t.Fatalf("create queued task run: %v", err)
 	}
-	if _, err := driver.ClaimAndExecuteTaskRunWithResult(ctx, st, driver.TaskRunWorkerOptions{
-		WorkspaceKey:       "TEST",
-		TaskRunID:          taskRunID,
-		NodeID:             "wf-node-1",
-		SupportedProviders: []string{"local-noop"},
-		HeartbeatInterval:  -1,
-	}, nil); err != nil {
-		t.Fatalf("claim and execute task run: %v", err)
+	const leaseID = "wf-task-run-lease-1"
+	const leaseToken = "wf-task-run-token-1"
+	claimed, err := st.TaskRuns().ClaimQueued(ctx, "TEST", store.TaskRunClaim{
+		TaskRunID: taskRunID, NodeID: "wf-node-1", LeaseID: leaseID, LeaseToken: leaseToken,
+		SupportedProviders: []string{"local-noop"}, ClaimedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("claim queued task run fixture: %v", err)
 	}
+	finishedAt := time.Now().UTC()
+	if _, err := st.TaskRuns().Finish(ctx, "TEST", taskRunID, store.TaskRunFinish{
+		NodeID: claimed.NodeID, LeaseID: claimed.LeaseID, LeaseToken: leaseToken,
+		FencingToken: claimed.FencingToken, Status: domain.TaskRunCompleted, FinishedAt: finishedAt,
+	}); err != nil {
+		t.Fatalf("finish task run fixture: %v", err)
+	}
+
+	ports := &workflowTaskRunConvergencePorts{store: st}
+	issuer := authority.NewIssuer()
+	admission, err := issuer.NewAdmission(execution.OperationRules()...)
+	if err != nil {
+		t.Fatalf("create Execution admission: %v", err)
+	}
+	service, err := execution.New(execution.Dependencies{Convergence: execution.TaskRunConvergenceDependencies{
+		Source: ports, Events: ports, LeadResolver: ports, Notifications: ports,
+	}}, admission)
+	if err != nil {
+		t.Fatalf("create Execution service: %v", err)
+	}
+	principal, err := issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: "workflow-test-convergence", Class: authority.ClassSystem, Workspace: "TEST",
+		Actions: []authority.Action{execution.ActionConvergeTaskRun}, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("derive convergence principal: %v", err)
+	}
+	auth, err := issuer.IssueSystem(principal, "TEST", execution.ActionConvergeTaskRun, "workflow handler convergence test")
+	if err != nil {
+		t.Fatalf("issue convergence authority: %v", err)
+	}
+	if _, err := service.ConvergeTaskRun(ctx, auth, execution.ConvergeTaskRunCommand{
+		WorkspaceKey: "TEST", RequestID: "workflow-test-converge-" + taskRunID,
+		TaskRunID: taskRunID, ObservedAt: finishedAt,
+	}); err != nil {
+		t.Fatalf("converge terminal task run: %v", err)
+	}
+}
+
+type workflowTaskRunConvergencePorts struct {
+	store store.Store
+}
+
+func (ports *workflowTaskRunConvergencePorts) GetTerminalTaskRun(ctx context.Context, workspace, taskRunID string) (*execution.TerminalTaskRunRecord, error) {
+	run, err := ports.store.TaskRuns().Get(ctx, workspace, taskRunID)
+	if err != nil {
+		return nil, err
+	}
+	if run.FinishedAt == nil {
+		return nil, execution.ErrConflict
+	}
+	status := execution.StatusFailed
+	switch run.Status {
+	case domain.TaskRunCompleted:
+		status = execution.StatusSucceeded
+	case domain.TaskRunCancelled:
+		status = execution.StatusCancelled
+	}
+	record := &execution.TerminalTaskRunRecord{
+		WorkspaceKey: run.WorkspaceKey, TaskRunID: run.TaskRunID, DriverRunID: run.DriverRunID,
+		DriverStepID: run.DriverStepID, WorkItemID: run.TaskID, Status: status,
+		ErrorClass: run.ErrorClass, ErrorMessage: run.ErrorMessage, LogsRef: run.LogsRef,
+		ArtifactsRef: run.ArtifactsRef, FinishedAt: *run.FinishedAt,
+	}
+	if run.DriverRunID == "" {
+		return record, nil
+	}
+	parent, err := ports.store.DriverRuns().Get(ctx, workspace, run.DriverRunID)
+	if err != nil {
+		return nil, err
+	}
+	record.EpicID = parent.EpicID
+	return record, nil
+}
+
+func (*workflowTaskRunConvergencePorts) ListTaskRunConvergenceCandidates(context.Context, execution.TaskRunConvergenceCandidateQuery) (execution.TaskRunConvergenceCandidatePage, error) {
+	return execution.TaskRunConvergenceCandidatePage{}, nil
+}
+
+func (ports *workflowTaskRunConvergencePorts) EnsureTaskRunTerminalEvent(ctx context.Context, event execution.TaskRunTerminalEvent) error {
+	eventType := domain.TaskRunEventFailed
+	status := domain.TaskRunFailed
+	switch event.Type {
+	case execution.TaskRunTerminalCompleted:
+		eventType = domain.TaskRunEventCompleted
+		status = domain.TaskRunCompleted
+	case execution.TaskRunTerminalCancelled:
+		eventType = domain.TaskRunEventCancelled
+		status = domain.TaskRunCancelled
+	}
+	_, err := ports.store.TaskRunEvents().Append(ctx, store.TaskRunEventAppend{
+		WorkspaceKey: event.WorkspaceKey, EventID: event.EventID, EpicID: event.EpicID,
+		DriverRunID: event.DriverRunID, TaskID: event.WorkItemID, TaskRunID: event.TaskRunID,
+		Type: eventType, Status: status, SchedulerState: event.SchedulerState, Attempt: event.Attempt,
+		ErrorClass: event.ErrorClass, ErrorMessage: event.ErrorMessage, LogsRef: event.LogsRef,
+		ArtifactsRef: event.ArtifactsRef, OccurredAt: event.OccurredAt,
+	})
+	return err
+}
+
+func (ports *workflowTaskRunConvergencePorts) ResolveEpicLead(ctx context.Context, workspace, epicID string) (string, error) {
+	agents, err := ports.store.Agents().List(ctx, workspace)
+	if err != nil {
+		return "", err
+	}
+	for _, agent := range agents {
+		if agent != nil && agent.Parent == epicID && (agent.RoleName == "lead" || agent.RoleName == "orchestrator") {
+			return agent.Name, nil
+		}
+	}
+	return "", nil
+}
+
+func (ports *workflowTaskRunConvergencePorts) EnsureLeadTaskNotification(ctx context.Context, notification execution.LeadTaskNotification) error {
+	_, err := ports.store.Outbox().Create(ctx, store.OutboxCreate{
+		WorkspaceKey: notification.WorkspaceKey, Kind: domain.OutboxKindLeadTaskMessage,
+		EpicID: notification.EpicID, DriverRunID: notification.DriverRunID, TaskRunID: notification.TaskRunID,
+		TargetAgent: notification.TargetAgent, Body: "terminal task run", DedupeKey: notification.DedupeKey,
+	})
+	return err
 }
 
 func bindWorkflowEpicLead(t *testing.T, ctx context.Context, st store.Store, name, epicID string) {
@@ -335,7 +818,7 @@ func TestGetRunEventsReturnsDriverRunEvents(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST/runs/"+run.RunID+"/events", nil)
 	rec := httptest.NewRecorder()
@@ -386,7 +869,7 @@ func TestGetRunEmbedsDriverSteps(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST/runs/"+run.RunID, nil)
 	rec := httptest.NewRecorder()
@@ -419,7 +902,7 @@ func TestGetRunEmbedsDriverSteps(t *testing.T) {
 func TestCreateWorkflowVersionRejectsPackageManifest(t *testing.T) {
 	st := memstore.New()
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	body := `{"files":{"package.json":"{}","workflows/demo.ts":"export async function run(){ return {}; }"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo/versions", stringsReader(body))
@@ -433,7 +916,7 @@ func TestCreateWorkflowVersionRejectsPackageManifest(t *testing.T) {
 func TestCreateWorkflowVersionRejectsInlineActivation(t *testing.T) {
 	st := memstore.New()
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	body := `{"files":{"workflows/demo.ts":"export async function run(){ return {}; }"},"activate":true}`
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo/versions", stringsReader(body))
@@ -456,7 +939,7 @@ func TestCreateWorkflowVersionRegistersWithoutActivation(t *testing.T) {
 	installFakeFlueBuild(t)
 	t.Chdir(t.TempDir())
 	mux := http.NewServeMux()
-	NewModule(st).Register(mux)
+	newWorkflowTestModule(st).Register(mux)
 
 	body := `{"files":{"workflows/demo.ts":"export async function run(){ return {}; }"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/workflows/demo/versions", stringsReader(body))

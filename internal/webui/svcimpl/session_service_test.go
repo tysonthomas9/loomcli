@@ -35,12 +35,19 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 		Status:       domain.AgentSessionRunning,
 		Phase:        "implementation",
 		Metadata: map[string]string{
-			"backend":         "localdogfood",
-			"transcript_path": "/tmp/sess-1/transcript.jsonl",
-			"files_changed":   "1",
-			"lines_added":     "2",
-			"lines_removed":   "3",
-			"files_touched":   "file.txt",
+			"backend":           "localdogfood",
+			"transcript_path":   "/tmp/sess-1/transcript.jsonl",
+			"runtime_strategy":  "local-cli-codex",
+			"delivery":          "patch_back",
+			"patch_back_status": "applied",
+			"logs_ref":          "artifact://logs-1",
+			"local_branch":      "loom/task-1",
+			"head_sha":          "abc123",
+			"github_pr_url":     "https://github.com/acme/widgets/pull/1",
+			"files_changed":     "1",
+			"lines_added":       "2",
+			"lines_removed":     "3",
+			"files_touched":     "file.txt",
 		},
 	})
 	if err != nil {
@@ -71,6 +78,11 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 	}
 	if item.Backend != "localdogfood" || !item.HasTranscript {
 		t.Fatalf("item backend/transcript = %q/%v", item.Backend, item.HasTranscript)
+	}
+	if item.RuntimeStrategy != "local-cli-codex" || item.DeliveryMode != "patch_back" || item.PatchBackStatus != "applied" ||
+		item.LogsRef != "artifact://logs-1" || item.LocalBranch != "loom/task-1" || item.HeadSHA != "abc123" ||
+		item.GitHubPRURL != "https://github.com/acme/widgets/pull/1" {
+		t.Fatalf("execution evidence = %+v", item)
 	}
 	if item.FilesChanged != 1 || item.LinesAdded != 2 || item.LinesRemoved != 3 || len(item.FilesTouched) != 1 || item.FilesTouched[0] != "file.txt" {
 		t.Fatalf("item diff stats = %+v", item.SessionRecord)

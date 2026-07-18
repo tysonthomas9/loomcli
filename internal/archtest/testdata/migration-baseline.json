@@ -394,6 +394,50 @@
             "artifact_paths": ["docs/migrations/modular-monolith/08-phase-3-decisions-and-evidence.md"]
           }
         ]
+      },
+      {
+        "id": "phase4-execution-precommit-1353e2faf",
+        "loom_head": "1353e2faf14ae121c93fe5eb92f779b56a2ad7ae",
+        "fleetdb_head": "f1c4e11199c2c7cdab52cce55899af4df328fbcb",
+        "openapi_sha256": "136a7722b628163c9d6f612ce6ce6be74bf7290d171bc63d54c263b30a122725",
+        "recorded_at": "2026-07-16",
+        "runs": [
+          {
+            "id": "architecture-check",
+            "repository": "loom",
+            "command": ["go", "run", "./scripts/archcheck", "check"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Provisional historical capture measured from Loom base 1353e2faf14a plus its then-current Phase 4 pre-commit diff; retained append-only and superseded for current-source status by a fresh architecture check. No self-referential final commit identity is implied."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Provisional pre-commit capture: all 11 profiles and the all-files AST pass accepted four active roots, 53 mutations, Store 82/71, 90 handler exceptions, 243 primary direct-write rows across 265 sites plus the separate 10-row/11-site legacy-driver ratchet, 86 runtime components, 103 goroutine definitions, six measured performance records, and zero pending decisions. These measured values are historical and are not the final Phase 4 snapshot."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "architecture-tests",
+            "repository": "loom",
+            "command": ["go", "test", "./internal/archtest", "-count=1"],
+            "environment": {
+              "set": ["GOCACHE=/tmp/go-build-cache", "GOMODCACHE=/tmp/go-mod-cache"],
+              "unset": [],
+              "notes": "Provisional historical architecture-test run against the same then-current Phase 4 source and manifests; retained append-only and not promoted to final Phase 4 evidence."
+            },
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Provisional pre-commit capture: the full architecture package passed in 213.562 seconds, including exact direct-write, legacy-driver digest, runtime, capability, mutation-ledger, replay-classification, and expiry tests. The duration and source binding remain historical rather than final Phase 4 evidence."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          },
+          {
+            "id": "contract-snapshot-match",
+            "repository": "cross-repo",
+            "command": ["shasum", "-a", "256", "fleet-db-modular-monolith-phase4/api/openapi.yaml", "loomcli-modular-monolith-phase4/internal/infra/fleetdb/testdata/fleetdb-openapi.yaml"],
+            "environment": {"set": [], "unset": [], "notes": "Provisional historical run from the rc-2 multi-repository workspace against the then-current paired Phase 4 pre-commit sources; retained append-only and superseded for final contract status."},
+            "expected_skips": [],
+            "result": {"status": "pass", "summary": "Provisional pre-commit capture: FleetDB source and Loom vendored OpenAPI were byte-identical at SHA-256 136a7722b628163c9d6f612ce6ce6be74bf7290d171bc63d54c263b30a122725. This historical hash is not the final paired Phase 4 contract result."},
+            "artifact_paths": ["docs/migrations/modular-monolith/09-phase-4-decisions-and-evidence.md"]
+          }
+        ]
       }
     ]
   },
@@ -408,8 +452,8 @@
   },
   "ratchets": {
     "composite_store": {
-      "max_production_files": 88,
-      "max_outside_composition": 77,
+      "max_production_files": 82,
+      "max_outside_composition": 71,
       "composition_prefixes": [
         "internal/cli/serve/",
         "internal/infra/",
@@ -433,7 +477,6 @@
         "internal/cli/daemon/supervisor/supervisor.go",
         "internal/cli/daemonregistry/daemonregistry.go",
         "internal/cli/driver/agent_cmd.go",
-        "internal/cli/epic/run.go",
         "internal/cli/serve/daemonwire/daemon.go",
         "internal/cli/serve/metricscmd/handlers.go",
         "internal/cli/serve/metricscmd/monitor_store_data_source.go",
@@ -443,12 +486,9 @@
         "internal/cli/serve/serveadapter/serveadapter.go",
         "internal/cli/serve/workspacemgr/agent_identity_migration.go",
         "internal/cli/serve/workspacemgr/workspace_store.go",
-        "internal/cli/workflow/workflow_cmd.go",
         "internal/cli/workspace/ops_cmd.go",
         "internal/cli/workspace/workspacev2_cmd.go",
-        "internal/driver/await_op.go",
         "internal/driver/await_reconcilers.go",
-        "internal/driver/composition.go",
         "internal/driver/epic_snapshot.go",
         "internal/driver/executor.go",
         "internal/driver/global_runner.go",
@@ -457,9 +497,7 @@
         "internal/driver/stale_task_sweeper.go",
         "internal/driver/task_bridge.go",
         "internal/driver/task_bridge_session.go",
-        "internal/driver/task_events.go",
         "internal/driver/task_request.go",
-        "internal/driver/task_retry.go",
         "internal/driver/task_scheduling.go",
         "internal/driver/task_worker.go",
         "internal/driver/task_worktree_resolver.go",
@@ -477,7 +515,7 @@
         "internal/trigger/delivery_sweeper.go",
         "internal/trigger/internal_source.go",
         "internal/trigger/issue_journal_bridge.go",
-        "internal/webui/agentmodules/agentmodules.go",
+        "internal/webui/agentmodules/routecontracts/deps.go",
         "internal/webui/app/server_workspace.go",
         "internal/webui/handlers/agents/module.go",
         "internal/webui/handlers/agents/record_dto.go",
@@ -547,7 +585,6 @@
         {"file": "internal/webui/handlers/prreview/stream.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/roles/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/runhistory/runhistory.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
-        {"file": "internal/webui/handlers/taskrunapi/artifacts.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend"},
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/backend/fleet"},
         {"file": "internal/webui/handlers/taskrunapi/module.go", "import": "github.com/tysonthomas9/loomcli/internal/store"},

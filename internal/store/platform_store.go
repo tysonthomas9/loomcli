@@ -749,9 +749,14 @@ type TaskRunCreate struct {
 	RunnerEntrypoint string
 	RunnerVersionID  string
 	ProviderProfile  string
+	TargetNodeID     string
 	Status           domain.TaskRunStatus
 	NodeID           string
 	LeaseID          string
+	// LeaseToken is accepted only by compatibility stores that must seed a
+	// pre-running fenced TaskRun. Production claim/start transports carry the
+	// token as an opaque header and never persist or return it in the TaskRun.
+	LeaseToken       string
 	FencingToken     int64
 	RunnerPlacement  domain.TaskRunPlacement
 	SandboxPlacement domain.TaskRunPlacement
@@ -865,6 +870,7 @@ type TaskRunComplete struct {
 }
 
 type TaskRunLogAppend struct {
+	RequestID    string
 	NodeID       string
 	LeaseID      string
 	LeaseToken   string

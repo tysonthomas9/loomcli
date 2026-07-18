@@ -13,9 +13,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -23,7 +25,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	catalogfleetdb "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	authorityhttp "github.com/tysonthomas9/loomcli/internal/platform/authority/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -53,15 +55,15 @@ func TestNewWorkflowCatalogModuleRejectsAutomationWithoutCatalog(t *testing.T) {
 func TestWorkflowCatalogComposesProductionAutomationCapability(t *testing.T) {
 	client, _ := newCatalogFleetClient(t)
 	state := memstore.New()
-	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled: true, AutomationEnabled: true, FleetDBClient: client,
 		AutomationDriverRuns: state.DriverRuns(), AutomationWorkspaces: state.Workspaces(),
 		AutomationWebhookVerifier: webhooks.NewCompatibilityVerifier(webhooks.CompatibilityVerifierConfig{
 			Bindings: state.TriggerBindings(), Connectors: state.Connectors(),
 		}),
-		AutomationAwaits: state.Awaits(), WorkflowTargetCatalog: state,
-		RuntimeDir: t.TempDir(),
-	})
+		AutomationAwaits: state.Awaits(),
+		RuntimeDir:       t.TempDir(),
+	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule: %v", err)
 	}
@@ -79,18 +81,13 @@ func TestWorkflowCatalogComposesProductionAutomationCapability(t *testing.T) {
 	}
 }
 
-func TestLegacyWorkflowTargetPreparerProjectsActivatedTarget(t *testing.T) {
-	state := memstore.New()
-	if _, err := state.Drivers().Create(t.Context(), store.DriverCreate{
-		WorkspaceKey: "TEST", DriverID: "driver-1", Name: "custom-workflow",
-		OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive, ActiveVersionID: "version-2",
-	}); err != nil {
-		t.Fatalf("create driver: %v", err)
-	}
-	preparer := newLegacyWorkflowTargetPreparer(state)
-	if preparer == nil {
-		t.Fatal("legacy preparer is nil")
-	}
+func TestConfiguredWorkflowTargetPreparerProjectsTarget(t *testing.T) {
+	preparer := &configuredWorkflowTargetPreparer{prepare: func(_ context.Context, workspace, workflow string) (WorkflowTarget, error) {
+		if workspace == "TEST" && workflow == "custom-workflow" {
+			return WorkflowTarget{DriverID: "driver-1", DriverVersionID: "version-2"}, nil
+		}
+		return WorkflowTarget{}, domain.ErrNotFound
+	}}
 	target, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow")
 	if err != nil {
 		t.Fatalf("PrepareWorkflowTarget: %v", err)
@@ -98,8 +95,8 @@ func TestLegacyWorkflowTargetPreparerProjectsActivatedTarget(t *testing.T) {
 	if target.DriverID != "driver-1" || target.DriverVersionID != "version-2" {
 		t.Fatalf("target = %+v", target)
 	}
-	if newLegacyWorkflowTargetPreparer(nil) != nil {
-		t.Fatal("nil Store constructed a legacy preparer")
+	if _, err := (&configuredWorkflowTargetPreparer{}).PrepareWorkflowTarget(t.Context(), "TEST", "custom-workflow"); !errors.Is(err, workflowbinding.ErrUnavailable) {
+		t.Fatalf("nil preparation error = %v, want %v", err, workflowbinding.ErrUnavailable)
 	}
 	if _, err := preparer.PrepareWorkflowTarget(t.Context(), "TEST", "missing"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("missing workflow error = %v, want domain.ErrNotFound", err)
@@ -108,11 +105,11 @@ func TestLegacyWorkflowTargetPreparerProjectsActivatedTarget(t *testing.T) {
 
 func TestNewWorkflowCatalogModuleRejectsNilSharedFleetDBClient(t *testing.T) {
 	runtimeDir := filepath.Join(t.TempDir(), "runtime")
-	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled:    true,
 		RuntimeDir: runtimeDir,
 		Workspace:  "TEST",
-	})
+	}))
 	if module != nil {
 		t.Fatalf("module = %#v, want nil", module)
 	}
@@ -124,9 +121,9 @@ func TestNewWorkflowCatalogModuleRejectsNilSharedFleetDBClient(t *testing.T) {
 
 func TestWorkflowCatalogCompositionStartsUnscopedAndExposesNarrowSystemResolver(t *testing.T) {
 	client, _ := newCatalogFleetClient(t)
-	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled: true, FleetDBClient: client, RuntimeDir: t.TempDir(),
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule without startup workspace: %v", err)
 	}
@@ -148,9 +145,9 @@ func TestWorkflowCatalogCompositionStartsUnscopedAndExposesNarrowSystemResolver(
 
 func TestWorkflowCatalogCompositionRejectsUnregisteredSystemAuthorityComponent(t *testing.T) {
 	client, _ := newCatalogFleetClient(t)
-	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled: true, FleetDBClient: client, RuntimeDir: t.TempDir(),
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule: %v", err)
 	}
@@ -231,12 +228,12 @@ func TestWorkflowCatalogFleetDBBridgeOwnsItsDTOAndErrorVocabulary(t *testing.T) 
 func TestLocalWorkflowCatalogCompositionCreatesSecureCredentialAndRequiresIt(t *testing.T) {
 	client, fleet := newCatalogFleetClient(t)
 	runtimeDir := filepath.Join(t.TempDir(), "runtime")
-	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled:       true,
 		FleetDBClient: client,
 		RuntimeDir:    runtimeDir,
 		Workspace:     "TEST",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule: %v", err)
 	}
@@ -301,9 +298,9 @@ func TestLocalWorkflowCatalogCompositionCreatesSecureCredentialAndRequiresIt(t *
 func TestLocalWorkflowCatalogBrowserLaunchIsSingleUseAndActionScoped(t *testing.T) {
 	client, fleet := newCatalogFleetClient(t)
 	runtimeDir := filepath.Join(t.TempDir(), "runtime")
-	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled: true, FleetDBClient: client, RuntimeDir: runtimeDir, Workspace: "TEST",
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule: %v", err)
 	}
@@ -403,19 +400,19 @@ func TestLocalBrowserBrokerDelegatesEnabledAutomationOperatorActionsOnly(t *test
 func TestExternalWorkflowCatalogCompositionTrustsOnlyVerifiedMiddlewareIdentity(t *testing.T) {
 	client, fleet := newCatalogFleetClient(t)
 	runtimeDir := filepath.Join(t.TempDir(), "runtime")
-	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled:       true,
 		FleetDBClient: client,
 		RuntimeDir:    runtimeDir,
 		Workspace:     "TEST",
 		ExternalAuth:  true,
-		WorkspaceRoleResolver: func(_ context.Context, workspace string, identity middleware.UserIdentity) (string, error) {
+		ExternalOperatorResolverFactory: testExternalOperatorResolverFactory(func(_ context.Context, workspace string, identity middleware.UserIdentity) (string, error) {
 			if workspace != "TEST" || identity.UserID != "verified-user-1" {
 				return "developer", nil
 			}
 			return "maintainer", nil
-		},
-	})
+		}),
+	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule: %v", err)
 	}
@@ -446,18 +443,84 @@ func TestExternalWorkflowCatalogCompositionTrustsOnlyVerifiedMiddlewareIdentity(
 }
 
 func TestExternalWorkflowCatalogCompositionFailsClosedWithoutRoleResolver(t *testing.T) {
-	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
+	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled:      true,
 		RuntimeDir:   t.TempDir(),
 		Workspace:    "TEST",
 		ExternalAuth: true,
-	})
-	if err == nil || !strings.Contains(err.Error(), "workspace role resolver is required") {
+	}))
+	if err == nil || !strings.Contains(err.Error(), "operator resolver factory is required") {
 		t.Fatalf("NewWorkflowCatalogModule error = %v, want missing resolver error", err)
 	}
 	if module != nil {
 		t.Fatalf("module = %#v, want nil", module)
 	}
+}
+
+func testWorkflowCatalogConfig(config WorkflowCatalogConfig) WorkflowCatalogConfig {
+	config.WorkspaceFromContext = middleware.WorkspaceFromContext
+	config.BuiltinWorkflow = func(string) bool { return false }
+	config.BrowserSessionRouteFactory = func(
+		broker *authority.LocalBrowserSessionBroker,
+		workspaceFromContext func(context.Context) string,
+	) RouteModule {
+		return authorityhttp.New(broker, workspaceFromContext)
+	}
+	if config.PrepareWorkflowTarget == nil {
+		config.PrepareWorkflowTarget = func(error) WorkflowTargetPreparation {
+			return func(context.Context, string, string) (WorkflowTarget, error) {
+				return WorkflowTarget{DriverID: "driver-1", DriverVersionID: "version-1"}, nil
+			}
+		}
+	}
+	return config
+}
+
+type testExternalOperatorResolver struct {
+	issuer          *authority.Issuer
+	resolveRole     middleware.WorkspaceRoleResolver
+	unauthenticated error
+}
+
+func testExternalOperatorResolverFactory(resolveRole middleware.WorkspaceRoleResolver) ExternalOperatorResolverFactory {
+	return func(issuer *authority.Issuer, unauthenticated error) OperatorAuthorityResolver {
+		return &testExternalOperatorResolver{issuer: issuer, resolveRole: resolveRole, unauthenticated: unauthenticated}
+	}
+}
+
+func (resolver *testExternalOperatorResolver) ResolveOperatorAuthority(
+	request *http.Request,
+	workspace string,
+	action authority.Action,
+) (authority.OperatorAuthority, error) {
+	if request == nil {
+		return authority.OperatorAuthority{}, resolver.unauthenticated
+	}
+	identity, ok := middleware.UserIdentityFromContext(request.Context())
+	if !ok || strings.TrimSpace(identity.UserID) == "" {
+		return authority.OperatorAuthority{}, resolver.unauthenticated
+	}
+	workspace = strings.TrimSpace(workspace)
+	if resolver == nil || resolver.issuer == nil || workspace == "" {
+		return authority.OperatorAuthority{}, authority.ErrInvalidScope
+	}
+	role, err := resolver.resolveRole(request.Context(), workspace, identity)
+	if err != nil {
+		return authority.OperatorAuthority{}, authority.ErrAdmissionDenied
+	}
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "admin", "owner", "maintainer":
+	default:
+		return authority.OperatorAuthority{}, authority.ErrAdmissionDenied
+	}
+	principal, err := resolver.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: identity.UserID, Class: authority.ClassOperator, Workspace: workspace,
+		Actions: []authority.Action{action}, ExpiresAt: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		return authority.OperatorAuthority{}, err
+	}
+	return resolver.issuer.IssueOperator(principal, workspace, action)
 }
 
 func assertCatalogStatus(t *testing.T, handler http.Handler, workspace, authorization string, identity *middleware.UserIdentity, want int) *httptest.ResponseRecorder {

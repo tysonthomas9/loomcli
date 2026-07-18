@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
+	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -321,7 +322,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Start health doctor to auto-restart daemons with stuck circuit breakers.
 	if daemonExpected && workspacePathsFn != nil {
-		doctor := webui.NewHealthDoctor(app.multiPool, workspacePathsFn, config.Logger, webui.DefaultHealthDoctorConfig())
+		doctor := daemon.NewHealthDoctor(app.multiPool, workspacePathsFn, config.Logger, daemon.DefaultHealthDoctorConfig())
 		go doctor.Run(ctx)
 	}
 

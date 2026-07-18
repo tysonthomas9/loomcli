@@ -19,7 +19,7 @@ func TestAwaitEventReconcilerResolvesPendingAwaitAndCompletesNotification(t *tes
 	payload := json.RawMessage(`{"approved":true}`)
 	event := appendAwaitReconcileEvent(t, st, "stored-event-1", "approval-source-1", "approval.granted", "deploy-1", "alice", payload)
 	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
-	reconciler, err := NewAwaitEventReconciler(outbox, &trigger.AwaitMatcher{Store: st}, "WS", nil)
+	reconciler, err := NewAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,12 +33,22 @@ func TestAwaitEventReconcilerResolvesPendingAwaitAndCompletesNotification(t *tes
 	}
 }
 
+func TestAutomationAwaitEventNotifierRequiresExplicitResolver(t *testing.T) {
+	st := memstore.New()
+	if notifier, err := NewAutomationAwaitEventNotifier(st.Awaits(), st.DriverRuns()); err == nil || notifier != nil {
+		t.Fatalf("legacy notifier = %T, %v; want fail-closed composition error", notifier, err)
+	}
+	if notifier, err := NewAutomationAwaitEventNotifierWithResolver(st.Awaits(), st.DriverRuns(), nil); err == nil || notifier != nil {
+		t.Fatalf("nil-resolver notifier = %T, %v; want fail-closed composition error", notifier, err)
+	}
+}
+
 func TestAwaitEventReconcilerResponseLossRetriesAndConverges(t *testing.T) {
 	st, run, instanceKey := setupAwaitEventReconcileRun(t, "run-loss", "approval.granted:deploy-loss")
 	event := appendAwaitReconcileEvent(t, st, "stored-event-loss", "approval-source-loss",
 		"approval.granted", "deploy-loss", "alice", nil)
 	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
-	dispatcher := &responseLossAwaitEventDispatcher{inner: &trigger.AwaitMatcher{Store: st}}
+	dispatcher := &responseLossAwaitEventDispatcher{inner: testAwaitMatcher(t, st)}
 	first, err := NewAwaitEventReconciler(outbox, dispatcher, "WS", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +59,7 @@ func TestAwaitEventReconcilerResponseLossRetriesAndConverges(t *testing.T) {
 	}
 	assertAwaitEventReconciled(t, st, run.RunID, instanceKey, "approval-source-loss", nil)
 
-	restarted, err := NewAwaitEventReconciler(outbox, &trigger.AwaitMatcher{Store: st}, "WS", nil)
+	restarted, err := NewAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +81,7 @@ func TestAwaitEventReconcilerCompletionKeepsRegistrationCatchUp(t *testing.T) {
 	event := appendAwaitReconcileEvent(t, st, "stored-event-before", "approval-source-before",
 		"approval.granted", "deploy-before", "alice", json.RawMessage(`{"approved":true}`))
 	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
-	reconciler, err := NewAwaitEventReconciler(outbox, &trigger.AwaitMatcher{Store: st}, "WS", nil)
+	reconciler, err := NewAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +104,7 @@ func TestAwaitEventReconcilerQuarantinesOversizedEventWithoutPoisoningLaterWinne
 	first := appendAwaitReconcileEvent(t, st, "stored-event-large", "approval-source-large",
 		"approval.granted", "deploy-large", "alice", oversized)
 	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
-	reconciler, err := NewAwaitEventReconciler(outbox, &trigger.AwaitMatcher{Store: st}, "WS", nil)
+	reconciler, err := NewAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +140,7 @@ func TestAwaitEventReconcilerCompletesForgedRunFinishedAndLaterGenuineEventWins(
 		"github", domain.TriggerEventOriginExternal, payload,
 	)
 	outbox := st.TriggerEvents().(store.AwaitEventNotificationStore)
-	reconciler, err := NewAwaitEventReconciler(outbox, &trigger.AwaitMatcher{Store: st}, "WS", nil)
+	reconciler, err := NewAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +176,7 @@ func TestAwaitEventReconcilerRetriesTruncatedPayloadMetadataWithoutResolving(t *
 		"approval.granted", "deploy-truncated", "alice", payload)
 	inner := st.TriggerEvents().(store.AwaitEventNotificationStore)
 	outbox := &payloadSizeMismatchAwaitEventOutbox{AwaitEventNotificationStore: inner}
-	reconciler, err := NewAwaitEventReconciler(outbox, &trigger.AwaitMatcher{Store: st}, "WS", nil)
+	reconciler, err := NewAwaitEventReconciler(outbox, testAwaitMatcher(t, st), "WS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

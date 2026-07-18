@@ -2,10 +2,12 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -16,6 +18,23 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 )
+
+func phase4RequiredCapabilities(catalog, automation bool) []string {
+	required := append([]string{fleetdb.ExecutionAwaitAtomicResumeCapability}, fleetdb.Phase4FoundationCapabilities()...)
+	if catalog {
+		required = append(required, fleetdb.WorkflowCatalogVersionLifecycleCapability)
+	}
+	if automation {
+		required = append(required, fleetdb.AutomationTriggerAdmissionCapability)
+	}
+	return required
+}
+
+func sortedPhase4RequiredCapabilities(catalog, automation bool) []string {
+	required := phase4RequiredCapabilities(catalog, automation)
+	slices.Sort(required)
+	return required
+}
 
 func TestAutomationWebCapabilityViewExposesNoRuntimeProducerPorts(t *testing.T) {
 	view := reflect.TypeOf(automationWebCapabilityView{})
@@ -36,14 +55,14 @@ func TestRequiredFleetDBCapabilitiesFollowEnabledSlices(t *testing.T) {
 		want              []string
 		wantErr           bool
 	}{
-		{name: "local default enabled", want: []string{fleetdb.ExecutionAwaitAtomicResumeCapability, fleetdb.WorkflowCatalogVersionLifecycleCapability, fleetdb.AutomationTriggerAdmissionCapability}},
-		{name: "local explicit enabled", catalogValue: "true", want: []string{fleetdb.ExecutionAwaitAtomicResumeCapability, fleetdb.WorkflowCatalogVersionLifecycleCapability, fleetdb.AutomationTriggerAdmissionCapability}},
-		{name: "automation explicitly disabled", catalogValue: "true", automationValue: "false", want: []string{fleetdb.ExecutionAwaitAtomicResumeCapability, fleetdb.WorkflowCatalogVersionLifecycleCapability}},
-		{name: "disabled", catalogValue: "false", want: []string{fleetdb.ExecutionAwaitAtomicResumeCapability}},
+		{name: "local default enabled", want: phase4RequiredCapabilities(true, true)},
+		{name: "local explicit enabled", catalogValue: "true", want: phase4RequiredCapabilities(true, true)},
+		{name: "automation explicitly disabled", catalogValue: "true", automationValue: "false", want: phase4RequiredCapabilities(true, false)},
+		{name: "disabled", catalogValue: "false", want: phase4RequiredCapabilities(false, false)},
 		{name: "automation cannot outlive catalog", catalogValue: "false", automationValue: "true", wantErr: true},
-		{name: "external default disabled without resolver", externalAuth: true, want: []string{fleetdb.ExecutionAwaitAtomicResumeCapability}},
-		{name: "external explicit disabled without resolver", catalogValue: "false", externalAuth: true, want: []string{fleetdb.ExecutionAwaitAtomicResumeCapability}},
-		{name: "external default enabled with resolver", externalAuth: true, resolverAvailable: true, want: []string{fleetdb.ExecutionAwaitAtomicResumeCapability, fleetdb.WorkflowCatalogVersionLifecycleCapability, fleetdb.AutomationTriggerAdmissionCapability}},
+		{name: "external default disabled without resolver", externalAuth: true, want: phase4RequiredCapabilities(false, false)},
+		{name: "external explicit disabled without resolver", catalogValue: "false", externalAuth: true, want: phase4RequiredCapabilities(false, false)},
+		{name: "external default enabled with resolver", externalAuth: true, resolverAvailable: true, want: phase4RequiredCapabilities(true, true)},
 		{name: "external explicit enabled without resolver fails", catalogValue: "true", externalAuth: true, wantErr: true},
 		{name: "invalid catalog", catalogValue: "sometimes", wantErr: true},
 		{name: "invalid automation", automationValue: "sometimes", wantErr: true},
@@ -100,9 +119,10 @@ func TestOpenServeStoreRejectsMissingExecutionAwaitCapabilityBeforeRuntime(t *te
 	if !errors.As(err, &incompatibility) {
 		t.Fatalf("error=%v, want *fleetdb.CapabilityIncompatibilityError", err)
 	}
+	wantBase := sortedPhase4RequiredCapabilities(false, false)
 	if incompatibility.Kind != fleetdb.CapabilityKeysMissing ||
-		len(incompatibility.Required) != 1 || incompatibility.Required[0] != fleetdb.ExecutionAwaitAtomicResumeCapability ||
-		len(incompatibility.Missing) != 1 || incompatibility.Missing[0] != fleetdb.ExecutionAwaitAtomicResumeCapability {
+		!reflect.DeepEqual(incompatibility.Required, wantBase) ||
+		!reflect.DeepEqual(incompatibility.Missing, wantBase) {
 		t.Fatalf("incompatibility=%+v", incompatibility)
 	}
 	if got := calls.Load(); got != 1 {
@@ -121,10 +141,8 @@ func TestOpenServeStoreRejectsMissingAutomationCapabilityWithoutFallback(t *test
 		}
 		capabilityCalls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"api_revision":"v1",
-			"capabilities":["execution.await_atomic_resume.v1","workflow_catalog.version_lifecycle.v1"]
-		}`))
+		available := phase4RequiredCapabilities(true, false)
+		_ = json.NewEncoder(w).Encode(map[string]any{"api_revision": "v1", "capabilities": available})
 	}))
 	defer server.Close()
 
@@ -148,11 +166,7 @@ func TestOpenServeStoreRejectsMissingAutomationCapabilityWithoutFallback(t *test
 	if !errors.As(err, &incompatibility) {
 		t.Fatalf("error=%v, want *fleetdb.CapabilityIncompatibilityError", err)
 	}
-	wantRequired := []string{
-		fleetdb.AutomationTriggerAdmissionCapability,
-		fleetdb.ExecutionAwaitAtomicResumeCapability,
-		fleetdb.WorkflowCatalogVersionLifecycleCapability,
-	}
+	wantRequired := sortedPhase4RequiredCapabilities(true, true)
 	if incompatibility.Kind != fleetdb.CapabilityKeysMissing ||
 		!reflect.DeepEqual(incompatibility.Required, wantRequired) ||
 		!reflect.DeepEqual(incompatibility.Missing, []string{fleetdb.AutomationTriggerAdmissionCapability}) {

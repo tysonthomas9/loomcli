@@ -43,9 +43,17 @@ type SessionService interface {
 // SessionListItem extends a session record with computed UI fields.
 type SessionListItem struct {
 	sessions.SessionRecord
-	IsActive      bool `json:"is_active"`
-	HasTranscript bool `json:"has_transcript"`
-	HasDiff       bool `json:"has_diff"`
+	IsActive        bool   `json:"is_active"`
+	HasTranscript   bool   `json:"has_transcript"`
+	HasDiff         bool   `json:"has_diff"`
+	RuntimeStrategy string `json:"runtime_strategy,omitempty"`
+	DeliveryMode    string `json:"delivery,omitempty"`
+	PatchBackStatus string `json:"patch_back_status,omitempty"`
+	LogsRef         string `json:"logs_ref,omitempty"`
+	LocalBranch     string `json:"local_branch,omitempty"`
+	HeadSHA         string `json:"head_sha,omitempty"`
+	GitHubBranch    string `json:"github_branch,omitempty"`
+	GitHubPRURL     string `json:"github_pr_url,omitempty"`
 }
 
 // SessionDetailData extends session metadata with computed UI fields.

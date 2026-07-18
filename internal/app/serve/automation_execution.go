@@ -245,7 +245,8 @@ func validateAutomationEmissionAuthority(auth authority.ExecutionAuthority) (str
 	workspace := strings.TrimSpace(auth.Workspace())
 	runID := strings.TrimSpace(auth.Subject())
 	if auth.Action() != automation.ActionAdmitEvent || workspace == "" || workspace != auth.Workspace() ||
-		runID == "" || runID != auth.Subject() || strings.TrimSpace(auth.NodeID()) == "" ||
+		runID == "" || runID != auth.Subject() || auth.ResourceKind() != authority.ExecutionResourceDriverRun ||
+		auth.ResourceID() != runID || strings.TrimSpace(auth.NodeID()) == "" ||
 		strings.TrimSpace(auth.LeaseID()) == "" || auth.FencingToken() <= 0 {
 		return "", "", authority.ErrAdmissionDenied
 	}

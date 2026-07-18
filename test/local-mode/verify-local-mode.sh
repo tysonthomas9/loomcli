@@ -29,6 +29,11 @@ manifest_field() {
   printf '%s' "$RUN_MANIFEST_JSON" | jq -er --arg field "$field" '.[$field] | select(type == "string" and length > 0)'
 }
 
+manifest_optional_field() {
+  field="$1"
+  printf '%s' "$RUN_MANIFEST_JSON" | jq -r --arg field "$field" '.[$field] // "" | tostring'
+}
+
 positive_utc_epoch() {
   printf '%s' "$1" | jq -Rer '
     def utc_epoch:
@@ -50,7 +55,16 @@ load_run_manifest() {
   RUN_ID="$(manifest_field run_id)"
   RUN_STARTED_AT="$(manifest_field started_at)"
   BACKEND="$(manifest_field backend)"
+  PLANE="$(manifest_optional_field plane)"
   WORKSPACE="$(manifest_field workspace)"
+  PLAN_AGENT_RECORD_ID="$(manifest_optional_field plan_agent_record_id)"
+  CODE_AGENT_RECORD_ID="$(manifest_optional_field code_agent_record_id)"
+  PLAN_AGENT_NAME="$(manifest_optional_field plan_agent_name)"
+  CODE_AGENT_NAME="$(manifest_optional_field code_agent_name)"
+  PLAN_AGENT_ROLE="$(manifest_optional_field plan_agent_role)"
+  CODE_AGENT_ROLE="$(manifest_optional_field code_agent_role)"
+  PLAN_BINDING_ID="$(manifest_optional_field plan_binding_id)"
+  CODE_BINDING_ID="$(manifest_optional_field code_binding_id)"
   PLAN_TASK_ID="$(manifest_field plan_task_id)"
   CODE_TASK_ID="$(manifest_field code_task_id)"
   PLAN_TASK_TITLE="$(manifest_field plan_task_title)"
@@ -77,6 +91,47 @@ load_run_manifest() {
     echo "[local-mode-verify] FATAL: manifest backend ${BACKEND} does not match expected backend ${EXPECTED_BACKEND}" >&2
     return 1
   fi
+}
+
+agents_json() {
+  api_get "api/workspaces/${WORKSPACE}/agents"
+}
+
+prompt_agents_match_manifest() {
+  [ "$PLANE" = "ts" ]
+  [ "$PLAN_AGENT_RECORD_ID" != "" ]
+  [ "$CODE_AGENT_RECORD_ID" != "" ]
+  agents_json | jq -e \
+    --arg plan_id "$PLAN_AGENT_RECORD_ID" --arg code_id "$CODE_AGENT_RECORD_ID" \
+    --arg plan_name "$PLAN_AGENT_NAME" --arg code_name "$CODE_AGENT_NAME" \
+    --arg plan_role "$PLAN_AGENT_ROLE" --arg code_role "$CODE_AGENT_ROLE" \
+    --arg plan_binding "$PLAN_BINDING_ID" --arg code_binding "$CODE_BINDING_ID" '
+      (.data // []) as $agents |
+      ([$agents[] | select(.id == $plan_id and .name == $plan_name and .kind == "prompt" and .enabled == true and
+        .behavior.role_name == $plan_role and any(.bindings[]?; .binding_id == $plan_binding and
+          .source_kind == "internal" and .enabled == true and
+          (.event_type_patterns | index("internal.task.ready") != null)))] | length) == 1 and
+      ([$agents[] | select(.id == $code_id and .name == $code_name and .kind == "prompt" and .enabled == true and
+        .behavior.role_name == $code_role and any(.bindings[]?; .binding_id == $code_binding and
+          .source_kind == "internal" and .enabled == true and
+          (.event_type_patterns | index("internal.task.ready") != null)))] | length) == 1
+    ' >/dev/null
+}
+
+prompt_agents_precede_tasks() {
+  agents="$(agents_json)"
+  plan_agent_created="$(printf '%s' "$agents" | jq -r --arg id "$PLAN_AGENT_RECORD_ID" '.data[]? | select(.id == $id) | .created_at // empty')"
+  code_agent_created="$(printf '%s' "$agents" | jq -r --arg id "$CODE_AGENT_RECORD_ID" '.data[]? | select(.id == $id) | .created_at // empty')"
+  plan_task_created="$(issue_json "$PLAN_TASK_ID" | jq -r '.data.created_at // .created_at // empty')"
+  code_task_created="$(issue_json "$CODE_TASK_ID" | jq -r '.data.created_at // .created_at // empty')"
+  plan_agent_epoch="$(positive_utc_epoch "$plan_agent_created")"
+  code_agent_epoch="$(positive_utc_epoch "$code_agent_created")"
+  plan_task_epoch="$(positive_utc_epoch "$plan_task_created")"
+  code_task_epoch="$(positive_utc_epoch "$code_task_created")"
+  [ "$plan_agent_epoch" -le "$plan_task_epoch" ]
+  [ "$plan_agent_epoch" -le "$code_task_epoch" ]
+  [ "$code_agent_epoch" -le "$plan_task_epoch" ]
+  [ "$code_agent_epoch" -le "$code_task_epoch" ]
 }
 
 wait_for() {
@@ -141,6 +196,13 @@ issue_status_closed() {
     '(.data.status // .status // "") as $status | $status == "closed" or $status == "done"' >/dev/null
 }
 
+issue_is_unassigned() {
+  task_id="$1"
+  json="$(issue_json "$task_id")"
+  printf '%s' "$json" | jq -e \
+    '(.data.assignee // .assignee // "") == ""' >/dev/null
+}
+
 issue_has_design() {
   task_id="$1"
   json="$(issue_json "$task_id")"
@@ -191,6 +253,19 @@ task_has_completed_session() {
       else -1 end;
     (.data.sessions // .sessions // []) |
     any(.status == "completed" and .is_active == false and
+      ((.started_at | utc_epoch) >= $started_epoch))
+  ' >/dev/null
+}
+
+task_has_expected_backend_exit_zero() {
+  task_id="$1"
+  sessions_json "$task_id" | jq -e --arg backend "$BACKEND" --argjson started_epoch "$RUN_STARTED_EPOCH" '
+    def utc_epoch:
+      if type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$") then
+        (sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch -1)
+      else -1 end;
+    (.data.sessions // .sessions // []) |
+    any(.status == "completed" and .is_active == false and .backend == $backend and .exit_code == 0 and
       ((.started_at | utc_epoch) >= $started_epoch))
   ' >/dev/null
 }
@@ -252,18 +327,29 @@ wait_for "Loom API is reachable" api_reachable
 wait_for "manifest-owned local-mode tasks exist" manifest_tasks_exist
 wait_for "planner task belongs to this run" issue_matches_run "$PLAN_TASK_ID" "$PLAN_TASK_TITLE"
 wait_for "coder task belongs to this run" issue_matches_run "$CODE_TASK_ID" "$CODE_TASK_TITLE"
+if [ "$PLANE" = "ts" ]; then
+  wait_for "public planner/coder prompt agents match the manifest" prompt_agents_match_manifest
+  wait_for "public planner/coder prompt agents were seeded before tasks" prompt_agents_precede_tasks
+fi
 
 wait_for "planner task moved to review" issue_status_is "$PLAN_TASK_ID" review
+wait_for "planner task released its assignee" issue_is_unassigned "$PLAN_TASK_ID"
 wait_for "planner task has design" issue_has_design "$PLAN_TASK_ID"
 wait_for "planner completed session exists" task_has_completed_session "$PLAN_TASK_ID"
+wait_for "planner used ${BACKEND} and exited zero" task_has_expected_backend_exit_zero "$PLAN_TASK_ID"
 wait_for "planner transcript flag is set" task_has_transcript_flag "$PLAN_TASK_ID"
 wait_for "planner transcript has entries" transcript_has_entries "$PLAN_TASK_ID"
 
 wait_for "coder task is closed" issue_status_closed "$CODE_TASK_ID"
 wait_for "coder completed session exists" task_has_completed_session "$CODE_TASK_ID"
+wait_for "coder used ${BACKEND} and exited zero" task_has_expected_backend_exit_zero "$CODE_TASK_ID"
 wait_for "coder transcript flag is set" task_has_transcript_flag "$CODE_TASK_ID"
 wait_for "coder transcript has entries" transcript_has_entries "$CODE_TASK_ID"
 wait_for "coder diff metadata is present" task_has_diff_flag "$CODE_TASK_ID"
 wait_for "coder diff contains local-mode artifact" code_diff_mentions_output_file
 
-echo "[local-mode-verify] local-mode daemon, agent, transcript, and diff flow verified"
+if [ "$PLANE" = "ts" ]; then
+  echo "[local-mode-verify] local-mode TS prompt-agent, transcript, and diff flow verified"
+else
+  echo "[local-mode-verify] local-mode daemon, agent, transcript, and diff flow verified"
+fi

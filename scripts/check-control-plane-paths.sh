@@ -59,7 +59,10 @@ fi
 # or translate its narrow transport into the module-owned adapter contract.
 # The Phase 3 Automation seams likewise share the same client to expose the
 # consumer-owned durability and atomic dispatch ports; neither constructs a
-# second client or creates an alternate control-plane path.
+# second client or creates an alternate control-plane path. The Phase 4
+# Execution and Artifacts seams follow the same rule: files listed below are
+# composition roots or narrow transport adapters over the one bootstrap-owned
+# client, never additional client constructors.
 rg -n \
   -e 'github\.com/tysonthomas9/loomcli/internal/infra/fleetdb' \
   cmd internal \
@@ -76,8 +79,14 @@ if [[ -s "$tmp" ]]; then
     case "$file" in
       internal/bootstrap/openstore.go | \
       internal/bootstrap/embedded.go | \
+      internal/app/serve/artifacts.go | \
+      internal/app/serve/artifacts_fleetdb.go | \
       internal/app/serve/automation_execution.go | \
       internal/app/serve/automation_fleetdb.go | \
+      internal/app/serve/execution.go | \
+      internal/app/serve/execution_driver_run_fleetdb.go | \
+      internal/app/serve/execution_task_run_ports.go | \
+      internal/app/serve/execution_task_run_recovery.go | \
       internal/app/serve/workflow_catalog.go | \
       internal/app/serve/workflow_catalog_fleetdb.go | \
       internal/cli/serve/serveadapter/workflow_catalog.go)

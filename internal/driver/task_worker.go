@@ -7,13 +7,23 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 var ErrNoQueuedTaskRun = errors.New("task worker: no queued task run")
+
+type taskWorkerClaimState struct {
+	runMu   sync.Mutex
+	pending *execution.ClaimTaskRunCommand
+}
+
+var taskWorkerClaimStateInitMu sync.Mutex
 
 type TaskWorker struct {
 	Store              store.Store
@@ -32,6 +42,20 @@ type TaskWorker struct {
 	HeartbeatInterval  time.Duration
 	MaxAttempts        int
 	Executor           TaskExecutor
+	// Artifacts is injected from the serve-owned capability and forwarded to
+	// every HostBridge executor. There is no production Store.Artifacts fallback.
+	Artifacts artifactsmodule.API
+	// Execution is the only production mutation surface for TaskRun and worker
+	// node lifecycle. Store remains available for read-side runner resolution,
+	// workspace enumeration, and host-bridge dependencies.
+	Execution          execution.TaskRunWorkerAPI
+	TaskRunAuthorities execution.TaskRunAuthorityResolver
+	// Convergence is the Execution-owned immediate projection command. The
+	// runtime convergence pass replays the same idempotent command after
+	// crashes; production composition supplies both fields together.
+	Convergence          execution.TaskRunConvergenceAPI
+	ExecutionAuthorities execution.SystemAuthorityResolver
+	ExecutionComponentID string
 	// APIBaseURL is the serve task-run API base URL exported to bridge task
 	// runners as LOOM_TASK_RUN_API_URL (see HostBridgeTaskExecutor).
 	APIBaseURL string
@@ -43,18 +67,41 @@ type TaskWorker struct {
 	WorktreeResolver TaskWorktreeResolver
 	// Now is a clock seam for tests; nil uses time.Now.
 	Now func() time.Time
+
+	// claimState retains the complete private claim envelope across an
+	// ambiguous response so the next pass can replay FleetDB's durable receipt.
+	// It is intentionally per worker and never copied into public results.
+	claimState *taskWorkerClaimState
 }
 
 func (w *TaskWorker) RunOnce(ctx context.Context) (*TaskRunRequestOutcome, error) {
 	if w == nil || w.Store == nil {
 		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
 	}
+	claimState := w.taskWorkerRuntimeClaimState()
+	claimState.runMu.Lock()
+	defer claimState.runMu.Unlock()
+	if err := w.validateRunOnceDependencies(); err != nil {
+		return nil, err
+	}
 	workDir, err := (&Executor{WorkDir: w.WorkDir}).resolveWorkDir()
 	if err != nil {
 		return nil, err
 	}
 	if ws := strings.TrimSpace(w.WorkspaceKey); ws != "" {
+		if pending := claimState.pending; pending != nil && pending.WorkspaceKey != ws {
+			return nil, fmt.Errorf("pending TaskRun claim belongs to workspace %q, not %q: %w", pending.WorkspaceKey, ws, execution.ErrConflict)
+		}
 		return w.runOnceInWorkspace(ctx, ws, workDir)
+	}
+	if pending := claimState.pending; pending != nil {
+		outcome, err := w.runOnceInWorkspace(ctx, pending.WorkspaceKey, workDir)
+		if err == nil {
+			return outcome, nil
+		}
+		if !errors.Is(err, ErrNoQueuedTaskRun) {
+			return nil, err
+		}
 	}
 	workspaces, err := w.Store.Workspaces().List(ctx)
 	if err != nil {
@@ -75,8 +122,21 @@ func (w *TaskWorker) RunOnce(ctx context.Context) (*TaskRunRequestOutcome, error
 	return nil, ErrNoQueuedTaskRun
 }
 
+func (w *TaskWorker) validateRunOnceDependencies() error {
+	if w.Execution == nil || w.TaskRunAuthorities == nil || w.ExecutionAuthorities == nil || w.Convergence == nil || strings.TrimSpace(w.ExecutionComponentID) == "" {
+		return fmt.Errorf("execution TaskRun worker APIs and exact component id are required: %w", execution.ErrUnavailable)
+	}
+	if w.Artifacts == nil {
+		return fmt.Errorf("artifacts capability is required: %w", artifactsmodule.ErrUnavailable)
+	}
+	return nil
+}
+
 func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string) (*TaskRunRequestOutcome, error) {
 	nodeID := w.nodeID()
+	if pending := w.taskWorkerRuntimeClaimState().pending; pending != nil && pending.WorkspaceKey == ws {
+		nodeID = pending.NodeID
+	}
 	if nodeID == "" {
 		return nil, fmt.Errorf("worker node id required: %w", domain.ErrInvalid)
 	}
@@ -86,45 +146,403 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 	executor := w.Executor
 	if executor == nil {
 		executor = HostBridgeTaskExecutor{
-			Store:            w.Store,
-			WorktreePath:     workDir,
-			APIBaseURL:       w.APIBaseURL,
-			LocalSettingsDir: w.LocalSettingsDir,
-			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store, Lineage: DefaultStackLineageLookup()}),
-			StackStore:       DefaultStackStore(),
+			Store:               w.Store,
+			Artifacts:           w.Artifacts,
+			ArtifactAuthorities: w.TaskRunAuthorities,
+			WorktreePath:        workDir,
+			APIBaseURL:          w.APIBaseURL,
+			LocalSettingsDir:    w.LocalSettingsDir,
+			WorktreeResolver:    firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store, Lineage: DefaultStackLineageLookup()}),
+			StackStore:          DefaultStackStore(),
 		}
+	} else {
+		executor = withTaskWorkerArtifacts(executor, w.Artifacts, w.TaskRunAuthorities)
 	}
-	outcome, err := ClaimAndExecuteTaskRunWithResult(ctx, w.Store, TaskRunWorkerOptions{
-		WorkspaceKey:       ws,
-		TaskRunID:          w.TaskRunID,
-		NodeID:             nodeID,
-		RunnerID:           w.RunnerID,
-		LeaseID:            w.LeaseID,
-		LeaseToken:         w.LeaseToken,
-		SupportedProviders: w.SupportedProviders,
-		Capabilities:       w.Capabilities,
-		WorkerProfileIDs:   w.WorkerProfileIDs,
-		RunnerPlacement:    w.runnerPlacement(nodeID),
-		SandboxPlacement:   w.SandboxPlacement,
-		HeartbeatInterval:  w.HeartbeatInterval,
-		// Default close-on-success. The worker claims any queued run without
-		// knowing its id in advance, so a per-request override (a planner's
-		// closeTask=false) is persisted on the run's RuntimeMetadata and wins
-		// after claim — see resolveCloseTaskOnSuccess in executeClaimedTaskRun.
-		CloseTaskOnSuccess: true,
-		MaxAttempts:        w.maxAttempts(),
-		Now:                w.Now,
-	}, executor)
+	outcome, err := w.claimAndExecuteTaskRun(ctx, ws, nodeID, executor)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, ErrNoQueuedTaskRun
 		}
 		return nil, err
 	}
-	if err := w.updateLinkedDriverStep(ctx, outcome.Run); err != nil {
-		return outcome, err
+	if outcome.Run != nil && outcome.Run.Status.IsTerminal() && w.Convergence != nil {
+		if err := w.convergeTerminalTaskRun(ctx, ws, outcome.Run.TaskRunID); err != nil {
+			return outcome, err
+		}
+		return outcome, nil
 	}
 	return outcome, nil
+}
+
+func withTaskWorkerArtifacts(executor TaskExecutor, api artifactsmodule.API, resolver execution.TaskRunAuthorityResolver) TaskExecutor {
+	switch value := executor.(type) {
+	case HostBridgeTaskExecutor:
+		if value.Artifacts == nil {
+			value.Artifacts = api
+		}
+		if value.ArtifactAuthorities == nil {
+			value.ArtifactAuthorities = resolver
+		}
+		return value
+	case *HostBridgeTaskExecutor:
+		if value != nil && value.Artifacts == nil {
+			value.Artifacts = api
+		}
+		if value != nil && value.ArtifactAuthorities == nil {
+			value.ArtifactAuthorities = resolver
+		}
+	}
+	return executor
+}
+
+func (w *TaskWorker) claimAndExecuteTaskRun(ctx context.Context, workspace, nodeID string, executor TaskExecutor) (*TaskRunRequestOutcome, error) {
+	claimState := w.taskWorkerRuntimeClaimState()
+	componentID := strings.TrimSpace(w.ExecutionComponentID)
+	systemAuth, err := w.ExecutionAuthorities.ResolveExecutionSystemAuthority(ctx, workspace, execution.ActionClaimTaskRun, componentID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve TaskRun claim authority: %w", err)
+	}
+	command := w.pendingOrNewTaskRunClaim(claimState, workspace, nodeID, componentID)
+	claim, err := w.Execution.ClaimTaskRun(ctx, systemAuth, command)
+	if err != nil {
+		if errors.Is(err, execution.ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
+			clearTaskWorkerPendingClaim(claimState, command.RequestID)
+			return nil, ErrNoQueuedTaskRun
+		}
+		if !errors.Is(err, execution.ErrUnavailable) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			clearTaskWorkerPendingClaim(claimState, command.RequestID)
+		}
+		return nil, fmt.Errorf("claim queued TaskRun: %w", err)
+	}
+	claimed, err := legacyTaskRunFromExecution(claim.Run)
+	if err != nil {
+		return nil, err
+	}
+	clearTaskWorkerPendingClaim(claimState, command.RequestID)
+	leaseToken := command.LeaseToken
+	owner := execution.Owner{
+		ResourceKind: execution.ResourceTaskRun, ResourceID: claimed.TaskRunID,
+		NodeID: claimed.NodeID, LeaseID: claimed.LeaseID, LeaseToken: leaseToken, FencingToken: claimed.FencingToken,
+	}
+	opts := executeClaimedTaskRunOptions{
+		WorkspaceKey: claimed.WorkspaceKey, DriverRunID: claimed.DriverRunID, DriverStepID: claimed.DriverStepID,
+		TaskID: claimed.TaskID, ProviderProfile: claimed.ProviderProfile,
+		RunnerTrustLevel: domain.DriverTrustLevel(claimed.RuntimeMetadata["runner_trust_level"]),
+		ParentSessionID:  claimed.RuntimeMetadata["parent_session_id"], LeaseToken: leaseToken,
+		HeartbeatInterval: w.HeartbeatInterval, CloseTaskOnSuccess: true, MaxAttempts: w.maxAttempts(),
+		HeartbeatSource: "task_run_worker", Now: w.Now,
+	}
+	refs := claimedTaskRunRefsFromOptions(claimed, opts)
+	stopHeartbeat := w.startExecutionTaskRunHeartbeat(ctx, claimed, owner, refs)
+	defer stopHeartbeat()
+
+	execResult, execErr := executor.ExecuteTask(ctx, taskExecRequest(claimed, opts, refs))
+	return w.finishExecutedTaskRun(ctx, workspace, claimed, owner, opts, refs, leaseToken, execResult, execErr)
+}
+
+func (w *TaskWorker) pendingOrNewTaskRunClaim(state *taskWorkerClaimState, workspace, nodeID, componentID string) execution.ClaimTaskRunCommand {
+	if state.pending != nil {
+		return cloneTaskWorkerClaimCommand(*state.pending)
+	}
+	now := taskRunNow(w.Now)
+	leaseID, leaseToken := w.taskRunLease(nodeID)
+	command := execution.ClaimTaskRunCommand{
+		WorkspaceKey: workspace, RequestID: fmt.Sprintf("claim-task-run:%s:%d", componentID, now.UnixNano()),
+		TaskRunID: strings.TrimSpace(w.TaskRunID), NodeID: nodeID, RunnerID: strings.TrimSpace(w.RunnerID),
+		LeaseID: leaseID, LeaseToken: leaseToken, LeaseTTL: (&Executor{HeartbeatInterval: w.HeartbeatInterval}).nodeTTL(),
+		SupportedProviders: append([]string(nil), w.SupportedProviders...), Capabilities: append([]string(nil), w.Capabilities...),
+		WorkerProfileIDs: append([]string(nil), w.WorkerProfileIDs...),
+		RunnerPlacement:  executionTaskRunPlacement(w.runnerPlacement(nodeID)),
+		SandboxPlacement: executionTaskRunPlacement(w.SandboxPlacement), ClaimedAt: now,
+	}
+	stored := cloneTaskWorkerClaimCommand(command)
+	state.pending = &stored
+	return command
+}
+
+func cloneTaskWorkerClaimCommand(command execution.ClaimTaskRunCommand) execution.ClaimTaskRunCommand {
+	command.SupportedProviders = append([]string(nil), command.SupportedProviders...)
+	command.Capabilities = append([]string(nil), command.Capabilities...)
+	command.WorkerProfileIDs = append([]string(nil), command.WorkerProfileIDs...)
+	return command
+}
+
+func clearTaskWorkerPendingClaim(state *taskWorkerClaimState, requestID string) {
+	if state == nil || state.pending == nil || state.pending.RequestID != requestID {
+		return
+	}
+	*state.pending = execution.ClaimTaskRunCommand{}
+	state.pending = nil
+}
+
+func (w *TaskWorker) taskWorkerRuntimeClaimState() *taskWorkerClaimState {
+	// TaskWorker is commonly constructed with a struct literal. A tiny global
+	// initializer lock makes that path race-safe without placing a copy-sensitive
+	// mutex in the worker value itself.
+	taskWorkerClaimStateInitMu.Lock()
+	defer taskWorkerClaimStateInitMu.Unlock()
+	if w.claimState == nil {
+		w.claimState = &taskWorkerClaimState{}
+	}
+	return w.claimState
+}
+
+// CloneForRuntime returns an independent worker execution slot. The retained
+// claim envelope is runtime-local and must never be shared when the serve
+// template fans out into concurrent worker passes.
+func (w TaskWorker) CloneForRuntime() TaskWorker {
+	w.claimState = &taskWorkerClaimState{}
+	return w
+}
+
+func (w *TaskWorker) taskRunLease(nodeID string) (string, string) {
+	leaseID := strings.TrimSpace(w.LeaseID)
+	if leaseID == "" {
+		leaseID = generatedTaskRunLeaseID(nodeID)
+	}
+	leaseToken := strings.TrimSpace(w.LeaseToken)
+	if leaseToken == "" {
+		leaseToken = generatedTaskRunLeaseToken()
+	}
+	return leaseID, leaseToken
+}
+
+type executedTaskRunState struct {
+	claimed     *domain.TaskRun
+	owner       execution.Owner
+	opts        executeClaimedTaskRunOptions
+	leaseToken  string
+	result      TaskExecResult
+	completion  taskExecCompletion
+	metadata    map[string]string
+	retry       taskRunRetryDecisionResult
+	artifactIDs []string
+}
+
+func (w *TaskWorker) finishExecutedTaskRun(
+	ctx context.Context,
+	workspace string,
+	claimed *domain.TaskRun,
+	owner execution.Owner,
+	opts executeClaimedTaskRunOptions,
+	refs claimedTaskRunRefs,
+	leaseToken string,
+	result TaskExecResult,
+	execErr error,
+) (*TaskRunRequestOutcome, error) {
+	state := executedTaskRunState{
+		claimed: claimed, owner: owner, opts: opts, leaseToken: leaseToken, result: result,
+		completion:  normalizeTaskExecCompletion(result, execErr),
+		metadata:    taskExecRuntimeMetadata(result, refs),
+		artifactIDs: normalizeArtifactIDs(result.ArtifactIDs),
+	}
+	state.retry = taskRunRetryDecision(claimed, opts, state.completion)
+	if state.retry.Retry {
+		return w.requeueExecutedTaskRun(ctx, workspace, state)
+	}
+	if state.completion.Status == domain.TaskRunFailed {
+		return w.exhaustExecutedTaskRun(ctx, workspace, state)
+	}
+	return w.finalizeExecutedTaskRun(ctx, workspace, state)
+}
+
+func (w *TaskWorker) requeueExecutedTaskRun(ctx context.Context, workspace string, state executedTaskRunState) (*TaskRunRequestOutcome, error) {
+	state.metadata = taskRunRetryMetadata(state.claimed, state.retry, state.completion, state.metadata)
+	auth, err := w.TaskRunAuthorities.ResolveTaskRunAuthority(ctx, workspace, execution.ActionRequeueTaskRun, state.owner)
+	if err != nil {
+		return nil, fmt.Errorf("resolve TaskRun requeue authority: %w", err)
+	}
+	requeuedAt := taskRunNow(w.Now)
+	result, err := w.Execution.RequeueTaskRun(ctx, auth, execution.RequeueTaskRunCommand{
+		WorkspaceKey: workspace, RequestID: fmt.Sprintf("requeue-task-run:%s:%d", state.claimed.TaskRunID, state.retry.Attempt),
+		Owner: state.owner, RuntimeMetadata: state.metadata, LogsRef: state.result.LogsRef, ArtifactsRef: state.result.ArtifactsRef,
+		ErrorClass: state.completion.ErrorClass, ErrorMessage: state.completion.ErrorMessage,
+		RequeuedAt: requeuedAt, NextEligibleAt: requeuedAt.Add(taskRunRetryBackoff(state.retry.Attempt)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("requeue TaskRun: %w", err)
+	}
+	run, err := legacyTaskRunFromExecution(result.Run)
+	return &TaskRunRequestOutcome{Run: run, LeaseToken: state.leaseToken, ArtifactIDs: state.artifactIDs}, err
+}
+
+func (w *TaskWorker) exhaustExecutedTaskRun(ctx context.Context, workspace string, state executedTaskRunState) (*TaskRunRequestOutcome, error) {
+	state.metadata = taskRunBlockedMetadata(state.claimed, state.opts, state.completion, state.metadata)
+	auth, err := w.TaskRunAuthorities.ResolveTaskRunAuthority(ctx, workspace, execution.ActionExhaustTaskRunRetries, state.owner)
+	if err != nil {
+		return nil, fmt.Errorf("resolve TaskRun retry exhaustion authority: %w", err)
+	}
+	exitCode := state.completion.ExitCode
+	result, err := w.Execution.ExhaustTaskRunRetries(ctx, auth, execution.ExhaustTaskRunRetriesCommand{
+		WorkspaceKey: workspace, RequestID: fmt.Sprintf("exhaust-task-run:%s:%d", state.claimed.TaskRunID, state.retry.Attempt),
+		Owner: state.owner, Attempt: state.retry.Attempt, MaxAttempts: state.retry.MaxAttempts, ExitCode: &exitCode,
+		LogsRef: state.result.LogsRef, ArtifactsRef: state.result.ArtifactsRef,
+		RequiredArtifactIDs: state.artifactIDs, RequireArtifacts: len(state.artifactIDs) > 0,
+		InputTokens: state.result.InputTokens, OutputTokens: state.result.OutputTokens,
+		CacheReadTokens: state.result.CacheReadTokens, CacheWriteTokens: state.result.CacheWriteTokens,
+		EstimatedCostUSD: state.result.EstimatedCostUSD, RuntimeMetadata: state.metadata,
+		ErrorClass: state.completion.ErrorClass, ErrorMessage: state.completion.ErrorMessage, FinishedAt: taskRunNow(w.Now),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("exhaust TaskRun retries: %w", err)
+	}
+	run, err := legacyTaskRunFromExecution(result.Run)
+	return &TaskRunRequestOutcome{Run: run, LeaseToken: state.leaseToken, ArtifactIDs: state.artifactIDs}, err
+}
+
+func (w *TaskWorker) finalizeExecutedTaskRun(ctx context.Context, workspace string, state executedTaskRunState) (*TaskRunRequestOutcome, error) {
+	auth, err := w.TaskRunAuthorities.ResolveTaskRunAuthority(ctx, workspace, execution.ActionFinalize, state.owner)
+	if err != nil {
+		return nil, fmt.Errorf("resolve TaskRun finalize authority: %w", err)
+	}
+	status := execution.StatusSucceeded
+	if state.completion.Status == domain.TaskRunCancelled {
+		status = execution.StatusCancelled
+	}
+	exitCode := state.completion.ExitCode
+	finishedAt := taskRunNow(w.Now)
+	_, err = w.Execution.Finalize(ctx, auth, execution.FinalizeCommand{
+		WorkspaceKey: workspace, RequestID: "worker-complete-" + state.claimed.TaskRunID,
+		Owner: state.owner, Classification: execution.ExitClassification{
+			Status: status, ErrorClass: state.completion.ErrorClass, Summary: state.completion.ErrorMessage,
+		},
+		ExitCode: &exitCode, LogsRef: state.result.LogsRef, ArtifactsRef: state.result.ArtifactsRef,
+		RequiredArtifactIDs: state.artifactIDs, RequireArtifacts: len(state.artifactIDs) > 0,
+		InputTokens: state.result.InputTokens, OutputTokens: state.result.OutputTokens,
+		CacheReadTokens: state.result.CacheReadTokens, CacheWriteTokens: state.result.CacheWriteTokens,
+		EstimatedCostUSD: state.result.EstimatedCostUSD, RuntimeMetadata: state.metadata,
+		CloseWorkItem: status == execution.StatusSucceeded && resolveCloseTaskOnSuccess(true, state.claimed.RuntimeMetadata),
+		CloseReason:   "completed by task run", FinishedAt: finishedAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("finalize TaskRun: %w", err)
+	}
+	applyExecutedTaskRunResult(state.claimed, state.result, state.completion, state.metadata, exitCode, finishedAt)
+	return &TaskRunRequestOutcome{Run: state.claimed, LeaseToken: state.leaseToken, ArtifactIDs: state.artifactIDs}, nil
+}
+
+func applyExecutedTaskRunResult(claimed *domain.TaskRun, result TaskExecResult, completion taskExecCompletion, metadata map[string]string, exitCode int, finishedAt time.Time) {
+	claimed.Status = completion.Status
+	claimed.ExitCode = &exitCode
+	claimed.LogsRef = result.LogsRef
+	claimed.ArtifactsRef = result.ArtifactsRef
+	claimed.RuntimeMetadata = metadata
+	claimed.ErrorClass = completion.ErrorClass
+	claimed.ErrorMessage = completion.ErrorMessage
+	claimed.FinishedAt = &finishedAt
+}
+
+func (w *TaskWorker) startExecutionTaskRunHeartbeat(
+	ctx context.Context,
+	run *domain.TaskRun,
+	owner execution.Owner,
+	refs claimedTaskRunRefs,
+) context.CancelFunc {
+	heartbeatCtx, cancel := context.WithCancel(ctx)
+	interval := taskRunHeartbeatInterval(w.HeartbeatInterval)
+	if interval <= 0 {
+		return cancel
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case at := <-ticker.C:
+				auth, err := w.TaskRunAuthorities.ResolveTaskRunAuthority(heartbeatCtx, run.WorkspaceKey, execution.ActionHeartbeat, owner)
+				if err == nil {
+					_, err = w.Execution.Heartbeat(heartbeatCtx, auth, execution.HeartbeatCommand{
+						WorkspaceKey: run.WorkspaceKey, Owner: owner, At: at.UTC(),
+						RuntimeMetadata: map[string]string{
+							"driver_run_id": refs.DriverRunID, "runner": refs.Runner, "runner_ref": refs.RunnerRef,
+							"runner_kind": refs.RunnerKind, "provider_profile": refs.ProviderProfile,
+							"heartbeat_source": refs.HeartbeatSource,
+						},
+					})
+				}
+				if err != nil && heartbeatCtx.Err() == nil {
+					slog.WarnContext(heartbeatCtx, "Execution TaskRun heartbeat failed; run may be recovered as stale",
+						"task_run_id", run.TaskRunID, "workspace", run.WorkspaceKey, "err", err)
+				}
+			}
+		}
+	}()
+	return cancel
+}
+
+func executionTaskRunPlacement(value domain.TaskRunPlacement) execution.Placement {
+	return execution.Placement{
+		Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID,
+		SandboxID: value.SandboxID, CWD: value.CWD, RepoRef: value.RepoRef,
+	}
+}
+
+func legacyTaskRunFromExecution(run *execution.TaskRun) (*domain.TaskRun, error) {
+	if run == nil || strings.TrimSpace(run.TaskRunID) == "" {
+		return nil, fmt.Errorf("execution returned no TaskRun: %w", execution.ErrConflict)
+	}
+	status := domain.TaskRunStatus(run.Status)
+	if run.Status == execution.StatusSucceeded {
+		status = domain.TaskRunCompleted
+	}
+	legacy := &domain.TaskRun{
+		WorkspaceKey: run.WorkspaceKey, TaskRunID: run.TaskRunID, DriverRunID: run.DriverRunID,
+		DriverStepID: run.DriverStepID, TaskID: run.WorkItemID, WorkerProfileID: run.WorkerProfileID,
+		Runner: run.Runner, RunnerRef: run.RunnerRef, RunnerKind: run.RunnerKind,
+		RunnerEntrypoint: run.RunnerEntrypoint, RunnerVersionID: run.RunnerVersionID,
+		ProviderProfile: run.ProviderProfile, TargetNodeID: run.TargetNodeID, Status: status,
+		NodeID: run.Owner.NodeID, LeaseID: run.Owner.LeaseID, FencingToken: run.Owner.FencingToken,
+		RunnerPlacement: domain.TaskRunPlacement{
+			Provider: run.RunnerPlacement.Provider, NodeID: run.RunnerPlacement.NodeID,
+			RunnerID: run.RunnerPlacement.RunnerID, SandboxID: run.RunnerPlacement.SandboxID,
+			CWD: run.RunnerPlacement.CWD, RepoRef: run.RunnerPlacement.RepoRef,
+		},
+		SandboxPlacement: domain.TaskRunPlacement{
+			Provider: run.SandboxPlacement.Provider, NodeID: run.SandboxPlacement.NodeID,
+			RunnerID: run.SandboxPlacement.RunnerID, SandboxID: run.SandboxPlacement.SandboxID,
+			CWD: run.SandboxPlacement.CWD, RepoRef: run.SandboxPlacement.RepoRef,
+		},
+		Input: append([]byte(nil), run.Input...), ExitCode: run.ExitCode, LogsRef: run.LogsRef,
+		ArtifactsRef: run.ArtifactsRef, InputTokens: run.InputTokens, OutputTokens: run.OutputTokens,
+		CacheReadTokens: run.CacheReadTokens, CacheWriteTokens: run.CacheWriteTokens,
+		EstimatedCostUSD: run.EstimatedCostUSD, RuntimeMetadata: cloneStringMap(run.RuntimeMetadata),
+		ErrorClass: run.ErrorClass, ErrorMessage: run.ErrorMessage, FinishedAt: run.FinishedAt,
+		CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt,
+	}
+	if run.NextEligibleAt != nil {
+		legacy.NextEligibleAt = *run.NextEligibleAt
+	}
+	if run.StartedAt != nil {
+		legacy.StartedAt = *run.StartedAt
+	}
+	if run.LastHeartbeat != nil {
+		legacy.LastHeartbeat = *run.LastHeartbeat
+	}
+	return legacy, nil
+}
+
+func (w *TaskWorker) convergeTerminalTaskRun(ctx context.Context, workspace, taskRunID string) error {
+	if w.ExecutionAuthorities == nil {
+		return fmt.Errorf("execution convergence authority resolver required: %w", execution.ErrUnavailable)
+	}
+	componentID := strings.TrimSpace(w.ExecutionComponentID)
+	if componentID == "" {
+		componentID = "execution-task-run-worker-1"
+	}
+	auth, err := w.ExecutionAuthorities.ResolveExecutionSystemAuthority(ctx, workspace, execution.ActionConvergeTaskRun, componentID)
+	if err != nil {
+		return fmt.Errorf("resolve TaskRun convergence authority: %w", err)
+	}
+	_, err = w.Convergence.ConvergeTaskRun(ctx, auth, execution.ConvergeTaskRunCommand{
+		WorkspaceKey: workspace, RequestID: "immediate-task-run:" + taskRunID,
+		TaskRunID: taskRunID, ObservedAt: taskRunNow(w.Now),
+	})
+	if err != nil {
+		return fmt.Errorf("converge terminal TaskRun: %w", err)
+	}
+	return nil
 }
 
 func firstNonNilTaskWorktreeResolver(primary, fallback TaskWorktreeResolver) TaskWorktreeResolver {
@@ -132,33 +550,6 @@ func firstNonNilTaskWorktreeResolver(primary, fallback TaskWorktreeResolver) Tas
 		return primary
 	}
 	return fallback
-}
-
-func (w *TaskWorker) updateLinkedDriverStep(ctx context.Context, run *domain.TaskRun) error {
-	if run == nil || run.DriverRunID == "" || run.DriverStepID == "" {
-		return nil
-	}
-	parent, err := w.Store.DriverRuns().Get(ctx, run.WorkspaceKey, run.DriverRunID)
-	if err != nil {
-		return fmt.Errorf("get parent driver run for task step update: %w", err)
-	}
-	if parent.Status != domain.DriverRunRunning {
-		return nil
-	}
-	status := driverStepStatusForTaskRun(run.Status)
-	outputRef := firstNonEmpty(run.ArtifactsRef, run.LogsRef)
-	_, err = w.Store.DriverSteps().Update(ctx, run.WorkspaceKey, run.DriverStepID, store.DriverStepUpdate{
-		Status:       &status,
-		TaskRunID:    &run.TaskRunID,
-		OutputRef:    &outputRef,
-		NodeID:       parent.NodeID,
-		LeaseID:      parent.LeaseID,
-		FencingToken: parent.FencingToken,
-	})
-	if err != nil {
-		return fmt.Errorf("update linked driver step from task worker: %w", err)
-	}
-	return nil
 }
 
 func (w *TaskWorker) nodeID() string {
@@ -195,46 +586,40 @@ func (w *TaskWorker) maxAttempts() int {
 
 func (w *TaskWorker) ensureNode(ctx context.Context, ws, nodeID string) error {
 	ttl := (&Executor{HeartbeatInterval: w.HeartbeatInterval}).nodeTTL()
-	ownerActor := executorOwnerActor()
-	runtimeProvider := domain.RuntimeProviderLocal
-	labels := []string{"loom-driver-executor", "loom-task-worker"}
-	capabilities := w.nodeCapabilities()
-	toolInventory := []string{"loom-driver", "loom-task-worker"}
-	drainState := domain.NodeDrainActive
-	_, err := w.Store.Nodes().Create(ctx, store.NodeCreate{
-		WorkspaceKey:    ws,
-		NodeID:          nodeID,
-		OwnerActor:      ownerActor,
-		RuntimeProvider: runtimeProvider,
-		Labels:          labels,
-		Capabilities:    capabilities,
-		ToolInventory:   toolInventory,
-		DrainState:      drainState,
-		TTL:             ttl,
-	})
-	if err == nil {
-		return nil
+	now := taskRunNow(w.Now)
+	componentID := strings.TrimSpace(w.ExecutionComponentID)
+	registerAuth, err := w.ExecutionAuthorities.ResolveExecutionSystemAuthority(ctx, ws, execution.ActionRegisterWorkerNode, componentID)
+	if err != nil {
+		return fmt.Errorf("resolve task worker registration authority: %w", err)
 	}
-	if !errors.Is(err, domain.ErrAlreadyExists) {
+	if _, err := w.Execution.RegisterWorkerNode(ctx, registerAuth, execution.RegisterWorkerNodeCommand{
+		WorkspaceKey: ws, RequestID: "register-task-worker:" + componentID + ":" + nodeID,
+		NodeID: nodeID, OwnerActor: executorOwnerActor(), RuntimeProvider: string(domain.RuntimeProviderLocal),
+		Labels: []string{"loom-driver-executor", "loom-task-worker"}, Capabilities: w.nodeCapabilities(),
+		ToolInventory: []string{"loom-driver", "loom-task-worker"}, Version: "loom-serve", Capacity: 1,
+		TTL: ttl, RegisteredAt: now,
+	}); err != nil {
 		return fmt.Errorf("register task worker node: %w", err)
 	}
-	if _, hbErr := w.Store.Nodes().Heartbeat(ctx, ws, nodeID, ttl); hbErr != nil {
-		return fmt.Errorf("heartbeat task worker node: %w", hbErr)
+	heartbeatAuth, err := w.ExecutionAuthorities.ResolveExecutionSystemAuthority(ctx, ws, execution.ActionHeartbeatWorkerNode, componentID)
+	if err != nil {
+		return fmt.Errorf("resolve task worker node heartbeat authority: %w", err)
 	}
-	if existing, getErr := w.Store.Nodes().Get(ctx, ws, nodeID); getErr == nil {
-		labels = mergeNodeStringSet(existing.Labels, labels)
-		capabilities = mergeNodeStringSet(existing.Capabilities, capabilities)
-		toolInventory = mergeNodeStringSet(existing.ToolInventory, toolInventory)
+	if _, err := w.Execution.HeartbeatWorkerNode(ctx, heartbeatAuth, execution.HeartbeatWorkerNodeCommand{
+		WorkspaceKey: ws, RequestID: fmt.Sprintf("heartbeat-task-worker:%s:%d", componentID, now.UnixNano()),
+		NodeID: nodeID, TTL: ttl, HeartbeatAt: now,
+	}); err != nil {
+		return fmt.Errorf("heartbeat task worker node: %w", err)
 	}
-	if _, updateErr := w.Store.Nodes().Update(ctx, ws, nodeID, store.NodeUpdate{
-		OwnerActor:      &ownerActor,
-		RuntimeProvider: &runtimeProvider,
-		Labels:          &labels,
-		Capabilities:    &capabilities,
-		ToolInventory:   &toolInventory,
-		DrainState:      &drainState,
-	}); updateErr != nil {
-		return fmt.Errorf("refresh task worker node: %w", updateErr)
+	drainAuth, err := w.ExecutionAuthorities.ResolveExecutionSystemAuthority(ctx, ws, execution.ActionSetWorkerNodeDrain, componentID)
+	if err != nil {
+		return fmt.Errorf("resolve task worker drain authority: %w", err)
+	}
+	if _, err := w.Execution.SetWorkerNodeDrain(ctx, drainAuth, execution.SetWorkerNodeDrainCommand{
+		WorkspaceKey: ws, RequestID: "activate-task-worker:" + componentID + ":" + nodeID,
+		NodeID: nodeID, DrainState: execution.WorkerNodeActive, ChangedAt: now,
+	}); err != nil {
+		return fmt.Errorf("activate task worker node: %w", err)
 	}
 	return nil
 }
@@ -255,34 +640,6 @@ func taskRunHeartbeatInterval(interval time.Duration) time.Duration {
 		return 0
 	}
 	return interval
-}
-
-func heartbeatTaskRun(ctx context.Context, s store.Store, run *domain.TaskRun, leaseToken string, interval time.Duration, metadata map[string]string) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			// Log (don't swallow) heartbeat failures: a silently-dropped heartbeat
-			// stops LastHeartbeat from advancing, so the stale-task sweeper can kill
-			// a live run with no trace of why. A failed heartbeat does NOT cancel the
-			// run — execution continues; the staleness threshold
-			// (LOOM_DRIVER_STALE_TASK_MAX_AGE) must be large enough to tolerate a
-			// transient store gap.
-			if _, err := s.TaskRuns().Heartbeat(ctx, run.WorkspaceKey, run.TaskRunID, store.TaskRunHeartbeat{
-				NodeID:          run.NodeID,
-				LeaseID:         run.LeaseID,
-				LeaseToken:      leaseToken,
-				FencingToken:    run.FencingToken,
-				RuntimeMetadata: cloneStringMap(metadata),
-			}); err != nil && ctx.Err() == nil {
-				slog.WarnContext(ctx, "task run heartbeat failed; run may be swept as stale",
-					"task_run_id", run.TaskRunID, "workspace", run.WorkspaceKey, "err", err)
-			}
-		}
-	}
 }
 
 func TaskRunResultFromDomain(run *domain.TaskRun, artifactIDs ...[]string) TaskRunRequestResult {
@@ -326,6 +683,5 @@ func TaskRunResultFromOutcome(outcome *TaskRunRequestOutcome) TaskRunRequestResu
 		return TaskRunRequestResult{}
 	}
 	result := TaskRunResultFromDomain(outcome.Run, outcome.ArtifactIDs)
-	result.LeaseToken = outcome.LeaseToken
 	return result
 }

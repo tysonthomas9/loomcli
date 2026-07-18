@@ -50,10 +50,46 @@ func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 		// GAP A: dispatches the builtin runner by name.
 		`runner: "local-task-runner"`,
 		`taskPrompt: prompt`,
+		// A lost TaskRun response is not proof that enqueue failed; only a
+		// certified pre-commit rejection may unclaim the Work Item. A 409 is a
+		// real conflict because exact durable replay resolves before this layer.
+		"if (!isAmbiguousTaskRunRequestError(e)) {",
+		`await releaseClaimAfterError(loom, issueId, "request the TaskRun", e)`,
+		// Event payloads are an early spend gate, not authoritative after claim;
+		// every role rechecks the current card before dispatch.
+		"if (isGatingFilter(taskFilter)) {",
+		// Typed release is the sole phase-mismatch/pre-commit cleanup command.
+		"await loom.tasks.release({ taskId: issueId })",
+		// A planner terminal receipt retires the typed generation and lock, but
+		// the host must also clear the former DriverRun assignee during handoff.
+		`loom.issues.update({ issueId, status: "review", assignee: "" })`,
+		`errorClass: "prompt_agent_planner_handoff_failed"`,
+		// Failed/cancelled TaskRuns must not leave the terminal card looking
+		// claimed by a DriverRun whose typed generation was retired.
+		`loom.issues.update({ issueId, status: "open", assignee: "" })`,
+		`errorClass: "prompt_agent_terminal_handoff_failed"`,
+		// A needs-revision card belongs exclusively to the planner even when it
+		// still carries an older design.
+		`if (taskFilter === "has_design") return hasDesign === true && !hasRevision;`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("prompt-agent source missing %q", want)
 		}
+	}
+	unclaimStart := strings.Index(source, "async function unclaimTask")
+	if unclaimStart < 0 {
+		t.Fatal("prompt-agent unclaimTask helper missing")
+	}
+	unclaimEnd := strings.Index(source[unclaimStart:], "\n}\n")
+	if unclaimEnd < 0 {
+		t.Fatal("prompt-agent unclaimTask helper is unterminated")
+	}
+	unclaimSource := source[unclaimStart : unclaimStart+unclaimEnd]
+	if strings.Contains(unclaimSource, `loom.issues.update({ issueId, status: "open" })`) {
+		t.Fatal("prompt-agent must use the typed Work Item release instead of a generic lifecycle update")
+	}
+	if strings.Contains(unclaimSource, "catch (_releaseErr)") {
+		t.Fatal("prompt-agent must not report a successful handback after typed release fails")
 	}
 }
 

@@ -2,13 +2,17 @@
 package driver
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -50,7 +54,7 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 		ArtifactsRef: "artifacts://task-run-worker-loop",
 	}}
 
-	outcome, err := (&TaskWorker{
+	worker := &TaskWorker{
 		Store:              st,
 		WorkspaceKey:       "TEST",
 		NodeID:             "task-worker-node-1",
@@ -58,7 +62,9 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 		SupportedProviders: []string{"flue-local"},
 		HeartbeatInterval:  -1,
 		Executor:           executor,
-	}).RunOnce(ctx)
+	}
+	wireTaskWorkerTestExecution(worker, st)
+	outcome, err := worker.RunOnce(ctx)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -73,6 +79,10 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	}
 	replayed, err := st.TaskRuns().Complete(ctx, "TEST", "task-run-worker-loop", store.TaskRunComplete{
 		CompletionID: "worker-complete-task-run-worker-loop",
+		NodeID:       outcome.Run.NodeID,
+		LeaseID:      outcome.Run.LeaseID,
+		LeaseToken:   executor.req.LeaseToken,
+		FencingToken: outcome.Run.FencingToken,
 		Status:       domain.TaskRunCompleted,
 	})
 	if err != nil {
@@ -87,6 +97,97 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	}
 	if step.Status != domain.DriverStepCompleted || step.TaskRunID != "task-run-worker-loop" || step.OutputRef != "artifacts://task-run-worker-loop" {
 		t.Fatalf("driver step = %+v, want completed linked step with task output", step)
+	}
+}
+
+func TestTaskWorkerRunOnceReplaysExactClaimEnvelopeAfterLostResponse(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	if _, err := st.DriverSteps().Create(ctx, store.DriverStepCreate{
+		WorkspaceKey: "TEST", StepID: "step-worker-lost-response", DriverRunID: run.RunID,
+		StepKind: "task_run", Status: domain.DriverStepQueued,
+		NodeID: run.NodeID, LeaseID: run.LeaseID, FencingToken: run.FencingToken,
+	}); err != nil {
+		t.Fatalf("Create driver step: %v", err)
+	}
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey: "TEST", TaskRunID: "task-run-worker-lost-response", DriverRunID: run.RunID,
+		DriverStepID: "step-worker-lost-response", TaskID: "TEST-LOST-RESPONSE",
+		ProviderProfile: "flue-local", Status: domain.TaskRunQueued,
+		SandboxPlacement: domain.TaskRunPlacement{Provider: "flue-local"},
+	}); err != nil {
+		t.Fatalf("Create queued task run: %v", err)
+	}
+	executor := &recordingTaskExecutor{result: TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0}}
+	now := time.Now().UTC()
+	worker := &TaskWorker{
+		Store: st, WorkspaceKey: "TEST", NodeID: "task-worker-node-1", RunnerID: "task-worker-runner-1",
+		SupportedProviders: []string{"flue-local"}, Capabilities: []string{"repo"},
+		WorkerProfileIDs: []string{"profile-1"}, HeartbeatInterval: -1, Executor: executor,
+		Now: func() time.Time { return now },
+	}
+	wireTaskWorkerTestExecution(worker, st)
+	lost := &lostResponseTaskWorkerExecution{TaskRunWorkerAPI: worker.Execution}
+	worker.Execution = lost
+
+	if _, err := worker.RunOnce(ctx); !errors.Is(err, execution.ErrUnavailable) {
+		t.Fatalf("first RunOnce error = %v, want ambiguous unavailable", err)
+	}
+	if executor.req.TaskRunID != "" {
+		t.Fatalf("executor ran before claim receipt replay: %+v", executor.req)
+	}
+	now = now.Add(time.Minute)
+	outcome, err := worker.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("replayed RunOnce: %v", err)
+	}
+	if len(lost.commands) != 2 || !lost.sameEnvelope {
+		t.Fatalf("claim envelope was not replayed exactly; calls=%d same=%v", len(lost.commands), lost.sameEnvelope)
+	}
+	if outcome.Run.TaskRunID != "task-run-worker-lost-response" || outcome.Run.Status != domain.TaskRunCompleted ||
+		executor.req.LeaseToken == "" || executor.req.LeaseToken != lost.commands[0].LeaseToken {
+		t.Fatalf("replayed outcome=%+v executor task=%q", outcome.Run, executor.req.TaskRunID)
+	}
+}
+
+func TestTaskWorkerRunOnceSerializesClaimReceiptReplay(t *testing.T) {
+	_, st, _ := setupRunningDriverRun(t)
+	worker := &TaskWorker{
+		Store: st, WorkspaceKey: "TEST", NodeID: "task-worker-node-1", HeartbeatInterval: -1,
+		Executor: &recordingTaskExecutor{},
+	}
+	wireTaskWorkerTestExecution(worker, st)
+	claims := &concurrentClaimTaskWorkerExecution{
+		TaskRunWorkerAPI: worker.Execution, entered: make(chan struct{}, 2), release: make(chan struct{}),
+	}
+	worker.Execution = claims
+
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	run := func() {
+		defer wg.Done()
+		_, err := worker.RunOnce(context.Background())
+		errs <- err
+	}
+	wg.Add(1)
+	go run()
+	<-claims.entered
+	wg.Add(1)
+	go run()
+	select {
+	case <-claims.entered:
+		t.Fatal("second RunOnce entered ClaimTaskRun before the first pass completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(claims.release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if !errors.Is(err, execution.ErrUnavailable) {
+			t.Fatalf("RunOnce error = %v, want unavailable", err)
+		}
+	}
+	if claims.maxActive() != 1 {
+		t.Fatalf("max concurrent ClaimTaskRun calls = %d, want 1", claims.maxActive())
 	}
 }
 
@@ -111,10 +212,11 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	executor := HostBridgeTaskExecutor{
 		Store:        st,
 		WorktreePath: t.TempDir(),
+		APIBaseURL:   testTaskRunAPIURL,
 		Command:      hostBridgeHelperCommand(t, "flue-transcript", "unused-base", "unused-patch"),
 	}
 
-	outcome, err := (&TaskWorker{
+	worker := &TaskWorker{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		NodeID:            "task-worker-node-1",
@@ -122,7 +224,9 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 		HeartbeatInterval: -1,
 		MaxAttempts:       1,
 		Executor:          executor,
-	}).RunOnce(ctx)
+	}
+	wireTaskWorkerTestExecution(worker, st)
+	outcome, err := worker.RunOnce(ctx)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -162,10 +266,11 @@ func TestTaskWorkerRunOnceRefusesUntrustedQueuedNamedRunner(t *testing.T) {
 	executor := HostBridgeTaskExecutor{
 		Store:        st,
 		WorktreePath: t.TempDir(),
+		APIBaseURL:   testTaskRunAPIURL,
 		Command:      []string{"sh", "-c", "printf ran > \"$1\"; printf '%s\n' '{\"status\":\"completed\",\"exit_code\":0}'", "sh", ranPath},
 	}
 
-	outcome, err := (&TaskWorker{
+	worker := &TaskWorker{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		NodeID:            "task-worker-node-1",
@@ -173,7 +278,9 @@ func TestTaskWorkerRunOnceRefusesUntrustedQueuedNamedRunner(t *testing.T) {
 		HeartbeatInterval: -1,
 		MaxAttempts:       1,
 		Executor:          executor,
-	}).RunOnce(ctx)
+	}
+	wireTaskWorkerTestExecution(worker, st)
+	outcome, err := worker.RunOnce(ctx)
 	if err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -237,6 +344,7 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 		Executor:           executor,
 		Now:                func() time.Time { return now },
 	}
+	wireTaskWorkerTestExecution(worker, st)
 
 	first, err := worker.RunOnce(ctx)
 	if err != nil {
@@ -288,14 +396,36 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 
 func TestTaskWorkerRunOnceReturnsNoQueuedTaskRun(t *testing.T) {
 	ctx, st, _ := setupRunningDriverRun(t)
-	_, err := (&TaskWorker{
+	worker := &TaskWorker{
 		Store:             st,
 		WorkspaceKey:      "TEST",
 		NodeID:            "task-worker-node-1",
 		HeartbeatInterval: -1,
 		Executor:          &recordingTaskExecutor{},
-	}).RunOnce(ctx)
+	}
+	wireTaskWorkerTestExecution(worker, st)
+	_, err := worker.RunOnce(ctx)
 	if !errors.Is(err, ErrNoQueuedTaskRun) {
 		t.Fatalf("RunOnce err = %v, want ErrNoQueuedTaskRun", err)
+	}
+}
+
+func TestTaskWorkerRunOnceFailsClosedWithoutConvergence(t *testing.T) {
+	ctx, st, _ := setupRunningDriverRun(t)
+	worker := &TaskWorker{Store: st, WorkspaceKey: "TEST", NodeID: "task-worker-node-1", HeartbeatInterval: -1}
+	wireTaskWorkerTestExecution(worker, st)
+	worker.Convergence = nil
+	if _, err := worker.RunOnce(ctx); !errors.Is(err, execution.ErrUnavailable) {
+		t.Fatalf("RunOnce error = %v, want Execution unavailable", err)
+	}
+}
+
+func TestTaskWorkerRunOnceFailsClosedWithoutArtifacts(t *testing.T) {
+	ctx, st, _ := setupRunningDriverRun(t)
+	worker := &TaskWorker{Store: st, WorkspaceKey: "TEST", NodeID: "task-worker-node-1", HeartbeatInterval: -1}
+	wireTaskWorkerTestExecution(worker, st)
+	worker.Artifacts = nil
+	if _, err := worker.RunOnce(ctx); !errors.Is(err, artifactsmodule.ErrUnavailable) {
+		t.Fatalf("RunOnce error = %v, want Artifacts unavailable", err)
 	}
 }

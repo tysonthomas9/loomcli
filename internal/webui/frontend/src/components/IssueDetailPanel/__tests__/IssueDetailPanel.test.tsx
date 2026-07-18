@@ -1360,6 +1360,7 @@ describe("IssueDetailPanel", () => {
             leadName: "lead-desktop-qa-epic",
             requestedBy: "ui",
             runner: "local-task-runner",
+            deliveryMode: "patch-back",
           },
         );
       });
@@ -1445,6 +1446,7 @@ describe("IssueDetailPanel", () => {
             leadName: "lead-desktop-qa-epic",
             requestedBy: "ui",
             runner: "daytona-task-runner",
+            deliveryMode: "pull-request",
             repoUrl: "https://github.com/tyson/slack-clone-e2e.git",
             baseBranch: "develop",
             openPullRequest: true,
@@ -1501,6 +1503,7 @@ describe("IssueDetailPanel", () => {
             leadName: "lead-desktop-qa-epic-2",
             requestedBy: "ui",
             runner: "local-task-runner",
+            deliveryMode: "patch-back",
           },
         );
       });
