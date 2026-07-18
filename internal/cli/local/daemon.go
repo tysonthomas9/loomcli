@@ -14,6 +14,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
@@ -149,9 +150,16 @@ func localDaemonWorkspaceKey() (string, error) {
 }
 
 func runLocalDaemonOnce(ctx context.Context, dataDir, exe string, port int, workspaceKey string) error {
-	logFile, err := os.OpenFile(daemonLogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-	if err != nil {
-		return fmt.Errorf("open daemon log: %w", err)
+	// Size-capped, rotating daemon log. lumberjack opens the file lazily on the
+	// first write (and creates the logs dir if needed), so there is no open
+	// error to check here. appendLocalDaemonLog still appends to the same path
+	// independently via os.OpenFile; both writers target daemonLogPath.
+	logFile := &lumberjack.Logger{
+		Filename:   daemonLogPath(dataDir),
+		MaxSize:    100, // MB
+		MaxBackups: 3,
+		MaxAge:     14, // days
+		Compress:   true,
 	}
 	defer func() { _ = logFile.Close() }()
 
