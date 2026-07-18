@@ -120,7 +120,7 @@ func newDriverIssueBackend(h *bootstrap.StoreHandle, ws, actor string) (*fleet.F
 	issueBackend, err := fleet.New(fleet.Config{
 		BaseURL:     h.URL(),
 		WorkspaceID: ws,
-		APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
+		APIKey:      h.FleetDBClientAPIKey(),
 		Actor:       actor,
 	})
 	if err != nil {

@@ -3,7 +3,6 @@ package epic
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -309,7 +308,7 @@ func projectEpicStackForRun(ctx context.Context, handle *bootstrap.StoreHandle, 
 	ib, err := fleet.New(fleet.Config{
 		BaseURL:     handle.URL(),
 		WorkspaceID: ws,
-		APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
+		APIKey:      handle.FleetDBClientAPIKey(),
 		Actor:       driverpkg.DriverRunActor(runID),
 	})
 	if err != nil {
