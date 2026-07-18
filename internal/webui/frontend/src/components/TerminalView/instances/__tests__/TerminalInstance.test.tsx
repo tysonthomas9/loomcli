@@ -15,7 +15,7 @@
  * optional-chain in `write()`.
  */
 
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -302,14 +302,17 @@ describe("TerminalInstance", () => {
     await flushPendingWork();
 
     expect(connectionState.writeCallbacks).toHaveLength(0);
-    expect(xtermState.onReady).not.toBeNull();
+    await waitFor(() => {
+      expect(xtermState.onReady).not.toBeNull();
+    });
 
     act(() => {
       xtermState.onReady?.(xtermState.handle);
     });
-    await flushPendingWork();
 
-    expect(connectionState.writeCallbacks).toHaveLength(1);
+    await waitFor(() => {
+      expect(connectionState.writeCallbacks).toHaveLength(1);
+    });
     expect(connectionState.xtermFitCountsAtConnect).toEqual([1]);
   });
 

@@ -338,7 +338,7 @@ func watchHarnessLeadRuntime(
 				events = nil
 				continue
 			}
-			w.observeTurnEvent(ctx, ev)
+			w.observeConversationEvent(ctx, ev)
 		case <-ticker.C:
 			w.poll(ctx)
 		}
@@ -368,9 +368,15 @@ func (w *harnessLeadRuntimeWatcher) persist(ctx context.Context, status string) 
 	}
 }
 
-func (w *harnessLeadRuntimeWatcher) observeTurnEvent(ctx context.Context, ev chat.TurnEvent) {
+func (w *harnessLeadRuntimeWatcher) observeConversationEvent(ctx context.Context, ev chat.ConversationEvent) {
+	// Input request lifecycle events share the conversation stream but do not
+	// represent assistant activity. Delivery still observes them so raw PTY
+	// staging pauses while an interactive harness dialog is pending.
 	if w.handle != nil {
-		w.handle.observeTurnEvent(ev)
+		w.handle.observeConversationEvent(ev)
+	}
+	if ev.Type != chat.EventTurn {
+		return
 	}
 	if ev.Turn.Role != chat.RoleAssistant {
 		return

@@ -240,8 +240,8 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/nwaples/rardecode/v2 v2.1.0 h1:JQl9ZoBPDy+nIZGb1mx8+anfHp/LV3NE2MjMiv0ct/U=
 github.com/nwaples/rardecode/v2 v2.1.0/go.mod h1:7uz379lSxPe6j9nvzxUZ+n7mnJNgjsRNb6IbvGVHRmw=
-github.com/olesho/harness-wrapper v0.5.4-0.20260717220832-d3fcd4c40da2 h1:1wuuJd9fFm+LS3aMDFUpZ5mBo/1/RaZOP4fyJDTd0wU=
-github.com/olesho/harness-wrapper v0.5.4-0.20260717220832-d3fcd4c40da2/go.mod h1:9hjgrBnwBW41rI1acbpP2oVeTV674w8WKYwLHXBg/FI=
+github.com/olesho/harness-wrapper v0.7.6-0.20260718021055-003291869238 h1:FFrDuT7J+3gSIGTHf0z387yL99p7z2U1UxwNBD+WJGo=
+github.com/olesho/harness-wrapper v0.7.6-0.20260718021055-003291869238/go.mod h1:9hjgrBnwBW41rI1acbpP2oVeTV674w8WKYwLHXBg/FI=
 github.com/pelletier/go-toml/v2 v2.2.4 h1:mye9XuhQ6gvn5h28+VilKrrPoQVanw5PMw/TB0t5Ec4=
 github.com/pelletier/go-toml/v2 v2.2.4/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
 github.com/pierrec/lz4/v4 v4.1.21 h1:yOVMLb6qSIDP67pl/5F7RepeKYu/VmTyEXvuMI5d9mQ=

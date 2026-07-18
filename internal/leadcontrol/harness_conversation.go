@@ -21,7 +21,7 @@ type harnessConversation interface {
 	PID() int
 	ChatSessionID() string
 	HarnessSessionID() string
-	Events() <-chan chat.TurnEvent
+	Events() <-chan chat.ConversationEvent
 	Wait() (wrapper.Result, error)
 	Close(ctx context.Context) error
 }
@@ -82,7 +82,7 @@ func (c *chatHarnessConversation) HarnessSessionID() string {
 	return sess.HarnessSessionID
 }
 
-func (c *chatHarnessConversation) Events() <-chan chat.TurnEvent { return c.conv.Events() }
+func (c *chatHarnessConversation) Events() <-chan chat.ConversationEvent { return c.conv.Events() }
 
 func (c *chatHarnessConversation) Wait() (wrapper.Result, error) { return c.conv.Wrapper().Wait() }
 
