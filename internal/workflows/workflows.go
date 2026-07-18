@@ -602,7 +602,7 @@ func linkFlueBuildDependencies(root string) error {
 		filepath.Join("node_modules", "@hono", "node-server"): filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
 		filepath.Join("node_modules", "hono"):                 filepath.Join(runtimeRoot, "node_modules", "hono"),
 	}
-	if daytonaRoot, err := daytonaSDKRoot(); err == nil {
+	if daytonaRoot, err := daytonaSDKRoot(runtimeRoot); err == nil {
 		links[filepath.Join("node_modules", "@daytona", "sdk")] = daytonaRoot
 	} else if strings.TrimSpace(os.Getenv("DAYTONA_SDK_ROOT")) != "" {
 		return err
@@ -663,13 +663,20 @@ func flueRuntimeRoot() (string, error) {
 	return "", fmt.Errorf("%w: local @flue/runtime package not found; set LOOM_FLUE_RUNTIME_ROOT, FLUE_RUNTIME_ROOT, or FLUE_REPO", ErrBuildToolchainUnavailable)
 }
 
-func daytonaSDKRoot() (string, error) {
+func daytonaSDKRoot(runtimeRoot string) (string, error) {
 	candidates := []string{}
-	if root := strings.TrimSpace(os.Getenv("DAYTONA_SDK_ROOT")); root != "" {
-		candidates = append(candidates, root)
+	configuredRoot := strings.TrimSpace(os.Getenv("DAYTONA_SDK_ROOT"))
+	if configuredRoot != "" {
+		candidates = append(candidates, configuredRoot)
 	}
 	if repo := strings.TrimSpace(os.Getenv("FLUE_REPO")); repo != "" {
 		candidates = append(candidates, filepath.Join(repo, "node_modules", ".pnpm", "node_modules", "@daytona", "sdk"))
+	}
+	runtimeRoot = filepath.Clean(strings.TrimSpace(runtimeRoot))
+	packagesRoot := filepath.Dir(runtimeRoot)
+	if filepath.Base(runtimeRoot) == "runtime" && filepath.Base(packagesRoot) == "packages" {
+		flueRoot := filepath.Dir(packagesRoot)
+		candidates = append(candidates, filepath.Join(flueRoot, "node_modules", ".pnpm", "node_modules", "@daytona", "sdk"))
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		candidates = append(candidates, filepath.Join(cwd, "..", "flue", "node_modules", ".pnpm", "node_modules", "@daytona", "sdk"))
@@ -679,6 +686,9 @@ func daytonaSDKRoot() (string, error) {
 		if _, err := os.Stat(filepath.Join(candidate, "package.json")); err == nil {
 			return candidate, nil
 		}
+	}
+	if configuredRoot != "" {
+		return "", fmt.Errorf("local @daytona/sdk package not found at DAYTONA_SDK_ROOT=%s", configuredRoot)
 	}
 	return "", fmt.Errorf("local @daytona/sdk package not found; set DAYTONA_SDK_ROOT")
 }

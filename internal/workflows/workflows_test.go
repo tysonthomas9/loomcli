@@ -351,10 +351,8 @@ func TestReadLocalSourceDoesNotInferUndeclaredSiblingRunners(t *testing.T) {
 
 func TestBuildAndRegisterCustomSourceWithRealFlue(t *testing.T) {
 	repoRoot := workflowTestRepoRoot(t)
-	flueBin := filepath.Join(repoRoot, "..", "flue", "packages", "cli", "bin", "flue.mjs")
-	if _, err := os.Stat(flueBin); err != nil {
-		t.Skipf("Flue CLI bin unavailable: %v", err)
-	}
+	flueRoot := workflowTestFlueRepoRoot(t, repoRoot)
+	flueBin := filepath.Join(flueRoot, "packages", "cli", "bin", "flue.mjs")
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skipf("node unavailable: %v", err)
@@ -366,8 +364,8 @@ func TestBuildAndRegisterCustomSourceWithRealFlue(t *testing.T) {
 	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", string(flueCmd))
 	t.Setenv("LOOM_REAL_FLUE_CMD", "")
 	t.Setenv("LOOM_SDK_ROOT", filepath.Join(repoRoot, "sdk"))
-	t.Setenv("FLUE_RUNTIME_ROOT", filepath.Join(repoRoot, "..", "flue", "packages", "runtime"))
-	t.Setenv("DAYTONA_SDK_ROOT", filepath.Join(repoRoot, "..", "flue", "node_modules", ".pnpm", "node_modules", "@daytona", "sdk"))
+	t.Setenv("FLUE_RUNTIME_ROOT", filepath.Join(flueRoot, "packages", "runtime"))
+	t.Setenv("DAYTONA_SDK_ROOT", filepath.Join(flueRoot, "node_modules", ".pnpm", "node_modules", "@daytona", "sdk"))
 
 	ctx := context.Background()
 	st := memstore.New()
@@ -448,6 +446,146 @@ func TestFlueRuntimeRootHonorsLoomPrefixedEnv(t *testing.T) {
 	if got != runtimeRoot {
 		t.Fatalf("flueRuntimeRoot = %q, want %q", got, runtimeRoot)
 	}
+}
+
+func TestDaytonaSDKRootDerivesFromResolvedFlueRuntimeRoot(t *testing.T) {
+	flueRoot := t.TempDir()
+	runtimeRoot := filepath.Join(flueRoot, "packages", "runtime")
+	daytonaRoot := filepath.Join(flueRoot, "node_modules", ".pnpm", "node_modules", "@daytona", "sdk")
+	for _, root := range []string{runtimeRoot, daytonaRoot} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", root, err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"test"}`+"\n"), 0o644); err != nil {
+			t.Fatalf("write package.json for %s: %v", root, err)
+		}
+	}
+	t.Setenv("DAYTONA_SDK_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
+
+	got, err := daytonaSDKRoot(runtimeRoot)
+	if err != nil {
+		t.Fatalf("daytonaSDKRoot returned error: %v", err)
+	}
+	if got != daytonaRoot {
+		t.Fatalf("daytonaSDKRoot = %q, want %q", got, daytonaRoot)
+	}
+}
+
+func TestLinkFlueBuildDependenciesLinksDerivedDaytonaSDK(t *testing.T) {
+	flueRoot := t.TempDir()
+	runtimeRoot := filepath.Join(flueRoot, "packages", "runtime")
+	daytonaRoot := filepath.Join(flueRoot, "node_modules", ".pnpm", "node_modules", "@daytona", "sdk")
+	for _, root := range []string{
+		runtimeRoot,
+		filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
+		filepath.Join(runtimeRoot, "node_modules", "hono"),
+		daytonaRoot,
+	} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", root, err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"test"}`+"\n"), 0o644); err != nil {
+			t.Fatalf("write package.json for %s: %v", root, err)
+		}
+	}
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", runtimeRoot)
+	t.Setenv("FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
+	t.Setenv("DAYTONA_SDK_ROOT", "")
+
+	buildRoot := t.TempDir()
+	if err := linkFlueBuildDependencies(buildRoot); err != nil {
+		t.Fatalf("linkFlueBuildDependencies returned error: %v", err)
+	}
+	link := filepath.Join(buildRoot, "node_modules", "@daytona", "sdk")
+	got, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("read Daytona SDK symlink: %v", err)
+	}
+	if got != daytonaRoot {
+		t.Fatalf("Daytona SDK symlink target = %q, want %q", got, daytonaRoot)
+	}
+}
+
+func TestLinkFlueBuildDependenciesRejectsInvalidExplicitDaytonaSDKRoot(t *testing.T) {
+	runtimeRoot := filepath.Join(t.TempDir(), "runtime")
+	for _, root := range []string{
+		runtimeRoot,
+		filepath.Join(runtimeRoot, "node_modules", "@hono", "node-server"),
+		filepath.Join(runtimeRoot, "node_modules", "hono"),
+	} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", root, err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"test"}`+"\n"), 0o644); err != nil {
+			t.Fatalf("write package.json for %s: %v", root, err)
+		}
+	}
+	missingDaytonaRoot := filepath.Join(t.TempDir(), "missing-daytona-sdk")
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", runtimeRoot)
+	t.Setenv("FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
+	t.Setenv("DAYTONA_SDK_ROOT", missingDaytonaRoot)
+
+	err := linkFlueBuildDependencies(t.TempDir())
+	if err == nil {
+		t.Fatal("linkFlueBuildDependencies returned nil error for invalid DAYTONA_SDK_ROOT")
+	}
+	if !strings.Contains(err.Error(), missingDaytonaRoot) {
+		t.Fatalf("linkFlueBuildDependencies error = %q, want invalid root %q", err, missingDaytonaRoot)
+	}
+}
+
+func TestBuildBuiltinEpicRunnerWithRealFlueDerivesDaytonaSDK(t *testing.T) {
+	repoRoot := workflowTestRepoRoot(t)
+	flueRoot := workflowTestFlueRepoRoot(t, repoRoot)
+	flueBin := filepath.Join(flueRoot, "packages", "cli", "bin", "flue.mjs")
+	runtimeRoot := filepath.Join(flueRoot, "packages", "runtime")
+	daytonaRoot := filepath.Join(flueRoot, "node_modules", ".pnpm", "node_modules", "@daytona", "sdk")
+	for _, path := range []string{flueBin, filepath.Join(runtimeRoot, "package.json"), filepath.Join(daytonaRoot, "package.json")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Skipf("real Flue dependency unavailable at %s: %v", path, err)
+		}
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skipf("node unavailable: %v", err)
+	}
+	flueCmd, err := json.Marshal([]string{node, flueBin})
+	if err != nil {
+		t.Fatalf("encode Flue command: %v", err)
+	}
+	t.Setenv("LOOM_REAL_FLUE_CMD_JSON", string(flueCmd))
+	t.Setenv("LOOM_REAL_FLUE_CMD", "")
+	t.Setenv("LOOM_SDK_ROOT", filepath.Join(repoRoot, "sdk"))
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", runtimeRoot)
+	t.Setenv("FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
+	t.Setenv("DAYTONA_SDK_ROOT", "")
+
+	serverPath, diagnostics, err := BuildBuiltinBundle(context.Background(), BuiltinEpicRunnerWorkflowName, filepath.Join(t.TempDir(), "dist"))
+	if err != nil {
+		t.Fatalf("BuildBuiltinBundle diagnostics:\n%s\nerr: %v", diagnostics, err)
+	}
+	if _, err := os.Stat(serverPath); err != nil {
+		t.Fatalf("stat built server: %v", err)
+	}
+}
+
+func workflowTestFlueRepoRoot(t *testing.T, repoRoot string) string {
+	t.Helper()
+	for _, candidate := range []string{
+		filepath.Join(repoRoot, "..", "flue"),
+		filepath.Join(repoRoot, "..", "..", "flue"),
+	} {
+		candidate = filepath.Clean(candidate)
+		if _, err := os.Stat(filepath.Join(candidate, "packages", "cli", "bin", "flue.mjs")); err == nil {
+			return candidate
+		}
+	}
+	t.Skip("real Flue checkout unavailable")
+	return ""
 }
 
 func workflowTestRepoRoot(t *testing.T) string {
