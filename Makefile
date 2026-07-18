@@ -358,7 +358,7 @@ test-aft:
 # Opt-in: run the REAL codex CLI through epic-runner (needs a logged-in ~/.codex; never in CI)
 test-aft-real:
 	@echo "Running aft REAL-CODEX tier (spends nothing on a ChatGPT-account codex; needs ~/.codex login)..."
-	@AFT_REAL_CODEX=1 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+	@AFT_REAL_BACKEND=codex AFT_REAL_CODEX=1 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
 
 # Opt-in: run the REAL claude CLI through epic-runner (subscription OAuth login; consumes
 # the Claude account rate window — ANTHROPIC_API_KEY is unset so no API dollars; never in CI)
@@ -385,7 +385,7 @@ test-aft-real-all: test-aft-real test-aft-real-claude test-aft-real-opencode tes
 # Opt-in: exercise the agents-page Logs tab's live-tmux terminal with real codex.
 test-aft-terminal:
 	@command -v tmux >/dev/null 2>&1 || { echo "test-aft-terminal requires tmux on PATH" >&2; exit 1; }
-	@AFT_REAL_CODEX=1 AFT_SUITES=$(PWD)/tests/aft/real-terminal-suites tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+	@AFT_REAL_BACKEND=codex AFT_REAL_CODEX=1 AFT_SUITES=$(PWD)/tests/aft/real-terminal-suites tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
 
 test-aft-podman:
 	@AFT_STACK=podman AFT_REAL_CODEX=1 tests/aft/run-aft-podman.sh --no-agent $(AFT_ARGS)

@@ -37,9 +37,9 @@ pnpm) for the agent-flow suite, and `claude` unless `--no-agent`.
 
 ## Real codex tier
 
-`make test-aft-real` runs the opt-in real-codex tier: the server keeps `claude`
-stubbed, but lets the epic-runner resolve the operator's real `codex` CLI from
-`PATH`. It requires `codex` on `PATH` and a logged-in `~/.codex/auth.json`
+`make test-aft-real` runs the opt-in real-codex tier: the server keeps every
+other agent CLI stubbed (`e2e/stubs-real-codex/`), but lets the epic-runner
+resolve the operator's real `codex` CLI from `PATH`. It requires `codex` on `PATH` and a logged-in `~/.codex/auth.json`
 (`codex login`). The target passes `--no-agent`; only the server-side codex run is
 real.
 

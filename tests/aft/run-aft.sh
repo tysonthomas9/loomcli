@@ -106,8 +106,14 @@ preflight_ports() {
 
 # Real-backend tiers: AFT_REAL_BACKEND=<codex|claude|opencode|cursor> lets ONE real
 # agent CLI resolve on the server's PATH while every other agent CLI stays stubbed.
-# AFT_REAL_CODEX=1 is the back-compat alias for AFT_REAL_BACKEND=codex.
-if [[ "${AFT_REAL_CODEX:-}" == "1" && -z "${AFT_REAL_BACKEND:-}" ]]; then
+# AFT_REAL_CODEX=1 is the back-compat alias for AFT_REAL_BACKEND=codex; a conflicting
+# AFT_REAL_BACKEND is a hard error — never guess which paid backend to run.
+if [[ "${AFT_REAL_CODEX:-}" == "1" ]]; then
+    if [[ -n "${AFT_REAL_BACKEND:-}" && "$AFT_REAL_BACKEND" != "codex" ]]; then
+        echo "[aft] conflicting real-tier selection: AFT_REAL_CODEX=1 means codex, but AFT_REAL_BACKEND=$AFT_REAL_BACKEND" >&2
+        echo "[aft] unset one of them (is AFT_REAL_BACKEND exported in your shell?)" >&2
+        exit 1
+    fi
     AFT_REAL_BACKEND=codex
 fi
 
@@ -118,7 +124,7 @@ if [[ -n "${AFT_REAL_BACKEND:-}" ]]; then
     case "$AFT_REAL_BACKEND" in
         codex)
             REAL_BIN=codex
-            REAL_STUB_DIR="stubs-claude-only"
+            REAL_STUB_DIR="stubs-real-codex"
             # unset so codex uses the ChatGPT-account auth.json, not API billing
             REAL_UNSET_FLAGS="-u OPENAI_API_KEY"
             ;;
