@@ -2,45 +2,17 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/sandbox"
 )
-
-// sandboxHostGateway is the address a sandbox container uses to reach a service
-// (e.g. `loom serve`) on the host when only a localhost server URL is known.
-const sandboxHostGateway = "host.docker.internal"
-
-// sandboxLoomPath is where the loom binary is uploaded inside the sandbox. The
-// sandbox root is read-write, so no directory needs pre-creating.
-const sandboxLoomPath = "/sandbox/loom"
-
-// sandboxBootstrapPath is where the bootstrap script is uploaded. `openshell
-// sandbox exec` rejects newline-bearing arguments, so the multi-line bootstrap
-// is uploaded as a file and run as `sh <path>` rather than passed inline.
-const sandboxBootstrapPath = "/sandbox/bootstrap.sh"
-
-// SandboxConfig configures OpenShell sandbox execution for a one-shot agent run.
-//
-// NOTE: daemon-mode sandbox config (per-agent `execution: sandbox`) is a separate,
-// deferred change — v5 moved daemon config into the FleetDB/domain store, so it
-// needs domain + store plumbing. See SANDBOX-PORT-TODO.md and the rescue tag
-// rescue-sandbox-openshell-pr20 for the original daemon SandboxStrategy.
-type SandboxConfig struct {
-	Providers []string // credential providers injected into the sandbox (e.g. "claude", "github")
-	Network   string   // "open" (default) or a path to a custom OPA/Rego policy YAML
-	From      string   // container base image (--from); empty uses the openshell default
-	Backend   string   // backend override inside the sandbox; empty inherits the host default
-}
 
 // SandboxOneshotConfig holds settings for a single sandboxed agent invocation
 // triggered by the --sandbox flag on `loom task` / `loom plan`.
@@ -50,11 +22,15 @@ type SandboxOneshotConfig struct {
 	WorktreePath string // resolved local worktree path
 	ParentID     string // --parent epic filter (may be empty)
 
-	// Resolved at runtime (not set by the flag): the FleetDB/loom-serve endpoint
-	// the in-container agent uses to claim/update tasks (v5 task state is in
-	// FleetDB, not the repo), plus the workspace it belongs to.
-	ServerURL   string // LOOM_SERVER_URL exported into the sandbox
-	WorkspaceID string // LOOM_WORKSPACE exported into the sandbox
+	// Resolved at runtime (not set by the flag): the FleetDB endpoint + a
+	// workspace-scoped credential the in-container agent uses for BOTH config
+	// and task state (v5 keeps both in FleetDB). With LOOM_SERVER_URL unset the
+	// agent's issue backend resolves to `fleetdb`, so it talks ONLY to fleet-db,
+	// confined by the scoped key (least privilege).
+	FleetDBURL   string // LOOM_FLEET_DB_URL exported into the sandbox
+	FleetDBKey   string // LOOM_FLEET_DB_API_KEY (workspace-scoped developer key)
+	FleetDBActor string // LOOM_FLEET_DB_ACTOR
+	WorkspaceID  string // LOOM_WORKSPACE
 }
 
 // handleSandboxMode validates flags and runs a one-shot sandbox agent, exiting the
@@ -65,68 +41,93 @@ func handleSandboxMode(agentType, agentName, worktreePath, parentID string, auto
 		fmt.Fprintf(os.Stderr, "Error: --sandbox and --auto are mutually exclusive\n")
 		cli.ExitWithFlush(1)
 	}
-	if err := runSandboxOneshot(SandboxOneshotConfig{
+	exitCode, err := runSandboxOneshot(SandboxOneshotConfig{
 		AgentType:    agentType,
 		AgentName:    agentName,
 		WorktreePath: worktreePath,
 		ParentID:     parentID,
-	}); err != nil {
+	})
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
+	}
+	// ExitWithFlush (which calls os.Exit) runs only here, AFTER runSandboxOneshot
+	// has returned and its deferred cleanup — credential revoke, then sandbox
+	// delete — has completed. Calling it from inside runSandboxOneshot would skip
+	// those defers and leak a live scoped credential + a running sandbox.
+	if exitCode != 0 {
+		cli.ExitWithFlush(exitCode)
 	}
 }
 
 // runSandboxOneshot runs a single agent invocation inside an OpenShell sandbox:
 // push the branch, create the sandbox (cloning the branch and running loom
 // inside), wait for completion, fast-forward the results back, and clean up.
-func runSandboxOneshot(cfg SandboxOneshotConfig) error {
+// It returns the in-container agent's exit code and never calls os.Exit itself,
+// so its deferred cleanup always runs — the caller decides how to exit.
+func runSandboxOneshot(cfg SandboxOneshotConfig) (int, error) {
 	branch, err := cli.GetCurrentBranch(cfg.WorktreePath)
 	if err != nil {
-		return fmt.Errorf("getting current branch: %w", err)
+		return 0, fmt.Errorf("getting current branch: %w", err)
 	}
 	if branch == "" {
-		return fmt.Errorf("detached HEAD in %s; --sandbox requires a named branch", cfg.WorktreePath)
+		return 0, fmt.Errorf("detached HEAD in %s; --sandbox requires a named branch", cfg.WorktreePath)
 	}
 
 	projectDir, err := resolveSandboxProjectDir(cfg.WorktreePath)
 	if err != nil {
-		return fmt.Errorf("resolving project directory: %w", err)
+		return 0, fmt.Errorf("resolving project directory: %w", err)
 	}
 
-	repoURL := resolveSandboxRepoURL(projectDir)
+	repoURL, err := sandbox.ResolveRepoURL(projectDir, "")
+	if err != nil {
+		return 0, err
+	}
 	if repoURL == "" {
-		return fmt.Errorf("could not determine git remote URL for %s", projectDir)
+		return 0, fmt.Errorf("could not determine git remote URL for %s", projectDir)
 	}
 
 	// v5 keeps task state in FleetDB, not in the repo, so the agent inside the
-	// sandbox must reach the loom-serve/FleetDB HTTP API. Fail fast if we can't.
+	// sandbox must reach the FleetDB HTTP API. Fail fast if we can't.
 	if err := applySandboxFleetConfig(&cfg); err != nil {
-		return err
+		return 0, err
 	}
 
-	if err := pushSandboxBranch(cfg.WorktreePath, branch); err != nil {
-		return err
+	// Mint a short-TTL, workspace-scoped developer credential for this run (when
+	// the host holds an admin key); revoke it on teardown so a finished sandbox
+	// leaves no live credential.
+	revokeCred, err := provisionSandboxCredential(context.Background(), &cfg)
+	if err != nil {
+		return 0, err
 	}
 
 	sandboxName := fmt.Sprintf("loom-%s-%x", cfg.AgentName, time.Now().UnixMilli())
+	// Single teardown for every exit path (success, agent failure, or a Go error
+	// below): revoke the credential FIRST, then delete the sandbox — the same
+	// order the supervised path uses. Registered before create so a failure in
+	// create/upload/exec still tears down and revokes.
 	defer func() {
+		revokeCred()
 		fmt.Printf("[sandbox] Cleaning up sandbox %s...\n", sandboxName)
-		deleteSandbox(sandboxName)
+		sandbox.DeleteSandbox(sandboxName)
 	}()
-	deleteSandbox(sandboxName) // best-effort cleanup of a stale sandbox from a prior crash
+
+	if err := pushSandboxBranch(cfg.WorktreePath, branch); err != nil {
+		return 0, err
+	}
 
 	fmt.Printf("[sandbox] Creating sandbox %s...\n", sandboxName)
-	exitCode, err := runSandboxAgent(sandboxName, defaultSandboxConfig(), branch, cfg, sandboxCloneURL(repoURL))
+	exitCode, err := runSandboxAgent(sandboxName, sandbox.DefaultConfig(), branch, cfg, repoURL)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
+	// Merge whatever the run pushed. On failure the bootstrap's push (its last
+	// step) never ran, so this is a harmless no-op fetch; on success it
+	// fast-forwards the agent's work into the host worktree.
 	mergeSandboxResults(projectDir, cfg.WorktreePath, branch)
 
-	if exitCode != 0 {
-		cli.ExitWithFlush(exitCode)
-	}
-	return nil
+	return exitCode, nil
 }
 
 // pushSandboxBranch pushes the worktree's branch to origin so the sandbox can
@@ -145,92 +146,42 @@ func pushSandboxBranch(worktreePath, branch string) error {
 }
 
 // runSandboxAgent runs the agent inside a fresh sandbox using the OpenShell
-// v0.0.53 flow: create (keep-alive, with a trivial command so create returns
-// instead of attaching an interactive shell) → upload the loom binary → upload
-// the bootstrap script → exec it. The bootstrap is uploaded as a file and run as
-// `sh <path>` because `sandbox exec` rejects multi-line arguments. Returns the
-// agent's exit code.
-func runSandboxAgent(name string, cfg SandboxConfig, branch string, oneshot SandboxOneshotConfig, repoURL string) (int, error) {
-	loomBin, err := resolveSandboxLoomBinary()
-	if err != nil {
-		return 0, err
+// v0.0.53 flow (see package sandbox): create (keep-alive, trivial command) →
+// upload loom → upload bootstrap → exec it. Returns the agent's exit code.
+func runSandboxAgent(name string, cfg sandbox.Config, branch string, oneshot SandboxOneshotConfig, repoURL string) (int, error) {
+	// Auto-generate an OPA policy opening the fleet-db + repo endpoints unless an
+	// explicit LOOM_SANDBOX_POLICY was given (the default "open" doesn't open them).
+	if cfg.Network == "open" {
+		if eps := sandbox.PolicyEndpoints(oneshot.FleetDBURL, repoURL); len(eps) > 0 {
+			policyPath, cleanupPolicy, err := sandbox.WritePolicy(eps, []string{cfg.LoomCmd(), "/usr/bin/git", "/usr/bin/curl"})
+			if err != nil {
+				return 0, err
+			}
+			defer cleanupPolicy()
+			cfg.Network = policyPath
+		}
 	}
-	if err := runOpenshell(buildSandboxCreateArgs(name, cfg)); err != nil {
+	if err := sandbox.RunOpenshell(sandbox.BuildCreateArgs(name, cfg)); err != nil {
 		return 0, fmt.Errorf("openshell sandbox create: %w", err)
 	}
-	if err := runOpenshell([]string{"sandbox", "upload", name, loomBin, sandboxLoomPath}); err != nil {
-		return 0, fmt.Errorf("openshell sandbox upload loom: %w", err)
+	if cfg.UploadsLoom() {
+		loomBin, err := sandbox.ResolveLoomBinary()
+		if err != nil {
+			return 0, err
+		}
+		if err := sandbox.RunOpenshell([]string{"sandbox", "upload", name, loomBin, sandbox.LoomPath}); err != nil {
+			return 0, fmt.Errorf("openshell sandbox upload loom: %w", err)
+		}
 	}
-	scriptPath, cleanup, err := writeBootstrapScript(buildOneshotCommand(branch, oneshot, repoURL, cfg.Backend))
+	scriptPath, cleanup, err := sandbox.WriteBootstrapScript(buildOneshotCommand(branch, oneshot, repoURL, cfg))
 	if err != nil {
 		return 0, err
 	}
 	defer cleanup()
-	if err := runOpenshell([]string{"sandbox", "upload", name, scriptPath, sandboxBootstrapPath}); err != nil {
+	if err := sandbox.RunOpenshell([]string{"sandbox", "upload", name, scriptPath, sandbox.BootstrapPath}); err != nil {
 		return 0, fmt.Errorf("openshell sandbox upload bootstrap: %w", err)
 	}
-	return runOpenshellExit([]string{"sandbox", "exec", "-n", name, "--", "sh", sandboxBootstrapPath})
-}
-
-// resolveSandboxLoomBinary returns a loom binary that can run inside the (Linux)
-// sandbox. The container is Linux, so a darwin/host binary won't execute (exec
-// format error — the arch matches, the OS/format does not). Prefer an explicit
-// LOOM_SANDBOX_LOOM_BIN; otherwise the running binary only when this host is
-// itself Linux.
-func resolveSandboxLoomBinary() (string, error) {
-	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_LOOM_BIN")); v != "" {
-		return v, nil
-	}
-	if runtime.GOOS == "linux" {
-		return os.Executable()
-	}
-	return "", fmt.Errorf("--sandbox runs a Linux container but this host is %s/%s: set "+
-		"LOOM_SANDBOX_LOOM_BIN to a `GOOS=linux GOARCH=%s` loom build (or use a --from image with loom baked in)",
-		runtime.GOOS, runtime.GOARCH, runtime.GOARCH)
-}
-
-// writeBootstrapScript writes the bootstrap to a temp file and returns its path
-// and a cleanup func. Used because `openshell sandbox exec` rejects arguments
-// that contain newlines, so the multi-line bootstrap is uploaded and run by path.
-func writeBootstrapScript(script string) (string, func(), error) {
-	f, err := os.CreateTemp("", "loom-sandbox-bootstrap-*.sh")
-	if err != nil {
-		return "", func() {}, fmt.Errorf("write bootstrap script: %w", err)
-	}
-	name := f.Name()
-	cleanup := func() { _ = os.Remove(name) }
-	if _, err := f.WriteString(script); err != nil {
-		_ = f.Close()
-		cleanup()
-		return "", func() {}, fmt.Errorf("write bootstrap script: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		cleanup()
-		return "", func() {}, fmt.Errorf("write bootstrap script: %w", err)
-	}
-	return name, cleanup, nil
-}
-
-// runOpenshell runs an openshell subcommand with inherited stdio and waits.
-func runOpenshell(args []string) error {
-	cmd := exec.Command("openshell", args...) //nolint:gosec // args built internally
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
-}
-
-// runOpenshellExit runs an openshell subcommand and returns its exit code (0/nil
-// on success; the remote exit code with a nil error on a clean non-zero exit).
-func runOpenshellExit(args []string) (int, error) {
-	cmd := exec.Command("openshell", args...) //nolint:gosec // args built internally
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return exitErr.ExitCode(), nil
-		}
-		return 0, fmt.Errorf("openshell exec: %w", err)
-	}
-	return 0, nil
+	return sandbox.RunOpenshellExit([]string{"sandbox", "exec", "-n", name, "--", "sh", sandbox.BootstrapPath})
 }
 
 // mergeSandboxResults fetches the branch the sandbox pushed and fast-forwards the
@@ -255,67 +206,15 @@ func mergeSandboxResults(projectDir, worktreePath, branch string) {
 	}
 }
 
-// defaultSandboxConfig returns the sandbox defaults for one-shot runs, with env
-// overrides. v5 dropped loom.yaml; daemon-level FleetDB-backed config is a
-// deferred change, so these env knobs are how an operator configures a one-shot:
-//
-//   - LOOM_SANDBOX_POLICY    — path to a custom OPA/Rego policy YAML. Required to
-//     reach a `loom serve` on a non-443/80/22 port (the default "open" policy
-//     only opens common ports); passed to `openshell sandbox create --policy`.
-//   - LOOM_SANDBOX_PROVIDERS — comma-separated credential providers (empty string
-//     disables provider attachment — e.g. for the token-free playground backend).
-func defaultSandboxConfig() SandboxConfig {
-	cfg := SandboxConfig{Network: "open", Providers: []string{"claude", "github"}}
-	if p := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_POLICY")); p != "" {
-		cfg.Network = p
-	}
-	if v, ok := os.LookupEnv("LOOM_SANDBOX_PROVIDERS"); ok {
-		cfg.Providers = nil
-		for _, p := range strings.Split(v, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				cfg.Providers = append(cfg.Providers, p)
-			}
-		}
-	}
-	if b := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_BACKEND")); b != "" {
-		cfg.Backend = b
-	}
-	return cfg
-}
-
-// resolveSandboxRepoURL returns the origin remote URL for projectDir, or "" on error.
-func resolveSandboxRepoURL(projectDir string) string {
-	out, err := cli.RunGitCommand(projectDir, "remote", "get-url", "origin")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out)
-}
-
-// sandboxCloneURL returns the git URL the sandbox uses to clone the repo. The host
-// and the sandbox reach the host at different addresses, so a localhost origin is
-// rewritten to the container host gateway — or overridden via LOOM_SANDBOX_REPO_URL
-// with an address both sides can reach (e.g. the host LAN IP or a git endpoint).
-func sandboxCloneURL(origin string) string {
-	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_REPO_URL")); v != "" {
-		return v
-	}
-	out := origin
-	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		out = strings.ReplaceAll(out, lh, sandboxHostGateway)
-	}
-	return out
-}
-
-// applySandboxFleetConfig resolves the FleetDB/loom-serve endpoint + workspace the
+// applySandboxFleetConfig resolves the FleetDB endpoint + workspace the
 // in-container agent needs (v5 task state is in FleetDB) and records them on cfg.
 // Returns an error if no reachable server or workspace can be determined, so the
 // caller fails before booting a sandbox whose agent could never claim work.
 func applySandboxFleetConfig(cfg *SandboxOneshotConfig) error {
-	cfg.ServerURL = resolveSandboxServerURL()
-	if cfg.ServerURL == "" {
-		return fmt.Errorf("--sandbox needs a FleetDB server the container can reach: " +
-			"run `loom serve` and set LOOM_SERVER_URL, or set LOOM_SANDBOX_SERVER_URL to a container-reachable URL")
+	cfg.FleetDBURL = resolveSandboxFleetDBURL()
+	if cfg.FleetDBURL == "" {
+		return fmt.Errorf("--sandbox needs a FleetDB the container can reach: set LOOM_FLEET_DB_URL " +
+			"(+ LOOM_FLEET_DB_API_KEY), or LOOM_SANDBOX_FLEETDB_URL to a container-reachable URL")
 	}
 	cfg.WorkspaceID = resolveSandboxWorkspace()
 	if cfg.WorkspaceID == "" {
@@ -324,23 +223,33 @@ func applySandboxFleetConfig(cfg *SandboxOneshotConfig) error {
 	return nil
 }
 
-// resolveSandboxServerURL returns a FleetDB / loom-serve URL the sandbox
-// container can reach, or "" if none is configured. It prefers an explicit
-// LOOM_SANDBOX_SERVER_URL (the operator-supplied, container-reachable address);
-// otherwise it rewrites a localhost LOOM_SERVER_URL to the container's host
-// gateway so the in-container agent can reach the host's serve.
-func resolveSandboxServerURL() string {
-	if v := strings.TrimSpace(os.Getenv("LOOM_SANDBOX_SERVER_URL")); v != "" {
-		return v
+// provisionSandboxCredential mints a short-TTL, workspace-scoped `developer` API
+// key for a unique sandbox actor and records it on cfg, returning a revoke func.
+// It runs only when the host holds an admin fleet-db credential
+// (LOOM_FLEET_DB_API_KEY + LOOM_FLEET_DB_URL); otherwise it is a no-op, leaving
+// the sandbox to use the host config's ambient credential (e.g. a dev/auth-off
+// fleet-db). Provisioning errors are fatal: a configured admin path that fails
+// must not silently fall back to an over-privileged key.
+func provisionSandboxCredential(ctx context.Context, cfg *SandboxOneshotConfig) (func(), error) {
+	key, actor, revoke, err := sandbox.ProvisionCredential(ctx, cfg.WorkspaceID, cfg.AgentName)
+	if err != nil {
+		return nil, err
 	}
-	host := strings.TrimSpace(os.Getenv("LOOM_SERVER_URL"))
-	if host == "" {
-		return ""
+	if actor != "" { // a scoped key was minted (admin path); else ambient credential
+		cfg.FleetDBKey = key
+		cfg.FleetDBActor = actor
+		fmt.Printf("[sandbox] Provisioned scoped developer credential for %s\n", actor)
 	}
-	for _, lh := range []string{"localhost", "127.0.0.1", "0.0.0.0"} {
-		host = strings.ReplaceAll(host, lh, sandboxHostGateway)
-	}
-	return host
+	return revoke, nil
+}
+
+// resolveSandboxFleetDBURL returns a FleetDB URL the sandbox container can
+// reach, or "" if none is configured. It prefers an explicit
+// LOOM_SANDBOX_FLEETDB_URL (the operator-supplied, container-reachable address);
+// otherwise it rewrites a localhost LOOM_FLEET_DB_URL to the container's host
+// gateway so the in-container agent can reach the host's fleet-db.
+func resolveSandboxFleetDBURL() string {
+	return sandbox.FleetDBURL()
 }
 
 // resolveSandboxWorkspace returns the workspace ID to pass to the in-sandbox
@@ -389,66 +298,60 @@ func isSandboxProjectRoot(dir string) bool {
 	return false
 }
 
-// buildSandboxCreateArgs builds the `openshell sandbox create` arguments. The
-// loom binary and bootstrap are uploaded/exec'd separately afterwards (v0.0.53
-// has no --upload create flag), so create only provisions the sandbox.
-func buildSandboxCreateArgs(name string, cfg SandboxConfig) []string {
-	args := []string{"sandbox", "create", "--name", name}
-	if cfg.From != "" {
-		args = append(args, "--from", cfg.From)
-	}
-	for _, p := range cfg.Providers {
-		args = append(args, "--provider", p)
-	}
-	if len(cfg.Providers) > 0 {
-		// Non-interactive: auto-create missing providers from local credentials
-		// rather than prompting (which errors without a TTY).
-		args = append(args, "--auto-providers")
-	}
-	// Only pass --policy for custom networks; the default "open" relies on the
-	// sandbox's built-in policy.
-	if cfg.Network != "" && cfg.Network != "open" {
-		args = append(args, "--policy", cfg.Network)
-	}
-	// Trailing trivial command: create RUNS it and returns. A command-less create
-	// attaches an interactive SSH shell and blocks forever in a non-TTY context.
-	// Without --no-keep the sandbox persists for the upload + exec steps.
-	args = append(args, "--", "true")
-	return args
-}
-
 // buildOneshotCommand builds the shell bootstrap script run inside the sandbox:
 // clone the branch, run loom, then commit and push the code changes back.
-func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL, backendOverride string) string {
+func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL string, cfg sandbox.Config) string {
 	var sb strings.Builder
 	sb.WriteString("set -e\n")
-	sb.WriteString("chmod +x " + sandboxLoomPath + "\n")
+	if cfg.UploadsLoom() {
+		sb.WriteString("chmod +x " + sandbox.LoomPath + "\n")
+	}
 	// The OpenShell proxy intercepts HTTPS but its CA cert isn't in the container
 	// trust store, so disable git SSL verification for sandbox network operations.
 	sb.WriteString("export GIT_SSL_NO_VERIFY=1\n")
 	sb.WriteString(fmt.Sprintf("git clone --branch %s --single-branch %s /sandbox/repo\n",
-		shellQuote(branch), shellQuote(repoURL)))
+		sandbox.ShellQuote(branch), sandbox.ShellQuote(repoURL)))
 	sb.WriteString("cd /sandbox/repo\n")
 	sb.WriteString("git config user.name \"loom-sandbox\"\n")
 	sb.WriteString("git config user.email \"loom-sandbox@local\"\n")
 
-	// v5 keeps task state in FleetDB, not the repo. Point the in-container agent
-	// at the loom-serve HTTP API (LOOM_SERVER_URL auto-selects the api backend)
-	// so it can claim/update/close work; LOOM_WORKSPACE scopes it.
-	if oneshot.ServerURL != "" {
-		sb.WriteString("export LOOM_SERVER_URL=" + shellQuote(oneshot.ServerURL) + "\n")
+	// v5 keeps BOTH config and task state in FleetDB. Point the in-container
+	// agent at fleet-db directly (LOOM_SERVER_URL unset → the `fleetdb` issue
+	// backend) with its workspace-scoped credential, so it authenticates AND is
+	// authorized in exactly one workspace.
+	if oneshot.FleetDBURL != "" {
+		sb.WriteString("export LOOM_FLEET_DB_URL=" + sandbox.ShellQuote(oneshot.FleetDBURL) + "\n")
+	}
+	if oneshot.FleetDBKey != "" {
+		sb.WriteString("export LOOM_FLEET_DB_API_KEY=" + sandbox.ShellQuote(oneshot.FleetDBKey) + "\n")
+	}
+	if oneshot.FleetDBActor != "" {
+		sb.WriteString("export LOOM_FLEET_DB_ACTOR=" + sandbox.ShellQuote(oneshot.FleetDBActor) + "\n")
 	}
 	if oneshot.WorkspaceID != "" {
-		sb.WriteString("export LOOM_WORKSPACE=" + shellQuote(oneshot.WorkspaceID) + "\n")
+		sb.WriteString("export LOOM_WORKSPACE=" + sandbox.ShellQuote(oneshot.WorkspaceID) + "\n")
+	}
+	// The in-container target is the absolute clone path (below), so the agent
+	// name would otherwise degrade to filepath.Base("/sandbox/repo") = "repo".
+	// Carry the real name via LOOM_AGENT_NAME (used for locks, prompts, sessions,
+	// and event attribution); it sits below LOOM_FLEET_DB_ACTOR in actor
+	// precedence, so it never overrides the scoped credential's identity.
+	if oneshot.AgentName != "" {
+		sb.WriteString("export LOOM_AGENT_NAME=" + sandbox.ShellQuote(oneshot.AgentName) + "\n")
 	}
 
-	loomCmd := fmt.Sprintf("%s %s %s", sandboxLoomPath,
-		shellQuote(oneshot.AgentType), shellQuote("worktrees/"+oneshot.AgentName))
-	if backendOverride != "" {
-		loomCmd += " --backend " + shellQuote(backendOverride)
+	// Run loom against the absolute clone path, NOT a relative "worktrees/<name>":
+	// a relative target forces host-side workspace resolution (GET
+	// /api/v1/admin/workspaces), which the scoped developer key is forbidden to
+	// call (403). The absolute-path branch of ResolveAgentTarget short-circuits
+	// before any FleetDB call and uses the repo actually cloned into the sandbox.
+	loomCmd := fmt.Sprintf("%s %s %s", cfg.LoomCmd(),
+		sandbox.ShellQuote(oneshot.AgentType), sandbox.ShellQuote("/sandbox/repo"))
+	if cfg.Backend != "" {
+		loomCmd += " --backend " + sandbox.ShellQuote(cfg.Backend)
 	}
 	if oneshot.ParentID != "" {
-		loomCmd += " --parent " + shellQuote(oneshot.ParentID)
+		loomCmd += " --parent " + sandbox.ShellQuote(oneshot.ParentID)
 	}
 	sb.WriteString(loomCmd + "\n")
 
@@ -456,30 +359,7 @@ func buildOneshotCommand(branch string, oneshot SandboxOneshotConfig, repoURL, b
 	// issue-tracker sync step here; only code changes travel back via git.
 	sb.WriteString("git add -A\n")
 	sb.WriteString(fmt.Sprintf("git diff --cached --quiet || git commit -m %s\n",
-		shellQuote(fmt.Sprintf("sandbox agent work [%s]", branch))))
-	sb.WriteString(fmt.Sprintf("git push origin %s\n", shellQuote(branch)))
+		sandbox.ShellQuote(fmt.Sprintf("sandbox agent work [%s]", branch))))
+	sb.WriteString(fmt.Sprintf("git push origin %s\n", sandbox.ShellQuote(branch)))
 	return sb.String()
-}
-
-// openshellBinary returns the openshell CLI binary name.
-func openshellBinary() string { return "openshell" }
-
-// deleteSandbox runs `openshell sandbox delete <name>` with a 30s timeout.
-// Best-effort: errors are logged, not returned.
-func deleteSandbox(name string) {
-	if name == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, openshellBinary(), "sandbox", "delete", name) //nolint:gosec // name is internally generated
-	if out, err := cmd.CombinedOutput(); err != nil {
-		slog.Warn("sandbox delete failed", "name", name, "output", string(out), "err", err)
-	}
-}
-
-// shellQuote wraps s in single quotes for safe use inside a /bin/sh -c string,
-// escaping any embedded single quotes.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

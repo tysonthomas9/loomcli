@@ -523,6 +523,7 @@ type Agent struct {
 	MaxConcurrency int               `json:"max_concurrency,omitempty"`
 	BudgetPolicy   string            `json:"budget_policy,omitempty"`
 	DesiredState   AgentDesiredState `json:"desired_state,omitempty"`
+	Execution      string            `json:"execution,omitempty"` // "" (host) or "sandbox" (run under OpenShell)
 	// Hooks holds supervisor-owned post-run pipelines. Nil or empty preserves
 	// the pre-hook behavior: the agent's own prompt does its bookkeeping.
 	Hooks     *AgentHooks `json:"hooks,omitempty"`

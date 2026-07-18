@@ -17,6 +17,17 @@ type ResolvedTarget struct {
 	Repo      string // repo name (empty when running at workspace root)
 }
 
+// absTargetAgentName returns the agent name for an absolute-path target. It
+// prefers LOOM_AGENT_NAME (set by the sandbox bootstrap, where the target is the
+// clone path /sandbox/repo and filepath.Base would collapse every agent to
+// "repo"), falling back to the path's base name for ordinary local runs.
+func absTargetAgentName(path string) string {
+	if v := os.Getenv("LOOM_AGENT_NAME"); v != "" {
+		return v
+	}
+	return filepath.Base(path)
+}
+
 // ResolveAgentTarget resolves a CLI argument (workspace name, repo name, or
 // worktree name) into the working directory and agent name. Claude runs from
 // the workspace root so loom data commands resolve the active workspace.
@@ -29,7 +40,7 @@ func ResolveAgentTarget(name, repo string) (ResolvedTarget, error) {
 		}
 		return ResolvedTarget{
 			WorkDir:   name,
-			AgentName: filepath.Base(name),
+			AgentName: absTargetAgentName(name),
 		}, nil
 	}
 
@@ -59,13 +70,13 @@ func resolveWorkspaceTarget(resolver *cli.Resolver, name, repo string) (Resolved
 		}
 		return ResolvedTarget{
 			WorkDir:   name,
-			AgentName: filepath.Base(name),
+			AgentName: absTargetAgentName(name),
 		}, nil
 	}
 
 	wsConfig, ok := resolver.Config.Workspaces[resolver.Workspace]
 	if !ok || wsConfig.Path == "" {
-		return ResolvedTarget{}, fmt.Errorf("workspace %q has no path configured", resolver.Workspace)
+		return ResolvedTarget{}, fmt.Errorf("workspace %q has no local path configured; use an absolute path such as /sandbox/repo", resolver.Workspace)
 	}
 
 	// Per-repo worktree routing: create/find worktree under repo directory

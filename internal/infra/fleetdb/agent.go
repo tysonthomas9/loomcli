@@ -34,6 +34,7 @@ type agentWire struct {
 	MaxConcurrency   int                `json:"max_concurrency,omitempty"`
 	BudgetPolicy     string             `json:"budget_policy,omitempty"`
 	DesiredState     string             `json:"desired_state,omitempty"`
+	Execution        string             `json:"execution,omitempty"`
 	Hooks            *domain.AgentHooks `json:"hooks,omitempty"`
 	CreatedAt        time.Time          `json:"created_at"`
 	UpdatedAt        time.Time          `json:"updated_at"`
@@ -66,6 +67,7 @@ func (a agentWire) toDomain() *domain.Agent {
 		MaxConcurrency:   a.MaxConcurrency,
 		BudgetPolicy:     a.BudgetPolicy,
 		DesiredState:     domain.AgentDesiredState(a.DesiredState),
+		Execution:        a.Execution,
 		Hooks:            a.Hooks.Clone(),
 		CreatedAt:        a.CreatedAt,
 		UpdatedAt:        a.UpdatedAt,
@@ -103,6 +105,7 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		MaxConcurrency   int                `json:"max_concurrency,omitempty"`
 		BudgetPolicy     string             `json:"budget_policy,omitempty"`
 		DesiredState     string             `json:"desired_state,omitempty"`
+		Execution        string             `json:"execution,omitempty"`
 		Hooks            *domain.AgentHooks `json:"hooks,omitempty"`
 	}{
 		Name:             in.Name,
@@ -119,6 +122,7 @@ func (s *agentStore) Create(ctx context.Context, in store.AgentCreate) (*domain.
 		MaxConcurrency:   in.MaxConcurrency,
 		BudgetPolicy:     in.BudgetPolicy,
 		DesiredState:     string(in.DesiredState),
+		Execution:        in.Execution,
 		Hooks:            in.Hooks.Clone(),
 	}
 	var resp agentWire
@@ -169,6 +173,7 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 		MaxConcurrency   *int      `json:"max_concurrency,omitempty"`
 		BudgetPolicy     *string   `json:"budget_policy,omitempty"`
 		DesiredState     *string   `json:"desired_state,omitempty"`
+		Execution        *string   `json:"execution,omitempty"`
 		// A non-nil empty object is the explicit clear marker; omitempty only
 		// drops a nil pointer, so {} still reaches fleet-db.
 		Hooks *domain.AgentHooks `json:"hooks,omitempty"`
@@ -184,6 +189,7 @@ func (s *agentStore) Update(ctx context.Context, ws, name string, patch store.Ag
 		TaskFilter:       patch.TaskFilter,
 		MaxConcurrency:   patch.MaxConcurrency,
 		BudgetPolicy:     patch.BudgetPolicy,
+		Execution:        patch.Execution,
 		Hooks:            patch.Hooks.Clone(),
 	}
 	if patch.State != nil {

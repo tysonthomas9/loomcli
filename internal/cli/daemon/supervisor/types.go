@@ -47,6 +47,9 @@ type AgentProcess struct {
 	InputWaitPending       int               // interactive harness prompts currently awaiting an answer; a count (not a flag) so overlapping prompts nest — see input_wait.go
 	InputWaitSince         time.Time         // when InputWaitPending last rose from zero; anchors the bound that stops a suspension from outliving its cause
 
+	SandboxName   string // OpenShell sandbox name for execution:sandbox agents (empty otherwise); Mu-protected
+	sandboxRevoke func() // revokes this sandbox's scoped credential at cleanup (nil if none); Mu-protected
+
 	RestartCount   int       // consecutive restart attempts
 	LastStart      time.Time // when subprocess was last spawned
 	LastExit       time.Time // when subprocess last exited
@@ -137,6 +140,15 @@ func (ap *AgentProcess) ResolveRemoteBranch() string {
 		return remote + "/" + branch
 	}
 	return "origin/main"
+}
+
+// IsSandbox reports whether this agent runs inside an OpenShell sandbox
+// (execution: sandbox). Sandbox agents change spawn, cleanup, and — critically —
+// liveness handling: the host cannot reach a containerized agent's IPC socket,
+// ownership lease, or transcript, so those watchdogs must be skipped for them
+// (else a healthy sandboxed agent is reaped — the "watchdog FATAL" failure class).
+func (ap *AgentProcess) IsSandbox() bool {
+	return ap.Entry.Execution == cfgpkg.ExecutionSandbox
 }
 
 // SupervisedAgentStatus is a snapshot of a supervised agent's state for external inspection.
