@@ -43,13 +43,31 @@ const wtermState = vi.hoisted(() => {
   return {
     stub,
     onReadyFiredCount: 0,
+    lastProps: null as Record<string, unknown> | null,
   };
 });
+
+const resizeObserverState = vi.hoisted(() => ({
+  callbacks: [] as ResizeObserverCallback[],
+}));
+
+class MockResizeObserver implements ResizeObserver {
+  constructor(callback: ResizeObserverCallback) {
+    resizeObserverState.callbacks.push(callback);
+  }
+
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+vi.stubGlobal("ResizeObserver", MockResizeObserver);
 
 const connectionState = vi.hoisted(() => ({
   writeCallbacks: [] as Array<(data: string | Uint8Array) => void>,
   cleanupCount: 0,
   xtermFitCountsAtConnect: [] as number[],
+  terminalSizesAtConnect: [] as Array<{ cols: number; rows: number }>,
 }));
 
 const xtermState = vi.hoisted(() => {
@@ -101,6 +119,7 @@ vi.mock("@wterm/react", async () => {
 
   const Terminal = React.forwardRef<unknown, TerminalProps>(
     function Terminal(props, ref) {
+      wtermState.lastProps = props as unknown as Record<string, unknown>;
       React.useImperativeHandle(
         ref,
         () => ({
@@ -151,9 +170,16 @@ vi.mock("../terminalConnection", () => ({
       write: (data: string | Uint8Array) => void,
       _wsRef: { current: WebSocket | null },
       setConnState: (s: string) => void,
+      _onConnected: () => void,
+      _onDisconnected: () => void,
+      _onOutput: () => void,
+      _onBackendCrash: (reason: string) => void,
+      _onSessionKilled: () => void,
+      terminalSize: { cols: number; rows: number },
     ): (() => void) => {
       connectionState.writeCallbacks.push(write);
       connectionState.xtermFitCountsAtConnect.push(xtermState.fitCount);
+      connectionState.terminalSizesAtConnect.push(terminalSize);
       setConnState("connecting");
       const cleanup = () => {
         connectionState.cleanupCount += 1;
@@ -202,11 +228,20 @@ function latestWriteCallback(): (data: string | Uint8Array) => void {
 describe("TerminalInstance", () => {
   beforeEach(() => {
     wtermState.stub.write = vi.fn();
+    wtermState.stub.resize = vi.fn((cols: number, rows: number) => {
+      wtermState.stub.cols = cols;
+      wtermState.stub.rows = rows;
+    });
+    wtermState.stub.cols = 80;
+    wtermState.stub.rows = 24;
     wtermState.stub.element = document.createElement("div");
     wtermState.onReadyFiredCount = 0;
+    wtermState.lastProps = null;
+    resizeObserverState.callbacks.length = 0;
     connectionState.writeCallbacks.length = 0;
     connectionState.cleanupCount = 0;
     connectionState.xtermFitCountsAtConnect.length = 0;
+    connectionState.terminalSizesAtConnect.length = 0;
     xtermState.fitCount = 0;
     xtermState.onReady = null;
   });
@@ -288,6 +323,109 @@ describe("TerminalInstance", () => {
       expect(writeMock).toHaveBeenCalledWith("strict-mode-bytes");
 
       unmount();
+    });
+  });
+
+  describe("Loom-owned wterm layout", () => {
+    it("disables wterm autoResize so hidden routes cannot collapse the grid to 1x1", async () => {
+      render(<TerminalInstance sessionName="alpha" isActive />);
+      await flushPendingWork();
+
+      expect(wtermState.lastProps?.autoResize).toBe(false);
+      expect(wtermState.lastProps?.cols).toBe(80);
+      expect(wtermState.lastProps?.rows).toBe(24);
+      expect(wtermState.lastProps?.style).toEqual({ height: "100%" });
+    });
+
+    it("ignores zero-size observations and resizes from a visible pane", async () => {
+      const element = document.createElement("div");
+      const grid = document.createElement("div");
+      grid.className = "term-grid";
+      element.appendChild(grid);
+      wtermState.stub.element = element;
+
+      const rectSpy = vi
+        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockReturnValue({
+          width: 10,
+          height: 20,
+          top: 0,
+          left: 0,
+          right: 10,
+          bottom: 20,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect);
+
+      const resizeMock = vi.fn((cols: number, rows: number) => {
+        wtermState.stub.cols = cols;
+        wtermState.stub.rows = rows;
+      });
+      wtermState.stub.resize = resizeMock;
+
+      const { unmount } = render(
+        <TerminalInstance sessionName="alpha" isActive />,
+      );
+      await flushPendingWork();
+      resizeMock.mockClear();
+
+      const callback = resizeObserverState.callbacks.at(-1);
+      expect(callback).toBeDefined();
+
+      act(() => {
+        callback?.(
+          [{ contentRect: { width: 0, height: 0 } } as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+      await flushPendingWork();
+      expect(resizeMock).not.toHaveBeenCalled();
+
+      Object.defineProperty(element, "clientWidth", {
+        configurable: true,
+        value: 800,
+      });
+      Object.defineProperty(element, "clientHeight", {
+        configurable: true,
+        value: 400,
+      });
+      act(() => {
+        callback?.(
+          [
+            {
+              contentRect: { width: 800, height: 400 },
+            } as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+      });
+      await waitFor(() => {
+        expect(resizeMock).toHaveBeenCalledWith(80, 20);
+      });
+      rectSpy.mockRestore();
+      unmount();
+    });
+
+    it("does not persist an inactive renderer's sentinel resize", async () => {
+      const { rerender } = render(
+        <TerminalInstance sessionName="alpha" isActive={false} />,
+      );
+      await flushPendingWork();
+      expect(connectionState.terminalSizesAtConnect).toHaveLength(0);
+
+      const onResize = wtermState.lastProps?.onResize as
+        | ((cols: number, rows: number) => void)
+        | undefined;
+      act(() => onResize?.(1, 1));
+
+      rerender(<TerminalInstance sessionName="alpha" isActive />);
+      await flushPendingWork();
+
+      expect(connectionState.terminalSizesAtConnect.at(-1)).toEqual({
+        cols: 80,
+        rows: 24,
+      });
     });
   });
 

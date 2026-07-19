@@ -777,7 +777,12 @@ export function TerminalView({
       pane: "left" | "right" | null,
       isActiveOverride?: boolean,
     ) => {
-      const paneIsActive = isActiveOverride ?? tab.id === paneActiveTabId;
+      // A selected tab is only layout-active while the Terminal route itself
+      // is visible. Propagating route activity keeps renderer observers and
+      // PTY resizing suspended while App preserves TerminalView under
+      // display:none for session continuity.
+      const paneIsActive =
+        isActive && (isActiveOverride ?? tab.id === paneActiveTabId);
       const meta = metaBySession.get(tab.sessionName);
       // Undefined while metadata is still loading — preserves connect-on-
       // mount. Only concrete `false` gates auto-attach.
@@ -828,6 +833,7 @@ export function TerminalView({
       setFocusedLeft,
       setFocusedRight,
       paneActiveTabId,
+      isActive,
     ],
   );
 
