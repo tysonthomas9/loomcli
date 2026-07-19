@@ -2,6 +2,7 @@ package backends
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -71,7 +72,7 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 	}{
 		"gemini":   {[]string{"--approval-mode=yolo"}, "gemini"},
 		"cursor":   {[]string{"--force"}, "cursor-agent"},
-		"opencode": {[]string{"run", "--dir", "/repo"}, "opencode"},
+		"opencode": {[]string{"run", "--interactive", "--auto", "--dir", "/repo"}, "opencode"},
 	}
 	for backend, want := range cases {
 		captured := installFakeHarnessLead(t)
@@ -85,9 +86,8 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 		if captured.Backend != backend || captured.BinaryPath != want.binary {
 			t.Fatalf("%s: captured config = %+v", backend, captured)
 		}
-		got := strings.Join(captured.Args, " ")
-		if !strings.HasPrefix(got, strings.Join(want.args, " ")) {
-			t.Fatalf("%s: captured args = %q, want prefix %q", backend, got, strings.Join(want.args, " "))
+		if !slices.Equal(captured.Args, want.args) {
+			t.Fatalf("%s: captured args = %q, want %q", backend, captured.Args, want.args)
 		}
 		for _, kv := range captured.Env {
 			if strings.HasPrefix(kv, "CLAUDE_CODE_NO_FLICKER=") {

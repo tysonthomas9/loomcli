@@ -56,7 +56,7 @@ func TestBuildInteractiveCmd_PromptInArgs(t *testing.T) {
 			name:     "opencode",
 			buildFn:  buildOpenCodeInteractiveCmd,
 			prompt:   "do something",
-			wantArgs: []string{"opencode", "run", "--dir", "/tmp/work", "do something"},
+			wantArgs: []string{"opencode", "run", "--interactive", "--auto", "--dir", "/tmp/work", "do something"},
 		},
 	}
 
@@ -118,7 +118,7 @@ func TestBuildInteractiveCmd_BinaryAndFlags(t *testing.T) {
 			name:       "opencode",
 			buildFn:    buildOpenCodeInteractiveCmd,
 			wantBinary: "opencode",
-			wantFlags:  []string{"run", "--dir"},
+			wantFlags:  []string{"run", "--interactive", "--auto", "--dir"},
 		},
 	}
 
