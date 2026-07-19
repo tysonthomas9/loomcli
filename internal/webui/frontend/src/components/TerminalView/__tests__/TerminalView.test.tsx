@@ -626,6 +626,51 @@ describe("TerminalView", () => {
       );
       expect(mockMetadataHook.createTab).toHaveBeenCalledTimes(1);
     });
+
+    it("propagates route activity to the selected terminal pane", async () => {
+      setMetadata([
+        {
+          session_name: "session-1",
+          label: "Session 1",
+          pty_alive: true,
+        },
+      ]);
+      const { rerender } = render(<TerminalView isActive />);
+
+      await waitFor(() => {
+        const calls = vi.mocked(TerminalInstance).mock.calls;
+        expect(
+          calls.some(
+            ([props]) =>
+              props?.sessionName === "session-1" && props.isActive === true,
+          ),
+        ).toBe(true);
+      });
+
+      vi.mocked(TerminalInstance).mockClear();
+      rerender(<TerminalView isActive={false} />);
+      await waitFor(() => {
+        const calls = vi.mocked(TerminalInstance).mock.calls;
+        expect(
+          calls.some(
+            ([props]) =>
+              props?.sessionName === "session-1" && props.isActive === false,
+          ),
+        ).toBe(true);
+      });
+
+      vi.mocked(TerminalInstance).mockClear();
+      rerender(<TerminalView isActive />);
+      await waitFor(() => {
+        const calls = vi.mocked(TerminalInstance).mock.calls;
+        expect(
+          calls.some(
+            ([props]) =>
+              props?.sessionName === "session-1" && props.isActive === true,
+          ),
+        ).toBe(true);
+      });
+    });
   });
 
   // ── Tab sort order ─────────────────────────────────────────────────────────
