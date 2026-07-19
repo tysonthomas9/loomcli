@@ -148,6 +148,7 @@ func TestHarnessDeliveryWaitsForInputRequestThenDrains(t *testing.T) {
 	createHarnessLeadSession(t, st)
 	setHarnessRuntimeMetadata(t, st, RuntimeStatusWaitingUserInput)
 	fake := newFakeHarnessConversation()
+	fake.setInputPending(true)
 	handle := installFakeHarnessConversation(t, "lead-session", fake)
 	handle.observeConversationEvent(chat.ConversationEvent{
 		Type:  chat.EventInputRequest,
@@ -176,6 +177,7 @@ func TestHarnessDeliveryWaitsForInputRequestThenDrains(t *testing.T) {
 		Type:  chat.EventInputResolved,
 		Input: &chat.InputRequest{ID: "trust-1"},
 	})
+	fake.setInputPending(false)
 	result, err = DeliverPendingLeadMessages(ctx, st, "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverPendingLeadMessages() error = %v", err)
@@ -477,6 +479,7 @@ type fakeHarnessConversation struct {
 	resizes               [][2]uint16
 	resizeErrs            []error
 	snapshot              wrapper.Snapshot
+	inputPending          bool
 	sendErr               error
 	sendBlocksUntilCancel bool
 	harnessSessionID      string
@@ -527,6 +530,18 @@ func (f *fakeHarnessConversation) enqueueResizeErrors(errs ...error) {
 
 func (f *fakeHarnessConversation) AcquireControl(context.Context) (func(), error) {
 	return func() {}, nil
+}
+
+func (f *fakeHarnessConversation) InputPending(context.Context) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inputPending, nil
+}
+
+func (f *fakeHarnessConversation) setInputPending(pending bool) {
+	f.mu.Lock()
+	f.inputPending = pending
+	f.mu.Unlock()
 }
 
 func (f *fakeHarnessConversation) Send(ctx context.Context, text string) (string, error) {

@@ -80,6 +80,16 @@ func (h *leadConversationHandle) markTurnDone() {
 	h.mu.Unlock()
 }
 
+// Turn activity must NOT clear inputPending. harness-wrapper treats
+// interactive input prompts as independent of turn state (see pkg/chat
+// conversation.go handleTurnsEvent: "Interactive input prompts are independent
+// of turn state"), so a turn Pending/Streaming/Complete event can fire while a
+// trust/permission dialog is genuinely open. Clearing inputPending on a turn
+// event would drop that guard and let a queued assignment be pasted into the
+// open dialog. Event state is refreshed authoritatively under the conversation
+// control token immediately before staging, so dropped request/resolve events
+// cannot make this hint unsafe or wedge delivery permanently.
+
 // observeConversationEvent updates delivery bookkeeping from the chat event
 // stream. Input request lifecycle events do not describe turn progress, but
 // they must pause raw PTY staging so a queued assignment cannot be pasted into
@@ -127,15 +137,43 @@ func (h *leadConversationHandle) hasPendingInput() bool {
 	return h.inputPending
 }
 
+// refreshInputPending replaces the lossy event-stream hint with authoritative
+// chat state. The caller must hold the conversation control token; production's
+// InputPending implementation uses Conversation.Answer's request-ID validation
+// without writing any bytes to the PTY.
+func (h *leadConversationHandle) refreshInputPending(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.refreshInputPendingLocked(ctx)
+}
+
+func (h *leadConversationHandle) refreshInputPendingLocked(ctx context.Context) error {
+	pending, err := h.conv.InputPending(ctx)
+	if err != nil {
+		return err
+	}
+	h.inputPending = pending
+	if !pending {
+		h.inputRequestID = ""
+	}
+	if pending {
+		return chat.ErrInputPending
+	}
+	return nil
+}
+
 // writeStdinUnlessInputPending serializes a raw PTY write with input-request
 // event observation. Without this critical section a dialog could arrive
 // after delivery's pending-input check but before the assignment bytes were
 // staged, causing the assignment to be pasted into the dialog.
-func (h *leadConversationHandle) writeStdinUnlessInputPending(p []byte) error {
+func (h *leadConversationHandle) writeStdinUnlessInputPending(ctx context.Context, p []byte) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.inputPending {
-		return chat.ErrInputPending
+	// Probe again in the same critical section as the raw write. The earlier
+	// refresh in sendHarnessTurn handles dropped events; this second check
+	// narrows the request-arrival race before bytes reach the PTY.
+	if err := h.refreshInputPendingLocked(ctx); err != nil {
+		return err
 	}
 	_, err := h.conv.WriteStdin(p)
 	return err
@@ -304,9 +342,6 @@ func (d *harnessTurnDeliverer) turnBlockReason(handle *leadConversationHandle, s
 	if status == RuntimeStatusFailed {
 		return "lead harness is failed"
 	}
-	if handle.hasPendingInput() {
-		return "lead harness is waiting for interactive input"
-	}
 	if handle.turnInFlight() {
 		return "lead harness assistant turn is in flight"
 	}
@@ -346,17 +381,18 @@ var harnessSendTimeout = 10 * time.Second
 // against. On timeout the already-staged text is remembered on the handle so
 // the retry submits it without typing a duplicate copy into the composer.
 func sendHarnessTurn(ctx context.Context, handle *leadConversationHandle, message string) error {
-	// Re-check after acquiring the control token. An input request may have
-	// arrived after turnBlockReason ran but before delivery gained control.
-	if handle.hasPendingInput() {
-		return chat.ErrInputPending
+	// Refresh from authoritative chat state after acquiring the control token.
+	// Conversation.Events is intentionally lossy, so its request/resolved hints
+	// cannot be the final safety decision before a raw PTY write.
+	if err := handle.refreshInputPending(ctx); err != nil {
+		return err
 	}
 	if handle.staged() != message {
 		payload := message
 		if strings.ContainsAny(message, "\r\n") {
 			payload = "\x1b[200~" + message + "\x1b[201~"
 		}
-		if err := handle.writeStdinUnlessInputPending([]byte(payload)); err != nil {
+		if err := handle.writeStdinUnlessInputPending(ctx, []byte(payload)); err != nil {
 			return err
 		}
 		handle.setStaged(message)
@@ -383,7 +419,7 @@ func sendHarnessTurn(ctx context.Context, handle *leadConversationHandle, messag
 		// unmodified Enter in claude's enhanced-keyboard mode, which is
 		// always active under --dangerously-skip-permissions (the only mode
 		// loom launches harness leads in).
-		if werr := handle.writeStdinUnlessInputPending([]byte(harnessEnterKeystroke)); werr != nil {
+		if werr := handle.writeStdinUnlessInputPending(ctx, []byte(harnessEnterKeystroke)); werr != nil {
 			return werr
 		}
 	}

@@ -459,12 +459,9 @@ export const TerminalInstance = forwardRef<
     // applies to wtermInstanceRef: cleanup nulled it, but onReady won't
     // fire to re-set it, so write() would silently drop every replayed
     // byte. Restore from the still-alive TerminalHandle.
-    if (
-      !useXTerm &&
-      isActiveRef.current &&
-      wtermReadyRef.current &&
-      (ptyAlive !== false || autoStartStaleSession)
-    ) {
+    const canReconnect =
+      isActiveRef.current && (ptyAlive !== false || autoStartStaleSession);
+    if (canReconnect && !useXTerm && wtermReadyRef.current) {
       if (wtermInstanceRef.current == null) {
         const instance = wtermRef.current?.instance as WTerm | undefined;
         if (instance) {
@@ -472,11 +469,21 @@ export const TerminalInstance = forwardRef<
         }
       }
       doConnectRef.current?.();
+    } else if (canReconnect && useXTerm && xtermInstanceRef.current != null) {
+      // The lazy xterm renderer is not remounted on a ptyAlive-driven re-run,
+      // so its onReady won't fire again to repopulate the ref or reconnect.
+      // Its handle is still alive (handleXTermDispose owns disposal), so
+      // re-kick the connection the cleanup below tore down — the same recovery
+      // the wterm branch already had.
+      doConnectRef.current?.();
     }
     return () => {
       beingKilledRef.current = true;
       wtermInstanceRef.current = null;
-      xtermInstanceRef.current = null;
+      // Do NOT null xtermInstanceRef here: the XTermRenderer child owns its
+      // handle and nulls it via handleXTermDispose on real disposal. Nulling it
+      // on a mere effect re-run (e.g. a ptyAlive transition) stranded a Claude
+      // tab with no path back — no onReady to repopulate the ref, no reconnect.
       pendingRendererWritesRef.current = [];
       clearReconnectTimers();
       wsCleanupRef.current?.();

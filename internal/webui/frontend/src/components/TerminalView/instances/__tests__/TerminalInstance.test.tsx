@@ -364,4 +364,82 @@ describe("TerminalInstance", () => {
       rectSpy.mockRestore();
     });
   });
+
+  // The xterm analog of the PR #54 regression above. The
+  // lifecycle effect's cleanup nulls xtermInstanceRef and closes the socket for
+  // every renderer, but its reconnect block is gated on `!useXTerm`. So when a
+  // server-driven `ptyAlive` transition re-runs the effect, a Claude/xterm tab
+  // tears down and never reconnects — frozen with no overlay.
+  describe("xterm reconnect after lifecycle re-run", () => {
+    it("reconnects a Claude xterm tab after a ptyAlive transition tears down its socket", async () => {
+      // Active Claude tab: xterm mounts lazily; firing its onReady opens the
+      // first WebSocket (same path as "waits for Claude xterm to fit").
+      const { rerender, unmount } = render(
+        <TerminalInstance
+          sessionName="claude-alpha"
+          backendName="claude"
+          isActive
+        />,
+      );
+      await flushPendingWork();
+      await waitFor(() => expect(xtermState.onReady).not.toBeNull());
+      act(() => {
+        xtermState.onReady?.(xtermState.handle);
+      });
+      await waitFor(() => {
+        expect(connectionState.writeCallbacks).toHaveLength(1);
+      });
+
+      // Server metadata resolves: pty_alive undefined -> true. ptyAlive is in
+      // the lifecycle effect's deps, so it re-runs and its cleanup closes the
+      // socket. The wterm path re-kicks doConnect here (see PR #54 regression
+      // above); a healthy xterm tab must recover the same way.
+      rerender(
+        <TerminalInstance
+          sessionName="claude-alpha"
+          backendName="claude"
+          isActive
+          ptyAlive
+        />,
+      );
+      await flushPendingWork();
+
+      // The teardown really ran (the socket was closed)...
+      expect(connectionState.cleanupCount).toBeGreaterThanOrEqual(1);
+      // ...so the tab must reopen a connection. Without a fix, xtermInstanceRef
+      // was nulled and the reconnect block is !useXTerm-gated, so no new
+      // WebSocket opens and the terminal freezes at "connected".
+      expect(connectionState.writeCallbacks.length).toBeGreaterThanOrEqual(2);
+
+      unmount();
+    });
+
+    // Control: the identical ptyAlive transition on a wterm tab DOES reconnect.
+    // Proves the failure above is xterm-specific (the !useXTerm-gated block),
+    // not a general property of ptyAlive transitions or a harness artifact.
+    it("control: a wterm tab reconnects after the same ptyAlive transition", async () => {
+      const { rerender, unmount } = render(
+        <TerminalInstance sessionName="wterm-alpha" isActive />,
+      );
+      await flushPendingWork();
+      expect(wtermState.onReadyFiredCount).toBe(1);
+      await waitFor(() => {
+        expect(connectionState.writeCallbacks.length).toBeGreaterThanOrEqual(1);
+      });
+      const before = connectionState.writeCallbacks.length;
+
+      rerender(
+        <TerminalInstance sessionName="wterm-alpha" isActive ptyAlive />,
+      );
+      await flushPendingWork();
+
+      expect(connectionState.cleanupCount).toBeGreaterThanOrEqual(1);
+      // onReady never re-fires (WASM cache), yet the wterm path restores the
+      // ref and reconnects — the recovery the xterm path is missing.
+      expect(wtermState.onReadyFiredCount).toBe(1);
+      expect(connectionState.writeCallbacks.length).toBeGreaterThan(before);
+
+      unmount();
+    });
+  });
 });
