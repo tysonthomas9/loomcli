@@ -72,7 +72,7 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 	}{
 		"gemini":   {[]string{"--approval-mode=yolo"}, "gemini"},
 		"cursor":   {[]string{"--force"}, "cursor-agent"},
-		"opencode": {[]string{"run", "--interactive", "--auto", "--dir", "/repo"}, "opencode"},
+		"opencode": {nil, "opencode"},
 	}
 	for backend, want := range cases {
 		captured := installFakeHarnessLead(t)
@@ -88,6 +88,9 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 		}
 		if !slices.Equal(captured.Args, want.args) {
 			t.Fatalf("%s: captured args = %q, want %q", backend, captured.Args, want.args)
+		}
+		if backend == "opencode" && captured.PromptFlag != "--prompt" {
+			t.Fatalf("opencode: PromptFlag = %q, want --prompt", captured.PromptFlag)
 		}
 		for _, kv := range captured.Env {
 			if strings.HasPrefix(kv, "CLAUDE_CODE_NO_FLICKER=") {

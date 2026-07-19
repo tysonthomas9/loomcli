@@ -38,8 +38,7 @@ var openCodeNonInteractiveInvoker func(workDir, prompt, agentName string, shutdo
 // buildOpenCodeInteractiveCmd constructs the exec.Cmd for interactive OpenCode invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildOpenCodeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	args := openCodeInteractiveArgs(workDir)
-	args = append(args, prompt)
+	args := append(openCodeInteractiveArgs(), "--prompt", prompt)
 	cmd := exec.Command("opencode", args...)
 	cmd.Dir = workDir
 	cmd.Env = buildBackendEnv(workDir, agentName)
@@ -51,9 +50,9 @@ func buildOpenCodeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 
 // openCodeInteractiveArgs is shared by plain and controlled interactive
 // launches so the two paths cannot drift onto different OpenCode CLI flags.
-func openCodeInteractiveArgs(workDir string) []string {
-	args := []string{"run", "--interactive", "--auto", "--dir", workDir}
-	return append(args, openCodeModelArgs()...)
+// The interactive command is OpenCode's root TUI; cmd.Dir supplies the project.
+func openCodeInteractiveArgs() []string {
+	return openCodeModelArgs()
 }
 
 func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {

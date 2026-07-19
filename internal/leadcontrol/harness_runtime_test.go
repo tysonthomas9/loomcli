@@ -18,7 +18,7 @@ func TestHarnessNameForBackend(t *testing.T) {
 		"Claude":   HarnessNameClaudeCode,
 		"codex":    HarnessNameCodex,
 		"gemini":   HarnessNameGemini,
-		"opencode": HarnessNameGeneric,
+		"opencode": HarnessNameOpenCode,
 		"cursor":   HarnessNameGeneric,
 		"":         HarnessNameGeneric,
 	}
@@ -26,6 +26,39 @@ func TestHarnessNameForBackend(t *testing.T) {
 		if got := HarnessNameForBackend(backend); got != want {
 			t.Errorf("HarnessNameForBackend(%q) = %q, want %q", backend, got, want)
 		}
+	}
+}
+
+func TestHarnessLeadArgsPromptPlacement(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  HarnessLeadRuntimeConfig
+		want []string
+	}{
+		{
+			name: "positional prompt",
+			cfg:  HarnessLeadRuntimeConfig{Args: []string{"--force"}, Prompt: "lead prompt"},
+			want: []string{"--force", "lead prompt"},
+		},
+		{
+			name: "flagged prompt",
+			cfg:  HarnessLeadRuntimeConfig{Args: []string{"--model", "provider/model"}, PromptFlag: "--prompt", Prompt: "lead prompt"},
+			want: []string{"--model", "provider/model", "--prompt", "lead prompt"},
+		},
+		{
+			name: "empty prompt omits flag",
+			cfg:  HarnessLeadRuntimeConfig{Args: []string{"--model", "provider/model"}, PromptFlag: "--prompt"},
+			want: []string{"--model", "provider/model"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := harnessLeadArgs(tc.cfg)
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("harnessLeadArgs() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
