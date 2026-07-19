@@ -182,7 +182,64 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
   and documents the gap in a comment; when the section is re-mounted, promote that step back
   to a UI flow.
 
+### 1.13 Per-issue `design_format` — loom↔fleet-db contract drift + whole-PATCH amplification
+- **Severity:** MED (drift latent; amplification real) · **Fix:** fleet-db (Part B) + loom (tolerant PATCH) · **Status:** OPEN (found 2026-07-18 by the settings-design-format suite)
+- fleet-db main has `design_format` **only on the workspace model**
+  (`internal/models/workspace.go` — the #87 "Part A" change); the issue model/update path has
+  no such field. loom v5 exposes per-issue `design_format` on the PATCH surface anyway
+  (`internal/webui/handlers/issues/issues.go:20`) and forwards it; fleet-db strict-decodes
+  update payloads, so the **entire PATCH 400s** — every other field in the same request is
+  lost. Same strict-decode family as `unknown field "kind"` (roles) and
+  `unknown field "external_ref"` (create — which loom already compat-handles in
+  `internal/backend/fleet/create_compat.go`; no equivalent exists for update).
+- Latent today: no first-party sender (frontend writes only the workspace-level toggle; the
+  HTML renderer auto-detects inline HTML per issue) — but any agent/API client setting the
+  field on a fleetdb-backed workspace hits the hard failure.
+- **Fix:** (a) fleet-db: add issue-level `design_format` (finish Part B); (b) loom: strip or
+  compat-fallback unsupported update fields against fleet-db so one drifted field cannot
+  poison a whole PATCH. (b) is worth doing regardless of (a).
+
+### 1.14 CreateWorkspaceModal cannot create local or empty workspaces
+- **Severity:** MED (feature gap, inconsistent) · **Fix:** loom · **Status:** OPEN (found 2026-07-18 by the workspace-mgmt suite)
+- The modal requires ≥1 clone URL and rejects anything not starting `https://`/`git@`
+  (`CreateWorkspaceModal.tsx` `CLONE_URL_RE` + `canSubmit`), while **AddRepoModal accepts
+  local paths** and the API supports both `type:"empty"` and path repos. From the UI there is
+  no way to create an empty workspace or one backed by a local repo. The aft suite pins the
+  validation error text and creates via API.
+
+### 1.15 Create-time `status` on issue POST fails outright (second failure mode)
+- **Severity:** MED (API contract) · **Fix:** loom/fleet-db (decide the contract) · **Status:** OPEN (found 2026-07-18 by the pr-workspace-degraded suite)
+- `POST /issues` with `status:"review"` in the body returns non-2xx (observed as a silent
+  empty response under `curl -sf`; exact code not captured before switching patterns).
+  Companion to the already-logged defect where the Create modal's `status:"deferred"` is
+  silently **dropped** — so create-time status is broken two different ways depending on the
+  value. Create-then-PATCH works and is what suites use. Decide one contract: honor, reject
+  loudly, or document-and-drop — not a mix.
+
+### 1.16 Bulk status change: no optimistic update or post-apply refetch
+- **Severity:** LOW (UX) · **Fix:** loom frontend · **Status:** OPEN (found 2026-07-18, screenshot-vetted)
+- After the bulk Status apply, the success toast fires while the table's Status column still
+  shows the old value for the affected rows; a fresh load shows the new status. The fan-out
+  PATCHes land — the table just never updates in place.
+
+### 1.17 Issue/session detail panel clips past the viewport edge
+- **Severity:** LOW/MED (responsive layout) · **Fix:** loom frontend · **Status:** OPEN (found 2026-07-18, screenshot-vetted)
+- At the aft harness window size, the right-hand issue/session detail panel extends beyond the
+  right viewport edge: the DESIGN heading and the Runs tab's transcript/cost/token content
+  render partially off-screen (seen independently in the settings-design-format and
+  zz-agent-flow session captures). Content exists and asserts pass; a human at this width
+  cannot read it.
+
 ### Suspected / low-confidence (re-validate before acting)
+- **Local-task-runner stub sessions record zero diff evidence** — `has_diff:false`,
+  `files_changed:0` on completed stub runs, while all four real-CLI tiers project
+  `files_changed>=1`. Either the stub genuinely commits nothing through the runner path
+  (likely) or local-runner diff-evidence projection has a gap. The zz-agent-flow suite pins
+  the observed contract (`404 diff not found`), so a change here will surface. MED/LOW.
+- **`/ws/:id/workspace` cold-load redirect race** — the single-repo→kanban redirect keys off
+  `isMultiRepo`, which is false while repos are still loading, so a deep link to `/workspace`
+  on a **multi-repo** workspace can bounce to kanban on cold load. Observed only indirectly
+  (single-repo stack); multi-repo case inferred from `App.tsx`. LOW.
 - **PR approve/reject are loom-status-only** — Approve can push a merged GitHub PR back to
   `open`; Request-changes hard-demotes `in_progress`→`open`
   (`components/.../PRReviewWorkspace.tsx:182-201`). MED/LOW, needs `gh`.
@@ -262,6 +319,16 @@ explicit ordering/isolation config) removes a whole class of flakiness.
 The Logs tab's live-tmux / embedded-terminal mode is the one path still only unit-tested; a
 scenario behind `AFT_REAL_TERMINAL=1` (spawns a real lead) would close it. Riskier (real
 auto-spawn); ship after phase 3.
+
+### 3.9 Testability gaps found while landing the 2026-07-18 coverage set
+- **No deterministic staleness seam for PR review** — `pr-review-stale-banner` needs a real
+  PR head to move (stale-subject 409) and `pr-chat-unavailable` needs a reviewer in a
+  failed/unsupported state; neither is reachable on a gh-less stack. A fake-connector hook
+  (or an injectable stale-subject response) would let aft cover both.
+- **Missing stable testids** — AddRepoModal inputs (suites match by label), and
+  DiffTab/DiffFileRow/DiffFileViewer (suites match by role/text + API proof). Cheap adds.
+- **`/config/design-format` is PATCH-only** — no GET; suites assert persistence via the
+  workspace GET payload. Minor API asymmetry.
 
 ---
 
