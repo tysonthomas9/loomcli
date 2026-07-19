@@ -22,6 +22,16 @@ const xtermMocks = vi.hoisted(() => {
     write = vi.fn();
     focus = vi.fn();
     scrollToBottom = vi.fn();
+    scrollToLine = vi.fn();
+    buffer = {
+      active: { baseY: 0, viewportY: 0, cursorY: 0 },
+    };
+    marker = {
+      line: 0,
+      isDisposed: false,
+      dispose: vi.fn(),
+    };
+    registerMarker = vi.fn(() => this.marker);
     dispose = vi.fn();
     loadAddon = vi.fn();
     open = vi.fn((host: HTMLElement) => {
@@ -115,6 +125,7 @@ describe("XTermRenderer", () => {
     expect(terminal?.write).toHaveBeenCalledWith("output");
     expect(terminal?.focus).toHaveBeenCalledOnce();
     expect(terminal?.scrollToBottom).toHaveBeenCalledOnce();
+    terminal?.scrollToBottom.mockClear();
 
     const host = view.getByTestId("xterm-terminal");
     Object.defineProperties(host, {
@@ -126,6 +137,7 @@ describe("XTermRenderer", () => {
       terminal.rows = 42;
     }
     expect(handle.fit()).toEqual({ cols: 132, rows: 42 });
+    expect(terminal?.scrollToBottom).toHaveBeenCalledOnce();
     const fitAddon = terminal?.loadAddon.mock.calls[0]?.[0] as
       | InstanceType<typeof xtermMocks.MockFitAddon>
       | undefined;
@@ -137,5 +149,39 @@ describe("XTermRenderer", () => {
     expect(terminal?.binaryDisposable.dispose).toHaveBeenCalledOnce();
     expect(terminal?.resizeDisposable.dispose).toHaveBeenCalledOnce();
     expect(terminal?.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a scrolled-up buffer line anchored while fitting", async () => {
+    const onReady = vi.fn();
+    const view = render(
+      <XTermRenderer
+        onReady={onReady}
+        onDispose={vi.fn()}
+        onData={vi.fn()}
+        onBinary={vi.fn()}
+        onResize={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(onReady).toHaveBeenCalledOnce());
+    const terminal = xtermMocks.MockTerminal.instances[0];
+    const handle = onReady.mock.calls[0]?.[0] as XTermRendererHandle;
+    const host = view.getByTestId("xterm-terminal");
+    Object.defineProperties(host, {
+      clientWidth: { configurable: true, value: 800 },
+      clientHeight: { configurable: true, value: 480 },
+    });
+
+    if (!terminal) throw new Error("xterm was not created");
+    terminal.buffer.active = { baseY: 500, viewportY: 250, cursorY: 20 };
+    terminal.marker.line = 250;
+
+    expect(handle.fit()).toEqual({ cols: 80, rows: 24 });
+    expect(terminal.registerMarker).toHaveBeenCalledWith(-270);
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(250);
+    expect(terminal.scrollToBottom).not.toHaveBeenCalled();
+    expect(terminal.marker.dispose).toHaveBeenCalledOnce();
+
+    view.unmount();
   });
 });

@@ -935,7 +935,7 @@ describe("TerminalView", () => {
     });
   });
 
-  // Search overlay removed with the wterm migration — native browser
+  // Search overlay was removed during terminal simplification — browser
   // find-in-page (Cmd+F) operates on the DOM-rendered cells.
 
   // ── Issue context (sanitizeSessionName + pendingIssueContext) ─────────────

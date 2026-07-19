@@ -17,7 +17,7 @@ import { forwardRef, type Ref } from "react";
 import { TerminalPane } from "../TerminalPane";
 import type { TabState } from "@/components/TerminalView/tabs";
 
-// TerminalInstance is a heavy component that mounts wterm; stub it so the
+// TerminalInstance is a heavy component that mounts xterm; stub it so the
 // test focuses on overlay composition. forwardRef so the ref passed by
 // TerminalPane is accepted without a warning. The factory is hoisted, so
 // the stub is created inside it.
