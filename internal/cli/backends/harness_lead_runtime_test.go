@@ -47,14 +47,20 @@ func TestRunControlledLeadRuntimeDispatchesClaude(t *testing.T) {
 	if captured.WorkDir != "/repo" || captured.Prompt != "prompt" {
 		t.Fatalf("captured workdir/prompt = %q/%q", captured.WorkDir, captured.Prompt)
 	}
-	var found bool
+	var foundWorktree, foundClaudeVirtualScroll bool
 	for _, kv := range captured.Env {
 		if kv == "LOOM_WORKTREE_PATH=/repo" {
-			found = true
+			foundWorktree = true
+		}
+		if kv == claudeVirtualScrollEnv {
+			foundClaudeVirtualScroll = true
 		}
 	}
-	if !found {
+	if !foundWorktree {
 		t.Fatalf("captured env missing LOOM_WORKTREE_PATH: %#v", captured.Env)
+	}
+	if !foundClaudeVirtualScroll {
+		t.Fatalf("captured env missing Claude virtual scroll mode: %#v", captured.Env)
 	}
 }
 
@@ -82,6 +88,11 @@ func TestRunControlledLeadRuntimeDispatchesGenericBackends(t *testing.T) {
 		got := strings.Join(captured.Args, " ")
 		if !strings.HasPrefix(got, strings.Join(want.args, " ")) {
 			t.Fatalf("%s: captured args = %q, want prefix %q", backend, got, strings.Join(want.args, " "))
+		}
+		for _, kv := range captured.Env {
+			if strings.HasPrefix(kv, "CLAUDE_CODE_NO_FLICKER=") {
+				t.Fatalf("%s: Claude-only virtual scroll mode leaked into env: %#v", backend, captured.Env)
+			}
 		}
 	}
 }

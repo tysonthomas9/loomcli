@@ -16,6 +16,11 @@ import (
 // (no PTY supervision, no queued message delivery).
 const envLeadControlled = "LOOM_LEAD_CONTROLLED"
 
+// Claude's fullscreen renderer only advertises mouse tracking when its
+// virtualized scrollback mode is enabled. Keep this scoped to controlled
+// interactive leads; background Claude workers do not render in web xterm.
+const claudeVirtualScrollEnv = "CLAUDE_CODE_NO_FLICKER=1"
+
 func leadControlDisabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLeadControlled))) {
 	case "0", "false", "no", "off":
@@ -92,10 +97,11 @@ func harnessLeadInvocation(backend, workDir string) (harnessLeadLaunch, bool) {
 	switch backend {
 	case "claude":
 		sessionID := newHarnessSessionID()
+		env := append(buildClaudeEnv(workDir, ""), claudeVirtualScrollEnv)
 		return harnessLeadLaunch{
 			binary:           "claude",
 			args:             []string{"--session-id", sessionID, "--dangerously-skip-permissions"},
-			env:              buildClaudeEnv(workDir, ""),
+			env:              env,
 			harnessSessionID: sessionID,
 		}, true
 	case "gemini":

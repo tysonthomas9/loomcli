@@ -25,6 +25,43 @@
   height: 100%;
 }
 
+.xtermContainer {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: var(--terminal-bg);
+  overflow: hidden;
+}
+
+.xtermContainer :global(.xterm),
+.xtermContainer :global(.xterm-screen) {
+  width: 100%;
+  height: 100%;
+}
+
+.xtermContainer :global(.xterm-viewport) {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--terminal-scrollbar-thumb) var(--terminal-bg);
+}
+
+.xtermContainer :global(.xterm-viewport)::-webkit-scrollbar {
+  width: 8px;
+}
+
+.xtermContainer :global(.xterm-viewport)::-webkit-scrollbar-track {
+  background: var(--terminal-bg);
+}
+
+.xtermContainer :global(.xterm-viewport)::-webkit-scrollbar-thumb {
+  background: var(--terminal-scrollbar-thumb);
+  border-radius: 4px;
+}
+
+.xtermContainer :global(.xterm-viewport)::-webkit-scrollbar-thumb:hover {
+  background: var(--terminal-scrollbar-thumb-hover);
+}
+
 /* Override wterm's opinionated chrome and map its theme vars onto loom's
  * --terminal-* tokens so the terminal follows :root / [data-theme="light"]
  * automatically. */

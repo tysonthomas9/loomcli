@@ -1,10 +1,9 @@
 /**
  * TerminalInstance component.
  *
- * A single wterm-backed terminal pane bound to one PTY-backed WebSocket.
- * The wterm renderer handles grid layout, scrolling, DOM selection, native
- * copy/paste, and resize observation; this component owns the WebSocket
- * lifecycle and reconnect state machine.
+ * A single terminal pane bound to one PTY-backed WebSocket. Claude-backed
+ * panes use xterm.js; every other backend stays on wterm. This component owns
+ * the shared WebSocket lifecycle and reconnect state machine.
  *
  * The imperative handle is deliberately narrow (disconnect, reconnect,
  * focus, pasteText) so parent components stay decoupled from renderer
@@ -16,6 +15,8 @@ import { Terminal, type TerminalHandle } from "@wterm/react";
 import "@wterm/react/css";
 import {
   forwardRef,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -37,7 +38,14 @@ import {
 
 import type { ReconnectOverlayState } from "./ReconnectingOverlay";
 import { connectWebSocket, encodeResize } from "./terminalConnection";
+import { terminalRendererForBackend } from "./terminalRenderer";
+import type { XTermRendererHandle } from "./XTermRenderer";
 import styles from "./TerminalInstance.module.css";
+
+const LazyXTermRenderer = lazy(async () => {
+  const module = await import("./XTermRenderer");
+  return { default: module.XTermRenderer };
+});
 
 /** Stricter backoff for initial connection failures (e.g. session not found). */
 const INITIAL_CONNECT_CONFIG: ReconnectConfig = {
@@ -83,6 +91,8 @@ export type ConnectionState =
 export interface TerminalInstanceProps {
   sessionName: string;
   isActive: boolean;
+  /** Canonical backend name. Only exact `claude` values select xterm.js. */
+  backendName?: string | undefined;
   onConnectionStateChange?: (
     state: ConnectionState,
     hasConnected: boolean,
@@ -125,6 +135,7 @@ export const TerminalInstance = forwardRef<
   {
     sessionName,
     isActive,
+    backendName,
     onConnectionStateChange,
     onReconnectStateChange,
     onOutput,
@@ -138,8 +149,10 @@ export const TerminalInstance = forwardRef<
   ref,
 ) {
   const { workspaceId } = useWorkspaceContext();
+  const useXTerm = terminalRendererForBackend(backendName) === "xterm";
   const wtermRef = useRef<TerminalHandle | null>(null);
   const wtermInstanceRef = useRef<WTerm | null>(null);
+  const xtermInstanceRef = useRef<XTermRendererHandle | null>(null);
   const pendingRendererWritesRef = useRef<Array<string | Uint8Array>>([]);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const terminalSizeRef = useRef({ cols: 80, rows: 24 });
@@ -152,8 +165,9 @@ export const TerminalInstance = forwardRef<
   }, []);
 
   const getViewportElement = useCallback((): HTMLElement | null => {
+    if (useXTerm) return null;
     return wrapperRef.current?.querySelector<HTMLElement>(".wterm") ?? null;
-  }, []);
+  }, [useXTerm]);
 
   const distanceFromBottom = useCallback((el: HTMLElement): number => {
     return Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
@@ -175,15 +189,28 @@ export const TerminalInstance = forwardRef<
   }, []);
 
   const syncViewportToBottom = useCallback(() => {
+    if (useXTerm) {
+      xtermInstanceRef.current?.scrollToBottom();
+      return;
+    }
     const el = getViewportElement();
     if (!el) return;
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
-  }, [getViewportElement]);
+  }, [getViewportElement, useXTerm]);
 
   const write = useCallback(
     (data: string | Uint8Array) => {
+      if (useXTerm) {
+        const xterm = xtermInstanceRef.current;
+        if (xterm) {
+          xterm.write(data);
+          return;
+        }
+        pendingRendererWritesRef.current.push(data);
+        return;
+      }
       const wt = wtermInstanceRef.current;
       if (wt) {
         wt.write(data);
@@ -192,11 +219,15 @@ export const TerminalInstance = forwardRef<
       }
       pendingRendererWritesRef.current.push(data);
     },
-    [forceRendererPaint],
+    [forceRendererPaint, useXTerm],
   );
   const focus = useCallback(() => {
-    wtermInstanceRef.current?.focus();
-  }, []);
+    if (useXTerm) {
+      xtermInstanceRef.current?.focus();
+    } else {
+      wtermInstanceRef.current?.focus();
+    }
+  }, [useXTerm]);
 
   // Start pessimistic: until the server's config arrives, prefer the long
   // ceiling over the old 30-second default. This matters for loom-agentd
@@ -320,9 +351,8 @@ export const TerminalInstance = forwardRef<
         (data) => write(data),
         wsRef,
         setConnectionState,
-        // onConnected — wterm's autoResize will fire onResize with the true
-        // container size, which sends the first encodeResize. Don't preempt
-        // with a stale 80×24 seed.
+        // onConnected — the renderer receives the server's durable PTY replay
+        // immediately after this callback.
         () => {
           clearReconnectTimers();
           onReconnectStateChangeRef.current?.(null);
@@ -429,11 +459,9 @@ export const TerminalInstance = forwardRef<
     // applies to wtermInstanceRef: cleanup nulled it, but onReady won't
     // fire to re-set it, so write() would silently drop every replayed
     // byte. Restore from the still-alive TerminalHandle.
-    if (
-      isActiveRef.current &&
-      wtermReadyRef.current &&
-      (ptyAlive !== false || autoStartStaleSession)
-    ) {
+    const canReconnect =
+      isActiveRef.current && (ptyAlive !== false || autoStartStaleSession);
+    if (canReconnect && !useXTerm && wtermReadyRef.current) {
       if (wtermInstanceRef.current == null) {
         const instance = wtermRef.current?.instance as WTerm | undefined;
         if (instance) {
@@ -441,16 +469,33 @@ export const TerminalInstance = forwardRef<
         }
       }
       doConnectRef.current?.();
+    } else if (canReconnect && useXTerm && xtermInstanceRef.current != null) {
+      // The lazy xterm renderer is not remounted on a ptyAlive-driven re-run,
+      // so its onReady won't fire again to repopulate the ref or reconnect.
+      // Its handle is still alive (handleXTermDispose owns disposal), so
+      // re-kick the connection the cleanup below tore down — the same recovery
+      // the wterm branch already had.
+      doConnectRef.current?.();
     }
     return () => {
       beingKilledRef.current = true;
       wtermInstanceRef.current = null;
+      // Do NOT null xtermInstanceRef here: the XTermRenderer child owns its
+      // handle and nulls it via handleXTermDispose on real disposal. Nulling it
+      // on a mere effect re-run (e.g. a ptyAlive transition) stranded a Claude
+      // tab with no path back — no onReady to repopulate the ref, no reconnect.
       pendingRendererWritesRef.current = [];
       clearReconnectTimers();
       wsCleanupRef.current?.();
       wsCleanupRef.current = null;
     };
-  }, [sessionName, clearReconnectTimers, ptyAlive, autoStartStaleSession]);
+  }, [
+    sessionName,
+    clearReconnectTimers,
+    ptyAlive,
+    autoStartStaleSession,
+    useXTerm,
+  ]);
 
   useEffect(() => {
     if (ptyAlive === false && !autoStartStaleSession) {
@@ -524,12 +569,47 @@ export const TerminalInstance = forwardRef<
     [forceRendererPaint, measureTerminalSize, ptyAlive, autoStartStaleSession],
   );
 
+  const handleXTermReady = useCallback(
+    (xterm: XTermRendererHandle) => {
+      xtermInstanceRef.current = xterm;
+      const pendingWrites = pendingRendererWritesRef.current.splice(0);
+      for (const data of pendingWrites) {
+        xterm.write(data);
+      }
+      const measured = xterm.fit();
+      if (measured) terminalSizeRef.current = measured;
+      setReadyVersion((value) => value + 1);
+      if (ptyAlive === false && !autoStartStaleSession) {
+        setConnectionState("session_ended");
+        return;
+      }
+      if (
+        isActiveRef.current &&
+        !wsCleanupRef.current &&
+        !isSocketOpenOrConnecting(wsRef.current)
+      ) {
+        doConnectRef.current?.();
+      }
+    },
+    [ptyAlive, autoStartStaleSession],
+  );
+
+  const handleXTermDispose = useCallback((xterm: XTermRendererHandle) => {
+    if (xtermInstanceRef.current === xterm) {
+      xtermInstanceRef.current = null;
+    }
+  }, []);
+
   // In the desktop shell, a terminal can be mounted before the renderer's
   // ready event fires. Kick one connection attempt as soon as the pane is
   // active; output is still written once the renderer instance is available.
   useEffect(() => {
     if (!isActive) return;
     if (ptyAlive === false && !autoStartStaleSession) return;
+    // Claude's controlled harness sizes its inner PTY from the first WebSocket
+    // attachment. Wait for the lazy xterm renderer to fit the visible pane so
+    // that first attachment does not permanently seed an 80x24 inner grid.
+    if (useXTerm && !xtermInstanceRef.current) return;
     if (connectionState !== "disconnected") return;
     if (reconnectCancelRef.current) return;
     if (wsCleanupRef.current || isSocketOpenOrConnecting(wsRef.current)) {
@@ -537,6 +617,7 @@ export const TerminalInstance = forwardRef<
     }
 
     const timeout = setTimeout(() => {
+      if (useXTerm && !xtermInstanceRef.current) return;
       if (connectionState !== "disconnected") return;
       if (reconnectCancelRef.current) return;
       if (wsCleanupRef.current || isSocketOpenOrConnecting(wsRef.current)) {
@@ -555,10 +636,22 @@ export const TerminalInstance = forwardRef<
     autoStartStaleSession,
     connectionState,
     readyVersion,
+    useXTerm,
   ]);
 
   const handleData = useCallback(
     (data: string) => {
+      if (!writable) return;
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    },
+    [writable],
+  );
+
+  const handleBinary = useCallback(
+    (data: Uint8Array) => {
       if (!writable) return;
       const ws = wsRef.current;
       if (ws?.readyState === WebSocket.OPEN) {
@@ -588,6 +681,18 @@ export const TerminalInstance = forwardRef<
 
     const syncActiveLayout = () => {
       if (cancelled) return;
+      if (useXTerm) {
+        const xterm = xtermInstanceRef.current;
+        if (!xterm) return;
+        const measured = xterm.fit();
+        if (measured) {
+          terminalSizeRef.current = measured;
+          handleResize(measured.cols, measured.rows);
+        }
+        focus();
+        syncViewportToBottom();
+        return;
+      }
       const wt = wtermInstanceRef.current;
       if (!wt) return;
       const measured = measureTerminalSize(wt);
@@ -627,11 +732,13 @@ export const TerminalInstance = forwardRef<
     handleResize,
     measureTerminalSize,
     syncViewportToBottom,
+    useXTerm,
   ]);
 
   // Re-measure the grid when font prefs change so cols/rows stay accurate.
   useEffect(() => {
     const onFontChange = () => {
+      if (useXTerm) return;
       const wt = wtermInstanceRef.current;
       if (!wt) return;
       const measured = measureTerminalSize(wt);
@@ -654,7 +761,7 @@ export const TerminalInstance = forwardRef<
     window.addEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
     return () =>
       window.removeEventListener(TERMINAL_FONT_CHANGE_EVENT, handler);
-  }, [forceRendererPaint, handleResize, measureTerminalSize]);
+  }, [forceRendererPaint, handleResize, measureTerminalSize, useXTerm]);
 
   useImperativeHandle(
     ref,
@@ -712,17 +819,40 @@ export const TerminalInstance = forwardRef<
       ref={wrapperRef}
       className={styles.wrapper}
       data-testid="terminal-wrapper"
+      data-terminal-input
+      data-terminal-renderer={useXTerm ? "xterm" : "wterm"}
     >
-      <Terminal
-        ref={wtermRef}
-        cols={80}
-        rows={24}
-        autoResize
-        onReady={handleReady}
-        onData={handleData}
-        onResize={handleResize}
-        className={styles.container}
-      />
+      {useXTerm ? (
+        <Suspense
+          fallback={
+            <div
+              className={styles.xtermContainer}
+              data-testid="xterm-loading"
+            />
+          }
+        >
+          <LazyXTermRenderer
+            className={styles.xtermContainer}
+            onReady={handleXTermReady}
+            onDispose={handleXTermDispose}
+            onData={handleData}
+            onBinary={handleBinary}
+            onResize={handleResize}
+            onFocus={() => onTerminalFocusRef.current?.()}
+          />
+        </Suspense>
+      ) : (
+        <Terminal
+          ref={wtermRef}
+          cols={80}
+          rows={24}
+          autoResize
+          onReady={handleReady}
+          onData={handleData}
+          onResize={handleResize}
+          className={styles.container}
+        />
+      )}
     </div>
   );
 });

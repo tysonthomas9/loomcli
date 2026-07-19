@@ -15,7 +15,7 @@
  * optional-chain in `write()`.
  */
 
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -49,7 +49,31 @@ const wtermState = vi.hoisted(() => {
 const connectionState = vi.hoisted(() => ({
   writeCallbacks: [] as Array<(data: string | Uint8Array) => void>,
   cleanupCount: 0,
+  xtermFitCountsAtConnect: [] as number[],
 }));
+
+const xtermState = vi.hoisted(() => {
+  const state = {
+    fitCount: 0,
+    onReady: null as null | ((handle: unknown) => void),
+    handle: null as unknown as {
+      write: (data: string | Uint8Array) => void;
+      focus: () => void;
+      fit: () => { cols: number; rows: number };
+      scrollToBottom: () => void;
+    },
+  };
+  state.handle = {
+    write: () => {},
+    focus: () => {},
+    fit: () => {
+      state.fitCount += 1;
+      return { cols: 132, rows: 43 };
+    },
+    scrollToBottom: () => {},
+  };
+  return state;
+});
 
 // ── Mock @wterm/react ────────────────────────────────────────────────────────
 //
@@ -103,6 +127,17 @@ vi.mock("@wterm/react", async () => {
 
 vi.mock("@wterm/react/css", () => ({}));
 
+vi.mock("../XTermRenderer", async () => {
+  const React = await import("react");
+
+  function XTermRenderer(props: { onReady: (handle: unknown) => void }) {
+    xtermState.onReady = props.onReady;
+    return React.createElement("div", { "data-testid": "mock-xterm" });
+  }
+
+  return { XTermRenderer };
+});
+
 // ── Mock terminalConnection ──────────────────────────────────────────────────
 //
 // Captures every `write` callback the component hands us. Tests invoke the
@@ -118,6 +153,7 @@ vi.mock("../terminalConnection", () => ({
       setConnState: (s: string) => void,
     ): (() => void) => {
       connectionState.writeCallbacks.push(write);
+      connectionState.xtermFitCountsAtConnect.push(xtermState.fitCount);
       setConnState("connecting");
       const cleanup = () => {
         connectionState.cleanupCount += 1;
@@ -170,6 +206,9 @@ describe("TerminalInstance", () => {
     wtermState.onReadyFiredCount = 0;
     connectionState.writeCallbacks.length = 0;
     connectionState.cleanupCount = 0;
+    connectionState.xtermFitCountsAtConnect.length = 0;
+    xtermState.fitCount = 0;
+    xtermState.onReady = null;
   });
 
   afterEach(() => {
@@ -252,6 +291,31 @@ describe("TerminalInstance", () => {
     });
   });
 
+  it("waits for Claude xterm to fit before opening its first WebSocket", async () => {
+    render(
+      <TerminalInstance
+        sessionName="claude-alpha"
+        backendName="claude"
+        isActive
+      />,
+    );
+    await flushPendingWork();
+
+    expect(connectionState.writeCallbacks).toHaveLength(0);
+    await waitFor(() => {
+      expect(xtermState.onReady).not.toBeNull();
+    });
+
+    act(() => {
+      xtermState.onReady?.(xtermState.handle);
+    });
+
+    await waitFor(() => {
+      expect(connectionState.writeCallbacks).toHaveLength(1);
+    });
+    expect(connectionState.xtermFitCountsAtConnect).toEqual([1]);
+  });
+
   describe("terminal font changes", () => {
     it("re-measures and resizes when terminal font prefs change", async () => {
       const element = document.createElement("div");
@@ -298,6 +362,84 @@ describe("TerminalInstance", () => {
 
       expect(resizeMock).toHaveBeenCalled();
       rectSpy.mockRestore();
+    });
+  });
+
+  // The xterm analog of the PR #54 regression above. The
+  // lifecycle effect's cleanup nulls xtermInstanceRef and closes the socket for
+  // every renderer, but its reconnect block is gated on `!useXTerm`. So when a
+  // server-driven `ptyAlive` transition re-runs the effect, a Claude/xterm tab
+  // tears down and never reconnects — frozen with no overlay.
+  describe("xterm reconnect after lifecycle re-run", () => {
+    it("reconnects a Claude xterm tab after a ptyAlive transition tears down its socket", async () => {
+      // Active Claude tab: xterm mounts lazily; firing its onReady opens the
+      // first WebSocket (same path as "waits for Claude xterm to fit").
+      const { rerender, unmount } = render(
+        <TerminalInstance
+          sessionName="claude-alpha"
+          backendName="claude"
+          isActive
+        />,
+      );
+      await flushPendingWork();
+      await waitFor(() => expect(xtermState.onReady).not.toBeNull());
+      act(() => {
+        xtermState.onReady?.(xtermState.handle);
+      });
+      await waitFor(() => {
+        expect(connectionState.writeCallbacks).toHaveLength(1);
+      });
+
+      // Server metadata resolves: pty_alive undefined -> true. ptyAlive is in
+      // the lifecycle effect's deps, so it re-runs and its cleanup closes the
+      // socket. The wterm path re-kicks doConnect here (see PR #54 regression
+      // above); a healthy xterm tab must recover the same way.
+      rerender(
+        <TerminalInstance
+          sessionName="claude-alpha"
+          backendName="claude"
+          isActive
+          ptyAlive
+        />,
+      );
+      await flushPendingWork();
+
+      // The teardown really ran (the socket was closed)...
+      expect(connectionState.cleanupCount).toBeGreaterThanOrEqual(1);
+      // ...so the tab must reopen a connection. Without a fix, xtermInstanceRef
+      // was nulled and the reconnect block is !useXTerm-gated, so no new
+      // WebSocket opens and the terminal freezes at "connected".
+      expect(connectionState.writeCallbacks.length).toBeGreaterThanOrEqual(2);
+
+      unmount();
+    });
+
+    // Control: the identical ptyAlive transition on a wterm tab DOES reconnect.
+    // Proves the failure above is xterm-specific (the !useXTerm-gated block),
+    // not a general property of ptyAlive transitions or a harness artifact.
+    it("control: a wterm tab reconnects after the same ptyAlive transition", async () => {
+      const { rerender, unmount } = render(
+        <TerminalInstance sessionName="wterm-alpha" isActive />,
+      );
+      await flushPendingWork();
+      expect(wtermState.onReadyFiredCount).toBe(1);
+      await waitFor(() => {
+        expect(connectionState.writeCallbacks.length).toBeGreaterThanOrEqual(1);
+      });
+      const before = connectionState.writeCallbacks.length;
+
+      rerender(
+        <TerminalInstance sessionName="wterm-alpha" isActive ptyAlive />,
+      );
+      await flushPendingWork();
+
+      expect(connectionState.cleanupCount).toBeGreaterThanOrEqual(1);
+      // onReady never re-fires (WASM cache), yet the wterm path restores the
+      // ref and reconnects — the recovery the xterm path is missing.
+      expect(wtermState.onReadyFiredCount).toBe(1);
+      expect(connectionState.writeCallbacks.length).toBeGreaterThan(before);
+
+      unmount();
     });
   });
 });

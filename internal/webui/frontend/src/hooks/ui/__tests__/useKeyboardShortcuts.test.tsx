@@ -125,6 +125,25 @@ describe("KeyboardShortcutProvider", () => {
 
       expect(onWorkspaceSwitcher).not.toHaveBeenCalled();
     });
+
+    it("does not steal Ctrl+K from the renderer-neutral terminal surface", () => {
+      const onWorkspaceSwitcher = vi.fn();
+
+      render(
+        <KeyboardShortcutProvider onWorkspaceSwitcher={onWorkspaceSwitcher}>
+          <div data-terminal-input>
+            <textarea data-testid="xterm-input" />
+          </div>
+        </KeyboardShortcutProvider>,
+      );
+
+      fireEvent.keyDown(screen.getByTestId("xterm-input"), {
+        key: "k",
+        ctrlKey: true,
+      });
+
+      expect(onWorkspaceSwitcher).not.toHaveBeenCalled();
+    });
   });
 
   describe("Cmd/Ctrl+Shift+1-9 workspace positional switching", () => {
