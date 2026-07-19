@@ -82,3 +82,34 @@ Also blocked-by-defect: RA-010 (PR detail route not implemented — TSV logs it 
    (status stays conservative until CI runs them on every PR).
 3. Tier 2 scaffolding (git seeding helper in `tests/aft/scripts/`).
 4. Revisit blocked stories (PS-003, RA-010) when their defects close.
+
+---
+
+## Next set — 2026-07-18 census, post-v5 merge
+
+Baseline (full deterministic run, 34/34 green): routes **14/14**, components **36/50**,
+endpoints **46/80**, testids **166/461**. The v5 merge also landed browser features with
+zero aft coverage: workspace design-format, artifact/HTML issue designs, the v3 file
+explorer's edit surface, and the PR-native review workspace (discussion panel).
+Everything below is deterministic (no gh, no LLMs) — degraded/error paths are asserted
+where the real integration needs GitHub.
+
+| # | Suite (new*/extend) | Closes | Tests |
+|---|---|---|---|
+| 1 | workspace-mgmt* | CreateWorkspaceModal, AddRepoModal, ConfirmDialog components; `/repos`, `/repos/:repo` (DELETE — regression for FINDINGS 1.10), `/name`, `/order`, `jobs/:id` endpoints; create-workspace-\*, add-repo-\*, workspace-rename/context-menu, confirm-dialog-\* testids | create ws via modal (job progress → board), add repo via modal, remove repo through the confirm dialog, rename via context menu, reorder via API + assert sidebar order |
+| 2 | table-bulk* | BulkActionToolbar component (regression for FINDINGS 1.8); bulk-action-\*, issue-table-\*, toggle-column-\* testids | multi-select rows → bulk status + bulk close → assert via API; selection-count and clear |
+| 3 | settings-design-format* | `/config/design-format` endpoint (new in v5); design-format-panel/select/save, design-panel, design-html-content testids; UserMenu component | toggle markdown→html in settings, assert persisted via GET; issue with design content renders design-html-content sanitized (script payload inert); user menu opens |
+| 4 | dependencies-graph (extend) | BlockedBadge, GraphControls, NodeTooltip, StatusColumn components; `issues/:id/move` endpoint; blocked-badge, zoom/fit buttons, node-tooltip, move-dialog-\* testids | blocked card shows badge; graph zoom-in/out/fit; hover node → tooltip; move issue to e2e-ws-2 via detail-panel dialog → appears on the other board |
+| 5 | zz-agent-flow (extend) | `agents/:name`, `agents/:name/diff/files`, `diff/file`, `issues/:id/git/diff-stat`, `tasks/:id/sessions/:id` (+`/diff`, `/transcript`), `runs/:id` endpoints; CreateAgentModal, CodeMirrorEditor components | after the stub epic-run: open agent Diff tab (file list + file patch), session detail (diff + transcript sub-tabs), run status via API; create a second agent through the modal (no start) |
+| 6 | pr-workspace-degraded* | PRDiscussionPanel component; `pull-requests/:o/:r/:n` detail/conversation endpoints (degraded 4xx path); pr-discuss-button, pr-discussion-error/retry, pr-chat-unavailable, pr-review-stale-banner testids | review issue with a github-shaped external_ref: Discuss PR opens the panel, conversation fails gracefully (error + retry, no crash); stale banner via forced refresh hook if reachable |
+| 7 | smoke (extend) | `/api/client-errors`, `/api/monitor/status`, `/api/editors`, `/api/workspaces/order`, `onboarding/first-task` endpoints | pure `run:` curl assertions (POST a synthetic client error → accepted; editors list shape; order round-trip; first-task payload) |
+
+Estimated ~28 tests / ~60s added runtime. Expected census after: components ≥ 47/50,
+endpoints ≥ 65/80, testids ≥ 230/461.
+
+Deliberately deferred: `terminal/ws` + `terminal/setup` deep coverage (needs a ws step in
+the aft runner), `git/push-all` (mutates a remote; needs a seeded bare remote first),
+OpenInEditor click-through and `/api/editors/open` (launches a real editor on the host —
+needs an EDITOR stub), EmbeddedTerminal (tmux tier already covers it via
+test-aft-terminal), task quarantine (supervisor runtime, not browser-observable
+deterministically).
