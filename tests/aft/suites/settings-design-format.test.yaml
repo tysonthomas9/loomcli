@@ -1,0 +1,82 @@
+# Settings coverage that touches process-global local settings. Keep the
+# Daytona/runtime subtest last and restore captured settings in teardown.
+suite: settings-design-format
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS" > "$AFT_WORK_DIR/settings-workspace.orig.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; print(d.get("design_format") or "markdown")' "$AFT_WORK_DIR/settings-workspace.orig.json" > "$AFT_WORK_DIR/settings-design-format.orig"; curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/local-settings.orig.json"; python3 -c 'import json,sys; data=json.load(open(sys.argv[1])).get("data",{}); print((data.get("agent_runtime") or {}).get("default") or "local")' "$AFT_WORK_DIR/local-settings.orig.json" > "$AFT_WORK_DIR/settings-runtime.orig"; python3 -c 'import json,sys; data=json.load(open(sys.argv[1])).get("data",{}); print("true" if ((data.get("runtime_credentials") or {}).get("daytona") or {}).get("configured") else "false")' "$AFT_WORK_DIR/local-settings.orig.json" > "$AFT_WORK_DIR/settings-daytona-configured.orig"
+teardown: >-
+  fmt="$(cat "$AFT_WORK_DIR/settings-design-format.orig" 2>/dev/null || echo markdown)"; python3 -c 'import json,sys; print(json.dumps({"design_format": sys.argv[1]}))' "$fmt" > "$AFT_WORK_DIR/settings-restore-design.json"; curl -s -X PATCH "$AFT_BASE_URL/api/workspaces/E2E-WS/config/design-format" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/settings-restore-design.json" >/dev/null || true; runtime="$(cat "$AFT_WORK_DIR/settings-runtime.orig" 2>/dev/null || echo local)"; python3 -c 'import json,sys; print(json.dumps({"agent_runtime":{"default":sys.argv[1]}}))' "$runtime" > "$AFT_WORK_DIR/settings-restore-runtime.json"; curl -s -X PATCH "$AFT_BASE_URL/api/local/settings" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/settings-restore-runtime.json" >/dev/null || true; if [ "$(cat "$AFT_WORK_DIR/settings-daytona-configured.orig" 2>/dev/null || echo false)" = false ]; then curl -s -X PATCH "$AFT_BASE_URL/api/local/settings" -H "Content-Type: application/json" -d '{"runtime_credentials":{"daytona":{"clear":true}}}' >/dev/null || true; fi; if [ -s "$AFT_WORK_DIR/settings-html-issue.id" ]; then curl -s -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS/issues/$(cat "$AFT_WORK_DIR/settings-html-issue.id")/close" -H "Content-Type: application/json" -d '{"reason":"aft cleanup","force":true}' >/dev/null || true; fi
+
+tests:
+  # covers: SettingsView; design-format endpoint; HTML design renderer; workspace GET design_format
+  - name: html design format persists and sanitizes issue design
+    intent: Saving HTML as the workspace design format persists through the workspace API, and legacy inline issue HTML renders without executing scripts
+    steps:
+      - open: /ws/E2E-WS/settings
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=settings-view]') &&
+            !!document.querySelector('[data-testid=design-format-panel]')
+      - select: { testid: design-format-select, value: html }
+      - click: { testid: design-format-save-button }
+      - run: >-
+          for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS" > "$AFT_WORK_DIR/settings-design-html.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert d.get("design_format")=="html", d.get("design_format")' "$AFT_WORK_DIR/settings-design-html.json" && exit 0; sleep 1; done; echo "workspace design_format never became html"; exit 1
+      # IssueCreateRequest does not carry design_format and this stack's FleetDB rejects it on PATCH. DesignPanel intentionally auto-detects legacy inline HTML when format metadata is absent.
+      - run: >-
+          python3 -c 'import json,os; run=os.environ.get("RUN_ID") or "local"; marker="AFT HTML MARKER "+run; design="<section><h2>"+marker+"</h2><p>safe html content</p><script>window.__aftXss=1;parent.__aftXss=1</script></section>"; print(json.dumps({"title":"html design "+run,"issue_type":"task","priority":2,"design":design}))' > "$AFT_WORK_DIR/settings-html-issue.json"; create_code="$(curl -sS -o "$AFT_WORK_DIR/settings-html-issue.resp.json" -w "%{http_code}" -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS/issues" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/settings-html-issue.json")"; [ "$create_code" = 201 ] || { echo "HTML issue create failed with HTTP $create_code:"; cat "$AFT_WORK_DIR/settings-html-issue.resp.json"; exit 1; }; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d["data"]; assert data.get("design"), data; print(data["id"])' "$AFT_WORK_DIR/settings-html-issue.resp.json" > "$AFT_WORK_DIR/settings-html-issue.id"
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - wait: { text: "html design ${RUN_ID:-local}" }
+      - click: { selector: "section[data-status=ready] article[aria-label*='html design ${RUN_ID:-local}']", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=design-section]') &&
+            !!document.querySelector('[data-testid=design-panel]') &&
+            !!document.querySelector('[data-testid=design-html-content]')
+      - wait:
+          fn: >-
+            (() => {
+              const frame = document.querySelector('[data-testid=design-html-content]');
+              const doc = frame?.contentDocument;
+              return !!doc &&
+                doc.body.textContent.includes('AFT HTML MARKER ${RUN_ID:-local}') &&
+                window.__aftXss === undefined &&
+                !doc.querySelector('script');
+            })()
+
+  # covers: SettingsView; local settings GET/PATCH; Daytona credential save/clear; agent runtime default
+  # VERIFY-AT-RUNTIME: the isolated stack should start without a Daytona credential; fail rather than clearing an unknown pre-existing secret.
+  - name: daytona credential and runtime settings are sanitized
+    intent: Remote runtime settings persist sanitized Daytona credential state, briefly flip the default runner to daytona, and restore local immediately
+    steps:
+      - open: /ws/E2E-WS/settings
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=settings-view]') &&
+            !!document.querySelector('[data-testid=remote-runtimes-panel]')
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-daytona-before.json"; python3 -c 'import json,sys; data=json.load(open(sys.argv[1])).get("data",{}); cfg=((data.get("runtime_credentials") or {}).get("daytona") or {}).get("configured"); assert not cfg, "VERIFY-AT-RUNTIME: expected no pre-existing Daytona credential in isolated AFT stack"' "$AFT_WORK_DIR/settings-daytona-before.json"
+      - fill:
+          testid: daytona-api-key-input
+          value: "dtn_aft_${RUN_ID:-local}"
+      - click: { testid: daytona-credential-save-button }
+      - wait: { text: Daytona credential saved }
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-daytona-saved.json"; python3 -c 'import json,sys; raw=open(sys.argv[1]).read(); d=json.loads(raw).get("data",{}); daytona=(d.get("runtime_credentials") or {}).get("daytona") or {}; assert daytona.get("configured") is True, daytona; assert "dtn_aft_" not in raw, raw; assert "sealed" not in raw, raw' "$AFT_WORK_DIR/settings-daytona-saved.json"
+      - select: { testid: agent-runtime-select, value: daytona }
+      - click: { testid: agent-runtime-save-button }
+      - run: >-
+          for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-runtime-daytona.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("data",{}); assert (d.get("agent_runtime") or {}).get("default")=="daytona", d.get("agent_runtime")' "$AFT_WORK_DIR/settings-runtime-daytona.json" && exit 0; sleep 1; done; echo "agent_runtime.default never became daytona"; exit 1
+      - select: { testid: agent-runtime-select, value: local }
+      - click: { testid: agent-runtime-save-button }
+      - run: >-
+          for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-runtime-local.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("data",{}); assert (d.get("agent_runtime") or {}).get("default")=="local", d.get("agent_runtime")' "$AFT_WORK_DIR/settings-runtime-local.json" && exit 0; sleep 1; done; echo "agent_runtime.default never restored to local"; exit 1
+      - click: { testid: daytona-credential-clear-button }
+      - wait: { text: No Daytona credential saved }
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-daytona-cleared.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("data",{}); daytona=(d.get("runtime_credentials") or {}).get("daytona") or {}; assert daytona.get("configured") is False, daytona' "$AFT_WORK_DIR/settings-daytona-cleared.json"

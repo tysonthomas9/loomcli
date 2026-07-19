@@ -17,6 +17,7 @@ setup: >-
   >/dev/null
 teardown: >-
   AFT_WS=E2E-WS-AGENT "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents/iris-${RUN_ID:-local}" >/dev/null || true;
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT" >/dev/null || true
 
 tests:
@@ -98,7 +99,7 @@ tests:
       - run: >-
           curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/workflows/epic-runner"
           -H "Content-Type: application/json"
-          -d "{\"epicId\":\"$(cat "$AFT_WORK_DIR/agent-epic.id")\"}"
+          -d "{\"epicId\":\"$(cat "$AFT_WORK_DIR/agent-epic.id")\",\"runner\":\"local-task-runner\"}"
           > "$AFT_WORK_DIR/agent-run.json"
       # The POST above carries the (synchronous) workflow-bundle build; this step only
       # covers execution. Keep the poll well under the 120s run-step ceiling: 40 x ~2s
@@ -117,3 +118,76 @@ tests:
           fn: >-
             !Array.from(document.querySelectorAll("section[data-status=ready] article")).some((el) => el.textContent.includes('agent-flow task'))
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='agent-flow task ${RUN_ID:-local}']", equals: 0 } }
+
+  # covers: agents/:name/diff/files; agents/:name/diff/file; DiffTab; DiffFileRow; DiffFileViewer
+  - name: agent diff tab opens changed file
+    intent: A committed change in nova's worktree appears in the agent Diff tab, and opening the file loads the per-file patch
+    steps:
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT" > "$AFT_WORK_DIR/agent-workspace.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; repos=d.get("repos") or []; assert d.get("path") and repos and repos[0].get("name") and repos[0].get("path"), d; print("workspace_path="+repr(d["path"])); print("repo="+repr(repos[0]["name"])); print("repo_path="+repr(repos[0]["path"]))' "$AFT_WORK_DIR/agent-workspace.json" > "$AFT_WORK_DIR/agent-diff.env"; . "$AFT_WORK_DIR/agent-diff.env"; worktree="$workspace_path/worktrees/$repo/nova"; if [ ! -e "$worktree/.git" ]; then [ ! -e "$worktree" ] || { echo "non-worktree path already exists at $worktree"; exit 1; }; mkdir -p "$(dirname "$worktree")"; git -C "$repo_path" worktree prune; if git -C "$repo_path" show-ref --verify --quiet refs/heads/nova; then git -C "$repo_path" worktree add "$worktree" nova; else git -C "$repo_path" worktree add "$worktree" -b nova; fi; fi; [ "$(git -C "$worktree" branch --show-current)" = nova ] || { echo "nova worktree is not on branch nova"; exit 1; }; file="aft-diff-${RUN_ID:-local}.txt"; printf '%s\n' "AFT-DIFF-MARKER ${RUN_ID:-local} $(date +%s)" > "$worktree/$file"; git -C "$worktree" add "$file"; git -C "$worktree" diff --cached --quiet || git -C "$worktree" -c user.email=e2e@x -c user.name=e2e commit -m "aft diff ${RUN_ID:-local}" -q; printf '%s\n' "$file" > "$AFT_WORK_DIR/agent-diff-file.name"
+      - open: /ws/E2E-WS-AGENT/agents/nova
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agents-page]')
+      - click: { role: button, name: Diff, exact: true }
+      - run: >-
+          file="$(cat "$AFT_WORK_DIR/agent-diff-file.name")"; for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents/nova/diff/files?to=HEAD" > "$AFT_WORK_DIR/agent-diff-files.json" && python3 -c 'import json,sys; f=sys.argv[2]; d=json.load(open(sys.argv[1])); files=(d.get("data") or {}).get("files") or []; assert any(x.get("path")==f for x in files), files' "$AFT_WORK_DIR/agent-diff-files.json" "$file" && exit 0; sleep 1; done; echo "agent diff file never appeared"; exit 1
+      - wait: { text: "1 file changed" }
+      - click: { role: button, name: "aft-diff-${RUN_ID:-local}.txt" }
+      - wait: { text: AFT-DIFF-MARKER }
+
+  # covers: runs/:id; tasks/:taskId/sessions; session detail; transcript; no-diff contract
+  - name: session detail transcript and diff tabs render
+    intent: The task's recorded stub session opens in the Runs tab, renders its transcript, and exposes the disabled UI plus 404 API contract for an unavailable diff
+    steps:
+      - run: >-
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("run_id") or d.get("id") or d.get("data",{}).get("run_id") or d.get("data",{}).get("id") or "")' "$AFT_WORK_DIR/agent-run.json" > "$AFT_WORK_DIR/agent-run.id"; [ -n "$(cat "$AFT_WORK_DIR/agent-run.id" | tr -d "[:space:]")" ] || { echo "workflow run response did not contain a run id"; cat "$AFT_WORK_DIR/agent-run.json"; exit 1; }; curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/runs/$(cat "$AFT_WORK_DIR/agent-run.id")" > "$AFT_WORK_DIR/agent-run-detail.json"
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/agent-task.id")"; curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions" > "$AFT_WORK_DIR/agent-sessions.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d.get("data",{}); sessions=data.get("sessions") if isinstance(data,dict) else data; assert sessions, d; s=sessions[0]; assert s.get("session_id"), s; assert s.get("has_transcript") is True, s; assert s.get("has_diff") is False, s; assert s.get("files_changed")==0, s; print(s["session_id"])' "$AFT_WORK_DIR/agent-sessions.json" > "$AFT_WORK_DIR/agent-session.id"
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/agent-task.id")"; agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-WS-AGENT/agents/nova"; agent-browser --session "$AFT_SESSION" wait --fn "document.readyState === 'complete'"; agent-browser --session "$AFT_SESSION" eval "localStorage.setItem('loom:E2E-WS-AGENT:agent-work-panel-view:nova', JSON.stringify({statusFilter:'all',leadFilter:'all',taskSearch:'',expandedEpics:{},selectedTaskId:'$task'})); location.reload()"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agents-page]') &&
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+      - click: { role: tab, name: Runs, exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=sessions-tab]') &&
+            !!document.querySelector('[data-testid=session-timeline]')
+      - run: >-
+          sid="$(cat "$AFT_WORK_DIR/agent-session.id")"; agent-browser --session "$AFT_SESSION" click "[data-testid='session-row-$sid']"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=session-detail-view]')
+      - expect: { visible: { testid: session-inner-tab-transcript } }
+      - expect: { visible: { testid: session-transcript } }
+      # has_diff=false disables the tab, so the component cannot enter its diff pane.
+      - expect: { enabled: { testid: session-inner-tab-diff, equals: false } }
+      - expect: { attr: { testid: session-inner-tab-diff, name: title, equals: "No diff available" } }
+      - expect: { count: { testid: session-diff, equals: 0 } }
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/agent-task.id")"; sid="$(cat "$AFT_WORK_DIR/agent-session.id")"; detail_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-detail.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid")"; transcript_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-transcript.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid/transcript")"; diff_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-diff.resp.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid/diff")"; python3 -c 'import json,sys; detail=json.load(open(sys.argv[1])); transcript=json.load(open(sys.argv[2])); no_diff=json.load(open(sys.argv[3])); assert sys.argv[4]=="200", (sys.argv[4],detail); assert sys.argv[5]=="200", (sys.argv[5],transcript); assert sys.argv[6]=="404", (sys.argv[6],no_diff); assert (detail.get("data") or {}).get("session_id")==sys.argv[7], detail; assert transcript.get("success") is True and (transcript.get("data") or {}).get("entries"), transcript; assert no_diff.get("success") is False and no_diff.get("error")=="diff not found", no_diff' "$AFT_WORK_DIR/agent-session-detail.json" "$AFT_WORK_DIR/agent-session-transcript.json" "$AFT_WORK_DIR/agent-session-diff.resp.json" "$detail_code" "$transcript_code" "$diff_code" "$sid"
+
+  # covers: CreateAgentModal; POST /api/workspaces/:ws/agents; DELETE /api/workspaces/:ws/agents/:name
+  - name: create second agent from modal without starting it
+    intent: The CreateAgentModal can create a second task agent scoped to the first repo without invoking the start endpoint
+    steps:
+      - open: /ws/E2E-WS-AGENT/agents/nova
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agents-page]')
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-agent-overlay]')
+      - click: { testid: create-agent-template-task }
+      - fill:
+          testid: create-agent-name
+          value: "iris-${RUN_ID:-local}"
+      # The modal preselects the first repo; click twice to cover the chip interaction and leave the agent scoped to that repo.
+      - click: { selector: "[data-testid='create-agent-repo-chips'] button", first: true }
+      - click: { selector: "[data-testid='create-agent-repo-chips'] button", first: true }
+      - click: { testid: create-agent-submit }
+      - run: >-
+          for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents" > "$AFT_WORK_DIR/agent-list-after-iris.json" && python3 -c 'import json,sys; name=sys.argv[2]; d=json.load(open(sys.argv[1])); data=d.get("data",d); agents=data.get("agents") if isinstance(data,dict) else data; assert any(a.get("name")==name for a in agents), agents' "$AFT_WORK_DIR/agent-list-after-iris.json" "iris-${RUN_ID:-local}" && exit 0; sleep 1; done; echo "iris agent never appeared"; exit 1

@@ -172,6 +172,16 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
   409s. Tolerated (task closes fine), but every run logs it.
 - **Fix:** unify the CompletionID so the redundant call is an idempotent 200 replay.
 
+### 1.12 Workspace rename UI is dead code — no browser path to rename
+- **Severity:** MED (feature gap) · **Fix:** loom · **Status:** OPEN (found 2026-07-18 by the workspace-mgmt suite)
+- `OtherWorkspacesSection` (sidebar workspace list with per-workspace overflow → rename/remove,
+  incl. `SortableWorkspaceEntry` + `WorkspaceContextMenu`) is exported from
+  `internal/webui/frontend/src/components/WorkspaceTree/index.ts:18` but nothing in the app
+  mounts it — only its own unit test imports it. `PATCH /api/workspaces/{ws}/name` works;
+  the UI to reach it never renders. The workspace-mgmt aft suite covers the endpoint via API
+  and documents the gap in a comment; when the section is re-mounted, promote that step back
+  to a UI flow.
+
 ### Suspected / low-confidence (re-validate before acting)
 - **PR approve/reject are loom-status-only** — Approve can push a merged GitHub PR back to
   `open`; Request-changes hard-demotes `in_progress`→`open`

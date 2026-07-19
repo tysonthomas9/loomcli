@@ -24,10 +24,11 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
       # the empty-state marker renders only after the (empty) issue fetch settles,
-      # so wait for it rather than one-shot asserting right after the toolbar mounts
+      # and can blink through a skeleton re-render under load — wait until it is
+      # actually laid out, not just present
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=empty-workspace-board]')
+            (() => { const el = document.querySelector('[data-testid=empty-workspace-board]'); return !!el && el.offsetParent !== null; })()
       - expect: { visible: { testid: empty-workspace-board } }
 
   # covers: LCLI-PS-002

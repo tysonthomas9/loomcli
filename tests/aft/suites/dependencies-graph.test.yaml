@@ -46,6 +46,10 @@ tests:
           fn: >-
             document.querySelectorAll('[data-testid=graph-view] .react-flow__node').length >= 2
       - expect: { count: { selector: "[data-testid=graph-view] .react-flow__node", atLeast: 2 } }
+      # edges render a frame after nodes — wait for them instead of one-shot counting
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-testid=graph-view] .react-flow__edge').length >= 1
       - expect: { count: { selector: "[data-testid=graph-view] .react-flow__edge", atLeast: 1 } }
       - wait:
           fn: >-

@@ -107,6 +107,17 @@ where the real integration needs GitHub.
 Estimated ~28 tests / ~60s added runtime. Expected census after: components ≥ 47/50,
 endpoints ≥ 65/80, testids ≥ 230/461.
 
+**Status 2026-07-18:** items 1, 2, 3, 5, 6 implemented (plus Daytona settings folded
+into item 3) — suites `workspace-mgmt`, `table-bulk`, `settings-design-format`,
+`pr-workspace-degraded`, and the `zz-agent-flow` extension. 43/43 green; all nine new
+tests screenshot-vetted. Census moved 36→42/50 components, 46→62/80 endpoints,
+166→215/461 testids. Notes from the live runs: CreateWorkspaceModal requires an
+https/git@ clone URL (file:// is covered as validation-error UX; workspace created via
+API), workspace rename has no mounted UI (FINDINGS §1.12 — endpoint covered via API),
+the deterministic stub session pins the no-diff contract (`has_diff:false`, session
+diff 404), and the agent Diff tab is fed by a seeded `worktrees/<repo>/nova` checkout.
+Items 4 and 7 remain open.
+
 Deliberately deferred: `terminal/ws` + `terminal/setup` deep coverage (needs a ws step in
 the aft runner), `git/push-all` (mutates a remote; needs a seeded bare remote first),
 OpenInEditor click-through and `/api/editors/open` (launches a real editor on the host —
