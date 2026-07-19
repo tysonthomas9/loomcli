@@ -3,7 +3,7 @@
  * Handles token fetching, URL building, resize encoding, and WebSocket lifecycle.
  *
  * Renderer-agnostic: the caller provides a `write` function (for output) and
- * wires input directly (e.g. wterm's `onData` → ws.send).
+ * wires renderer input directly (`onData` → ws.send).
  */
 
 import { get, wsUrl, getWsBaseUrl } from "@/hooks/api";
@@ -60,7 +60,7 @@ function buildWsUrl(
 }
 
 /**
- * Encode a resize message per the wterm wire format: an in-band escape
+ * Encode a resize message using Loom's in-band terminal wire format: an escape
  * sequence "\x1b[RESIZE:<cols>;<rows>]" sent as a WebSocket string message.
  * Matches the server-side regex in internal/webui/server/realtime/terminal_relay.go.
  */
@@ -80,8 +80,8 @@ const WORKSPACE_UNAVAILABLE_REASON = "workspace unavailable";
 
 /**
  * Connect a WebSocket, wiring received bytes into `write` and announcing
- * lifecycle transitions. The caller owns input (wterm's `onData` → ws.send)
- * and resize (wterm's `onResize` → encodeResize → ws.send).
+ * lifecycle transitions. The caller owns input (`onData` → ws.send) and
+ * resize (`onResize` → encodeResize → ws.send).
  *
  * Returns a cleanup function that closes the WS and marks the connect
  * attempt cancelled (idempotent; safe to call before or after onopen).
