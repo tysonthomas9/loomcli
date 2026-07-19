@@ -3,10 +3,29 @@
  * Uses openapi-fetch generated client.
  */
 
-import { api, ApiError, apiErrorFromResponse } from "@/api/common";
+import {
+  api,
+  ApiError,
+  apiErrorFromResponse,
+  patch,
+  unwrapResponse,
+  wsUrl,
+} from "@/api/common";
 import { cacheBackendConfig } from "@/api/common/config";
 import type { BackendConfigData } from "@/api/common";
 import type { WorkspaceData } from "./workspace";
+
+interface ApiEnvelope<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+export interface WorkspaceEvalPolicyPatch {
+  eval_sampling_percent?: number;
+  eval_batch_size?: number;
+  eval_lookback_days?: number;
+}
 
 /**
  * Get the store-backed backend config for a specific workspace.
@@ -92,4 +111,16 @@ export async function updateWorkspaceDesignFormat(
   }
   const { fetchWorkspaceApi } = await import("./workspace");
   return fetchWorkspaceApi(workspaceId);
+}
+
+/** Update per-workspace session-eval sampling and batch policy knobs. */
+export async function updateWorkspaceEvalPolicy(
+  workspaceId: string,
+  body: WorkspaceEvalPolicyPatch,
+): Promise<WorkspaceData> {
+  const envelope = await patch<ApiEnvelope<WorkspaceData>>(
+    wsUrl(workspaceId, "/config/eval-policy"),
+    body,
+  );
+  return unwrapResponse(envelope);
 }

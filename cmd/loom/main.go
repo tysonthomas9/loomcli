@@ -21,6 +21,7 @@ import (
 	_ "github.com/tysonthomas9/loomcli/internal/cli/doctor"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/driver"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/epic"
+	_ "github.com/tysonthomas9/loomcli/internal/cli/evals"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/git"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/hooks"
 	_ "github.com/tysonthomas9/loomcli/internal/cli/local"

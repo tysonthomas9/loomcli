@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["scores", "score_rationales", "error_taxonomy_tags", "improvement_categories", "judge_summary"],
+  "properties": {
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome_success", "instruction_adherence", "efficiency", "tool_use_quality"],
+      "properties": {
+        "outcome_success": { "type": "integer", "description": "0-100 per the rubric bands" },
+        "instruction_adherence": { "type": "integer", "description": "0-100 per the rubric bands" },
+        "efficiency": { "type": "integer", "description": "0-100 per the rubric bands" },
+        "tool_use_quality": { "type": "integer", "description": "0-100 per the rubric bands" }
+      }
+    },
+    "score_rationales": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome_success", "instruction_adherence", "efficiency", "tool_use_quality"],
+      "properties": {
+        "outcome_success": { "type": "string", "description": "one sentence, cite entry seq" },
+        "instruction_adherence": { "type": "string", "description": "one sentence, cite entry seq" },
+        "efficiency": { "type": "string", "description": "one sentence, cite entry seq" },
+        "tool_use_quality": { "type": "string", "description": "one sentence, cite entry seq" }
+      }
+    },
+    "error_taxonomy_tags": {
+      "type": "array",
+      "items": { "type": "string", "description": "allowlist tag or other:<snake_case>" }
+    },
+    "improvement_categories": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness", "linter", "prompt", "skill"],
+      "properties": {
+        "harness": { "type": "array", "items": { "type": "string" } },
+        "linter": { "type": "array", "items": { "type": "string" } },
+        "prompt": { "type": "array", "items": { "type": "string" } },
+        "skill": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "judge_summary": { "type": "string", "description": "2-4 sentences for a dashboard reader" }
+  }
+}

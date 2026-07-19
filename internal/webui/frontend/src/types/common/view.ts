@@ -15,14 +15,14 @@ export type ViewMode =
   | "graph"
   | "monitor"
   | "observability"
+  | "traces"
   | "terminal"
   | "agents"
   | "prs"
   | "workspace"
   | "settings"
   | "files"
-  | "issue-detail"
-  | "agents";
+  | "issue-detail";
 
 /**
  * Default view when none is specified.

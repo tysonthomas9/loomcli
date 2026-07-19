@@ -63,6 +63,8 @@ function formatViewName(view: ViewMode): string {
       return "Monitor";
     case "observability":
       return "Observability";
+    case "traces":
+      return "Traces";
     case "terminal":
       return "Terminal";
     case "workspace":

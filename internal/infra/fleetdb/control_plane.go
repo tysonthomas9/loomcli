@@ -2,6 +2,7 @@ package fleetdb
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strconv"
 	"time"
@@ -102,6 +103,7 @@ func (s *agentSessionStore) Create(ctx context.Context, in store.AgentSessionCre
 		Status          domain.AgentSessionStatus `json:"status,omitempty"`
 		Phase           string                    `json:"phase,omitempty"`
 		Attempt         int                       `json:"attempt,omitempty"`
+		StartedAt       time.Time                 `json:"started_at,omitempty"`
 		Metadata        map[string]string         `json:"metadata,omitempty"`
 	}{
 		SessionID:       in.SessionID,
@@ -114,6 +116,7 @@ func (s *agentSessionStore) Create(ctx context.Context, in store.AgentSessionCre
 		Status:          in.Status,
 		Phase:           in.Phase,
 		Attempt:         in.Attempt,
+		StartedAt:       in.StartedAt,
 		Metadata:        in.Metadata,
 	}
 	var out domain.AgentSession
@@ -172,6 +175,52 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 		resp.AgentSessions = filterAgentSessionsClientSide(resp.AgentSessions, clientSideKind, clientSideParent, clientSideLimit)
 	}
 	return resp.AgentSessions, nil
+}
+
+func (s *agentSessionStore) ListPage(ctx context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, int, error) {
+	q := url.Values{}
+	if filter.AgentID != "" {
+		q.Set("agent_id", filter.AgentID)
+	}
+	if filter.NodeID != "" {
+		q.Set("node_id", filter.NodeID)
+	}
+	if filter.TaskID != "" {
+		q.Set("task_id", filter.TaskID)
+	}
+	if filter.Status != "" {
+		q.Set("status", string(filter.Status))
+	}
+	if filter.Kind != "" {
+		q.Set("kind", string(filter.Kind))
+	}
+	if filter.ParentSessionID != "" {
+		q.Set("parent_session_id", filter.ParentSessionID)
+	}
+	if filter.Since != nil {
+		q.Set("since", filter.Since.UTC().Format(time.RFC3339))
+	}
+	if filter.Until != nil {
+		q.Set("until", filter.Until.UTC().Format(time.RFC3339))
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", strconv.Itoa(filter.Limit))
+	}
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-sessions", q)
+	var resp struct {
+		AgentSessions []*domain.AgentSession `json:"agent_sessions"`
+		Total         *int                   `json:"total"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, 0, err
+	}
+	if resp.Total == nil {
+		return nil, 0, fmt.Errorf("fleet-db must be upgraded: agent-sessions list response is missing total for server-side session time filtering: %w", store.ErrServerCapability)
+	}
+	if resp.AgentSessions == nil {
+		resp.AgentSessions = []*domain.AgentSession{}
+	}
+	return resp.AgentSessions, *resp.Total, nil
 }
 
 // Client-side filter for Kind / ParentSessionID; see List comment above.

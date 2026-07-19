@@ -3,7 +3,7 @@
  * Displays project backend configuration with a dropdown and per-agent overrides table.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
@@ -19,6 +19,7 @@ import {
   useWorkspaceDesignFormat,
   useWorkspaceContext,
 } from "@/hooks/workspace";
+import { useEvalCron, useWorkspaceEvalPolicy } from "@/hooks/evals";
 import type { BackendInfo } from "@/utils/workspace";
 import {
   useTerminalFont,
@@ -47,6 +48,12 @@ interface RedisFormState {
   tls: boolean;
 }
 
+interface EvalPolicyFormState {
+  samplingPercent: string;
+  batchSize: string;
+  lookbackDays: string;
+}
+
 type AgentRuntimeDefault = "local" | "daytona";
 type RuntimeCredentialProvider = "daytona" | "github";
 
@@ -58,6 +65,51 @@ const EMPTY_REDIS_FORM: RedisFormState = {
   db: "0",
   tls: false,
 };
+
+const DEFAULT_EVAL_POLICY = {
+  samplingPercent: 100,
+  batchSize: 25,
+  lookbackDays: 30,
+};
+
+function workspaceEvalPolicy(
+  workspace: {
+    eval_sampling_percent?: number | undefined;
+    eval_batch_size?: number | undefined;
+    eval_lookback_days?: number | undefined;
+  } | null,
+): typeof DEFAULT_EVAL_POLICY {
+  return {
+    samplingPercent:
+      workspace?.eval_sampling_percent && workspace.eval_sampling_percent > 0
+        ? workspace.eval_sampling_percent
+        : DEFAULT_EVAL_POLICY.samplingPercent,
+    batchSize:
+      workspace?.eval_batch_size && workspace.eval_batch_size > 0
+        ? workspace.eval_batch_size
+        : DEFAULT_EVAL_POLICY.batchSize,
+    lookbackDays:
+      workspace?.eval_lookback_days && workspace.eval_lookback_days > 0
+        ? workspace.eval_lookback_days
+        : DEFAULT_EVAL_POLICY.lookbackDays,
+  };
+}
+
+function evalPolicyFormFromPersisted(
+  persisted: typeof DEFAULT_EVAL_POLICY,
+): EvalPolicyFormState {
+  return {
+    samplingPercent: String(persisted.samplingPercent),
+    batchSize: String(persisted.batchSize),
+    lookbackDays: String(persisted.lookbackDays),
+  };
+}
+
+function parsePositiveInteger(value: string): number | null {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return null;
+  return parsed;
+}
 
 export function SettingsView({
   className,
@@ -106,6 +158,30 @@ export function SettingsView({
   );
   const { isSaving: isSavingDesignFormat, updateDesignFormat } =
     useWorkspaceDesignFormat();
+  const rawEvalSamplingPercent = workspace?.eval_sampling_percent;
+  const rawEvalBatchSize = workspace?.eval_batch_size;
+  const rawEvalLookbackDays = workspace?.eval_lookback_days;
+  const persistedEvalPolicy = useMemo(
+    () =>
+      workspaceEvalPolicy({
+        eval_sampling_percent: rawEvalSamplingPercent,
+        eval_batch_size: rawEvalBatchSize,
+        eval_lookback_days: rawEvalLookbackDays,
+      }),
+    [rawEvalBatchSize, rawEvalLookbackDays, rawEvalSamplingPercent],
+  );
+  const [evalPolicyForm, setEvalPolicyForm] = useState<EvalPolicyFormState>(
+    evalPolicyFormFromPersisted(persistedEvalPolicy),
+  );
+  const { isSaving: isSavingEvalPolicy, updateEvalPolicy } =
+    useWorkspaceEvalPolicy();
+  const {
+    cron: evalCron,
+    isLoading: isEvalCronLoading,
+    isSaving: isEvalCronSaving,
+    error: evalCronError,
+    setEnabled: setEvalCronEnabled,
+  } = useEvalCron();
 
   const { fontFamily, fontSize, setFontFamily, setFontSize } =
     useTerminalFont();
@@ -145,6 +221,10 @@ export function SettingsView({
   useEffect(() => {
     setDesignFormat(persistedDesignFormat);
   }, [persistedDesignFormat, workspaceId]);
+
+  useEffect(() => {
+    setEvalPolicyForm(evalPolicyFormFromPersisted(persistedEvalPolicy));
+  }, [persistedEvalPolicy, workspaceId]);
 
   const rootClassName = [styles.settingsView, className]
     .filter(Boolean)
@@ -189,6 +269,36 @@ export function SettingsView({
   // Determine the current dropdown value
   const currentValue = selectedBackend ?? config.backend;
   const hasChanges = currentValue !== config.backend;
+  const evalSamplingPercent = parsePositiveInteger(
+    evalPolicyForm.samplingPercent,
+  );
+  const evalBatchSize = parsePositiveInteger(evalPolicyForm.batchSize);
+  const evalLookbackDays = parsePositiveInteger(evalPolicyForm.lookbackDays);
+  const evalPolicyValidationError =
+    evalSamplingPercent == null ||
+    evalSamplingPercent < 1 ||
+    evalSamplingPercent > 100
+      ? "Sampling percent must be between 1 and 100"
+      : evalBatchSize == null || evalBatchSize < 1
+        ? "Batch size must be at least 1"
+        : evalLookbackDays == null || evalLookbackDays < 1
+          ? "Lookback days must be at least 1"
+          : null;
+  const evalPolicyPatch = {
+    ...(evalSamplingPercent !== null &&
+    evalSamplingPercent !== persistedEvalPolicy.samplingPercent
+      ? { eval_sampling_percent: evalSamplingPercent }
+      : {}),
+    ...(evalBatchSize !== null &&
+    evalBatchSize !== persistedEvalPolicy.batchSize
+      ? { eval_batch_size: evalBatchSize }
+      : {}),
+    ...(evalLookbackDays !== null &&
+    evalLookbackDays !== persistedEvalPolicy.lookbackDays
+      ? { eval_lookback_days: evalLookbackDays }
+      : {}),
+  };
+  const hasEvalPolicyChanges = Object.keys(evalPolicyPatch).length > 0;
 
   // Check if any agents have backend overrides
   const agentsWithOverrides = config.agents.filter((a) => a.backend !== "");
@@ -223,6 +333,35 @@ export function SettingsView({
         ? "Design format updated successfully"
         : "Failed to update design format",
       { type: ok ? "success" : "error" },
+    );
+  };
+
+  const handleEvalPolicySave = async () => {
+    if (
+      !workspaceId ||
+      !hasEvalPolicyChanges ||
+      isSavingEvalPolicy ||
+      evalPolicyValidationError
+    ) {
+      return;
+    }
+    const ok = await updateEvalPolicy(evalPolicyPatch);
+    showToast(
+      ok ? "Session eval policy saved" : "Failed to save session eval policy",
+      { type: ok ? "success" : "error" },
+    );
+  };
+
+  const handleEvalCronToggle = async (enabled: boolean) => {
+    if (isEvalCronSaving) return;
+    const state = await setEvalCronEnabled(enabled);
+    if (!state) {
+      showToast("Failed to update session evals", { type: "error" });
+      return;
+    }
+    showToast(
+      state.enabled ? "Session evals enabled" : "Session evals paused",
+      { type: "success" },
     );
   };
 
@@ -503,6 +642,135 @@ export function SettingsView({
               data-testid="design-format-save-button"
             >
               {isSavingDesignFormat ? "Saving..." : "Save Design Format"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Session evals */}
+      <div className={styles.panel} data-testid="eval-policy-panel">
+        <div className={styles.panelHeader}>
+          <h3 className={styles.panelTitle}>Session evals</h3>
+        </div>
+        <div className={styles.panelContent}>
+          <p className={styles.description}>
+            Hourly judging spends LLM tokens. Enabling session evals opts this
+            workspace into that spend.
+          </p>
+
+          <div className={styles.evalCronRow}>
+            {evalCron?.provisioned ? (
+              <label className={styles.checkboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={evalCron.enabled}
+                  disabled={isEvalCronSaving || isEvalCronLoading}
+                  onChange={(event) =>
+                    void handleEvalCronToggle(event.target.checked)
+                  }
+                  data-testid="evals-enable-toggle"
+                />
+                {evalCron.enabled ? "Enabled" : "Paused"}
+              </label>
+            ) : (
+              <button
+                type="button"
+                className={styles.navButton}
+                disabled={isEvalCronSaving || isEvalCronLoading}
+                onClick={() => void handleEvalCronToggle(true)}
+                data-testid="evals-enable-toggle"
+              >
+                {isEvalCronSaving ? "Enabling..." : "Enable session evals"}
+              </button>
+            )}
+            {evalCron?.schedule && (
+              <span className={styles.sourceTag}>{evalCron.schedule}</span>
+            )}
+          </div>
+          {evalCronError && (
+            <p className={styles.errorText}>
+              Failed to load eval cron state: {evalCronError.message}
+            </p>
+          )}
+
+          <div className={styles.fieldGrid}>
+            <div className={styles.formGroup}>
+              <label className={styles.label} htmlFor="eval-sampling-input">
+                Sampling percent
+              </label>
+              <input
+                id="eval-sampling-input"
+                type="number"
+                min={1}
+                max={100}
+                className={styles.input}
+                value={evalPolicyForm.samplingPercent}
+                onChange={(event) =>
+                  setEvalPolicyForm((current) => ({
+                    ...current,
+                    samplingPercent: event.target.value,
+                  }))
+                }
+                data-testid="eval-policy-sampling"
+              />
+            </div>
+            <div className={styles.formGroup}>
+              <label className={styles.label} htmlFor="eval-batch-size-input">
+                Batch size
+              </label>
+              <input
+                id="eval-batch-size-input"
+                type="number"
+                min={1}
+                className={styles.input}
+                value={evalPolicyForm.batchSize}
+                onChange={(event) =>
+                  setEvalPolicyForm((current) => ({
+                    ...current,
+                    batchSize: event.target.value,
+                  }))
+                }
+                data-testid="eval-policy-batch-size"
+              />
+              <p className={styles.description}>server caps each tick at 100</p>
+            </div>
+            <div className={styles.formGroup}>
+              <label className={styles.label} htmlFor="eval-lookback-input">
+                Lookback days
+              </label>
+              <input
+                id="eval-lookback-input"
+                type="number"
+                min={1}
+                className={styles.input}
+                value={evalPolicyForm.lookbackDays}
+                onChange={(event) =>
+                  setEvalPolicyForm((current) => ({
+                    ...current,
+                    lookbackDays: event.target.value,
+                  }))
+                }
+                data-testid="eval-policy-lookback-days"
+              />
+            </div>
+          </div>
+          {evalPolicyValidationError && (
+            <p className={styles.errorText}>{evalPolicyValidationError}</p>
+          )}
+          <div className={styles.formGroup}>
+            <button
+              type="button"
+              className={styles.saveButton}
+              disabled={
+                !workspaceId ||
+                !hasEvalPolicyChanges ||
+                Boolean(evalPolicyValidationError) ||
+                isSavingEvalPolicy
+              }
+              onClick={handleEvalPolicySave}
+              data-testid="eval-policy-save"
+            >
+              {isSavingEvalPolicy ? "Saving..." : "Save Session Evals"}
             </button>
           </div>
         </div>

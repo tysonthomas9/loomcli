@@ -652,9 +652,9 @@ const _useRouteViewMock = mockUseRouteView;
 // Import view pages — rendered by Outlet mock via viewRegistry.
 // Views use WorkspaceViewContext (provided by App) and their heavy sub-components
 // are already mocked above (GraphView, MonitorDashboard, FileExplorer, etc.).
-import { KanbanPage } from "@/views/KanbanPage";
-import { TablePage } from "@/views/TablePage";
-import { GraphPage } from "@/views/GraphPage";
+import { KanbanPage } from "@/views/boards/KanbanPage";
+import { TablePage } from "@/views/boards/TablePage";
+import { GraphPage } from "@/views/boards/GraphPage";
 import { MonitorPage } from "@/views/MonitorPage";
 import { ObservabilityPage } from "@/views/ObservabilityPage";
 import { SettingsPage } from "@/views/SettingsPage";

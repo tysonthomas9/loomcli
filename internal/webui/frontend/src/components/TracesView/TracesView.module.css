@@ -1,0 +1,637 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+.filterBar {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+  flex-wrap: wrap;
+}
+
+.filterGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.filterLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-bg-card);
+}
+
+.segment {
+  border: 0;
+  border-right: 1px solid var(--color-border-light);
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.segment:last-child {
+  border-right: 0;
+}
+
+.segment[data-active="true"] {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.select,
+.input {
+  height: 30px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  padding: 0 8px;
+}
+
+.input {
+  min-width: 160px;
+}
+
+.refreshButton {
+  height: 30px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.refreshButton:hover {
+  background: var(--color-bg-hover);
+}
+
+.customRange {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+
+.content {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(520px, 44%) minmax(0, 1fr);
+}
+
+.listPane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+}
+
+.banner {
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(202, 138, 4, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(250, 204, 21, 0.11);
+  color: #a16207;
+  font-size: 12px;
+}
+
+.listStatus {
+  padding: 18px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.listError {
+  padding: 18px;
+  color: var(--color-danger);
+  font-size: 13px;
+}
+
+.tableWrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--color-text-tertiary);
+  background: var(--color-panel-bg);
+  border-bottom: 1px solid var(--color-border-light);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--color-bg-hover);
+}
+
+.row[data-selected="true"] {
+  background: var(--color-bg-selected, rgba(59, 130, 246, 0.08));
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+}
+
+.agentCell {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-primary);
+}
+
+.kindBadge,
+.statusChip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.kindBadge {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-light);
+}
+
+.statusChip {
+  gap: 5px;
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.statusChip[data-status="completed"] {
+  color: #16a34a;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.statusChip[data-status="failed"] {
+  color: #dc2626;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.statusChip[data-status="running"] {
+  color: #ca8a04;
+  background: rgba(250, 204, 21, 0.14);
+}
+
+.statusChip[data-status="aborted"] {
+  color: #6b7280;
+  background: rgba(107, 114, 128, 0.13);
+}
+
+.indicator {
+  color: var(--color-text-muted);
+}
+
+.evalScores {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.evalScoresFailed {
+  font-size: 11px;
+  color: var(--color-danger);
+  white-space: nowrap;
+}
+
+.indicator[data-on="true"] {
+  color: var(--color-success);
+  font-weight: 700;
+}
+
+.detailPane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-panel-bg);
+}
+
+.detailEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.detailMeta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.metaCell {
+  min-width: 0;
+  padding: 8px 12px;
+  border-right: 1px solid var(--color-border-light);
+}
+
+.metaLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
+}
+
+.metaValue {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabBar {
+  display: flex;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+  padding: 0 12px;
+}
+
+.tab {
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tab[data-active="true"] {
+  color: var(--color-text-primary);
+  font-weight: 700;
+  border-bottom-color: var(--color-primary);
+}
+
+.tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.diffPane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.diffEditor {
+  flex: 1;
+  min-height: 0;
+}
+
+.subagents {
+  border-top: 1px solid var(--color-border-light);
+  padding: 12px 14px 18px;
+  background: var(--color-panel-bg);
+}
+
+.subagentsTitle {
+  margin: 0 0 8px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.subagentItem {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  background: var(--color-bg-card);
+}
+
+.subagentSummary {
+  cursor: pointer;
+  padding: 8px 10px;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.subagentBody {
+  border-top: 1px solid var(--color-border-light);
+  max-height: 480px;
+  overflow: auto;
+}
+
+.evalPanel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+  background: var(--color-panel-bg);
+}
+
+.evalPanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.evalPanelTitle {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+}
+
+.evalRejudgeButton {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+
+.evalRejudgeButton:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.evalRejudgeButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.evalRequestedBadge,
+.evalErrorChip,
+.evalTag,
+.evalPromptVersion {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+
+.evalRequestedBadge {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.evalErrorChip {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.evalPromptVersion,
+.evalTag {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-light);
+}
+
+.evalPausedNote {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+.evalStateEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: calc(var(--space-12) * 3);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.evalFailed {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.evalDone {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.evalScoreGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.evalScoreRow {
+  display: grid;
+  grid-template-columns: minmax(var(--space-12), 1fr) minmax(0, 2fr) var(
+      --space-8
+    );
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+}
+
+.evalScoreLabel {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+
+.evalScoreTrack {
+  height: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.evalScoreFill {
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+}
+
+.evalScoreValue {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.evalTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.evalSummary {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+
+.evalDetails {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+}
+
+.evalDetails summary {
+  cursor: pointer;
+  padding: var(--space-3);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.evalRationaleList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+.evalRationale span {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+}
+
+.evalRationale p {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+
+.evalInsightGroups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.evalInsightGroup {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  padding: var(--space-3);
+}
+
+.evalInsightGroup h4 {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+}
+
+.evalInsightGroup ul {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+
+.evalEmptyText {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.evalMetaLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-family-mono);
+}
+
+@media (max-width: 980px) {
+  .content {
+    grid-template-columns: 1fr;
+  }
+
+  .listPane {
+    min-height: 360px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border-light);
+  }
+
+  .evalScoreGrid,
+  .evalRationaleList,
+  .evalInsightGroups {
+    grid-template-columns: 1fr;
+  }
+}

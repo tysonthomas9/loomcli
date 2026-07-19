@@ -1,0 +1,37 @@
+{
+  "session_id": "20260716-230149-fixture-child-coder--81dd921c",
+  "judge_model": "gpt-5.6-sol",
+  "judge_prompt_version": "v1",
+  "eval_id": "eval-20260716-230149-fixture-child-coder--81dd921c-v1",
+  "validation_warnings": [],
+  "result": {
+    "scores": {
+      "outcome_success": 12,
+      "instruction_adherence": 98,
+      "efficiency": 88,
+      "tool_use_quality": 92
+    },
+    "score_rationales": {
+      "outcome_success": "The agent claimed the task and began its prerequisite, but the required file change, commit, task closure, and all verification are absent, with no diff produced before the session ended during the wait (entries 12, 14, 46).",
+      "instruction_adherence": "The agent loaded and claimed the assigned task, then faithfully started the exact foreground `sleep 3600` without touching files or emitting progress commentary while it ran (entries 10, 12, 14-46).",
+      "efficiency": "Although nearly the entire session was an idle wait, that wait was the task's explicitly mandated first step, and the agent added no substantive detours beyond necessary session polling (entries 10, 14-46).",
+      "tool_use_quality": "The agent correctly used a persistent foreground execution session and successive bounded wait calls, consistently recognizing that the process remained active, though the session ended before it could consume the final result (entries 14-46)."
+    },
+    "error_taxonomy_tags": [
+      "incomplete_task",
+      "idle_wait",
+      "killed_or_truncated"
+    ],
+    "improvement_categories": {
+      "harness": [
+        "Change watchdog budgeting so that an explicitly required foreground wait cannot be killed before its stated duration, or reject such a task before execution, as the 3600-second command begun at entry 14 was still running when the transcript ended at entry 46."
+      ],
+      "linter": [],
+      "prompt": [
+        "Change synthetic task designs so that settle waits are bounded within the agent-session runtime or represented by an external synchronization primitive, preventing a mandatory prerequisite like entry 10 from consuming the whole session without producing an artifact."
+      ],
+      "skill": []
+    },
+    "judge_summary": "The session correctly loaded and claimed LOCALMODE-10, then followed its unusual design by starting the required 3600-second foreground sleep. It was terminated about 950 seconds into that wait, leaving no file modification, commit, test evidence, or task closure, so outcome success is failing despite excellent instruction adherence and competent tool handling. The decisive issue is the mismatch between the mandatory wait and the session lifetime, reflected by the `idle_wait`, `killed_or_truncated`, and `incomplete_task` tags."
+  }
+}

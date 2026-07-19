@@ -99,6 +99,33 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
       errorClass: "stale",
       errorMessage: "lost",
     });
+    await client.evals.listUnevaluated({ promptVersion: "v1" });
+    await client.evals.getTranscript({ sessionId: "session-1", promptVersion: "v1" });
+    await client.evals.putMetric({
+      sessionId: "session-1",
+      promptVersion: "v1",
+      status: "done",
+      eval: {
+        scores: {
+          outcome_success: 100,
+          instruction_adherence: 100,
+          efficiency: 100,
+          tool_use_quality: 100,
+        },
+        score_rationales: {
+          outcome_success: "done",
+          instruction_adherence: "followed",
+          efficiency: "direct",
+          tool_use_quality: "appropriate",
+        },
+        error_taxonomy_tags: [],
+        improvement_categories: { harness: [], linter: [], prompt: [], skill: [] },
+        judge_summary: "passed",
+        judge_model: "gpt-5.6-sol",
+        eval_cost: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      },
+    });
+    await client.evals.rejudge({ sessionId: "session-1" });
     await client.tasks.complete({
       taskId: "TASK-1",
       taskRunId: "task-run-1",
@@ -131,7 +158,13 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
       if (spec.method === "GET") {
         continue;
       }
-      assertNoSnakeCaseKeys(call.body);
+      if (op === "eval-metric-put") {
+        const { eval: rawEval, ...envelope } = call.body;
+        assertNoSnakeCaseKeys(envelope);
+        assert.ok(rawEval && typeof rawEval === "object", "eval-metric-put must preserve its schema-shaped eval payload");
+      } else {
+        assertNoSnakeCaseKeys(call.body);
+      }
       const allowed = new Set(spec.fields);
       for (const key of Object.keys(call.body)) {
         assert.ok(allowed.has(key), `op ${op} sent wire field ${key} not in the frozen manifest`);
@@ -216,6 +249,9 @@ test("contract: strict camelCase — snake_case inputs are not honored", async (
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].body, {}, "snake_case epic_id must be ignored, not forwarded");
 
+    await client.evals.getTranscript({ session_id: "session-1", prompt_version: "v1" });
+    assert.deepEqual(calls[1].body, {}, "snake_case eval inputs must be ignored, not forwarded");
+
     assert.throws(
       () => client.events.await({ pattern: "approval:x@sha", timeout_ms: 500 }),
       (err) => err instanceof DriverApiError && err.code === "await_timeout_required",
@@ -226,7 +262,7 @@ test("contract: strict camelCase — snake_case inputs are not honored", async (
       /requires taskId/,
       "snake_case task_id must not satisfy taskId",
     );
-    assert.equal(calls.length, 1, "rejected snake_case inputs must never reach the wire");
+    assert.equal(calls.length, 2, "rejected snake_case inputs must never reach the wire");
   });
 });
 

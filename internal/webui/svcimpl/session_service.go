@@ -1,23 +1,20 @@
 package svcimpl
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript/backends"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/transcriptref"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -247,6 +244,10 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 	if err != nil {
 		return nil, err
 	}
+	return s.sessionListItemsFromAgentSessions(ctx, wsID, records), nil
+}
+
+func (s *sessionServiceImpl) sessionListItemsFromAgentSessions(ctx context.Context, wsID string, records []*domain.AgentSession) []service.SessionListItem {
 	// Resolve local stores once so artifact presence reflects on-disk truth, not the
 	// metadata keys (stamped at creation/completion). Best-effort: a remote-only
 	// deployment may have no local store, in which case we fall back to metadata.
@@ -262,6 +263,7 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 		item := service.SessionListItem{
 			SessionRecord: sessionRecordFromAgentSession(rec),
 			IsActive:      isActiveAgentSession(rec.Status),
+			Kind:          rec.Kind,
 		}
 		fillControlPlaneArtifactFlags(&item, stores, rec)
 		items = append(items, item)
@@ -269,7 +271,7 @@ func (s *sessionServiceImpl) controlPlaneTaskSessions(ctx context.Context, wsID,
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].StartedAt.After(items[j].StartedAt)
 	})
-	return items, nil
+	return items
 }
 
 // fillControlPlaneArtifactFlags sets HasTranscript/HasDiff from on-disk truth when a
@@ -310,21 +312,27 @@ func sessionRecordFromAgentSession(rec *domain.AgentSession) sessions.SessionRec
 		backend = firstNonEmptySessionValue(rec.Metadata["backend"], rec.Metadata["runtime"])
 	}
 	diffMeta := sessions.DecodeDiffStatsMetadata(rec.Metadata)
+	usageMeta := sessionUsageFromMetadata(rec.Metadata)
 	out := sessions.SessionRecord{
-		SchemaVersion: sessions.CurrentSchemaVersion,
-		SessionID:     rec.SessionID,
-		TaskID:        taskID,
-		AgentName:     rec.AgentID,
-		Backend:       backend,
-		Phase:         rec.Phase,
-		StartedAt:     startedAt,
-		Status:        sessionStatusFromAgentSession(rec.Status),
-		AttemptNum:    rec.Attempt,
-		ErrorClass:    rec.ErrorClass,
-		FilesChanged:  diffMeta.FilesChanged,
-		LinesAdded:    diffMeta.LinesAdded,
-		LinesRemoved:  diffMeta.LinesRemoved,
-		FilesTouched:  diffMeta.FilesTouched,
+		SchemaVersion:    sessions.CurrentSchemaVersion,
+		SessionID:        rec.SessionID,
+		TaskID:           taskID,
+		AgentName:        rec.AgentID,
+		Backend:          backend,
+		Phase:            rec.Phase,
+		StartedAt:        startedAt,
+		Status:           sessionStatusFromAgentSession(rec.Status),
+		AttemptNum:       rec.Attempt,
+		ErrorClass:       rec.ErrorClass,
+		InputTokens:      usageMeta.InputTokens,
+		OutputTokens:     usageMeta.OutputTokens,
+		CacheReadTokens:  usageMeta.CacheReadTokens,
+		CacheWriteTokens: usageMeta.CacheWriteTokens,
+		EstimatedCostUSD: usageMeta.EstimatedCostUSD,
+		FilesChanged:     diffMeta.FilesChanged,
+		LinesAdded:       diffMeta.LinesAdded,
+		LinesRemoved:     diffMeta.LinesRemoved,
+		FilesTouched:     diffMeta.FilesTouched,
 	}
 	if rec.FinishedAt != nil {
 		out.EndedAt = rec.FinishedAt
@@ -336,6 +344,41 @@ func sessionRecordFromAgentSession(rec *domain.AgentSession) sessions.SessionRec
 		out.ExitCode = *rec.ExitCode
 	}
 	return out
+}
+
+type sessionUsageMetadata struct {
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	EstimatedCostUSD float64
+}
+
+func sessionUsageFromMetadata(metadata map[string]string) sessionUsageMetadata {
+	if metadata == nil {
+		return sessionUsageMetadata{}
+	}
+	costKey := "estimated_cost_usd"
+	if strings.TrimSpace(metadata[costKey]) == "" {
+		costKey = "cost_usd"
+	}
+	return sessionUsageMetadata{
+		InputTokens:      metadataInt64(metadata, "input_tokens"),
+		OutputTokens:     metadataInt64(metadata, "output_tokens"),
+		CacheReadTokens:  metadataInt64(metadata, "cache_read_tokens"),
+		CacheWriteTokens: metadataInt64(metadata, "cache_write_tokens"),
+		EstimatedCostUSD: metadataFloat64(metadata, costKey),
+	}
+}
+
+func metadataInt64(metadata map[string]string, key string) int64 {
+	n, _ := strconv.ParseInt(strings.TrimSpace(metadata[key]), 10, 64)
+	return n
+}
+
+func metadataFloat64(metadata map[string]string, key string) float64 {
+	n, _ := strconv.ParseFloat(strings.TrimSpace(metadata[key]), 64)
+	return n
 }
 
 func sessionStatusFromAgentSession(status domain.AgentSessionStatus) sessions.SessionStatus {
@@ -399,15 +442,9 @@ func (s *sessionServiceImpl) GetSession(ctx context.Context, wsID, taskID, sessi
 }
 
 func (s *sessionServiceImpl) controlPlaneSessionRecord(ctx context.Context, wsID, taskID, sessionID string) (*domain.AgentSession, error) {
-	if s.store == nil {
-		return nil, service.ErrNotFound("session not found")
-	}
-	rec, err := s.store.AgentSessions().Get(ctx, wsID, sessionID)
+	rec, err := s.workspaceControlPlaneSessionRecord(ctx, wsID, sessionID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, service.ErrNotFound("session not found")
-		}
-		return nil, service.ErrInternal("failed to load session", err)
+		return nil, err
 	}
 	if rec.TaskID != taskID && (rec.Metadata == nil || rec.Metadata["task_id"] != taskID) {
 		return nil, service.ErrNotFound("session not found")
@@ -423,10 +460,14 @@ func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, task
 	if err != nil {
 		return nil, err
 	}
+	return sessionDetailFromAgentSession(rec), nil
+}
+
+func sessionDetailFromAgentSession(rec *domain.AgentSession) *service.SessionDetailData {
 	return &service.SessionDetailData{
 		SessionMetadata: sessions.SessionMetadata{SessionRecord: sessionRecordFromAgentSession(rec)},
 		IsActive:        isActiveAgentSession(rec.Status),
-	}, nil
+	}
 }
 
 func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
@@ -461,6 +502,10 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
+	return s.controlPlaneTranscriptFromRecord(ctx, wsID, rec)
+}
+
+func (s *sessionServiceImpl) controlPlaneTranscriptFromRecord(ctx context.Context, wsID string, rec *domain.AgentSession) ([]transcript.Event, error) {
 	transcriptRef := ""
 	if rec.Metadata != nil {
 		transcriptRef = strings.TrimSpace(rec.Metadata["transcript_ref"])
@@ -468,119 +513,24 @@ func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, 
 	if transcriptRef == "" {
 		return nil, service.ErrNotFound("transcript not found")
 	}
-	data, err := s.readTranscriptRef(ctx, wsID, transcriptRef)
+	var artifacts store.ArtifactStore
+	if s.store != nil {
+		artifacts = s.store.Artifacts()
+	}
+	data, err := transcriptref.Resolve(ctx, artifacts, wsID, transcriptRef)
 	if err != nil {
 		return nil, service.ErrInternal("failed to load transcript", err)
 	}
-	events, err := parseCanonicalTranscriptBytes(data)
+	backend := ""
+	if rec.Metadata != nil {
+		backend = rec.Metadata["backend"]
+	}
+	events, err := transcriptref.ParseTranscriptBytes(backend, data)
 	if err != nil {
 		return nil, service.ErrInternal("failed to parse transcript", err)
 	}
 	if events == nil {
 		events = []transcript.Event{}
-	}
-	return events, nil
-}
-
-const maxControlPlaneTranscriptBytes = 16 << 20
-
-func (s *sessionServiceImpl) readTranscriptRef(ctx context.Context, wsID, ref string) ([]byte, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return nil, errors.New("empty transcript ref")
-	}
-	if strings.HasPrefix(ref, "artifact://") {
-		artifactID := strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
-		if artifactID == "" {
-			return nil, errors.New("empty artifact transcript ref")
-		}
-		if s.store == nil {
-			return nil, errors.New("artifact store unavailable")
-		}
-		if reader, ok := s.store.Artifacts().(store.ArtifactContentReader); ok {
-			data, err := reader.ReadContent(ctx, wsID, artifactID)
-			if err == nil {
-				return data, nil
-			}
-			if !errors.Is(err, domain.ErrNotFound) {
-				return nil, err
-			}
-		}
-		artifact, err := s.store.Artifacts().Get(ctx, wsID, artifactID)
-		if err != nil {
-			return nil, err
-		}
-		return readTranscriptURI(ctx, artifact.URI)
-	}
-	return readTranscriptURI(ctx, ref)
-}
-
-func readTranscriptURI(ctx context.Context, rawURI string) ([]byte, error) {
-	rawURI = strings.TrimSpace(rawURI)
-	switch {
-	case strings.HasPrefix(rawURI, "file://"):
-		parsed, err := url.Parse(rawURI)
-		if err != nil {
-			return nil, err
-		}
-		path := parsed.Path
-		if path == "" {
-			path = parsed.Host
-		}
-		if path == "" {
-			return nil, errors.New("empty file transcript ref")
-		}
-		return os.ReadFile(path) //nolint:gosec // refs are emitted by the trusted runner/control-plane path.
-	case strings.HasPrefix(rawURI, "http://"), strings.HasPrefix(rawURI, "https://"):
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURI, nil)
-		if err != nil {
-			return nil, err
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, errors.New("transcript ref returned non-success status")
-		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, maxControlPlaneTranscriptBytes+1))
-		if err != nil {
-			return nil, err
-		}
-		if len(body) > maxControlPlaneTranscriptBytes {
-			return nil, errors.New("transcript is too large")
-		}
-		return body, nil
-	default:
-		return nil, errors.New("unsupported transcript ref")
-	}
-}
-
-func parseCanonicalTranscriptBytes(data []byte) ([]transcript.Event, error) {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 {
-		return []transcript.Event{}, nil
-	}
-	if trimmed[0] == '[' {
-		var events []transcript.Event
-		if err := json.Unmarshal(trimmed, &events); err != nil {
-			return nil, err
-		}
-		return events, nil
-	}
-	lines := bytes.Split(trimmed, []byte("\n"))
-	events := make([]transcript.Event, 0, len(lines))
-	for _, line := range lines {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var event transcript.Event
-		if err := json.Unmarshal(line, &event); err != nil {
-			return nil, err
-		}
-		events = append(events, event)
 	}
 	return events, nil
 }
@@ -595,6 +545,10 @@ func (s *sessionServiceImpl) ListSessionSubagents(ctx context.Context, wsID, tas
 	if err != nil {
 		return nil, err
 	}
+	return listSessionSubagentsFromStore(store, sessionID)
+}
+
+func listSessionSubagentsFromStore(store *sessions.Store, sessionID string) ([]string, error) {
 	names, err := store.ListSubagentTranscripts(sessionID)
 	if err != nil {
 		logger.Error("failed to list subagent transcripts", "session_id", sessionID, "err", err)
@@ -627,6 +581,10 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(ctx context.Context, w
 	if err != nil {
 		return nil, err
 	}
+	return getSessionSubagentTranscriptFromStore(store, meta, sessionID, subagentID)
+}
+
+func getSessionSubagentTranscriptFromStore(store *sessions.Store, meta *sessions.SessionMetadata, sessionID, subagentID string) ([]transcript.Event, error) {
 	if subagentID == "" {
 		return nil, service.ErrValidation("subagent ID is required")
 	}
@@ -645,7 +603,7 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(ctx context.Context, w
 		}
 		return nil, service.ErrInternal("stat subagent transcript", statErr)
 	}
-	events, parseErr := backends.ParseEventsFromFile(meta.Backend, path)
+	events, parseErr := transcriptref.ParseEventsFromFile(meta.Backend, path)
 	if parseErr != nil {
 		return nil, service.ErrInternal("parse subagent transcript", parseErr)
 	}
@@ -655,13 +613,9 @@ func (s *sessionServiceImpl) GetSessionSubagentTranscript(ctx context.Context, w
 	return events, nil
 }
 
-// authorizedSessionStore looks up the session's store and metadata, enforces
-// task ownership, and validates the IDs. Shared by transcript and diff
-// endpoints to cut boilerplate.
-func (s *sessionServiceImpl) authorizedSessionStore(ctx context.Context, wsID, taskID, sessionID string) (*sessions.Store, *sessions.SessionMetadata, error) {
-	if taskID == "" || !validTaskID.MatchString(taskID) {
-		return nil, nil, service.ErrValidation("invalid task ID")
-	}
+// workspaceSessionStore looks up the session's store and metadata and
+// validates the session ID without enforcing task ownership.
+func (s *sessionServiceImpl) workspaceSessionStore(ctx context.Context, wsID, sessionID string) (*sessions.Store, *sessions.SessionMetadata, error) {
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
 		return nil, nil, service.ErrValidation("invalid session ID")
 	}
@@ -676,6 +630,20 @@ func (s *sessionServiceImpl) authorizedSessionStore(ctx context.Context, wsID, t
 		}
 		logger.Error("failed to load session metadata", "session_id", sessionID, "err", err)
 		return nil, nil, service.ErrInternal("failed to load session", err)
+	}
+	return store, meta, nil
+}
+
+// authorizedSessionStore looks up the session's store and metadata, enforces
+// task ownership, and validates the IDs. Shared by transcript and diff
+// endpoints to cut boilerplate.
+func (s *sessionServiceImpl) authorizedSessionStore(ctx context.Context, wsID, taskID, sessionID string) (*sessions.Store, *sessions.SessionMetadata, error) {
+	if taskID == "" || !validTaskID.MatchString(taskID) {
+		return nil, nil, service.ErrValidation("invalid task ID")
+	}
+	store, meta, err := s.workspaceSessionStore(ctx, wsID, sessionID)
+	if err != nil {
+		return nil, nil, err
 	}
 	if meta.TaskID != taskID {
 		return nil, nil, service.ErrNotFound("session not found")
@@ -720,14 +688,27 @@ func (s *sessionServiceImpl) controlPlaneSessionDiff(ctx context.Context, wsID, 
 	if err != nil {
 		return "", err
 	}
+	return s.controlPlaneSessionDiffFromRecord(ctx, wsID, rec)
+}
+
+func (s *sessionServiceImpl) workspaceControlPlaneSessionDiff(ctx context.Context, wsID, sessionID string) (string, error) {
+	rec, err := s.workspaceControlPlaneSessionRecord(ctx, wsID, sessionID)
+	if err != nil {
+		return "", err
+	}
+	return s.controlPlaneSessionDiffFromRecord(ctx, wsID, rec)
+}
+
+func (s *sessionServiceImpl) controlPlaneSessionDiffFromRecord(ctx context.Context, wsID string, rec *domain.AgentSession) (string, error) {
 	artifactID := ""
 	if rec.Metadata != nil {
 		artifactID = controlPlaneDiffArtifactRef(rec.Metadata)
 	}
 	if artifactID == "" && rec.Metadata != nil {
-		artifactID, err = s.diffArtifactIDForTaskRun(ctx, wsID, rec.Metadata["task_run_id"])
-		if err != nil {
-			return "", err
+		var lookupErr error
+		artifactID, lookupErr = s.diffArtifactIDForTaskRun(ctx, wsID, rec.Metadata["task_run_id"])
+		if lookupErr != nil {
+			return "", lookupErr
 		}
 	}
 	if artifactID == "" {
@@ -792,7 +773,7 @@ func (s *sessionServiceImpl) readControlPlaneArtifactText(ctx context.Context, w
 		return "", errors.New("empty artifact ref")
 	}
 	if isSupportedControlPlaneURI(artifactID) {
-		data, err := readTranscriptURI(ctx, artifactID)
+		data, err := transcriptref.Resolve(ctx, nil, wsID, artifactID)
 		if err != nil {
 			return "", err
 		}
@@ -817,7 +798,7 @@ func (s *sessionServiceImpl) readControlPlaneArtifactText(ctx context.Context, w
 	if strings.TrimSpace(artifact.URI) == "" {
 		return "", domain.ErrNotFound
 	}
-	data, err := readTranscriptURI(ctx, artifact.URI)
+	data, err := transcriptref.Resolve(ctx, nil, wsID, artifact.URI)
 	if err != nil {
 		return "", err
 	}

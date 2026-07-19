@@ -24,6 +24,8 @@ const (
 	BuiltinEpicRunnerWorkflowName        = "epic-runner"
 	BuiltinGitHubReviewAgentWorkflowName = "github-review-agent"
 	BuiltinGitHubReviewTaskRunnerName    = "github-review-task-runner"
+	BuiltinSessionEvalAgentWorkflowName  = "session-eval-agent"
+	BuiltinSessionEvalTaskRunnerName     = "session-eval-task-runner"
 )
 
 //go:embed builtin/epic-runner.ts
@@ -43,6 +45,12 @@ var builtinGitHubReviewAgentWorkflowSource string
 
 //go:embed builtin/github-review-task-runner.ts
 var builtinGitHubReviewTaskRunnerWorkflowSource string
+
+//go:embed builtin/session-eval-agent.ts
+var builtinSessionEvalAgentWorkflowSource string
+
+//go:embed builtin/session-eval-task-runner.ts
+var builtinSessionEvalTaskRunnerWorkflowSource string
 
 type Spec struct {
 	Entrypoint string
@@ -79,6 +87,7 @@ var builtinMu sync.Mutex
 var builtinWorkflows = map[string]Spec{
 	BuiltinEpicRunnerWorkflowName:        builtinEpicRunnerSpec(),
 	BuiltinGitHubReviewAgentWorkflowName: builtinGitHubReviewAgentSpec(),
+	BuiltinSessionEvalAgentWorkflowName:  builtinSessionEvalAgentSpec(),
 }
 
 // builtinSpec builds the single-entrypoint Spec for an embedded source-tree
@@ -103,6 +112,12 @@ func builtinEpicRunnerSpec() Spec {
 func builtinGitHubReviewAgentSpec() Spec {
 	spec := builtinSpec(BuiltinGitHubReviewAgentWorkflowName, builtinGitHubReviewAgentWorkflowSource)
 	spec.Files["workflows/"+BuiltinGitHubReviewTaskRunnerName+".ts"] = builtinGitHubReviewTaskRunnerWorkflowSource
+	return spec
+}
+
+func builtinSessionEvalAgentSpec() Spec {
+	spec := builtinSpec(BuiltinSessionEvalAgentWorkflowName, builtinSessionEvalAgentWorkflowSource)
+	spec.Files["workflows/"+BuiltinSessionEvalTaskRunnerName+".ts"] = builtinSessionEvalTaskRunnerWorkflowSource
 	return spec
 }
 

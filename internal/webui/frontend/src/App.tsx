@@ -297,6 +297,7 @@ function App() {
     workspace: "kanban",
     files: "kanban",
     observability: "kanban",
+    traces: "kanban",
     // PRs view needs every status (review issues are the PR queue), so use the
     // full "kanban" fetch mode rather than the default "ready" (open-only).
     prs: "kanban",

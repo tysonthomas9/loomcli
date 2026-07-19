@@ -120,6 +120,107 @@ func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing
 	}
 }
 
+func TestSessionServiceWorkspaceScopedControlPlaneMethods(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	base := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+
+	transcriptBody := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"workspace transcript"}` + "\n")
+	patchBody := []byte("diff --git a/workspace.txt b/workspace.txt\n+workspace\n")
+	createFinalizedArtifact(t, st, "transcript-workspace-1", "workspace-new", "TASK-A", "task-run-new", "transcript", "application/x-ndjson", transcriptBody)
+	createFinalizedArtifact(t, st, "patch-workspace-1", "workspace-new", "TASK-A", "task-run-new", "patch", "text/x-diff", patchBody)
+
+	createSession := func(id string, startedAt time.Time, metadata map[string]string) {
+		t.Helper()
+		if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+			WorkspaceKey:    "WS",
+			SessionID:       id,
+			AgentID:         "flue-task-agent",
+			Kind:            domain.AgentSessionKindTask,
+			TaskID:          "TASK-A",
+			ParentSessionID: "lead-session-1",
+			Status:          domain.AgentSessionCompleted,
+			Phase:           "implementation",
+			StartedAt:       startedAt,
+			Metadata:        metadata,
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	createSession("workspace-old", base.Add(-2*time.Hour), map[string]string{"runtime": "flue"})
+	createSession("workspace-middle", base.Add(-30*time.Minute), map[string]string{"runtime": "flue"})
+	createSession("workspace-new", base.Add(-10*time.Minute), map[string]string{
+		"runtime":            "flue",
+		"task_run_id":        "task-run-new",
+		"transcript_ref":     "artifact://transcript-workspace-1",
+		"patch_artifact_id":  "patch-workspace-1",
+		"files_changed":      "2",
+		"lines_added":        "3",
+		"lines_removed":      "1",
+		"files_touched":      "workspace.txt",
+		"input_tokens":       "11",
+		"output_tokens":      "22",
+		"cache_read_tokens":  "33",
+		"cache_write_tokens": "44",
+		"estimated_cost_usd": "0.55",
+	})
+
+	svc := NewSessionService(st, nil)
+	since := base.Add(-time.Hour)
+	items, total, err := svc.ListWorkspaceSessions(ctx, "WS", service.WorkspaceSessionListOptions{
+		Since:   since,
+		AgentID: "flue-task-agent",
+		Kind:    domain.AgentSessionKindTask,
+		Limit:   1,
+	})
+	if err != nil {
+		t.Fatalf("ListWorkspaceSessions: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("total = %d, want 2", total)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.SessionID != "workspace-new" || item.TaskID != "TASK-A" || item.Kind != domain.AgentSessionKindTask {
+		t.Fatalf("item identity = %+v kind=%q", item.SessionRecord, item.Kind)
+	}
+	if item.Backend != "flue" || !item.HasTranscript || !item.HasDiff {
+		t.Fatalf("item backend/flags = %q/%v/%v", item.Backend, item.HasTranscript, item.HasDiff)
+	}
+	if item.FilesChanged != 2 || item.LinesAdded != 3 || item.LinesRemoved != 1 || len(item.FilesTouched) != 1 || item.FilesTouched[0] != "workspace.txt" {
+		t.Fatalf("item diff stats = %+v", item.SessionRecord)
+	}
+	if item.InputTokens != 11 || item.OutputTokens != 22 || item.CacheReadTokens != 33 || item.CacheWriteTokens != 44 || item.EstimatedCostUSD != 0.55 {
+		t.Fatalf("item usage = %+v", item.SessionRecord)
+	}
+
+	detail, err := svc.GetWorkspaceSession(ctx, "WS", "workspace-new")
+	if err != nil {
+		t.Fatalf("GetWorkspaceSession: %v", err)
+	}
+	if detail.SessionID != "workspace-new" || detail.IsActive {
+		t.Fatalf("detail = %+v", detail)
+	}
+
+	events, err := svc.GetWorkspaceSessionTranscript(ctx, "WS", "workspace-new")
+	if err != nil {
+		t.Fatalf("GetWorkspaceSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "workspace transcript" {
+		t.Fatalf("events = %+v", events)
+	}
+
+	diff, err := svc.GetWorkspaceSessionDiff(ctx, "WS", "workspace-new")
+	if err != nil {
+		t.Fatalf("GetWorkspaceSessionDiff: %v", err)
+	}
+	if diff != string(patchBody) {
+		t.Fatalf("diff = %q, want %q", diff, patchBody)
+	}
+}
+
 func TestSessionServiceControlPlaneDiffArtifactReadContent(t *testing.T) {
 	ctx := t.Context()
 	st := memstore.New()
@@ -613,6 +714,20 @@ func TestSessionServiceEventStoreSubagentsAreDiscoverable(t *testing.T) {
 	if len(events) != 1 || events[0].Text != "subagent from event store" {
 		t.Fatalf("subagent events = %+v", events)
 	}
+	workspaceIDs, err := svc.ListWorkspaceSessionSubagents(t.Context(), "WS", sessionID)
+	if err != nil {
+		t.Fatalf("ListWorkspaceSessionSubagents: %v", err)
+	}
+	if len(workspaceIDs) != 1 || workspaceIDs[0] != "agent-789" {
+		t.Fatalf("workspace subagent ids = %v, want [agent-789]", workspaceIDs)
+	}
+	workspaceEvents, err := svc.GetWorkspaceSessionSubagentTranscript(t.Context(), "WS", sessionID, "agent-789")
+	if err != nil {
+		t.Fatalf("GetWorkspaceSessionSubagentTranscript: %v", err)
+	}
+	if len(workspaceEvents) != 1 || workspaceEvents[0].Text != "subagent from event store" {
+		t.Fatalf("workspace subagent events = %+v", workspaceEvents)
+	}
 }
 
 func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
@@ -632,5 +747,64 @@ func TestReadScrollbackFileReturnsInternalWhenHomeDirUnavailable(t *testing.T) {
 	}
 	if svcErr.Kind != service.KindInternal {
 		t.Fatalf("error kind = %q, want %q", svcErr.Kind, service.KindInternal)
+	}
+}
+
+func TestListWorkspaceSessionsAttachesEvalSummaries(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	base := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+
+	create := func(id string, metadata map[string]string) {
+		t.Helper()
+		if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+			WorkspaceKey: "WS",
+			SessionID:    id,
+			AgentID:      "codex-coder",
+			Kind:         domain.AgentSessionKindTask,
+			Status:       domain.AgentSessionCompleted,
+			StartedAt:    base,
+			Metadata:     metadata,
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	create("judged-1", map[string]string{"eval_status": "done", "eval_prompt_version": "v1"})
+	create("unjudged-1", nil)
+	if _, err := st.SessionEvals().Create(ctx, &domain.SessionEval{
+		EvalID:             "eval-judged-1-v1",
+		SessionID:          "judged-1",
+		AgentID:            "codex-coder",
+		WorkspaceKey:       "WS",
+		JudgePromptVersion: "v1",
+		Scores: domain.SessionEvalScores{
+			OutcomeSuccess:       76,
+			InstructionAdherence: 58,
+			Efficiency:           93,
+			ToolUseQuality:       74,
+		},
+	}); err != nil {
+		t.Fatalf("create eval: %v", err)
+	}
+
+	svc := NewSessionService(st, nil)
+	items, _, err := svc.ListWorkspaceSessions(ctx, "WS", service.WorkspaceSessionListOptions{})
+	if err != nil {
+		t.Fatalf("ListWorkspaceSessions: %v", err)
+	}
+	byID := map[string]service.SessionListItem{}
+	for _, item := range items {
+		byID[item.SessionID] = item
+	}
+	judged := byID["judged-1"]
+	if judged.EvalStatus != "done" || judged.EvalScores == nil {
+		t.Fatalf("judged item eval = status %q scores %+v", judged.EvalStatus, judged.EvalScores)
+	}
+	if judged.EvalScores.OutcomeSuccess != 76 || judged.EvalScores.ToolUseQuality != 74 {
+		t.Fatalf("judged scores = %+v", judged.EvalScores)
+	}
+	unjudged := byID["unjudged-1"]
+	if unjudged.EvalStatus != "" || unjudged.EvalScores != nil {
+		t.Fatalf("unjudged item eval = status %q scores %+v", unjudged.EvalStatus, unjudged.EvalScores)
 	}
 }

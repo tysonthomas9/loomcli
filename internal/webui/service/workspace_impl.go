@@ -575,6 +575,33 @@ func (s *workspaceServiceImpl) PatchWorkspaceDesignFormat(ctx context.Context, w
 	return data, nil
 }
 
+func (s *workspaceServiceImpl) PatchWorkspaceEvalPolicy(ctx context.Context, wsID string, patch WorkspaceEvalPolicyPatch) (*ops.WorkspaceData, error) {
+	if err := ValidateWorkspaceEvalPolicyPatch(patch); err != nil {
+		return nil, ErrValidation(err.Error())
+	}
+	if s.store == nil {
+		return nil, ErrUnavailable("workspace store unavailable")
+	}
+	ws, serr := s.resolveStoreWorkspaceForDefault(ctx, wsID)
+	if serr != nil {
+		return nil, serr
+	}
+	if _, err := s.store.Workspaces().Update(ctx, ws.Key, store.WorkspaceUpdate{
+		EvalSamplingPercent: patch.EvalSamplingPercent,
+		EvalBatchSize:       patch.EvalBatchSize,
+		EvalLookbackDays:    patch.EvalLookbackDays,
+	}); err != nil {
+		return nil, ErrInternal("failed to save workspace eval policy", err)
+	}
+	s.invalidateWorkspaceCache()
+	data, err := s.loadWorkspaceByID(ctx, ws.Key)
+	if err != nil {
+		return nil, ErrInternal("failed to load workspace data", err)
+	}
+	normalizeWorkspaceData(data)
+	return data, nil
+}
+
 func (s *workspaceServiceImpl) invalidateWorkspaceCache() {
 	if s.workspaceCache != nil {
 		s.workspaceCache.invalidateAll()

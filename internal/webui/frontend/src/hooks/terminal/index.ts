@@ -13,6 +13,27 @@ export { useSessionRestore } from "./useSessionRestore";
 export { useSessionTranscript } from "./useSessionTranscript";
 export type { UseSessionTranscriptResult } from "./useSessionTranscript";
 
+export { useWorkspaceSession } from "./useWorkspaceSession";
+export type { UseWorkspaceSessionResult } from "./useWorkspaceSession";
+
+export { useWorkspaceSessionDiff } from "./useWorkspaceSessionDiff";
+export type { UseWorkspaceSessionDiffResult } from "./useWorkspaceSessionDiff";
+
+export {
+  useWorkspaceSessionSubagents,
+  useWorkspaceSubagentTranscript,
+} from "./useWorkspaceSessionSubagents";
+export type {
+  UseWorkspaceSessionSubagentsResult,
+  UseWorkspaceSubagentTranscriptResult,
+} from "./useWorkspaceSessionSubagents";
+
+export { useWorkspaceSessions } from "./useWorkspaceSessions";
+export type { UseWorkspaceSessionsResult } from "./useWorkspaceSessions";
+
+export { useWorkspaceSessionTranscript } from "./useWorkspaceSessionTranscript";
+export type { UseWorkspaceSessionTranscriptResult } from "./useWorkspaceSessionTranscript";
+
 export { useTaskLogPolling } from "./useTaskLogPolling";
 export type {
   UseTaskLogPollingOptions,

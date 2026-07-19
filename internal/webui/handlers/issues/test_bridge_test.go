@@ -399,6 +399,10 @@ func (s *testSessionServiceImpl) ListTaskSessions(_ context.Context, _, taskID s
 	return items, nil
 }
 
+func (s *testSessionServiceImpl) ListWorkspaceSessions(_ context.Context, _ string, _ service.WorkspaceSessionListOptions) ([]service.SessionListItem, int, error) {
+	return nil, 0, service.ErrUnavailable("session store not available")
+}
+
 func (s *testSessionServiceImpl) GetSession(_ context.Context, _, _, sessionID string) (*service.SessionDetailData, error) {
 	if s.sessStore == nil {
 		return nil, service.ErrUnavailable("session store not available")
@@ -411,6 +415,10 @@ func (s *testSessionServiceImpl) GetSession(_ context.Context, _, _, sessionID s
 		return nil, service.ErrInternal("failed to load session", err)
 	}
 	return &service.SessionDetailData{SessionMetadata: *meta, IsActive: meta.Status == sessions.StatusRunning}, nil
+}
+
+func (s *testSessionServiceImpl) GetWorkspaceSession(ctx context.Context, wsID, sessionID string) (*service.SessionDetailData, error) {
+	return s.GetSession(ctx, wsID, "", sessionID)
 }
 
 func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, _, sessionID string) ([]transcript.Event, error) {
@@ -427,12 +435,24 @@ func (s *testSessionServiceImpl) GetSessionTranscript(_ context.Context, _, _, s
 	return events, nil
 }
 
+func (s *testSessionServiceImpl) GetWorkspaceSessionTranscript(ctx context.Context, wsID, sessionID string) ([]transcript.Event, error) {
+	return s.GetSessionTranscript(ctx, wsID, "", sessionID)
+}
+
 func (s *testSessionServiceImpl) ListSessionSubagents(_ context.Context, _, _, _ string) ([]string, error) {
 	return nil, nil
 }
 
+func (s *testSessionServiceImpl) ListWorkspaceSessionSubagents(ctx context.Context, wsID, sessionID string) ([]string, error) {
+	return s.ListSessionSubagents(ctx, wsID, "", sessionID)
+}
+
 func (s *testSessionServiceImpl) GetSessionSubagentTranscript(_ context.Context, _, _, _, _ string) ([]transcript.Event, error) {
 	return nil, nil
+}
+
+func (s *testSessionServiceImpl) GetWorkspaceSessionSubagentTranscript(ctx context.Context, wsID, sessionID, subagentID string) ([]transcript.Event, error) {
+	return s.GetSessionSubagentTranscript(ctx, wsID, "", sessionID, subagentID)
 }
 
 func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, _, sessionID string) (string, error) {
@@ -447,6 +467,10 @@ func (s *testSessionServiceImpl) GetSessionDiff(_ context.Context, _, _, session
 		return "", service.ErrInternal("failed to read diff", err)
 	}
 	return diff, nil
+}
+
+func (s *testSessionServiceImpl) GetWorkspaceSessionDiff(ctx context.Context, wsID, sessionID string) (string, error) {
+	return s.GetSessionDiff(ctx, wsID, "", sessionID)
 }
 
 func (s *testSessionServiceImpl) ListSessionHistory(ctx context.Context, wsID, issueID string) ([]sessionhistory.SessionRecord, error) {
@@ -536,19 +560,37 @@ type stubSessionService struct{}
 func (s *stubSessionService) ListTaskSessions(_ context.Context, _, _ string) ([]service.SessionListItem, error) {
 	return nil, nil
 }
+func (s *stubSessionService) ListWorkspaceSessions(_ context.Context, _ string, _ service.WorkspaceSessionListOptions) ([]service.SessionListItem, int, error) {
+	return nil, 0, nil
+}
 func (s *stubSessionService) GetSession(_ context.Context, _, _, _ string) (*service.SessionDetailData, error) {
+	return &service.SessionDetailData{}, nil
+}
+func (s *stubSessionService) GetWorkspaceSession(_ context.Context, _, _ string) (*service.SessionDetailData, error) {
 	return &service.SessionDetailData{}, nil
 }
 func (s *stubSessionService) GetSessionTranscript(_ context.Context, _, _, _ string) ([]transcript.Event, error) {
 	return nil, nil
 }
+func (s *stubSessionService) GetWorkspaceSessionTranscript(_ context.Context, _, _ string) ([]transcript.Event, error) {
+	return nil, nil
+}
 func (s *stubSessionService) ListSessionSubagents(_ context.Context, _, _, _ string) ([]string, error) {
+	return nil, nil
+}
+func (s *stubSessionService) ListWorkspaceSessionSubagents(_ context.Context, _, _ string) ([]string, error) {
 	return nil, nil
 }
 func (s *stubSessionService) GetSessionSubagentTranscript(_ context.Context, _, _, _, _ string) ([]transcript.Event, error) {
 	return nil, nil
 }
+func (s *stubSessionService) GetWorkspaceSessionSubagentTranscript(_ context.Context, _, _, _ string) ([]transcript.Event, error) {
+	return nil, nil
+}
 func (s *stubSessionService) GetSessionDiff(_ context.Context, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (s *stubSessionService) GetWorkspaceSessionDiff(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
 func (s *stubSessionService) ListSessionHistory(_ context.Context, _, _ string) ([]sessionhistory.SessionRecord, error) {

@@ -91,6 +91,33 @@ LOCAL_MODE_CODEX_CLI_VERSION=0.144.1 make local-mode-codex-up
 
 If auth is missing, do not fake the result. Report the missing auth as a blocker or switch to a test path that does not claim real backend behavior.
 
+## Session Eval Machinery
+
+Use the standing dogfood verifier when a change touches session eval workflows,
+session-evals storage, eval rollups, Traces read paths, or eval dashboard
+surfaces. This is manual, not CI: it needs Podman/Docker, the sibling Flue
+checkout installed and built, and Codex mode uses real auth plus judge spend.
+
+Plain deterministic path:
+
+```bash
+make local-mode-up
+make local-mode-evals-verify
+```
+
+Live Codex path:
+
+```bash
+make local-mode-codex-up
+LOCAL_MODE_EVALS_MODE=codex make local-mode-evals-verify
+```
+
+The plain verifier proves `loom evals enable`, the cron binding,
+`eval_backend_unavailable` preflight defer behavior with no stamps, and Traces
+API transcript reads. The Codex verifier proves a real completed task session
+gets `eval-<session>-v1`, score/rationale/tag/model/cost fields, session
+`eval_status=done`, eval rollup coverage, and optional `agent-browser` UI checks.
+
 ## Parallel Stacks
 
 Use separate Compose projects and ports. Keep the same project name for logs and teardown.

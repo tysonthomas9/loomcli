@@ -34,20 +34,20 @@ func (u leafUsage) cost() float64 {
 // readLeafTranscript reads the session's on-disk native transcript ONCE so the
 // finalize can reuse it for both the on-disk token backfill (the supervisor's
 // collector-less finalize otherwise lands tokens=0) and the control-plane
-// transcript_ref artifact upload. ok=false when there is no transcript yet.
-func (s *Supervisor) readLeafTranscript(sessionID string) (data []byte, usage leafUsage, ok bool) {
+// transcript_ref artifact upload. Empty data means there is no transcript yet.
+func (s *Supervisor) readLeafTranscript(sessionID string) (data []byte, usage leafUsage) {
 	if sessionID == "" {
-		return nil, leafUsage{}, false
+		return nil, leafUsage{}
 	}
 	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
-		return nil, leafUsage{}, false
+		return nil, leafUsage{}
 	}
 	data, err = os.ReadFile(sessStore.NativeTranscriptPath(sessionID)) //nolint:gosec // session-owned path
 	if err != nil || len(data) == 0 {
-		return nil, leafUsage{}, false
+		return nil, leafUsage{}
 	}
-	return data, extractLeafUsage(data), true
+	return data, extractLeafUsage(data)
 }
 
 // extractLeafUsage scans a canonical transcript from the end for the terminal
@@ -123,8 +123,15 @@ func (s *Supervisor) finalizeAgentSession(ap *AgentProcess, exitCode int) {
 	// finalizeLocalSession) and the control-plane transcript_ref artifact upload.
 	// Read before finalizeLocalSession, whose codex/claude re-sync can rewrite the
 	// on-disk file — this captures the TS leaf's canonical transcript verbatim.
-	transcriptData, usage, _ := s.readLeafTranscript(state.sessionID)
+	transcriptData, usage := s.readLeafTranscript(state.sessionID)
 	diffResult := finalizeLocalSession(state.session, ap, state.beforeRef, taskID, exitCode, errClass, usage)
+	if len(transcriptData) == 0 {
+		// The daemon codex/claude paths only sync the native transcript into the
+		// session store during finalizeLocalSession, so the pre-finalize read is
+		// empty for them; re-read so those sessions get transcript_ref stamped
+		// live instead of waiting for loom doctor --fix.
+		transcriptData, _ = s.readLeafTranscript(state.sessionID)
+	}
 	s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
 		sessionID:      state.sessionID,
 		leaseID:        state.leaseID,

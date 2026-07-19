@@ -170,6 +170,28 @@ export interface LoomTaskRunAwaitInput extends LoomTaskRunGetInput {
   timeoutMs?: number;
 }
 
+export interface LoomEvalPromptInput {
+  promptVersion?: string;
+  prompt_version?: string;
+}
+
+export interface LoomEvalSessionInput extends LoomEvalPromptInput {
+  sessionId?: string;
+  session_id?: string;
+}
+
+export interface LoomEvalMetricInput extends LoomEvalSessionInput {
+  status?: "done" | "failed" | string;
+  errorClass?: string;
+  error_class?: string;
+  eval?: unknown;
+}
+
+export interface LoomEvalRejudgeInput {
+  sessionId?: string;
+  session_id?: string;
+}
+
 /** camelCase freshness assertions for connector egress (CV9 wire shape). */
 export interface LoomConnectorPreconditions {
   expectedHeadSha?: string;
@@ -426,6 +448,12 @@ export declare class LoomDriverClient {
     active(input?: LoomTaskRunActiveInput): Promise<Record<string, unknown> | null>;
     recoverStale(input?: LoomTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
   };
+  readonly evals: {
+    listUnevaluated(input?: LoomEvalPromptInput): Promise<Record<string, unknown> | null>;
+    getTranscript(input?: LoomEvalSessionInput): Promise<Record<string, unknown> | null>;
+    putMetric(input?: LoomEvalMetricInput): Promise<Record<string, unknown> | null>;
+    rejudge(input?: LoomEvalRejudgeInput): Promise<Record<string, unknown> | null>;
+  };
   readonly connectors: LoomConnectorsNamespace;
   readonly events: {
     /** Throws WorkflowSuspended when the run suspends; see LoomAwaitEventInput for the determinism and freshness rules. */
@@ -463,6 +491,10 @@ export declare class LoomDriverClient {
   awaitTaskRun(input?: LoomTaskRunAwaitInput): Promise<Record<string, unknown> | null>;
   activeTaskRuns(input?: LoomTaskRunActiveInput): Promise<Record<string, unknown> | null>;
   recoverStaleTaskRuns(input?: LoomTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
+  listUnevaluatedSessions(input?: LoomEvalPromptInput): Promise<Record<string, unknown> | null>;
+  getSessionTranscript(input?: LoomEvalSessionInput): Promise<Record<string, unknown> | null>;
+  putEvalMetric(input?: LoomEvalMetricInput): Promise<Record<string, unknown> | null>;
+  rejudgeSession(input?: LoomEvalRejudgeInput): Promise<Record<string, unknown> | null>;
   completeTask(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   releaseTask(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   /**

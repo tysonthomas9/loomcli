@@ -16,10 +16,16 @@ var noopHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) 
 
 func TestSessionModule_RegisterRoutes(t *testing.T) {
 	mod := NewSessionModule(&stubSessionService{}, SessionModuleOpts{
-		ListTaskSessions:     noopHandler,
-		GetSession:           noopHandler,
-		GetSessionTranscript: noopHandler,
-		GetSessionDiff:       noopHandler,
+		ListTaskSessions:                      noopHandler,
+		GetSession:                            noopHandler,
+		GetSessionTranscript:                  noopHandler,
+		GetSessionDiff:                        noopHandler,
+		ListWorkspaceSessions:                 noopHandler,
+		GetWorkspaceSession:                   noopHandler,
+		GetWorkspaceSessionTranscript:         noopHandler,
+		GetWorkspaceSessionDiff:               noopHandler,
+		ListWorkspaceSessionSubagents:         noopHandler,
+		GetWorkspaceSessionSubagentTranscript: noopHandler,
 	})
 
 	mux := http.NewServeMux()
@@ -35,6 +41,12 @@ func TestSessionModule_RegisterRoutes(t *testing.T) {
 		{"GET", "/api/workspaces/test-ws/tasks/task1/sessions/sess1"},
 		{"GET", "/api/workspaces/test-ws/tasks/task1/sessions/sess1/transcript"},
 		{"GET", "/api/workspaces/test-ws/tasks/task1/sessions/sess1/diff"},
+		{"GET", "/api/workspaces/test-ws/sessions"},
+		{"GET", "/api/workspaces/test-ws/sessions/sess1"},
+		{"GET", "/api/workspaces/test-ws/sessions/sess1/transcript"},
+		{"GET", "/api/workspaces/test-ws/sessions/sess1/diff"},
+		{"GET", "/api/workspaces/test-ws/sessions/sess1/subagents"},
+		{"GET", "/api/workspaces/test-ws/sessions/sess1/subagents/sub1/transcript"},
 	}
 
 	for _, rt := range routes {
@@ -52,7 +64,7 @@ func TestSessionModule_RegisterRoutes(t *testing.T) {
 }
 
 func TestSessionModule_AllRoutesUnconditional(t *testing.T) {
-	// All 6 routes register regardless of whether the underlying stores are nil.
+	// History routes register regardless of whether the underlying stores are nil.
 	// The SessionService handles nil stores internally.
 	mod := NewSessionModule(&stubSessionService{}, SessionModuleOpts{})
 

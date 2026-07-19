@@ -31,6 +31,11 @@ type Workspace struct {
 	ErrorMessage  string         `json:"error_message,omitempty"`
 	DefaultBranch string         `json:"default_branch,omitempty"`
 	DesignFormat  string         `json:"design_format,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	// Zero means unset; callers should resolve effective defaults via
+	// evals.EffectivePolicy.
+	EvalSamplingPercent int       `json:"eval_sampling_percent,omitempty"`
+	EvalBatchSize       int       `json:"eval_batch_size,omitempty"`
+	EvalLookbackDays    int       `json:"eval_lookback_days,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }

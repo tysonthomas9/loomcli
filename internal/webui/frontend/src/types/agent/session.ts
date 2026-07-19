@@ -11,8 +11,31 @@
 
 import type { components } from "@/types/generated/openapi";
 
+import type { EvalScoreAverages } from "./evals";
+
 /** Lifecycle state of a session. */
 export type SessionStatus = "running" | "completed" | "failed" | "aborted";
+
+/** Raw control-plane status values accepted by workspace session filters. */
+export type WorkspaceSessionStatusFilter =
+  | "queued"
+  | "leased"
+  | "starting"
+  | "running"
+  | "idle"
+  | "yielded"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "expired";
+
+/** Workspace-scoped agent session kind values. */
+export type WorkspaceSessionKind =
+  | "task"
+  | "orchestration"
+  | "terminal"
+  | "maintenance"
+  | "ad_hoc";
 
 /** A single agent session record. Aliased from generated SessionResponse schema. */
 export type SessionRecord = components["schemas"]["SessionResponse"];
@@ -23,6 +46,7 @@ export type TranscriptEntryRole = "user" | "assistant" | "tool" | "system";
 /** Canonical event type values in the transcript event stream. */
 export type TranscriptEntryType =
   | "text"
+  | "reasoning"
   | "tool_use"
   | "tool_result"
   | "session_meta";
@@ -55,6 +79,37 @@ export interface SessionListResponse {
     task_id: string;
     sessions: SessionRecord[];
   };
+}
+
+export type WorkspaceSessionListItem = SessionRecord & {
+  kind?: WorkspaceSessionKind;
+  /** eval_status metadata stamp (absent = never judged). */
+  eval_status?: "done" | "failed";
+  /** Scores joined from the session's newest eval record. */
+  eval_scores?: EvalScoreAverages;
+};
+
+export interface WorkspaceSessionFilters {
+  since?: string;
+  until?: string;
+  status?: WorkspaceSessionStatusFilter;
+  agent_id?: string;
+  kind?: WorkspaceSessionKind;
+  limit?: number;
+}
+
+/** Response data from GET /api/workspaces/{ws}/sessions */
+export interface WorkspaceSessionListData {
+  sessions: WorkspaceSessionListItem[];
+  total: number;
+  limit: number;
+}
+
+/** Response from GET /api/workspaces/{ws}/sessions */
+export interface WorkspaceSessionListResponse {
+  success: boolean;
+  data: WorkspaceSessionListData;
+  error?: string;
 }
 
 /** Response from GET /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId} */

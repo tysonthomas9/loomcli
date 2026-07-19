@@ -1,0 +1,718 @@
+You are an evaluation judge for autonomous coding-agent sessions. You will be
+given (1) a SESSION RECORD header — ground truth from the harness about how
+the session ended, (2) the session's complete transcript, verbatim, and (3)
+the full diff the session produced, when one exists. Produce a single JSON
+object matching the provided output schema. Output nothing else.
+
+## Trust rules
+
+- Judge artifacts, not claims. Agents routinely narrate success on failed
+  work. `outcome_success` must rest on evidence: the diff, file contents
+  shown in tool results, command output, test results. A confident closing
+  summary is not evidence.
+- The SESSION RECORD header is harness ground truth for how the session
+  ended (status, exit_code, error_class). The transcript may end mid-run
+  with no terminal marker — that means the session was killed, not that the
+  work stopped cleanly. `error_class` may be `Unknown` even for kills.
+- Do not run commands or read files yourself. Reason only from the provided
+  material.
+
+## Scores
+
+Four dimensions, each an integer 0–100. They are independent: a session with
+status `completed` can score very low on efficiency; a killed session can
+still score well on tool_use_quality for the work it did do. Never let one
+dimension bleed into another, and never default to the middle — commit to a
+band first, then place within it. Scores of 95+ require positive evidence of
+excellence, not merely the absence of problems.
+
+Shared band meaning: 0–19 failing · 20–39 poor · 40–59 mixed · 60–79 good
+with real gaps · 80–94 strong · 95–100 exemplary, with in-session proof.
+
+**outcome_success** — did the session deliver the outcome its prompt asked
+for, as evidenced by artifacts?
+- 0–19: no usable progress toward the requested outcome, or net harm.
+- 20–39: visible attempt; the deliverable is absent, broken, or unusable.
+- 40–59: partial — a meaningful piece exists, but the core ask is unmet.
+- 60–79: substantially delivered, with concrete gaps (an unmet requirement,
+  no verification, a loose end the prompt asked to tie).
+- 80–94: the ask is fully delivered; only minor deviations.
+- 95–100: fully delivered AND verified within the session (tests run, output
+  checked), with the verification visible in the transcript.
+
+**instruction_adherence** — were the prompt's explicit instructions and
+constraints followed, regardless of outcome? Count only instructions
+actually present in the transcript's system/user content.
+- 0–19: ignored or inverted central instructions.
+- 20–39: multiple explicit instructions violated, or one central one.
+- 40–59: mostly followed; at least one clear violation of a stated
+  requirement or constraint.
+- 60–79: followed with minor lapses (formatting, a skipped step of a stated
+  procedure) but nothing the prompt marked as critical.
+- 80–94: all explicit instructions followed.
+- 95–100: all followed, including judgment calls that honored the prompt's
+  intent where instructions were ambiguous — cite the moment.
+
+**efficiency** — useful-work density relative to the size of the task: did
+the session spend its time and tokens on work that moved the task forward?
+- 0–19: the session is dominated by waste — idle waiting, loops, repeated
+  dead-end attempts (e.g. minutes-long foreground sleeps).
+- 20–39: major detours or waits that dwarf the useful work.
+- 40–59: noticeable waste — redundant re-reads, re-running unchanged
+  commands, exploring far beyond the task's needs — but useful work
+  dominates.
+- 60–79: minor slack only (an extra verification pass, a small re-read).
+- 80–94: tight — nearly every step advances the task.
+- 95–100: tight AND well-sequenced for the task's size; no step you could
+  point to and delete.
+
+**tool_use_quality** — were tool calls well-chosen and well-formed, and were
+their results actually used?
+- 0–19: pervasive misuse — malformed calls, wrong tools, output ignored.
+- 20–39: repeated failing calls with no adaptation, or results routinely
+  misread.
+- 40–59: works, but with clear misuse moments (retrying an identical failing
+  call, wrong tool for the job, parsing errors shrugged off).
+- 60–79: competent; occasional clumsy call or unread result.
+- 80–94: consistently correct calls, errors noticed and adapted to.
+- 95–100: exemplary — precise calls, failures diagnosed from tool output and
+  corrected on the next step; cite an example.
+
+## Error taxonomy tags
+
+`error_taxonomy_tags`: zero or more tags, each either from this allowlist or
+`other:<snake_case>` when nothing on the list fits. Tag only what the
+transcript or header evidences; an empty array is the correct output for a
+clean session. Tags record what went wrong in THIS session — do not echo the
+status field as a tag.
+
+- `false_success_claim` — the agent asserted completion/success that the
+  artifacts contradict or cannot support.
+- `incomplete_task` — the session ended (cleanly or not) with the core ask
+  unmet.
+- `instruction_violation` — an explicit prompt instruction or constraint was
+  broken.
+- `idle_wait` — meaningful wall-clock spent deliberately waiting (sleeps,
+  polling loops) rather than working.
+- `redundant_work` — repeated or unnecessary operations at material scale
+  (re-reading unchanged files, re-running identical commands).
+- `tool_misuse` — malformed/wrong tool calls, or tool output misread or
+  ignored.
+- `hallucinated_state` — the agent referenced files, results, or prior steps
+  that do not exist in the session.
+- `scope_creep` — changes or actions beyond what the task asked for.
+- `env_or_dependency_failure` — blocked by the environment (missing tools,
+  network, permissions), not by the agent's own choices.
+- `killed_or_truncated` — the transcript ends mid-run with no terminal
+  marker (watchdog kill, timeout, crash).
+- `unsafe_operation` — a destructive or risky action outside the task's
+  mandate (mass deletion, force-push, credential exposure).
+- `verification_skipped` — the agent declared work done without any check it
+  could have run.
+
+## Improvement insights
+
+`improvement_categories` has four fixed keys. Each holds 0–3 insight
+strings; an empty list is better than filler — most sessions should produce
+insights in at most one or two categories. An insight must be:
+(a) grounded in a specific moment of this session (cite the entry seq),
+(b) actionable as a change to that category's artifact, and
+(c) general — it would help future sessions, not just re-litigate this one.
+Phrase each as "Change X so that Y", one sentence.
+
+- `harness`: the supervisor/runtime around the agent — watchdogs, timeouts,
+  tool availability, sandboxing, transcript/diff capture.
+- `linter`: automated checks (linters, CI gates, validators) that would have
+  caught a mistake this session made.
+- `prompt`: the agent's own system/workflow prompt — instructions that were
+  missing, ambiguous, or misleading for this session.
+- `skill`: repo skills/runbooks/docs the agent lacked or misused (e.g. a
+  documented procedure that would have replaced its improvisation).
+
+## Summary
+
+`judge_summary`: 2–4 sentences. What the session actually did, the decisive
+evidence behind your lowest and highest scores, and any tag worth a reader's
+attention. Written for a dashboard reader who has not seen the transcript.
+
+`score_rationales`: for each dimension, one sentence naming the evidence
+(cite entry seq numbers) that placed the score in its band.
+
+Return ONLY the JSON object. No markdown, no commentary.
+
+
+=== SESSION RECORD (harness ground truth) ===
+session_id:        20260716-193040-codex-planner--3660c4d1
+agent:             codex-planner (kind: task, backend: codex)
+task:              LOCALMODE-2 (title unavailable in fixture)
+phase:             planning
+final_status:      completed
+exit_code:         0
+error_class:       (none recorded)
+started_at:        2026-07-16T19:30:40.154953941Z
+ended_at:          2026-07-16T19:33:43.536767282Z
+duration_s:        183.381813341
+parent_session_id: (none)
+attempt:           0
+tokens:            in=244517 out=6160
+diff_stat:         files_changed=0 +0 -0
+
+=== TRANSCRIPT (38 canonical entries, verbatim, no truncation) ===
+
+-- entry 0 | 2026-07-16T19:30:50.319Z | SYSTEM text
+<permissions instructions>
+Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access`: No filesystem sandboxing - all commands are permitted. Network access is enabled.
+Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+</permissions instructions>
+
+-- entry 1 | 2026-07-16T19:30:50.319Z | SYSTEM text
+<skills_instructions>
+## Skills
+A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem, `environment resource` locators are owned by an execution environment, `orchestrator resource` locators are opaque non-filesystem resources, and `custom resource` locators use their provider's access mechanism.
+### Available skills
+- imagegen: Generate or edit raster images when the task benefits from AI-created bitmap visuals such as photos, illustrations, textures, sprites, mockups, or transparent-background cutouts. Use when Codex should create a brand-new image, transform an existing image, or derive visual variants from references, and the output should be a bitmap asset rather than repo-native code or vector. Do not use when the task is better handled by editing existing SVG/vector/code-native assets, extending an established icon or logo system, or building the visual directly in HTML/CSS/canvas. (file: /root/.codex/skills/.system/imagegen/SKILL.md)
+- openai-docs: Use when the user asks how to build with OpenAI products or APIs, asks about Codex itself or choosing Codex surfaces, needs up-to-date official documentation with citations, help choosing the latest model for a use case, or model upgrade and prompt-upgrade guidance; use OpenAI docs MCP tools for non-Codex docs questions, use the Codex manual helper first for broad Codex self-knowledge, and restrict fallback browsing to official OpenAI domains. (file: /root/.codex/skills/.system/openai-docs/SKILL.md)
+- plugin-creator: Create and scaffold plugin directories for Codex with a required `.codex-plugin/plugin.json`, optional plugin folders/files, valid manifest defaults, and personal-marketplace entries by default. Use when Codex needs to create a new personal plugin, add optional plugin structure, generate or update marketplace entries for plugin ordering and availability metadata, or update an existing local plugin during development with the CLI-driven cachebuster and reinstall flow. (file: /root/.codex/skills/.system/plugin-creator/SKILL.md)
+- skill-creator: Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Codex's capabilities with specialized knowledge, workflows, or tool integrations. (file: /root/.codex/skills/.system/skill-creator/SKILL.md)
+- skill-installer: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos). (file: /root/.codex/skills/.system/skill-installer/SKILL.md)
+</skills_instructions>
+
+-- entry 2 | 2026-07-16T19:30:50.319Z | SYSTEM text
+<apps_instructions>
+## Apps (Connectors)
+Apps (Connectors) can be explicitly triggered in user messages in the format `[$app-name](app://{connector_id})`. Apps can also be implicitly triggered as long as the context suggests usage of available apps.
+An app is equivalent to a set of MCP tools within the `codex_apps` MCP.
+An installed app's MCP tools are either provided to you already, or can be lazy-loaded through the `tool_search` tool. If `tool_search` is available, the apps that are searchable by `tools_search` will be listed by it.
+Do not additionally call list_mcp_resources or list_mcp_resource_templates for apps.
+</apps_instructions>
+
+-- entry 3 | 2026-07-16T19:30:50.319Z | SYSTEM text
+You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
+
+At the start of your turn, you are the active agent.
+You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.
+All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.
+
+You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task and trigger a turn, and `send_message` to pass a message to a running agent without triggering a turn.
+Child agents can also spawn their own sub-agents.
+You can decide how much context you want to propagate to your sub-agents with the `fork_turns` parameter.
+
+You will receive messages in the analysis channel in the form:
+```
+Message Type: MESSAGE | FINAL_ANSWER
+Task name: <recipient>
+Sender: <author>
+Payload:
+<payload text>
+```
+They may be addressed as to=/root
+
+Note that collaboration tools cannot be called from inside `functions.exec`. Call `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, and `list_agents` only as direct tool calls using the recipient shown in their tool definitions, such as `to=functions.collaboration.spawn_agent`, since they are intentionally absent from the `functions.exec` `tools.*` namespace. Available tools in `functions.exec` are explicitly described with a `tools` namespace in the developer message.
+
+All agents share the same directory. In detail:
+- All agents have access to the same container and filesystem as you.
+- All agents use the same current working directory.
+- As a result, edits made by one agent are immediately visible to all other agents.
+
+There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
+
+-- entry 4 | 2026-07-16T19:30:50.319Z | SYSTEM text
+<multi_agent_mode>Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work.</multi_agent_mode>
+
+-- entry 5 | 2026-07-16T19:30:50.319Z | USER text
+<recommended_plugins>
+Here is a list of plugins that are available but not installed. If the user's query would benefit from one of these plugins, use the `request_plugin_install` tool to suggest that they install it. Pass the parenthesized ID as `plugin_id`. For example, suggest the Google Drive plugin if the query could possibly be better answered with access to Google Drive.
+
+- Atlassian Rovo (atlassian-rovo@openai-curated-remote)
+- Box (box@openai-curated-remote)
+- Figma (figma@openai-curated-remote)
+- GitHub (github@openai-curated-remote)
+- Gmail (gmail@openai-curated-remote)
+- Google Calendar (google-calendar@openai-curated-remote)
+- Google Drive (google-drive@openai-curated-remote)
+- Notion (notion@openai-curated-remote)
+- Outlook Calendar (outlook-calendar@openai-curated-remote)
+- Outlook Email (outlook-email@openai-curated-remote)
+- SharePoint (sharepoint@openai-curated-remote)
+- Slack (slack@openai-curated-remote)
+- Teams (teams@openai-curated-remote)
+</recommended_plugins>
+
+-- entry 6 | 2026-07-16T19:30:50.319Z | USER text
+<environment_context>
+  <cwd>/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner</cwd>
+  <shell>bash</shell>
+  <current_date>2026-07-16</current_date>
+  <timezone>Etc/UTC</timezone>
+  <filesystem><workspace_roots><root>/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner</root></workspace_roots><permission_profile type="disabled"><file_system type="unrestricted" /></permission_profile></filesystem>
+</environment_context>
+
+-- entry 7 | 2026-07-16T19:30:50.327Z | USER text
+## WORKFLOW: Planning Task (Design Only - No Implementation)
+
+You are a disciplined software architect. Your job is to CREATE PLANS, not implement them.
+Follow this workflow EXACTLY for ONE task.
+
+**Your agent name is: codex-planner** (Loom actor is set automatically)
+
+### Workspace Mode: Multi-Repo Environment
+You are working in a multi-repo workspace. The workspace root is your current working directory.
+Repositories are subdirectories within this workspace:
+
+| Repo | Path | Default Branch |
+|------|------|----------------|
+| source-repo | .//root/.loom/workspaces/LOCALMODE/source-repo | localmode |
+
+**Important workspace rules:**
+- Run `loom data` commands from the workspace root (current directory)
+- Run git commands (git status, git add, git commit, git push) from the specific repo subdirectory
+- Run build/test commands from the specific repo subdirectory
+- Changes may span multiple repos — coordinate commits across them
+
+
+### Multi-Agent Safety Rules
+
+You are running in a parallel multi-agent environment. Follow these rules strictly:
+
+- **Only modify files directly related to your assigned task** — do not touch files outside your task scope
+- **Never run** `git stash`, `git checkout main`, or `git clean` outside your assigned worktree
+- **Never force-push or reset --hard** without explicit instruction from the user
+- **If you encounter files/changes from another agent**, leave them alone — do not modify, revert, or clean them up
+- **Commit only your changes** — do not stage unrelated modifications with `git add -A` or `git add .`; use specific file paths
+- **If your worktree has unexpected state**, report it via task notes or `loom complete` rather than cleaning it up
+- **Do not switch branches** — you are confined to your assigned worktree branch
+
+### Step 1: Load Your Pre-Assigned Task
+- Your task has been pre-assigned by the Fleet API: LOCALMODE-2
+- Run 'loom data show LOCALMODE-2' to load the full task details
+- The supervisor or Fleet API has already claimed this task
+- Run 'loom claim LOCALMODE-2' to register with the agent monitor
+- IMPORTANT: Do NOT run 'loom data ready' — your task is already assigned
+- If the task does not exist or its status is neither 'open' nor the expected pre-claimed 'in_progress':
+  1. Print the error
+  2. Run 'loom complete'
+  3. EXIT immediately
+
+### Step 1.5: Check if This is a Revision
+Check the task's labels for 'needs-revision':
+- Run 'loom data show LOCALMODE-2 --output json' and check the labels field
+
+**If the task has a 'needs-revision' label:**
+- This is a REVISION - a previous design was rejected
+- Run 'loom data show LOCALMODE-2' and inspect comments/notes for feedback
+- Read the existing design field for context
+- Your new design must address the specific feedback
+
+**If no 'needs-revision' label:**
+- This is a NEW task - create a fresh design
+
+### Step 2: Research the Codebase
+Before creating a plan:
+- Read relevant existing code to understand patterns and conventions
+- Identify what files need to be created or modified
+- Understand the existing architecture
+- Look for similar implementations to follow as patterns
+- Identify dependencies and potential blockers
+
+### Step 3: Create a Detailed Plan
+Write a comprehensive plan that includes:
+
+#### 3a. Summary
+- One paragraph explaining what this task accomplishes
+- Why it's needed and what problem it solves
+
+#### 3b. Technical Approach
+- High-level approach and architecture decisions
+- Key design patterns to use
+- Trade-offs considered and why this approach was chosen
+
+#### 3c. Files to Create
+- List each new file with its purpose
+- Include file path and brief description of contents
+
+#### 3d. Files to Modify
+- List each existing file that needs changes
+- Describe what changes are needed and why
+
+#### 3e. Dependencies
+- External packages/libraries needed
+- Internal modules this depends on
+- Tasks that should be completed first (if any)
+
+#### 3f. Edge Cases & Error Handling
+- List edge cases to handle
+- Error scenarios and how to handle them
+- Validation requirements
+
+#### 3g. Testing Strategy
+- What tests should be written
+- Key scenarios to cover
+- How to manually verify the implementation works
+
+### Step 4: Save the Plan
+Save your plan to the task's design field:
+```
+loom data update <id> --design="<your complete plan here>" --design-format=markdown
+```
+
+IMPORTANT: Make sure the plan is complete and detailed enough that another agent
+(or human) could implement it without needing to ask questions.
+
+### Step 5: Mark for Review
+Set the task status to 'review' and clear the assignee:
+```
+# If labels need to change, document it in the task notes for the lead.
+
+# Then mark for review:
+loom data update <id> --status review --assignee=""
+```
+
+This puts the task in review status where:
+- It won't appear in 'loom data ready' (filtered out)
+- The lead can find it with 'loom data list --status review'
+- Other agents won't accidentally pick it up
+
+### Step 6: Signal Completion and Exit
+```
+loom complete
+```
+
+### CRITICAL: STOP - DO NOT IMPLEMENT
+
+After completing Step 6, you are DONE.
+- Do NOT write any implementation code
+- Do NOT create any new files for the feature
+- Do NOT pick up another task
+- Do NOT continue working
+- Simply EXIT
+
+You have completed ONE planning task. The human will:
+1. Review your plan with 'loom data list --status review' then 'loom data show <id>'
+2. Either approve it (set status back to open) or request changes
+3. Run an implementation agent separately
+
+Your job was ONLY to create the plan. Implementation happens later.
+
+-- entry 8 | 2026-07-16T19:30:54.451Z | ASSISTANT text
+I’ll load and register `LOCALMODE-2`, verify whether it is a revision, then inspect only the relevant code and save a design—no implementation files will be changed.
+
+-- entry 9 | 2026-07-16T19:30:58.646Z | ASSISTANT tool_use [exec call_zOa0btayzCChRdUETCJYWkju]
+const p = await tools.update_plan({plan:[
+  {step:"Load, validate, and claim LOCALMODE-2",status:"in_progress"},
+  {step:"Inspect revision feedback and relevant codebase patterns",status:"pending"},
+  {step:"Draft and save the detailed design",status:"pending"},
+  {step:"Move task to review and signal completion",status:"pending"}
+]});
+const r = await tools.exec_command({cmd:"loom data show LOCALMODE-2","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":20000});
+text(JSON.stringify({plan:p,show:r}));
+
+
+-- entry 10 | 2026-07-16T19:30:58.725Z | TOOL tool_result [ call_zOa0btayzCChRdUETCJYWkju]
+Script completed
+Wall time 0.1 seconds
+Output:
+{"plan":{},"show":{"chunk_id":"c79b3c","wall_time_seconds":0.000008583,"exit_code":0,"original_token_count":74,"output":"ID:       LOCALMODE-2\nTitle:    Local mode planner dogfood\nStatus:   in_progress\nPriority: 0\nType:     task\nAssignee: codex-planner\nOwner:    local-mode-harness@fixture.local\nParent:   LOCALMODE-1\n\nDescription:\nPlanner agent should claim this task and write an approved implementation design.\n"}}
+
+-- entry 11 | 2026-07-16T19:31:04.226Z | ASSISTANT tool_use [exec call_nKNbglWworL4AMdhdTmCuw9U]
+const r1 = await tools.exec_command({cmd:"loom claim LOCALMODE-2","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":10000});
+const r2 = await tools.exec_command({cmd:"loom data show LOCALMODE-2 --output json","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":20000});
+text(JSON.stringify({claim:r1,json:r2}));
+
+
+-- entry 12 | 2026-07-16T19:31:04.312Z | TOOL tool_result [ call_nKNbglWworL4AMdhdTmCuw9U]
+Script completed
+Wall time 0.1 seconds
+Output:
+{"claim":{"chunk_id":"5a38e9","wall_time_seconds":0.000005666,"exit_code":0,"original_token_count":41,"output":"time=2026-07-16T19:31:04.248Z level=INFO msg=\"opened cloud fleet-db client\" url=http://fleet-db:8080\nClaimed task: LOCALMODE-2\nTitle: Local mode planner dogfood\n"},"json":{"chunk_id":"5fd463","wall_time_seconds":0.000006875,"exit_code":0,"original_token_count":125,"output":"{\n  \"id\": \"LOCALMODE-2\",\n  \"title\": \"Local mode planner dogfood\",\n  \"status\": \"in_progress\",\n  \"priority\": 0,\n  \"issue_type\": \"task\",\n  \"assignee\": \"codex-planner\",\n  \"owner\": \"local-mode-harness@fixture.local\",\n  \"source_repo\": \"source-repo\",\n  \"parent\": \"LOCALMODE-1\",\n  \"has_design\": false,\n  \"created_at\": \"2026-07-16T19:30:39.768646321Z\",\n  \"updated_at\": \"2026-07-16T19:30:39.768646321Z\",\n  \"description\": \"Planner agent should claim this task and write an approved implementation design.\"\n}\n"}}
+
+-- entry 13 | 2026-07-16T19:31:10.658Z | ASSISTANT text
+The task exists, is correctly pre-claimed/in progress, and has no `needs-revision` label or existing design. I’m treating it as a new design and now mapping the repository’s actual structure and conventions.
+
+-- entry 14 | 2026-07-16T19:31:15.038Z | ASSISTANT tool_use [exec call_ikJ4mw5bpY5LsacodmzxjpA3]
+const a = await tools.exec_command({cmd:"pwd && rg --files -g 'AGENTS.md' -g '!node_modules' -g '!vendor' | sed -n '1,80p'","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":10000});
+const b = await tools.exec_command({cmd:"git status --short --branch && git rev-parse --show-toplevel && git log -5 --oneline --decorate","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":10000});
+const c = await tools.exec_command({cmd:"rg --files -g '!node_modules' -g '!vendor' | sed -n '1,240p'","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":20000});
+text(JSON.stringify({agents:a,git:b,files:c}));
+
+
+-- entry 15 | 2026-07-16T19:31:15.183Z | TOOL tool_result [ call_ikJ4mw5bpY5LsacodmzxjpA3]
+Script completed
+Wall time 0.1 seconds
+Output:
+{"agents":{"chunk_id":"71a9c1","wall_time_seconds":0.0000135,"exit_code":0,"original_token_count":18,"output":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner\n"},"git":{"chunk_id":"d7b5bd","wall_time_seconds":0.000008709,"exit_code":0,"original_token_count":61,"output":"## codex-planner\n?? .agent.lock\n?? .agent.lock.flock\n/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner\n43a3516 (HEAD -> codex-planner, origin/main, origin/localmode, main, localmode, codex-coder) Initial local mode fixture\n"},"files":{"chunk_id":"70c41f","wall_time_seconds":0.00001,"exit_code":0,"original_token_count":5,"output":"README.md\nMakefile\n"}}
+
+-- entry 16 | 2026-07-16T19:31:22.956Z | ASSISTANT tool_use [exec call_JeM448rn2mGQb8ZsiRIYlrHT]
+const a = await tools.exec_command({cmd:"sed -n '1,240p' README.md && sed -n '1,240p' Makefile","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":20000});
+const b = await tools.exec_command({cmd:"loom data show LOCALMODE-1","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":20000});
+const c = await tools.exec_command({cmd:"git show --stat --oneline HEAD && git show --format=fuller --no-ext-diff HEAD -- README.md Makefile","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":30000});
+text(JSON.stringify({contents:a,parent:b,history:c}));
+
+
+-- entry 17 | 2026-07-16T19:31:23.1Z | TOOL tool_result [ call_JeM448rn2mGQb8ZsiRIYlrHT]
+Script completed
+Wall time 0.1 seconds
+Output:
+{"contents":{"chunk_id":"b08918","wall_time_seconds":0.000006208,"exit_code":0,"original_token_count":15,"output":"# Local Mode Dogfood Repo\ngate:\n\t@echo \"local mode gate ok\"\n"},"parent":{"chunk_id":"e3db1b","wall_time_seconds":0.000006875,"exit_code":0,"original_token_count":52,"output":"ID:       LOCALMODE-1\nTitle:    Local mode dogfood epic\nStatus:   open\nPriority: 1\nType:     epic\nOwner:    local-mode-harness@fixture.local\n\nDescription:\nEnd-to-end local-mode planner and coder validation.\n"},"history":{"chunk_id":"98af4f","wall_time_seconds":0.000010541,"exit_code":0,"original_token_count":170,"output":"43a3516 Initial local mode fixture\n Makefile  | 2 ++\n README.md | 1 +\n 2 files changed, 3 insertions(+)\ncommit 43a3516ae924ae0f378e3e09c310a329a8ab7158\nAuthor:     local-mode <local-mode@fixture.local>\nAuthorDate: Thu Jul 16 19:30:38 2026 +0000\nCommit:     local-mode <local-mode@fixture.local>\nCommitDate: Thu Jul 16 19:30:38 2026 +0000\n\n    Initial local mode fixture\n\ndiff --git a/Makefile b/Makefile\nnew file mode 100644\nindex 0000000..ac62a78\n--- /dev/null\n+++ b/Makefile\n@@ -0,0 +1,2 @@\n+gate:\n+\t@echo \"local mode gate ok\"\ndiff --git a/README.md b/README.md\nnew file mode 100644\nindex 0000000..24196db\n--- /dev/null\n+++ b/README.md\n@@ -0,0 +1 @@\n+# Local Mode Dogfood Repo\n"}}
+
+-- entry 18 | 2026-07-16T19:31:42.085Z | ASSISTANT tool_use [exec call_i6qFbrUGih4g3Ny58sCKQmfj]
+const a = await tools.exec_command({cmd:"loom data list --output json","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":30000});
+const b = await tools.exec_command({cmd:"loom data show --help","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":20000});
+const c = await tools.exec_command({cmd:"git branch -a -vv","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":10000});
+text(JSON.stringify({tasks:a,help:b,branches:c}));
+
+
+-- entry 19 | 2026-07-16T19:31:42.23Z | TOOL tool_result [ call_i6qFbrUGih4g3Ny58sCKQmfj]
+Script completed
+Wall time 0.1 seconds
+Output:
+{"tasks":{"chunk_id":"2f65f1","wall_time_seconds":0.000007375,"exit_code":0,"original_token_count":516,"output":"[\n  {\n    \"id\": \"LOCALMODE-2\",\n    \"title\": \"Local mode planner dogfood\",\n    \"status\": \"in_progress\",\n    \"priority\": 0,\n    \"issue_type\": \"task\",\n    \"assignee\": \"codex-planner\",\n    \"owner\": \"local-mode-harness@fixture.local\",\n    \"source_repo\": \"source-repo\",\n    \"parent\": \"LOCALMODE-1\",\n    \"has_design\": false,\n    \"created_at\": \"2026-07-16T19:30:39.768646321Z\",\n    \"updated_at\": \"2026-07-16T19:30:39.768646321Z\"\n  },\n  {\n    \"id\": \"LOCALMODE-3\",\n    \"title\": \"Local mode coder dogfood\",\n    \"status\": \"in_progress\",\n    \"priority\": 0,\n    \"issue_type\": \"task\",\n    \"assignee\": \"codex-coder\",\n    \"owner\": \"local-mode-harness@fixture.local\",\n    \"source_repo\": \"source-repo\",\n    \"parent\": \"LOCALMODE-1\",\n    \"design\": \"Approved design: append a short local-mode dogfood result to local-mode-agent-output.txt, commit it, then close the task.\",\n    \"has_design\": true,\n    \"created_at\": \"2026-07-16T19:30:39.777921581Z\",\n    \"updated_at\": \"2026-07-16T19:30:39.777921581Z\"\n  },\n  {\n    \"id\": \"LOCALMODE-1\",\n    \"title\": \"Local mode dogfood epic\",\n    \"status\": \"open\",\n    \"priority\": 1,\n    \"issue_type\": \"epic\",\n    \"owner\": \"local-mode-harness@fixture.local\",\n    \"source_repo\": \"source-repo\",\n    \"has_design\": false,\n    \"created_at\": \"2026-07-16T19:30:39.735058425Z\",\n    \"updated_at\": \"2026-07-16T19:30:39.735058425Z\"\n  },\n  {\n    \"id\": \"LOCALMODE-4\",\n    \"title\": \"Document local-mode runbook\",\n    \"status\": \"open\",\n    \"priority\": 2,\n    \"issue_type\": \"task\",\n    \"owner\": \"local-mode\",\n    \"source_repo\": \"source-repo\",\n    \"parent\": \"LOCALMODE-1\",\n    \"has_design\": false,\n    \"created_at\": \"2026-07-16T19:30:39.882342749Z\",\n    \"updated_at\": \"2026-07-16T19:30:39.882342749Z\"\n  },\n  {\n    \"id\": \"LOCALMODE-5\",\n    \"title\": \"Exercise epic swimlane UI\",\n    \"status\": \"open\",\n    \"priority\": 2,\n    \"issue_type\": \"task\",\n    \"owner\": \"local-mode\",\n    \"source_repo\": \"source-repo\",\n    \"parent\": \"LOCALMODE-1\",\n    \"has_design\": false,\n    \"created_at\": \"2026-07-16T19:30:39.925935035Z\",\n    \"updated_at\": \"2026-07-16T19:30:39.925935035Z\"\n  }\n]\n"},"help":{"chunk_id":"40d367","wall_time_seconds":0.000008583,"exit_code":0,"original_token_count":148,"output":"Show a single issue by ID (HTTP)\n\nUsage:\n  loom data show <issue-id> [flags]\n\nFlags:\n  -h, --help   help for show\n\nGlobal Flags:\n      --backend string      AI backend CLI to use (codex, claude, opencode). Env: LOOM_BACKEND\n      --log-format string   Log format (text|json) (default \"text\")\n      --log-output string   Log output destination (stderr|<filepath>) (default \"stderr\")\n  -o, --output string       Output format: text|json (default \"text\")\n      --server string       Loom server base URL (or LOOM_SERVER_URL env var)\n      --workspace string    Workspace ID. Env: LOOM_WORKSPACE\n"},"branches":{"chunk_id":"785572","wall_time_seconds":0.000007791,"exit_code":0,"original_token_count":137,"output":"+ codex-coder              43a3516 (/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-coder) Initial local mode fixture\n* codex-planner            43a3516 Initial local mode fixture\n+ localmode                43a3516 (/root/.loom/workspaces/LOCALMODE/source-repo) [origin/localmode] Initial local mode fixture\n+ main                     43a3516 (/workspace/source-repo) [origin/main] Initial local mode fixture\n  remotes/origin/localmode 43a3516 Initial local mode fixture\n  remotes/origin/main      43a3516 Initial local mode fixture\n"}}
+
+-- entry 20 | 2026-07-16T19:31:54.413Z | ASSISTANT text
+The repository is intentionally a minimal fixture: only a README and a `make gate` smoke target. The sibling coder-dogfood task establishes the fixture convention—record a short result in `local-mode-agent-output.txt`—so the planner design will follow that convention while explicitly preserving any concurrently added coder result.
+
+-- entry 21 | 2026-07-16T19:31:56.474Z | ASSISTANT tool_use [exec call_15dnAonfEUirrg87DfJPEZC6]
+const a = await tools.exec_command({cmd:"loom data show LOCALMODE-3","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":10000});
+const b = await tools.exec_command({cmd:"loom data show LOCALMODE-4 && loom data show LOCALMODE-5","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":20000});
+const c = await tools.exec_command({cmd:"git ls-tree -r --name-only HEAD && git diff -- README.md Makefile && make gate","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":10000});
+text(JSON.stringify({coder:a,related:b,baseline:c}));
+
+
+-- entry 22 | 2026-07-16T19:31:56.594Z | TOOL tool_result [ call_15dnAonfEUirrg87DfJPEZC6]
+Script completed
+Wall time 0.1 seconds
+Output:
+{"coder":{"chunk_id":"bbace4","wall_time_seconds":0.000005292,"exit_code":0,"original_token_count":107,"output":"ID:       LOCALMODE-3\nTitle:    Local mode coder dogfood\nStatus:   in_progress\nPriority: 0\nType:     task\nAssignee: codex-coder\nOwner:    local-mode-harness@fixture.local\nParent:   LOCALMODE-1\n\nDescription:\nCoder agent should claim this task and make a small committed fixture change.\n\nDesign (--design):\nApproved design: append a short local-mode dogfood result to local-mode-agent-output.txt, commit it, then close the task.\n"},"related":{"chunk_id":"7dd256","wall_time_seconds":0.000006458,"exit_code":0,"original_token_count":104,"output":"ID:       LOCALMODE-4\nTitle:    Document local-mode runbook\nStatus:   open\nPriority: 2\nType:     task\nOwner:    local-mode\nParent:   LOCALMODE-1\n\nDescription:\nAdd troubleshooting notes for Podman machine failures.\nID:       LOCALMODE-5\nTitle:    Exercise epic swimlane UI\nStatus:   open\nPriority: 2\nType:     task\nOwner:    local-mode\nParent:   LOCALMODE-1\n\nDescription:\nVerify epic grouping on the kanban board.\n"},"baseline":{"chunk_id":"a4178f","wall_time_seconds":0.0000065,"exit_code":0,"original_token_count":10,"output":"Makefile\nREADME.md\nlocal mode gate ok\n"}}
+
+-- entry 23 | 2026-07-16T19:32:13.925Z | ASSISTANT tool_use [exec call_bRZTBe6izkicAZ4gdKlI6Uer]
+const p = await tools.update_plan({explanation:"Task and repository research are complete; the design follows the fixture’s existing append-only result convention and avoids unrelated documentation or build changes.",plan:[
+  {step:"Load, validate, and claim LOCALMODE-2",status:"completed"},
+  {step:"Inspect revision feedback and relevant codebase patterns",status:"completed"},
+  {step:"Draft and save the detailed design",status:"in_progress"},
+  {step:"Move task to review and signal completion",status:"pending"}
+]});
+text(p);
+
+
+-- entry 24 | 2026-07-16T19:32:13.956Z | TOOL tool_result [ call_bRZTBe6izkicAZ4gdKlI6Uer]
+Script completed
+Wall time 0.0 seconds
+Output:
+{}
+
+-- entry 25 | 2026-07-16T19:32:50.437Z | ASSISTANT tool_use [exec call_1pvDZQ09SmnneqQUEbPU72sH]
+const design = `## Summary
+
+Record successful completion of the local-mode planner dogfood flow in the repository fixture. The implementation will add a deterministic, human-readable result for \`LOCALMODE-2\` to the same append-only output artifact used by the sibling coder dogfood task, proving that a planner-created design can move through review and later be implemented without expanding the fixture into a production feature.
+
+## Technical Approach
+
+Use \`local-mode-agent-output.txt\` as the shared, line-oriented dogfood result log, following the convention already defined by sibling task \`LOCALMODE-3\`. Add exactly one stable line, \`LOCALMODE-2 planner design completed\`, ending with a newline.
+
+Treat the artifact as append-only. If the file does not yet exist in the implementation branch, create it with the planner line. If it exists because \`LOCALMODE-3\` or another fixture task has landed first, preserve every existing line and append the planner line only when it is absent. This makes the change safe across either task integration order and makes a rerun idempotent.
+
+Keep the implementation deliberately data-only: do not alter the Makefile, README, or add runtime code. The existing \`make gate\` target remains the repository health check, while an exact-line assertion validates this task-specific result. This is preferable to teaching the Makefile about each dogfood task because per-task markers are fixture data, not permanent build behavior.
+
+Acceptance criteria:
+
+- \`local-mode-agent-output.txt\` contains exactly one full line equal to \`LOCALMODE-2 planner design completed\`.
+- Any pre-existing dogfood result lines remain byte-for-byte intact and in their original order.
+- The file ends with a newline.
+- \`make gate\` continues to succeed.
+- The implementation commit contains only the task-scoped fixture result change.
+
+## Files to Create
+
+- \`local-mode-agent-output.txt\` — create this line-oriented fixture result log when it is not already present, containing the planner completion marker. The file may instead already exist by implementation time due to the concurrently assigned coder dogfood task; in that case follow the modification behavior below rather than recreating it.
+
+## Files to Modify
+
+- \`local-mode-agent-output.txt\` — if introduced by \`LOCALMODE-3\` before this task is implemented or integrated, append the planner marker without replacing, reformatting, sorting, or duplicating existing entries.
+- No existing tracked file in the current planning baseline requires modification. In particular, leave \`README.md\` and \`Makefile\` unchanged because they already describe the fixture and provide its smoke gate.
+
+## Dependencies
+
+- External packages or libraries: none.
+- Internal dependencies: the existing repository fixture and its \`make gate\` target.
+- Coordination dependency: \`LOCALMODE-3\` is concurrently assigned and targets the same output filename. There is no strict execution-order dependency, but the implementer must inspect the post-merge file state and preserve the sibling marker if present. If both branches create the file independently, resolve the add/add conflict by retaining both lines.
+- No other task must be completed first.
+
+## Edge Cases & Error Handling
+
+- Missing output file: create it with the single planner marker and a trailing newline.
+- Existing output file: append without truncating or rewriting prior content.
+- Existing planner marker: do not add another copy; normalize nothing else.
+- File without a final newline: add the minimum separator needed so the planner marker starts on its own line, while preserving existing content.
+- Concurrent add/add merge with \`LOCALMODE-3\`: resolve to a line-oriented file containing both task results exactly once; do not choose one side wholesale.
+- Unexpected unrelated worktree changes: leave them untouched and stage only \`local-mode-agent-output.txt\`.
+- Write or merge failure: stop without committing a partial result and report the failure rather than modifying unrelated files to compensate.
+
+## Testing Strategy
+
+Automated checks:
+
+1. Run \`make gate\` and confirm it prints \`local mode gate ok\` with a zero exit status.
+2. Assert exact marker presence with \`grep -Fx 'LOCALMODE-2 planner design completed' local-mode-agent-output.txt\`.
+3. Assert uniqueness with \`test "$(grep -Fxc 'LOCALMODE-2 planner design completed' local-mode-agent-output.txt)" -eq 1\`.
+4. Verify the final byte is a newline, for example with a text-file newline check available in the shell environment.
+5. Inspect \`git diff --check\` for whitespace errors and \`git diff -- local-mode-agent-output.txt\` to confirm no existing result was removed or changed.
+
+Manual verification:
+
+- Open \`local-mode-agent-output.txt\` and confirm it is readable as one result per line.
+- If the coder dogfood marker is present, confirm it remains unchanged and the planner marker appears once.
+- Before committing, use \`git status --short\` to ensure only the intended fixture artifact is staged; do not include agent lock files or unrelated changes.`;
+
+const shellQuote = s => "'" + s.replace(/'/g, "'\"'\"'") + "'";
+const r = await tools.exec_command({
+  cmd: "loom data update LOCALMODE-2 --design=" + shellQuote(design) + " --design-format=markdown",
+  workdir:"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner",
+  yield_time_ms:10000,
+  max_output_tokens:20000
+});
+text(r);
+
+
+-- entry 26 | 2026-07-16T19:32:50.508Z | TOOL tool_result [ call_1pvDZQ09SmnneqQUEbPU72sH]
+Script completed
+Wall time 0.1 seconds
+Output:
+{"chunk_id":"4df321","wall_time_seconds":0.000008792,"exit_code":1,"original_token_count":354,"output":"Error: backend [validation_error] Update: unknown field \"design_format\"\nUsage:\n  loom data update <issue-id> [flags]\n\nFlags:\n      --assignee string                 Set assignee\n      --depends-on stringArray          Add dependency on issue ID (repeatable)\n      --description string              Set description\n      --description-from-file string    Read description from file (use - for stdin)\n      --design string                   Set design\n      --design-format string            Set design format (markdown or html)\n  -h, --help                            help for update\n      --notes string                    Set notes\n      --priority int                    Set priority\n      --remove-depends-on stringArray   Remove dependency on issue ID (repeatable)\n      --status string                   Set status\n      --title string                    Set title\n\nGlobal Flags:\n      --backend string      AI backend CLI to use (codex, claude, opencode). Env: LOOM_BACKEND\n      --log-format string   Log format (text|json) (default \"text\")\n      --log-output string   Log output destination (stderr|<filepath>) (default \"stderr\")\n  -o, --output string       Output format: text|json (default \"text\")\n      --server string       Loom server base URL (or LOOM_SERVER_URL env var)\n      --workspace string    Workspace ID. Env: LOOM_WORKSPACE\n\nbackend [validation_error] Update: unknown field \"design_format\"\n"}
+
+-- entry 27 | 2026-07-16T19:32:55.969Z | ASSISTANT text
+The Loom client exposes `--design-format`, but this local Fleet backend rejects the corresponding `design_format` field. I’m retrying the same design update without that optional flag; the design itself is Markdown and will remain unchanged.
+
+-- entry 28 | 2026-07-16T19:33:16.317Z | ASSISTANT tool_use [exec call_pjBsFs4wXGtXhpVrQ0AA5QuI]
+const design = `## Summary
+
+Record successful completion of the local-mode planner dogfood flow in the repository fixture. The implementation will add a deterministic, human-readable result for \`LOCALMODE-2\` to the same append-only output artifact used by the sibling coder dogfood task, proving that a planner-created design can move through review and later be implemented without expanding the fixture into a production feature.
+
+## Technical Approach
+
+Use \`local-mode-agent-output.txt\` as the shared, line-oriented dogfood result log, following the convention already defined by sibling task \`LOCALMODE-3\`. Add exactly one stable line, \`LOCALMODE-2 planner design completed\`, ending with a newline.
+
+Treat the artifact as append-only. If the file does not yet exist in the implementation branch, create it with the planner line. If it exists because \`LOCALMODE-3\` or another fixture task has landed first, preserve every existing line and append the planner line only when it is absent. This makes the change safe across either task integration order and makes a rerun idempotent.
+
+Keep the implementation deliberately data-only: do not alter the Makefile, README, or add runtime code. The existing \`make gate\` target remains the repository health check, while an exact-line assertion validates this task-specific result. This is preferable to teaching the Makefile about each dogfood task because per-task markers are fixture data, not permanent build behavior.
+
+Acceptance criteria:
+
+- \`local-mode-agent-output.txt\` contains exactly one full line equal to \`LOCALMODE-2 planner design completed\`.
+- Any pre-existing dogfood result lines remain byte-for-byte intact and in their original order.
+- The file ends with a newline.
+- \`make gate\` continues to succeed.
+- The implementation commit contains only the task-scoped fixture result change.
+
+## Files to Create
+
+- \`local-mode-agent-output.txt\` — create this line-oriented fixture result log when it is not already present, containing the planner completion marker. The file may instead already exist by implementation time due to the concurrently assigned coder dogfood task; in that case follow the modification behavior below rather than recreating it.
+
+## Files to Modify
+
+- \`local-mode-agent-output.txt\` — if introduced by \`LOCALMODE-3\` before this task is implemented or integrated, append the planner marker without replacing, reformatting, sorting, or duplicating existing entries.
+- No existing tracked file in the current planning baseline requires modification. In particular, leave \`README.md\` and \`Makefile\` unchanged because they already describe the fixture and provide its smoke gate.
+
+## Dependencies
+
+- External packages or libraries: none.
+- Internal dependencies: the existing repository fixture and its \`make gate\` target.
+- Coordination dependency: \`LOCALMODE-3\` is concurrently assigned and targets the same output filename. There is no strict execution-order dependency, but the implementer must inspect the post-merge file state and preserve the sibling marker if present. If both branches create the file independently, resolve the add/add conflict by retaining both lines.
+- No other task must be completed first.
+
+## Edge Cases & Error Handling
+
+- Missing output file: create it with the single planner marker and a trailing newline.
+- Existing output file: append without truncating or rewriting prior content.
+- Existing planner marker: do not add another copy; normalize nothing else.
+- File without a final newline: add the minimum separator needed so the planner marker starts on its own line, while preserving existing content.
+- Concurrent add/add merge with \`LOCALMODE-3\`: resolve to a line-oriented file containing both task results exactly once; do not choose one side wholesale.
+- Unexpected unrelated worktree changes: leave them untouched and stage only \`local-mode-agent-output.txt\`.
+- Write or merge failure: stop without committing a partial result and report the failure rather than modifying unrelated files to compensate.
+
+## Testing Strategy
+
+Automated checks:
+
+1. Run \`make gate\` and confirm it prints \`local mode gate ok\` with a zero exit status.
+2. Assert exact marker presence with \`grep -Fx 'LOCALMODE-2 planner design completed' local-mode-agent-output.txt\`.
+3. Assert uniqueness with \`test "$(grep -Fxc 'LOCALMODE-2 planner design completed' local-mode-agent-output.txt)" -eq 1\`.
+4. Verify the final byte is a newline, for example with a text-file newline check available in the shell environment.
+5. Inspect \`git diff --check\` for whitespace errors and \`git diff -- local-mode-agent-output.txt\` to confirm no existing result was removed or changed.
+
+Manual verification:
+
+- Open \`local-mode-agent-output.txt\` and confirm it is readable as one result per line.
+- If the coder dogfood marker is present, confirm it remains unchanged and the planner marker appears once.
+- Before committing, use \`git status --short\` to ensure only the intended fixture artifact is staged; do not include agent lock files or unrelated changes.`;
+
+const shellQuote = s => "'" + s.replace(/'/g, "'\"'\"'") + "'";
+const r = await tools.exec_command({
+  cmd: "loom data update LOCALMODE-2 --design=" + shellQuote(design),
+  workdir:"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner",
+  yield_time_ms:10000,
+  max_output_tokens:20000
+});
+text(r);
+
+
+-- entry 29 | 2026-07-16T19:33:16.399Z | TOOL tool_result [ call_pjBsFs4wXGtXhpVrQ0AA5QuI]
+Script completed
+Wall time 0.1 seconds
+Output:
+{"chunk_id":"4376d3","wall_time_seconds":0.000007459,"exit_code":0,"original_token_count":5,"output":"updated LOCALMODE-2\n"}
+
+-- entry 30 | 2026-07-16T19:33:21.327Z | ASSISTANT tool_use [exec call_FgW941QjRm2SVYVrbEIUKW1x]
+const p = await tools.update_plan({plan:[
+  {step:"Load, validate, and claim LOCALMODE-2",status:"completed"},
+  {step:"Inspect revision feedback and relevant codebase patterns",status:"completed"},
+  {step:"Draft and save the detailed design",status:"completed"},
+  {step:"Move task to review and signal completion",status:"in_progress"}
+]});
+const r = await tools.exec_command({cmd:"loom data show LOCALMODE-2","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":30000});
+text(JSON.stringify({plan:p,task:r}));
+
+
+-- entry 31 | 2026-07-16T19:33:21.375Z | TOOL tool_result [ call_FgW941QjRm2SVYVrbEIUKW1x]
+Script completed
+Wall time 0.0 seconds
+Output:
+{"plan":{},"task":{"chunk_id":"ebed1d","wall_time_seconds":0.000009917,"exit_code":0,"original_token_count":1335,"output":"ID:       LOCALMODE-2\nTitle:    Local mode planner dogfood\nStatus:   in_progress\nPriority: 0\nType:     task\nAssignee: codex-planner\nOwner:    local-mode-harness@fixture.local\nParent:   LOCALMODE-1\n\nDescription:\nPlanner agent should claim this task and write an approved implementation design.\n\nDesign (--design):\n## Summary\n\nRecord successful completion of the local-mode planner dogfood flow in the repository fixture. The implementation will add a deterministic, human-readable result for `LOCALMODE-2` to the same append-only output artifact used by the sibling coder dogfood task, proving that a planner-created design can move through review and later be implemented without expanding the fixture into a production feature.\n\n## Technical Approach\n\nUse `local-mode-agent-output.txt` as the shared, line-oriented dogfood result log, following the convention already defined by sibling task `LOCALMODE-3`. Add exactly one stable line, `LOCALMODE-2 planner design completed`, ending with a newline.\n\nTreat the artifact as append-only. If the file does not yet exist in the implementation branch, create it with the planner line. If it exists because `LOCALMODE-3` or another fixture task has landed first, preserve every existing line and append the planner line only when it is absent. This makes the change safe across either task integration order and makes a rerun idempotent.\n\nKeep the implementation deliberately data-only: do not alter the Makefile, README, or add runtime code. The existing `make gate` target remains the repository health check, while an exact-line assertion validates this task-specific result. This is preferable to teaching the Makefile about each dogfood task because per-task markers are fixture data, not permanent build behavior.\n\nAcceptance criteria:\n\n- `local-mode-agent-output.txt` contains exactly one full line equal to `LOCALMODE-2 planner design completed`.\n- Any pre-existing dogfood result lines remain byte-for-byte intact and in their original order.\n- The file ends with a newline.\n- `make gate` continues to succeed.\n- The implementation commit contains only the task-scoped fixture result change.\n\n## Files to Create\n\n- `local-mode-agent-output.txt` — create this line-oriented fixture result log when it is not already present, containing the planner completion marker. The file may instead already exist by implementation time due to the concurrently assigned coder dogfood task; in that case follow the modification behavior below rather than recreating it.\n\n## Files to Modify\n\n- `local-mode-agent-output.txt` — if introduced by `LOCALMODE-3` before this task is implemented or integrated, append the planner marker without replacing, reformatting, sorting, or duplicating existing entries.\n- No existing tracked file in the current planning baseline requires modification. In particular, leave `README.md` and `Makefile` unchanged because they already describe the fixture and provide its smoke gate.\n\n## Dependencies\n\n- External packages or libraries: none.\n- Internal dependencies: the existing repository fixture and its `make gate` target.\n- Coordination dependency: `LOCALMODE-3` is concurrently assigned and targets the same output filename. There is no strict execution-order dependency, but the implementer must inspect the post-merge file state and preserve the sibling marker if present. If both branches create the file independently, resolve the add/add conflict by retaining both lines.\n- No other task must be completed first.\n\n## Edge Cases & Error Handling\n\n- Missing output file: create it with the single planner marker and a trailing newline.\n- Existing output file: append without truncating or rewriting prior content.\n- Existing planner marker: do not add another copy; normalize nothing else.\n- File without a final newline: add the minimum separator needed so the planner marker starts on its own line, while preserving existing content.\n- Concurrent add/add merge with `LOCALMODE-3`: resolve to a line-oriented file containing both task results exactly once; do not choose one side wholesale.\n- Unexpected unrelated worktree changes: leave them untouched and stage only `local-mode-agent-output.txt`.\n- Write or merge failure: stop without committing a partial result and report the failure rather than modifying unrelated files to compensate.\n\n## Testing Strategy\n\nAutomated checks:\n\n1. Run `make gate` and confirm it prints `local mode gate ok` with a zero exit status.\n2. Assert exact marker presence with `grep -Fx 'LOCALMODE-2 planner design completed' local-mode-agent-output.txt`.\n3. Assert uniqueness with `test \"$(grep -Fxc 'LOCALMODE-2 planner design completed' local-mode-agent-output.txt)\" -eq 1`.\n4. Verify the final byte is a newline, for example with a text-file newline check available in the shell environment.\n5. Inspect `git diff --check` for whitespace errors and `git diff -- local-mode-agent-output.txt` to confirm no existing result was removed or changed.\n\nManual verification:\n\n- Open `local-mode-agent-output.txt` and confirm it is readable as one result per line.\n- If the coder dogfood marker is present, confirm it remains unchanged and the planner marker appears once.\n- Before committing, use `git status --short` to ensure only the intended fixture artifact is staged; do not include agent lock files or unrelated changes.\n"}}
+
+-- entry 32 | 2026-07-16T19:33:27.17Z | ASSISTANT text
+The complete design is saved and verified in the task. It specifies the exact marker, append-only conflict handling with the concurrent coder task, acceptance criteria, and validation commands; I’m now moving it to review and clearing the assignee.
+
+-- entry 33 | 2026-07-16T19:33:29.039Z | ASSISTANT tool_use [exec call_x1XzcQv5epzAv0fjNMt75VFp]
+const r1 = await tools.exec_command({cmd:"loom data update LOCALMODE-2 --status review --assignee=\"\"","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":10000});
+const r2 = await tools.exec_command({cmd:"loom data show LOCALMODE-2 --output json","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":30000});
+text(JSON.stringify({update:r1,verify:r2}));
+
+
+-- entry 34 | 2026-07-16T19:33:29.13Z | TOOL tool_result [ call_x1XzcQv5epzAv0fjNMt75VFp]
+Script completed
+Wall time 0.1 seconds
+Output:
+{"update":{"chunk_id":"3806a6","wall_time_seconds":0.000006375,"exit_code":0,"original_token_count":5,"output":"updated LOCALMODE-2\n"},"verify":{"chunk_id":"dd8006","wall_time_seconds":0.000006709,"exit_code":0,"original_token_count":1392,"output":"{\n  \"id\": \"LOCALMODE-2\",\n  \"title\": \"Local mode planner dogfood\",\n  \"status\": \"review\",\n  \"priority\": 0,\n  \"issue_type\": \"task\",\n  \"owner\": \"local-mode-harness@fixture.local\",\n  \"source_repo\": \"source-repo\",\n  \"parent\": \"LOCALMODE-1\",\n  \"design\": \"## Summary\\n\\nRecord successful completion of the local-mode planner dogfood flow in the repository fixture. The implementation will add a deterministic, human-readable result for `LOCALMODE-2` to the same append-only output artifact used by the sibling coder dogfood task, proving that a planner-created design can move through review and later be implemented without expanding the fixture into a production feature.\\n\\n## Technical Approach\\n\\nUse `local-mode-agent-output.txt` as the shared, line-oriented dogfood result log, following the convention already defined by sibling task `LOCALMODE-3`. Add exactly one stable line, `LOCALMODE-2 planner design completed`, ending with a newline.\\n\\nTreat the artifact as append-only. If the file does not yet exist in the implementation branch, create it with the planner line. If it exists because `LOCALMODE-3` or another fixture task has landed first, preserve every existing line and append the planner line only when it is absent. This makes the change safe across either task integration order and makes a rerun idempotent.\\n\\nKeep the implementation deliberately data-only: do not alter the Makefile, README, or add runtime code. The existing `make gate` target remains the repository health check, while an exact-line assertion validates this task-specific result. This is preferable to teaching the Makefile about each dogfood task because per-task markers are fixture data, not permanent build behavior.\\n\\nAcceptance criteria:\\n\\n- `local-mode-agent-output.txt` contains exactly one full line equal to `LOCALMODE-2 planner design completed`.\\n- Any pre-existing dogfood result lines remain byte-for-byte intact and in their original order.\\n- The file ends with a newline.\\n- `make gate` continues to succeed.\\n- The implementation commit contains only the task-scoped fixture result change.\\n\\n## Files to Create\\n\\n- `local-mode-agent-output.txt` — create this line-oriented fixture result log when it is not already present, containing the planner completion marker. The file may instead already exist by implementation time due to the concurrently assigned coder dogfood task; in that case follow the modification behavior below rather than recreating it.\\n\\n## Files to Modify\\n\\n- `local-mode-agent-output.txt` — if introduced by `LOCALMODE-3` before this task is implemented or integrated, append the planner marker without replacing, reformatting, sorting, or duplicating existing entries.\\n- No existing tracked file in the current planning baseline requires modification. In particular, leave `README.md` and `Makefile` unchanged because they already describe the fixture and provide its smoke gate.\\n\\n## Dependencies\\n\\n- External packages or libraries: none.\\n- Internal dependencies: the existing repository fixture and its `make gate` target.\\n- Coordination dependency: `LOCALMODE-3` is concurrently assigned and targets the same output filename. There is no strict execution-order dependency, but the implementer must inspect the post-merge file state and preserve the sibling marker if present. If both branches create the file independently, resolve the add/add conflict by retaining both lines.\\n- No other task must be completed first.\\n\\n## Edge Cases \\u0026 Error Handling\\n\\n- Missing output file: create it with the single planner marker and a trailing newline.\\n- Existing output file: append without truncating or rewriting prior content.\\n- Existing planner marker: do not add another copy; normalize nothing else.\\n- File without a final newline: add the minimum separator needed so the planner marker starts on its own line, while preserving existing content.\\n- Concurrent add/add merge with `LOCALMODE-3`: resolve to a line-oriented file containing both task results exactly once; do not choose one side wholesale.\\n- Unexpected unrelated worktree changes: leave them untouched and stage only `local-mode-agent-output.txt`.\\n- Write or merge failure: stop without committing a partial result and report the failure rather than modifying unrelated files to compensate.\\n\\n## Testing Strategy\\n\\nAutomated checks:\\n\\n1. Run `make gate` and confirm it prints `local mode gate ok` with a zero exit status.\\n2. Assert exact marker presence with `grep -Fx 'LOCALMODE-2 planner design completed' local-mode-agent-output.txt`.\\n3. Assert uniqueness with `test \\\"$(grep -Fxc 'LOCALMODE-2 planner design completed' local-mode-agent-output.txt)\\\" -eq 1`.\\n4. Verify the final byte is a newline, for example with a text-file newline check available in the shell environment.\\n5. Inspect `git diff --check` for whitespace errors and `git diff -- local-mode-agent-output.txt` to confirm no existing result was removed or changed.\\n\\nManual verification:\\n\\n- Open `local-mode-agent-output.txt` and confirm it is readable as one result per line.\\n- If the coder dogfood marker is present, confirm it remains unchanged and the planner marker appears once.\\n- Before committing, use `git status --short` to ensure only the intended fixture artifact is staged; do not include agent lock files or unrelated changes.\",\n  \"has_design\": true,\n  \"created_at\": \"2026-07-16T19:30:39.768646321Z\",\n  \"updated_at\": \"2026-07-16T19:33:29.065457918Z\",\n  \"description\": \"Planner agent should claim this task and write an approved implementation design.\"\n}\n"}}
+
+-- entry 35 | 2026-07-16T19:33:38.838Z | ASSISTANT tool_use [exec call_6CG1X5xCkGoP8Ur6sOBhFvC8]
+const r = await tools.exec_command({cmd:"loom complete","workdir":"/root/.loom/workspaces/LOCALMODE/worktrees/source-repo/codex-planner","yield_time_ms":10000,"max_output_tokens":10000});
+text(r);
+
+
+-- entry 36 | 2026-07-16T19:33:38.885Z | TOOL tool_result [ call_6CG1X5xCkGoP8Ur6sOBhFvC8]
+Script completed
+Wall time 0.0 seconds
+Output:
+{"chunk_id":"e4551e","wall_time_seconds":0.000005792,"exit_code":0,"original_token_count":7,"output":"Task completion signaled\n"}
+
+-- entry 37 | 2026-07-16T19:33:43.419Z | ASSISTANT text
+`LOCALMODE-2` planning is complete.
+
+- Detailed implementation design saved in Markdown
+- Task moved to `review`
+- Assignee cleared
+- `loom complete` signaled
+- No implementation or repository files modified
+
+=== FULL DIFF PRODUCED BY THE SESSION ===
+(no diff was produced by this session)
+
+Return ONLY the JSON object matching the output schema.

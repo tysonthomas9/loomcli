@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -374,6 +376,61 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	}
 	if _, hasText := result["text"]; hasText {
 		t.Fatalf("tool result line should use output, not text: %+v", result)
+	}
+}
+
+func TestPersistRunnerOutputArtifactsWarnsWhenTranscriptUploadFails(t *testing.T) {
+	var logs bytes.Buffer
+	origLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(origLogger) })
+
+	req := hostBridgeTaskExecRequest()
+	session := &flueTaskSession{SessionID: "flue-task-run-1", Metadata: map[string]string{}}
+	result, err := (HostBridgeTaskExecutor{}).persistRunnerOutputArtifacts(context.Background(), req, session, bridgeTaskRunnerResult{
+		TranscriptEntries: []transcript.Event{{
+			Seq:  1,
+			Role: "assistant",
+			Type: "text",
+			Text: "done",
+		}},
+	}, TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0})
+	if err != nil {
+		t.Fatalf("persistRunnerOutputArtifacts returned error: %v", err)
+	}
+	if result.RuntimeMetadata["transcript_ref"] != "" || result.RuntimeMetadata["transcript_artifact_id"] != "" {
+		t.Fatalf("runtime metadata = %+v, want no transcript_ref/artifact id", result.RuntimeMetadata)
+	}
+	if len(result.ArtifactIDs) != 0 {
+		t.Fatalf("artifact ids = %+v, want none", result.ArtifactIDs)
+	}
+	if session.Metadata["transcript_ref"] != "" {
+		t.Fatalf("session metadata = %+v, want no transcript_ref", session.Metadata)
+	}
+	if !strings.Contains(logs.String(), "task run transcript artifact upload failed") {
+		t.Fatalf("logs = %q, want transcript upload warning", logs.String())
+	}
+}
+
+func TestPersistRunnerOutputArtifactsWarnsWhenTranscriptReadFails(t *testing.T) {
+	var logs bytes.Buffer
+	origLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(origLogger) })
+
+	req := hostBridgeTaskExecRequest()
+	executor := HostBridgeTaskExecutor{WorktreePath: t.TempDir()}
+	result, err := executor.persistRunnerOutputArtifacts(context.Background(), req, nil, bridgeTaskRunnerResult{
+		TranscriptPath: "missing-transcript.jsonl",
+	}, TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0})
+	if err != nil {
+		t.Fatalf("persistRunnerOutputArtifacts returned error: %v", err)
+	}
+	if result.RuntimeMetadata["transcript_ref"] != "" {
+		t.Fatalf("runtime metadata = %+v, want no transcript_ref", result.RuntimeMetadata)
+	}
+	if !strings.Contains(logs.String(), "task run transcript read failed") {
+		t.Fatalf("logs = %q, want transcript read warning", logs.String())
 	}
 }
 

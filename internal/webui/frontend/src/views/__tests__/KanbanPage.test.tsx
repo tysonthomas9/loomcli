@@ -56,7 +56,7 @@ vi.mock("@/api", () => ({
   updateIssue: vi.fn(),
 }));
 
-import { KanbanPage } from "../KanbanPage";
+import { KanbanPage } from "../boards/KanbanPage";
 
 describe("KanbanPage", () => {
   it("renders without crashing", () => {

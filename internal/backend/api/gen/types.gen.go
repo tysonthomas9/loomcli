@@ -221,6 +221,51 @@ func (e ErrorResponseSuccess) Valid() bool {
 	}
 }
 
+// Defines values for EvalCronResponseSuccess.
+const (
+	EvalCronResponseSuccessTrue EvalCronResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the EvalCronResponseSuccess enum.
+func (e EvalCronResponseSuccess) Valid() bool {
+	switch e {
+	case EvalCronResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EvalRejudgeResponseSuccess.
+const (
+	EvalRejudgeResponseSuccessTrue EvalRejudgeResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the EvalRejudgeResponseSuccess enum.
+func (e EvalRejudgeResponseSuccess) Valid() bool {
+	switch e {
+	case EvalRejudgeResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for EvalRollupResponseSuccess.
+const (
+	EvalRollupResponseSuccessTrue EvalRollupResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the EvalRollupResponseSuccess enum.
+func (e EvalRollupResponseSuccess) Valid() bool {
+	switch e {
+	case EvalRollupResponseSuccessTrue:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FileCheckoutKind.
 const (
 	FileCheckoutKindAgent FileCheckoutKind = "agent"
@@ -277,22 +322,22 @@ func (e FileCheckoutRepairRequestScope) Valid() bool {
 
 // Defines values for FileCheckoutRepairResponseMethod.
 const (
-	None      FileCheckoutRepairResponseMethod = "none"
-	Provision FileCheckoutRepairResponseMethod = "provision"
-	Recreate  FileCheckoutRepairResponseMethod = "recreate"
-	Repair    FileCheckoutRepairResponseMethod = "repair"
+	FileCheckoutRepairResponseMethodNone      FileCheckoutRepairResponseMethod = "none"
+	FileCheckoutRepairResponseMethodProvision FileCheckoutRepairResponseMethod = "provision"
+	FileCheckoutRepairResponseMethodRecreate  FileCheckoutRepairResponseMethod = "recreate"
+	FileCheckoutRepairResponseMethodRepair    FileCheckoutRepairResponseMethod = "repair"
 )
 
 // Valid indicates whether the value is a known member of the FileCheckoutRepairResponseMethod enum.
 func (e FileCheckoutRepairResponseMethod) Valid() bool {
 	switch e {
-	case None:
+	case FileCheckoutRepairResponseMethodNone:
 		return true
-	case Provision:
+	case FileCheckoutRepairResponseMethodProvision:
 		return true
-	case Recreate:
+	case FileCheckoutRepairResponseMethodRecreate:
 		return true
-	case Repair:
+	case FileCheckoutRepairResponseMethodRepair:
 		return true
 	default:
 		return false
@@ -556,13 +601,13 @@ func (e IssueTabType) Valid() bool {
 
 // Defines values for MessageResponseSuccess.
 const (
-	True MessageResponseSuccess = true
+	MessageResponseSuccessTrue MessageResponseSuccess = true
 )
 
 // Valid indicates whether the value is a known member of the MessageResponseSuccess enum.
 func (e MessageResponseSuccess) Valid() bool {
 	switch e {
-	case True:
+	case MessageResponseSuccessTrue:
 		return true
 	default:
 		return false
@@ -836,6 +881,42 @@ func (e RuntimeReadyResponseMode) Valid() bool {
 	case Daemon:
 		return true
 	case Fleet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SessionEvalStateEvalStatus.
+const (
+	SessionEvalStateEvalStatusDone   SessionEvalStateEvalStatus = "done"
+	SessionEvalStateEvalStatusFailed SessionEvalStateEvalStatus = "failed"
+	SessionEvalStateEvalStatusNone   SessionEvalStateEvalStatus = "none"
+)
+
+// Valid indicates whether the value is a known member of the SessionEvalStateEvalStatus enum.
+func (e SessionEvalStateEvalStatus) Valid() bool {
+	switch e {
+	case SessionEvalStateEvalStatusDone:
+		return true
+	case SessionEvalStateEvalStatusFailed:
+		return true
+	case SessionEvalStateEvalStatusNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SessionEvalStateResponseSuccess.
+const (
+	True SessionEvalStateResponseSuccess = true
+)
+
+// Valid indicates whether the value is a known member of the SessionEvalStateResponseSuccess enum.
+func (e SessionEvalStateResponseSuccess) Valid() bool {
+	switch e {
+	case True:
 		return true
 	default:
 		return false
@@ -1620,7 +1701,16 @@ type BlockedIssue struct {
 	DesignFormat     *BlockedIssueDesignFormat `json:"design_format,omitempty"`
 	DueAt            *time.Time                `json:"due_at,omitempty"`
 	EstimatedMinutes *int                      `json:"estimated_minutes,omitempty"`
-	ExternalRef      *string                   `json:"external_ref,omitempty"`
+
+	// EvalBatchSize Session-eval batch size. The driver op clamps the effective value to 100.
+	EvalBatchSize *int `json:"eval_batch_size,omitempty"`
+
+	// EvalLookbackDays Session-eval lookback window in days. Omitted or zero means default 30.
+	EvalLookbackDays *int `json:"eval_lookback_days,omitempty"`
+
+	// EvalSamplingPercent Session-eval deterministic sampling percent. Omitted or zero means default 100.
+	EvalSamplingPercent *int    `json:"eval_sampling_percent,omitempty"`
+	ExternalRef         *string `json:"external_ref,omitempty"`
 
 	// HasDesign True for either a legacy inline or artifact-backed design.
 	HasDesign    *bool                  `json:"has_design,omitempty"`
@@ -1775,6 +1865,116 @@ type ErrorResponse struct {
 
 // ErrorResponseSuccess defines model for ErrorResponse.Success.
 type ErrorResponseSuccess bool
+
+// EvalCronPutRequest defines model for EvalCronPutRequest.
+type EvalCronPutRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// EvalCronResponse defines model for EvalCronResponse.
+type EvalCronResponse struct {
+	Data    EvalCronState           `json:"data"`
+	Error   *string                 `json:"error,omitempty"`
+	Success EvalCronResponseSuccess `json:"success"`
+}
+
+// EvalCronResponseSuccess defines model for EvalCronResponse.Success.
+type EvalCronResponseSuccess bool
+
+// EvalCronState defines model for EvalCronState.
+type EvalCronState struct {
+	Enabled     bool    `json:"enabled"`
+	Provisioned bool    `json:"provisioned"`
+	Schedule    *string `json:"schedule"`
+}
+
+// EvalFailureClass defines model for EvalFailureClass.
+type EvalFailureClass struct {
+	Count      int    `json:"count"`
+	ErrorClass string `json:"error_class"`
+}
+
+// EvalInsight defines model for EvalInsight.
+type EvalInsight struct {
+	CreatedAt time.Time `json:"created_at"`
+	EvalId    string    `json:"eval_id"`
+	SessionId string    `json:"session_id"`
+	Text      string    `json:"text"`
+}
+
+// EvalInsights defines model for EvalInsights.
+type EvalInsights struct {
+	Harness []EvalInsight `json:"harness"`
+	Linter  []EvalInsight `json:"linter"`
+	Prompt  []EvalInsight `json:"prompt"`
+	Skill   []EvalInsight `json:"skill"`
+}
+
+// EvalJudgePromptVersion defines model for EvalJudgePromptVersion.
+type EvalJudgePromptVersion struct {
+	Count   int    `json:"count"`
+	Version string `json:"version"`
+}
+
+// EvalRejudgeResponse defines model for EvalRejudgeResponse.
+type EvalRejudgeResponse struct {
+	Data    EvalRejudgeResult          `json:"data"`
+	Error   *string                    `json:"error,omitempty"`
+	Success EvalRejudgeResponseSuccess `json:"success"`
+}
+
+// EvalRejudgeResponseSuccess defines model for EvalRejudgeResponse.Success.
+type EvalRejudgeResponseSuccess bool
+
+// EvalRejudgeResult defines model for EvalRejudgeResult.
+type EvalRejudgeResult struct {
+	BindingEnabled bool `json:"binding_enabled"`
+	Requested      bool `json:"requested"`
+}
+
+// EvalRollupData defines model for EvalRollupData.
+type EvalRollupData struct {
+	EvalCount           int                      `json:"eval_count"`
+	FailureClasses      []EvalFailureClass       `json:"failure_classes"`
+	Insights            EvalInsights             `json:"insights"`
+	JudgePromptVersions []EvalJudgePromptVersion `json:"judge_prompt_versions"`
+	ScoreAverages       EvalScoreAverages        `json:"score_averages"`
+	ScoreBuckets        []EvalScoreBucket        `json:"score_buckets"`
+	Since               time.Time                `json:"since"`
+	TagFrequencies      []EvalTagFrequency       `json:"tag_frequencies"`
+	Until               time.Time                `json:"until"`
+}
+
+// EvalRollupResponse defines model for EvalRollupResponse.
+type EvalRollupResponse struct {
+	Data    EvalRollupData            `json:"data"`
+	Error   *string                   `json:"error,omitempty"`
+	Success EvalRollupResponseSuccess `json:"success"`
+}
+
+// EvalRollupResponseSuccess defines model for EvalRollupResponse.Success.
+type EvalRollupResponseSuccess bool
+
+// EvalScoreAverages defines model for EvalScoreAverages.
+type EvalScoreAverages struct {
+	Efficiency           float64 `json:"efficiency"`
+	InstructionAdherence float64 `json:"instruction_adherence"`
+	OutcomeSuccess       float64 `json:"outcome_success"`
+	ToolUseQuality       float64 `json:"tool_use_quality"`
+}
+
+// EvalScoreBucket defines model for EvalScoreBucket.
+type EvalScoreBucket struct {
+	Averages    EvalScoreAverages `json:"averages"`
+	BucketStart time.Time         `json:"bucket_start"`
+	EvalCount   int               `json:"eval_count"`
+}
+
+// EvalTagFrequency defines model for EvalTagFrequency.
+type EvalTagFrequency struct {
+	Count int    `json:"count"`
+	Tag   string `json:"tag"`
+}
 
 // FileBlameLine defines model for FileBlameLine.
 type FileBlameLine struct {
@@ -2046,7 +2246,16 @@ type Issue struct {
 	DesignFormat     *IssueDesignFormat `json:"design_format,omitempty"`
 	DueAt            *time.Time         `json:"due_at,omitempty"`
 	EstimatedMinutes *int               `json:"estimated_minutes,omitempty"`
-	ExternalRef      *string            `json:"external_ref,omitempty"`
+
+	// EvalBatchSize Session-eval batch size. The driver op clamps the effective value to 100.
+	EvalBatchSize *int `json:"eval_batch_size,omitempty"`
+
+	// EvalLookbackDays Session-eval lookback window in days. Omitted or zero means default 30.
+	EvalLookbackDays *int `json:"eval_lookback_days,omitempty"`
+
+	// EvalSamplingPercent Session-eval deterministic sampling percent. Omitted or zero means default 100.
+	EvalSamplingPercent *int    `json:"eval_sampling_percent,omitempty"`
+	ExternalRef         *string `json:"external_ref,omitempty"`
 
 	// HasDesign True for either a legacy inline or artifact-backed design.
 	HasDesign    *bool           `json:"has_design,omitempty"`
@@ -2624,6 +2833,80 @@ type SeedRequest struct {
 	Title       string  `json:"title"`
 }
 
+// SessionEval defines model for SessionEval.
+type SessionEval struct {
+	AgentId               string                           `json:"agent_id"`
+	CreatedAt             time.Time                        `json:"created_at"`
+	ErrorTaxonomyTags     []string                         `json:"error_taxonomy_tags"`
+	EvalCost              SessionEvalCost                  `json:"eval_cost"`
+	EvalId                string                           `json:"eval_id"`
+	ImprovementCategories SessionEvalImprovementCategories `json:"improvement_categories"`
+	JudgeModel            string                           `json:"judge_model"`
+	JudgePromptVersion    string                           `json:"judge_prompt_version"`
+	JudgeSummary          string                           `json:"judge_summary"`
+	ScoreRationales       SessionEvalScoreRationales       `json:"score_rationales"`
+	Scores                SessionEvalScores                `json:"scores"`
+	SessionEndedAt        time.Time                        `json:"session_ended_at"`
+	SessionId             string                           `json:"session_id"`
+	SessionStartedAt      time.Time                        `json:"session_started_at"`
+	TaskId                *string                          `json:"task_id,omitempty"`
+	UpdatedAt             time.Time                        `json:"updated_at"`
+	WorkspaceKey          string                           `json:"workspace_key"`
+}
+
+// SessionEvalCost defines model for SessionEvalCost.
+type SessionEvalCost struct {
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	TotalTokens  int64 `json:"total_tokens"`
+}
+
+// SessionEvalImprovementCategories defines model for SessionEvalImprovementCategories.
+type SessionEvalImprovementCategories struct {
+	Harness []string `json:"harness"`
+	Linter  []string `json:"linter"`
+	Prompt  []string `json:"prompt"`
+	Skill   []string `json:"skill"`
+}
+
+// SessionEvalScoreRationales defines model for SessionEvalScoreRationales.
+type SessionEvalScoreRationales struct {
+	Efficiency           string `json:"efficiency"`
+	InstructionAdherence string `json:"instruction_adherence"`
+	OutcomeSuccess       string `json:"outcome_success"`
+	ToolUseQuality       string `json:"tool_use_quality"`
+}
+
+// SessionEvalScores defines model for SessionEvalScores.
+type SessionEvalScores struct {
+	Efficiency           int `json:"efficiency"`
+	InstructionAdherence int `json:"instruction_adherence"`
+	OutcomeSuccess       int `json:"outcome_success"`
+	ToolUseQuality       int `json:"tool_use_quality"`
+}
+
+// SessionEvalState defines model for SessionEvalState.
+type SessionEvalState struct {
+	Eval              *SessionEval               `json:"eval,omitempty"`
+	EvalErrorClass    *string                    `json:"eval_error_class"`
+	EvalPromptVersion *string                    `json:"eval_prompt_version"`
+	EvalRequested     bool                       `json:"eval_requested"`
+	EvalStatus        SessionEvalStateEvalStatus `json:"eval_status"`
+}
+
+// SessionEvalStateEvalStatus defines model for SessionEvalState.EvalStatus.
+type SessionEvalStateEvalStatus string
+
+// SessionEvalStateResponse defines model for SessionEvalStateResponse.
+type SessionEvalStateResponse struct {
+	Data    SessionEvalState                `json:"data"`
+	Error   *string                         `json:"error,omitempty"`
+	Success SessionEvalStateResponseSuccess `json:"success"`
+}
+
+// SessionEvalStateResponseSuccess defines model for SessionEvalStateResponse.Success.
+type SessionEvalStateResponseSuccess bool
+
 // SessionHistoryRecord Session history record (Redis-backed, per-issue)
 type SessionHistoryRecord struct {
 	Backend        string                       `json:"backend"`
@@ -2662,6 +2945,7 @@ type SessionResponse struct {
 	HasTranscript    bool       `json:"has_transcript"`
 	InputTokens      int64      `json:"input_tokens"`
 	IsActive         bool       `json:"is_active"`
+	Kind             *string    `json:"kind,omitempty"`
 	LastError        *string    `json:"last_error,omitempty"`
 	LinesAdded       int        `json:"lines_added"`
 	LinesRemoved     int        `json:"lines_removed"`
@@ -2807,7 +3091,16 @@ type TreeNode struct {
 	DesignFormat     *TreeNodeDesignFormat `json:"design_format,omitempty"`
 	DueAt            *time.Time            `json:"due_at,omitempty"`
 	EstimatedMinutes *int                  `json:"estimated_minutes,omitempty"`
-	ExternalRef      *string               `json:"external_ref,omitempty"`
+
+	// EvalBatchSize Session-eval batch size. The driver op clamps the effective value to 100.
+	EvalBatchSize *int `json:"eval_batch_size,omitempty"`
+
+	// EvalLookbackDays Session-eval lookback window in days. Omitted or zero means default 30.
+	EvalLookbackDays *int `json:"eval_lookback_days,omitempty"`
+
+	// EvalSamplingPercent Session-eval deterministic sampling percent. Omitted or zero means default 100.
+	EvalSamplingPercent *int    `json:"eval_sampling_percent,omitempty"`
+	ExternalRef         *string `json:"external_ref,omitempty"`
 
 	// HasDesign True for either a legacy inline or artifact-backed design.
 	HasDesign    *bool              `json:"has_design,omitempty"`
@@ -2940,6 +3233,13 @@ type WorkspaceDesignFormatPatchRequest struct {
 
 // WorkspaceDesignFormatPatchRequestDesignFormat defines model for WorkspaceDesignFormatPatchRequest.DesignFormat.
 type WorkspaceDesignFormatPatchRequestDesignFormat string
+
+// WorkspaceEvalPolicyPatchRequest defines model for WorkspaceEvalPolicyPatchRequest.
+type WorkspaceEvalPolicyPatchRequest struct {
+	EvalBatchSize       *int `json:"eval_batch_size,omitempty"`
+	EvalLookbackDays    *int `json:"eval_lookback_days,omitempty"`
+	EvalSamplingPercent *int `json:"eval_sampling_percent,omitempty"`
+}
 
 // WorkspaceRenameRequest defines model for WorkspaceRenameRequest.
 type WorkspaceRenameRequest struct {
@@ -3131,6 +3431,15 @@ type ListBlockedParams struct {
 
 // ListBlockedParamsType defines parameters for ListBlocked.
 type ListBlockedParamsType string
+
+// GetEvalRollupParams defines parameters for GetEvalRollup.
+type GetEvalRollupParams struct {
+	// Since RFC3339 lower bound on eval created_at. Defaults to until minus 7 days.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// Until RFC3339 upper bound on eval created_at. Defaults to now.
+	Until *time.Time `form:"until,omitempty" json:"until,omitempty"`
+}
 
 // SubscribeEventsParams defines parameters for SubscribeEvents.
 type SubscribeEventsParams struct {
@@ -3417,6 +3726,19 @@ type ListReadyParamsMolType string
 // ListReadyParamsSort defines parameters for ListReady.
 type ListReadyParamsSort string
 
+// ListWorkspaceSessionsParams defines parameters for ListWorkspaceSessions.
+type ListWorkspaceSessionsParams struct {
+	// Since RFC3339 lower bound on started_at. Defaults to now minus 7 days when neither since nor until is provided.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// Until RFC3339 upper bound on started_at.
+	Until   *time.Time `form:"until,omitempty" json:"until,omitempty"`
+	Status  *string    `form:"status,omitempty" json:"status,omitempty"`
+	AgentId *string    `form:"agent_id,omitempty" json:"agent_id,omitempty"`
+	Kind    *string    `form:"kind,omitempty" json:"kind,omitempty"`
+	Limit   *int       `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetTaskLogParams defines parameters for GetTaskLog.
 type GetTaskLogParams struct {
 	// Lines Number of lines to return
@@ -3510,6 +3832,12 @@ type PatchWorkspaceBackendJSONRequestBody = WorkspaceBackendPatchRequest
 
 // PatchWorkspaceDesignFormatJSONRequestBody defines body for PatchWorkspaceDesignFormat for application/json ContentType.
 type PatchWorkspaceDesignFormatJSONRequestBody = WorkspaceDesignFormatPatchRequest
+
+// PatchWorkspaceEvalPolicyJSONRequestBody defines body for PatchWorkspaceEvalPolicy for application/json ContentType.
+type PatchWorkspaceEvalPolicyJSONRequestBody = WorkspaceEvalPolicyPatchRequest
+
+// PutEvalsCronJSONRequestBody defines body for PutEvalsCron for application/json ContentType.
+type PutEvalsCronJSONRequestBody = EvalCronPutRequest
 
 // WriteScopedFileJSONRequestBody defines body for WriteScopedFile for application/json ContentType.
 type WriteScopedFileJSONRequestBody = FileWriteRequest

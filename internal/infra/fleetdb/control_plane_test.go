@@ -3,6 +3,7 @@ package fleetdb
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -139,6 +140,82 @@ func TestAgentSessionList_FiltersKindAndParentClientSide(t *testing.T) {
 		if s.Kind != domain.AgentSessionKindTask || s.ParentSessionID != "orch-1" {
 			t.Fatalf("unexpected session passed filter: %+v", s)
 		}
+	}
+}
+
+func TestControlPlaneClientAgentSessionListPageQueryAndTotal(t *testing.T) {
+	since := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	until := since.Add(time.Hour)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/agent-sessions" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		q := r.URL.Query()
+		want := map[string]string{
+			"agent_id":          "agent-1",
+			"node_id":           "node-1",
+			"task_id":           "T-1",
+			"status":            "completed",
+			"kind":              "task",
+			"parent_session_id": "orch-1",
+			"since":             since.Format(time.RFC3339),
+			"until":             until.Format(time.RFC3339),
+			"limit":             "2",
+		}
+		for key, value := range want {
+			if q.Get(key) != value {
+				t.Fatalf("query[%s] = %q, want %q (raw=%s)", key, q.Get(key), value, r.URL.RawQuery)
+			}
+		}
+		writeJSON(t, w, map[string]any{
+			"agent_sessions": []domain.AgentSession{{WorkspaceKey: "WS", SessionID: "sess-1", AgentID: "agent-1"}},
+			"total":          7,
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, total, err := client.AgentSessions().ListPage(t.Context(), "WS", store.AgentSessionFilter{
+		AgentID:         "agent-1",
+		NodeID:          "node-1",
+		TaskID:          "T-1",
+		Status:          domain.AgentSessionCompleted,
+		Kind:            domain.AgentSessionKindTask,
+		ParentSessionID: "orch-1",
+		Since:           &since,
+		Until:           &until,
+		Limit:           2,
+	})
+	if err != nil {
+		t.Fatalf("ListPage: %v", err)
+	}
+	if total != 7 {
+		t.Fatalf("total = %d, want 7", total)
+	}
+	if len(got) != 1 || got[0].SessionID != "sess-1" {
+		t.Fatalf("sessions = %+v", got)
+	}
+}
+
+func TestControlPlaneClientAgentSessionListPageMissingTotalCapabilityError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/agent-sessions" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		writeJSON(t, w, map[string]any{"agent_sessions": []domain.AgentSession{}})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = client.AgentSessions().ListPage(t.Context(), "WS", store.AgentSessionFilter{})
+	if !errors.Is(err, store.ErrServerCapability) {
+		t.Fatalf("err = %v, want ErrServerCapability", err)
 	}
 }
 

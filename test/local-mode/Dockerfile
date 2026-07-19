@@ -27,15 +27,13 @@ ARG INSTALL_CODEX=false
 ARG CODEX_CLI_VERSION=latest
 ARG INSTALL_CLAUDE=false
 ARG CLAUDE_CLI_VERSION=latest
-# Node 24 (via NodeSource) is installed when any Node-based backend CLI is
-# requested. The bundled TS leaf imports node:sqlite (flue durability), so the
-# image needs Node >=22 regardless of which backend runs.
+# Node 24 (via NodeSource) is always installed. Built-in workflow
+# materialization and the bundled TS leaf import Node/Flue modules even when
+# the agent backend itself is deterministic.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash ca-certificates curl git jq lsof make ripgrep tmux wget \
-    && if [ "$INSTALL_CODEX" = "true" ] || [ "$INSTALL_CLAUDE" = "true" ]; then \
-        curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-        && apt-get install -y --no-install-recommends nodejs; \
-    fi \
+    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && if [ "$INSTALL_CODEX" = "true" ]; then \
         npm install -g "@openai/codex@${CODEX_CLI_VERSION}"; \
     fi \
@@ -44,8 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fi \
     && rm -rf /var/lib/apt/lists/*
 ENV SHELL=/bin/bash
+ENV LOOM_SDK_ROOT=/opt/loom/sdk
 
 COPY --from=builder /out/loom /usr/local/bin/loom
+COPY sdk/ /opt/loom/sdk/
 COPY test/local-mode/local-mode-entrypoint /usr/local/bin/local-mode-entrypoint
 COPY test/local-mode/loom-backend-localdogfood /usr/local/bin/loom-backend-localdogfood
 RUN chmod +x /usr/local/bin/local-mode-entrypoint /usr/local/bin/loom-backend-localdogfood \

@@ -106,6 +106,7 @@ func (t *tracedStore) Repos() store.RepoStore                 { return t.repos }
 func (t *tracedStore) Agents() store.AgentStore               { return t.agents }
 func (t *tracedStore) Nodes() store.NodeStore                 { return t.nodes }
 func (t *tracedStore) AgentSessions() store.AgentSessionStore { return t.agentSessions }
+func (t *tracedStore) SessionEvals() store.SessionEvalStore   { return t.inner.SessionEvals() }
 func (t *tracedStore) TerminalSessions() store.TerminalSessionStore {
 	return t.terminalSessions
 }

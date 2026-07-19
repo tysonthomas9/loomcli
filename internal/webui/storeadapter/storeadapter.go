@@ -70,16 +70,19 @@ func BuildWorkspaceDataForKey(ctx context.Context, s store.Store, key string) (*
 	wsPath := resolveWorkspacePath(ws.Key)
 
 	return &ops.WorkspaceData{
-		ID:               ws.Key,
-		Name:             ws.Name,
-		Path:             wsPath,
-		Repos:            repos,
-		Groups:           groups,
-		Agents:           agents,
-		Workspaces:       summaries,
-		WorkspaceOrder:   nil, // TODO(.16): persist order in DaemonProfile or similar
-		DefaultWorkspace: "",
-		DesignFormat:     ws.DesignFormat,
+		ID:                  ws.Key,
+		Name:                ws.Name,
+		Path:                wsPath,
+		Repos:               repos,
+		Groups:              groups,
+		Agents:              agents,
+		Workspaces:          summaries,
+		WorkspaceOrder:      nil, // TODO(.16): persist order in DaemonProfile or similar
+		DefaultWorkspace:    "",
+		DesignFormat:        ws.DesignFormat,
+		EvalSamplingPercent: ws.EvalSamplingPercent,
+		EvalBatchSize:       ws.EvalBatchSize,
+		EvalLookbackDays:    ws.EvalLookbackDays,
 	}, nil
 }
 

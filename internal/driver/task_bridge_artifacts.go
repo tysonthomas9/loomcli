@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,26 +120,7 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 	if result.RuntimeMetadata == nil {
 		result.RuntimeMetadata = map[string]string{}
 	}
-	if transcriptRef := firstNonEmpty(runner.TranscriptRef, runner.TranscriptRefCamel); transcriptRef != "" {
-		result.RuntimeMetadata["transcript_ref"] = transcriptRef
-	}
-	transcriptContent, err := e.runnerFileOrInlineBytes(runner.transcriptInline(), firstNonEmpty(runner.TranscriptPath, runner.TranscriptPathCamel), "transcript")
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	if len(transcriptContent) > 0 && result.RuntimeMetadata["transcript_ref"] == "" {
-		artifactID := "transcript-" + req.TaskRunID
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
-		if err != nil {
-			return TaskExecResult{}, err
-		}
-		result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
-		result.RuntimeMetadata["transcript_ref"] = "artifact://" + finalized.ArtifactID
-		result.RuntimeMetadata["transcript_artifact_id"] = finalized.ArtifactID
-	}
-	if result.RuntimeMetadata["transcript_ref"] != "" && session != nil {
-		session.Metadata["transcript_ref"] = result.RuntimeMetadata["transcript_ref"]
-	}
+	result = e.persistRunnerTranscript(ctx, req, session, runner, result)
 
 	logContent, err := e.runnerFileOrInlineBytes(runner.logsInline(), firstNonEmpty(runner.LogsPath, runner.LogsPathCamel), "logs")
 	if err != nil {
@@ -164,6 +146,43 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 		result.ArtifactsRef = "artifacts://" + req.TaskRunID
 	}
 	return result, nil
+}
+
+// persistRunnerTranscript resolves the runner's transcript into a
+// transcript_ref: a leaf-provided ref wins, otherwise inline/file content is
+// uploaded as a content artifact. Best-effort — an observability write must
+// not fail the task run.
+func (e HostBridgeTaskExecutor) persistRunnerTranscript(ctx context.Context, req TaskExecRequest, session *flueTaskSession, runner bridgeTaskRunnerResult, result TaskExecResult) TaskExecResult {
+	if transcriptRef := firstNonEmpty(runner.TranscriptRef, runner.TranscriptRefCamel); transcriptRef != "" {
+		result.RuntimeMetadata["transcript_ref"] = transcriptRef
+	}
+	transcriptContent, err := e.runnerFileOrInlineBytes(runner.transcriptInline(), firstNonEmpty(runner.TranscriptPath, runner.TranscriptPathCamel), "transcript")
+	if err != nil {
+		slog.WarnContext(ctx, "task run transcript read failed; continuing without transcript_ref",
+			"task_run_id", req.TaskRunID,
+			"session_id", sessionIDFromFlueTaskSession(session),
+			"err", err)
+		transcriptContent = nil
+	}
+	if len(transcriptContent) > 0 && result.RuntimeMetadata["transcript_ref"] == "" {
+		artifactID := "transcript-" + req.TaskRunID
+		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
+		if err != nil {
+			slog.WarnContext(ctx, "task run transcript artifact upload failed; continuing without transcript_ref",
+				"task_run_id", req.TaskRunID,
+				"session_id", sessionIDFromFlueTaskSession(session),
+				"artifact_id", artifactID,
+				"err", err)
+		} else {
+			result.ArtifactIDs = normalizeArtifactIDs(append(result.ArtifactIDs, finalized.ArtifactID))
+			result.RuntimeMetadata["transcript_ref"] = "artifact://" + finalized.ArtifactID
+			result.RuntimeMetadata["transcript_artifact_id"] = finalized.ArtifactID
+		}
+	}
+	if result.RuntimeMetadata["transcript_ref"] != "" && session != nil {
+		session.Metadata["transcript_ref"] = result.RuntimeMetadata["transcript_ref"]
+	}
+	return result
 }
 
 func (r bridgeTaskRunnerResult) transcriptInline() []byte {

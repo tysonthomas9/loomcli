@@ -297,6 +297,63 @@ export interface paths {
     patch: operations["patchWorkspaceDesignFormat"];
     trace?: never;
   };
+  "/api/workspaces/{ws}/config/eval-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Set workspace session-eval policy knobs */
+    patch: operations["patchWorkspaceEvalPolicy"];
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/eval-rollup": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get session-eval dashboard rollups
+     * @description Computes rollups in loomcli over `session-evals` whose `created_at`
+     *     falls in the requested window. Daily buckets are used by default;
+     *     windows of 48 hours or less use hourly UTC buckets.
+     */
+    get: operations["getEvalRollup"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/evals/cron": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get session-eval cron provisioning state */
+    get: operations["getEvalsCron"];
+    /** Enable or pause the session-eval cron binding */
+    put: operations["putEvalsCron"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/readyz": {
     parameters: {
       query?: never;
@@ -655,6 +712,142 @@ export interface paths {
     };
     /** Get scrollback content for a session history record */
     get: operations["getSessionScrollback"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List workspace sessions for Traces */
+    get: operations["listWorkspaceSessions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/sessions/{sessionId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get workspace session metadata */
+    get: operations["getWorkspaceSession"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/sessions/{sessionId}/eval": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get a workspace session's eval state */
+    get: operations["getWorkspaceSessionEval"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/sessions/{sessionId}/rejudge": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Request re-judging for a workspace session */
+    post: operations["rejudgeWorkspaceSession"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/sessions/{sessionId}/transcript": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get workspace session transcript entries */
+    get: operations["getWorkspaceSessionTranscript"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/sessions/{sessionId}/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get workspace session git diff */
+    get: operations["getWorkspaceSessionDiff"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/sessions/{sessionId}/subagents": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List captured subagent IDs for a workspace session */
+    get: operations["listWorkspaceSessionSubagents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/sessions/{sessionId}/subagents/{subagentId}/transcript": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get workspace session subagent transcript entries */
+    get: operations["getWorkspaceSessionSubagentTranscript"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2571,6 +2764,12 @@ export interface components {
        * @enum {string}
        */
       design_format?: "markdown" | "html";
+      /** @description Session-eval deterministic sampling percent. Omitted or zero means default 100. */
+      eval_sampling_percent?: number;
+      /** @description Session-eval batch size. The driver op clamps the effective value to 100. */
+      eval_batch_size?: number;
+      /** @description Session-eval lookback window in days. Omitted or zero means default 30. */
+      eval_lookback_days?: number;
       /** @description True for either a legacy inline or artifact-backed design. */
       has_design?: boolean;
       acceptance_criteria?: string;
@@ -2917,6 +3116,11 @@ export interface components {
       /** @enum {string} */
       design_format: "markdown" | "html";
     };
+    WorkspaceEvalPolicyPatchRequest: {
+      eval_sampling_percent?: number;
+      eval_batch_size?: number;
+      eval_lookback_days?: number;
+    };
     BackendConfigResponse: {
       success: boolean;
       data?: {
@@ -2965,12 +3169,160 @@ export interface components {
       role: string;
       status: string;
     };
+    EvalRollupResponse: {
+      /** @constant */
+      success: true;
+      data: components["schemas"]["EvalRollupData"];
+      error?: string;
+    };
+    EvalRollupData: {
+      /** Format: date-time */
+      since: string;
+      /** Format: date-time */
+      until: string;
+      eval_count: number;
+      score_averages: components["schemas"]["EvalScoreAverages"];
+      score_buckets: components["schemas"]["EvalScoreBucket"][];
+      tag_frequencies: components["schemas"]["EvalTagFrequency"][];
+      insights: components["schemas"]["EvalInsights"];
+      failure_classes: components["schemas"]["EvalFailureClass"][];
+      judge_prompt_versions: components["schemas"]["EvalJudgePromptVersion"][];
+    };
+    EvalScoreAverages: {
+      /** Format: double */
+      outcome_success: number;
+      /** Format: double */
+      instruction_adherence: number;
+      /** Format: double */
+      efficiency: number;
+      /** Format: double */
+      tool_use_quality: number;
+    };
+    EvalScoreBucket: {
+      /** Format: date-time */
+      bucket_start: string;
+      eval_count: number;
+      averages: components["schemas"]["EvalScoreAverages"];
+    };
+    EvalTagFrequency: {
+      tag: string;
+      count: number;
+    };
+    EvalInsights: {
+      harness: components["schemas"]["EvalInsight"][];
+      linter: components["schemas"]["EvalInsight"][];
+      prompt: components["schemas"]["EvalInsight"][];
+      skill: components["schemas"]["EvalInsight"][];
+    };
+    EvalInsight: {
+      text: string;
+      session_id: string;
+      eval_id: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    EvalFailureClass: {
+      error_class: string;
+      count: number;
+    };
+    EvalJudgePromptVersion: {
+      version: string;
+      count: number;
+    };
+    SessionEvalStateResponse: {
+      /** @constant */
+      success: true;
+      data: components["schemas"]["SessionEvalState"];
+      error?: string;
+    };
+    SessionEvalState: {
+      /** @enum {string} */
+      eval_status: "done" | "failed" | "none";
+      eval_error_class: string | null;
+      eval_prompt_version: string | null;
+      eval_requested: boolean;
+      eval?: components["schemas"]["SessionEval"];
+    };
+    EvalRejudgeResponse: {
+      /** @constant */
+      success: true;
+      data: components["schemas"]["EvalRejudgeResult"];
+      error?: string;
+    };
+    EvalRejudgeResult: {
+      requested: boolean;
+      binding_enabled: boolean;
+    };
+    EvalCronResponse: {
+      /** @constant */
+      success: true;
+      data: components["schemas"]["EvalCronState"];
+      error?: string;
+    };
+    EvalCronState: {
+      provisioned: boolean;
+      enabled: boolean;
+      schedule: string | null;
+    };
+    EvalCronPutRequest: {
+      enabled: boolean;
+    };
+    SessionEval: {
+      eval_id: string;
+      session_id: string;
+      task_id?: string;
+      agent_id: string;
+      workspace_key: string;
+      scores: components["schemas"]["SessionEvalScores"];
+      score_rationales: components["schemas"]["SessionEvalScoreRationales"];
+      error_taxonomy_tags: string[];
+      improvement_categories: components["schemas"]["SessionEvalImprovementCategories"];
+      judge_summary: string;
+      judge_model: string;
+      judge_prompt_version: string;
+      eval_cost: components["schemas"]["SessionEvalCost"];
+      /** Format: date-time */
+      session_started_at: string;
+      /** Format: date-time */
+      session_ended_at: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    SessionEvalScores: {
+      outcome_success: number;
+      instruction_adherence: number;
+      efficiency: number;
+      tool_use_quality: number;
+    };
+    SessionEvalScoreRationales: {
+      outcome_success: string;
+      instruction_adherence: string;
+      efficiency: string;
+      tool_use_quality: string;
+    };
+    SessionEvalImprovementCategories: {
+      harness: string[];
+      linter: string[];
+      prompt: string[];
+      skill: string[];
+    };
+    SessionEvalCost: {
+      /** Format: int64 */
+      input_tokens: number;
+      /** Format: int64 */
+      output_tokens: number;
+      /** Format: int64 */
+      total_tokens: number;
+    };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {
       session_id: string;
       task_id: string;
       epic_id?: string;
       agent_name: string;
+      kind?: string;
       backend: string;
       model?: string;
       phase?: string;
@@ -4105,6 +4457,147 @@ export interface operations {
       };
     };
   };
+  patchWorkspaceEvalPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["WorkspaceEvalPolicyPatchRequest"];
+      };
+    };
+    responses: {
+      /** @description Updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Invalid eval policy */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getEvalRollup: {
+    parameters: {
+      query?: {
+        /** @description RFC3339 lower bound on eval created_at. Defaults to until minus 7 days. */
+        since?: string;
+        /** @description RFC3339 upper bound on eval created_at. Defaults to now. */
+        until?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Session-eval dashboard rollup */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EvalRollupResponse"];
+        };
+      };
+      /** @description Invalid time window */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description fleet-db must be upgraded for eval failure-class scans */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getEvalsCron: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Session-eval cron state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EvalCronResponse"];
+        };
+      };
+    };
+  };
+  putEvalsCron: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EvalCronPutRequest"];
+      };
+    };
+    responses: {
+      /** @description Session-eval cron state after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EvalCronResponse"];
+        };
+      };
+      /** @description Invalid request body or provisioning validation failure */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   getWorkspaceRuntimeReady: {
     parameters: {
       query?: never;
@@ -4908,6 +5401,321 @@ export interface operations {
         };
       };
       /** @description Record not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  listWorkspaceSessions: {
+    parameters: {
+      query?: {
+        /** @description RFC3339 lower bound on started_at. Defaults to now minus 7 days when neither since nor until is provided. */
+        since?: string;
+        /** @description RFC3339 upper bound on started_at. */
+        until?: string;
+        status?: string;
+        agent_id?: string;
+        kind?: string;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Workspace session list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: {
+              sessions: components["schemas"]["SessionResponse"][];
+              /** @description Pre-truncation count matching the server-side filters. */
+              total: number;
+              limit: number;
+            };
+          };
+        };
+      };
+      /** @description Invalid query parameter */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description fleet-db must be upgraded for server-side session time filtering */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Session detail */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: components["schemas"]["SessionResponse"];
+          };
+        };
+      };
+      /** @description Session not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceSessionEval: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Session eval state */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionEvalStateResponse"];
+        };
+      };
+      /** @description Session or stamped eval record not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  rejudgeWorkspaceSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Re-judge request accepted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["EvalRejudgeResponse"];
+        };
+      };
+      /** @description Session is not a valid eval candidate */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Session not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Re-judge request conflicted with current state */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getWorkspaceSessionTranscript: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Transcript */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: {
+              session_id?: string;
+              entries?: components["schemas"]["TranscriptEntry"][];
+            };
+          };
+        };
+      };
+      /** @description Session not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceSessionDiff: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Diff content */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Session not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  listWorkspaceSessionSubagents: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        sessionId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Subagent list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: {
+              session_id?: string;
+              subagent_ids?: string[];
+            };
+          };
+        };
+      };
+      /** @description Session not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceSessionSubagentTranscript: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        sessionId: string;
+        subagentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Subagent transcript */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data?: {
+              session_id?: string;
+              entries?: components["schemas"]["TranscriptEntry"][];
+            };
+          };
+        };
+      };
+      /** @description Session not found */
       404: {
         headers: {
           [name: string]: unknown;

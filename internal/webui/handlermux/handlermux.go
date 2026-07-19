@@ -145,6 +145,9 @@ func HandleWorkspaceBackendPatch(svc service.WorkspaceService) http.HandlerFunc 
 func HandleWorkspaceDesignFormatPatch(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleWorkspaceDesignFormatPatch(svc)
 }
+func HandleWorkspaceEvalPolicyPatch(svc service.WorkspaceService) http.HandlerFunc {
+	return workspace.HandleWorkspaceEvalPolicyPatch(svc)
+}
 func HandleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleActiveWorkspace(svc)
 }

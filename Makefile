@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-flue-preflight local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify local-mode-evals-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -9,10 +9,12 @@ LOCAL_MODE_COMPOSE_PROJECT ?= loomcli-local-mode
 LOCAL_MODE_COMPOSE ?=
 LOCAL_MODE_COMPOSE_FILES ?=
 LOCAL_MODE_COMPOSE_UP_FLAGS ?= --build
+LOCAL_MODE_EVALS_MODE ?= $(if $(MODE),$(MODE),plain)
 LOCAL_MODE_FLEETDB_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-fleet-db:latest
 LOCAL_MODE_LOOM_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom:latest
 LOCAL_MODE_LOOM_CODEX_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-codex:latest
 LOCAL_MODE_LOOM_CLAUDE_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-claude:latest
+FLUE_REPO ?= ../flue
 LOCAL_MODE_COMPOSE_EXTRA := $(foreach file,$(LOCAL_MODE_COMPOSE_FILES),-f $(file))
 LOCAL_MODE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CODEX_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml $(LOCAL_MODE_COMPOSE_EXTRA)
@@ -165,33 +167,71 @@ local-mode-frontend-dist:
 	  $(MAKE) build-frontend; \
 	fi
 
-local-mode-up: local-mode-frontend-dist
+local-mode-flue-preflight:
+	@set -e; \
+	flue_repo="$(FLUE_REPO)"; \
+	runtime="$$flue_repo/packages/runtime"; \
+	cli="$$flue_repo/packages/cli"; \
+	if [ ! -d "$$flue_repo" ]; then \
+	  echo "local-mode Flue preflight failed: missing Flue checkout at $$flue_repo" >&2; \
+	  echo "Fix: clone flue as a sibling and npm install in packages/runtime, or set FLUE_REPO to the checkout path." >&2; \
+	  exit 1; \
+	fi; \
+	if [ ! -f "$$runtime/package.json" ]; then \
+	  echo "local-mode Flue preflight failed: missing runtime package at $$runtime" >&2; \
+	  echo "Fix: clone flue as a sibling and npm install in packages/runtime, or set FLUE_REPO to the checkout path." >&2; \
+	  exit 1; \
+	fi; \
+	for dep in "$$runtime/node_modules/hono/package.json" "$$runtime/node_modules/@hono/node-server/package.json"; do \
+	  if [ ! -f "$$dep" ]; then \
+	    echo "local-mode Flue preflight failed: missing installed dependency $$dep" >&2; \
+	    echo "Fix: clone flue as a sibling and npm install in packages/runtime, honoring FLUE_REPO=$$flue_repo." >&2; \
+	    exit 1; \
+	  fi; \
+	done; \
+	if [ ! -f "$$cli/bin/flue.mjs" ] || [ ! -f "$$cli/dist/flue.js" ]; then \
+	  echo "local-mode Flue preflight failed: Flue CLI is not built under $$cli" >&2; \
+	  echo "Fix: build the sibling flue packages/cli package, or set FLUE_REPO to a checkout with packages/cli/dist/flue.js." >&2; \
+	  exit 1; \
+	fi; \
+	if [ ! -d "$$runtime/dist" ]; then \
+	  echo "local-mode Flue preflight failed: Flue runtime is not built under $$runtime (missing dist/)" >&2; \
+	  echo "Fix: build the sibling flue packages/runtime package (pnpm --filter ./packages/runtime build), honoring FLUE_REPO=$$flue_repo." >&2; \
+	  exit 1; \
+	fi; \
+	echo "local-mode Flue preflight ok: $$runtime"
+
+local-mode-up: local-mode-flue-preflight local-mode-frontend-dist
 	@echo "Starting local-mode dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	$$compose $(LOCAL_MODE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+	flue_repo="$$(cd "$(FLUE_REPO)" && pwd -P)"; \
+	FLUE_REPO="$$flue_repo" $$compose $(LOCAL_MODE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
-local-mode-codex-up: local-mode-frontend-dist
+local-mode-codex-up: local-mode-flue-preflight local-mode-frontend-dist
 	@echo "Starting local-mode Codex dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	$$compose $(LOCAL_MODE_CODEX_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+	flue_repo="$$(cd "$(FLUE_REPO)" && pwd -P)"; \
+	FLUE_REPO="$$flue_repo" $$compose $(LOCAL_MODE_CODEX_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
-local-mode-claude-up: local-mode-frontend-dist
+local-mode-claude-up: local-mode-flue-preflight local-mode-frontend-dist
 	@echo "Starting local-mode Claude dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	$$compose $(LOCAL_MODE_CLAUDE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+	flue_repo="$$(cd "$(FLUE_REPO)" && pwd -P)"; \
+	FLUE_REPO="$$flue_repo" $$compose $(LOCAL_MODE_CLAUDE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 # Daemon TS leaf routed to Daytona: a claimed task runs inside a real Daytona
 # sandbox. Requires DAYTONA_API_KEY on the host; DAYTONA_REPO_URL must be a
 # network-reachable git URL. e.g.:
 #   DAYTONA_API_KEY=... LOOM_DAEMON_LEAF=ts make local-mode-daytona-up
-local-mode-daytona-up: local-mode-frontend-dist
+local-mode-daytona-up: local-mode-flue-preflight local-mode-frontend-dist
 	@echo "Starting local-mode Daytona dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	$$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+	flue_repo="$$(cd "$(FLUE_REPO)" && pwd -P)"; \
+	FLUE_REPO="$$flue_repo" $$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 local-mode-down:
 	@set -e; \
@@ -225,6 +265,11 @@ local-mode-codex-verify:
 	@LOOM_LOCAL_MODE_PLAN_TASK_ID="$${LOOM_LOCAL_MODE_PLAN_TASK_ID:-LOCALMODE-2}" \
 	  LOOM_LOCAL_MODE_CODE_TASK_ID="$${LOOM_LOCAL_MODE_CODE_TASK_ID:-LOCALMODE-3}" \
 	  test/local-mode/verify-local-mode.sh
+
+local-mode-evals-verify:
+	@mode="$${LOCAL_MODE_EVALS_MODE:-$(LOCAL_MODE_EVALS_MODE)}"; \
+	echo "Running local-mode eval machinery verifier ($$mode)..."; \
+	test/local-mode/verify-evals.sh "$$mode"
 
 test-local-mode-harness: local-mode-verify
 
@@ -616,6 +661,7 @@ help:
 	@echo "  make local-mode-codex-up - Run local-mode stack with Codex agents"
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"
 	@echo "  make local-mode-codex-verify - Verify Codex local-mode stack"
+	@echo "  make local-mode-evals-verify - Verify local-mode session eval machinery"
 	@echo "  make local-mode-logs    - Tail selected local-mode stack logs"
 	@echo "  make local-mode-down    - Stop selected local-mode stack and volumes"
 	@echo "    LOCAL_MODE_COMPOSE='docker compose' LOCAL_MODE_COMPOSE_PROJECT=name LOCAL_MODE_UI_PORT=8383 LOCAL_MODE_API_PORT=8382 LOCAL_MODE_FLEETDB_PORT=8380"

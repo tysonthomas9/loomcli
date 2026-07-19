@@ -27,6 +27,7 @@ type Store struct {
 	agents     *agentStore
 	nodes      *nodeStore
 	sessions   *agentSessionStore
+	evals      *sessionEvalStore
 	terminals  *terminalSessionStore
 	artifacts  *artifactStore
 	leases     *agentLeaseStore
@@ -85,6 +86,7 @@ func New() *Store {
 		agents:     newAgentStore(),
 		nodes:      nodes,
 		sessions:   newAgentSessionStore(),
+		evals:      newSessionEvalStore(),
 		terminals:  newTerminalSessionStore(),
 		artifacts:  artifacts,
 		leases:     newAgentLeaseStore(),
@@ -168,6 +170,8 @@ func (s *Store) Nodes() store.NodeStore { return s.nodes }
 
 // AgentSessions returns the AgentSessionStore.
 func (s *Store) AgentSessions() store.AgentSessionStore { return s.sessions }
+
+func (s *Store) SessionEvals() store.SessionEvalStore { return s.evals }
 
 func (s *Store) TerminalSessions() store.TerminalSessionStore { return s.terminals }
 

@@ -45,7 +45,7 @@ vi.mock("@/components/IssueViewGuard", () => ({
   ),
 }));
 
-import { GraphPage } from "../GraphPage";
+import { GraphPage } from "../boards/GraphPage";
 
 describe("GraphPage", () => {
   it("renders without crashing", async () => {

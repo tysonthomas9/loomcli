@@ -169,9 +169,13 @@ func (s *agentSessionStore) Create(_ context.Context, in store.AgentSessionCreat
 		Status:          in.Status,
 		Phase:           in.Phase,
 		Attempt:         in.Attempt,
+		StartedAt:       in.StartedAt,
 		Metadata:        cloneMap(in.Metadata),
 		CreatedAt:       now,
 		UpdatedAt:       now,
+	}
+	if session.StartedAt.IsZero() {
+		session.StartedAt = now
 	}
 	s.items[in.WorkspaceKey][in.SessionID] = session
 	return cloneAgentSession(session), nil
@@ -203,6 +207,25 @@ func (s *agentSessionStore) List(_ context.Context, ws string, filter store.Agen
 		out = out[:filter.Limit]
 	}
 	return out, nil
+}
+
+func (s *agentSessionStore) ListPage(_ context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sessions := s.items[ws]
+	out := make([]*domain.AgentSession, 0, len(sessions))
+	for _, session := range sessions {
+		if !sessionMatchesPage(session, filter) {
+			continue
+		}
+		out = append(out, cloneAgentSession(session))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.After(out[j].StartedAt) })
+	total := len(out)
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, total, nil
 }
 
 func (s *agentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {
@@ -295,6 +318,19 @@ func sessionMatches(s *domain.AgentSession, filter store.AgentSessionFilter) boo
 		return false
 	}
 	if filter.ParentSessionID != "" && s.ParentSessionID != filter.ParentSessionID {
+		return false
+	}
+	return true
+}
+
+func sessionMatchesPage(s *domain.AgentSession, filter store.AgentSessionFilter) bool {
+	if !sessionMatches(s, filter) {
+		return false
+	}
+	if filter.Since != nil && s.StartedAt.Before(*filter.Since) {
+		return false
+	}
+	if filter.Until != nil && s.StartedAt.After(*filter.Until) {
 		return false
 	}
 	return true

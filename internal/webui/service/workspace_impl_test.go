@@ -381,6 +381,43 @@ func TestPatchWorkspaceDesignFormat_RejectsInvalidFormat(t *testing.T) {
 	}
 }
 
+func TestPatchWorkspaceEvalPolicy_StoreBackedUpdatesWorkspace(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	sampling := 50
+	batch := 75
+	data, err := svc.PatchWorkspaceEvalPolicy(ctx, "ALPHA", WorkspaceEvalPolicyPatch{
+		EvalSamplingPercent: &sampling,
+		EvalBatchSize:       &batch,
+	})
+	if err != nil {
+		t.Fatalf("PatchWorkspaceEvalPolicy: %v", err)
+	}
+	if data.ID != "ALPHA" || data.EvalSamplingPercent != 50 || data.EvalBatchSize != 75 {
+		t.Fatalf("workspace data = %+v", data)
+	}
+	ws, err := st.Workspaces().Get(ctx, "ALPHA")
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if ws.EvalSamplingPercent != 50 || ws.EvalBatchSize != 75 || ws.EvalLookbackDays != 0 {
+		t.Fatalf("eval policy = %+v", ws)
+	}
+}
+
+func TestPatchWorkspaceEvalPolicy_RejectsInvalidValues(t *testing.T) {
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: memstore.New()})
+	zero := 0
+	if _, err := svc.PatchWorkspaceEvalPolicy(context.Background(), "ALPHA", WorkspaceEvalPolicyPatch{EvalLookbackDays: &zero}); err == nil {
+		t.Fatal("expected validation error")
+	}
+}
+
 func TestSetDefaultWorkspace_Removed(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 
