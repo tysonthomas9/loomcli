@@ -346,7 +346,7 @@ func TestGitHubReviewTaskRunnerSourceContract(t *testing.T) {
 		`review_findings: JSON.stringify(findings)`,
 		`"--output-schema"`,
 		`"--output-last-message"`,
-		`execFileSync(CODEX`,
+		`invocationKey: "review"`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("github-review-task-runner source missing %q", want)
