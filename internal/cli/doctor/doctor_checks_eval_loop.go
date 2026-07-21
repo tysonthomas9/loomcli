@@ -142,6 +142,10 @@ func assessEvalLoop(binding *domain.TriggerBinding, runs []*domain.DriverRun, no
 		}
 	}
 
+	return assessEvalLoopLatestRun(latest)
+}
+
+func assessEvalLoopLatestRun(latest *domain.DriverRun) CheckResult {
 	if latest.Status == domain.DriverRunFailed {
 		class := evalLoopErrorClass(latest)
 		if class == evalBackendUnsupported {
