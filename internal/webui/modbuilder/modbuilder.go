@@ -146,6 +146,6 @@ func NewLocalSettingsHandlers(dataDir string, invalidator CredentialSeedInvalida
 // NewTaskRunAPIModule creates the task-runner HTTP API module
 // (POST /api/workspaces/{ws}/task-run/{op}, lease-token auth) so task runner
 // processes talk to serve instead of holding fleet-db credentials.
-func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string) interface{ Register(*http.ServeMux) } {
-	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL, LocalSettingsDir: localSettingsDir})
+func NewTaskRunAPIModule(st store.Store, fleetBaseURL string, localSettingsDir string, onSessionOpen func(store.SessionRunContext, store.SessionRef)) interface{ Register(*http.ServeMux) } {
+	return taskrunapi.NewModule(taskrunapi.Config{Store: st, FleetBaseURL: fleetBaseURL, LocalSettingsDir: localSettingsDir, OnSessionOpen: onSessionOpen})
 }

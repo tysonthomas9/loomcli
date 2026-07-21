@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +49,10 @@ type HostBridgeTaskExecutor struct {
 	Store        store.Store
 	WorktreePath string
 	Command      []string
+	// SessionReconciler settles task-plane invocation sessions synchronously
+	// before ExecuteTask returns to the worker's terminal TaskRun write. Product
+	// bridge construction sites set it explicitly; nil disables reconciliation.
+	SessionReconciler *TaskRunSessionReconciler
 	// APIBaseURL, when set, is exported to the spawned task runner as
 	// LOOM_TASK_RUN_API_URL: the serve-hosted task-run API the runner SDK
 	// targets with its per-task-run lease token instead of dialing fleet-db
@@ -245,6 +250,9 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if runBridge == nil {
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
 	}
+	if err := e.markBridgeTaskPlane(ctx, req); err != nil {
+		return TaskExecResult{}, err
+	}
 
 	session, err := e.startFlueTaskSession(ctx, req)
 	if err != nil {
@@ -253,10 +261,11 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	var runner *bridgeTaskRunnerResult
 	defer func() {
 		if session != nil {
-			if finishErr := e.finishFlueTaskSession(ctx, req, session, result, runner, err); finishErr != nil && err == nil {
-				err = finishErr
+			if finishErr := e.finishFlueTaskSession(ctx, req, session, result, runner, err); finishErr != nil {
+				slog.WarnContext(ctx, "finish flue task session failed", "task_run_id", req.TaskRunID, "err", finishErr)
 			}
 		}
+		e.reconcileTaskRunSessions(ctx, req, &result, err)
 	}()
 	runnerResult, err := runBridge()
 	if err != nil {
@@ -299,6 +308,51 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return result, nil
 	}
 	return e.finalizeAndApplyPatch(ctx, req, runnerResult, patch, result)
+}
+
+func (e HostBridgeTaskExecutor) reconcileTaskRunSessions(ctx context.Context, req TaskExecRequest, result *TaskExecResult, execErr error) {
+	if e.Store == nil || result == nil {
+		return
+	}
+	reconciler := e.SessionReconciler
+	if reconciler == nil {
+		return
+	}
+	reconciled, err := reconciler.ReconcileBridge(ctx, req, *result, execErr)
+	metadata := cloneStringMap(result.RuntimeMetadata)
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	metadata["unclosed_sessions"] = strconv.Itoa(reconciled.Unclosed)
+	if err != nil {
+		metadata["session_reconcile_error"] = err.Error()
+		slog.WarnContext(ctx, "task-run session reconciliation failed", "task_run_id", req.TaskRunID, "err", err)
+	}
+	result.RuntimeMetadata = metadata
+}
+
+// markBridgeTaskPlane lets taskrunapi reject leaf self-complete on bridge-run
+// task-plane leaves. Non-bridge topologies never receive this marker and keep
+// their legacy complete op for the server reconciliation-loop ownership model.
+func (e HostBridgeTaskExecutor) markBridgeTaskPlane(ctx context.Context, req TaskExecRequest) error {
+	if e.Store == nil || e.SessionReconciler == nil || req.TaskRunID == "" {
+		return nil
+	}
+	run, err := e.Store.TaskRuns().Get(ctx, req.WorkspaceKey, req.TaskRunID)
+	if err != nil {
+		return fmt.Errorf("load bridge task-plane run: %w", err)
+	}
+	if run.Status != domain.TaskRunRunning {
+		return fmt.Errorf("mark bridge task-plane run %q in status %q: %w", req.TaskRunID, run.Status, domain.ErrInvalidTransition)
+	}
+	_, err = e.Store.TaskRuns().Heartbeat(ctx, req.WorkspaceKey, req.TaskRunID, store.TaskRunHeartbeat{
+		NodeID: req.NodeID, LeaseID: req.LeaseID, LeaseToken: req.LeaseToken, FencingToken: req.FencingToken,
+		RuntimeMetadata: map[string]string{"bridge_task_plane": "true"},
+	})
+	if err != nil {
+		return fmt.Errorf("mark bridge task-plane run %q: %w", req.TaskRunID, err)
+	}
+	return nil
 }
 
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {

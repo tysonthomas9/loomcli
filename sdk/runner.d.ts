@@ -388,6 +388,7 @@ export declare class TaskRunClient {
   getRuntimeCredential(input: { provider: "daytona" | "github" | string }, options?: { signal?: AbortSignal }): Promise<RuntimeCredentialResponse>;
   sessionOpen(input: AgentSessionOpenInput, options?: { signal?: AbortSignal }): Promise<AgentSessionOpenResult>;
   sessionClose(input: AgentSessionCloseInput, options?: { signal?: AbortSignal }): Promise<AgentSessionCloseResult>;
+  /** Non-bridge topologies only; bridge task-plane leaves return an IPC result instead. */
   completeRun(input?: CompleteRunInput, options?: { signal?: AbortSignal }): Promise<CompleteRunResponse>;
 }
 

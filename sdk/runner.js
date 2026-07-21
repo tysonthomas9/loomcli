@@ -355,6 +355,8 @@ export class TaskRunClient {
     }), options);
   }
 
+  // Reserved for non-bridge ownership topologies. A bridge-run task-plane
+  // leaf must return its IPC result; serve rejects self-completion there.
   async completeRun(input = {}, options = {}) {
     const artifactIds = normalizeStringList(input.required_artifact_ids || input.requiredArtifactIDs || input.artifact_ids || input.artifactIds);
     const policy = input.taskStatusPolicy || input.task_status_policy || {};
