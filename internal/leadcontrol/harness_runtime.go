@@ -23,6 +23,7 @@ const (
 	HarnessNameClaudeCode = "claude-code"
 	HarnessNameCodex      = "codex"
 	HarnessNameGemini     = "gemini"
+	HarnessNameOpenCode   = "opencode"
 	HarnessNameGeneric    = "generic"
 )
 
@@ -51,10 +52,13 @@ type HarnessLeadRuntimeConfig struct {
 	// HarnessName selects the harness-wrapper adapter. Defaults from Backend
 	// via HarnessNameForBackend.
 	HarnessName string
-	// BinaryPath and Args launch the harness; Prompt is appended as the final
-	// positional argument.
+	// BinaryPath and Args launch the harness. Prompt is appended as the final
+	// positional argument unless PromptFlag is set, in which case the runtime
+	// appends PromptFlag followed by Prompt. This supports CLIs such as OpenCode
+	// whose interactive TUI accepts its startup prompt only through a flag.
 	BinaryPath string
 	Args       []string
+	PromptFlag string
 	Env        []string
 	// HarnessSessionID is the harness's own session id when the launch args
 	// pin one (claude --session-id <uuid>). Persisted with the starting
@@ -78,6 +82,8 @@ func HarnessNameForBackend(backend string) string {
 		return HarnessNameCodex
 	case "gemini":
 		return HarnessNameGemini
+	case "opencode":
+		return HarnessNameOpenCode
 	default:
 		return HarnessNameGeneric
 	}
@@ -216,6 +222,9 @@ func normalizeHarnessLeadRuntimeConfig(cfg HarnessLeadRuntimeConfig) HarnessLead
 func harnessLeadArgs(cfg HarnessLeadRuntimeConfig) []string {
 	args := append([]string{}, cfg.Args...)
 	if cfg.Prompt != "" {
+		if cfg.PromptFlag != "" {
+			args = append(args, cfg.PromptFlag)
+		}
 		args = append(args, cfg.Prompt)
 	}
 	return args

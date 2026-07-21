@@ -69,6 +69,7 @@ func RunControlledLeadRuntime(
 		Backend:          backend,
 		BinaryPath:       inv.binary,
 		Args:             inv.args,
+		PromptFlag:       inv.promptFlag,
 		Env:              inv.env,
 		HarnessSessionID: inv.harnessSessionID,
 	})
@@ -83,6 +84,7 @@ type harnessLeadLaunch struct {
 	binary           string
 	args             []string
 	env              []string
+	promptFlag       string
 	harnessSessionID string
 }
 
@@ -107,8 +109,12 @@ func harnessLeadInvocation(backend, workDir string) (harnessLeadLaunch, bool) {
 	case "gemini":
 		return harnessLeadLaunch{binary: "gemini", args: []string{"--approval-mode=yolo"}, env: buildBackendEnv(workDir, "")}, true
 	case "opencode":
-		args := append([]string{"run", "--dir", workDir, "--dangerously-skip-permissions"}, openCodeModelArgs()...)
-		return harnessLeadLaunch{binary: "opencode", args: args, env: buildBackendEnv(workDir, "")}, true
+		return harnessLeadLaunch{
+			binary:     "opencode",
+			args:       openCodeInteractiveArgs(),
+			promptFlag: "--prompt",
+			env:        buildBackendEnv(workDir, ""),
+		}, true
 	case "cursor":
 		// the headless agent CLI is `cursor-agent`; `cursor` is the IDE launcher.
 		return harnessLeadLaunch{binary: "cursor-agent", args: []string{"--force"}, env: buildBackendEnv(workDir, "")}, true

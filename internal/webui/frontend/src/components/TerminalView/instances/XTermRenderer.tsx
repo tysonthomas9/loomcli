@@ -19,6 +19,8 @@ export interface XTermRendererHandle {
   scrollToBottom: () => void;
 }
 
+export const TERMINAL_SCROLLBACK_LINES = 10_000;
+
 interface XTermRendererProps {
   className?: string | undefined;
   onReady: (handle: XTermRendererHandle) => void;
@@ -71,7 +73,7 @@ function binaryStringToBytes(data: string): Uint8Array {
 }
 
 /**
- * Thin xterm.js renderer used only by Claude-backed terminal tabs.
+ * Thin xterm.js renderer shared by interactive terminal tabs.
  * PTY ownership and reconnect behavior stay in TerminalInstance.
  */
 export function XTermRenderer({
@@ -106,7 +108,7 @@ export function XTermRenderer({
       cursorBlink: true,
       fontFamily: font.fontFamily,
       fontSize: font.fontSize,
-      scrollback: 10_000,
+      scrollback: TERMINAL_SCROLLBACK_LINES,
       theme: readTheme(),
     });
     const fitAddon = new FitAddon();
@@ -115,11 +117,36 @@ export function XTermRenderer({
 
     const fit = (): { cols: number; rows: number } | null => {
       if (host.clientWidth <= 0 || host.clientHeight <= 0) return null;
+
+      // FitAddon may reflow wrapped rows. Anchor the top visible buffer line
+      // with an xterm marker so a user reading older output stays on that
+      // content instead of jumping to the prompt. Markers move with buffer
+      // trims/reflow; the distance fallback covers alternate-buffer modes,
+      // where xterm does not provide markers.
+      const before = terminal.buffer.active;
+      const wasAtBottom = before.viewportY >= before.baseY;
+      const distanceFromBottom = Math.max(0, before.baseY - before.viewportY);
+      const marker = wasAtBottom
+        ? undefined
+        : terminal.registerMarker(
+            before.viewportY - (before.baseY + before.cursorY),
+          );
       try {
         fitAddon.fit();
       } catch {
+        marker?.dispose();
         return null;
       }
+
+      const after = terminal.buffer.active;
+      if (wasAtBottom) {
+        terminal.scrollToBottom();
+      } else if (marker && !marker.isDisposed) {
+        terminal.scrollToLine(Math.min(marker.line, after.baseY));
+      } else {
+        terminal.scrollToLine(Math.max(0, after.baseY - distanceFromBottom));
+      }
+      marker?.dispose();
       return { cols: terminal.cols, rows: terminal.rows };
     };
 
