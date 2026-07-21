@@ -148,6 +148,8 @@ type autoLoopCtx struct {
 	updateState       func(string) error
 	clearTaskID       func() error
 	readLock          func() (*cli.LockInfo, error)
+	workScanFailures  int
+	scanSleep         func(time.Duration, <-chan struct{}) bool
 
 	// lastClaudeSessionID holds the Claude session UUID from the previous
 	// invocation. Used to resume the session on error-retry instead of
@@ -217,6 +219,9 @@ func RunAutoModeLoop(opts AutoModeOptions, shutdown chan struct{}) {
 		ctx.state.CircuitBreakerTrips = ctx.rateLimitBreaker.totalTrips
 	}
 	printAutoModeSummary(ctx.state)
+	if strings.HasPrefix(ctx.state.ExitReason, agenterr.WorkScanFailureMarker+":") {
+		fmt.Println(ctx.state.ExitReason)
+	}
 }
 
 // applyAutoModeDefaults fills zero-value fields in opts with sensible defaults.
@@ -289,6 +294,7 @@ func initAutoLoop(opts AutoModeOptions) *autoLoopCtx {
 	ctx.updateState = buildStateUpdater(opts)
 	ctx.clearTaskID = buildTaskIDClearer(opts)
 	ctx.readLock = buildLockReader(opts)
+	ctx.scanSleep = interruptibleSleep
 
 	return ctx
 }
@@ -360,14 +366,26 @@ func checkAutoExitConditions(ctx *autoLoopCtx, shutdown chan struct{}) string {
 func waitForAvailableTasks(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	available, err := ctx.hasAvailableTasks()
 	if err != nil {
-		fmt.Printf("[auto] Error checking tasks: %v\n", err)
-		if interruptibleSleep(time.Duration(ctx.opts.Interval)*time.Second, shutdown) {
+		retry, delay := nextWorkScanRetry(&ctx.workScanFailures, err)
+		if !retry {
+			ctx.state.ShouldExit = true
+			ctx.state.ExitReason = workScanFailureReason(err)
+			return false
+		}
+		fmt.Printf("[auto] Ready/work scan failed (attempt %d/%d): %v; retrying in %s\n",
+			ctx.workScanFailures, workScanMaxAttempts, err, delay)
+		sleep := ctx.scanSleep
+		if sleep == nil {
+			sleep = interruptibleSleep
+		}
+		if sleep(delay, shutdown) {
 			ctx.state.ShouldExit = true
 			ctx.state.ExitReason = "shutdown signal received"
 			return false
 		}
 		return true // retry
 	}
+	ctx.workScanFailures = 0
 	if available {
 		return true
 	}

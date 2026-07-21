@@ -35,6 +35,18 @@ type errorPattern struct {
 // The format is provider-independent.
 var retryAfterRe = regexp.MustCompile(`(?i)retry.?after[:\s]+(\d+)`)
 
+// WorkScanFailureMarker is the stable final-line marker auto-mode agents emit
+// after bounded retries cannot read the ready/work queue. It carries the
+// original read failure after a colon so the daemon can distinguish a failed
+// scan from a genuine empty queue without fabricating a NoWork result.
+//
+// Stable string contract: changing it requires updating the auto-mode emitter
+// (internal/cli/automode/work_scan.go).
+const WorkScanFailureMarker = "loom: work scan failed"
+
+// workScanFailureRe captures the normalized cause carried by the marker.
+var workScanFailureRe = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(WorkScanFailureMarker) + `(?::\s*(.*))?\s*$`)
+
 // BackendUnavailableMarker is the stable log marker the inner backend
 // subprocess emits when the configured CLI is not on PATH. classifyFromText
 // recognizes it before anything else so the supervisor gets a categorical
@@ -213,22 +225,36 @@ func classifyHarnessMarkers(text string) *classifyResult {
 func classifyFromText(text string, exitCode int, backend string) *AgentError {
 	now := time.Now()
 
-	// Explicit markers and the harness's terminal verdict come first.
-	result := classifyHarnessMarkers(text)
+	var result *classifyResult
 
-	// 2. Primary: harness-wrapper owns the cost/rate-limit/transport/API-error
+	// 1. Loom-owned marker: auto-mode exhausted bounded retries while reading
+	// the ready/work queue. This must win over a clean exit's NoWork inference.
+	if match := workScanFailureRe.FindStringSubmatch(text); len(match) > 0 {
+		message := strings.TrimSpace(match[1])
+		if message == "" {
+			message = "ready/work scan failed"
+		}
+		result = &classifyResult{Class: OutcomeFromDomain(WorkScanFailureOutcome), Message: message}
+	}
+
+	// Explicit markers and the harness's terminal verdict come next.
+	if result == nil {
+		result = classifyHarnessMarkers(text)
+	}
+
+	// 3. Primary: harness-wrapper owns the cost/rate-limit/transport/API-error
 	//    patterns. Run its classifier as a one-shot over the captured text and
 	//    map the structured Classification onto our ErrorClass.
 	if result == nil && text != "" {
 		result = fromClassification(wrapper.ClassifyOutput(backend, text), text)
 	}
 
-	// 3. Residual: loom-specific distinctions the wrapper does not model.
+	// 4. Residual: loom-specific distinctions the wrapper does not model.
 	if result == nil {
 		result = classifyWithPatterns(text, residualPatterns)
 	}
 
-	// 4. Exit-code fallback.
+	// 5. Exit-code fallback.
 	if result == nil {
 		result = &classifyResult{
 			Class:   OutcomeFromHarness(classifyByExitCode(exitCode)),

@@ -36,6 +36,8 @@ func TestDecide_Golden(t *testing.T) {
 		// loom-domain outcomes
 		{"no-work → uncounted poll", agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
 			Disposition{Decision: RetryUncounted, Backoff: BPNoWork}},
+		{"work-scan-failure → counted retry/block", agenterr.OutcomeFromDomain(agenterr.WorkScanFailureOutcome),
+			Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}},
 		{"backend-unavailable → block/recheck", agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome),
 			Disposition{Decision: Block, Backoff: BPBackendUnavailable}},
 		{"lock-conflict → retry/block (capped)", agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome),
@@ -78,6 +80,7 @@ func TestQuarantineEligible(t *testing.T) {
 		{"unknown → eligible (-1 signal death)", agenterr.OutcomeFromHarness(wrapper.ErrUnknown), true},
 		// loom-domain outcomes: coordination signals, never task-fault
 		{"no-work → not eligible", agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome), false},
+		{"work-scan-failure → not eligible", agenterr.OutcomeFromDomain(agenterr.WorkScanFailureOutcome), false},
 		{"lock-conflict → not eligible", agenterr.OutcomeFromDomain(agenterr.LockConflictOutcome), false},
 		{"spawn-failure → not eligible", agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome), false},
 		{"backend-unavailable → not eligible", agenterr.OutcomeFromDomain(agenterr.BackendUnavailableOutcome), false},

@@ -1411,15 +1411,16 @@ func TestFormatDaemonDuration(t *testing.T) {
 func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
 	backoffTime := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
 	status := DaemonAgentStatus{
-		Worktree:       "falcon",
-		Role:           "plan",
-		PID:            12345,
-		Status:         "running",
-		WorktreePath:   "/path/to/falcon",
-		LastErrorClass: "RateLimited",
-		NoWorkCount:    3,
-		BackoffUntil:   backoffTime,
-		RemoteBranch:   "origin/main",
+		Worktree:         "falcon",
+		Role:             "plan",
+		PID:              12345,
+		Status:           "running",
+		WorktreePath:     "/path/to/falcon",
+		LastErrorClass:   "RateLimited",
+		LastErrorMessage: "rate limit exceeded",
+		NoWorkCount:      3,
+		BackoffUntil:     backoffTime,
+		RemoteBranch:     "origin/main",
 	}
 
 	data, err := json.Marshal(status)
@@ -1432,7 +1433,7 @@ func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	expectedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "backoff_until", "remote_branch"}
+	expectedKeys := []string{"worktree_path", "last_error_class", "last_error_message", "no_work_count", "backoff_until", "remote_branch"}
 	for _, key := range expectedKeys {
 		if _, ok := m[key]; !ok {
 			t.Errorf("expected JSON key %q not found", key)
@@ -1449,6 +1450,9 @@ func TestDaemonAgentStatus_NewFields_JSON(t *testing.T) {
 	}
 	if roundTrip.LastErrorClass != "RateLimited" {
 		t.Errorf("LastErrorClass = %q, want %q", roundTrip.LastErrorClass, "RateLimited")
+	}
+	if roundTrip.LastErrorMessage != "rate limit exceeded" {
+		t.Errorf("LastErrorMessage = %q, want %q", roundTrip.LastErrorMessage, "rate limit exceeded")
 	}
 	if roundTrip.NoWorkCount != 3 {
 		t.Errorf("NoWorkCount = %d, want 3", roundTrip.NoWorkCount)
@@ -1476,11 +1480,20 @@ func TestDaemonAgentStatus_NewFields_OmitEmpty(t *testing.T) {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}
 
-	omittedKeys := []string{"worktree_path", "last_error_class", "no_work_count", "remote_branch"}
+	omittedKeys := []string{"worktree_path", "last_error_class", "last_error_message", "no_work_count", "remote_branch"}
 	for _, key := range omittedKeys {
 		if _, ok := m[key]; ok {
 			t.Errorf("key %q should be omitted when zero/empty", key)
 		}
+	}
+}
+
+func TestFormatLastDaemonError(t *testing.T) {
+	if got := formatLastDaemonError(DaemonAgentStatus{LastErrorClass: "WorkScanFailure", LastErrorMessage: "HTTP 429 rate limit exceeded"}); got != "WorkScanFailure: HTTP 429 rate limit exceeded" {
+		t.Errorf("formatLastDaemonError() = %q", got)
+	}
+	if got := formatLastDaemonError(DaemonAgentStatus{LastErrorClass: "NoWork"}); got != "NoWork" {
+		t.Errorf("formatLastDaemonError() = %q", got)
 	}
 }
 
@@ -1492,14 +1505,15 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 
 	agents := []SupervisedAgentStatus{
 		{
-			Worktree:       "falcon",
-			Role:           "plan",
-			PID:            0,
-			WorktreePath:   "/path/to/falcon",
-			LastErrorClass: "Timeout",
-			NoWorkCount:    7,
-			BackoffUntil:   backoffTime,
-			RemoteBranch:   "origin/develop",
+			Worktree:         "falcon",
+			Role:             "plan",
+			PID:              0,
+			WorktreePath:     "/path/to/falcon",
+			LastErrorClass:   "Timeout",
+			LastErrorMessage: "upstream timed out",
+			NoWorkCount:      7,
+			BackoffUntil:     backoffTime,
+			RemoteBranch:     "origin/develop",
 		},
 	}
 
@@ -1523,6 +1537,9 @@ func TestWriteStateFile_NewFields_RoundTrip(t *testing.T) {
 	}
 	if a.LastErrorClass != "Timeout" {
 		t.Errorf("LastErrorClass = %q, want %q", a.LastErrorClass, "Timeout")
+	}
+	if a.LastErrorMessage != "upstream timed out" {
+		t.Errorf("LastErrorMessage = %q, want %q", a.LastErrorMessage, "upstream timed out")
 	}
 	if a.NoWorkCount != 7 {
 		t.Errorf("NoWorkCount = %d, want 7", a.NoWorkCount)

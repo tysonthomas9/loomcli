@@ -38,6 +38,10 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	if backend == "" {
 		backend = s.ConfigSnapshot().Backend
 	}
+	classifiedFromLog := agenterr.ClassifyFromLog(logPath, exitCode, backend)
+	if classifyWorkScanFailure(ap, classifiedFromLog) {
+		return
+	}
 
 	// A duration kill is classified from the stop reason rather than the exit,
 	// and checked before everything else because every arm below would read it
@@ -50,12 +54,11 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	if taskID == "" && (exitCode == 0 || stopReason == StopReasonWatchdog) {
 		s.markNoWork(ap, backend)
 	} else if exitCode != 0 {
-		ae := agenterr.ClassifyFromLog(logPath, exitCode, backend)
 		ap.Mu.Lock()
-		ap.LastError = ae
+		ap.LastError = classifiedFromLog
 		ap.LastNoWork = false
 		ap.Mu.Unlock()
-		log.Printf("[daemon] Agent %s: classified error: %v", ap.Entry.Worktree, ae)
+		log.Printf("[daemon] Agent %s: classified error: %v", ap.Entry.Worktree, classifiedFromLog)
 	} else if s.runLeftClaimHeld(ap, taskID) {
 		s.markIncompleteRun(ap, taskID, backend)
 	} else {
@@ -179,6 +182,18 @@ func isIncompleteRun(ap *AgentProcess) bool {
 	ap.Mu.Lock()
 	defer ap.Mu.Unlock()
 	return ap.LastError != nil && ap.LastError.Class.Is(agenterr.IncompleteRunOutcome)
+}
+
+func classifyWorkScanFailure(ap *AgentProcess, classified *agenterr.AgentError) bool {
+	if !classified.Class.Is(agenterr.WorkScanFailureOutcome) {
+		return false
+	}
+	ap.Mu.Lock()
+	ap.LastError = classified
+	ap.LastNoWork = false
+	ap.Mu.Unlock()
+	log.Printf("[daemon] Agent %s: work scan failed: %s", ap.Entry.Worktree, classified.Message)
+	return true
 }
 
 // markSpawnFailure records a spawn failure as a synthetic agent exit so the

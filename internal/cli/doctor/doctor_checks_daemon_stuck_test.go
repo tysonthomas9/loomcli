@@ -190,6 +190,23 @@ func TestEvaluateDaemonStuck_PassWhenAgentsAreFresh(t *testing.T) {
 	}
 }
 
+func TestEvaluateDaemonStuck_FailsWhenWorkScanningIsStarved(t *testing.T) {
+	now := time.Now()
+	state := freshState("planner")
+	state.Agents[0].LastErrorClass = "WorkScanFailure"
+	state.Agents[0].LastErrorMessage = "failed to check ready tasks: HTTP 429 rate limit exceeded"
+
+	result := evaluateDaemonStuck(state, now.Add(-5*time.Second), now, 30*time.Second)
+
+	if result.Status != StatusFail {
+		t.Fatalf("expected StatusFail for a starved work scan, got %s (%s / %s)",
+			result.Status, result.Summary, result.Detail)
+	}
+	if !strings.Contains(result.Detail, "planner") || !strings.Contains(result.Detail, "HTTP 429") {
+		t.Errorf("detail = %q, want agent and scan cause", result.Detail)
+	}
+}
+
 // TestEvaluateDaemonStuck_FailAcceptanceCase reproduces the observed bug:
 // backoff_until pinned 5 hours in the past while no_work_backoff=30s.
 func TestEvaluateDaemonStuck_FailAcceptanceCase(t *testing.T) {

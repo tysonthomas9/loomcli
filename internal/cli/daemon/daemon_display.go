@@ -48,7 +48,7 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 		fmt.Printf("      Last run: %s (exit %d)\n", formatDaemonDuration(runtime), agent.LastExitCode)
 	}
 	if agent.LastErrorClass != "" {
-		fmt.Printf("      Last error: %s\n", agent.LastErrorClass)
+		fmt.Printf("      Last error: %s\n", formatLastDaemonError(agent))
 	}
 	if agent.NoWorkCount > 0 {
 		fmt.Printf("      NoWork: %d\n", agent.NoWorkCount)
@@ -70,6 +70,13 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 			fmt.Printf("      Stopped: %s\n", agent.StopReason)
 		}
 	}
+}
+
+func formatLastDaemonError(agent DaemonAgentStatus) string {
+	if agent.LastErrorMessage == "" {
+		return agent.LastErrorClass
+	}
+	return fmt.Sprintf("%s: %s", agent.LastErrorClass, agent.LastErrorMessage)
 }
 
 // printAgentBranchInfo prints the branch and git sync status for an agent.

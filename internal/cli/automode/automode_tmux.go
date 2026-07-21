@@ -28,6 +28,7 @@ type tmuxLoopCtx struct {
 	hasAvailableTasks     func() (bool, error)
 	taskCount             int
 	consecutiveNoProgress int
+	workScanFailures      int
 	idleStart             time.Time
 }
 
@@ -143,14 +144,23 @@ func tmuxCheckExit(ctx *tmuxLoopCtx, shutdown chan struct{}) string {
 func tmuxWaitForTasks(ctx *tmuxLoopCtx, shutdown chan struct{}) bool {
 	available, err := ctx.hasAvailableTasks()
 	if err != nil {
-		fmt.Printf("[auto] Error checking tasks: %v\n", err)
-		if interruptibleSleep(5*time.Second, shutdown) {
+		retry, delay := nextWorkScanRetry(&ctx.workScanFailures, err)
+		if !retry {
+			cleanupTmuxSession(ctx.sessionName)
+			printTmuxSummary(ctx.taskCount)
+			fmt.Println(workScanFailureReason(err))
+			return false
+		}
+		fmt.Printf("[auto] Ready/work scan failed (attempt %d/%d): %v; retrying in %s\n",
+			ctx.workScanFailures, workScanMaxAttempts, err, delay)
+		if interruptibleSleep(delay, shutdown) {
 			cleanupTmuxSession(ctx.sessionName)
 			printTmuxSummary(ctx.taskCount)
 			return false
 		}
 		return true
 	}
+	ctx.workScanFailures = 0
 	if available {
 		return true
 	}
