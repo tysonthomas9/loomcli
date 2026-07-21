@@ -63,21 +63,75 @@ func analyzeProfile(root string, profile AnalysisProfile, graph CapabilityGraph,
 	if err != nil {
 		return nil, err
 	}
-	typedRoots, err := packages.Load(profilePackagesConfig(root, profile, profileTypedRootLoadMode), "./...")
+	typedViolations, genericMechanismPatterns, err := analyzeProfileTypedRoots(root, profile, graph, seenPackageErrors)
 	if err != nil {
 		return nil, err
 	}
+	violations = append(violations, typedViolations...)
+	genericMechanismViolations, err := analyzeProfileGenericMechanisms(root, profile, genericMechanismPatterns, genericMechanisms, seenPackageErrors)
+	if err != nil {
+		return nil, err
+	}
+	return append(violations, genericMechanismViolations...), nil
+}
+
+// analyzeProfileTypedRoots deliberately returns only strings and package patterns so
+// its package graph becomes unreachable before the focused TypesInfo load.
+func analyzeProfileTypedRoots(
+	root string,
+	profile AnalysisProfile,
+	graph CapabilityGraph,
+	seenPackageErrors map[string]struct{},
+) ([]string, []string, error) {
+	typedRoots, err := packages.Load(profilePackagesConfig(root, profile, profileTypedRootLoadMode), "./...")
+	if err != nil {
+		return nil, nil, err
+	}
+	violations := []string{}
 	for _, pkg := range typedRoots {
-		for _, pkgErr := range pkg.Errors {
-			message := fmt.Sprintf("profile %s package %s: %s", profile.Name, pkg.PkgPath, pkgErr.Msg)
-			if _, seen := seenPackageErrors[message]; !seen {
-				seenPackageErrors[message] = struct{}{}
-				violations = append(violations, message)
-			}
-		}
-		violations = append(violations, profilePackageViolations(root, profile.Name, pkg, graph, genericMechanisms)...)
+		violations = append(violations, profilePackageErrorViolations(profile.Name, pkg, seenPackageErrors)...)
+		violations = append(violations, profilePackageViolations(profile.Name, pkg, graph)...)
 	}
 	violations = append(violations, requiredSourceViolations(root, profile, typedRoots)...)
+	genericMechanismPatterns, err := genericMechanismCandidatePatterns(root, typedRoots)
+	if err != nil {
+		return nil, nil, err
+	}
+	return violations, genericMechanismPatterns, nil
+}
+
+func analyzeProfileGenericMechanisms(
+	root string,
+	profile AnalysisProfile,
+	candidatePatterns []string,
+	policies []GenericMechanismUse,
+	seenPackageErrors map[string]struct{},
+) ([]string, error) {
+	if len(candidatePatterns) == 0 {
+		return nil, nil
+	}
+	packagesWithCandidates, err := packages.Load(
+		profilePackagesConfig(root, profile, profileGenericMechanismLoadMode),
+		candidatePatterns...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	violations := []string{}
+	seenViolations := map[string]struct{}{}
+	for _, pkg := range packagesWithCandidates {
+		violations = append(violations, profilePackageErrorViolations(profile.Name, pkg, seenPackageErrors)...)
+		if !profilePackageChecked(pkg) {
+			continue
+		}
+		for _, violation := range typedGenericMechanismViolations(root, profile.Name, pkg, policies) {
+			if _, seen := seenViolations[violation]; seen {
+				continue
+			}
+			seenViolations[violation] = struct{}{}
+			violations = append(violations, violation)
+		}
+	}
 	return violations, nil
 }
 
@@ -93,13 +147,7 @@ func analyzeProfileDependencyMetadata(
 	violations := []string{}
 	seenPackageErrors := map[string]struct{}{}
 	for _, pkg := range dependencyRoots {
-		for _, pkgErr := range pkg.Errors {
-			message := fmt.Sprintf("profile %s package %s: %s", profile.Name, pkg.PkgPath, pkgErr.Msg)
-			if _, seen := seenPackageErrors[message]; !seen {
-				seenPackageErrors[message] = struct{}{}
-				violations = append(violations, message)
-			}
-		}
+		violations = append(violations, profilePackageErrorViolations(profile.Name, pkg, seenPackageErrors)...)
 		if !profilePackageChecked(pkg) {
 			continue
 		}
@@ -111,13 +159,28 @@ func analyzeProfileDependencyMetadata(
 	return violations, seenPackageErrors, nil
 }
 
+func profilePackageErrorViolations(profile string, pkg *packages.Package, seen map[string]struct{}) []string {
+	violations := []string{}
+	for _, pkgErr := range pkg.Errors {
+		message := fmt.Sprintf("profile %s package %s: %s", profile, pkg.PkgPath, pkgErr.Msg)
+		if _, exists := seen[message]; exists {
+			continue
+		}
+		seen[message] = struct{}{}
+		violations = append(violations, message)
+	}
+	return violations
+}
+
 const profileTypedRootLoadMode packages.LoadMode = packages.NeedName |
 	packages.NeedFiles |
 	packages.NeedCompiledGoFiles |
-	packages.NeedSyntax |
 	packages.NeedTypes |
-	packages.NeedTypesInfo |
 	packages.NeedImports
+
+const profileGenericMechanismLoadMode packages.LoadMode = profileTypedRootLoadMode |
+	packages.NeedSyntax |
+	packages.NeedTypesInfo
 
 const profileDependencyLoadMode packages.LoadMode = packages.NeedName |
 	packages.NeedImports |
@@ -156,7 +219,7 @@ func requiredSourceViolations(root string, profile AnalysisProfile, loaded []*pa
 	return violations
 }
 
-func profilePackageViolations(root, profile string, pkg *packages.Package, graph CapabilityGraph, genericMechanisms []GenericMechanismUse) []string {
+func profilePackageViolations(profile string, pkg *packages.Package, graph CapabilityGraph) []string {
 	if !profilePackageChecked(pkg) {
 		return nil
 	}
@@ -166,7 +229,6 @@ func profilePackageViolations(root, profile string, pkg *packages.Package, graph
 			violations = append(violations, fmt.Sprintf("profile %s package %s imports %s: %s", profile, pkg.PkgPath, importPath, reason))
 		}
 	}
-	violations = append(violations, typedGenericMechanismViolations(root, profile, pkg, genericMechanisms)...)
 	packageBoundary := classifyBoundaryPackage(pkg.PkgPath, graph)
 	if isCapabilityPackage(packageBoundary.kind) {
 		violations = append(violations, typedExportedSignatureViolations(profile, pkg, graph)...)
@@ -369,6 +431,70 @@ func firstLeakedTypeParameters(parameters *types.TypeParamList, currentPackage s
 	return ""
 }
 
+func genericMechanismCandidatePatterns(root string, loaded []*packages.Package) ([]string, error) {
+	visited := map[string]struct{}{}
+	candidatePatterns := map[string]struct{}{}
+	for _, pkg := range loaded {
+		if !profilePackageChecked(pkg) {
+			continue
+		}
+		for _, path := range pkg.CompiledGoFiles {
+			if _, seen := visited[path]; seen {
+				continue
+			}
+			visited[path] = struct{}{}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil, fmt.Errorf("resolve generic-mechanism candidate %s: %w", path, err)
+			}
+			rel = filepath.ToSlash(rel)
+			if !genericMechanismSourceChecked(rel) {
+				continue
+			}
+			candidate, err := sourceContainsGenericMechanismSelector(path)
+			if err != nil {
+				return nil, fmt.Errorf("prefilter generic-mechanism candidate %s: %w", rel, err)
+			}
+			if candidate {
+				candidatePatterns["./"+filepath.ToSlash(filepath.Dir(rel))] = struct{}{}
+			}
+		}
+	}
+	patterns := make([]string, 0, len(candidatePatterns))
+	for pattern := range candidatePatterns {
+		patterns = append(patterns, pattern)
+	}
+	slices.Sort(patterns)
+	return patterns, nil
+}
+
+func sourceContainsGenericMechanismSelector(path string) (bool, error) {
+	contents, err := os.ReadFile(path) //nolint:gosec // paths come from go/packages CompiledGoFiles
+	if err != nil {
+		return false, err
+	}
+	parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, contents, parser.SkipObjectResolution)
+	if parseErr != nil {
+		// Fail closed by sending malformed selected source through the focused
+		// load too. The package error remains the authoritative diagnostic.
+		return true, nil
+	}
+	candidate := false
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if ok && isGenericMechanismSelector(selector.Sel.Name) {
+			candidate = true
+			return false
+		}
+		return !candidate
+	})
+	return candidate, nil
+}
+
+func genericMechanismSourceChecked(rel string) bool {
+	return underAnyRoot(rel, []string{"internal/app", "internal/cli", "internal/modules", "internal/webui/handlers"})
+}
+
 func typedGenericMechanismViolations(
 	root, profile string,
 	pkg *packages.Package,
@@ -383,7 +509,7 @@ func typedGenericMechanismViolations(
 			continue
 		}
 		rel = filepath.ToSlash(rel)
-		if !underAnyRoot(rel, []string{"internal/app", "internal/cli", "internal/modules", "internal/webui/handlers"}) {
+		if !genericMechanismSourceChecked(rel) {
 			continue
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
@@ -546,7 +672,7 @@ func allFileBoundaryViolations(rel string, file *ast.File, graph CapabilityGraph
 }
 
 func genericMechanismBoundaryViolations(rel string, file *ast.File, policies []GenericMechanismUse) []string {
-	if !underAnyRoot(rel, []string{"internal/app", "internal/cli", "internal/modules", "internal/webui/handlers"}) {
+	if !genericMechanismSourceChecked(rel) {
 		return nil
 	}
 	violations := []string{}

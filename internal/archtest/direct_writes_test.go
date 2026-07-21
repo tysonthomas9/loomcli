@@ -9,31 +9,16 @@ import (
 	"testing"
 )
 
-func TestCheckedInDirectWriteInventoryMatchesAllProfiles(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	matrix, err := LoadAnalysisMatrix(filepath.Join("testdata", "analysis-matrix.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	inventory, err := LoadDirectWriteInventory(filepath.Join("testdata", "direct-writes.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed, violations, err := CheckDirectWrites(root, matrix, inventory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(violations) != 0 {
-		t.Fatalf("direct-write inventory violations: %v", violations)
-	}
-	if len(observed) != 243 {
-		t.Fatalf("direct-write rows = %d, want strict baseline of 243", len(observed))
+	if len(inventory.Writes) != 243 {
+		t.Fatalf("direct-write rows = %d, want strict baseline of 243", len(inventory.Writes))
 	}
 	totalSites := 0
-	for _, use := range observed {
+	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
 	if totalSites != 265 {

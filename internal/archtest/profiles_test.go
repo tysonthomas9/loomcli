@@ -306,7 +306,7 @@ func TestProfileBoundarySkipsOnlySyntheticTestMainPackage(t *testing.T) {
 			modulePath + "/internal/domain": {PkgPath: modulePath + "/internal/domain"},
 		},
 	}
-	if violations := profilePackageViolations("", "fixture", synthetic, graph, nil); len(violations) != 0 {
+	if violations := profilePackageViolations("fixture", synthetic, graph); len(violations) != 0 {
 		t.Fatalf("synthetic test-main violations = %v, want ignored", violations)
 	}
 
@@ -316,7 +316,7 @@ func TestProfileBoundarySkipsOnlySyntheticTestMainPackage(t *testing.T) {
 			modulePath + "/internal/domain": {PkgPath: modulePath + "/internal/domain"},
 		},
 	}
-	violations := profilePackageViolations("", "fixture", realTestVariant, graph, nil)
+	violations := profilePackageViolations("fixture", realTestVariant, graph)
 	if !containsViolation(violations, "capability adapter may import only") {
 		t.Fatalf("real package-under-test violations = %v, want boundary enforcement", violations)
 	}
@@ -355,6 +355,107 @@ var _ int = "tag-only type error"
 	if !containsViolation(tagged, "cannot use") {
 		t.Fatalf("tagged profile did not report selected test type error: %v", tagged)
 	}
+}
+
+func TestAnalyzeProfileResolvesGenericMechanismsInSelectedTestFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module "+modulePath+"\n\ngo 1.25.6\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeGoFile(t, root, "internal/app/example/example.go", `package example
+
+type ordinaryStore struct{}
+func (ordinaryStore) ActionLedgers() any { return nil }
+func useOrdinaryStore() { _ = (ordinaryStore{}).ActionLedgers() }
+
+type profileStats struct { Leases int }
+func readProfileStats() { _ = (profileStats{}).Leases }
+`)
+	writeGoFile(t, root, "internal/app/example/same_tagged_test.go", `//go:build profilefixture
+
+package example
+
+type samePackageStore struct{}
+func (samePackageStore) Leases() any { return nil }
+func useSamePackageStore() { _ = (samePackageStore{}).Leases() }
+`)
+	writeGoFile(t, root, "internal/app/example/external_tagged_test.go", `//go:build profilefixture
+
+package example_test
+
+type externalTestStore struct{}
+func (externalTestStore) ActionLedger() any { return nil }
+func useExternalTestStore() { _ = (externalTestStore{}).ActionLedger() }
+`)
+
+	untagged, err := analyzeProfile(root, AnalysisProfile{
+		Name: "untagged-tests", GOOS: "linux", GOARCH: "amd64", Enforced: true,
+	}, validGraph(), genericMechanismTestPolicies())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countViolationsContaining(untagged, "directly references generic"); got != 1 {
+		t.Fatalf("untagged generic-mechanism violations = %v, want one ordinary-source violation and no field false positive", untagged)
+	}
+
+	tagged, err := analyzeProfile(root, AnalysisProfile{
+		Name: "tagged-tests", GOOS: "linux", GOARCH: "amd64", Tags: []string{"profilefixture"}, Enforced: true,
+	}, validGraph(), genericMechanismTestPolicies())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countViolationsContaining(tagged, "directly references generic"); got != 3 {
+		t.Fatalf("tagged generic-mechanism violations = %v, want three unique source violations", tagged)
+	}
+	for _, want := range []string{
+		"file internal/app/example/example.go:",
+		"file internal/app/example/same_tagged_test.go:",
+		"file internal/app/example/external_tagged_test.go:",
+	} {
+		if !containsViolation(tagged, want) {
+			t.Fatalf("tagged profile violations = %v, want focused test-file violation containing %q", tagged, want)
+		}
+	}
+}
+
+func TestGenericMechanismCandidatePrefilterFailsClosedOnParseError(t *testing.T) {
+	root := t.TempDir()
+	writeGoFile(t, root, "internal/app/example/broken.go", "package example\nfunc broken( {\n")
+	candidate, err := sourceContainsGenericMechanismSelector(filepath.Join(root, "internal/app/example/broken.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !candidate {
+		t.Fatal("malformed selected source was filtered out, want focused load to preserve fail-closed diagnostics")
+	}
+}
+
+func TestAnalyzeProfileReportsMalformedGenericCandidateOnce(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module "+modulePath+"\n\ngo 1.25.6\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeGoFile(t, root, "internal/app/example/broken.go", "package example\nfunc broken( {\n")
+
+	violations, err := analyzeProfile(root, AnalysisProfile{
+		Name: "malformed-candidate", GOOS: "linux", GOARCH: "amd64", Enforced: true,
+	}, validGraph(), genericMechanismTestPolicies())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := countViolationsContaining(violations, "broken.go"); got != 1 {
+		t.Fatalf("malformed candidate violations = %v, want one deduplicated package diagnostic", violations)
+	}
+}
+
+func countViolationsContaining(violations []string, fragment string) int {
+	count := 0
+	for _, violation := range violations {
+		if strings.Contains(violation, fragment) {
+			count++
+		}
+	}
+	return count
 }
 
 func TestAnalyzeProfileRequiresSelectedSourceSentinel(t *testing.T) {

@@ -28,9 +28,20 @@ func TestProfilePackageLoadModesSeparateTypedRootsFromDependencyMetadata(t *test
 	if profileTypedRootLoadMode&packages.NeedDeps != 0 {
 		t.Fatalf("typed-root load mode %v includes dependency graph expansion", profileTypedRootLoadMode)
 	}
-	typedRequired := packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports
+	typedRequired := packages.NeedName | packages.NeedCompiledGoFiles | packages.NeedTypes | packages.NeedImports
 	if profileTypedRootLoadMode&typedRequired != typedRequired {
 		t.Fatalf("typed-root load mode %v does not include %v", profileTypedRootLoadMode, typedRequired)
+	}
+	expensiveSyntax := packages.NeedSyntax | packages.NeedTypesInfo
+	if profileTypedRootLoadMode&expensiveSyntax != 0 {
+		t.Fatalf("typed-root load mode %v includes focused syntax fields %v", profileTypedRootLoadMode, expensiveSyntax)
+	}
+	focusedRequired := typedRequired | packages.NeedSyntax | packages.NeedTypesInfo
+	if profileGenericMechanismLoadMode&focusedRequired != focusedRequired {
+		t.Fatalf("generic-mechanism load mode %v does not include %v", profileGenericMechanismLoadMode, focusedRequired)
+	}
+	if profileGenericMechanismLoadMode&packages.NeedDeps != 0 {
+		t.Fatalf("generic-mechanism load mode %v includes dependency graph expansion", profileGenericMechanismLoadMode)
 	}
 	dependencyRequired := packages.NeedName | packages.NeedImports | packages.NeedDeps
 	if profileDependencyLoadMode&dependencyRequired != dependencyRequired {
