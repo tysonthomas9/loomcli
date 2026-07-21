@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -185,6 +186,9 @@ func TestSessionServiceWorkspaceScopedControlPlaneMethods(t *testing.T) {
 	item := items[0]
 	if item.SessionID != "workspace-new" || item.TaskID != "TASK-A" || item.Kind != domain.AgentSessionKindTask {
 		t.Fatalf("item identity = %+v kind=%q", item.SessionRecord, item.Kind)
+	}
+	if item.TaskRunID != "task-run-new" || item.InvocationKey != "" || item.Attempt != 0 {
+		t.Fatalf("legacy explicit run fields = %+v", item)
 	}
 	if item.Backend != "flue" || !item.HasTranscript || !item.HasDiff {
 		t.Fatalf("item backend/flags = %q/%v/%v", item.Backend, item.HasTranscript, item.HasDiff)
@@ -778,10 +782,10 @@ func TestListWorkspaceSessionsAttachesEvalSummaries(t *testing.T) {
 		WorkspaceKey:       "WS",
 		JudgePromptVersion: "v1",
 		Scores: domain.SessionEvalScores{
-			OutcomeSuccess:       76,
-			InstructionAdherence: 58,
-			Efficiency:           93,
-			ToolUseQuality:       74,
+			"outcome_success":       76,
+			"instruction_adherence": 58,
+			"efficiency":            93,
+			"tool_use_quality":      74,
 		},
 	}); err != nil {
 		t.Fatalf("create eval: %v", err)
@@ -800,11 +804,136 @@ func TestListWorkspaceSessionsAttachesEvalSummaries(t *testing.T) {
 	if judged.EvalStatus != "done" || judged.EvalScores == nil {
 		t.Fatalf("judged item eval = status %q scores %+v", judged.EvalStatus, judged.EvalScores)
 	}
-	if judged.EvalScores.OutcomeSuccess != 76 || judged.EvalScores.ToolUseQuality != 74 {
+	if (*judged.EvalScores)["outcome_success"] != 76 || (*judged.EvalScores)["tool_use_quality"] != 74 {
 		t.Fatalf("judged scores = %+v", judged.EvalScores)
 	}
 	unjudged := byID["unjudged-1"]
 	if unjudged.EvalStatus != "" || unjudged.EvalScores != nil {
 		t.Fatalf("unjudged item eval = status %q scores %+v", unjudged.EvalStatus, unjudged.EvalScores)
+	}
+}
+
+func TestWorkspaceSessionFiltersAndScoreDimensionsUseFullRange(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	base := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	createTraceSession(t, st, traceSessionInput{ID: "both-new", RunID: "run-1", InvocationKey: "worker", Tags: []string{"eval", "review"}, StartedAt: base.Add(2 * time.Minute)})
+	createTraceSession(t, st, traceSessionInput{ID: "both-old", RunID: "run-1", InvocationKey: "review", Attempt: 1, Tags: []string{"eval", "review"}, StartedAt: base})
+	createTraceSession(t, st, traceSessionInput{ID: "only-eval", RunID: "run-1", Tags: []string{"eval"}, StartedAt: base.Add(time.Minute)})
+	createTraceSession(t, st, traceSessionInput{ID: "other-run", RunID: "run-2", Tags: []string{"eval", "review"}, StartedAt: base.Add(3 * time.Minute)})
+	createTraceEval(t, st, "both-new", "eval-new", domain.SessionEvalScores{"outcome_success": 80})
+	createTraceEval(t, st, "both-old", "eval-old", domain.SessionEvalScores{"novel_dimension": 61})
+
+	svc := NewSessionService(st, nil).(*sessionServiceImpl)
+	opts := service.WorkspaceSessionListOptions{TaskRunID: "run-1", Tags: []string{"eval", "review"}, Limit: 1}
+	items, total, err := svc.ListWorkspaceSessions(ctx, "WS", opts)
+	if err != nil || total != 2 || len(items) != 1 {
+		t.Fatalf("ListWorkspaceSessions = items=%d total=%d err=%v, want page 1 of 2", len(items), total, err)
+	}
+	if item := items[0]; item.TaskRunID != "run-1" || item.InvocationKey != "worker" || item.Attempt != 0 {
+		t.Fatalf("explicit task-run fields = %+v", item)
+	}
+	dims, err := svc.ListWorkspaceSessionScoreDimensions(ctx, "WS", opts)
+	if err != nil || len(dims) != 2 || dims[0] != "novel_dimension" || dims[1] != "outcome_success" {
+		t.Fatalf("score dimensions = %v, err=%v", dims, err)
+	}
+	items, total, err = svc.ListWorkspaceSessions(ctx, "WS", service.WorkspaceSessionListOptions{Tags: []string{"eval", "missing"}})
+	if err != nil || total != 0 || len(items) != 0 {
+		t.Fatalf("AND tag filter = items=%d total=%d err=%v, want no matches", len(items), total, err)
+	}
+}
+
+func TestWorkspaceSessionDetailsExposeJudgeLinkage(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	createTraceSession(t, st, traceSessionInput{ID: "subject", Kind: domain.AgentSessionKindTask})
+	createTraceSession(t, st, traceSessionInput{ID: "judge", Kind: domain.AgentSessionKindJudge, Metadata: map[string]string{"judged_session_id": "subject"}})
+	if _, err := st.SessionEvals().Create(ctx, &domain.SessionEval{EvalID: "eval-subject", SessionID: "subject", AgentID: "agent", WorkspaceKey: "WS", Scores: domain.SessionEvalScores{"outcome_success": 70}, JudgeSessionID: "judge"}); err != nil {
+		t.Fatalf("create judge link eval: %v", err)
+	}
+
+	svc := NewSessionService(st, nil).(*sessionServiceImpl)
+	subject, err := svc.GetWorkspaceSession(ctx, "WS", "subject")
+	if err != nil || subject.JudgeSessionID != "judge" {
+		t.Fatalf("subject detail = %+v, err=%v", subject, err)
+	}
+	judge, err := svc.GetWorkspaceSession(ctx, "WS", "judge")
+	if err != nil || judge.JudgedSessionID != "subject" {
+		t.Fatalf("judge detail = %+v, err=%v", judge, err)
+	}
+	localDetail := &service.SessionDetailData{}
+	svc.attachJudgeSessionLink(ctx, "WS", "judge", localDetail)
+	if localDetail.JudgedSessionID != "subject" {
+		t.Fatalf("local detail control-plane linkage = %+v", localDetail)
+	}
+}
+
+func TestWorkspaceTraceRunSupportsJoinedAndDegradedStates(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{WorkspaceKey: "WS", TaskRunID: "run-happy", TaskID: "TASK-1", Status: domain.TaskRunRunning}); err != nil {
+		t.Fatalf("create happy task run: %v", err)
+	}
+	finishTraceRun(t, st, "run-happy")
+	createTraceSession(t, st, traceSessionInput{ID: "run-one", RunID: "run-happy", Attempt: 0, FilesChanged: 2})
+	createTraceSession(t, st, traceSessionInput{ID: "run-two", RunID: "run-happy", Attempt: 1, FilesChanged: 3})
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{WorkspaceKey: "WS", TaskRunID: "run-empty", TaskID: "TASK-2"}); err != nil {
+		t.Fatalf("create empty task run: %v", err)
+	}
+	createTraceSession(t, st, traceSessionInput{ID: "orphan", RunID: "run-missing"})
+
+	svc := NewSessionService(st, nil).(*sessionServiceImpl)
+	happy, err := svc.GetWorkspaceTraceRun(ctx, "WS", "run-happy")
+	if err != nil || happy.TaskRun == nil || happy.TaskRun.Status != domain.TaskRunCompleted || happy.TotalTokens != 26 || happy.FilesChanged != 5 || happy.AttemptCount != 2 || happy.DurationSeconds <= 0 || len(happy.Sessions) != 2 || happy.Sessions[0].SessionID != "run-one" || happy.Sessions[1].SessionID != "run-two" {
+		t.Fatalf("happy trace run = %+v, err=%v", happy, err)
+	}
+	empty, err := svc.GetWorkspaceTraceRun(ctx, "WS", "run-empty")
+	if err != nil || empty.TaskRun == nil || empty.TaskRunMissing || len(empty.Sessions) != 0 {
+		t.Fatalf("empty trace run = %+v, err=%v", empty, err)
+	}
+	orphan, err := svc.GetWorkspaceTraceRun(ctx, "WS", "run-missing")
+	if err != nil || !orphan.TaskRunMissing || len(orphan.Sessions) != 1 {
+		t.Fatalf("orphan trace run = %+v, err=%v", orphan, err)
+	}
+}
+
+type traceSessionInput struct {
+	ID            string
+	RunID         string
+	InvocationKey string
+	Attempt       int
+	Tags          []string
+	Kind          domain.AgentSessionKind
+	StartedAt     time.Time
+	FilesChanged  int
+	Metadata      map[string]string
+}
+
+func createTraceSession(t *testing.T, st store.Store, in traceSessionInput) {
+	t.Helper()
+	kind := in.Kind
+	if kind == "" {
+		kind = domain.AgentSessionKindTask
+	}
+	metadata := in.Metadata
+	if metadata == nil && in.FilesChanged != 0 {
+		metadata = map[string]string{"files_changed": strconv.Itoa(in.FilesChanged)}
+	}
+	if _, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{WorkspaceKey: "WS", SessionID: in.ID, AgentID: "agent", Kind: kind, Status: domain.AgentSessionCompleted, TaskRunID: in.RunID, InvocationKey: in.InvocationKey, Attempt: in.Attempt, Tags: in.Tags, StartedAt: in.StartedAt, Metadata: metadata}); err != nil {
+		t.Fatalf("create trace session %s: %v", in.ID, err)
+	}
+}
+
+func createTraceEval(t *testing.T, st store.Store, sessionID, evalID string, scores domain.SessionEvalScores) {
+	t.Helper()
+	if _, err := st.SessionEvals().Create(t.Context(), &domain.SessionEval{EvalID: evalID, SessionID: sessionID, AgentID: "agent", WorkspaceKey: "WS", Scores: scores}); err != nil {
+		t.Fatalf("create trace eval %s: %v", evalID, err)
+	}
+}
+
+func finishTraceRun(t *testing.T, st store.Store, taskRunID string) {
+	t.Helper()
+	if _, err := st.TaskRuns().Finish(t.Context(), "WS", taskRunID, store.TaskRunFinish{Status: domain.TaskRunCompleted, FinishedAt: time.Now().UTC().Add(time.Second), InputTokens: 11, OutputTokens: 7, CacheReadTokens: 5, CacheWriteTokens: 3}); err != nil {
+		t.Fatalf("finish trace task run %s: %v", taskRunID, err)
 	}
 }

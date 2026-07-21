@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sort"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -16,15 +17,54 @@ import (
 )
 
 func (s *sessionServiceImpl) ListWorkspaceSessions(ctx context.Context, wsID string, opts service.WorkspaceSessionListOptions) ([]service.SessionListItem, int, error) {
+	records, total, err := s.listWorkspaceSessionPage(ctx, wsID, opts, opts.Limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := s.sessionListItemsFromAgentSessions(ctx, wsID, records)
+	s.attachEvalSummaries(ctx, wsID, records, items)
+	return items, total, nil
+}
+
+func (s *sessionServiceImpl) ListWorkspaceSessionScoreDimensions(ctx context.Context, wsID string, opts service.WorkspaceSessionListOptions) ([]string, error) {
+	records, _, err := s.listWorkspaceSessionPage(ctx, wsID, opts, 0)
+	if err != nil || len(records) == 0 {
+		return nil, err
+	}
+	bySession := sessionIDSet(records)
+	evals, err := s.store.SessionEvals().List(ctx, wsID, store.SessionEvalFilter{})
+	if err != nil {
+		return nil, service.ErrInternal("failed to list session evals", err)
+	}
+	dimensions := map[string]struct{}{}
+	for _, eval := range evals {
+		if eval == nil || !bySession[eval.SessionID] {
+			continue
+		}
+		for dimension := range eval.Scores {
+			dimensions[dimension] = struct{}{}
+		}
+	}
+	return sortedStringKeys(dimensions), nil
+}
+
+func (s *sessionServiceImpl) listWorkspaceSessionPage(ctx context.Context, wsID string, opts service.WorkspaceSessionListOptions, limit int) ([]*domain.AgentSession, int, error) {
 	if s.store == nil {
 		return nil, 0, service.ErrUnavailable("session store not available")
 	}
-	filter := store.AgentSessionFilter{
-		AgentID: opts.AgentID,
-		Status:  opts.Status,
-		Kind:    opts.Kind,
-		Limit:   opts.Limit,
+	filter := workspaceSessionFilter(opts, limit)
+	records, total, err := s.store.AgentSessions().ListPage(ctx, wsID, filter)
+	if errors.Is(err, store.ErrServerCapability) {
+		return nil, 0, service.ErrBadGateway("fleet-db must be upgraded: agent-sessions list response is missing total for server-side session time filtering")
 	}
+	if err != nil {
+		return nil, 0, service.ErrInternal("failed to list sessions", err)
+	}
+	return records, total, nil
+}
+
+func workspaceSessionFilter(opts service.WorkspaceSessionListOptions, limit int) store.AgentSessionFilter {
+	filter := store.AgentSessionFilter{AgentID: opts.AgentID, TaskRunID: opts.TaskRunID, Tags: append([]string(nil), opts.Tags...), Status: opts.Status, Kind: opts.Kind, Limit: limit}
 	if !opts.Since.IsZero() {
 		since := opts.Since
 		filter.Since = &since
@@ -33,16 +73,7 @@ func (s *sessionServiceImpl) ListWorkspaceSessions(ctx context.Context, wsID str
 		until := opts.Until
 		filter.Until = &until
 	}
-	records, total, err := s.store.AgentSessions().ListPage(ctx, wsID, filter)
-	if err != nil {
-		if errors.Is(err, store.ErrServerCapability) {
-			return nil, 0, service.ErrBadGateway("fleet-db must be upgraded: agent-sessions list response is missing total for server-side session time filtering")
-		}
-		return nil, 0, service.ErrInternal("failed to list sessions", err)
-	}
-	items := s.sessionListItemsFromAgentSessions(ctx, wsID, records)
-	s.attachEvalSummaries(ctx, wsID, records, items)
-	return items, total, nil
+	return filter
 }
 
 // attachEvalSummaries joins each session's eval_status metadata stamp and, when
@@ -55,9 +86,6 @@ func (s *sessionServiceImpl) attachEvalSummaries(ctx context.Context, wsID strin
 		if rec != nil && rec.Metadata != nil && rec.Metadata["eval_status"] != "" {
 			statusBySession[rec.SessionID] = rec.Metadata["eval_status"]
 		}
-	}
-	if len(statusBySession) == 0 {
-		return
 	}
 	scoresBySession := map[string]*domain.SessionEvalScores{}
 	if evals, err := s.store.SessionEvals().List(ctx, wsID, store.SessionEvalFilter{}); err == nil {
@@ -76,6 +104,25 @@ func (s *sessionServiceImpl) attachEvalSummaries(ctx context.Context, wsID strin
 		items[i].EvalStatus = statusBySession[sid]
 		items[i].EvalScores = scoresBySession[sid]
 	}
+}
+
+func sessionIDSet(records []*domain.AgentSession) map[string]bool {
+	ids := make(map[string]bool, len(records))
+	for _, record := range records {
+		if record != nil {
+			ids[record.SessionID] = true
+		}
+	}
+	return ids
+}
+
+func sortedStringKeys(values map[string]struct{}) []string {
+	keys := make([]string, 0, len(values))
+	for value := range values {
+		keys = append(keys, value)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (s *sessionServiceImpl) GetWorkspaceSession(ctx context.Context, wsID, sessionID string) (*service.SessionDetailData, error) {
@@ -98,10 +145,12 @@ func (s *sessionServiceImpl) GetWorkspaceSession(ctx context.Context, wsID, sess
 		logger.Error("failed to load session", "session_id", sessionID, "err", err)
 		return nil, service.ErrInternal("failed to load session", err)
 	}
-	return &service.SessionDetailData{
+	detail := &service.SessionDetailData{
 		SessionMetadata: *meta,
 		IsActive:        meta.Status == sessions.StatusRunning,
-	}, nil
+	}
+	s.attachJudgeSessionLink(ctx, wsID, sessionID, detail)
+	return detail, nil
 }
 
 func (s *sessionServiceImpl) workspaceControlPlaneSessionRecord(ctx context.Context, wsID, sessionID string) (*domain.AgentSession, error) {
@@ -123,7 +172,101 @@ func (s *sessionServiceImpl) workspaceControlPlaneSession(ctx context.Context, w
 	if err != nil {
 		return nil, err
 	}
-	return sessionDetailFromAgentSession(rec), nil
+	detail := sessionDetailFromAgentSession(rec)
+	s.attachJudgeSessionLink(ctx, wsID, rec.SessionID, detail)
+	return detail, nil
+}
+
+func (s *sessionServiceImpl) attachJudgeSessionLink(ctx context.Context, wsID, sessionID string, detail *service.SessionDetailData) {
+	if detail == nil || s.store == nil {
+		return
+	}
+	if rec, err := s.store.AgentSessions().Get(ctx, wsID, sessionID); err == nil && rec.Metadata != nil {
+		detail.JudgedSessionID = rec.Metadata["judged_session_id"]
+	}
+	evals, err := s.store.SessionEvals().List(ctx, wsID, store.SessionEvalFilter{SessionID: sessionID})
+	if err == nil && len(evals) > 0 && evals[0] != nil {
+		detail.JudgeSessionID = evals[0].JudgeSessionID
+	}
+}
+
+// GetWorkspaceTraceRun returns TaskRun truth plus all joined sessions. A
+// missing TaskRun is non-fatal when task-plane session evidence still exists.
+func (s *sessionServiceImpl) GetWorkspaceTraceRun(ctx context.Context, wsID, taskRunID string) (*service.WorkspaceTraceRunData, error) {
+	if taskRunID == "" || !validSessionID.MatchString(taskRunID) {
+		return nil, service.ErrValidation("invalid task run ID")
+	}
+	records, _, err := s.listWorkspaceSessionPage(ctx, wsID, service.WorkspaceSessionListOptions{TaskRunID: taskRunID}, 0)
+	if err != nil {
+		return nil, err
+	}
+	items := s.sessionListItemsFromAgentSessions(ctx, wsID, records)
+	s.attachEvalSummaries(ctx, wsID, records, items)
+	data := traceRunData(taskRunID, records, items)
+	run, err := s.store.TaskRuns().Get(ctx, wsID, taskRunID)
+	if err == nil {
+		return applyTaskRunTruth(data, run), nil
+	}
+	if errors.Is(err, domain.ErrNotFound) && len(items) > 0 {
+		data.TaskRunMissing = true
+		return data, nil
+	}
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, service.ErrNotFound("task run not found")
+	}
+	return nil, service.ErrInternal("failed to load task run", err)
+}
+
+func traceRunData(taskRunID string, records []*domain.AgentSession, items []service.SessionListItem) *service.WorkspaceTraceRunData {
+	data := &service.WorkspaceTraceRunData{TaskRunID: taskRunID, Sessions: items, AttemptCount: sessionAttemptCount(records)}
+	for _, item := range items {
+		data.FilesChanged += item.FilesChanged
+		if data.TaskID == "" {
+			data.TaskID = item.TaskID
+		}
+	}
+	sortTraceRunSessions(data.Sessions)
+	return data
+}
+
+func sortTraceRunSessions(items []service.SessionListItem) {
+	sort.Slice(items, func(i, j int) bool {
+		left, right := items[i], items[j]
+		if left.Attempt != right.Attempt {
+			return left.Attempt < right.Attempt
+		}
+		if !left.StartedAt.Equal(right.StartedAt) {
+			return left.StartedAt.Before(right.StartedAt)
+		}
+		if left.InvocationKey != right.InvocationKey {
+			return left.InvocationKey < right.InvocationKey
+		}
+		return left.SessionID < right.SessionID
+	})
+}
+
+func sessionAttemptCount(records []*domain.AgentSession) int {
+	maxAttempt := -1
+	for _, record := range records {
+		if record != nil && record.Attempt > maxAttempt {
+			maxAttempt = record.Attempt
+		}
+	}
+	return maxAttempt + 1
+}
+
+func applyTaskRunTruth(data *service.WorkspaceTraceRunData, run *domain.TaskRun) *service.WorkspaceTraceRunData {
+	data.TaskRun = run
+	data.TaskRunMissing = false
+	if run == nil {
+		return data
+	}
+	data.TaskID = run.TaskID
+	data.TotalTokens = run.InputTokens + run.OutputTokens + run.CacheReadTokens + run.CacheWriteTokens
+	if !run.StartedAt.IsZero() && run.FinishedAt != nil {
+		data.DurationSeconds = run.FinishedAt.Sub(run.StartedAt).Seconds()
+	}
+	return data
 }
 
 func (s *sessionServiceImpl) GetWorkspaceSessionTranscript(ctx context.Context, wsID, sessionID string) ([]transcript.Event, error) {

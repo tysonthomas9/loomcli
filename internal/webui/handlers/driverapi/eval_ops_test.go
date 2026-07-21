@@ -44,10 +44,11 @@ func TestDriverEvalOpsListPutAndRejudge(t *testing.T) {
 	resp, decoded = h.do(t, opRequest{
 		op: "eval-metric-put",
 		body: map[string]any{
-			"sessionId":     "sess-1",
-			"promptVersion": "v1",
-			"status":        "done",
-			"eval":          driverEvalPayload(),
+			"sessionId":      "sess-1",
+			"judgeSessionId": "judge-session-1",
+			"promptVersion":  "v1",
+			"status":         "done",
+			"eval":           driverEvalPayload(),
 		},
 		headers: h.ownerHeaders(),
 	})
@@ -56,6 +57,10 @@ func TestDriverEvalOpsListPutAndRejudge(t *testing.T) {
 	}
 	if decoded["evalId"] != "eval-sess-1-v1" || decoded["created"] != true {
 		t.Fatalf("metric response = %+v", decoded)
+	}
+	metric, err := h.store.SessionEvals().Get(context.Background(), "WS", "eval-sess-1-v1")
+	if err != nil || metric.JudgeSessionID != "judge-session-1" {
+		t.Fatalf("metric judge linkage = %+v, err=%v", metric, err)
 	}
 
 	resp, decoded = h.do(t, opRequest{

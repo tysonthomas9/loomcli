@@ -288,10 +288,10 @@ type scoreAccumulator struct {
 
 func (a *scoreAccumulator) add(scores domain.SessionEvalScores) {
 	a.count++
-	a.outcomeSuccess += scores.OutcomeSuccess
-	a.instructionAdherence += scores.InstructionAdherence
-	a.efficiency += scores.Efficiency
-	a.toolUseQuality += scores.ToolUseQuality
+	a.outcomeSuccess += scores["outcome_success"]
+	a.instructionAdherence += scores["instruction_adherence"]
+	a.efficiency += scores["efficiency"]
+	a.toolUseQuality += scores["tool_use_quality"]
 }
 
 func (a scoreAccumulator) averages() service.EvalScoreAverages {
