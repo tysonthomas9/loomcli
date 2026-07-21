@@ -739,8 +739,6 @@ func TestClassifyAgentExit_WatchdogIdleNoTaskIsNoWork(t *testing.T) {
 	}
 }
 
-
-
 func TestAgentProcess(t *testing.T) {
 	t.Run("initial state has zero values", func(t *testing.T) {
 		ap := &AgentProcess{
