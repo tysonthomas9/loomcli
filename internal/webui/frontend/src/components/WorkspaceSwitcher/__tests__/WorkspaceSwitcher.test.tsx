@@ -6,15 +6,31 @@
  * Unit tests for WorkspaceSwitcher component.
  */
 
-import { render as rtlRender, screen, fireEvent } from "@testing-library/react";
+import {
+  render as rtlRender,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import type { RenderOptions } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { WorkspaceSummary } from "@/api/workspace";
 import { KeyboardShortcutProvider } from "@/hooks";
+import { renameWorkspace, deleteWorkspace } from "@/hooks/api";
 
 import { WorkspaceSwitcher } from "../WorkspaceSwitcher";
+
+// The management hook calls these mutations; stub them so no real request fires.
+vi.mock("@/hooks/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/api")>();
+  return {
+    ...actual,
+    renameWorkspace: vi.fn().mockResolvedValue({}),
+    deleteWorkspace: vi.fn().mockResolvedValue({}),
+  };
+});
 
 const Wrapper = ({ children }: { children: React.ReactNode }) => (
   <KeyboardShortcutProvider>{children}</KeyboardShortcutProvider>
@@ -678,6 +694,204 @@ describe("WorkspaceSwitcher", () => {
       // The overlay SHOULD be in document.body
       portalContainer = document.body.querySelector("[class*=overlay]");
       expect(portalContainer).not.toBeNull();
+    });
+  });
+
+  describe("workspace management", () => {
+    beforeEach(() => {
+      vi.mocked(renameWorkspace)
+        .mockClear()
+        .mockResolvedValue({} as never);
+      vi.mocked(deleteWorkspace)
+        .mockClear()
+        .mockResolvedValue({} as never);
+    });
+
+    it("shows an overflow action on every workspace row (active included)", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByTestId("workspace-overflow-alpha"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("workspace-overflow-beta")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("workspace-overflow-gamma"),
+      ).toBeInTheDocument();
+    });
+
+    it("offers Rename and Remove for a non-active workspace", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("workspace-overflow-beta"));
+      expect(screen.getByTestId("workspace-context-menu")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("workspace-context-menu-rename"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("workspace-context-menu-remove"),
+      ).toBeInTheDocument();
+    });
+
+    it("offers Rename but not Remove for the active workspace", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("workspace-overflow-alpha"));
+      expect(screen.getByTestId("workspace-context-menu")).toBeInTheDocument();
+      // The active workspace can be renamed...
+      expect(
+        screen.getByTestId("workspace-context-menu-rename"),
+      ).toBeInTheDocument();
+      // ...but not removed from under the view it's showing.
+      expect(
+        screen.queryByTestId("workspace-context-menu-remove"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renames the active workspace by its id", async () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("workspace-overflow-alpha"));
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId("workspace-rename-input");
+      fireEvent.change(input, { target: { value: "alpha-renamed" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() =>
+        expect(vi.mocked(renameWorkspace)).toHaveBeenCalledWith(
+          "ws-alpha",
+          "alpha-renamed",
+        ),
+      );
+    });
+
+    it("renames a workspace by its id when Enter is pressed", async () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("workspace-overflow-beta"));
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId("workspace-rename-input");
+      fireEvent.change(input, { target: { value: "beta-renamed" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() =>
+        expect(vi.mocked(renameWorkspace)).toHaveBeenCalledWith(
+          "ws-beta",
+          "beta-renamed",
+        ),
+      );
+    });
+
+    it("does not switch workspace or navigate the list while renaming (Enter is captured)", async () => {
+      const onSelect = vi.fn();
+      render(
+        <WorkspaceSwitcher
+          isOpen
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={onSelect}
+          onClose={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("workspace-overflow-beta"));
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId("workspace-rename-input");
+      fireEvent.change(input, { target: { value: "beta-renamed" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      // Enter saved the rename (via the API) and must NOT have selected a row.
+      await waitFor(() =>
+        expect(vi.mocked(renameWorkspace)).toHaveBeenCalled(),
+      );
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it("cancels a rename on Escape without calling the API", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("workspace-overflow-beta"));
+      fireEvent.click(screen.getByTestId("workspace-context-menu-rename"));
+
+      const input = screen.getByTestId("workspace-rename-input");
+      fireEvent.change(input, { target: { value: "beta-renamed" } });
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      expect(
+        screen.queryByTestId("workspace-rename-input"),
+      ).not.toBeInTheDocument();
+      expect(vi.mocked(renameWorkspace)).not.toHaveBeenCalled();
+    });
+
+    it("opens a confirm dialog before removing a workspace", () => {
+      render(
+        <WorkspaceSwitcher
+          isOpen
+          workspaces={createWorkspaces()}
+          activeWorkspaceId="ws-alpha"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("workspace-overflow-gamma"));
+      fireEvent.click(screen.getByTestId("workspace-context-menu-remove"));
+
+      expect(screen.getByTestId("confirm-dialog-overlay")).toBeInTheDocument();
+      // The dialog names the workspace being removed.
+      expect(screen.getByText(/remove "gamma"/i)).toBeInTheDocument();
+      // Deletion is deferred (undo window) — not called just from confirming intent.
+      expect(vi.mocked(deleteWorkspace)).not.toHaveBeenCalled();
     });
   });
 });

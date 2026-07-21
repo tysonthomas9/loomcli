@@ -1,0 +1,57 @@
+# Surface tier: this fabricates legacy inline HTML because per-issue
+# design_format is blocked by FINDINGS §1.13. It guards DesignPanel's compatibility
+# auto-detect, not a product-correct authoring scenario. Promote when the per-issue
+# format contract lands and a faithful actor can create formatted design content.
+suite: design-format-legacy-surface
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS" > "$AFT_WORK_DIR/surface-design-workspace.orig.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; print(d.get("design_format") or "markdown")' "$AFT_WORK_DIR/surface-design-workspace.orig.json" > "$AFT_WORK_DIR/surface-design-format.orig"
+teardown: >-
+  fmt="$(cat "$AFT_WORK_DIR/surface-design-format.orig" 2>/dev/null || echo markdown)"; python3 -c 'import json,sys; print(json.dumps({"design_format":sys.argv[1]}))' "$fmt" > "$AFT_WORK_DIR/surface-design-restore.json"; curl -s -X PATCH "$AFT_BASE_URL/api/workspaces/E2E-WS/config/design-format" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/surface-design-restore.json" >/dev/null || true; if [ -s "$AFT_WORK_DIR/surface-html-issue.id" ]; then curl -s -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS/issues/$(cat "$AFT_WORK_DIR/surface-html-issue.id")/close" -H "Content-Type: application/json" -d '{"reason":"aft cleanup","force":true}' >/dev/null || true; fi
+
+tests:
+  # Surface-only because the issue body is a fabricated legacy fixture; promote
+  # when per-issue format metadata is accepted and actor-authored content can drive it.
+  # covers: DesignPanel legacy HTML auto-detect; design-html-content sanitization
+  - name: legacy inline html design auto-detects and sanitizes
+    intent: The legacy inline-HTML compatibility surface renders safe content without executing scripts
+    steps:
+      # Keep the workspace toggle local to this compatibility fixture; tier 1 has
+      # independent operator coverage for the same Settings control.
+      - open: /ws/E2E-WS/settings
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=settings-view]') &&
+            !!document.querySelector('[data-testid=design-format-panel]')
+      - select: { testid: design-format-select, value: html }
+      - click: { testid: design-format-save-button }
+      - run: >-
+          for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS" > "$AFT_WORK_DIR/surface-design-html.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert d.get("design_format")=="html", d.get("design_format")' "$AFT_WORK_DIR/surface-design-html.json" && exit 0; sleep 1; done; echo "workspace design_format never became html"; exit 1
+      # IssueCreateRequest has no design_format and FleetDB rejects it on PATCH;
+      # DesignPanel intentionally auto-detects legacy inline HTML without metadata.
+      - run: >-
+          python3 -c 'import json,os; run=os.environ.get("RUN_ID") or "local"; marker="AFT HTML MARKER "+run; design="<section><h2>"+marker+"</h2><p>safe html content</p><script>window.__aftXss=1;parent.__aftXss=1</script></section>"; print(json.dumps({"title":"html design "+run,"issue_type":"task","priority":2,"design":design}))' > "$AFT_WORK_DIR/surface-html-issue.json"; create_code="$(curl -sS -o "$AFT_WORK_DIR/surface-html-issue.resp.json" -w "%{http_code}" -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS/issues" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/surface-html-issue.json")"; [ "$create_code" = 201 ] || { echo "HTML issue create failed with HTTP $create_code:"; cat "$AFT_WORK_DIR/surface-html-issue.resp.json"; exit 1; }; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d["data"]; assert data.get("design"), data; print(data["id"])' "$AFT_WORK_DIR/surface-html-issue.resp.json" > "$AFT_WORK_DIR/surface-html-issue.id"
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - wait: { text: "html design ${RUN_ID:-local}" }
+      - click: { selector: "section[data-status=ready] article[aria-label*='html design ${RUN_ID:-local}']", first: true }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=design-section]') &&
+            !!document.querySelector('[data-testid=design-panel]') &&
+            !!document.querySelector('[data-testid=design-html-content]')
+      - wait:
+          fn: >-
+            (() => {
+              const frame = document.querySelector('[data-testid=design-html-content]');
+              const doc = frame?.contentDocument;
+              return !!doc &&
+                doc.body.textContent.includes('AFT HTML MARKER ${RUN_ID:-local}') &&
+                window.__aftXss === undefined &&
+                !doc.querySelector('script');
+            })()

@@ -242,7 +242,7 @@ describe("groupOpenByEpic", () => {
     expect(res.groups.map((g) => g.epicId)).toEqual(["EPIC-1"]);
   });
 
-  it("excludes closed tasks from the idle lead queue", () => {
+  it("includes completed children of open epics in the idle lead history", () => {
     const m = buildMap(
       issue({ id: "EPIC", title: "E", issue_type: "epic", status: "open" }),
       issue({ id: "T-OPEN", parent: "EPIC", status: "open" }),
@@ -250,18 +250,96 @@ describe("groupOpenByEpic", () => {
       issue({ id: "T-DONE", parent: "EPIC", status: "closed" }),
     );
     const res = groupOpenByEpic(m);
-    expect(res.totalTasks).toBe(2);
+    expect(res.totalTasks).toBe(3);
     expect(res.counts).toEqual({
       active: 0,
-      done: 0,
+      done: 1,
       open: 1,
       review: 0,
       blocked: 1,
     });
+    expect(res.groups[0]?.doneCount).toBe(1);
+    expect(res.groups[0]?.totalCount).toBe(3);
     expect(res.groups[0]?.tasks.map((t) => t.id)).toEqual([
       "T-OPEN",
       "T-BLOCKED",
+      "T-DONE",
     ]);
+  });
+
+  it("includes completed orphan tasks in the Unassigned group", () => {
+    const res = groupOpenByEpic(
+      buildMap(issue({ id: "T-DONE", status: "done" })),
+    );
+
+    expect(res.totalTasks).toBe(1);
+    expect(res.counts.done).toBe(1);
+    expect(res.groups).toHaveLength(1);
+    expect(res.groups[0]).toMatchObject({
+      epicTitle: "Unassigned",
+      doneCount: 1,
+      totalCount: 1,
+    });
+    expect(res.groups[0]?.tasks.map((task) => task.id)).toEqual(["T-DONE"]);
+  });
+
+  it("groups open work under its closed parent epic and includes completed siblings", () => {
+    const res = groupOpenByEpic(
+      buildMap(
+        issue({
+          id: "EPIC-CLOSED",
+          title: "Finished epic",
+          issue_type: "epic",
+          status: "closed",
+        }),
+        issue({ id: "T-OPEN", parent: "EPIC-CLOSED", status: "open" }),
+        issue({ id: "T-DONE", parent: "EPIC-CLOSED", status: "closed" }),
+      ),
+    );
+
+    expect(res.groups).toHaveLength(1);
+    expect(res.groups[0]).toMatchObject({
+      epicId: "EPIC-CLOSED",
+      epicTitle: "Finished epic",
+      doneCount: 1,
+      totalCount: 2,
+    });
+    expect(res.groups[0]?.tasks.map((task) => task.id)).toEqual([
+      "T-OPEN",
+      "T-DONE",
+    ]);
+    expect(res.totalTasks).toBe(2);
+    expect(res.counts).toEqual({
+      active: 0,
+      done: 1,
+      open: 1,
+      review: 0,
+      blocked: 0,
+    });
+  });
+
+  it("excludes completed work under a closed epic with no open siblings", () => {
+    const res = groupOpenByEpic(
+      buildMap(
+        issue({
+          id: "EPIC-CLOSED",
+          title: "Finished epic",
+          issue_type: "epic",
+          status: "closed",
+        }),
+        issue({ id: "T-DONE", parent: "EPIC-CLOSED", status: "closed" }),
+      ),
+    );
+
+    expect(res.groups).toEqual([]);
+    expect(res.totalTasks).toBe(0);
+    expect(res.counts).toEqual({
+      active: 0,
+      done: 0,
+      open: 0,
+      review: 0,
+      blocked: 0,
+    });
   });
 
   it("does not count the unassigned bucket as an epic in the queue label", () => {

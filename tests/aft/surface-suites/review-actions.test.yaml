@@ -1,0 +1,89 @@
+# Surface tier: these review-action fixtures have no reviewable branch, commit,
+# PR, or diff content on the gh-less stack (FINDINGS §1.19 and §3.9). They guard
+# the wired buttons/status transitions without claiming a real review scenario.
+# Promote them once seeded branch/commit review content exists.
+suite: review-actions-surface
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+tests:
+  # Surface-only because the row is a hollow status fixture; promote when the
+  # reviewer can inspect seeded branch/commit content before approving.
+  # covers: LCLI-RA-001 partial; PRReviewWorkspace approve wiring
+  - name: approving a review issue closes it and clears the queue
+    intent: An issue moved to review appears as a queue row, its review workspace opens in-app, and Approve closes the issue
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"review-approve-$RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/review-approve.id"
+      - run: >-
+          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/review-approve.id")"
+          -H "Content-Type: application/json" -d '{"status":"review"}'
+          >/dev/null
+      - open: /ws/E2E-WS/prs
+      - wait: { text: "review-approve-${RUN_ID:-local}" }
+      # rows are li[role=button] aria-label="Review <title>"
+      # rows re-render when GitHub enrichment settles, which can detach the node
+      # between find and click — retry the click until the review param lands
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find role button click --name "review-approve-${RUN_ID:-local}" || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "location.search" | grep -q "review=" && exit 0;
+          done; echo "review row click never opened the workspace"; exit 1
+      - wait: { url: "**review=**" }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=pr-review-workspace]')
+      - expect: { visible: { testid: pr-review-workspace } }
+      # unassigned review issue: the assign-a-reviewer control renders
+      - expect: { visible: { testid: review-agent-button } }
+      # button text is "✓ Approve"; accessible-name matching is substring
+      - click: { role: button, name: Approve }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=pr-review-workspace]')
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/review-approve.id")"
+          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'closed', data['status']"
+      - expect: { notText: "review-approve-${RUN_ID:-local}" }
+
+  # Surface-only because the row is a hollow status fixture; promote when the
+  # reviewer can inspect seeded branch/commit content before requesting changes.
+  # covers: LCLI-RA-001 partial; PRReviewWorkspace request-changes wiring
+  - name: requesting changes sends the issue back to open
+    intent: Request changes in the review workspace reopens the issue and removes it from the review queue
+    steps:
+      - run: >-
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          -H "Content-Type: application/json"
+          -d "{\"title\":\"review-changes-$RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
+          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
+          > "$AFT_WORK_DIR/review-changes.id"
+      - run: >-
+          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/review-changes.id")"
+          -H "Content-Type: application/json" -d '{"status":"review"}'
+          >/dev/null
+      - open: /ws/E2E-WS/prs
+      - wait: { text: "review-changes-${RUN_ID:-local}" }
+      # same enrichment-settle re-render race as the approve test — retry the click
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find role button click --name "review-changes-${RUN_ID:-local}" || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "location.search" | grep -q "review=" && exit 0;
+          done; echo "review row click never opened the workspace"; exit 1
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=pr-review-workspace]')
+      - click: { role: button, name: Request changes }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=pr-review-workspace]')
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/review-changes.id")"
+          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'open', data; assert 'needs-revision' in (data.get('labels') or []), data; assert 'requested changes' in (data.get('notes') or ''), data"
+      - expect: { notText: "review-changes-${RUN_ID:-local}" }

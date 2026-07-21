@@ -12,7 +12,7 @@ teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 tests:
   # covers: LCLI-DV-002
   - name: view tabs switch views and sync the URL
-    intent: Switching between the Kanban and List views via the toolbar tabs updates the route and renders each view
+    intent: An operator switches between Kanban and List with the toolbar tabs and sees the route and rendered view update
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -29,7 +29,7 @@ tests:
 
   # covers: LCLI-DV-002
   - name: a deep link straight to the table view works
-    intent: Opening /ws/E2E-WS/table directly renders the table without visiting the kanban first
+    intent: An operator follows a direct table link and sees the issue table without visiting the kanban first
     steps:
       - open: /ws/E2E-WS/table
       - wait:
@@ -40,7 +40,7 @@ tests:
 
   # covers: LCLI-DV-002
   - name: search survives list switch and table deep link
-    intent: A URL-backed search filter stays applied when moving from Kanban to List and opening the table route directly
+    intent: An agent creates matching and nonmatching issues through the API, then an operator sees a URL-backed search stay applied across Kanban, List, and a table deep link
     steps:
       - run: >-
           curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"

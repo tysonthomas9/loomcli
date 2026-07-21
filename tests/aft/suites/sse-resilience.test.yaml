@@ -10,7 +10,7 @@ tests:
   # LCLI-RA-007 (board consumer only — detail/tree/review surfaces not exercised;
   # reconnect recovery may arrive via refetch fallback rather than cursor catch-up)
   - name: stale banner clears and missed issue appears after reconnect
-    intent: When the browser loses SSE connectivity, the board shows stale data, then reconnect catch-up renders an issue created while offline
+    intent: An operator takes the browser offline while an agent creates an issue through the API, then reconnects and sees the stale banner clear and the missed issue appear
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:

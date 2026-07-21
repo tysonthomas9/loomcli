@@ -25,8 +25,10 @@ Extra aft flags go through `AFT_ARGS`, e.g.
 
 The harness starts `scripts/start-e2e-server.sh` (loom API on `E2E_PORT`, default 8090;
 vite preview on `E2E_FRONTEND_PORT`, default 3100, proxying `/api`), waits for readiness,
-runs every suite in `tests/aft/suites/`, and tears the stack down. The primary workspace
-is `e2e-ws` with id **`E2E-WS`** — exported to suites/hooks as `AFT_WS`.
+and passes both `tests/aft/suites/` and `tests/aft/surface-suites/` to **one aft run
+invocation** before tearing the stack down. Setting `AFT_SUITES` explicitly replaces that
+default with exactly one file or directory, which keeps the real-* tiers isolated. The
+primary workspace is `e2e-ws` with id **`E2E-WS`** — exported to suites/hooks as `AFT_WS`.
 
 Requirements: `go`, `node` >= 20 (24 for agent-browser), `agent-browser`, a **fleet-db**
 checkout (default `../fleet-db`; a sibling `../fleet-db-main` — e.g. a git worktree of
@@ -34,6 +36,26 @@ origin/main — is preferred when present because the epic-runner needs the driv
 domain), an aft checkout (default `../testing-app`, override `AFT_DIR`), a **flue**
 checkout at `../flue` (pinned commit in `internal/workflows/FLUE_COMMIT`, built with
 pnpm) for the agent-flow suite, and `claude` unless `--no-agent`.
+
+## Two suite tiers
+
+The directory is the tier; there is no YAML flag that changes a test's meaning.
+
+- `tests/aft/suites/` is the product-correctness tier. Every test follows actor fidelity:
+  each mutation in the test body must be attributable to the persona named by `intent:`.
+  An agent or API-client actor should mutate through the API because Loom's model is
+  “agents mutate via API, humans observe.” A human actor must use an existing mounted UI
+  control. Every intent names the actor explicitly.
+- Suite-level `setup:` and `teardown:` are fixture provisioning and cleanup, so they may use
+  the API freely. A test-body API **readback** may verify the result of a human UI action;
+  standalone API contract blocks do not belong in this tier.
+- `tests/aft/surface-suites/` is the surface-wiring tier for intentionally UI-orphaned API
+  contracts, fabricated or hollow fixtures, and compatibility surfaces that cannot yet form
+  a faithful scenario. Every surface test explains why it is here and what change would
+  promote it.
+
+The default run executes both directories together so ordering, reporting, and coverage
+describe one deterministic suite run.
 
 ## Real codex tier
 
@@ -137,8 +159,11 @@ excluded, so only UI-reachable endpoints count), and aft records a **trace**
 of what each test actually touched (browser URLs, the page's own network requests, API
 calls from `run:` steps, executed-step testids/selectors). The join — covered and
 uncovered routes/endpoints/testids, with the tests that touched each — prints after the
-run summary and renders at the top of the HTML report. A new route or endpoint added to
-the app shows up as uncovered automatically; no list to maintain.
+run summary and renders at the top of the HTML report. The census is a **combined metric
+across both tiers**: a surface test marks a route, endpoint, or testid covered exactly as a
+product-correctness test does. Tier meaning lives only in the directories and comments,
+not in census arithmetic. A new route or endpoint added to the app shows up as uncovered
+automatically; no list to maintain.
 
 ## CI
 
@@ -150,16 +175,29 @@ private `tysonthomas9/aft` **and** `tysonthomas9/fleet-db` repos.
 
 ## Suites
 
-- `smoke.test.yaml` — boots to `/ws/E2E-WS/kanban`, and an issue POSTed to
-  `/api/workspaces/E2E-WS/issues` *while the board is open* appears via SSE, no reload.
-- `issue-lifecycle.test.yaml` — create → `in_progress` → close via the API; the board
-  follows each transition live.
-- `issue-create-ui.test.yaml` — creates an issue through the New Issue modal
-  (`new-issue-button` → `create-issue-title` → `create-issue-submit`).
-- `filters.test.yaml` — board search narrows the kanban, syncs `?search=`, survives
-  reload. (v5's board toolbar has no group-by control, so search only.)
-- `views.test.yaml` — Kanban ↔ List via the toolbar tabs (`role=tab`, List routes to
-  `/ws/:id/list`; the data table stays at `/ws/:id/table` and is covered by deep link).
+Product-correctness (`tests/aft/suites/`):
+
+- `smoke`, `sse-resilience`, and `issue-lifecycle` — open-auth boot, live board delivery,
+  reconnect catch-up, and agent-driven lifecycle transitions.
+- `issue-create-ui`, `issue-detail`, `comments`, and `markdown-safety` — human creation and
+  field/comment editing, API readbacks, activity ordering, and safe rendering.
+- `dependencies-graph`, `filters`, `views`, `table-bulk`, and `pages` — dependency/graph
+  behavior, URL filtering, route/view switching, bulk actions, and page contracts.
+- `monitor`, `review-queue`, and `pr-workspace-degraded` — monitor/empty states, the honest
+  review-queue empty scenario, and browser-observable connector degradation.
+- `workspace-mgmt` and `workspaces` — clone validation, Local/Empty modal creation, repo
+  management, rename, switching, and deep links.
+- `settings-design-format` — the real settings toggle plus Daytona credential/runtime UI.
+- `zz-agent-flow` — modal-created agents, product-seeded logs/worktrees, stub epic execution,
+  completed-task session navigation, transcripts, and agent diff UI.
+
+Surface wiring (`tests/aft/surface-suites/`):
+
+- `workspace-order` — intentionally UI-unreachable reorder API persistence.
+- `review-actions` — approve/request-changes wiring over hollow review fixtures.
+- `design-format-legacy` — legacy inline-HTML auto-detect and sanitization.
+- `api-contracts` — standalone health/config/readiness contract probes.
+- `pr-contracts` — PR reviewer endpoint degraded-mode status and error-code contracts.
 
 Suites that create issues declare `teardown: scripts/close-open-issues.sh`, so every
 suite starts against an empty board. Cross-step state goes through `$AFT_WORK_DIR`.

@@ -7,7 +7,7 @@ teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
   - name: search filters the board and survives a reload
-    intent: Typing in the board search narrows the kanban to matching issues, is reflected in the URL, and persists across a reload
+    intent: An agent creates two issues through the API, then an operator searches the board and sees the matching filter persist in the URL across reload
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -35,7 +35,7 @@ tests:
 
   # covers: LCLI-DV-004
   - name: deep link applies search priority type and label filters on load
-    intent: URL filter params are parsed on first load and narrow the board before user interaction
+    intent: An agent creates issues with distinct metadata through the API, then an operator follows a filtered deep link and sees only the matching issue
     steps:
       - run: >-
           curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"

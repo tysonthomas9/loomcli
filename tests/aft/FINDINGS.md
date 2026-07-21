@@ -153,10 +153,11 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
 - **Fix:** wire the bulk actions, or remove the checkboxes.
 
 ### 1.9 No inline editing of priority/type/labels/owner on the issue detail panel
-- **Severity:** MED · **Fix:** loom / product-decision
-- `PriorityDropdown` / `TypeDropdown` / `LabelEditor` exist but are never mounted; type is
-  read-only (`internal/webui/frontend/src/components/IssueDetailPanel/IssueDetailPanel.tsx:1208-1243`).
-  No other surface edits these post-create.
+- **Severity:** MED · **Fix:** loom / product-decision · **Status:** RESOLVED 2026-07-21
+- `PriorityDropdown`, `TypeDropdown`, `LabelEditor`, and `OwnerDropdown` are mounted in
+  `IssueDetailPanel.tsx:1362-1409` and wired to the panel's PATCH-backed save handlers.
+- The tier-1 `issue-detail` aft suite now drives `PriorityDropdown` and `LabelEditor` through
+  their real browser controls, then uses an API readback only to verify persistence.
 
 ### 1.10 A wrongly-added repo can't be removed
 - **Severity:** MED (gap) · **Fix:** loom
@@ -173,14 +174,27 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
 - **Fix:** unify the CompletionID so the redundant call is an idempotent 200 replay.
 
 ### 1.12 Workspace rename UI is dead code — no browser path to rename
-- **Severity:** MED (feature gap) · **Fix:** loom · **Status:** OPEN (found 2026-07-18 by the workspace-mgmt suite)
+- **Severity:** MED (feature gap) · **Fix:** loom · **Status:** RESOLVED 2026-07-18
 - `OtherWorkspacesSection` (sidebar workspace list with per-workspace overflow → rename/remove,
-  incl. `SortableWorkspaceEntry` + `WorkspaceContextMenu`) is exported from
-  `internal/webui/frontend/src/components/WorkspaceTree/index.ts:18` but nothing in the app
-  mounts it — only its own unit test imports it. `PATCH /api/workspaces/{ws}/name` works;
-  the UI to reach it never renders. The workspace-mgmt aft suite covers the endpoint via API
-  and documents the gap in a comment; when the section is re-mounted, promote that step back
-  to a UI flow.
+  incl. `SortableWorkspaceEntry` + `WorkspaceContextMenu`) was exported from
+  `WorkspaceTree/index.ts` but nothing in the app mounted it — only its own unit test imported
+  it. `PATCH /api/workspaces/{ws}/name` worked; the UI to reach it never rendered.
+- **Fix:** rather than re-mount the orphaned sidebar section (the Aether-V3 redesign had moved
+  switching into the top selector + quick-switcher overlay), workspace **rename + remove** were
+  wired into the mounted `WorkspaceSwitcher` overlay itself — a per-workspace overflow (⋯) →
+  context menu on every row, reusing `WorkspaceContextMenu` + `ConfirmDialog` and a new
+  `useWorkspaceManagement` hook (keyed by workspace **id**, sourcing `refetch` from context so
+  both the sidebar-selector and global Cmd/Ctrl+K switcher instances work). The **active**
+  workspace can be renamed (routes are id-based — `/ws/:workspaceId` — so rename never breaks the
+  current URL) but not removed (its `Remove` action is hidden via `showRemove`, since deleting the
+  workspace you're viewing would strand the route). The dead `OtherWorkspacesSection` +
+  `SortableWorkspaceEntry` (+ tests/exports) were deleted. The workspace-mgmt aft suite's rename
+  step was promoted from an API PATCH to a real browser flow through the overflow menu.
+- **Reorder** was left UI-unreachable **by design** — drag/positional reorder is a poor fit for a
+  search-filtered quick-switcher; the endpoint stays API-covered (see §1.7, which is implemented,
+  not the stale `ErrNotImplemented`).
+- Its intentionally API-only aft coverage now lives in
+  `tests/aft/surface-suites/workspace-order.test.yaml`.
 
 ### 1.13 Per-issue `design_format` — loom↔fleet-db contract drift + whole-PATCH amplification
 - **Severity:** MED (drift latent; amplification real) · **Fix:** fleet-db (Part B) + loom (tolerant PATCH) · **Status:** OPEN (found 2026-07-18 by the settings-design-format suite)
@@ -200,12 +214,16 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
   poison a whole PATCH. (b) is worth doing regardless of (a).
 
 ### 1.14 CreateWorkspaceModal cannot create local or empty workspaces
-- **Severity:** MED (feature gap, inconsistent) · **Fix:** loom · **Status:** OPEN (found 2026-07-18 by the workspace-mgmt suite)
-- The modal requires ≥1 clone URL and rejects anything not starting `https://`/`git@`
-  (`CreateWorkspaceModal.tsx` `CLONE_URL_RE` + `canSubmit`), while **AddRepoModal accepts
-  local paths** and the API supports both `type:"empty"` and path repos. From the UI there is
-  no way to create an empty workspace or one backed by a local repo. The aft suite pins the
-  validation error text and creates via API.
+- **Severity:** MED (feature gap, inconsistent) · **Fix:** loom · **Status:** RESOLVED 2026-07-21
+- The original modal was structurally clone-only: it hardcoded `type:"clone"`, required a clone
+  URL, and exposed no local-repo or empty branch. `CLONE_URL_RE` belongs to `AddRepoModal`, not
+  `CreateWorkspaceModal`; the file-URL rejection pinned by aft is server-side validation in
+  `internal/webui/service/workspace_validate.go:28`. The backend already accepted `repos` with
+  `type:"empty"`.
+- **Fix:** `CreateWorkspaceModal` now exposes Clone, Local repos, and Empty modes. Clone still
+  surfaces the server's validation error, Local repos submits paths as `repos` on an empty-type
+  workspace, and Empty submits without repositories. Tier-1 `workspace-mgmt` and `workspaces`
+  drive the Local and Empty modes respectively.
 
 ### 1.15 Create-time `status` on issue POST fails outright (second failure mode)
 - **Severity:** MED (API contract) · **Fix:** loom/fleet-db (decide the contract) · **Status:** OPEN (found 2026-07-18 by the pr-workspace-degraded suite)
@@ -229,6 +247,23 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
   render partially off-screen (seen independently in the settings-design-format and
   zz-agent-flow session captures). Content exists and asserts pass; a human at this width
   cannot read it.
+
+### 1.18 Idle-lead work panel hid completed history
+- **Severity:** MED (reachability) · **Fix:** loom frontend · **Status:** RESOLVED 2026-07-21
+- `groupOpenByEpic` omitted closed child tasks, so the idle Lead work panel offered no user path
+  from an open epic to a completed task's session detail. The old aft test had to inject
+  `selectedTaskId` into localStorage to reach the Runs tab.
+- **Fix:** closed children of open epics are now included in `groupOpenByEpic`; epic cards remain
+  collapsed by default so pickup work stays visually primary. The tier-1 `zz-agent-flow` suite
+  now expands the epic and clicks the closed task's real `role=button` path.
+
+### 1.19 Review queue actions lack reviewable content on a gh-less stack
+- **Severity:** TEST-GAP · **Fix:** seeding seam / harness · **Status:** OPEN (found 2026-07-21)
+- A review-status issue can render Approve and Request changes, but without a PR, branch, commit,
+  or diff the reviewer has nothing to inspect. Treating those clicks as product-correct review
+  scenarios overclaims a hollow fixture.
+- The two action tests moved to `tests/aft/surface-suites/review-actions.test.yaml`. Promote them
+  when branch/commit review-content seeding exists; see §3.9.
 
 ### Suspected / low-confidence (re-validate before acting)
 - **Local-task-runner stub sessions record zero diff evidence** — `has_diff:false`,
@@ -329,6 +364,16 @@ auto-spawn); ship after phase 3.
   DiffTab/DiffFileRow/DiffFileViewer (suites match by role/text + API proof). Cheap adds.
 - **`/config/design-format` is PATCH-only** — no GET; suites assert persistence via the
   workspace GET payload. Minor API asymmetry.
+- **No gh-less review-content seed** — status-only review fixtures have no branch, commit, PR, or
+  diff for a reviewer to inspect. Extend the artifact seam so review-action scenarios can seed
+  reviewable branch/commit content before returning them to tier 1 (§1.19).
+
+### 3.10 Seeding seam extended for agent artifacts (2026-07-21)
+ADR-0001's hidden, `LOOM_TESTSUPPORT=1`-gated command family grew beyond
+`seed-transcript`: `seed-log` appends through the product archive-log writer/resolver, and
+`seed-worktree` creates/registers worktrees through the runtime's own flow and can commit a file
+as an agent-change stand-in. The remaining high-value candidate is `seed-session`, which would
+create a full session record rather than only transcript content.
 
 ---
 

@@ -21,15 +21,24 @@ teardown: >-
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT" >/dev/null || true
 
 tests:
-  # covers: agent-definition visibility (LCLI-AD group, UI surface slice)
+  # covers: CreateAgentModal lead template; agent-definition visibility; Logs refresh; monitor activity
   - name: created agent definition appears in agents page and monitor
-    intent: An agent definition created through the workspace API renders in the agents rail and the monitor activity panel, and start is accepted
+    intent: An operator creates a Lead agent through CreateAgentModal, observes it in the agents rail and monitor, and refreshes a runtime-seeded archive log
     steps:
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents"
-          -H "Content-Type: application/json"
-          -d '{"name":"nova","role_name":"lead"}'
-          >/dev/null
+      - open: /ws/E2E-WS-AGENT/agents
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=agents-page]')
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-agent-overlay]')
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: nova }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('nova')
       # deep link straight to the agent detail route — the bare /agents auto-select
       # depends on the agent store's first fetch and can exceed the step timeout
       - open: /ws/E2E-WS-AGENT/agents/nova
@@ -49,9 +58,8 @@ tests:
       - expect: { visible: { testid: archive-empty } }
       - expect: { text: No logs available for this agent yet. }
       - run: >-
-          d="$AFT_TESTS_DIR/../../tmp/e2e-workspace/.loom-config/.loom/logs/E2E-WS-AGENT/agents";
-          mkdir -p "$d";
-          printf '%s\n' "nova lead log line one" "nova lead AFT-LOG-MARKER $RUN_ID" > "$d/nova.log"
+          printf '%s\n' "nova lead log line one" "nova lead AFT-LOG-MARKER $RUN_ID" |
+          LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-log --workspace E2E-WS-AGENT --agent nova --content -
       - click: { selector: "div:has(> [data-testid='log-viewer']) > button" }
       - wait: { text: AFT-LOG-MARKER }
       - expect: { visible: { testid: terminal-container } }
@@ -71,13 +79,10 @@ tests:
           fn: >-
             document.body.textContent.includes('nova')
       - expect: { notText: No agents found }
-      # store-backed serve accepts start and flips desired state (no daemon involved)
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents/nova/start" >/dev/null
 
   # covers: LCLI-RA group partial — serve-driven epic run with stub backend
   - name: epic runner drives a stub agent to complete a task
-    intent: Triggering the epic-runner workflow makes a stub-backed worker claim the seeded task, execute, and close it, with the board and session records following
+    intent: An orchestration client triggers the epic-runner workflow so a stub-backed agent claims and closes its task while an operator observes the board and recorded session
     steps:
       - run: >-
           curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/issues"
@@ -119,12 +124,12 @@ tests:
             !Array.from(document.querySelectorAll("section[data-status=ready] article")).some((el) => el.textContent.includes('agent-flow task'))
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='agent-flow task ${RUN_ID:-local}']", equals: 0 } }
 
-  # covers: agents/:name/diff/files; agents/:name/diff/file; DiffTab; DiffFileRow; DiffFileViewer
+  # covers: seed-worktree runtime seam; agents/:name/diff/files; agents/:name/diff/file; DiffTab; DiffFileRow; DiffFileViewer
   - name: agent diff tab opens changed file
-    intent: A committed change in nova's worktree appears in the agent Diff tab, and opening the file loads the per-file patch
+    intent: An agent change seeded through the runtime worktree flow appears to an operator in nova's Diff tab and opens as a per-file patch
     steps:
       - run: >-
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT" > "$AFT_WORK_DIR/agent-workspace.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; repos=d.get("repos") or []; assert d.get("path") and repos and repos[0].get("name") and repos[0].get("path"), d; print("workspace_path="+repr(d["path"])); print("repo="+repr(repos[0]["name"])); print("repo_path="+repr(repos[0]["path"]))' "$AFT_WORK_DIR/agent-workspace.json" > "$AFT_WORK_DIR/agent-diff.env"; . "$AFT_WORK_DIR/agent-diff.env"; worktree="$workspace_path/worktrees/$repo/nova"; if [ ! -e "$worktree/.git" ]; then [ ! -e "$worktree" ] || { echo "non-worktree path already exists at $worktree"; exit 1; }; mkdir -p "$(dirname "$worktree")"; git -C "$repo_path" worktree prune; if git -C "$repo_path" show-ref --verify --quiet refs/heads/nova; then git -C "$repo_path" worktree add "$worktree" nova; else git -C "$repo_path" worktree add "$worktree" -b nova; fi; fi; [ "$(git -C "$worktree" branch --show-current)" = nova ] || { echo "nova worktree is not on branch nova"; exit 1; }; file="aft-diff-${RUN_ID:-local}.txt"; printf '%s\n' "AFT-DIFF-MARKER ${RUN_ID:-local} $(date +%s)" > "$worktree/$file"; git -C "$worktree" add "$file"; git -C "$worktree" diff --cached --quiet || git -C "$worktree" -c user.email=e2e@x -c user.name=e2e commit -m "aft diff ${RUN_ID:-local}" -q; printf '%s\n' "$file" > "$AFT_WORK_DIR/agent-diff-file.name"
+          file="aft-diff-${RUN_ID:-local}.txt"; printf '%s\n' "AFT-DIFF-MARKER ${RUN_ID:-local}" | LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-worktree --workspace E2E-WS-AGENT --agent nova --file "$file" --content - --message "aft diff ${RUN_ID:-local}"; printf '%s\n' "$file" > "$AFT_WORK_DIR/agent-diff-file.name"
       - open: /ws/E2E-WS-AGENT/agents/nova
       - wait:
           fn: >-
@@ -136,19 +141,26 @@ tests:
       - click: { role: button, name: "aft-diff-${RUN_ID:-local}.txt" }
       - wait: { text: AFT-DIFF-MARKER }
 
-  # covers: runs/:id; tasks/:taskId/sessions; session detail; transcript; no-diff contract
+  # covers: AgentWorkPanel completed-child path; runs/:id; tasks/:taskId/sessions; session detail; transcript; no-diff readback
   - name: session detail transcript and diff tabs render
-    intent: The task's recorded stub session opens in the Runs tab, renders its transcript, and exposes the disabled UI plus 404 API contract for an unavailable diff
+    intent: A reviewer expands an open epic's completed history, opens the closed task, and inspects its recorded transcript and unavailable-diff state in the Runs tab
     steps:
       - run: >-
           python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("run_id") or d.get("id") or d.get("data",{}).get("run_id") or d.get("data",{}).get("id") or "")' "$AFT_WORK_DIR/agent-run.json" > "$AFT_WORK_DIR/agent-run.id"; [ -n "$(cat "$AFT_WORK_DIR/agent-run.id" | tr -d "[:space:]")" ] || { echo "workflow run response did not contain a run id"; cat "$AFT_WORK_DIR/agent-run.json"; exit 1; }; curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/runs/$(cat "$AFT_WORK_DIR/agent-run.id")" > "$AFT_WORK_DIR/agent-run-detail.json"
       - run: >-
           task="$(cat "$AFT_WORK_DIR/agent-task.id")"; curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions" > "$AFT_WORK_DIR/agent-sessions.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d.get("data",{}); sessions=data.get("sessions") if isinstance(data,dict) else data; assert sessions, d; s=sessions[0]; assert s.get("session_id"), s; assert s.get("has_transcript") is True, s; assert s.get("has_diff") is False, s; assert s.get("files_changed")==0, s; print(s["session_id"])' "$AFT_WORK_DIR/agent-sessions.json" > "$AFT_WORK_DIR/agent-session.id"
-      - run: >-
-          task="$(cat "$AFT_WORK_DIR/agent-task.id")"; agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-WS-AGENT/agents/nova"; agent-browser --session "$AFT_SESSION" wait --fn "document.readyState === 'complete'"; agent-browser --session "$AFT_SESSION" eval "localStorage.setItem('loom:E2E-WS-AGENT:agent-work-panel-view:nova', JSON.stringify({statusFilter:'all',leadFilter:'all',taskSearch:'',expandedEpics:{},selectedTaskId:'$task'})); location.reload()"
+      - open: /ws/E2E-WS-AGENT/agents/nova
       - wait:
           fn: >-
-            !!document.querySelector('[data-testid=agents-page]') &&
+            !!document.querySelector('[data-testid=agents-page]') && document.body.textContent.includes('agent-flow epic')
+      # Closed children of an open epic now render through the idle-lead panel.
+      # Use the accessible expand control, then the completed task's real role=button.
+      - run: >-
+          epic="$(cat "$AFT_WORK_DIR/agent-epic.id")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "Expand epic $epic" && exit 0 || true; sleep 1; done; echo "epic expand control never clicked"; exit 1
+      - run: >-
+          task="$(cat "$AFT_WORK_DIR/agent-task.id")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "$task" && exit 0 || true; sleep 1; done; echo "closed task card never clicked"; exit 1
+      - wait:
+          fn: >-
             document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
       - click: { role: tab, name: Runs, exact: true }
       - wait:
@@ -166,12 +178,14 @@ tests:
       - expect: { enabled: { testid: session-inner-tab-diff, equals: false } }
       - expect: { attr: { testid: session-inner-tab-diff, name: title, equals: "No diff available" } }
       - expect: { count: { testid: session-diff, equals: 0 } }
+      # Allowed readback: verify the session artifacts recorded by the UI scenario,
+      # rather than treating these endpoints as a standalone contract test.
       - run: >-
           task="$(cat "$AFT_WORK_DIR/agent-task.id")"; sid="$(cat "$AFT_WORK_DIR/agent-session.id")"; detail_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-detail.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid")"; transcript_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-transcript.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid/transcript")"; diff_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-diff.resp.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid/diff")"; python3 -c 'import json,sys; detail=json.load(open(sys.argv[1])); transcript=json.load(open(sys.argv[2])); no_diff=json.load(open(sys.argv[3])); assert sys.argv[4]=="200", (sys.argv[4],detail); assert sys.argv[5]=="200", (sys.argv[5],transcript); assert sys.argv[6]=="404", (sys.argv[6],no_diff); assert (detail.get("data") or {}).get("session_id")==sys.argv[7], detail; assert transcript.get("success") is True and (transcript.get("data") or {}).get("entries"), transcript; assert no_diff.get("success") is False and no_diff.get("error")=="diff not found", no_diff' "$AFT_WORK_DIR/agent-session-detail.json" "$AFT_WORK_DIR/agent-session-transcript.json" "$AFT_WORK_DIR/agent-session-diff.resp.json" "$detail_code" "$transcript_code" "$diff_code" "$sid"
 
-  # covers: CreateAgentModal; POST /api/workspaces/:ws/agents; DELETE /api/workspaces/:ws/agents/:name
+  # covers: CreateAgentModal task template; repo-scope chip; POST /api/workspaces/:ws/agents readback
   - name: create second agent from modal without starting it
-    intent: The CreateAgentModal can create a second task agent scoped to the first repo without invoking the start endpoint
+    intent: An operator creates a second task agent through CreateAgentModal, deselects the preselected repo for workspace-wide scope, and verifies it exists without starting it
     steps:
       - open: /ws/E2E-WS-AGENT/agents/nova
       - wait:
@@ -185,8 +199,8 @@ tests:
       - fill:
           testid: create-agent-name
           value: "iris-${RUN_ID:-local}"
-      # The modal preselects the first repo; click twice to cover the chip interaction and leave the agent scoped to that repo.
-      - click: { selector: "[data-testid='create-agent-repo-chips'] button", first: true }
+      # The modal preselects the first repo; one click deliberately removes it and
+      # exercises the documented workspace-wide (no selected repos) scope.
       - click: { selector: "[data-testid='create-agent-repo-chips'] button", first: true }
       - click: { testid: create-agent-submit }
       - run: >-

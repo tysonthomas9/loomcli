@@ -9,7 +9,7 @@ tests:
   # issue-detail dependency controls and invalid-edit prevention untested);
   # LCLI-DV-005 partial (graph surface only — BlockedSummary/ready-highlighting untested)
   - name: blocking dependency drives board column and graph edge
-    intent: A blocking dependency created through the workspace API moves the blocked issue to the Blocked column, renders nodes and edges in GraphView, and removal returns it to Open
+    intent: An agent creates and removes a blocking dependency through the workspace API while an operator observes the blocked issue move through the board and GraphView
     steps:
       - run: >-
           blocker=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"

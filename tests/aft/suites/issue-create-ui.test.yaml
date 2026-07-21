@@ -7,7 +7,7 @@ teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 tests:
   # covers: LCLI-WP-001
   - name: create an issue through the New Issue modal
-    intent: A user creates an issue via the New Issue modal and it appears in the Open column
+    intent: A human author creates an issue through the New Issue modal and sees it appear in the Open column
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -31,7 +31,7 @@ tests:
 
   # covers: LCLI-WP-001
   - name: empty title keeps submit disabled
-    intent: The New Issue modal prevents submitting a blank title
+    intent: A human author cannot submit the New Issue modal with a blank title
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -45,7 +45,7 @@ tests:
   # DEFECT FIXED: the frontend createIssue() client omitted status from the
   # POST body. The server and fleet-db preserve create-time status once sent.
   - name: full-field create preserves type and description
-    intent: Creating an issue with type, description, and deferred status renders the saved values in the detail panel and persists them via the API
+    intent: A human author creates an issue with type, description, and deferred status, then verifies the saved values in the detail panel and through an API readback
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -82,7 +82,7 @@ tests:
           fn: >-
             document.querySelectorAll("section[data-status=backlog] article[aria-label*='ui-full-field-${RUN_ID:-local}']").length === 1
 
-  # covers: LCLI-WP-001
+  # covers: LCLI-WP-001; soft-duplicate-notice; soft-duplicate-create-anyway
   # This is fleet-db's documented SOFT-DUPLICATE GUARD, not a title upsert: when the
   # same actor creates an open issue with the same title and type within 60 seconds,
   # the existing issue is returned (200 + `X-Idempotency-Warning: soft-duplicate`)
@@ -91,7 +91,7 @@ tests:
   # surfaces the warning and offers "Create anyway"; earlier it swallowed the header,
   # which made the guard look like silent data loss.
   - name: duplicate titles hit the soft-duplicate guard
-    intent: Submitting the same title twice within the guard window yields a single card — the second create returns the existing issue with a soft-duplicate warning
+    intent: A human author sees the soft-duplicate warning after submitting the same title twice, then chooses Create anyway and gets a distinct second issue
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -104,6 +104,8 @@ tests:
       - wait:
           fn: >-
             document.querySelectorAll("section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']").length === 1
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?limit=100" > "$AFT_WORK_DIR/ui-duplicate-first.json"; python3 -c 'import json,os,sys; title="ui-duplicate-"+os.environ["RUN_ID"]; matches=[i for i in json.load(open(sys.argv[1]))["data"] if i.get("title")==title]; assert len(matches)==1, matches; print(matches[0]["id"])' "$AFT_WORK_DIR/ui-duplicate-first.json" > "$AFT_WORK_DIR/ui-duplicate-first.id"
       - open: /ws/E2E-WS/kanban
       - wait:
           fn: >-
@@ -112,17 +114,21 @@ tests:
       - expect: { visible: { testid: create-issue-title } }
       - fill: { testid: create-issue-title, value: "ui-duplicate-${RUN_ID:-local}" }
       - click: { testid: create-issue-submit }
-      # deterministic guard proof: creating the same title again returns the SAME id
-      # (a timed board-count alone couldn't distinguish the guard from slow rendering)
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=soft-duplicate-notice]')
+      - expect: { visible: { testid: soft-duplicate-notice } }
+      - expect: { text: An identical issue was created moments ago }
+      - expect: { visible: { testid: soft-duplicate-create-anyway } }
+      # Readback proves the second UI submit resolved to the existing id before
+      # the human explicitly bypasses the guard.
       - run: >-
-          id1=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
-          -H "Content-Type: application/json"
-          -d "{\"title\":\"ui-duplicate-$RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
-          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
-          id2=$(curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
-          -H "Content-Type: application/json"
-          -d "{\"title\":\"ui-duplicate-$RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
-          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])");
-          [ -n "$id1" ] && [ "$id1" = "$id2" ] || { echo "expected upsert, got '$id1' vs '$id2'"; exit 1; }
-      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']", equals: 1 } }
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?limit=100" > "$AFT_WORK_DIR/ui-duplicate-guarded.json"; python3 -c 'import json,os,sys; title="ui-duplicate-"+os.environ["RUN_ID"]; first=open(sys.argv[2]).read().strip(); matches=[i for i in json.load(open(sys.argv[1]))["data"] if i.get("title")==title]; assert len(matches)==1, matches; assert matches[0]["id"]==first, (matches,first)' "$AFT_WORK_DIR/ui-duplicate-guarded.json" "$AFT_WORK_DIR/ui-duplicate-first.id"
+      - click: { testid: soft-duplicate-create-anyway }
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']").length === 2
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues?limit=100" > "$AFT_WORK_DIR/ui-duplicate-forced.json"; python3 -c 'import json,os,sys; title="ui-duplicate-"+os.environ["RUN_ID"]; first=open(sys.argv[2]).read().strip(); matches=[i for i in json.load(open(sys.argv[1]))["data"] if i.get("title")==title]; ids={i["id"] for i in matches}; assert len(matches)==2 and len(ids)==2 and first in ids, matches' "$AFT_WORK_DIR/ui-duplicate-forced.json" "$AFT_WORK_DIR/ui-duplicate-first.id"
+      - expect: { count: { selector: "section[data-status=ready] article[aria-label*='ui-duplicate-${RUN_ID:-local}']", equals: 2 } }
       - expect: { notText: Something went wrong }

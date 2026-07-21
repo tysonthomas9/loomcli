@@ -8,10 +8,9 @@ teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 tests:
   # covers: LCLI-WP-002; LCLI-WP-006 partial (markdown description only — the
   # DesignPanel's design notes / acceptance criteria are untested); LCLI-WP-003
-  # partial (metadata/assignment persistence only — the AssigneePrompt is wired
-  # to kanban DRAG open->in_progress in v5, not to panel status changes)
+  # partial; PriorityDropdown; LabelEditor; IssueDetailPanel PATCH wiring
   - name: detail panel edits markdown status and persists metadata
-    intent: A card opens the detail panel, description markdown saves and survives reload, priority and labels persist, and panel status changes close and reopen the issue
+    intent: An agent creates an issue through the API, then a human editor saves markdown, changes priority and labels through mounted controls, and changes status while readbacks verify persistence
     steps:
       - run: >-
           curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
@@ -75,10 +74,32 @@ tests:
             Array.from(document.querySelectorAll('[data-testid=markdown-content] strong')).some((node) => node.textContent === 'bold detail')
       - expect: { text: Panel markdown persists. }
       - run: >-
-          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/detail.id")"
-          -H "Content-Type: application/json"
-          -d "{\"priority\":1,\"add_labels\":[\"detail-label-$RUN_ID\"]}"
-          >/dev/null
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid priority-dropdown-trigger click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=priority-dropdown-menu]')" | grep -q true && exit 0;
+          done; echo "priority dropdown click never opened the menu"; exit 1
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=priority-dropdown-menu]')
+      - click: { testid: priority-option-1 }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=priority-dropdown-trigger]')?.getAttribute('data-priority') === '1'
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid add-label-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=label-input]')" | grep -q true && exit 0;
+          done; echo "add label click never opened the label editor"; exit 1
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=label-input]')
+      - fill: { testid: label-input, value: "detail-label-${RUN_ID:-local}" }
+      - press: Enter
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=label-list]')?.textContent.includes('detail-label-${RUN_ID:-local}')
       - click: { testid: header-close-button }
       - open: /ws/E2E-WS/kanban?priority=1&labels=detail-label-${RUN_ID:-local}
       - wait:

@@ -160,6 +160,6 @@ invariants:
       gap: GitHub approve, request-changes, and merge execution is not configured; linked decisions return 503 before Loom mutation
     proofs:
       - {dimension: contract, kind: go, path: internal/webui/handlers/issues/review_decision_test.go, selector: TestReviewDecisionGitHubRefFailsClosedBeforeLoomMutation}
-      - {dimension: persistence, kind: aft, path: tests/aft/suites/review-queue.test.yaml, selector: approving a review issue}
-      - {dimension: ui, kind: aft, path: tests/aft/suites/review-queue.test.yaml, selector: requesting changes}
+      - {dimension: persistence, kind: aft, path: tests/aft/surface-suites/review-actions.test.yaml, selector: approving a review issue}
+      - {dimension: ui, kind: aft, path: tests/aft/surface-suites/review-actions.test.yaml, selector: requesting changes}
       - {dimension: retry, kind: go, path: internal/webui/handlers/issues/review_decision_test.go, selector: TestReviewDecisionReplaySkipsAlreadyAppliedPatch}

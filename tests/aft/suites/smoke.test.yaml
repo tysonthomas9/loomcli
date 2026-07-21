@@ -7,8 +7,9 @@ baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
+  # covers: LCLI-OPS-002 (open-auth browser effect)
   - name: app boots to the workspace kanban
-    intent: The SPA redirects to the E2E workspace kanban and renders the board shell
+    intent: An operator reaches the E2E workspace board directly in open-auth mode without a login wall
     steps:
       - open: /
       - wait: { url: "**/ws/*/kanban**" }
@@ -17,9 +18,10 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
       - expect: { visible: { testid: new-issue-button } }
+      - expect: { notText: Sign in to Loom }
 
   - name: api-created issue appears via SSE without reload
-    intent: An issue created through the workspace API while the board is open appears on the kanban via server push, with no reload
+    intent: An agent creates an issue through the workspace API while an operator observes it appear on the open kanban via server push without reloading
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -32,20 +34,3 @@ tests:
           -d "{\"title\":\"sse smoke $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
       - wait: { text: sse smoke }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
-
-  # covers: LCLI-OPS-002
-  - name: health and config endpoints return expected payloads
-    intent: Operators can probe process health and frontend runtime config without loading the SPA
-    steps:
-      - run: >-
-          curl -sf "$AFT_BASE_URL/health" |
-          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("status") == "ok", data'
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/config" |
-          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("mode") == "open", data; assert data.get("issue_backend") == "fleet", data'
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/readyz" |
-          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("ready") is True, data; assert data.get("mode") == "fleet", data'
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/health" |
-          python3 -c 'import json,sys; data=json.load(sys.stdin); assert isinstance(data, dict) and data, data'

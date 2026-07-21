@@ -5,7 +5,8 @@
 # Usage: tests/aft/run-aft.sh [aft options...]        # e.g. --no-agent, --strict, --heal, --record
 # Env:   E2E_PORT (API, default 8090)   E2E_FRONTEND_PORT (browser target, default 3100)
 #        FLEET_DB_REPO (default: sibling ../fleet-db)  AFT_DIR (default: sibling ../testing-app)
-#        AFT_SUITES (default: tests/aft/suites — a YAML file or directory)
+#        AFT_SUITES (default: product + surface suite directories; when set,
+#                    overrides them with exactly one YAML file or directory)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -321,6 +322,8 @@ echo "[aft] stack ready: browser $BASE_URL, api $API_URL"
 export AFT_BASE_URL="$BASE_URL"
 export AFT_API_URL="$API_URL"
 export AFT_WS="E2E-WS"   # primary workspace id seeded by start-e2e-server.sh
+export AFT_LOOM_BIN="$REPO_ROOT/tmp/loom-e2e"
+export AFT_LOOM_CONFIG_DIR="$REPO_ROOT/tmp/e2e-workspace/.loom-config"
 export LOOM_BASE_URL="$API_URL"
 export RUN_ID="${RUN_ID:-$(date +%s)}"
 export AFT_TESTS_DIR="$SCRIPT_DIR"
@@ -343,10 +346,19 @@ python3 "$SCRIPT_DIR/scripts/gen-census.py" --frontend "$REPO_ROOT/internal/webu
 CAFFEINATE=""
 command -v caffeinate >/dev/null 2>&1 && CAFFEINATE="caffeinate -dimsu"
 
+# The deterministic default is one aft invocation over both tiers so reporting and
+# census joins stay combined. Real-* tiers set AFT_SUITES above and therefore keep
+# their exact single-directory override.
+if [[ -n "${AFT_SUITES+x}" ]]; then
+    AFT_SUITE_PATHS=("$AFT_SUITES")
+else
+    AFT_SUITE_PATHS=("$SCRIPT_DIR/suites" "$SCRIPT_DIR/surface-suites")
+fi
+
 # 15s step timeout (aft default is 8s): the Loom SPA leans on SSE + polling stores,
 # and under CI/host load its reactions legitimately stretch past 8s — measured as
 # whole-suite flake storms on a busy machine.
-$CAFFEINATE node "$AFT_DIR/dist/cli.js" run "${AFT_SUITES:-$SCRIPT_DIR/suites}" --report-dir "$REPORT_DIR" \
+$CAFFEINATE node "$AFT_DIR/dist/cli.js" run "${AFT_SUITE_PATHS[@]}" --report-dir "$REPORT_DIR" \
     --viewport "${AFT_VIEWPORT:-1920x1080}" --timeout "${AFT_TIMEOUT:-15000}" \
     ${CENSUS:+--census "$CENSUS"} \
     ${AFT_MAX_BROWSERS:+--max-browsers "$AFT_MAX_BROWSERS"} "$@"

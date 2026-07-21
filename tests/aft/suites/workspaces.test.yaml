@@ -1,25 +1,37 @@
 # Workspace switching uses the sidebar WorkspaceSelectorBar plus the
-# WorkspaceSwitcher dialog. The server script's own e2e-ws-2 CLI create fails
-# silently on v5, so this suite creates the second workspace via the live API
-# (idempotent: an already-exists response is fine). Its server-assigned id is
-# E2E-WS-2 (uppercased name), which is what routes use.
+# WorkspaceSwitcher dialog. Suite setup provisions e2e-ws-2 as a shared fixture;
+# the product-correct creation scenario uses CreateWorkspaceModal's Empty mode.
 suite: workspaces
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 setup: >-
   curl -s -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json"
   -d '{"name":"e2e-ws-2","type":"empty"}' >/dev/null; echo "ensured e2e-ws-2"
-teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+teardown: >-
+  "$AFT_TESTS_DIR/scripts/close-open-issues.sh"; if [ -s "$AFT_WORK_DIR/workspaces-empty.id" ]; then curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$(cat "$AFT_WORK_DIR/workspaces-empty.id")" >/dev/null || true; fi
 
 tests:
-  # covers: LCLI-PS-001 partial (API create + board reachable; CLI create untested)
-  - name: workspace api creates a workspace with a routable board
-    intent: Creating a workspace through the API yields an uppercased id whose kanban route renders an empty board
+  # covers: LCLI-PS-001 partial; CreateWorkspaceModal empty mode; routable board
+  - name: empty-mode modal creates a workspace with a routable board
+    intent: An operator creates an empty workspace through the modal and reaches its empty kanban board
     steps:
+      - open: /ws/E2E-WS/kanban
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+      - click: { selector: "button[aria-label^='Active workspace:']" }
+      - click: { role: button, name: "+ New Workspace", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-workspace-overlay]')
+      - click: { testid: create-workspace-mode-empty }
+      - fill: { testid: create-workspace-name, value: e2e-ws-3 }
+      - click: { testid: create-workspace-submit }
+      # Read back the server-assigned id from the human UI action; its casing is
+      # intentionally not part of the product scenario.
       - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json"
-          -d '{"name":"e2e-ws-3","type":"empty"}'
-          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['id'] == 'E2E-WS-3', data"
-      - open: /ws/E2E-WS-3/kanban
+          for i in $(seq 1 20); do curl -sf "$AFT_BASE_URL/api/workspaces" > "$AFT_WORK_DIR/workspaces-after-empty.json" && ws="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next((w.get("id","") for w in d.get("workspaces",[]) if w.get("name")=="e2e-ws-3"), ""))' "$AFT_WORK_DIR/workspaces-after-empty.json")" && if [ -n "$ws" ]; then printf '%s\n' "$ws" > "$AFT_WORK_DIR/workspaces-empty.id"; exit 0; fi; sleep 1; done; echo "empty-mode workspace never appeared"; exit 1
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$(cat "$AFT_WORK_DIR/workspaces-empty.id")/kanban"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
@@ -33,7 +45,7 @@ tests:
 
   # covers: LCLI-PS-002
   - name: workspace selector switches route and board scope
-    intent: Switching from E2E-WS to e2e-ws-2 updates the workspace route and removes primary-workspace issues from the board
+    intent: An agent creates an issue in E2E-WS through the API, then an operator switches to e2e-ws-2 and sees the route and board scope change
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:
@@ -69,7 +81,7 @@ tests:
 
   # covers: LCLI-PS-002
   - name: second workspace deep link opens scoped empty board
-    intent: A direct route to the second workspace opens the correct board scope without first visiting the primary workspace
+    intent: An operator follows a direct link to the second workspace and sees its correctly scoped empty board without visiting the primary workspace first
     steps:
       - open: /ws/E2E-WS-2/kanban
       - wait:

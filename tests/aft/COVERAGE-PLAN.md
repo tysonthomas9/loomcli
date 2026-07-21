@@ -124,3 +124,45 @@ OpenInEditor click-through and `/api/editors/open` (launches a real editor on th
 needs an EDITOR stub), EmbeddedTerminal (tmux tier already covers it via
 test-aft-terminal), task quarantine (supervisor runtime, not browser-observable
 deterministically).
+
+---
+
+## 2026-07-21 — two-tier restructure
+
+The deterministic suite now separates claim strength by directory while preserving one run and
+one combined census:
+
+- `tests/aft/suites/` is product correctness. Every test-body mutation follows actor fidelity:
+  agent/API-client actors use the API; human actors use a mounted UI control. Suite-level
+  setup/teardown remains fixture provisioning, and API readbacks may verify a UI result.
+- `tests/aft/surface-suites/` guards wiring without claiming a faithful user scenario. Workspace
+  reorder moved there because it is intentionally UI-unreachable; Approve/Request changes moved
+  because the gh-less review fixtures have no reviewable content; legacy inline HTML moved because
+  per-issue `design_format` is blocked by FINDINGS §1.13; standalone health/config probes moved
+  because they are API contracts rather than browser scenarios.
+- The default harness passes both directories to one aft invocation. Coverage remains combined:
+  touching a surface in either directory marks the census item covered.
+
+Tier-1 scenarios were tightened around real actors: Lead creation now uses CreateAgentModal;
+priority/labels, comments, duplicate bypass, Local/Empty workspace creation, and workspace rename
+use their mounted controls; completed task sessions open by expanding the idle-lead epic rather
+than injecting localStorage. The terminal page records which healthy state rendered and asserts
+that branch's full contract.
+
+The test-only seeding seam now supplies the two agent-artifact stand-ins that previously required
+path fabrication:
+
+- `loom daemon seed-log --workspace <ws> --agent <name> --content <file|->` appends through the
+  product archive-log writer/resolver.
+- `loom daemon seed-worktree --workspace <ws> --agent <name> [--repo <r>] [--file <rel>
+  --content <file|-> --message <msg>]` uses the runtime worktree creation/registration flow and
+  can commit an agent-change stand-in.
+
+Two product fixes unlocked faithful paths: FINDINGS §1.14 is resolved by Clone, Local repos, and
+Empty modes in CreateWorkspaceModal; §1.18 is resolved by keeping closed children of open epics in
+the idle-lead grouping while leaving cards collapsed by default.
+
+Items **4** (the deeper dependencies/graph move-and-controls extension) and **7** (the remaining
+client-errors/monitor/editors/onboarding API set) from the 2026-07-18 set remain open. This
+restructure deliberately does not count standalone contract probes as product-correct tier-1
+coverage.

@@ -6,7 +6,7 @@ teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
   - name: issue travels open to in progress to closed, board follows live
-    intent: An issue created, started, and closed via the API moves across the kanban columns in realtime
+    intent: An agent creates, starts, and closes an issue through the API while an operator observes it move across kanban columns in realtime
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:

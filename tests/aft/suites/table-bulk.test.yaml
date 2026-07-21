@@ -10,7 +10,7 @@ teardown: >-
 tests:
   # covers: table route; IssueTable; IssueRow; BulkActionToolbar; ConfirmDialog; PATCH /issues/{id}
   - name: bulk status change
-    intent: Selecting two issue table rows and applying the Status bulk action updates only those issues to in_progress
+    intent: An API client provisions two issues, then an operator selects their table rows and applies the Status bulk action while readbacks verify both become in_progress
     steps:
       - run: >-
           ws="$(cat "$AFT_WORK_DIR/bulk-ws.id")"; : > "$AFT_WORK_DIR/bulk-status.ids"; for n in 1 2; do python3 -c 'import json,os,sys; run=os.environ.get("RUN_ID") or "local"; n=sys.argv[1]; print(json.dumps({"title":"bulk-status-"+run+"-"+n,"issue_type":"task","priority":2}))' "$n" > "$AFT_WORK_DIR/bulk-status-$n.json"; curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$ws/issues" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/bulk-status-$n.json" > "$AFT_WORK_DIR/bulk-status-$n.resp.json"; python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["id"])' "$AFT_WORK_DIR/bulk-status-$n.resp.json" >> "$AFT_WORK_DIR/bulk-status.ids"; done
@@ -38,7 +38,7 @@ tests:
 
   # covers: table route; IssueTable; IssueRow; BulkActionToolbar; ConfirmDialog; POST /issues/{id}/close
   - name: bulk close
-    intent: Selecting a different pair of rows and using the Close bulk action closes those issues through the fan-out close endpoint
+    intent: An API client provisions a different issue pair, then an operator selects the rows and uses the Close bulk action while readbacks verify both close
     steps:
       - run: >-
           ws="$(cat "$AFT_WORK_DIR/bulk-ws.id")"; : > "$AFT_WORK_DIR/bulk-close.ids"; for n in 1 2; do python3 -c 'import json,os,sys; run=os.environ.get("RUN_ID") or "local"; n=sys.argv[1]; print(json.dumps({"title":"bulk-close-"+run+"-"+n,"issue_type":"task","priority":2}))' "$n" > "$AFT_WORK_DIR/bulk-close-$n.json"; curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$ws/issues" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/bulk-close-$n.json" > "$AFT_WORK_DIR/bulk-close-$n.resp.json"; python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["id"])' "$AFT_WORK_DIR/bulk-close-$n.resp.json" >> "$AFT_WORK_DIR/bulk-close.ids"; done

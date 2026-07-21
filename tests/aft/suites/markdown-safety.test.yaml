@@ -8,7 +8,7 @@ teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 tests:
   # covers: LCLI-SEC-013
   - name: issue detail markdown sanitizes executable html
-    intent: A malicious issue description cannot execute script or image handlers, while safe markdown formatting still renders in the detail panel
+    intent: An agent submits an issue description containing malicious HTML, and a reviewer sees safe markdown render without script or image-handler execution
     steps:
       - open: /ws/E2E-WS/kanban
       - wait:

@@ -124,7 +124,7 @@ printf '%s\n%s\n%s\n' \
   '{"role":"assistant","type":"text","text":"cross-node transcript probe"}' \
   '{"role":"system","type":"result","text":"completed","output":"{\"input_tokens\":1,\"output_tokens\":1}"}' \
   > /tmp/tx.jsonl
-loom daemon seed-transcript --workspace "$WORKSPACE" --session "$tx_session" --task "$tx_task" --content /tmp/tx.jsonl \
+LOOM_TESTSUPPORT=1 loom daemon seed-transcript --workspace "$WORKSPACE" --session "$tx_session" --task "$tx_task" --content /tmp/tx.jsonl \
   || fail "seed-transcript failed"
 
 # (a) Resolution: node-b lists the seeded session (from fleet-db) with has_transcript=true.

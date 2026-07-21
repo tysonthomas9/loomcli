@@ -41,6 +41,17 @@
   font-size: var(--font-sm);
 }
 
+/* Row wrapper: switch button + trailing overflow button (or inline rename). */
+.itemRow {
+  display: flex;
+  align-items: center;
+}
+
+.itemRow .item {
+  flex: 1;
+  min-width: 0;
+}
+
 .item {
   display: flex;
   align-items: center;
@@ -54,6 +65,67 @@
   font-family: var(--font-family-base);
   color: var(--color-text);
   transition: background var(--transition-fast);
+}
+
+/* Per-workspace overflow (⋯) trigger, revealed on row hover/focus. */
+.overflowButton {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 4px 10px;
+  margin-right: 6px;
+  font-size: 18px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  opacity: 0;
+  transition:
+    opacity var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.itemRow:hover .overflowButton,
+.overflowButton:focus-visible {
+  opacity: 1;
+}
+
+.overflowButton:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+/* Inline rename editor shown in place of a row while it is being renamed. */
+.renameContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 6px 12px;
+}
+
+.renameInput {
+  width: 100%;
+  font-family: var(--font-family-base);
+  font-size: 14px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.renameInput:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-primary-subtle, rgba(80, 120, 255, 0.25));
+}
+
+.renameError {
+  font-size: var(--font-xs);
+  color: var(--color-danger, #e5484d);
 }
 
 .item:hover,

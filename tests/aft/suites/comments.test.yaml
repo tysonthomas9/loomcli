@@ -6,9 +6,9 @@ baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
 
 tests:
-  # covers: LCLI-IW-013, LCLI-RA-006
-  - name: api comments and lifecycle events render in panel activity
-    intent: Comments posted through the workspace API appear in the detail panel activity timeline with author, timestamp, and stable ordering alongside lifecycle events
+  # covers: LCLI-IW-013; LCLI-RA-006; CommentForm; ActivityLog; comments API
+  - name: agent and human comments render in panel activity
+    intent: An agent posts ordered comments and lifecycle transitions through the workspace API, then a human commenter submits through CommentForm while API readback verifies persistence under the configured web-stack actor
     steps:
       - run: >-
           curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
@@ -69,3 +69,18 @@ tests:
       # backend's best-effort comment post). Assert event existence, not reasons.
       - expect: { count: { testid: activity-event, atLeast: 2 } }
       - expect: { visible: { testid: comment-form } }
+      - fill: { testid: comment-textarea, value: "web ui comment ${RUN_ID:-local}" }
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid comment-submit click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "document.querySelector('[data-testid=comment-textarea]')?.value === ''" | grep -q true && exit 0;
+          done; echo "comment submit click never posted the comment"; exit 1
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=activity-comment]')).some((n) => n.textContent.includes('web ui comment ${RUN_ID:-local}') && n.textContent.includes('loom-e2e'))
+      - expect: { text: "web ui comment ${RUN_ID:-local}" }
+      # Readback verifies the result of the human UI action; it is not a separate
+      # API contract block.
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments" > "$AFT_WORK_DIR/comments-after-ui.json"; python3 -c 'import json,os,sys; data=json.load(open(sys.argv[1])).get("data",[]); text="web ui comment "+os.environ["RUN_ID"]; matches=[c for c in data if c.get("text")==text]; assert len(matches)==1, data; assert matches[0].get("author")=="loom-e2e", matches[0]' "$AFT_WORK_DIR/comments-after-ui.json"

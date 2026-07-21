@@ -148,6 +148,41 @@ describe("AgentWorkPanel", () => {
     expect(onTaskClick).toHaveBeenCalledWith(epic);
   });
 
+  it("opens a completed task from an expanded idle-lead epic", () => {
+    const onTaskClick = vi.fn();
+    const completedTask = issue({
+      id: "TASK-DONE",
+      title: "Finished task",
+      parent: "EPIC-1",
+      status: "closed",
+    });
+    renderWithStores(
+      <AgentWorkPanel agentName="lead-1" onTaskClick={onTaskClick} />,
+      {
+        agents: [agent({ name: "lead-1", role: "lead" })],
+        issues: [
+          issue({
+            id: "EPIC-1",
+            title: "Open epic",
+            issue_type: "epic",
+            status: "open",
+          }),
+          completedTask,
+        ],
+      },
+    );
+
+    expect(screen.queryByText("TASK-DONE")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Expand epic EPIC-1 (0 open)" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /TASK-DONE.*Finished task/ }),
+    );
+
+    expect(onTaskClick).toHaveBeenCalledWith(completedTask);
+  });
+
   it("filters tasks by id and title and hides empty epic groups", () => {
     renderWithStores(<AgentWorkPanel agentName="worker-1" />, {
       agents: [agent({ name: "worker-1", role: "task" })],

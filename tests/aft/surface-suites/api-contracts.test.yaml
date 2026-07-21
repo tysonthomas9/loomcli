@@ -1,0 +1,26 @@
+# Surface tier: these are standalone operator API contract assertions with no
+# browser scenario. Browser-observable boot/config effects remain in tier-1 smoke;
+# promote individual probes only when a product surface renders their result.
+suite: api-contracts-surface
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: "true"
+
+tests:
+  # Surface-only because the test probes endpoints without a user-facing flow;
+  # promote an endpoint when its effect is asserted through a mounted surface.
+  # covers: LCLI-OPS-002; /health; /api/config; readyz; /api/health
+  - name: health and config endpoints return expected payloads
+    intent: Operators can probe process health and frontend runtime config without loading the SPA
+    steps:
+      - run: >-
+          curl -sf "$AFT_BASE_URL/health" |
+          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("status") == "ok", data'
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/config" |
+          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("mode") == "open", data; assert data.get("issue_backend") == "fleet", data'
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/readyz" |
+          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("ready") is True, data; assert data.get("mode") == "fleet", data'
+      - run: >-
+          curl -sf "$AFT_BASE_URL/api/health" |
+          python3 -c 'import json,sys; data=json.load(sys.stdin); assert isinstance(data, dict) and data, data'

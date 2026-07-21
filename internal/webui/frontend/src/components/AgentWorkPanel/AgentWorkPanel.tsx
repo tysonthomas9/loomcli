@@ -1357,9 +1357,10 @@ export function groupAllByEpic(issuesMap: Map<string, Issue>): {
 }
 
 /**
- * groupOpenByEpic returns open epics plus their non-closed child tasks. This
- * is the idle lead view: it shows what a lead can pick up next without mixing
- * in completed history.
+ * groupOpenByEpic returns every open task grouped by parent, open epics even
+ * when empty, and completed children for groups already visible in the queue.
+ * Completed-only closed epics stay hidden. Epic cards remain collapsed by
+ * default so the idle lead view stays focused on pickup work.
  */
 export function groupOpenByEpic(issuesMap: Map<string, Issue>): {
   groups: EpicGroup[];
@@ -1371,13 +1372,15 @@ export function groupOpenByEpic(issuesMap: Map<string, Issue>): {
   let totalTasks = 0;
 
   for (const issue of issuesMap.values()) {
-    if (issue.issue_type === "epic") {
-      if (isOpenIssue(issue)) {
-        byEpic.set(issue.id, byEpic.get(issue.id) ?? []);
-      }
-      continue;
+    if (issue.issue_type === "epic" && isOpenIssue(issue)) {
+      byEpic.set(issue.id, []);
     }
-    if (!isOpenIssue(issue)) continue;
+  }
+
+  for (const issue of issuesMap.values()) {
+    if (issue.issue_type === "epic" || !isOpenIssue(issue)) continue;
+
+    const epicKey = issue.parent || ORPHAN_EPIC_KEY;
     totalTasks++;
     const status = (issue.status ?? "open").toLowerCase();
     if (status === "in_progress" || status === "active") counts.active++;
@@ -1385,7 +1388,22 @@ export function groupOpenByEpic(issuesMap: Map<string, Issue>): {
     else if (status === "review") counts.review++;
     else counts.open++;
 
+    const list = byEpic.get(epicKey) ?? [];
+    list.push(issue);
+    byEpic.set(epicKey, list);
+  }
+
+  for (const issue of issuesMap.values()) {
+    if (issue.issue_type === "epic") continue;
+
+    const status = (issue.status ?? "open").toLowerCase();
+    if (status !== "closed" && status !== "done") continue;
+
     const epicKey = issue.parent || ORPHAN_EPIC_KEY;
+    if (epicKey !== ORPHAN_EPIC_KEY && !byEpic.has(epicKey)) continue;
+
+    totalTasks++;
+    counts.done++;
     const list = byEpic.get(epicKey) ?? [];
     list.push(issue);
     byEpic.set(epicKey, list);
@@ -1399,13 +1417,19 @@ export function groupOpenByEpic(issuesMap: Map<string, Issue>): {
       epicKey === ORPHAN_EPIC_KEY
         ? "Unassigned"
         : (epicIssue?.title ?? epicKey);
+
+    let doneCount = 0;
+    for (const t of tasks) {
+      const s = (t.status ?? "open").toLowerCase();
+      if (s === "closed" || s === "done") doneCount++;
+    }
     tasks.sort(taskSortRank);
     groups.push({
       epicId: epicKey,
       epicTitle,
       ...(epicIssue !== undefined && { epicIssue }),
       tasks,
-      doneCount: 0,
+      doneCount,
       totalCount: tasks.length,
     });
   }

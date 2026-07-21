@@ -72,6 +72,34 @@ describe("WorkspaceContextMenu", () => {
       expect(menu.style.left).toBe("100px");
       expect(menu.style.top).toBe("200px");
     });
+
+    it("renders the Remove item by default", () => {
+      renderMenu(true);
+
+      expect(
+        screen.getByTestId("workspace-context-menu-remove"),
+      ).toBeInTheDocument();
+    });
+
+    it("hides the Remove item when showRemove is false (active workspace)", () => {
+      render(
+        <WorkspaceContextMenu
+          isOpen
+          position={defaultPosition}
+          onRename={onRename}
+          onRemove={onRemove}
+          onClose={onClose}
+          showRemove={false}
+        />,
+      );
+
+      expect(
+        screen.getByTestId("workspace-context-menu-rename"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("workspace-context-menu-remove"),
+      ).not.toBeInTheDocument();
+    });
   });
 
   // ── Click interactions ─────────────────────────────────────────────────────

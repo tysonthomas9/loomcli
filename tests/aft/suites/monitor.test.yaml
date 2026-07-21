@@ -5,7 +5,7 @@ baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 tests:
   # covers: LCLI-OPS-006, LCLI-DV-007
   - name: monitor dashboard renders project health and empty agent queue
-    intent: Opening the workspace monitor route renders MonitorDashboard panels and the empty agent activity state
+    intent: An operator opens the workspace monitor and sees project health, usage, and the connected empty agent-activity state
     steps:
       - open: /ws/E2E-WS/monitor
       - wait:
