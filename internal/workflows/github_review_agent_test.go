@@ -383,7 +383,7 @@ func TestDaytonaTaskRunnerSourceContract(t *testing.T) {
 		`function cloneCommand(`,
 		`imports.runtime.registerProvider("openai-codex"`,
 		`createFlueTranscriptCollector()`,
-		`transcript_entries: transcriptEntries`,
+		`agent.exec.invoke(`,
 		`uploadPatchArtifact(taskContext.client`,
 		`patch_artifact_id`,
 		`loom_task_session_id`,
