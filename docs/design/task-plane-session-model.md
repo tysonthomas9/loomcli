@@ -1,13 +1,23 @@
-# Flue Session Model
+# Task-Plane Session Model
 
 **Status:** Decided -- implementation not started.  
 **Date:** 2026-07-20  
 **Map ticket:** LOOMCLI-86  
 **Relation to v1 observability:** `docs/design/agent-observability.md`
-ships first. This is the post-v1 flue-plane session model and supersedes the
-bridge-minted 1:1 flue session mechanics only when the migration slice lands.
+ships first. This is the post-v1 task-plane session model and supersedes the
+bridge-minted 1:1 task-plane session mechanics only when the migration slice
+lands.
 
-The vocabulary of record is `CONTEXT.md` "Flue session model"
+## Naming
+
+**Flue** is reserved for the external agent-harness framework. This Loom plane
+and its model are named by role: the **task plane** and the **task-plane
+session model**, as decided in post-landing review on 2026-07-20. The
+server-composed session-id shape is an **AMENDMENT** to the LOOMCLI-87 §3
+resolution: its `flue-` prefix is dropped; that amendment is recorded on
+LOOMCLI-87.
+
+The vocabulary of record is `CONTEXT.md` "Task-plane session model"
 (`CONTEXT.md:71-104`). This spec uses **Agent Invocation**, **Invocation Key**,
 **Attempt**, and **Parent Session** exactly as defined there and does not
 redefine them.
@@ -52,8 +62,8 @@ across attempts (LOOMCLI-92).
 
 ## Scope
 
-**Flue plane only.** This spec changes flue TaskRun leaves and the flue bridge
-path. The daemon plane is out of scope for this map; the daemon supervisor
+**Task plane only.** This spec changes task-plane TaskRun leaves and the
+task-plane bridge path. The daemon plane is out of scope for this map; the daemon supervisor
 already creates one session per process start and remains the precedent, not
 the migration target.
 
@@ -185,7 +195,7 @@ leaf crash is handled by the session reconciler.
 
 **Server-composed identity.** The server composes:
 
-`flue-<taskRunID>-a<attempt>-<invocationKey>`
+`<taskRunID>-a<attempt>-<invocationKey>`
 
 The leaf never supplies the session id and does not receive attempt plumbing as
 authority. The server stamps the Attempt and fencing witness.
@@ -253,7 +263,8 @@ grouping joins through TaskRuns; promoting it later remains cheap.
 
 **Invocation fields are explicit.** `invocation_key` and `attempt` are explicit
 API fields. Clients never parse session ids for current rows. Legacy
-`flue-<taskRunID>` rows may degrade via metadata fallback until migration.
+`flue-<taskRunID>` rows may degrade via metadata fallback until migration;
+current session ids are `<taskRunID>-a<attempt>-<invocationKey>`.
 
 **Metadata stamped at open.**
 
@@ -400,9 +411,9 @@ recorded, never promoted into the run result; this removes today's `finishErr`
 promotion (`internal/driver/task_bridge.go:256`).
 
 **Leaf self-complete is forbidden on bridge paths.** taskrunapi `complete` /
-`sdk/runner.js completeRun` is not allowed for bridge-run flue leaves. IPC
+`sdk/runner.js completeRun` is not allowed for bridge-run task-plane leaves. IPC
 result is the only completion path. The op remains for non-bridge topologies,
-whose sessions are owned by the reconciliation loop. No current flue leaf calls
+whose sessions are owned by the reconciliation loop. No current task-plane leaf calls
 the op.
 
 **Backstops both land.**
@@ -660,7 +671,9 @@ invoke form lands.
 
 - Judge sessions carry `kind=judge`.
 - Preflight TaskRuns produce no sessions.
-- No legacy unsuffixed `flue-<taskRunID>` session ids exist post-landing.
+- Post-landing, no session id carries the `flue-` prefix at all: the legacy
+  detector is a plain prefix match, and legacy rows are exactly the
+  `flue-<taskRunID>` ids.
 - `eval_cost.total_tokens > 0` on the codex flow; the plain flow stays
   type-only.
 
@@ -671,7 +684,7 @@ because they match on status/kind, not id shape.
 **Doctor transcript_ref check unchanged.** `transcript_ref_backfill` remains a
 daemon-plane repair. It only fires when a session id resolves in a local
 `sessions.Store` with a native transcript file on disk
-(`doctor_checks_transcript_ref.go` `localNativeTranscript`). Flue sessions
+(`doctor_checks_transcript_ref.go` `localNativeTranscript`). Task-plane sessions
 missing `transcript_ref` are crash-lossy by contract and not doctor-repairable;
 the check stays task-scoped per LOOMCLI-94.
 
@@ -689,7 +702,8 @@ the check stays task-scoped per LOOMCLI-94.
 
 2. **Session lifecycle primitives and first-terminal CAS.**  
    Scope: store-level `Open(descriptor)` and `Finalize(sessionRef, outcome)`;
-   server-composed ids; identical-descriptor idempotency; conflicting
+   server-composed `<taskRunID>-a<attempt>-<invocationKey>` ids;
+   identical-descriptor idempotency; conflicting
    descriptor structured error; first-terminal-wins close guard; terminal-run
    open rejection; transcript artifact reference shape.  
    Depends on: slice 1.  
@@ -717,7 +731,7 @@ the check stays task-scoped per LOOMCLI-94.
    Implements: Session reconciler.  
    Repos: loomcli, with store/filter support from fleet-db already in slice 1.
 
-5. **One-landing flue cutover.**  
+5. **One-landing task-plane cutover.**
    Scope: migrate `session-eval-task-runner`, `local-task-runner`, and
    `github-review-task-runner` to agent-exec; delete
    `startFlueTaskSession`/`finishFlueTaskSession` machinery; remove legacy
@@ -772,7 +786,7 @@ the check stays task-scoped per LOOMCLI-94.
 
 **Daemon-plane migration.** The daemon supervisor can adopt the store primitive
 later, but this map does not unify it. **Revisit trigger:** a second
-daemon/flue divergence bug; the supervisor finalize-ordering transcript bug of
+daemon/task-plane divergence bug; the supervisor finalize-ordering transcript bug of
 2026-07-19 was the first.
 
 **Retention / TTL.** Session accumulation remains a fleet-db platform effort.
@@ -785,7 +799,7 @@ doctor transcript_ref check.
 **Deferred items from resolutions.** Timeline visualization, a session
 checkpoint/report op, proxy adapter, judge re-inclusion in eval candidates or
 score-dimension rollups, dashboard eval-health card, API-only eval-health
-surface, spend ledger, and automatic transcript repair for crash-lossy flue
+surface, spend ledger, and automatic transcript repair for crash-lossy task-plane
 sessions remain out of this spec unless their revisit triggers fire.
 
 ## Decision log index

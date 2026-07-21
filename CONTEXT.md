@@ -68,7 +68,7 @@ cohort. The unit the eval agent selects each tick.
 _Avoid_: evaluable session, session with transcript (having produced a
 transcript is not the test — having published one is)
 
-### Flue session model
+### Task-plane session model
 
 **Agent Invocation**:
 One agent invocation attempt within a task-run Attempt (failed spawns
