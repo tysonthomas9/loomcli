@@ -1,4 +1,5 @@
 export {
+  AgentExecSpecError,
   ArtifactHandle,
   LoomAPIError,
   RunnerEnv,
