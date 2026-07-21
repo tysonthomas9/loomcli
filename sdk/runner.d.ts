@@ -253,6 +253,10 @@ export interface AgentSessionOpenResult {
 
 export interface AgentSessionUsage {
   tokens?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
   cost?: number | null;
 }
 

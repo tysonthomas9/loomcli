@@ -342,7 +342,14 @@ export class TaskRunClient {
   async sessionClose(input = {}, options = {}) {
     this.#requireServeTransport("session-close");
     const usage = input.usage && typeof input.usage === "object"
-      ? compact({ tokens: input.usage.tokens, cost: input.usage.cost })
+      ? compact({
+        tokens: input.usage.tokens,
+        inputTokens: input.usage.inputTokens,
+        outputTokens: input.usage.outputTokens,
+        cacheReadTokens: input.usage.cacheReadTokens,
+        cacheWriteTokens: input.usage.cacheWriteTokens,
+        cost: input.usage.cost,
+      })
       : undefined;
     return this.#op("session-close", compact({
       sessionId: input.sessionId,
@@ -794,7 +801,9 @@ function captureAgentEntries(spec, result) {
       try {
         const event = JSON.parse(line);
         if (event && typeof event === "object" && event.type !== "session_meta") {
-          entries.push({ ...event, seq: entries.length });
+          for (const entry of streamEventEntries(spec.backend, event)) {
+            entries.push({ ...entry, seq: entries.length });
+          }
         }
       } catch {
         // Non-JSON backend chatter is intentionally not promoted to an event.
@@ -813,6 +822,75 @@ function captureAgentEntries(spec, result) {
     entries.push({ seq: entries.length, role: "tool", type: "stderr", text: result.stderr });
   }
   return entries;
+}
+
+function streamEventEntries(backend, event) {
+  if (backend === "codex") {
+    return codexStreamEventEntries(event);
+  }
+  return [event];
+}
+
+function codexStreamEventEntries(event) {
+  if (!isModernCodexStreamEvent(event)) {
+    return [event];
+  }
+  if (event.type === "item.completed") {
+    return codexItemEntries(event.item);
+  }
+  if (event.type === "turn.completed") {
+    const usage = codexUsage(event.usage);
+    return usage ? [{ role: "system", type: "result", usage }] : [];
+  }
+  return [];
+}
+
+function isModernCodexStreamEvent(event) {
+  return ["thread.started", "turn.started", "item.completed", "turn.completed"].includes(event.type);
+}
+
+function codexItemEntries(item) {
+  if (!item || typeof item !== "object") return [];
+  const text = textValue(item.text);
+  if (item.type === "agent_message") {
+    return text ? [{ role: "assistant", type: "text", text }] : [];
+  }
+  if (item.type === "reasoning") {
+    return text ? [{ role: "assistant", type: "reasoning", text }] : [];
+  }
+  if (item.type === "command_execution") {
+    return codexCommandEntries(item);
+  }
+  return [];
+}
+
+function codexCommandEntries(item) {
+  const toolUseId = textValue(item.id);
+  const output = textValue(item.aggregated_output ?? item.output) || codexCommandExit(item.exit_code);
+  return [
+    {
+      role: "assistant",
+      type: "tool_use",
+      tool_name: "command_execution",
+      tool_use_id: toolUseId,
+      tool_input: { command: textValue(item.command) },
+    },
+    { role: "tool", type: "tool_result", tool_use_id: toolUseId, output },
+  ];
+}
+
+function codexCommandExit(exitCode) {
+  return Number.isFinite(exitCode) ? `exit code: ${exitCode}` : "";
+}
+
+function codexUsage(value) {
+  if (!value || typeof value !== "object") return null;
+  const usage = compact({
+    input_tokens: finiteNumber(value.input_tokens ?? value.inputTokens),
+    cached_input_tokens: finiteNumber(value.cached_input_tokens ?? value.cachedInputTokens),
+    output_tokens: finiteNumber(value.output_tokens ?? value.outputTokens),
+  });
+  return Object.keys(usage).length > 0 ? usage : null;
 }
 
 function redactAgentEntries(entries, declaredSecrets) {
@@ -843,16 +921,29 @@ function extractAgentUsage(entries) {
     if (!usage || typeof usage !== "object") continue;
     const input = finiteNumber(usage.input_tokens ?? usage.inputTokens ?? usage.input);
     const output = finiteNumber(usage.output_tokens ?? usage.outputTokens ?? usage.output);
+    const cacheRead = finiteNumber(usage.cached_input_tokens ?? usage.cachedInputTokens ?? usage.cache_read_tokens ?? usage.cacheReadTokens);
+    const cacheWrite = finiteNumber(usage.cache_write_tokens ?? usage.cacheWriteTokens);
     const tokens = finiteNumber(usage.tokens ?? usage.total_tokens ?? usage.totalTokens) ??
       (input !== null || output !== null ? (input || 0) + (output || 0) : null);
     const cost = finiteNumber(usage.cost ?? usage.cost_usd ?? usage.costUsd ?? usage.total_cost_usd);
-    if (tokens !== null || cost !== null) return { tokens, cost };
+    if (tokens !== null || cost !== null || input !== null || output !== null || cacheRead !== null || cacheWrite !== null) {
+      const result = { tokens, cost };
+      if (input !== null) result.inputTokens = input;
+      if (output !== null) result.outputTokens = output;
+      if (cacheRead !== null) result.cacheReadTokens = cacheRead;
+      if (cacheWrite !== null) result.cacheWriteTokens = cacheWrite;
+      return result;
+    }
   }
   return null;
 }
 
 function finiteNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function textValue(value) {
+  return typeof value === "string" ? value : "";
 }
 
 function transcriptArtifactID(taskRunId, attempt, invocationKey) {

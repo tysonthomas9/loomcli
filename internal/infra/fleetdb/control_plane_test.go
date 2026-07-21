@@ -150,6 +150,22 @@ func TestControlPlaneClientSessionLifecycleUsesAtomicEndpoints(t *testing.T) {
 			if r.Method != http.MethodPost {
 				t.Fatalf("finalize method = %s", r.Method)
 			}
+			var body struct {
+				Usage struct {
+					Tokens           *int64   `json:"tokens"`
+					InputTokens      *int64   `json:"input_tokens"`
+					OutputTokens     *int64   `json:"output_tokens"`
+					CacheReadTokens  *int64   `json:"cache_read_tokens"`
+					CacheWriteTokens *int64   `json:"cache_write_tokens"`
+					CostUSD          *float64 `json:"cost_usd"`
+				} `json:"usage"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode finalize: %v", err)
+			}
+			if body.Usage.Tokens == nil || *body.Usage.Tokens != 15 || body.Usage.InputTokens == nil || *body.Usage.InputTokens != 10 || body.Usage.OutputTokens == nil || *body.Usage.OutputTokens != 5 || body.Usage.CacheReadTokens == nil || *body.Usage.CacheReadTokens != 3 || body.Usage.CacheWriteTokens == nil || *body.Usage.CacheWriteTokens != 2 || body.Usage.CostUSD == nil || *body.Usage.CostUSD != 1.5 {
+				t.Fatalf("finalize usage = %+v", body.Usage)
+			}
 			writeJSON(t, w, domain.AgentSession{WorkspaceKey: "WS", SessionID: "run-1-a1-agent", Attempt: 1, Status: domain.AgentSessionCompleted})
 		default:
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -164,7 +180,14 @@ func TestControlPlaneClientSessionLifecycleUsesAtomicEndpoints(t *testing.T) {
 	if err != nil || ref.SessionID != "run-1-a1-agent" {
 		t.Fatalf("Open = %#v, %v", ref, err)
 	}
-	if _, err := client.AgentSessions().Finalize(t.Context(), ref, store.SessionOutcome{Status: domain.AgentSessionCompleted}); err != nil {
+	tokens, input, output, cacheRead, cacheWrite := int64(15), int64(10), int64(5), int64(3), int64(2)
+	cost := 1.5
+	if _, err := client.AgentSessions().Finalize(t.Context(), ref, store.SessionOutcome{
+		Status: domain.AgentSessionCompleted,
+		Usage: store.SessionUsage{
+			Tokens: &tokens, InputTokens: &input, OutputTokens: &output, CacheReadTokens: &cacheRead, CacheWriteTokens: &cacheWrite, CostUSD: &cost,
+		},
+	}); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 }

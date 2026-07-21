@@ -270,12 +270,20 @@ func (s *agentSessionStore) Finalize(ctx context.Context, ref store.SessionRef, 
 		TranscriptRef         string                    `json:"transcript_ref,omitempty"`
 		DriverRunnerSessionID string                    `json:"driver_runner_session_id,omitempty"`
 		Usage                 struct {
-			Tokens  *int64   `json:"tokens,omitempty"`
-			CostUSD *float64 `json:"cost_usd,omitempty"`
+			Tokens           *int64   `json:"tokens,omitempty"`
+			InputTokens      *int64   `json:"input_tokens,omitempty"`
+			OutputTokens     *int64   `json:"output_tokens,omitempty"`
+			CacheReadTokens  *int64   `json:"cache_read_tokens,omitempty"`
+			CacheWriteTokens *int64   `json:"cache_write_tokens,omitempty"`
+			CostUSD          *float64 `json:"cost_usd,omitempty"`
 		} `json:"usage,omitempty"`
 		Metadata map[string]string `json:"metadata,omitempty"`
 	}{Status: outcome.Status, ExitCode: outcome.ExitCode, Summary: outcome.Summary, ErrorClass: outcome.ErrorClass, TranscriptRef: outcome.TranscriptRef, DriverRunnerSessionID: outcome.DriverRunnerSessionID, Metadata: outcome.Metadata}
 	body.Usage.Tokens = outcome.Usage.Tokens
+	body.Usage.InputTokens = outcome.Usage.InputTokens
+	body.Usage.OutputTokens = outcome.Usage.OutputTokens
+	body.Usage.CacheReadTokens = outcome.Usage.CacheReadTokens
+	body.Usage.CacheWriteTokens = outcome.Usage.CacheWriteTokens
 	body.Usage.CostUSD = outcome.Usage.CostUSD
 	var session domain.AgentSession
 	path := "/api/v1/" + pathEscape(ref.WorkspaceKey) + "/agent-sessions/" + pathEscape(ref.SessionID) + "/finalize"

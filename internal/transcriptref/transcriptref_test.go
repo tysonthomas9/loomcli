@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -140,6 +141,23 @@ func TestParseTranscriptBytesConvertsNativeCodexRollout(t *testing.T) {
 	}
 	if withPayload == 0 {
 		t.Fatal("converted codex events carry no payload; native conversion did not run")
+	}
+}
+
+func TestParseTranscriptBytesConvertsModernCodexEventStream(t *testing.T) {
+	data, err := os.ReadFile("../../docs/design/fixtures/agent-observability/modern-codex-event-stream.jsonl")
+	if err != nil {
+		t.Fatalf("read modern codex fixture: %v", err)
+	}
+	events, err := ParseTranscriptBytes("codex", data)
+	if err != nil {
+		t.Fatalf("ParseTranscriptBytes modern codex: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want one agent message", events)
+	}
+	if events[0].Role != transcript.RoleAssistant || events[0].Type != transcript.EventText || !strings.Contains(events[0].Text, "false_success_claim") {
+		t.Fatalf("modern codex event = %+v", events[0])
 	}
 }
 

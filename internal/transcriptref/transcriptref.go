@@ -114,9 +114,16 @@ func ParseTranscriptBytes(backend string, data []byte) ([]transcript.Event, erro
 	if len(trimmed) == 0 {
 		return []transcript.Event{}, nil
 	}
+	if looksModernCodexEventStream(backend, trimmed) {
+		return parseNativeTranscript(backend, data)
+	}
 	if looksCanonicalTranscript(trimmed) {
 		return ParseCanonicalTranscriptBytes(data)
 	}
+	return parseNativeTranscript(backend, data)
+}
+
+func parseNativeTranscript(backend string, data []byte) ([]transcript.Event, error) {
 	events, err := backends.ParseEvents(backend, data)
 	if err != nil {
 		return nil, err
@@ -125,6 +132,28 @@ func ParseTranscriptBytes(backend string, data []byte) ([]transcript.Event, erro
 		events = []transcript.Event{}
 	}
 	return events, nil
+}
+
+// looksModernCodexEventStream identifies current `codex exec --json` output.
+// These streams have a canonical session_meta lead followed by raw protocol
+// events, so they must reach the native Codex adapter rather than the
+// canonical JSONL reader.
+func looksModernCodexEventStream(backend string, trimmed []byte) bool {
+	if backend != "codex" {
+		return false
+	}
+	for _, line := range bytes.Split(trimmed, []byte("\n")) {
+		var event struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(line), &event) != nil {
+			continue
+		}
+		if strings.HasPrefix(event.Type, "thread.") || strings.HasPrefix(event.Type, "turn.") || strings.HasPrefix(event.Type, "item.") {
+			return true
+		}
+	}
+	return false
 }
 
 // looksCanonicalTranscript reports whether the transcript bytes are already in

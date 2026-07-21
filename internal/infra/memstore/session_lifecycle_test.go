@@ -113,6 +113,34 @@ func TestSessionLifecycleFinalizeFirstTerminalWins(t *testing.T) {
 	}
 }
 
+func TestSessionLifecycleFinalizeUsagePreservesExistingValuesOnZero(t *testing.T) {
+	st, run := lifecycleTestStore(t, domain.TaskRunRunning)
+	ref, err := st.AgentSessions().Open(t.Context(), run, lifecycleDescriptor("agent"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	metadata := map[string]string{
+		store.SessionMetadataInputTokens:      "100",
+		store.SessionMetadataOutputTokens:     "50",
+		store.SessionMetadataEstimatedCostUSD: "1.5",
+	}
+	if _, err := st.AgentSessions().Update(t.Context(), "WS", ref.SessionID, store.AgentSessionUpdate{Metadata: &metadata}); err != nil {
+		t.Fatalf("seed usage metadata: %v", err)
+	}
+	zero := int64(0)
+	zeroCost := 0.0
+	session, err := st.AgentSessions().Finalize(t.Context(), ref, store.SessionOutcome{
+		Status: domain.AgentSessionCompleted,
+		Usage:  store.SessionUsage{InputTokens: &zero, OutputTokens: &zero, CostUSD: &zeroCost},
+	})
+	if err != nil {
+		t.Fatalf("Finalize: %v", err)
+	}
+	if session.Metadata[store.SessionMetadataInputTokens] != "100" || session.Metadata[store.SessionMetadataOutputTokens] != "50" || session.Metadata[store.SessionMetadataEstimatedCostUSD] != "1.5" {
+		t.Fatalf("zero usage clobbered existing metadata: %#v", session.Metadata)
+	}
+}
+
 func TestAgentSessionUpdateTerminalReplayChecksAllSuppliedFields(t *testing.T) {
 	st, run := lifecycleTestStore(t, domain.TaskRunRunning)
 	ref, err := st.AgentSessions().Open(t.Context(), run, lifecycleDescriptor("agent"))

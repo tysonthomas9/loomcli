@@ -84,8 +84,12 @@ type sessionCloseParams struct {
 }
 
 type sessionUsageParams struct {
-	Tokens *int64   `json:"tokens"`
-	Cost   *float64 `json:"cost"`
+	Tokens           *int64   `json:"tokens"`
+	InputTokens      *int64   `json:"inputTokens"`
+	OutputTokens     *int64   `json:"outputTokens"`
+	CacheReadTokens  *int64   `json:"cacheReadTokens"`
+	CacheWriteTokens *int64   `json:"cacheWriteTokens"`
+	Cost             *float64 `json:"cost"`
 }
 
 type sessionCloseResult struct {
@@ -118,8 +122,14 @@ func (m *Module) sessionClose(ctx context.Context, ws string, id leaseIdentity, 
 	metadata, driverRunnerSessionID := closeMetadata(params.Metadata)
 	usage := store.SessionUsage{}
 	if params.Usage != nil {
-		usage.Tokens = params.Usage.Tokens
-		usage.CostUSD = params.Usage.Cost
+		usage = store.SessionUsage{
+			Tokens:           params.Usage.Tokens,
+			InputTokens:      params.Usage.InputTokens,
+			OutputTokens:     params.Usage.OutputTokens,
+			CacheReadTokens:  params.Usage.CacheReadTokens,
+			CacheWriteTokens: params.Usage.CacheWriteTokens,
+			CostUSD:          params.Usage.Cost,
+		}
 	}
 	finalized, err := m.store.AgentSessions().Finalize(ctx, store.SessionRef{
 		WorkspaceKey: ws,

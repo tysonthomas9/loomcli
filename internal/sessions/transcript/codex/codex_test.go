@@ -41,6 +41,36 @@ func TestEvents_CodexFlow(t *testing.T) {
 	}
 }
 
+func TestEvents_ModernCodexStream(t *testing.T) {
+	input := `{"type":"thread.started","thread_id":"thread-1"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"message-1","type":"agent_message","text":"hello"}}
+{"type":"item.completed","item":{"id":"reasoning-1","type":"reasoning","text":"checking"}}
+{"type":"item.completed","item":{"id":"command-1","type":"command_execution","command":"pwd","aggregated_output":"/repo","exit_code":0}}
+{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}
+`
+	events, err := Events([]byte(input))
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	if len(events) != 4 {
+		t.Fatalf("want four meaningful events, got %d: %+v", len(events), events)
+	}
+	assertDenseSeq(t, events)
+	if events[0].Role != transcript.RoleAssistant || events[0].Type != transcript.EventText || events[0].Text != "hello" {
+		t.Fatalf("agent message = %+v", events[0])
+	}
+	if events[1].Role != transcript.RoleAssistant || events[1].Type != transcript.EventReasoning || events[1].Text != "checking" {
+		t.Fatalf("reasoning = %+v", events[1])
+	}
+	if events[2].Role != transcript.RoleAssistant || events[2].Type != transcript.EventToolUse || events[2].ToolName != "command_execution" || events[2].ToolUseID != "command-1" {
+		t.Fatalf("command use = %+v", events[2])
+	}
+	if events[3].Type != transcript.EventToolResult || events[3].ToolUseID != "command-1" || events[3].Output != "/repo" {
+		t.Fatalf("command result = %+v", events[3])
+	}
+}
+
 // TestEvents_SkipsMalformedLine confirms a malformed (non-JSON) rollout line is
 // skipped (not fatal) — the wrapper's ParseRollout tolerance, exercised through
 // the delegating Events. A valid message after it still surfaces.

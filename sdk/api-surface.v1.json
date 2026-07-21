@@ -31,7 +31,7 @@
       "session-close": {
         "method": "POST",
         "fields": ["sessionId", "status", "exitCode", "summary", "usage", "transcriptRef", "metadata"],
-        "nested": { "usage": ["tokens", "cost"] }
+        "nested": { "usage": ["tokens", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "cost"] }
       }
     },
     "agentExec": {
