@@ -126,7 +126,7 @@ export async function run(ctx) {
         });
       }
       const errorClass = judge.errorClass === "transcript_too_large" ? "transcript_too_large" : "judge_error";
-      await putFailedMetric(loom, sessionId, errorClass);
+      await putFailedMetric(loom, sessionId, errorClass, judge.judgeSessionId);
       failed++;
       continue;
     }
@@ -134,19 +134,19 @@ export async function run(ctx) {
     const parsed = parseEvalResult(judge.evalResult);
     const valid = validateEvalResult(parsed);
     if (!valid.ok) {
-      await putFailedMetric(loom, sessionId, "judge_error");
+      await putFailedMetric(loom, sessionId, "judge_error", judge.judgeSessionId);
       failed++;
       continue;
     }
 
     const cost = normalizeEvalCost(judge.evalCost);
-    const put = await putDoneMetric(loom, sessionId, parsed, judge.judgeModel || model, cost);
+    const put = await putDoneMetric(loom, sessionId, parsed, judge.judgeModel || model, cost, judge.judgeSessionId);
     if (put === "done") {
       evaluated++;
     } else if (put === "rejected") {
       // The server permanently rejected the payload (validation): stamp
       // failed so the session is not re-judged every tick for this version.
-      await putFailedMetric(loom, sessionId, "judge_error");
+      await putFailedMetric(loom, sessionId, "judge_error", judge.judgeSessionId);
       failed++;
     } else {
       // Transient put failure: leave unstamped for the next tick to retry.
@@ -223,28 +223,32 @@ async function runJudgeTask(loom, backend, model, sessionId, judgeInput) {
   }
   const status = stringValue(run && run.status);
   const metadata = runtimeMetadata(run);
+  const judgeSessionId = stringValue(metadata.judge_session_id ?? metadata.judgeSessionId);
   if (status !== "completed") {
     return {
       ok: false,
       errorClass: stringValue(run && (run.errorClass || run.error_class)) || "judge_error",
       summary: "judge task " + taskRunId + " ended " + (status || "without a terminal status"),
+      judgeSessionId,
     };
   }
   return {
     ok: true,
     evalResult: metadata.eval_result ?? metadata.evalResult ?? "",
     judgeModel: stringValue(metadata.judge_model ?? metadata.judgeModel),
+    judgeSessionId,
     evalCost: metadata.eval_cost ?? metadata.evalCost,
   };
 }
 
 // Returns "done" on success, "rejected" when the server permanently refused
 // the payload (validation error, code "invalid"), "transient" otherwise.
-async function putDoneMetric(loom, sessionId, result, judgeModel, evalCost) {
+async function putDoneMetric(loom, sessionId, result, judgeModel, evalCost, judgeSessionId) {
   try {
     await loom.evals.putMetric({
       sessionId,
       promptVersion: PROMPT_VERSION,
+      judgeSessionId,
       status: "done",
       eval: {
         scores: result.scores,
@@ -262,11 +266,12 @@ async function putDoneMetric(loom, sessionId, result, judgeModel, evalCost) {
   }
 }
 
-async function putFailedMetric(loom, sessionId, errorClass) {
+async function putFailedMetric(loom, sessionId, errorClass, judgeSessionId = "") {
   try {
     await loom.evals.putMetric({
       sessionId,
       promptVersion: PROMPT_VERSION,
+      judgeSessionId,
       status: "failed",
       errorClass,
     });
@@ -413,28 +418,29 @@ function validateStringMap(values, keys) {
 }
 
 function normalizeEvalCost(raw) {
-  const zero = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
   let value = raw;
   if (typeof raw === "string") {
     try {
       value = JSON.parse(raw);
     } catch {
-      return zero;
+      return null;
     }
   }
   if (!value || typeof value !== "object") {
-    return zero;
+    return null;
+  }
+  const total = positiveInt(value.total_tokens ?? value.totalTokens);
+  if (total == null) {
+    return null;
   }
   return {
-    input_tokens: nonNegativeInt(value.input_tokens ?? value.inputTokens),
-    output_tokens: nonNegativeInt(value.output_tokens ?? value.outputTokens),
-    total_tokens: nonNegativeInt(value.total_tokens ?? value.totalTokens),
+    total_tokens: total,
   };
 }
 
-function nonNegativeInt(value) {
+function positiveInt(value) {
   const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
 }
 
 function runtimeMetadata(run) {

@@ -106,11 +106,12 @@ func (m *Module) sessionTranscriptGet(ctx context.Context, ws string, id driverI
 
 func (m *Module) evalMetricPut(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[struct {
-		SessionID     string            `json:"sessionId"`
-		PromptVersion string            `json:"promptVersion"`
-		Status        string            `json:"status"`
-		ErrorClass    string            `json:"errorClass"`
-		Eval          evals.EvalPayload `json:"eval"`
+		SessionID      string            `json:"sessionId"`
+		PromptVersion  string            `json:"promptVersion"`
+		JudgeSessionID string            `json:"judgeSessionId"`
+		Status         string            `json:"status"`
+		ErrorClass     string            `json:"errorClass"`
+		Eval           evals.EvalPayload `json:"eval"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -119,11 +120,12 @@ func (m *Module) evalMetricPut(ctx context.Context, ws string, id driverIdentity
 		return nil, err
 	}
 	evalID, created, err := evals.PutMetric(ctx, m.store, ws, evals.PutMetricParams{
-		SessionID:     params.SessionID,
-		PromptVersion: params.PromptVersion,
-		Status:        params.Status,
-		ErrorClass:    params.ErrorClass,
-		Eval:          params.Eval,
+		SessionID:      params.SessionID,
+		JudgeSessionID: params.JudgeSessionID,
+		PromptVersion:  params.PromptVersion,
+		Status:         params.Status,
+		ErrorClass:     params.ErrorClass,
+		Eval:           params.Eval,
 	})
 	if err != nil {
 		return nil, err

@@ -128,7 +128,7 @@
     "recover-stale-tasks": { "method": "POST", "fields": ["staleBefore", "maxAgeSeconds", "errorClass", "errorMessage"] },
     "sessions-list-unevaluated": { "method": "POST", "fields": ["promptVersion"] },
     "session-transcript-get": { "method": "POST", "fields": ["sessionId", "promptVersion"] },
-    "eval-metric-put": { "method": "POST", "fields": ["sessionId", "promptVersion", "status", "errorClass", "eval"] },
+    "eval-metric-put": { "method": "POST", "fields": ["sessionId", "promptVersion", "judgeSessionId", "status", "errorClass", "eval"] },
     "eval-rejudge": { "method": "POST", "fields": ["sessionId"] },
     "complete-task": {
       "method": "POST",

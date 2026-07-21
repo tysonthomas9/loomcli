@@ -279,11 +279,12 @@ type EvalPayload struct {
 }
 
 type PutMetricParams struct {
-	SessionID     string
-	PromptVersion string
-	Status        string
-	ErrorClass    string
-	Eval          EvalPayload
+	SessionID      string
+	JudgeSessionID string
+	PromptVersion  string
+	Status         string
+	ErrorClass     string
+	Eval           EvalPayload
 }
 
 func ValidateEvalPayload(payload EvalPayload, promptVersion string) error {

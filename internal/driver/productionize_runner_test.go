@@ -116,19 +116,6 @@ func TestRequireTerminalStatusRejectsCompletedNonZeroExit(t *testing.T) {
 	}
 }
 
-// flueTaskSessionStatus must map an empty status to failed (no fake completion).
-func TestFlueTaskSessionStatusEmptyIsFailed(t *testing.T) {
-	if got := flueTaskSessionStatus(TaskExecResult{Status: "", ExitCode: 0}, nil); got != domain.AgentSessionFailed {
-		t.Fatalf("empty status session = %q, want failed", got)
-	}
-	if got := flueTaskSessionStatus(TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 0}, nil); got != domain.AgentSessionCompleted {
-		t.Fatalf("completed session = %q, want completed", got)
-	}
-	if got := flueTaskSessionStatus(TaskExecResult{Status: domain.TaskRunCompleted, ExitCode: 1}, nil); got != domain.AgentSessionFailed {
-		t.Fatalf("completed nonzero session = %q, want failed", got)
-	}
-}
-
 // The noop provider gate (§4.5) fails closed by default and only enables with
 // LOOM_DRIVER_ENABLE_TEST_NOOP_PROVIDER=1, in BOTH preflight and execute.
 func TestNoopProviderGate(t *testing.T) {

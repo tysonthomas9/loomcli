@@ -124,7 +124,7 @@ func TestTaskWorkerRunOnceClaimsQueuedTaskRunAndClosesTask(t *testing.T) {
 	}
 }
 
-func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
+func TestTaskWorkerRunOnceLeavesUnadoptedRunnerWithoutSession(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
 		WorkspaceKey:     "TEST",
@@ -163,15 +163,8 @@ func TestTaskWorkerRunOnceMapsFlueSessionUnderParent(t *testing.T) {
 	if outcome.Run.Status != domain.TaskRunCompleted {
 		t.Fatalf("outcome status = %s error=%s, want completed", outcome.Run.Status, outcome.Run.ErrorMessage)
 	}
-	session, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-worker-flue")
-	if err != nil {
-		t.Fatalf("get flue agent session: %v", err)
-	}
-	if session.Kind != domain.AgentSessionKindTask || session.TaskID != "TEST-12" || session.ParentSessionID != "lead-session-1" {
-		t.Fatalf("session = %+v, want task session under lead-session-1", session)
-	}
-	if session.Metadata["runtime"] != "flue" || session.Metadata["task_run_id"] != "task-run-worker-flue" || session.Metadata["transcript_ref"] == "" {
-		t.Fatalf("session metadata = %+v, want flue transcript metadata", session.Metadata)
+	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-worker-flue"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("legacy bridge session err = %v, want not found", err)
 	}
 }
 

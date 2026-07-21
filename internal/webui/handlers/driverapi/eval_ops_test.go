@@ -44,10 +44,11 @@ func TestDriverEvalOpsListPutAndRejudge(t *testing.T) {
 	resp, decoded = h.do(t, opRequest{
 		op: "eval-metric-put",
 		body: map[string]any{
-			"sessionId":     "sess-1",
-			"promptVersion": "v1",
-			"status":        "done",
-			"eval":          driverEvalPayload(),
+			"sessionId":      "sess-1",
+			"judgeSessionId": "judge-sess-1",
+			"promptVersion":  "v1",
+			"status":         "done",
+			"eval":           driverEvalPayload(),
 		},
 		headers: h.ownerHeaders(),
 	})
@@ -163,7 +164,7 @@ func seedDriverEvalSession(t *testing.T, h *testHarness, sessionID string, ended
 		AgentID:      "agent-1",
 		Kind:         domain.AgentSessionKindTask,
 		TaskID:       "TASK-1",
-		Status:       domain.AgentSessionCompleted,
+		Status:       domain.AgentSessionRunning,
 		StartedAt:    started,
 		Metadata:     metadata,
 	}); err != nil {
@@ -171,7 +172,11 @@ func seedDriverEvalSession(t *testing.T, h *testHarness, sessionID string, ended
 	}
 	finishedAt := ended.UTC()
 	finishedAtPtr := &finishedAt
-	if _, err := h.store.AgentSessions().Update(context.Background(), "WS", sessionID, store.AgentSessionUpdate{FinishedAt: &finishedAtPtr}); err != nil {
+	completed := domain.AgentSessionCompleted
+	if _, err := h.store.AgentSessions().Update(context.Background(), "WS", sessionID, store.AgentSessionUpdate{
+		Status:     &completed,
+		FinishedAt: &finishedAtPtr,
+	}); err != nil {
 		t.Fatalf("finish session: %v", err)
 	}
 }

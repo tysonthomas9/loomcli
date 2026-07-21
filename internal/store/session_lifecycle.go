@@ -334,9 +334,9 @@ func AgentSessionUpdateMatches(session *domain.AgentSession, update AgentSession
 		matchesIntPointer(update.ExitCode, session.ExitCode) && matchesMetadata(update.Metadata, session.Metadata)
 }
 
-// ProtectAgentSessionTerminalUpdate scopes generic-update CAS to lifecycle-managed terminal sessions.
+// ProtectAgentSessionTerminalUpdate applies generic-update CAS to every terminal session.
 func ProtectAgentSessionTerminalUpdate(session *domain.AgentSession) bool {
-	return session != nil && session.InvocationKey != "" && session.Status.IsTerminal()
+	return session != nil && session.Status.IsTerminal()
 }
 
 // AgentSessionUpdateTouchesOutcome reports whether a PATCH carries settled outcome fields.

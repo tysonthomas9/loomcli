@@ -378,6 +378,7 @@ export class LoomDriverClient {
     return this.#httpCall("eval-metric-put", {
       sessionId: input.sessionId || "",
       promptVersion: input.promptVersion || "",
+      judgeSessionId: input.judgeSessionId || input.judge_session_id || "",
       status: input.status || "",
       errorClass: input.errorClass || "",
       eval: input.eval,

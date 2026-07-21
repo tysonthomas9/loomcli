@@ -471,6 +471,69 @@ describe("TaskRunClient.agent.exec", () => {
     assert.deepEqual(Object.keys(close.body).sort(), ["exitCode", "sessionId", "status", "summary", "transcriptRef"]);
   });
 
+  it("captures raw stream-json, redacts declared secrets, and extracts reported usage without inventing cost", async () => {
+    const calls = [];
+    const secret = "declared-agent-secret";
+    const stdout = [
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "command_execution", command: "env", aggregated_output: `token=${secret}` },
+      }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cached_input_tokens: 30,
+          cache_write_tokens: 7,
+          cost_usd: 0,
+        },
+      }),
+    ].join("\n") + "\n";
+    const client = taskRunClientForAgent(agentLifecycleFetch(calls));
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "codex",
+      argv: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stdout)})`],
+      transcript: "stream-json",
+      redactSecrets: [secret],
+    });
+
+    assert.equal(result.entries[0].type, "session_meta");
+    assert.equal(result.entries[1].type, "item.completed");
+    assert.equal(result.entries[1].item.aggregated_output, "token=[REDACTED]");
+    assert.deepEqual(result.usage, {
+      tokens: 120,
+      cost: 0,
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 7,
+    });
+    const upload = calls.find((call) => call.path.endsWith("/content"));
+    assert.ok(upload.body.includes('"type":"item.completed"'));
+    assert.ok(upload.body.includes("[REDACTED]"));
+    assert.equal(upload.body.includes(secret), false);
+  });
+
+  it("surfaces an opencode fatal stream error from the captured process output", async () => {
+    const calls = [];
+    const stdout = JSON.stringify({ type: "error", error: { message: "model overloaded" } }) + "\n";
+    const client = taskRunClientForAgent(agentLifecycleFetch(calls));
+
+    const result = await client.agent.exec({
+      invocationKey: "agent",
+      backend: "opencode",
+      argv: [process.execPath, "-e", `process.stdout.write(${JSON.stringify(stdout)})`],
+      transcript: "stream-json",
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.streamError, "model overloaded");
+    assert.equal(result.entries[1].type, "error");
+  });
+
   it("degrades only observability after the default open retries and leaves the process result intact", async () => {
     let opens = 0;
     const client = taskRunClientForAgent((url, init = {}) => {
@@ -614,6 +677,20 @@ function taskRunClientForAgent(fetch) {
     fencingToken: "42",
     fetch,
   });
+}
+
+function agentLifecycleFetch(calls) {
+  return (url, init = {}) => {
+    const path = new URL(url).pathname;
+    const body = init.method === "PUT" ? init.body : JSON.parse(init.body);
+    calls.push({ path, method: init.method, body });
+    if (path.endsWith("/session-open")) return json({ sessionId: "task-run-1-a1-agent", attempt: 1 });
+    if (path.endsWith("/artifact-declare")) return json({ artifactId: body.artifactId, type: body.type, durableStatus: "declared" });
+    if (path.endsWith("/content")) return json({ artifactId: "transcript-task-run-1-a1-agent", durableStatus: "uploaded" });
+    if (path.endsWith("/artifact-finalize")) return json({ artifactId: body.artifactId, durableStatus: "finalized" });
+    if (path.endsWith("/session-close")) return json({ sessionId: body.sessionId, status: body.status });
+    throw new Error(`unexpected ${init.method} ${path}`);
+  };
 }
 
 function json(body, init = {}) {
