@@ -69,7 +69,7 @@ func TestSessionEvalTaskRunnerSourceContract(t *testing.T) {
 		`"--model", model`,
 		`"--output-schema", schemaPath`,
 		`"--output-last-message", outPath`,
-		`timeout: 10 * 60 * 1000`,
+		`timeoutMs: 10 * 60 * 1000`,
 		`contextOverflow(message) ? "transcript_too_large" : "judge_error"`,
 		`eval_result: JSON.stringify(result)`,
 		`judge_model: model`,
