@@ -16,7 +16,6 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
-	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
@@ -51,7 +50,7 @@ type Server struct {
 	mux                 *http.ServeMux
 	wsModules           []wsModule // workspace-scoped route modules (registered on wsMux)
 	connectorDispatcher *connector.Dispatcher
-	sessionOpenRegistry *driverexecutor.TaskRunSessionOpenRegistry
+	sessionOpenRegistry *webui.TaskRunSessionOpenRegistry
 
 	// Connection pools
 	pool      appinfra.Pool // may be nil if daemon unavailable at startup

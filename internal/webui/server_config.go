@@ -174,3 +174,7 @@ func (c *ServerConfig) EnsureSessionOpenRegistry() *driverexecutor.TaskRunSessio
 	}
 	return c.SessionOpenRegistry
 }
+
+// TaskRunSessionOpenRegistry aliases the driver registry type so consumers
+// wired through this config need no direct driver import.
+type TaskRunSessionOpenRegistry = driverexecutor.TaskRunSessionOpenRegistry
