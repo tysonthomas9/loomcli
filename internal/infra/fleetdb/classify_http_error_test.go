@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func TestClassifyHTTPError_GoneMapsToErrGone(t *testing.T) {
@@ -17,6 +18,24 @@ func TestClassifyHTTPError_GoneMapsToErrGone(t *testing.T) {
 	}
 	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("err = %v, must not satisfy ErrAlreadyExists/ErrConflict", err)
+	}
+}
+
+func TestClassifyHTTPError_SessionLifecycleAttemptMismatch(t *testing.T) {
+	body := []byte(`{"error":{"code":"session_attempt_mismatch","message":"attempt mismatch"}}`)
+	err := classifyHTTPError(http.MethodPost, "/agent-sessions/open", http.StatusConflict, body)
+	var lifecycleErr *store.SessionLifecycleError
+	if !errors.As(err, &lifecycleErr) || lifecycleErr.Code != store.SessionLifecycleErrAttemptMismatch || lifecycleErr.Retryable() {
+		t.Fatalf("err = %v, want non-retryable attempt mismatch", err)
+	}
+}
+
+func TestClassifyHTTPError_SessionLifecycleContentionIsRetryable(t *testing.T) {
+	body := []byte(`{"error":{"code":"session_lifecycle_contention","message":"retry"}}`)
+	err := classifyHTTPError(http.MethodPost, "/agent-sessions/open", http.StatusServiceUnavailable, body)
+	var transient *store.SessionLifecycleTransientError
+	if !errors.As(err, &transient) || transient.Code != store.SessionLifecycleErrContention || !transient.Retryable() {
+		t.Fatalf("err = %v, want retryable lifecycle contention", err)
 	}
 }
 

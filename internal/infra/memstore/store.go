@@ -85,7 +85,7 @@ func New() *Store {
 		repos:      newRepoStore(),
 		agents:     newAgentStore(),
 		nodes:      nodes,
-		sessions:   newAgentSessionStore(),
+		sessions:   newAgentSessionStore(taskRuns),
 		evals:      newSessionEvalStore(),
 		terminals:  newTerminalSessionStore(),
 		artifacts:  artifacts,
