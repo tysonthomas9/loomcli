@@ -164,3 +164,17 @@ func FindAvailablePort(bindAddr string, startPort, maxAttempts int) (net.Listene
 func GetCwd() (string, error) {
 	return os.Getwd()
 }
+
+// EnsureSessionOpenRegistry returns the configured session-open registry,
+// lazily constructing the shared default so callers outside this package
+// need no direct driver dependency.
+func (c *ServerConfig) EnsureSessionOpenRegistry() *driverexecutor.TaskRunSessionOpenRegistry {
+	if c.SessionOpenRegistry == nil {
+		c.SessionOpenRegistry = driverexecutor.NewTaskRunSessionOpenRegistry()
+	}
+	return c.SessionOpenRegistry
+}
+
+// TaskRunSessionOpenRegistry aliases the driver registry type so consumers
+// wired through this config need no direct driver import.
+type TaskRunSessionOpenRegistry = driverexecutor.TaskRunSessionOpenRegistry

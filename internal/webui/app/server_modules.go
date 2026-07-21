@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 
-	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
@@ -135,7 +134,7 @@ func (app *Server) buildInfraModules() {
 
 func (app *Server) buildStoreBackedInfraModules() {
 	if app.sessionOpenRegistry == nil {
-		app.sessionOpenRegistry = driverexecutor.NewTaskRunSessionOpenRegistry()
+		app.sessionOpenRegistry = app.config.EnsureSessionOpenRegistry()
 	}
 	app.connectorDispatcher = app.buildConnectorDispatcher()
 	app.wsModules = append(app.wsModules, agents.NewModule(app.agentSvc, app.hub))
