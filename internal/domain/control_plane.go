@@ -61,6 +61,8 @@ const (
 	AgentSessionKindTerminal      AgentSessionKind = "terminal"
 	AgentSessionKindMaintenance   AgentSessionKind = "maintenance"
 	AgentSessionKindAdHoc         AgentSessionKind = "ad_hoc"
+	// Judge sessions are never eval candidates (LOOMCLI-94); kind==task excludes them.
+	AgentSessionKindJudge AgentSessionKind = "judge"
 )
 
 type AgentSessionStatus string
@@ -94,11 +96,14 @@ type AgentSession struct {
 	NodeID          string             `json:"node_id,omitempty"`
 	Kind            AgentSessionKind   `json:"kind"`
 	TaskID          string             `json:"task_id,omitempty"`
+	TaskRunID       string             `json:"task_run_id,omitempty"`
+	InvocationKey   string             `json:"invocation_key,omitempty"`
 	TerminalID      string             `json:"terminal_id,omitempty"`
 	ParentSessionID string             `json:"parent_session_id,omitempty"`
 	Status          AgentSessionStatus `json:"status"`
 	Phase           string             `json:"phase,omitempty"`
 	Attempt         int                `json:"attempt,omitempty"`
+	Tags            []string           `json:"tags,omitempty"`
 	StartedAt       time.Time          `json:"started_at,omitempty"`
 	LastHeartbeat   time.Time          `json:"last_heartbeat,omitempty"`
 	FinishedAt      *time.Time         `json:"finished_at,omitempty"`

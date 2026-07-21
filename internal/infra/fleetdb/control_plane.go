@@ -98,11 +98,14 @@ func (s *agentSessionStore) Create(ctx context.Context, in store.AgentSessionCre
 		NodeID          string                    `json:"node_id,omitempty"`
 		Kind            domain.AgentSessionKind   `json:"kind,omitempty"`
 		TaskID          string                    `json:"task_id,omitempty"`
+		TaskRunID       string                    `json:"task_run_id,omitempty"`
+		InvocationKey   string                    `json:"invocation_key,omitempty"`
 		TerminalID      string                    `json:"terminal_id,omitempty"`
 		ParentSessionID string                    `json:"parent_session_id,omitempty"`
 		Status          domain.AgentSessionStatus `json:"status,omitempty"`
 		Phase           string                    `json:"phase,omitempty"`
 		Attempt         int                       `json:"attempt,omitempty"`
+		Tags            []string                  `json:"tags,omitempty"`
 		StartedAt       time.Time                 `json:"started_at,omitempty"`
 		Metadata        map[string]string         `json:"metadata,omitempty"`
 	}{
@@ -111,11 +114,14 @@ func (s *agentSessionStore) Create(ctx context.Context, in store.AgentSessionCre
 		NodeID:          in.NodeID,
 		Kind:            in.Kind,
 		TaskID:          in.TaskID,
+		TaskRunID:       in.TaskRunID,
+		InvocationKey:   in.InvocationKey,
 		TerminalID:      in.TerminalID,
 		ParentSessionID: in.ParentSessionID,
 		Status:          in.Status,
 		Phase:           in.Phase,
 		Attempt:         in.Attempt,
+		Tags:            in.Tags,
 		StartedAt:       in.StartedAt,
 		Metadata:        in.Metadata,
 	}
@@ -145,20 +151,25 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 	if filter.TaskID != "" {
 		q.Set("task_id", filter.TaskID)
 	}
+	if filter.TaskRunID != "" {
+		q.Set("task_run_id", filter.TaskRunID)
+	}
 	if filter.Status != "" {
 		q.Set("status", string(filter.Status))
 	}
-	// fleet-db's listAgentSessions doesn't yet accept kind / parent_session_id
-	// as query params (see fleet-db/api/openapi.yaml :: listAgentSessions),
-	// so we ask for the broader set and filter client-side below. When fleet-db
-	// adds those params, append them here and drop the post-filter pass.
-	clientSideKind := filter.Kind
-	clientSideParent := filter.ParentSessionID
-	// Limit must be applied *after* the client-side filter, otherwise we
-	// could return fewer than the requested count when the server-side
-	// page contains many non-matching kinds/parents.
-	clientSideLimit := filter.Limit
-	if clientSideKind == "" && clientSideParent == "" && filter.Limit > 0 {
+	if filter.Attempt != nil {
+		q.Set("attempt", strconv.Itoa(*filter.Attempt))
+	}
+	if filter.NonTerminal {
+		q.Set("non_terminal", "true")
+	}
+	if filter.Kind != "" {
+		q.Set("kind", string(filter.Kind))
+	}
+	if filter.ParentSessionID != "" {
+		q.Set("parent_session_id", filter.ParentSessionID)
+	}
+	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
 	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-sessions", q)
@@ -170,9 +181,6 @@ func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.Ag
 	}
 	if resp.AgentSessions == nil {
 		resp.AgentSessions = []*domain.AgentSession{}
-	}
-	if clientSideKind != "" || clientSideParent != "" {
-		resp.AgentSessions = filterAgentSessionsClientSide(resp.AgentSessions, clientSideKind, clientSideParent, clientSideLimit)
 	}
 	return resp.AgentSessions, nil
 }
@@ -188,8 +196,17 @@ func (s *agentSessionStore) ListPage(ctx context.Context, ws string, filter stor
 	if filter.TaskID != "" {
 		q.Set("task_id", filter.TaskID)
 	}
+	if filter.TaskRunID != "" {
+		q.Set("task_run_id", filter.TaskRunID)
+	}
 	if filter.Status != "" {
 		q.Set("status", string(filter.Status))
+	}
+	if filter.Attempt != nil {
+		q.Set("attempt", strconv.Itoa(*filter.Attempt))
+	}
+	if filter.NonTerminal {
+		q.Set("non_terminal", "true")
 	}
 	if filter.Kind != "" {
 		q.Set("kind", string(filter.Kind))
@@ -221,27 +238,6 @@ func (s *agentSessionStore) ListPage(ctx context.Context, ws string, filter stor
 		resp.AgentSessions = []*domain.AgentSession{}
 	}
 	return resp.AgentSessions, *resp.Total, nil
-}
-
-// Client-side filter for Kind / ParentSessionID; see List comment above.
-func filterAgentSessionsClientSide(sessions []*domain.AgentSession, kind domain.AgentSessionKind, parent string, limit int) []*domain.AgentSession {
-	filtered := make([]*domain.AgentSession, 0, len(sessions))
-	for _, sess := range sessions {
-		if sess == nil {
-			continue
-		}
-		if kind != "" && sess.Kind != kind {
-			continue
-		}
-		if parent != "" && sess.ParentSessionID != parent {
-			continue
-		}
-		filtered = append(filtered, sess)
-		if limit > 0 && len(filtered) >= limit {
-			break
-		}
-	}
-	return filtered
 }
 
 func (s *agentSessionStore) Heartbeat(ctx context.Context, ws, sessionID string) (*domain.AgentSession, error) {

@@ -164,11 +164,14 @@ func (s *agentSessionStore) Create(_ context.Context, in store.AgentSessionCreat
 		NodeID:          in.NodeID,
 		Kind:            in.Kind,
 		TaskID:          in.TaskID,
+		TaskRunID:       in.TaskRunID,
+		InvocationKey:   in.InvocationKey,
 		TerminalID:      in.TerminalID,
 		ParentSessionID: in.ParentSessionID,
 		Status:          in.Status,
 		Phase:           in.Phase,
 		Attempt:         in.Attempt,
+		Tags:            append([]string(nil), in.Tags...),
 		StartedAt:       in.StartedAt,
 		Metadata:        cloneMap(in.Metadata),
 		CreatedAt:       now,
@@ -286,6 +289,7 @@ func cloneAgentSession(s *domain.AgentSession) *domain.AgentSession {
 	out := *s
 	out.FinishedAt = clonePtr(s.FinishedAt)
 	out.ExitCode = clonePtr(s.ExitCode)
+	out.Tags = append([]string(nil), s.Tags...)
 	out.Metadata = cloneMap(s.Metadata)
 	return &out
 }
@@ -311,7 +315,16 @@ func sessionMatches(s *domain.AgentSession, filter store.AgentSessionFilter) boo
 	if filter.TaskID != "" && s.TaskID != filter.TaskID {
 		return false
 	}
+	if filter.TaskRunID != "" && s.TaskRunID != filter.TaskRunID {
+		return false
+	}
 	if filter.Status != "" && s.Status != filter.Status {
+		return false
+	}
+	if filter.Attempt != nil && s.Attempt != *filter.Attempt {
+		return false
+	}
+	if filter.NonTerminal && s.Status.IsTerminal() {
 		return false
 	}
 	if filter.Kind != "" && s.Kind != filter.Kind {
