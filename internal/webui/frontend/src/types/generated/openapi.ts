@@ -737,6 +737,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/traces/runs/{taskRunId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get TaskRun truth and joined sessions for a Traces run view */
+    get: operations["getWorkspaceTraceRun"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/sessions/{sessionId}": {
     parameters: {
       query?: never;
@@ -3280,6 +3297,8 @@ export interface components {
       judge_summary: string;
       judge_model: string;
       judge_prompt_version: string;
+      /** @description Judge AgentSession that produced this evaluation, when available. */
+      judge_session_id?: string;
       eval_cost: components["schemas"]["SessionEvalCost"];
       /** Format: date-time */
       session_started_at: string;
@@ -3290,17 +3309,13 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description Dimension-keyed score map. Current judge writes still require exactly the canonical four keys. */
     SessionEvalScores: {
-      outcome_success: number;
-      instruction_adherence: number;
-      efficiency: number;
-      tool_use_quality: number;
+      [key: string]: number;
     };
+    /** @description Dimension-keyed rationale map matching scores. */
     SessionEvalScoreRationales: {
-      outcome_success: string;
-      instruction_adherence: string;
-      efficiency: string;
-      tool_use_quality: string;
+      [key: string]: string;
     };
     SessionEvalImprovementCategories: {
       harness: string[];
@@ -3323,6 +3338,12 @@ export interface components {
       epic_id?: string;
       agent_name: string;
       kind?: string;
+      task_run_id?: string;
+      invocation_key?: string;
+      attempt?: number;
+      tags?: string[];
+      eval_status?: string;
+      eval_scores?: components["schemas"]["SessionEvalScores"];
       backend: string;
       model?: string;
       phase?: string;
@@ -3353,7 +3374,58 @@ export interface components {
       is_active: boolean;
       has_transcript: boolean;
       has_diff: boolean;
+      /** @description Judge session joined from this subject session's displayed eval record. */
+      judge_session_id?: string;
+      /** @description Subject session read server-side from judge session metadata. */
+      judged_session_id?: string;
       last_error?: string;
+    };
+    WorkspaceSessionListItem: components["schemas"]["SessionResponse"] & {
+      task_run_id: string;
+      invocation_key: string;
+      attempt: number;
+    };
+    WorkspaceTraceRunResponse: {
+      success: boolean;
+      data: components["schemas"]["WorkspaceTraceRunData"];
+      error?: string;
+    };
+    WorkspaceTraceRunData: {
+      task_run_id: string;
+      task_run?: components["schemas"]["TraceTaskRun"];
+      task_run_missing: boolean;
+      task_id?: string;
+      attempt_count: number;
+      files_changed: number;
+      /** Format: int64 */
+      total_tokens: number;
+      /** Format: double */
+      duration_seconds: number;
+      sessions: components["schemas"]["WorkspaceSessionListItem"][];
+    };
+    /** @description Control-plane TaskRun truth used by the run header; additional TaskRun fields may be present. */
+    TraceTaskRun: {
+      workspace_key: string;
+      task_run_id: string;
+      task_id: string;
+      /** @description Control-plane TaskRun status. */
+      status: string;
+      /** Format: int64 */
+      input_tokens?: number;
+      /** Format: int64 */
+      output_tokens?: number;
+      /** Format: int64 */
+      cache_read_tokens?: number;
+      /** Format: int64 */
+      cache_write_tokens?: number;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      finished_at?: string | null;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
     };
     /** @description Single transcript entry from a session */
     TranscriptEntry: {
@@ -5418,6 +5490,11 @@ export interface operations {
         until?: string;
         status?: string;
         agent_id?: string;
+        /** @description Filter sessions by first-class task run identifier. */
+        task_run_id?: string;
+        /** @description Repeatable AND filter; every supplied tag must be present on a session. */
+        tag?: string[];
+        /** @description Filter by any supported session kind, including judge. */
         kind?: string;
         limit?: number;
       };
@@ -5439,10 +5516,12 @@ export interface operations {
           "application/json": {
             success: boolean;
             data: {
-              sessions: components["schemas"]["SessionResponse"][];
+              sessions: components["schemas"]["WorkspaceSessionListItem"][];
               /** @description Pre-truncation count matching the server-side filters. */
               total: number;
               limit: number;
+              /** @description Sorted union of eval score keys over the full filtered range before pagination. */
+              score_dimensions: string[];
             };
           };
         };
@@ -5456,6 +5535,44 @@ export interface operations {
       };
       /** @description fleet-db must be upgraded for server-side session time filtering */
       502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getWorkspaceTraceRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        taskRunId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Task run trace data */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WorkspaceTraceRunResponse"];
+        };
+      };
+      /** @description Invalid task run ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Neither a TaskRun nor linked sessions exist */
+      404: {
         headers: {
           [name: string]: unknown;
         };
