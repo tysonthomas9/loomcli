@@ -889,6 +889,8 @@ function codexUsage(value) {
     input_tokens: finiteNumber(value.input_tokens ?? value.inputTokens),
     cached_input_tokens: finiteNumber(value.cached_input_tokens ?? value.cachedInputTokens),
     output_tokens: finiteNumber(value.output_tokens ?? value.outputTokens),
+    cache_write_tokens: finiteNumber(value.cache_write_tokens ?? value.cacheWriteTokens),
+    cost_usd: finiteNumber(value.cost_usd ?? value.costUsd ?? value.total_cost_usd),
   });
   return Object.keys(usage).length > 0 ? usage : null;
 }
