@@ -1,0 +1,54 @@
+schema_version: 1
+suite: supervisor-disabled
+
+rows:
+  - id: deterministic-plan-coder
+    phase: execution
+    state: red
+    owner: execution-reliability-lane
+    blocker: >-
+      The TS prompt-agent execution leaf does not yet have a deterministic
+      local backend, public-API prompt-agent seeding is not ordered before task
+      creation, and local mode still enters the workspace daemon manager.
+    coordinates:
+      depth: end-to-end
+      realness: deterministic
+      provisioning: compose
+      polarity: positive-and-negative
+      target: loom-serve-ts-plane
+    env:
+      LOOM_LOCAL_MODE_PLANE: "ts"
+      LOOM_TASK_READY_EVENTS: "1"
+      LOCAL_MODE_COMPOSE_FILES: test/local-mode/docker-compose.workflow-build.yml
+      LOCAL_MODE_COMPOSE_UP_FLAGS: --build -d
+    setup:
+      - id: clean-project
+        argv: [make, local-mode-down]
+        timeout_seconds: 180
+      - id: workflow-toolchain
+        argv: [make, local-mode-workflow-build-check]
+        timeout_seconds: 120
+      - id: stack
+        argv: [make, local-mode-up]
+        timeout_seconds: 900
+    verify:
+      - id: deterministic-evidence
+        argv: [make, local-mode-verify]
+        timeout_seconds: 300
+    teardown:
+      - id: cleanup-stack
+        argv: [make, local-mode-down]
+        timeout_seconds: 180
+    assertions:
+      - local-mode-plane-ts
+      - task-ready-events-enabled
+      - zero-auto-agentdefs
+      - zero-daemon-processes
+      - zero-daemon-sockets
+      - public-api-plan-agent
+      - public-api-task-agent
+      - planner-review-design
+      - coder-completion
+      - planner-transcript
+      - coder-transcript
+      - coder-diff

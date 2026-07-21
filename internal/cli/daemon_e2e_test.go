@@ -180,6 +180,20 @@ func runLoomDaemon(t *testing.T, dir string, args ...string) (stdout, stderr str
 	return outBuf.String(), errBuf.String(), exitCode
 }
 
+// daemonStateJSON contains the daemon state fields asserted by these
+// composition-root subprocess tests. Keeping the wire shape local avoids an
+// import cycle through internal/cli/daemon.
+type daemonStateJSON struct {
+	PID       int               `json:"pid"`
+	StartedAt time.Time         `json:"started_at"`
+	Agents    []daemonAgentJSON `json:"agents"`
+}
+
+type daemonAgentJSON struct {
+	Worktree string `json:"worktree"`
+	Role     string `json:"role"`
+}
+
 // waitForFileRemoved polls until the file no longer exists.
 func waitForFileRemoved(t *testing.T, path string, timeout time.Duration) {
 	t.Helper()
@@ -374,7 +388,7 @@ func TestE2E_DaemonStateFileUpdated(t *testing.T) {
 		t.Fatal("state file did not appear within 20s")
 	}
 
-	var state DaemonState
+	var state daemonStateJSON
 	if err := json.Unmarshal(stateData, &state); err != nil {
 		t.Fatalf("parsing state file: %v\nContent: %s", err, stateData)
 	}

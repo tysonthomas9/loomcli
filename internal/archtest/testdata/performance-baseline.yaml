@@ -1,0 +1,350 @@
+schema_version: 1
+
+loom_serve_startup_readiness:
+  record:
+    status: measured
+    rationale: >-
+      Ten isolated cold-data-directory launches establish the pre-extraction
+      loom serve process-to-listen and HTTP-readiness baseline without running
+      a workspace daemon or any paid backend.
+    evidence:
+      source_sha: b64b5256ba206d482037a5dee2703fdecbb3c497
+      measured_at: 2026-07-15T17:30:30Z
+      evidence_source: >-
+        Clean git-archive binaries and the ten raw timing pairs recorded in
+        this result; FleetDB source 8120c788ccc78477a61cfba591fe0445c580ab77.
+      command:
+        - ./loom
+        - serve
+        - --no-daemon
+        - --bind
+        - 127.0.0.1
+        - --port
+        - <unique-loopback-port>
+      procedure: >-
+        Build Loom from git archive b64b5256 with GOCACHE=/tmp/go-build-cache;
+        build FleetDB from git archive 8120c788; for each of ten samples use a
+        fresh HOME, LOOM_CONFIG_DIR, and artifact directory, start loom serve
+        with the clean FleetDB binary, poll the structured log for "server
+        listening" and GET /health every 5ms, record elapsed milliseconds from
+        process spawn, then SIGTERM and wait before the next sample. Aggregates
+        use the nearest-rank method.
+      environment:
+        operating_system: macOS 15.6.1 (24G90)
+        architecture: arm64
+        cpu: Apple M4 Pro, 12 cores
+        memory: 24 GB
+        go_version: go1.26.0
+        node_version: v24.13.1 (not used by this measurement)
+        profile: clean archives; isolated data per sample; warm filesystem and Go cache; embedded Redis FleetDB; no daemon
+        dependencies:
+          - fleet-db@8120c788ccc78477a61cfba591fe0445c580ab77
+          - fleet-db-binary-sha256:9ead10cf35d5e4ae46ab1a4955b002b26fd83cd47da7369f68793b8b790bbbae
+  result:
+    sample_count: 10
+    percentile_method: nearest-rank
+    startup_to_listen_milliseconds:
+      - 108.486
+      - 44.499
+      - 43.349
+      - 46.264
+      - 28.809
+      - 28.958
+      - 48.169
+      - 28.563
+      - 30.084
+      - 48.719
+    readiness_milliseconds:
+      - 209.558
+      - 143.095
+      - 146.679
+      - 134.474
+      - 144.979
+      - 142.596
+      - 136.709
+      - 131.857
+      - 141.699
+      - 138.029
+    startup_p50:
+      value: 43.349
+      unit: milliseconds
+    startup_p95:
+      value: 108.486
+      unit: milliseconds
+    readiness_p50:
+      value: 141.699
+      unit: milliseconds
+    readiness_p95:
+      value: 209.558
+      unit: milliseconds
+
+workflow_approval_latency:
+  record:
+    status: not-yet-migrated
+    rationale: >-
+      Phase 2 is the first point at which workflow approve executes through the
+      migrated Workflow management boundary. Sampling the current direct-Store
+      command would not measure the required migrated use case.
+    evidence:
+      source_sha: b64b5256ba206d482037a5dee2703fdecbb3c497
+      measured_at: 2026-07-15
+      evidence_source: docs/migrations/modular-monolith/03-migration-plan.md Phase 2 and 04-enforcement-and-gates.md Performance and operability
+      command: []
+      procedure: >-
+        After the Phase 2 management route and client conversion exist, seed a
+        fixed workflow version, execute at least 30 approve calls against one
+        isolated local FleetDB deployment, retain all raw durations, and record
+        nearest-rank p50 and p95. Until then both values remain explicit nulls.
+      environment:
+        operating_system: macOS 15.6.1 (24G90)
+        architecture: arm64
+        cpu: Apple M4 Pro, 12 cores
+        memory: 24 GB
+        go_version: go1.26.0
+        node_version: v24.13.1
+        profile: not executable before the Phase 2 Workflow management boundary exists
+        dependencies: []
+  result:
+    use_case: workflow approve through the migrated authenticated management API
+    sample_count: 0
+    p50:
+      value: null
+      unit: milliseconds
+    p95:
+      value: null
+      unit: milliseconds
+
+fleetdb_round_trips:
+  record:
+    status: not-yet-migrated
+    rationale: >-
+      The representative workflow-approve management command and its stable
+      request boundary do not exist until Phase 2, so a target-path FleetDB
+      round-trip count cannot yet be observed without substituting legacy
+      direct-Store behavior.
+    evidence:
+      source_sha: b64b5256ba206d482037a5dee2703fdecbb3c497
+      measured_at: 2026-07-15
+      evidence_source: docs/migrations/modular-monolith/03-migration-plan.md Phase 2 and 04-enforcement-and-gates.md Performance and operability
+      command: []
+      procedure: >-
+        Once the Phase 2 workflow-approve route exists, run one fixed command
+        against an isolated FleetDB, count client transport requests or spans
+        from command start through response, repeat to confirm the count is
+        stable, and record the exact round-trips per command. No inferred count
+        from source call sites is accepted.
+      environment:
+        operating_system: macOS 15.6.1 (24G90)
+        architecture: arm64
+        cpu: Apple M4 Pro, 12 cores
+        memory: 24 GB
+        go_version: go1.26.0
+        node_version: v24.13.1
+        profile: not executable before the Phase 2 Workflow management boundary exists
+        dependencies: []
+  result:
+    command_name: workflow approve through the migrated authenticated management API
+    sampling_scope: command start through successful management response, including every Loom-to-FleetDB HTTP request
+    round_trips_per_command:
+      value: null
+      unit: round-trips/command
+
+production_background_loops:
+  record:
+    status: measured
+    rationale: >-
+      The Phase 1 AST inventory names every in-scope non-test source ticker and
+      goroutine launch definition plus every additional boot or long-lived
+      component; managed classifications are the production background-loop
+      population, while bounded command, request, and startup waits remain
+      visible but do not inflate that count. The all-source definition ledger
+      intentionally includes architecture tooling, mutually exclusive build-tag
+      variants such as testbackend, and the fake-harness helper; it is not a
+      simultaneous product-runtime instance count.
+    evidence:
+      source_sha: 9a5b30516f88e74d315cf54c7ed693cc93f8e5b5
+      measured_at: 2026-07-15T17:33:00Z
+      evidence_source: internal/archtest/testdata/runtime-components.yaml with exact AST parity enforced by internal/archtest/runtime_inventory_test.go
+      command:
+        - go
+        - test
+        - ./internal/archtest
+        - -run
+        - TestCheckedInRuntimeInventoryMatchesRepository
+        - -count=1
+      procedure: >-
+        Strictly load runtime-components.yaml, AST-scan non-test,
+        non-generated in-scope roots and all build variants for time.NewTicker
+        calls and go statements, require exact file/function/ordinal parity for
+        both, require every goroutine definition to link to one or more named
+        lifecycle components or carry an explicit bounded, request, command, or
+        helper disposition with a reason, verify every registered non-ticker
+        component still resolves to its source function, then count all launch
+        definitions, components, and lifecycle classifications.
+        background_loop_count is exactly the managed classification; the other
+        bounded classifications are reported separately.
+      environment:
+        operating_system: macOS 15.6.1 (24G90)
+        architecture: arm64
+        cpu: Apple M4 Pro, 12 cores
+        memory: 24 GB
+        go_version: go1.26.0
+        node_version: v24.13.1 (not used by this measurement)
+        profile: repository AST scan over cmd, internal, and sdk; _test.go and generated files excluded; architecture tooling, testbackend-tagged source, fake-harness source, and mutually exclusive platform variants included
+        dependencies:
+          - internal/archtest/testdata/runtime-components.yaml
+  result:
+    inventory_path: internal/archtest/testdata/runtime-components.yaml
+    total_components: 83
+    ticker_sites: 58
+    goroutine_launch_sites: 108
+    managed: 56
+    command_poll: 3
+    request_scoped: 15
+    startup_wait: 9
+    background_loop_count: 56
+    count_rule: classification equals managed
+
+full_build_gate_duration:
+  record:
+    status: measured
+    rationale: >-
+      The immutable integration ledger contains the latest complete successful
+      full Loom gate timing. It is an approximate historical baseline at its
+      explicit source SHA and must be refreshed on the current source before
+      approving the first pilot.
+    evidence:
+      source_sha: 09f071d0af6c3493eff724f32dab656c05f10cdf
+      measured_at: 2026-07-14
+      evidence_source: docs/migrations/modular-monolith/00-phase-0-baseline.md Validation ledger and final Loom gate command
+      command:
+        - env
+        - -u
+        - LOOM_WORKSPACE
+        - -u
+        - LOOM_WORKSPACE_RUNTIME_DIR
+        - -u
+        - LOOM_AGENT_NAME
+        - -u
+        - LOOM_AGENT_ROLE
+        - -u
+        - LOOM_AGENT_TERMINAL_ID
+        - -u
+        - LOOM_SESSION_ID
+        - -u
+        - LOOM_NOTIFY_TOKEN
+        - -u
+        - LOOM_CONFIG_DIR
+        - -u
+        - LOOM_DESKTOP_DATA_DIR
+        - -u
+        - LOOM_FRONTEND_DIR
+        - -u
+        - LOOM_WEBUI_URL
+        - -u
+        - LOOM_LOCAL_RUNTIME
+        - HOME=/tmp/loom-v5-merge-gate-home
+        - GOCACHE=/tmp/go-build-cache
+        - make
+        - gate
+      procedure: >-
+        Run the recorded clean-environment command from source 09f071d0 and
+        measure wall-clock time around the complete aggregate Go and frontend
+        gate. The source ledger records approximately 188 seconds; it does not
+        claim sub-second precision or silently re-label a partial current run.
+      environment:
+        operating_system: not captured in source evidence
+        architecture: not captured in source evidence
+        cpu: not captured in source evidence
+        memory: not captured in source evidence
+        go_version: not captured in source evidence
+        node_version: not captured in source evidence
+        profile: isolated HOME and clean Loom runtime environment; complete make gate
+        dependencies: []
+  result:
+    scope: complete Loom make gate, including Go and frontend aggregate checks
+    precision: approximate
+    duration:
+      value: 188
+      unit: seconds
+
+frontend_route_chunk_sizes:
+  record:
+    status: measured
+    rationale: >-
+      A clean production Vite build provides an exact raw-byte baseline for
+      every lazy route-entry JavaScript chunk before the first extraction.
+      Terminal is intentionally excluded because the router keeps it eagerly
+      mounted rather than producing a route-entry chunk.
+    evidence:
+      source_sha: b64b5256ba206d482037a5dee2703fdecbb3c497
+      measured_at: 2026-07-15T17:21:08Z
+      evidence_source: clean git archive npm production build and exact stat byte counts recorded below
+      command:
+        - npm
+        - run
+        - build
+      procedure: >-
+        Extract git archive b64b5256 into an isolated temporary directory,
+        reuse the lockfile-installed host node_modules, run npm run build, and
+        stat the raw byte size of each production lazy page entry under
+        dist/assets. Map entry names to the lazy routes declared in
+        src/router.tsx; shared vendor and CSS chunks are outside this entry-only
+        baseline. Wall time is /usr/bin/time -p real.
+      environment:
+        operating_system: macOS 15.6.1 (24G90)
+        architecture: arm64
+        cpu: Apple M4 Pro, 12 cores
+        memory: 24 GB
+        go_version: go1.26.0 (not used by this measurement)
+        node_version: v24.13.1
+        profile: clean git archive; production Vite build; existing lockfile-installed node_modules
+        dependencies:
+          - npm@11.8.0
+          - vite@5.4.21
+  result:
+    asset_scope: raw bytes of production lazy route-entry JavaScript; shared vendor and CSS assets excluded
+    build_duration:
+      value: 7.61
+      unit: seconds
+    route_count: 13
+    routes:
+      - route: /ws/:workspaceId/agents
+        entry: AgentsPage-Dy_stQAL.js
+        raw_bytes: 64187
+      - route: /ws/:workspaceId/agents/:agentName
+        entry: AgentsPage-Dy_stQAL.js
+        raw_bytes: 64187
+      - route: /ws/:workspaceId/files
+        entry: FilesPage-DSFQm5AJ.js
+        raw_bytes: 1741
+      - route: /ws/:workspaceId/graph
+        entry: GraphPage-DsBrAu87.js
+        raw_bytes: 1944
+      - route: /ws/:workspaceId/issues/:issueId
+        entry: IssueDetailPage-Dsinj03L.js
+        raw_bytes: 14997
+      - route: /ws/:workspaceId/kanban
+        entry: KanbanPage-C7cV76QV.js
+        raw_bytes: 24880
+      - route: /ws/:workspaceId/list
+        entry: ListPage-DU0QWcuz.js
+        raw_bytes: 5567
+      - route: /ws/:workspaceId/monitor
+        entry: MonitorPage-CZcvO0Vs.js
+        raw_bytes: 1742
+      - route: /ws/:workspaceId/observability
+        entry: ObservabilityPage-Cb6FXWa4.js
+        raw_bytes: 1605
+      - route: /ws/:workspaceId/prs
+        entry: PRsPage-D6_NCXme.js
+        raw_bytes: 34949
+      - route: /ws/:workspaceId/settings
+        entry: SettingsPage-4Xemgowl.js
+        raw_bytes: 1612
+      - route: /ws/:workspaceId/table
+        entry: TablePage-IzfPoN6I.js
+        raw_bytes: 15785
+      - route: /ws/:workspaceId/workspace
+        entry: WorkspacePage-CasdRP08.js
+        raw_bytes: 1028

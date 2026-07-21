@@ -114,6 +114,10 @@ func (m *MockGitRunner) Run(dir string, args ...string) cli.CommandResult {
 	return m.RunResult
 }
 
+func (m *MockGitRunner) RunContext(_ context.Context, dir string, args ...string) cli.CommandResult {
+	return m.Run(dir, args...)
+}
+
 func (m *MockGitRunner) RunWithOutput(dir string, args ...string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -288,6 +292,10 @@ type ExecBridgeGitRunner struct {
 
 func (g *ExecBridgeGitRunner) Run(dir string, args ...string) cli.CommandResult {
 	return g.Exec.Run(dir, "git", args...)
+}
+
+func (g *ExecBridgeGitRunner) RunContext(_ context.Context, dir string, args ...string) cli.CommandResult {
+	return g.Run(dir, args...)
 }
 
 func (g *ExecBridgeGitRunner) RunWithOutput(dir string, args ...string) error {

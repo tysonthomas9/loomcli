@@ -1,29 +1,33 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** Proposed
+- **Status:** Reviewed — Phase 1 enforcement complete
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
+**Phase 1 status:** Analyzer `1.0.0` strictly validates the approved graph and baseline, enforces all four release and seven tag/race profiles plus the all-files AST pass, rejects undeclared module roots/edges and cycles, detects forbidden signature/type leakage, and ratchets semantic composite-Store, plural-handler, and 233 type-resolved direct-write rows. The reviewed mutation ledger, 83-component runtime inventory with exact parity and default-deny lifecycle dispositions for 108 in-scope non-test source goroutine launch definitions, six-record performance baseline, and five-row characterization matrix are checked in. The supervisor-disabled manifest and runner are productized, but their only execution row is intentionally RED; this completed failure contract is not supervisor-disabled functionality.
+
 ## Architecture source of truth
 
-The implementation should check in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml` and `migration-baseline.json` beside it. The graph must declare:
+Phase 1 checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. The graph declares:
 
 - every capability root;
 - allowed capability-to-capability import, synchronous command/query, and durable event edges;
 - `app` and `platform` restrictions;
+- default-deny third-party imports for capability and named-workflow cores/adapters, plus the core standard-library infrastructure denylist;
+- `completed_phase: 1`, which makes legacy-path and direct-write expiry fail once the declared last permitted phase completes;
 - temporary legacy paths and their owners/expiry;
-- the [Phase 0 baselines](00-phase-0-baseline.md) for broad Store use and direct adapter writes, once each pending inventory is generated.
+- the [Phase 0 baselines](00-phase-0-baseline.md) for broad Store use and type-resolved direct adapter writes.
 
 The human ownership tables in [02-target-architecture.md](02-target-architecture.md) and the machine graph change together. An import exception without an ownership decision is not accepted.
 
 ## Go dependency gates
 
 1. Only a capability's public root may be imported by another capability.
-2. Capability cores import no `webui`, `cli`, transport adapter, or infrastructure implementation.
-3. Capability adapters may import their own public root and approved platform mechanisms; they may not import another capability's internals.
+2. Capability cores import no `webui`, `cli`, transport adapter, infrastructure implementation, unapproved third-party dependency, or denied standard-library infrastructure package.
+3. Capability adapters may import their own public root and adapter subtree, approved platform mechanisms, and reviewed external dependencies; only a `fleetdb` adapter may import the shared FleetDB transport. They may not import another capability, including its public root.
 4. `platform` imports no product capability.
 5. `app/serve` may construct public roots/adapters but owns no product state or policy.
-6. A named `app/<workflow>` core may call multiple public roots and its own ports but no module internals, concrete adapters, or repositories. `app/serve` alone constructs and injects the app-local adapter for an atomic-command or coordination-state port.
+6. A named `app/<workflow>` core may call multiple public roots, its own packages/ports, approved platform mechanisms, and reviewed neutral dependencies, but no module internals, concrete adapters, repositories, or unapproved infrastructure. `app/serve` alone constructs and injects the app-local adapter for an atomic-command or coordination-state port.
 7. Compile-time import and synchronous command/query graphs must both be acyclic.
 8. Unknown module roots or edges fail by default.
 
@@ -135,6 +139,7 @@ Workflow approve/unapprove/activate and every grant-write path require negative 
 
 - Every capability background component is registered with the runtime host.
 - Modules do not launch unmanaged long-lived goroutines from constructors.
+- Every in-scope non-test source `go` statement links to one or more named lifecycle components or carries an explicit bounded, request, command, or helper disposition with a nonempty reason; missing and stale links fail closed.
 - Cadence, jitter, timeout, backoff, health, and cancellation are observable and testable.
 - One failing reconciler does not stall unrelated reconcilers.
 - Restart/recovery tests prove idempotency.
@@ -230,11 +235,11 @@ These are not assumed to be covered by the root Go/frontend gate:
 
 ## Performance and operability
 
-Before the first complete pilot, record:
+Phase 1 records the pre-extraction values for:
 
 - `loom serve` startup time;
-- p50/p95 latency for the migrated use case;
-- fleet-db round trips per command;
+- p50/p95 latency for the migrated use case, currently `not-yet-migrated` with sample count `0` and null p50/p95;
+- fleet-db round trips per command, currently `not-yet-migrated` with a null count;
 - background-loop/reconciler counts;
 - build/test/gate duration;
 - frontend route chunk sizes for migrated routes.
@@ -248,7 +253,7 @@ Also record per slice:
 - Store/direct-write counts before and after;
 - fleet-db round-trip and latency sampling procedure.
 
-A module boundary that adds synchronous chatter without reducing broad dependencies is a regression. Thresholds should be set from the [Phase 0 baseline](00-phase-0-baseline.md); the migration document deliberately does not invent percentages before measurement.
+A module boundary that adds synchronous chatter without reducing broad dependencies is a regression. Phase 2 sets pilot budgets from the checked-in [performance baseline](06-phase-1-decisions-and-evidence.md#performance-and-operability-baseline) before approving the complete pilot; it must not invent target-path numbers from the legacy direct-Store flow.
 
 ## Outcome measures
 
@@ -258,7 +263,7 @@ After two completed backend slices, all three must improve:
 2. direct persistence writes from handlers/CLI decrease;
 3. zero business-rule files change outside the owner capability; only declared adapters/contracts may accompany the slice.
 
-Every completed extraction must reduce at least one legacy coupling count. Performance budgets are set after the pending Phase 0 performance inventory is added to the [baseline](00-phase-0-baseline.md), before the first pilot is approved.
+Every completed extraction must reduce at least one legacy coupling count. Performance budgets are set from the checked-in Phase 1 inventory before the first pilot is approved; the two target-path nulls are populated only after the Phase 2 management boundary makes them observable.
 
 If those do not improve, stop and revisit the capability map before extracting more code.
 
@@ -309,4 +314,4 @@ The modular-monolith migration is complete only when:
 
 ---
 
-[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Migration plan](03-migration-plan.md)
+[All migrations](../README.md) · [Migration overview](README.md) · Previous: [Migration plan](03-migration-plan.md) · [Phase 1 evidence](06-phase-1-decisions-and-evidence.md)

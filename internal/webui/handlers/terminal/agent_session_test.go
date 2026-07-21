@@ -36,6 +36,15 @@ type slowListTerminalService struct {
 	delay time.Duration
 }
 
+type failingPutTerminalService struct {
+	service.TerminalService
+	err error
+}
+
+func (s failingPutTerminalService) PutTab(context.Context, string, *tabmeta.TabMetadata) error {
+	return s.err
+}
+
 func (s slowListTerminalService) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
 	tabs, err := s.TerminalService.ListTabs(ctx, wsID)
 	if err != nil {
@@ -104,18 +113,39 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	if !strings.HasPrefix(orchestratorID, "lead-") {
 		t.Fatalf("LOOM_ORCHESTRATOR_SESSION_ID = %q, want lead- prefix", orchestratorID)
 	}
-	// Resolve orchestrator attribution via the join helper.
+	// Tab creation only reserves the ID. The loom lead child creates and starts
+	// heartbeating the durable record when the PTY is actually launched.
 	if got, err := store.OrchestrationSessionIDFor(ctx, st, "E2E", "lead-ui-e2e"); err != nil {
-		t.Fatalf("lookup orchestrator: %v", err)
-	} else if got != orchestratorID {
-		t.Fatalf("lead orchestrator = %q, want %q", got, orchestratorID)
+		t.Fatalf("lookup orchestrator before launch: %v", err)
+	} else if got != "" {
+		t.Fatalf("lead orchestrator before launch = %q, want no precreated running session", got)
 	}
-	session, err := st.AgentSessions().Get(ctx, "E2E", orchestratorID)
+	if _, err := st.AgentSessions().Get(ctx, "E2E", orchestratorID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("reserved orchestrator lookup error = %v, want not found before PTY launch", err)
+	}
+}
+
+func TestEnsureAgentTerminalSessionPutFailureDoesNotCreateRunningSession(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	baseSvc := webuiterminal.NewTerminalService(nil, tabStore, nil, rdb, nil, time.Now())
+	svc := failingPutTerminalService{TerminalService: baseSvc, err: errors.New("put failed")}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead", Backend: "codex"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "E2E", Name: "lead-put-fail", RoleName: "lead"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	if _, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-put-fail"); err == nil || !strings.Contains(err.Error(), "put failed") {
+		t.Fatalf("ensure error = %v, want PutTab failure", err)
+	}
+	sessions, err := st.AgentSessions().List(ctx, "E2E", store.AgentSessionFilter{AgentID: "lead-put-fail"})
 	if err != nil {
-		t.Fatalf("load orchestrator session: %v", err)
+		t.Fatalf("list agent sessions: %v", err)
 	}
-	if session.Kind != domain.AgentSessionKindOrchestration || session.TerminalID != meta.SessionName {
-		t.Fatalf("agent session = kind:%q terminal:%q", session.Kind, session.TerminalID)
+	if len(sessions) != 0 {
+		t.Fatalf("agent sessions after PutTab failure = %d, want 0", len(sessions))
 	}
 }
 
@@ -536,8 +566,8 @@ func TestEnsureAgentTerminalSessionSerializesConcurrentCreates(t *testing.T) {
 			orchestrationSessions++
 		}
 	}
-	if orchestrationSessions != 1 {
-		t.Fatalf("orchestration session count = %d, want 1", orchestrationSessions)
+	if orchestrationSessions != 0 {
+		t.Fatalf("orchestration session count before PTY launch = %d, want 0", orchestrationSessions)
 	}
 }
 
@@ -741,12 +771,8 @@ func TestEnsureAgentTerminalSessionCreatesOrchestrationForCustomInteractiveRole(
 	if !strings.HasPrefix(orchestratorID, "lead-") {
 		t.Fatalf("LOOM_ORCHESTRATOR_SESSION_ID = %q, want lead- prefix", orchestratorID)
 	}
-	session, err := st.AgentSessions().Get(ctx, "E2E", orchestratorID)
-	if err != nil {
-		t.Fatalf("load orchestration session: %v", err)
-	}
-	if session.AgentID != "operator-a" || session.Kind != domain.AgentSessionKindOrchestration {
-		t.Fatalf("session = agent:%q kind:%q, want operator orchestration", session.AgentID, session.Kind)
+	if _, err := st.AgentSessions().Get(ctx, "E2E", orchestratorID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("reserved orchestration session lookup error = %v, want not found before PTY launch", err)
 	}
 }
 

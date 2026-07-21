@@ -36,6 +36,14 @@ type StoreHandle struct {
 	embedded *EmbeddedFleetDB
 }
 
+// OpenStoreOptions carries startup requirements derived by the caller from the
+// capability slices enabled in its own configuration. Requirements are never
+// inferred from FleetDB itself: the server manifest verifies compatibility but
+// does not decide which Loom behavior is enabled.
+type OpenStoreOptions struct {
+	RequiredFleetDBCapabilities []string
+}
+
 // Mode reports the deployment mode chosen at OpenStore time.
 func (h *StoreHandle) Mode() Mode { return h.mode }
 
@@ -83,6 +91,15 @@ func (h *StoreHandle) Close() error {
 // only used in ModeLocal — it's where the embedded fleet-db's
 // miniredis snapshot lives.
 func OpenStore(ctx context.Context, dataDir string, logger *slog.Logger) (*StoreHandle, error) {
+	return OpenStoreWithOptions(ctx, dataDir, logger, OpenStoreOptions{})
+}
+
+// OpenStoreWithOptions opens the runtime Store and verifies any explicitly
+// required FleetDB deployment capabilities before returning it to the caller.
+// Empty requirements preserve the legacy startup path and perform no manifest
+// request, allowing the readiness contract to land before any slice requires
+// the not-yet-universal endpoint.
+func OpenStoreWithOptions(ctx context.Context, dataDir string, logger *slog.Logger, opts OpenStoreOptions) (*StoreHandle, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -97,16 +114,46 @@ func OpenStore(ctx context.Context, dataDir string, logger *slog.Logger) (*Store
 		HTTPClient: fleet.SharedHTTPClient(),
 	}
 
+	handle, err := openStoreForMode(ctx, dataDir, cfg, logger, mode)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireFleetDBCapabilities(ctx, handle, opts.RequiredFleetDBCapabilities); err != nil {
+		if closeErr := handle.Close(); closeErr != nil {
+			return nil, fmt.Errorf("openstore: fleet-db compatibility: %w (cleanup: %v)", err, closeErr)
+		}
+		return nil, fmt.Errorf("openstore: fleet-db compatibility: %w", err)
+	}
+	return handle, nil
+}
+
+func openStoreForMode(ctx context.Context, dataDir string, cfg fleetdb.Config, logger *slog.Logger, mode Mode) (*StoreHandle, error) {
 	switch mode {
 	case ModeCloud:
 		return openCloudStore(cfg, logger)
-
 	case ModeLocal:
 		return openLocalStore(ctx, dataDir, cfg, logger)
-
 	default:
 		return nil, fmt.Errorf("openstore: unknown mode %s", mode)
 	}
+}
+
+type fleetDBCapabilityChecker interface {
+	RequireCapabilities(context.Context, []string) error
+}
+
+func requireFleetDBCapabilities(ctx context.Context, handle *StoreHandle, required []string) error {
+	if len(required) == 0 {
+		return nil
+	}
+	if handle == nil || handle.Store == nil {
+		return errors.New("store handle is unavailable")
+	}
+	checker, ok := handle.Store.(fleetDBCapabilityChecker)
+	if !ok {
+		return fmt.Errorf("store %T does not support FleetDB capability negotiation", handle.Store)
+	}
+	return checker.RequireCapabilities(ctx, required)
 }
 
 func openCloudStore(cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {

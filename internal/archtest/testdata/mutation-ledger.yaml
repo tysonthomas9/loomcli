@@ -1,0 +1,45 @@
+schema_version: 1
+status: reviewed
+commands:
+  - id: workflowcatalog.activate-version
+    phase: 2B
+    aggregate_owner: workflowcatalog
+    coordinating_owner: workflowcatalog
+    mechanism_discriminator: driver_version
+    instance_owner: workflowcatalog
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.activate_driver_version.v1]
+    transaction_or_saga_boundary: One fleet-db transaction validates driver/version ownership, approved trust state, expected revision, and updates only activation fields.
+    idempotency_key: workspace_id:driver_id:version_id:expected_revision:activate
+    semantic_events_or_read_models: [workflow_catalog.effective_version_changed.v1]
+    retry_restart_behavior: Duplicate and lost-response retries return the committed revision; CAS conflict is terminal and never falls back to UpdateDriver.
+    negative_tests: [execution_authority, expired_operator, session_authority, stale_revision, unauthenticated, webhook_authority, wrong_workspace]
+    fault_injection_tests: [concurrent_metadata_update, duplicate_request, lost_response_after_commit]
+  - id: workflowcatalog.approve-version
+    phase: 2B
+    aggregate_owner: workflowcatalog
+    coordinating_owner: workflowcatalog
+    mechanism_discriminator: driver_version
+    instance_owner: workflowcatalog
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.approve_driver_version.v1]
+    transaction_or_saga_boundary: One fleet-db transaction validates driver/version ownership, validation state, and expected revision while preserving unrelated Driver metadata.
+    idempotency_key: workspace_id:driver_id:version_id:expected_revision:approve
+    semantic_events_or_read_models: [workflow_catalog.version_trust_changed.v1]
+    retry_restart_behavior: Duplicate and lost-response retries return the committed revision; CAS conflict is terminal and never falls back to UpdateDriver.
+    negative_tests: [execution_authority, expired_operator, invalid_validation_state, session_authority, stale_revision, unauthenticated, webhook_authority, wrong_workspace]
+    fault_injection_tests: [concurrent_metadata_update, duplicate_request, lost_response_after_commit]
+  - id: workflowcatalog.unapprove-version
+    phase: 2B
+    aggregate_owner: workflowcatalog
+    coordinating_owner: workflowcatalog
+    mechanism_discriminator: driver_version
+    instance_owner: workflowcatalog
+    accepted_authority: [operator]
+    durable_commands: [fleetdb.unapprove_driver_version.v1]
+    transaction_or_saga_boundary: One fleet-db transaction validates driver/version ownership and expected revision while preserving unrelated Driver metadata.
+    idempotency_key: workspace_id:driver_id:version_id:expected_revision:unapprove
+    semantic_events_or_read_models: [workflow_catalog.version_trust_changed.v1]
+    retry_restart_behavior: Duplicate and lost-response retries return the committed revision; CAS conflict is terminal and never falls back to UpdateDriver.
+    negative_tests: [execution_authority, expired_operator, session_authority, stale_revision, unauthenticated, webhook_authority, wrong_workspace]
+    fault_injection_tests: [concurrent_metadata_update, duplicate_request, lost_response_after_commit]

@@ -21,6 +21,15 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// ResolveDaemonPath resolves a path relative to projectDir, or returns it
+// unchanged when it is already absolute.
+func ResolveDaemonPath(projectDir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(projectDir, path)
+}
+
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cfg := s.ConfigSnapshot()

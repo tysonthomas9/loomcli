@@ -163,9 +163,10 @@ type bridgeArtifact struct {
 }
 
 type flueTaskSession struct {
-	SessionID string
-	Metadata  map[string]string
-	cancel    context.CancelFunc
+	SessionID     string
+	Metadata      map[string]string
+	cancel        context.CancelFunc
+	heartbeatDone <-chan struct{}
 }
 
 func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
