@@ -794,9 +794,10 @@ func loadDirectWritePackages(root string, profile AnalysisProfile, adapterRoots 
 	}
 	patterns := []string{}
 	for _, sourceRoot := range adapterRoots {
-		if _, statErr := os.Stat(filepath.Join(root, sourceRoot)); statErr == nil {
-			patterns = append(patterns, "./"+sourceRoot+"/...")
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(sourceRoot))); statErr != nil {
+			return nil, fmt.Errorf("inspect direct-write adapter root %q: %w", sourceRoot, statErr)
 		}
+		patterns = append(patterns, "./"+sourceRoot+"/...")
 	}
 	if len(patterns) == 0 {
 		return nil, nil

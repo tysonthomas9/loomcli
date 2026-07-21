@@ -478,13 +478,13 @@ func usesStoreSelector(parsed *ast.File, aliases map[string]struct{}, dotImport 
 }
 
 func generated(contents []byte) bool {
-	lines := strings.SplitN(string(contents), "\n", 4)
-	for i := 0; i < len(lines) && i < 3; i++ {
-		if strings.Contains(lines[i], "// Code generated") {
-			return true
-		}
-	}
-	return false
+	parsed, err := parser.ParseFile(
+		token.NewFileSet(),
+		"",
+		contents,
+		parser.PackageClauseOnly|parser.ParseComments,
+	)
+	return err == nil && ast.IsGenerated(parsed)
 }
 
 func outsidePrefixes(files, prefixes []string) []string {

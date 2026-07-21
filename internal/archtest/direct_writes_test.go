@@ -397,6 +397,7 @@ type WorkspaceStore interface { Create(string) error }
 import "github.com/tysonthomas9/loomcli/internal/store"
 func write(s store.WorkspaceStore) error { return s.Create("one") }
 `)
+	writeGoFile(t, root, "internal/cli/read.go", "package cli\n")
 
 	matrix := oneDirectWriteProfile()
 	inventory := directWriteTestInventory(matrix)

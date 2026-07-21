@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-architecture-memory check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -436,6 +436,12 @@ check-control-plane-paths:
 check-architecture:
 	@go run ./scripts/archcheck check
 
+ARCHCHECK_RSS_LIMIT_MIB ?= 2048
+ARCHCHECK_RSS_TIMEOUT_SECONDS ?= 1200
+
+check-architecture-memory:
+	@go run ./scripts/rsswatch $(ARCHCHECK_RSS_LIMIT_MIB) $(ARCHCHECK_RSS_TIMEOUT_SECONDS) go test ./internal/archtest -count=1 -timeout=15m
+
 # Check for stale LOC allowlist entries
 check-loc-stale:
 	@./scripts/check-loc-stale.sh --check-stale 1000
@@ -759,6 +765,7 @@ help:
 	@echo "  make check-no-raw-exec - Check for raw exec.Command in unit tests"
 	@echo "  make check-control-plane-paths - Check local/cloud fleet-db runtime path invariants"
 	@echo "  make check-architecture - Check modular-monolith manifests and coupling ratchets"
+	@echo "  make check-architecture-memory - Enforce the archtest process-tree RSS ceiling"
 	@echo "  make check-loc-stale   - Check for stale LOC allowlist entries"
 	@echo "  make lint              - Run Go linter (golangci-lint)"
 	@echo "  make lint-frontend     - Run frontend typecheck + ESLint"
