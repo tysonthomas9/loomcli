@@ -417,6 +417,32 @@ import _ "github.com/tysonthomas9/loomcli/internal/store"
 	}
 }
 
+func TestAnalyzeProfileReportsTransitiveForbiddenDependencyFromTestVariant(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module "+modulePath+"\n\ngo 1.25.6\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeGoFile(t, root, "internal/modules/workspace/api.go", "package workspace\n")
+	writeGoFile(t, root, "internal/modules/workspace/api_test.go", `package workspace
+import _ "github.com/tysonthomas9/loomcli/internal/safe"
+`)
+	writeGoFile(t, root, "internal/safe/safe.go", `package safe
+import _ "github.com/tysonthomas9/loomcli/internal/store"
+`)
+	writeGoFile(t, root, "internal/store/store.go", "package store\n")
+
+	violations, err := analyzeProfile(root, AnalysisProfile{
+		Name: "fixture-test-variant", GOOS: "linux", GOARCH: "amd64", Enforced: true,
+	}, validGraph(), genericMechanismTestPolicies())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "profile fixture-test-variant package " + modulePath + "/internal/modules/workspace reaches forbidden transitive dependency " + modulePath + "/internal/store"
+	if !containsViolation(violations, want) {
+		t.Fatalf("violations = %v, want test-variant transitive violation %q", violations, want)
+	}
+}
+
 func TestAnalyzeProfileRejectsExportedSignatureThroughLocalAlias(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module "+modulePath+"\n\ngo 1.25.6\n"), 0o600); err != nil {

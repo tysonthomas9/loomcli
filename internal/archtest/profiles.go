@@ -59,36 +59,78 @@ func analyzeProfiles(root string, matrix AnalysisMatrix, graph CapabilityGraph, 
 }
 
 func analyzeProfile(root string, profile AnalysisProfile, graph CapabilityGraph, genericMechanisms []GenericMechanismUse) ([]string, error) {
-	tags := append([]string(nil), profile.Tags...)
-	if profile.Race {
-		// The matrix calls for race source selection, not execution. The implicit
-		// race build tag selects the same files without requiring cross-CGO builds.
-		tags = append(tags, "race")
-	}
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
-			packages.NeedImports | packages.NeedDeps | packages.NeedModule,
-		Dir:   root,
-		Env:   profileEnvironment(profile),
-		Tests: true,
-	}
-	if len(tags) > 0 {
-		cfg.BuildFlags = []string{"-tags=" + strings.Join(tags, ",")}
-	}
-	loaded, err := packages.Load(cfg, "./...")
+	violations, seenPackageErrors, err := analyzeProfileDependencyMetadata(root, profile, graph)
 	if err != nil {
 		return nil, err
 	}
-	violations := []string{}
-	for _, pkg := range loaded {
+	typedRoots, err := packages.Load(profilePackagesConfig(root, profile, profileTypedRootLoadMode), "./...")
+	if err != nil {
+		return nil, err
+	}
+	for _, pkg := range typedRoots {
 		for _, pkgErr := range pkg.Errors {
-			violations = append(violations, fmt.Sprintf("profile %s package %s: %s", profile.Name, pkg.PkgPath, pkgErr.Msg))
+			message := fmt.Sprintf("profile %s package %s: %s", profile.Name, pkg.PkgPath, pkgErr.Msg)
+			if _, seen := seenPackageErrors[message]; !seen {
+				seenPackageErrors[message] = struct{}{}
+				violations = append(violations, message)
+			}
 		}
 		violations = append(violations, profilePackageViolations(root, profile.Name, pkg, graph, genericMechanisms)...)
 	}
-	violations = append(violations, requiredSourceViolations(root, profile, loaded)...)
+	violations = append(violations, requiredSourceViolations(root, profile, typedRoots)...)
 	return violations, nil
+}
+
+func analyzeProfileDependencyMetadata(
+	root string,
+	profile AnalysisProfile,
+	graph CapabilityGraph,
+) ([]string, map[string]struct{}, error) {
+	dependencyRoots, err := packages.Load(profilePackagesConfig(root, profile, profileDependencyLoadMode), "./...")
+	if err != nil {
+		return nil, nil, err
+	}
+	violations := []string{}
+	seenPackageErrors := map[string]struct{}{}
+	for _, pkg := range dependencyRoots {
+		for _, pkgErr := range pkg.Errors {
+			message := fmt.Sprintf("profile %s package %s: %s", profile.Name, pkg.PkgPath, pkgErr.Msg)
+			if _, seen := seenPackageErrors[message]; !seen {
+				seenPackageErrors[message] = struct{}{}
+				violations = append(violations, message)
+			}
+		}
+		if !profilePackageChecked(pkg) {
+			continue
+		}
+		packageBoundary := classifyBoundaryPackage(pkg.PkgPath, graph)
+		if packageBoundary.kind == boundaryPackageCapabilityPublic || packageBoundary.kind == boundaryPackageCapabilityCore {
+			violations = append(violations, transitiveModuleViolations(profile.Name, pkg)...)
+		}
+	}
+	return violations, seenPackageErrors, nil
+}
+
+const profileTypedRootLoadMode packages.LoadMode = packages.NeedName |
+	packages.NeedFiles |
+	packages.NeedCompiledGoFiles |
+	packages.NeedSyntax |
+	packages.NeedTypes |
+	packages.NeedTypesInfo |
+	packages.NeedImports
+
+const profileDependencyLoadMode packages.LoadMode = packages.NeedName |
+	packages.NeedImports |
+	packages.NeedDeps
+
+func profilePackagesConfig(root string, profile AnalysisProfile, mode packages.LoadMode) *packages.Config {
+	return &packages.Config{
+		Mode:       mode,
+		Dir:        root,
+		Env:        profileEnvironment(profile),
+		Tests:      true,
+		BuildFlags: profileBuildFlags(profile),
+	}
 }
 
 func requiredSourceViolations(root string, profile AnalysisProfile, loaded []*packages.Package) []string {
@@ -115,14 +157,7 @@ func requiredSourceViolations(root string, profile AnalysisProfile, loaded []*pa
 }
 
 func profilePackageViolations(root, profile string, pkg *packages.Package, graph CapabilityGraph, genericMechanisms []GenericMechanismUse) []string {
-	if !strings.HasPrefix(pkg.PkgPath, modulePath+"/internal/") {
-		return nil
-	}
-	// packages.Load(Tests: true) adds a synthetic test-main package whose path
-	// ends in ".test". Its imports are the test harness, not a production or
-	// test source boundary. The real package-under-test variants are loaded
-	// separately and remain fully checked, including their _test.go imports.
-	if strings.HasSuffix(pkg.PkgPath, ".test") {
+	if !profilePackageChecked(pkg) {
 		return nil
 	}
 	violations := []string{}
@@ -136,10 +171,21 @@ func profilePackageViolations(root, profile string, pkg *packages.Package, graph
 	if isCapabilityPackage(packageBoundary.kind) {
 		violations = append(violations, typedExportedSignatureViolations(profile, pkg, graph)...)
 	}
-	if packageBoundary.kind == boundaryPackageCapabilityPublic || packageBoundary.kind == boundaryPackageCapabilityCore {
-		violations = append(violations, transitiveModuleViolations(profile, pkg)...)
-	}
 	return violations
+}
+
+func profilePackageChecked(pkg *packages.Package) bool {
+	if !strings.HasPrefix(pkg.PkgPath, modulePath+"/internal/") {
+		return false
+	}
+	// packages.Load(Tests: true) adds a synthetic test-main package whose path
+	// ends in ".test". Its imports are the test harness, not a production or
+	// test source boundary. The real package-under-test variants are loaded
+	// separately and remain fully checked, including their _test.go imports.
+	if strings.HasSuffix(pkg.PkgPath, ".test") {
+		return false
+	}
+	return true
 }
 
 func typedExportedSignatureViolations(profile string, pkg *packages.Package, graph CapabilityGraph) []string {

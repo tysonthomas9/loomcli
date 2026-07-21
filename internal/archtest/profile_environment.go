@@ -2,8 +2,15 @@ package archtest
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
+
+// repositoryPackageBuildParallelism bounds compiler subprocess fan-out inside
+// each packages.Load call. profileEnvironment deliberately clears inherited
+// GOFLAGS, so the analyzer owns this limit instead of relying on the caller's
+// machine or CI configuration.
+const repositoryPackageBuildParallelism = 2
 
 func profileEnvironment(profile AnalysisProfile) []string {
 	env := make([]string, 0, len(os.Environ())+4)
@@ -15,4 +22,18 @@ func profileEnvironment(profile AnalysisProfile) []string {
 		env = append(env, entry)
 	}
 	return append(env, "GOOS="+profile.GOOS, "GOARCH="+profile.GOARCH, "CGO_ENABLED=0", "GOFLAGS=")
+}
+
+func profileBuildFlags(profile AnalysisProfile) []string {
+	tags := append([]string(nil), profile.Tags...)
+	if profile.Race {
+		// The matrix calls for race source selection, not execution. The implicit
+		// race build tag selects the same files without requiring cross-CGO builds.
+		tags = append(tags, "race")
+	}
+	flags := []string{"-p=" + strconv.Itoa(repositoryPackageBuildParallelism)}
+	if len(tags) > 0 {
+		flags = append(flags, "-tags="+strings.Join(tags, ","))
+	}
+	return flags
 }

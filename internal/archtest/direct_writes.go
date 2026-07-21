@@ -742,10 +742,6 @@ func validateDirectWriteRequiredSources(root string, profile AnalysisProfile) er
 	if len(profile.RequiredFiles) == 0 {
 		return nil
 	}
-	tags := append([]string(nil), profile.Tags...)
-	if profile.Race {
-		tags = append(tags, "race")
-	}
 	patterns := make([]string, 0, len(profile.RequiredFiles))
 	seenPatterns := map[string]struct{}{}
 	for _, required := range profile.RequiredFiles {
@@ -760,13 +756,11 @@ func validateDirectWriteRequiredSources(root string, profile AnalysisProfile) er
 		}
 	}
 	cfg := &packages.Config{
-		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles,
-		Dir:   root,
-		Env:   profileEnvironment(profile),
-		Tests: true,
-	}
-	if len(tags) > 0 {
-		cfg.BuildFlags = []string{"-tags=" + strings.Join(tags, ",")}
+		Mode:       packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles,
+		Dir:        root,
+		Env:        profileEnvironment(profile),
+		Tests:      true,
+		BuildFlags: profileBuildFlags(profile),
 	}
 	loaded, err := packages.Load(cfg, patterns...)
 	if err != nil {
@@ -788,21 +782,15 @@ const directWritePackageLoadMode packages.LoadMode = packages.NeedName |
 	packages.NeedImports
 
 func loadDirectWritePackages(root string, profile AnalysisProfile, adapterRoots []string) ([]*packages.Package, error) {
-	tags := append([]string(nil), profile.Tags...)
-	if profile.Race {
-		tags = append(tags, "race")
-	}
 	cfg := &packages.Config{
 		// Direct-write collection inspects only the requested adapter roots.
 		// Dependency types are resolved from export data; loading dependency
 		// syntax and TypesInfo here creates a second repository-scale graph per
 		// profile and is not needed by collectDirectWritePackage.
-		Mode: directWritePackageLoadMode,
-		Dir:  root,
-		Env:  profileEnvironment(profile),
-	}
-	if len(tags) > 0 {
-		cfg.BuildFlags = []string{"-tags=" + strings.Join(tags, ",")}
+		Mode:       directWritePackageLoadMode,
+		Dir:        root,
+		Env:        profileEnvironment(profile),
+		BuildFlags: profileBuildFlags(profile),
 	}
 	patterns := []string{}
 	for _, sourceRoot := range adapterRoots {
