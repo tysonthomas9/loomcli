@@ -18,6 +18,13 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+// repositoryScaleLoadConcurrency deliberately stays at one. A repository-wide
+// packages.Load with syntax and type information keeps a complete typed graph
+// live until the profile analysis returns. Running multiple profiles at once
+// multiplies peak memory without improving the type-checker's bounded
+// throughput enough to justify the cost.
+const repositoryScaleLoadConcurrency = 1
+
 // analyzeProfiles loads the complete package graph for each supported source
 // selection. go/packages is intentional here: direct AST scans cannot expose
 // transitive forbidden paths or profile-specific import cycles.
@@ -28,7 +35,7 @@ func analyzeProfiles(root string, matrix AnalysisMatrix, graph CapabilityGraph, 
 		err        error
 	}
 	results := make([]result, len(profiles))
-	semaphore := make(chan struct{}, 3)
+	semaphore := make(chan struct{}, repositoryScaleLoadConcurrency)
 	var wg sync.WaitGroup
 	for i, profile := range profiles {
 		i, profile := i, profile

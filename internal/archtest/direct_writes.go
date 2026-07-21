@@ -550,7 +550,7 @@ func snapshotDirectWriteProfiles(
 	classifier persistenceClassifier,
 ) []directWriteProfileResult {
 	results := make([]directWriteProfileResult, len(profiles))
-	semaphore := make(chan struct{}, 3)
+	semaphore := make(chan struct{}, repositoryScaleLoadConcurrency)
 	var wg sync.WaitGroup
 	for index, profile := range profiles {
 		index, profile := index, profile
@@ -779,17 +779,27 @@ func validateDirectWriteRequiredSources(root string, profile AnalysisProfile) er
 	return nil
 }
 
+const directWritePackageLoadMode packages.LoadMode = packages.NeedName |
+	packages.NeedFiles |
+	packages.NeedCompiledGoFiles |
+	packages.NeedSyntax |
+	packages.NeedTypes |
+	packages.NeedTypesInfo |
+	packages.NeedImports
+
 func loadDirectWritePackages(root string, profile AnalysisProfile, adapterRoots []string) ([]*packages.Package, error) {
 	tags := append([]string(nil), profile.Tags...)
 	if profile.Race {
 		tags = append(tags, "race")
 	}
 	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
-			packages.NeedImports | packages.NeedDeps | packages.NeedModule,
-		Dir: root,
-		Env: profileEnvironment(profile),
+		// Direct-write collection inspects only the requested adapter roots.
+		// Dependency types are resolved from export data; loading dependency
+		// syntax and TypesInfo here creates a second repository-scale graph per
+		// profile and is not needed by collectDirectWritePackage.
+		Mode: directWritePackageLoadMode,
+		Dir:  root,
+		Env:  profileEnvironment(profile),
 	}
 	if len(tags) > 0 {
 		cfg.BuildFlags = []string{"-tags=" + strings.Join(tags, ",")}
