@@ -1,9 +1,12 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 4 complete; Phase 5 has not started
+- **Status:** The Phase 4 architecture slice is complete; repository-admission
+  and local open-mode hardening are committed and source-gated, while refreshed
+  packaged Desktop and Podman/raw-browser proof remains pending; Phase 5 has not
+  started
 - **Date:** 2026-07-18
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
-- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, and final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at validated Loom product head `53cbe2577` with FleetDB `afb688768`
+- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at validated Loom product head `53cbe2577` with FleetDB `afb688768`, and the current source-gated hardening heads Loom `54b338d61` with FleetDB `c73c69a`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
 
 ## Decision summary
@@ -34,10 +37,11 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 | [07-phase-2-decisions-and-evidence.md](07-phase-2-decisions-and-evidence.md) | What Workflow Catalog boundary was implemented, which invariants it owns, what passed, and which external proof remains? |
 | [08-phase-3-decisions-and-evidence.md](08-phase-3-decisions-and-evidence.md) | Which Automation boundary, durable admission/dispatch contracts, runtime components, and compatibility decisions define Phase 3? |
 | [09-phase-4-decisions-and-evidence.md](09-phase-4-decisions-and-evidence.md) | Which Execution and minimal Artifacts boundaries, replay classes, supervisor-disabled proof, and packaged Desktop evidence define Phase 4? |
+| [10-local-open-mode-authority-revision.md](10-local-open-mode-authority-revision.md) | How does local open mode work without operator credential ceremony while OIDC remains authoritative for shared deployments? |
 
 ## Scope boundaries
 
-“Modular monolith” applies to the capability core hosted by `loom serve`. The approved target requires one product-mutation topology: standalone operator CLI commands become authenticated management-API clients rather than opening the composite Store directly. Under MM-7, those commands discover an explicitly configured endpoint, never start a host implicitly, fail closed when it is unavailable, authenticate locally, and migrate command family by command family while preserving output and exit-code compatibility. Local bootstrap/file-only commands remain platform tools outside product aggregate ownership.
+“Modular monolith” applies to the capability core hosted by `loom serve`. The approved target requires one product-mutation topology: standalone operator CLI commands become management-API clients rather than opening the composite Store directly. Under MM-7, those commands discover an explicitly configured endpoint, never start a host implicitly, fail closed when it is unavailable, use the server's configured open or OIDC trust mode, and migrate command family by command family while preserving output and exit-code compatibility. Local bootstrap/file-only commands remain platform tools outside product aggregate ownership.
 
 | Artifact | Migration decision |
 |---|---|
@@ -63,10 +67,10 @@ Phase 3 source implementation establishes active `internal/modules/automation`, 
 Phase 4 is complete. It activates the Execution and minimal Artifacts
 capability roots and moves the selected TaskRun and DriverRun owner-command
 paths behind the paired FleetDB contract. The current architecture check
-passes all 11 profiles plus the all-files AST check with four active roots, 56
-required command-ID namespaces, Store `82/71`, 90 handler exceptions, 243
-primary direct-write rows, 86 runtime components, and 103 goroutine
-definitions. The namespace prefixes group the ledger entries; they do not
+passes all 11 profiles plus the all-files AST check with four active roots, 60
+required command-ID namespaces, Store `82/71`, 90 handler exceptions, 251
+primary direct-write rows across 273 sites, 86 runtime components, and 103
+goroutine definitions. The namespace prefixes group the ledger entries; they do not
 replace the per-entry aggregate and coordinating-owner declarations. The
 separate `internal/driver` ratchet freezes its remaining 10 rows across 11
 sites without relabeling their owners. The paired OpenAPI snapshots are
@@ -85,19 +89,33 @@ snapshot records those results at Loom `53cbe2577` and FleetDB `afb688768`.
 Physical supervisor deletion remains Phase 6 work, and Phase 5 has not started.
 See the [Phase 4 record](09-phase-4-decisions-and-evidence.md).
 
+The current repository-admission and local-open authority hardening is
+committed at Loom `54b338d61` with FleetDB `c73c69a`. The paired OpenAPI
+snapshots match at SHA-256
+`bf2935fdbc785deaa70c2ac933dd5f63e44f9deb7ec2a61f332af1b889c8088c`, and
+both full source gates pass, including Loom's exact paired-source/binary run.
+These results do not rewrite the historical immutable Phase 4 snapshot. A new
+immutable snapshot and refreshed packaged Desktop plus Podman/raw-browser
+journeys remain pending.
+
 ## Approved architecture decisions
 
 | ID | Outcome |
 |---|---|
 | MM-1 | Adopt the ten coarse capability owners, including Artifacts and the Workspace/Source Control split. |
-| MM-2 | Require a server-issued 256-bit local operator credential stored in a mode-0600 runtime file; loopback location grants no authority. |
+| MM-2 | In local `open` mode, derive exact workspace/action-scoped typed operator authority server-side with the stable `local-open-operator` subject and no client credential; require the existing OIDC identity/role resolver for shared deployments. |
 | MM-3 | Advertise a capability key only when the active Redis or Postgres deployment has parity; missing support fails readiness with no fallback. |
 | MM-4 | Use Workflow Catalog approve/unapprove/activate as the first complete backend pilot after a behavior-neutral read seam. |
 | MM-5 | Place public capability roots at `internal/modules/<capability>` with optional owner-private subpackages. |
 | MM-6 | Expire compatibility facades after at most two migration waves unless an explicit reviewed extension records an owner. |
-| MM-7 | Use an explicitly configured management endpoint, no implicit host startup, fail-closed unavailability, local authentication, and family-by-family compatibility rollout. |
+| MM-7 | Use an explicitly configured management endpoint, no implicit host startup, fail-closed unavailability, the server's open/OIDC trust mode, and family-by-family compatibility rollout. |
 
 These outcomes are enforced by `capability-graph.yaml` and `migration-baseline.json`. Changing one requires a reviewed graph/baseline change; an individual slice must not reverse it through incidental package movement.
+
+The [local open-mode authority revision](10-local-open-mode-authority-revision.md)
+revises MM-2 so the single-user UI works without launch codes or a durable
+operator credential while leaving the existing OIDC/cloud path unchanged. The
+historical Phase 1 through Phase 4 evidence remains immutable.
 
 ---
 

@@ -1,14 +1,21 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** Phase 4 complete with architecture activation, paired contract and gates, source-bound proof, measured performance, packaged Desktop journeys, and immutable validation evidence; Phase 5 has not started
+- **Status:** The Phase 4 architecture slice is complete; the current repository-admission hardening delta has paired contract/source-gate proof, while its refreshed packaged Desktop journey remains pending; Phase 5 has not started
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
-**Phase 4 status:** Analyzer `1.0.0` enforces all four release and seven tag/race profiles plus the all-files AST pass, rejects undeclared module roots/edges and cycles, and detects forbidden signature/type leakage. Workflow Catalog, Automation, Execution, and minimal Artifacts roots are active at `completed_phase: 4`, and the mutation ledger contains 56 required command-ID namespaces grouped by prefix: three `workflowcatalog.*`, 14 `automation.*`, four `artifacts.*`, and 35 `execution.*`. Those prefix counts are not aggregate-ownership counts; each ledger row's `aggregate_owner`, `coordinating_owner`, and `instance_owner` remain authoritative. The current architecture check passes with 82 composite-Store files, 71 outside composition, 90 legacy handler-import exceptions, 243 primary direct-write rows across 265 sites, and a separate 10-row/11-site `internal/driver` digest ratchet. Runtime evidence names 86 components, 53 ticker sites, 58 managed components, and 103 in-scope non-test goroutine launch definitions. The source-bound Execution supervisor-disabled row passes against the paired Phase 4 FleetDB worktree; it remains a scoped Execution-lane proof, not the Phase 6 supervisor-deletion gate.
+**Phase 4 status:** Analyzer `1.0.0` enforces all four release and seven tag/race profiles plus the all-files AST pass, rejects undeclared module roots/edges and cycles, and detects forbidden signature/type leakage. Workflow Catalog, Automation, Execution, and minimal Artifacts roots are active at `completed_phase: 4`, and the mutation ledger contains 60 required command-ID namespaces grouped by prefix: three `workflowcatalog.*`, 14 `automation.*`, four `artifacts.*`, and 39 `execution.*`. Those prefix counts are not aggregate-ownership counts; each ledger row's `aggregate_owner`, `coordinating_owner`, and `instance_owner` remain authoritative. The current architecture check passes with 82 composite-Store files, 71 outside composition, 90 legacy handler-import exceptions, 251 primary direct-write rows across 273 sites, and a separate 10-row/11-site `internal/driver` digest ratchet. Runtime evidence names 86 components, 53 ticker sites, 58 managed components, and 103 in-scope non-test goroutine launch definitions. The source-bound Execution supervisor-disabled row passes against the paired Phase 4 FleetDB worktree; it remains a scoped Execution-lane proof, not the Phase 6 supervisor-deletion gate.
+
+The current hardening source is committed at Loom `54b338d61` and FleetDB
+`c73c69a`; their OpenAPI snapshots are byte-identical at SHA-256
+`bf2935fdbc785deaa70c2ac933dd5f63e44f9deb7ec2a61f332af1b889c8088c`.
+FleetDB's full gate and Loom's exact paired-source/binary full gate pass. These
+source results do not close the refreshed packaged-product rows below or create
+a new immutable validation snapshot.
 
 ## Architecture source of truth
 
-Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog, Automation, Execution, and Artifacts are now `active`, `completed_phase` is `4`, and the ledger records the complete 56-namespace inventory selected through Phase 4. The baseline retains the immutable Phase 2 snapshot, the self-reference-free Phase 3 base-plus-diff measurement, and the Phase 3 post-commit audit. Its retained Phase 4 pre-commit snapshot remains explicitly provisional and is not rewritten. The appended `phase4-execution-validation-53cbe2577` snapshot is the final paired source, contract, gate, performance, source-bound, and packaged-product record for Phase 4. The graph declares:
+Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog, Automation, Execution, and Artifacts are now `active`, `completed_phase` is `4`, and the ledger records the complete current 60-namespace inventory selected through Phase 4 and its hardening delta. The baseline retains the immutable Phase 2 snapshot, the self-reference-free Phase 3 base-plus-diff measurement, and the Phase 3 post-commit audit. Its retained Phase 4 pre-commit snapshot remains explicitly provisional and is not rewritten. The appended `phase4-execution-validation-53cbe2577` snapshot is the final paired source, contract, gate, performance, source-bound, and packaged-product record for the source it names. It remains historical evidence; it does not validate the later repository-admission hardening delta, whose refreshed packaged Desktop journey is still pending. The graph declares:
 
 - every capability root;
 - allowed capability-to-capability import, synchronous command/query, and durable event edges;
@@ -119,6 +126,8 @@ Required properties:
 10. A DriverRun Work Item claim returns one exact `ClaimActionID` generation. TaskRun request receipts retain it, and release, liveness, retry, and terminal commands must validate it without consulting mutable lineage as authority. A stale command never clears a successor generation.
 11. Typed TaskRun terminal policy is backend-parity behavior: close closes/unassigns; successful non-close completion reviews/unassigns; cancelled or non-blocking failure opens/unassigns; retry exhaustion or explicit block blocks/unassigns. TaskRun/Lease/Work Item transition is atomic, while DriverStep repair and terminal-event convergence use their separately declared durable paths.
 12. Artifact finalize and reference lost-response replay use the same deterministic command ID across a bounded 128-revision window ending at the current revision; the bound and divergent-reuse conflict behavior require tests.
+13. Repository admission is a Work Items owner command, not a read-then-generic-update sequence: admission of created or batch-created tasks and stale ready-event handling must invoke one command that rechecks current state and atomically persists `blocked`, unassigned state with private `repository_required` authority whenever a non-epic task has no unambiguous repository. Repository assignment may reopen only that exact policy block, and caller-editable metadata cannot mint or clear its authority.
+14. Retry recovers `repo_ref` from the immutable original TaskRun request receipt; it does not infer selection from a mutable claim. One normalized configured capacity is shared by the DriverRun executor and TaskRun workers, and cloned repository metadata records each repository's detected committed default branch unless an explicit branch is verified in every clone.
 
 Atomic fleet-db commands require backend transaction, CAS-conflict, concurrent update, duplicate retry, and lost-response retry tests. Workflow approve/unapprove/activate and Execution claim/finalize use this test class as single durable commands.
 
@@ -137,7 +146,8 @@ Every mutation declares accepted authority classes. The test matrix includes ope
 
 Structural requirements:
 
-- adapters construct authority only after credential verification;
+- adapters construct authority only after the configured deployment trust
+  check: server-owned local-open admission or external credential verification;
 - workspace scope and principal are server-derived;
 - operation classes are registered and unknown classes fail closed;
 - all driver operations are classified before the driver-op gate is considered complete;
@@ -147,7 +157,7 @@ Structural requirements:
 - connector secrets remain inside Connectors dispatch/materialization boundaries;
 - TaskRun and PTY environment-audit tests prove operator/forge credentials are absent; PTY commands also prove the session fence and session scope.
 
-Workflow approve/unapprove/activate and every grant-write path require negative tests on HTTP, CLI, and any internal entry surface. The standalone CLI must reach these commands through the authenticated management API, not by constructing authority or Store access locally. Its behavior slice also tests endpoint discovery, the prohibition on implicit host startup, unavailable-host failure, local/open-mode authentication, non-interactive use, output/exit-code compatibility, and rollback.
+Workflow approve/unapprove/activate and every grant-write path require negative tests on HTTP, CLI, and any internal entry surface. The standalone CLI must reach these commands through the configured management API, not by constructing authority or Store access locally. Its behavior slice also tests endpoint discovery, the prohibition on implicit host startup, unavailable-host failure, credential-free local/open mode, authenticated OIDC mode, non-interactive use, output/exit-code compatibility, and rollback.
 
 ## Runtime gates
 
@@ -222,7 +232,7 @@ Frontend proof per extracted route:
 - Fleet-db service/storage/API/OpenAPI tests and Loom handwritten-client/adapter tests pass.
 - The paired PR records companion SHA and vendored-spec checksum.
 - `GET /api/v1/capabilities` contract tests cover supported, missing-key, unsupported-version, and old-backend 404 responses for every supported Redis/Postgres and enabled/disabled route/configuration profile; a key is advertised only when the running deployment can execute it.
-- The exact 14-key Phase 4 foundation list in the target architecture stays synchronized with Loom and FleetDB constants. Existing umbrella keys cover the implemented method families: `execution.driver_run_work_item_claim.v1` requires both exact-generation claim and release, while `execution.task_run_work_item_design.v1` independently proves the run-derived, owner-fenced planner design command rather than widening the older lease-fencing key. The remaining TaskRun keys require Redis/Postgres parity for owner fencing and terminal Work Item policy. Do not add documentary release/terminal capability names that do not exist in code and OpenAPI.
+- The exact 18-key Phase 4 foundation list in the target architecture stays synchronized with Loom and FleetDB constants. Existing umbrella keys cover the implemented method families: `execution.driver_run_work_item_claim.v1` requires both exact-generation claim and release, while `execution.task_run_work_item_design.v1` independently proves the run-derived, owner-fenced planner design command rather than widening the older lease-fencing key. The three explicit terminal-recovery keys are not umbrella inventions: `execution.task_run_terminal_convergence.v1` requires the versioned pending-candidate query plus monotonic completion marker, `execution.terminal_driver_run_work_recovery.v1` requires the typed DriverRun recovery command, and `execution.terminal_driver_run_work_recovery_queue.v1` requires its durable claim/complete/retry queue. `work_items.repository_requirement.v1` requires Redis/Postgres parity for conditional repository blocking, private policy authority/recovery, atomic repository assignment, canonical replay, and commit-time dispatch readiness. The remaining TaskRun keys require Redis/Postgres parity for owner fencing and terminal Work Item policy. Do not add documentary generic release or terminal-policy capability names that do not exist in code and OpenAPI.
 - New Loom fails readiness with the exact missing capability key against old fleet-db; no generic mutation fallback is allowed.
 - Composition tests prove Loom derives required keys from its enabled slices, one low-level fleet-db transport client is shared by narrow capability/app adapters, and that client is never injected into a module or workflow core.
 - Negative authority tests cover every entry surface.
@@ -247,6 +257,12 @@ These are not assumed to be covered by the root Go/frontend gate:
 
 - SDK: `npm test`, deterministic generation diff, Go/operation-manifest parity, `npm pack --dry-run`, and API-surface compatibility.
 - Desktop: frontend typecheck, `cargo test`, capability-schema validation, loopback URL/native-command security tests, and packaged sidecar/web-assets smoke proof before signing.
+
+For the current repository-admission hardening delta, all applicable source and
+paired-contract gates may be recorded as green, but the Desktop row remains
+open until a freshly built package proves the blocked-card recovery and
+repository-selected retry through the product UI. Historical package evidence
+from `53cbe2577` is not a substitute for that journey.
 
 ## Performance and operability
 

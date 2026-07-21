@@ -17,7 +17,9 @@ Prerequisites:
 
 - Go toolchain for the sidecar
 - Rust toolchain for Tauri
-- Node.js/npm for the shell frontend
+- the exact Node.js/npm version pinned in `NODE_VERSION` for the shell frontend
+  and packaged workflow runtime
+- macOS 13.5 or newer (the pinned Node.js 24 runtime's deployment target)
 
 ```sh
 cd desktop
@@ -66,7 +68,18 @@ export, troubleshooting): `docs/product/desktop-installation-runbook.md`
 The Tauri config runs `scripts/prepare-sidecar.sh` before dev/build. That script
 builds the web UI into `src-tauri/resources/webui`, builds `../cmd/loom` into
 `src-tauri/binaries/loom-<target-triple>`, and, when the sibling FleetDB repo is
-available, builds `src-tauri/binaries/fleet-db-<target-triple>`. The
+available, builds `src-tauri/binaries/fleet-db-<target-triple>`. It also copies
+the exact Node.js version from `NODE_VERSION` to
+`src-tauri/resources/runtime/node`, signs the macOS copy with the minimum JIT
+entitlement required by V8, smoke-tests executable JavaScript, and packages
+Node's license. Keeping Node as an app resource prevents Tauri's shared
+external-sidecar signer from stripping its runtime-specific entitlement, while
+workflow execution remains independent of a LaunchAgent user's `PATH`. The
+Loom sidecar build also compiles the current built-in `prompt-agent` with the
+pinned Flue toolchain and embeds that generated, digest-marked bundle into the
+binary; generated files under `internal/workflows/builtin-dist` remain ignored.
+Set `FLUE_REPO` when the pinned Flue checkout is not discoverable next to the
+repo or its worktree parent. The
 `loom local service` entrypoint discovers the bundled FleetDB sibling and web UI
 resources, then sets `FLEET_DB_BIN` and `LOOM_FRONTEND_DIR` for the local
 `loom serve` process.
@@ -76,6 +89,7 @@ resources, then sets `FLEET_DB_BIN` and `LOOM_FRONTEND_DIR` for the local
 The initial desktop shell can:
 
 - build and bundle the `loom` sidecar
+- bundle the pinned Node.js runtime used by built-in Flue workflows
 - call `loom local start`
 - install and uninstall the app-owned macOS login service
 - call `loom local status --json`

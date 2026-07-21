@@ -1,10 +1,13 @@
 # Phase 4 Execution Decisions and Evidence
 
-- **Status:** Complete — paired implementation, contract and gates, architecture ratchets, source-bound supervisor-disabled proof, measured performance, exact packaged Desktop positive/fail-closed journeys, and immutable validation snapshot recorded; Phase 5 has not started
+- **Status:** The Phase 4 architecture slice is complete at its immutable validation snapshot; the current repository-admission hardening delta has paired implementation/contract/source-gate proof and split packaged Desktop evidence—the final package proves synchronous blocking, while the earlier v3 package proves repository selection and retry—but is not yet bound by a new immutable validation snapshot; Phase 5 has not started
 - **Date:** 2026-07-18
 - **Branch bases:** Loom `1353e2faf14ae121c93fe5eb92f779b56a2ad7ae`; FleetDB `f1c4e11199c2c7cdab52cce55899af4df328fbcb`
 - **Implementation commits:** Loom `510391c60f17c6e9fc951c710a07a8ef8768b67f`, `45a73889ab456e974d9cd4346bcb8873be172438`, `8037205dadec12cb8ddc83edcf5509d3acf89652`, `a240215be482b1efe4731a1a24485d4a5ccb8b76`, and `53cbe257715d55770c77d508c23620389b9c9de1`; FleetDB `424492070a0f26e798eabad51b11ee4ea0b6b58c`, `758842a7e3a703470f7afcced437f46935b5a12f`, and `afb6887682f777b0e7093b5dcdff0a5e236777f9`
-- **Scope:** Minimal Artifacts lifecycle, Execution-owned DriverRun/DriverStep/TaskRun/worker/lease/await/recovery mutations, supervisor-disabled execution, SDK runner containment, and packaged Desktop proof
+- **Architecture-analyzer and gate commits:** Loom `69e332697`, `02b62e5c7`, `88cb7f262`, `7d8118556`, and `e686b7a95`
+- **Current hardening heads:** Loom `54b338d61005799493463acdc559bf8a82022b1e`; FleetDB `c73c69a04f27490b54999fc8784cbc992ccff66c`
+- **Current paired contract:** byte-identical FleetDB and Loom OpenAPI snapshots at SHA-256 `bf2935fdbc785deaa70c2ac933dd5f63e44f9deb7ec2a61f332af1b889c8088c`
+- **Scope:** Minimal Artifacts lifecycle, Execution-owned DriverRun/DriverStep/TaskRun/worker/lease/await/recovery mutations, supervisor-disabled execution, SDK runner containment, Work Items repository admission and retry-placement hardening, and packaged Desktop proof
 
 ## Locked decisions
 
@@ -90,7 +93,7 @@ blanket synonym for returning an old response:
 |---|---|---|
 | Immutable receipt | Artifact create/upload/finalize/reference; TaskRun request, claim/start, Work Item planner-design save, requeue, retry exhaustion, completion, and append-log; DriverRun submit, claim, finish, and child-start; queue completion | A stable request identity and fingerprint return the committed snapshot or receipt after a lost response, even when the live projection has advanced. Upload identity includes the content digest and cannot accept different bytes. Finalize and reference retry the same deterministic command ID through a bounded 128-revision window ending at the current revision to find a committed receipt. Divergent reuse of any identity conflicts. |
 | Identity plus state convergence | Await register/resolve | Await identities prevent duplicate consumption while suspend/resume converges the current parent state. No second side effect is permitted merely to recreate an old response. |
-| State or lease convergence | Child cascade, heartbeats, stale recovery/scans, Node operations, WorkerProfile operations, terminal DriverStep repair, and queue claim/retry | Retry rechecks current ownership, fence, freshness, claim deadline, or desired state. A lost queue-claim response is recovered only after lease expiry; retry after a cleared claim may return an ownership conflict. Child-cascade identity freezes the affected IDs and intent while replay reports the descendants' current projections rather than stale snapshots. |
+| State or lease convergence | Child cascade, heartbeats, stale recovery/scans, Node operations, WorkerProfile operations, terminal DriverStep repair, terminal TaskRun convergence completion, and queue claim/retry | Retry rechecks current ownership, fence, freshness, claim deadline, or desired state. Terminal TaskRun convergence completion advances a monotonic versioned marker and replay returns the current marker without lowering it. A lost queue-claim response is recovered only after lease expiry; retry after a cleared claim may return an ownership conflict. Child-cascade identity freezes the affected IDs and intent while replay reports the descendants' current projections rather than stale snapshots. |
 
 TaskRun completion receipts created before request fingerprints were persisted
 retain the legacy same-TaskRun replay rule after upgrade: the same workspace,
@@ -160,6 +163,18 @@ DriverStep terminal repair and the terminal TaskRun event/notification are
 separate durable convergence legs; the completion command does not claim they
 are part of the same atomic transaction.
 
+After all three legs have succeeded or reached a durable skip decision,
+Execution advances the TaskRun's typed `terminal_convergence_version` and
+`terminal_converged_at` through a narrow FleetDB command. The periodic pass
+pages only terminal TaskRuns below the required protocol version, so completed
+history is not fetched and replayed every cadence. A partial leg or marker
+failure leaves the run eligible after restart; a lost completion response can
+replay the same command and observe the durable marker. Every new pass resets
+the exclusive TaskRun-ID cursor, which discovers a newly terminalized ID even
+when it sorts behind a prior page. Missing and older versions remain eligible
+for upgrade backfill, and concurrent old/new completion calls may only raise,
+never lower, the marker.
+
 `needs_revision` is a typed host protocol rather than text scraping. The local
 runner exposes a temporary, out-of-repository `LOOM_TASK_OUTCOME_FILE` and
 accepts only exact version-1 JSON with disposition `needs_revision` and a
@@ -170,6 +185,52 @@ leaves the Work Item open/unassigned for replanning. Malformed outcome data
 fails closed, and a nonzero exit or fatal stream error takes precedence over a
 valid file. Ordinary failed execution remains blocked instead of being reopened
 into a spend loop.
+
+### Repository admission, placement, and retry hardening
+
+A non-epic task without an explicit source repository is unambiguous only when
+its workspace has exactly one registered repository. With zero or multiple
+repositories, the Work Items owner performs one atomic repository-requirement
+command. FleetDB rechecks the current Issue projection, repository count,
+claim generation, live lock, and pending projections in the same Redis script
+or Postgres transaction before moving an eligible task to `blocked` and
+unassigning it. The result carries the canonical Issue and a commit-time
+`dispatch_ready` decision. Loom's ready-event bridge and startup reconciliation
+consume that result rather than dispatching from the stale journal payload;
+deleted tasks and tasks that concurrently became claimed, terminal, ordinarily
+blocked, or repository-assigned are suppressed.
+
+Repository selection is a separate atomic Work Items command. The caller sends
+a registered first-class repository `name`; FleetDB resolves and persists its
+effective `source_repo_id` (falling back to the name). In the same commit it
+reopens the Issue only when the Issue carries FleetDB's genuine private
+`repository_required` authority. Other blocked Issues remain blocked, and a
+lost assignment response can replay the already committed canonical Issue
+without applying a second transition.
+
+The policy authority is not caller-editable Issue metadata. Redis and Postgres
+persist it separately, public issue creation/batch creation and metadata
+set/remove endpoints cannot mint or remove the reserved `loom.block_reason`,
+and generic status, close, defer, assign, or claim operations cannot bypass a
+repository-required card. Delete clears the private record. Disaster recovery
+reconstructs authority only from
+the exact tagged block/assignment event sequence; an isolated public-looking
+marker is insufficient. Trusted import remains an Admin-only restore boundary
+and applies the same state machine.
+
+TaskRun retry preserves placement independently of mutable claim state. The
+reset path recovers `repo_ref` from the immutable original request receipt, so
+a selected repository cannot disappear into a multi-repository ambiguity on a
+later attempt. The DriverRun executor and TaskRun workers also register the
+same once-normalized configured node capacity; registration order cannot
+downgrade the process node to one slot.
+
+Repository cloning no longer guesses `main` or copies one workspace-wide
+default to every repository. Each clone records the committed branch selected
+by its remote symbolic HEAD (with the clone's symbolic HEAD as the bounded
+local/file-remote fallback). An explicit requested branch must resolve to a
+commit in every clone, and an empty or unborn remote fails closed instead of
+registering unrunnable metadata.
 
 ### Runtime and supervisor-disabled operation
 
@@ -187,7 +248,9 @@ Recovery preserves owner fencing. A healthy DriverRun invokes the
 owner-fenced stale-child command with its raw lease token kept inside the
 transport. System DriverRun recovery may fail a stale or crashed parent; the
 durable outcome path then converges its descendants through the child-cascade
-command. There is no tokenless, always-on global TaskRun recovery pass.
+command. There is no tokenless, always-on global TaskRun lifecycle recovery
+pass; the service-only TaskRun convergence pass repairs only terminal
+projections and uses the durable versioned completion boundary above.
 
 `@loom/sdk/runner` uses only the Loom task-run facade selected by
 `LOOM_TASK_RUN_API_URL`. Direct FleetDB credentials and mutation routes are not
@@ -210,7 +273,7 @@ policy.
 ## Compatibility and rollout
 
 Loom readiness requires `execution.await_atomic_resume.v1` plus the complete,
-exact 14-key Phase 4 foundation profile listed in the [target architecture](02-target-architecture.md#fleet-db-client-topology-and-compatibility)
+exact 18-key Phase 4 foundation profile listed in the [target architecture](02-target-architecture.md#fleet-db-client-topology-and-compatibility)
 before runtime loops start. A missing route, older FleetDB deployment, disabled
 command family, or absent authority resolver fails closed; there is no legacy
 multi-step mutation fallback or partial-profile mode. The existing keys are
@@ -219,9 +282,18 @@ umbrella parity gates rather than one key per method:
 and release. The dedicated `execution.task_run_work_item_design.v1` key is
 required because an older FleetDB can truthfully advertise TaskRun lease
 fencing without exposing the new atomic design route; the other TaskRun keys
-jointly cover the owner-fenced lifecycle and terminal Work Item policy. Phase 4
-does not invent separate release or
-terminal capability names absent from Loom, FleetDB, and OpenAPI.
+jointly cover the owner-fenced lifecycle and terminal Work Item policy. The
+three additional advertised keys correspond to actual typed routes:
+`execution.task_run_terminal_convergence.v1` for pending discovery and marker
+completion, `execution.terminal_driver_run_work_recovery.v1` for the terminal
+DriverRun recovery command, and
+`execution.terminal_driver_run_work_recovery_queue.v1` for its durable queue.
+`work_items.repository_requirement.v1` certifies the conditional repository
+block and atomic repository-assignment recovery commands, including canonical
+replay, private policy authority, and Redis/Postgres parity; Loom has no
+generic Issue-update fallback for these race-sensitive transitions.
+Phase 4 does not invent generic release or terminal-policy capability names
+absent from Loom, FleetDB, and OpenAPI.
 
 AgentCommand and AgentSession remain transitional records because their
 identity and interactive lifecycle ownership is Phase 5/6 scope. Their
@@ -261,14 +333,15 @@ The machine-readable mutation ledger enumerates the exact public Execution and
 Artifacts mutations by method and route. Architecture tests freeze that list,
 reject fictional generic commands, require the public FleetDB OpenAPI contract,
 and forbid new direct Store or FleetDB mutation paths outside declared owner
-adapters. The current architecture pass reports four active roots, 56 required
+adapters. The current architecture pass reports four active roots, 60 required
 command-ID namespaces, 82 composite-Store files, 71 outside composition, 90
-legacy handler-import exceptions, 243 primary direct-write rows, 86 runtime
-components, 103 goroutine definitions, all six existing architecture-inventory
+legacy handler-import exceptions, 251 primary direct-write rows across 273
+sites, 86 runtime components, 103 goroutine definitions, all six existing architecture-inventory
 performance records measured, and zero pending decisions across all 11
 declared profiles plus the all-files AST pass. The three
 `workflowcatalog.*`, 14 `automation.*`, four `artifacts.*`, and 35
-`execution.*` prefixes group IDs only; the ledger's aggregate, coordinating,
+`execution.*` prefixes at the immutable snapshot, now 39 after the terminal-work
+recovery delta, group IDs only; the ledger's aggregate, coordinating,
 and instance owners remain authoritative. Phase 4 execution-path latency and
 round-trip proof is separate from those fixed baseline categories. The real
 artifact-backed 30-sample product test measured p50 `11.796 ms`, p95
@@ -276,6 +349,74 @@ artifact-backed 30-sample product test measured p50 `11.796 ms`, p95
 workspace-guard reads plus the one atomic design command), within its
 `35 ms`/`75 ms` latency and three-request budgets. The architecture check
 passes; the aggregate product gates are not inferred from that result.
+
+### Architecture analyzer peak-memory fix
+
+The architecture analyzer previously amplified peak memory by keeping three
+repository-scale `go/packages` syntax/type graphs live concurrently for each
+profile pass. Direct-write collection also requested dependency syntax and
+`TypesInfo` even though it inspects only the requested adapter roots, and the
+package suite repeated the complete 11-profile direct-write scan after the
+authoritative repository test had already run it. This produced the observed
+approximately 15 GiB peak and a SIGKILL during a fresh
+`go test ./internal/archtest -count=1` run; inspection found no retained global
+package graph, so the failure is classified as peak-memory amplification rather
+than a classic retained-object leak.
+
+The Phase 4 fix serializes repository-scale loads and splits every architecture
+profile into three bounded views: import adjacency only for the transitive
+dependency graph; `Types` and compiled-file selection for all requested
+`./...` roots; and syntax plus `TypesInfo` only for directories whose selected
+files contain a generic-mechanism selector candidate. The broad typed graph is
+released before that focused semantic load begins. Direct-write analysis
+likewise omits `NeedDeps` because it inspects only requested adapter roots.
+Analyzer-owned `-p=2` flags bound Go compiler subprocess fan-out even though
+the profile environment deliberately clears caller `GOFLAGS`. The package
+suite also converts the duplicate checked-in 11-profile direct-write scan into
+a cheap strict row/site manifest assertion; the authoritative repository test
+remains responsible for matching observed calls to every baseline row and
+count.
+
+Regression tests freeze the single profile-load limit, typed-root versus
+metadata-only versus focused-`TypesInfo` modes, direct-write mode, and compiler
+cap. Existing typed receiver, tagged/race source, exported-signature, and
+transitive-dependency fixtures remain green. New fixtures prove same-package
+and external tagged test files reach the focused semantic load, repeated test
+variants cannot duplicate a violation, malformed selected source remains
+fail-closed, and the metadata graph still detects a test-only path through an
+internal helper to a forbidden dependency.
+
+The final hardening pass also replaces the former generated-file prefix check
+with Go's canonical `ast.IsGenerated` rule, so only a complete
+`// Code generated ... DO NOT EDIT.` marker before the package declaration can
+exclude a file. Every configured direct-write adapter root must exist; missing
+or inaccessible roots now stop analysis instead of silently reducing its
+scope. The checked-in `scripts/rsswatch` runner, `make
+check-architecture-memory` target, and dedicated CI job enforce a 2048 MiB
+process-tree ceiling and terminate the watched process group on budget or
+timeout failure.
+
+Bounded local validation on 2026-07-20 sampled aggregate RSS for each test
+process and its descendants every 250 ms and killed the process group at the
+declared ceiling:
+
+| Command | Result | Peak process-tree RSS | Hard ceiling |
+|---|---:|---:|---:|
+| Exact `7d8118556` `go test ./internal/archtest -count=1 -timeout=15m`, no `GOMEMLIMIT`, standard build cache | PASS in `132.652s` | `743.2 MiB` | `2048 MiB` |
+| Exact `7d8118556`, same command with a fresh `GOCACHE` | PASS in `191.376s` | `1154.8 MiB` | `2048 MiB` |
+| Exact `7d8118556` `go test -race ./internal/archtest -count=1 -timeout=15m` | PASS in `87.119s` | `1111.7 MiB` | `2048 MiB` |
+| Exact `7d8118556` `go run ./scripts/archcheck check` | PASS, `11/11` profiles | `370.5 MiB` | `2048 MiB` |
+
+Follow-up gate/analyzer commit `e686b7a95` applies the architecture RSS budget
+to the normal aggregate-gate path, replaces its duplicate repository-scale
+snapshot scan with a checked-in manifest assertion, and bounds gate worker
+fan-out and process cleanup. The measurements in the table remain provenance
+for exact commit `7d8118556`; they are not reattributed to the follow-up commit.
+
+Summed descendant RSS conservatively double-counts shared pages, so these
+figures are safe upper-bound evidence rather than heap profiles. `GOMEMLIMIT`
+is defense in depth, not the fix: the checked-in 2048 MiB process-tree budget
+is the primary regression proof.
 
 ## Slice locality and structural delta
 
@@ -324,9 +465,15 @@ awk '/^  - file:/{rows++} /^    count:/{sites += $2} END{print rows, sites}' \
   internal/archtest/testdata/direct-writes.yaml
 ```
 
-## Public-path and packaged Desktop proof
+## Historical public-path and packaged Desktop proof
 
-The completed acceptance sequence used product entry surfaces, not hand-seeded
+The acceptance sequence below is immutable evidence for Loom `53cbe2577` and
+FleetDB `afb688768` only. It predates the repository-admission hardening delta
+described above and must not be presented as refreshed package proof for the
+current worktree. Refreshed package evidence for the hardening delta is
+recorded separately below.
+
+The earlier acceptance sequence used product entry surfaces, not hand-seeded
 storage:
 
 1. run the Execution-tagged supervisor-disabled matrix against the paired
@@ -409,6 +556,45 @@ Versioned local evidence is retained at
 These local artifacts remain deliberately untracked; the checked-in evidence
 record and validation snapshot are the portable provenance.
 
+### Split repository-admission package evidence
+
+Packaged build `8b17cb261-phase4-repo-required-v3`, running at
+`http://127.0.0.1:58237`, exercised the current repository-admission path
+through the product UI. Task `PHASE4-TERRA-FRESH-20260718-12` was created
+without a repository and appeared in the canonical board's Blocked column.
+Selecting `hello-world` reopened it to Open. Its task worktree was then created
+under `hello-world` from `origin/master`; the bundled Codex run completed in
+`5m18s`, persisted the design, and moved the task to Review. The wrapper's
+terminal record rendered `Completed` with outcome `skipped`.
+
+That run exposed a transient create-response race: the create call returned an
+Open projection before durable reconciliation changed it to Blocked. It also
+predated the fix that verifies a recorded local-runtime PID's executable before
+signalling it, which prevents an unrelated process that reused a stale PID
+after reboot from being terminated.
+
+Final packaged build `8b17cb261-phase4-repo-required-final`, running at
+`http://127.0.0.1:61594`, contains both fixes. Creating
+`PHASE4-TERRA-FRESH-20260718-14` without a repository returned canonical
+`blocked` status in the synchronous POST response; an immediate GET also
+returned Blocked, and the task workflow-runs query returned zero runs. The
+packaged Desktop board and task detail rendered it in the Blocked column with
+`Repo: No repo`. That task was deliberately left blocked. Consequently, the
+final package does not prove repository-selection recovery or retry after both
+fixes. The earlier v3 package evidence proves the canonical
+repository-selection recovery and the real bundled-Codex run from
+`origin/master`, while the final package binds only the synchronous admission
+and stale-PID fixes to the rebuilt product. These are split evidence runs, not
+a claim that the final package satisfies the complete Desktop closure row in
+[the enforcement record](04-enforcement-and-gates.md).
+
+The final runtime used service PID `50694`, serve PID `50696`, FleetDB PID
+`50698`, and daemon PID `50702`. The running Loom executable reports build
+`8b17cb261-phase4-repo-required-final`; its SHA-256 is
+`16baced9dab5416bdfe351dc0c4a8e4f1b46958eb49fefbfaf7f4a531c09dfb9` and
+matches the bundled executable sidecar. This final-package evidence does
+not create a new immutable source validation snapshot.
+
 ## Completion evidence
 
 The baseline retains the appended
@@ -419,8 +605,8 @@ are not rewritten as the implementation changes. It is superseded for current
 source status by the live architecture check and must not be cited as the final
 paired contract or product-gate record.
 
-Final evidence includes the passing architecture check with the counts above,
-byte-identical FleetDB/Loom OpenAPI snapshots at SHA-256
+The immutable `53cbe2577` evidence includes the passing architecture check
+with the counts above, byte-identical FleetDB/Loom OpenAPI snapshots at SHA-256
 `26ed930bc527c3815742c8b4c7a0ba5267bdc91c585ddc9f78483d9373303482`, the
 green source-bound supervisor-disabled row, and the 30-sample artifact-backed
 product measurement (p50 `11.796 ms`, p95 `14.784 ms`, exactly three
@@ -439,15 +625,37 @@ attempt.
 
 The broad exploratory Playwright run is recorded but is not claimed as a Phase
 4 gate: 172 passed, 41 failed, six were interrupted, 95 skipped, and 1,166 did
-not run. The required targeted frontend and aggregate gates pass. The packaged
-Desktop positive Terra and unavailable-backend journeys above pass, Codex is
-restored as default, and the package remains running and healthy. The appended
+not run. The required targeted frontend and aggregate gates passed for that
+snapshot. Its packaged Desktop positive Terra and unavailable-backend journeys
+passed, Codex was restored as default, and that package was running and
+healthy when captured. The appended
 `phase4-execution-validation-53cbe2577` immutable snapshot binds these results
 to Loom `53cbe257715d55770c77d508c23620389b9c9de1`, FleetDB
 `afb6887682f777b0e7093b5dcdff0a5e236777f9`, and the final contract hash. The
 subsequent evidence-only commit changes documentation and the append-only
-baseline, not the validated product source. Phase 4 is complete; Phase 5 has
-not started.
+baseline, not the validated product source.
+
+The current repository-admission and local-authority hardening source is
+committed at Loom `54b338d61005799493463acdc559bf8a82022b1e` with FleetDB
+`c73c69a04f27490b54999fc8784cbc992ccff66c`. The FleetDB full gate passed in
+`775.61s` on the source staged into that commit; the only post-gate staging
+correction removed one trailing blank line from the new recovery-queue Lua
+file to satisfy `git diff --check`. The exact committed FleetDB sidecar has
+SHA-256 `06ebcc426453e9d7ada9f240f54ae5e1b0beeed9e29b17aa18ca607bea176505`.
+The Loom full gate then passed in `747.64s` at the exact Loom source commit
+against that FleetDB source checkout and binary. The paired OpenAPI snapshots
+are byte-identical at SHA-256
+`bf2935fdbc785deaa70c2ac933dd5f63e44f9deb7ec2a61f332af1b889c8088c`.
+
+Those results make the paired source, contract, architecture, SDK, frontend
+test/build, and component-boundary gates green. The split packaged Desktop
+evidence above remains narrower: the final package proves synchronous blocking
+with zero runs, while the earlier v3 package proves repository selection,
+reopening, and the bundled-Codex run. No single final package has yet proved
+blocked-card recovery after both fixes, and the final local-open packaged
+Desktop plus Podman/raw-browser journeys have not been rerun, so the product
+closure rows remain open. The delta is not yet bound by a new immutable
+validation snapshot. Phase 5 has not started.
 
 ---
 

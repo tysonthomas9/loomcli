@@ -1,6 +1,6 @@
 # Target Architecture and Capability Boundaries
 
-- **Status:** Target reviewed and approved; Phase 4 complete with paired contract and gates, source-bound proof, measured performance, packaged Desktop journeys, and immutable validation evidence; Phase 5 has not started
+- **Status:** Target reviewed and approved; the Phase 4 architecture slice is complete, and its repository-admission hardening delta has paired contract/source-gate proof; refreshed packaged Desktop proof for that delta is pending; Phase 5 has not started
 - **Scope:** In-process ownership and dependencies inside `loom serve`, operator CLI transport behavior, and corresponding frontend feature boundaries
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -210,7 +210,7 @@ New required backend behavior is negotiated before adapters become ready. The re
 
 The Execution-owned await dispatcher is always hosted by `loom serve`, so
 every serve profile requires `execution.await_atomic_resume.v1`. Phase 4 adds
-one indivisible, exact 14-key Execution/Artifacts foundation profile:
+one indivisible, exact 18-key Execution/Artifacts/Work Items foundation profile:
 `artifacts.owner_fenced_lifecycle.v1`,
 `execution.driver_run_child_cascade.v1`,
 `execution.driver_run_child_start.v1`,
@@ -221,9 +221,14 @@ one indivisible, exact 14-key Execution/Artifacts foundation profile:
 `execution.issue_claim_task_run_start.v1`,
 `execution.task_run_lease_fencing.v1`,
 `execution.task_run_log_idempotency.v1`,
+`execution.task_run_terminal_convergence.v1`,
 `execution.task_run_work_item_design.v1`,
-`execution.task_run_request.v1`, `execution.task_run_requeue.v1`, and
-`execution.task_run_retry_exhaustion.v1`. Loom requires the complete profile
+`execution.task_run_request.v1`,
+`execution.task_run_requeue.v1`,
+`execution.task_run_retry_exhaustion.v1`,
+`execution.terminal_driver_run_work_recovery.v1`,
+`execution.terminal_driver_run_work_recovery_queue.v1`, and
+`work_items.repository_requirement.v1`. Loom requires the complete profile
 before composing the runtime; a partial profile is not a compatibility mode.
 Enabling Workflow Catalog additionally requires
 `workflow_catalog.version_lifecycle.v1`; enabling Automation additionally
@@ -236,9 +241,18 @@ both exact-generation claim and release are usable behind the service boundary;
 `execution.task_run_work_item_design.v1` is separate because older deployments
 can provide the TaskRun lease family without the owner-fenced Work Item design
 command; the TaskRun claim, lease, request, requeue, and retry-exhaustion keys jointly
-gate the owner-fenced lifecycle and its Work Item terminal policy. The profile
-does not invent separate release or terminal-policy capability names that are
-absent from the code and OpenAPI contract. Redis and Postgres must implement
+gate the owner-fenced lifecycle and its Work Item terminal policy.
+`execution.task_run_terminal_convergence.v1` certifies the versioned pending-candidate
+query and monotonic completion marker, while the two terminal DriverRun keys
+certify the typed recovery command and its durable claim/complete/retry queue.
+`work_items.repository_requirement.v1` certifies both sides of repository
+admission: the conditional atomic block for an otherwise runnable task with no
+unambiguous repository and the atomic repository assignment that reopens only
+that exact policy block. The backend returns a canonical Issue plus a
+commit-time dispatch-readiness decision; Loom does not reconstruct either from
+the stale event that initiated admission.
+These are real typed routes or commands, not invented generic release or
+terminal-policy capability names. Redis and Postgres must implement
 the same `ClaimActionID` generation and terminal outcomes before the existing
 umbrella keys count as supported.
 
@@ -265,9 +279,19 @@ Authority is server-derived. Request DTOs never supply audit actor, workspace sc
 
 `SystemAuthority` is not an ambient superuser. It must be action/capability scoped, constructible only by a registered runtime component, audited with a reason, and rejected by operator-only commands. Execution and session authority cannot be converted into one another or into operator authority. Webhook authority cannot call arbitrary platform APIs.
 
-MM-2 settles the local/open-mode operator model: a server issues a 256-bit operator credential and stores it in a mode-0600 runtime file; loopback location alone grants no authority. Until a command family is converted to that path, any explicitly named legacy-authority adapter needs a removal issue and the slice may not claim security completion.
+MM-2 settles the operator model by deployment mode. In local `open` mode, the
+server derives typed authority for one canonical workspace and one registered
+handler-selected action with the stable `local-open-operator` subject; clients
+send no operator credential. In cloud or shared mode, the existing OIDC
+resolver derives authority only from verified identity and workspace role.
+Typed authority remains mandatory at every capability command boundary in both
+modes. See the approved
+[local open-mode authority revision](10-local-open-mode-authority-revision.md).
 
-Standalone operator CLI commands cannot construct `OperatorAuthority` merely because they run on the same host. The target CLI calls the authenticated management API; credential verification and authority derivation happen in `loom serve`. Completion of a migrated CLI surface requires removal of its direct Store/FleetDB mutation path.
+Standalone operator CLI commands cannot construct `OperatorAuthority`. They
+call the configured management API; `loom serve` applies its open or OIDC trust
+mode and derives authority. Completion of a migrated CLI surface requires
+removal of its direct Store/FleetDB mutation path.
 
 ## Runtime lifecycle
 
