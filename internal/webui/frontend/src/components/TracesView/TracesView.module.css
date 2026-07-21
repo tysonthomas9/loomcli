@@ -97,7 +97,11 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(520px, 44%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.content[data-panel-open="true"] {
+  grid-template-columns: minmax(520px, 1fr) minmax(360px, 42%);
 }
 
 .listPane {
@@ -105,8 +109,11 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--color-border-light);
   background: var(--color-panel-bg);
+}
+
+.content[data-panel-open="true"] .listPane {
+  border-right: 1px solid var(--color-border-light);
 }
 
 .banner {
@@ -139,6 +146,7 @@
 
 .table {
   width: 100%;
+  min-width: max-content;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -177,6 +185,11 @@
   box-shadow: inset 3px 0 0 var(--color-primary);
 }
 
+.attemptColumn {
+  width: 64px;
+  text-align: center !important;
+}
+
 .mono {
   font-family: var(--font-mono);
   color: var(--color-text-primary);
@@ -187,6 +200,59 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--color-text-primary);
+}
+
+.tableLink,
+.inlineLink,
+.evalJudgeLink {
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: none;
+}
+
+.tableLink:hover,
+.inlineLink:hover,
+.evalJudgeLink:hover {
+  text-decoration: underline;
+}
+
+.tagList {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tagPill,
+.tagPillStatic,
+.filterChip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-border-light);
+  border-radius: 999px;
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.tagPill {
+  cursor: pointer;
+}
+
+.tagPill:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.scoreCell {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .kindBadge,
@@ -265,6 +331,53 @@
   display: flex;
   flex-direction: column;
   background: var(--color-panel-bg);
+}
+
+.panelHeader {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px 6px 14px;
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-primary);
+  background: var(--color-bg-card);
+  font-size: 13px;
+}
+
+.panelActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panelButton {
+  min-height: 28px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.panelButton:hover {
+  background: var(--color-bg-hover);
+}
+
+.detailLinks {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+  font-size: 12px;
+}
+
+.judgeTranscriptHeader {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-secondary);
+  font-size: 12px;
 }
 
 .detailEmpty {
@@ -618,8 +731,163 @@
   font-family: var(--font-family-mono);
 }
 
+.evalJudgeLink {
+  align-self: flex-start;
+  font-size: var(--font-size-sm);
+}
+
+.filterChips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filterChip {
+  gap: 5px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-card);
+}
+
+.filterChip button {
+  border: 0;
+  background: transparent;
+  color: var(--color-text-tertiary);
+  padding: 0;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.runPage {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+}
+
+.runNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+  font-size: 12px;
+}
+
+.runNav a,
+.taskLink {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.runNav a:hover,
+.taskLink:hover {
+  text-decoration: underline;
+}
+
+.runHeader {
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+}
+
+.runTitleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.runEyebrow {
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.runTitle {
+  margin: 3px 0 0;
+  font-family: var(--font-mono);
+  font-size: 20px;
+}
+
+.taskLink {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.missingNotice {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 12px;
+}
+
+.runStats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(100px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.runStats > div {
+  padding: 9px 11px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+}
+
+.runStats span,
+.runStats strong {
+  display: block;
+}
+
+.runStats span {
+  margin-bottom: 3px;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.runStats strong {
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.runSessions {
+  min-height: 180px;
+  max-height: 45vh;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+}
+
+.runEmpty {
+  padding: 28px 20px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.runDetail {
+  min-height: 440px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-panel-bg);
+}
+
 @media (max-width: 980px) {
-  .content {
+  .content,
+  .content[data-panel-open="true"] {
     grid-template-columns: 1fr;
   }
 
@@ -627,6 +895,14 @@
     min-height: 360px;
     border-right: 0;
     border-bottom: 1px solid var(--color-border-light);
+  }
+
+  .content[data-panel-open="true"] .listPane {
+    border-right: 0;
+  }
+
+  .runStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .evalScoreGrid,

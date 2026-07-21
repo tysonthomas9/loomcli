@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import {
@@ -7,6 +12,7 @@ import {
   formatDuration,
   formatTokens,
 } from "@/components/TranscriptView";
+import { useSessionEval } from "@/hooks/evals";
 import {
   useWorkspaceSession,
   useWorkspaceSessionDiff,
@@ -14,6 +20,7 @@ import {
   useWorkspaceSessionTranscript,
   useWorkspaceSessions,
   useWorkspaceSubagentTranscript,
+  useWorkspaceTraceRun,
 } from "@/hooks/terminal";
 import type {
   WorkspaceSessionFilters,
@@ -27,7 +34,7 @@ import { TraceEvalPanel } from "./TraceEvalPanel";
 import styles from "./TracesView.module.css";
 
 type RangePreset = "24h" | "7d" | "30d" | "custom";
-type DetailTab = "transcript" | "diff" | "eval";
+type DetailTab = "eval" | "transcript" | "diff" | "judge";
 
 const DEFAULT_LIMIT = 200;
 const RANGE_OPTIONS: Array<{ value: RangePreset; label: string }> = [
@@ -59,6 +66,7 @@ const KIND_OPTIONS: Array<{ value: WorkspaceSessionKind; label: string }> = [
   { value: "terminal", label: "Terminal" },
   { value: "maintenance", label: "Maintenance" },
   { value: "ad_hoc", label: "Ad hoc" },
+  { value: "judge", label: "Judge" },
 ];
 
 export function getTruncationBannerText(
@@ -68,6 +76,18 @@ export function getTruncationBannerText(
 ): string | null {
   if (total <= shown) return null;
   return `showing newest ${limit} of ${total} in this range — narrow the time range`;
+}
+
+export function scoreDimensionsForSessions(
+  sessions: WorkspaceSessionListItem[],
+): string[] {
+  const dimensions = new Set<string>();
+  for (const session of sessions) {
+    for (const dimension of Object.keys(session.eval_scores ?? {})) {
+      dimensions.add(dimension);
+    }
+  }
+  return [...dimensions].sort();
 }
 
 function parseRange(value: string | null): RangePreset {
@@ -113,8 +133,17 @@ function formatDateTime(value: string | null | undefined): string {
   });
 }
 
+function formatScoreDimension(dimension: string): string {
+  return dimension.replace(/_/g, " ");
+}
+
 function totalTokens(session: WorkspaceSessionListItem): number {
-  return (session.input_tokens ?? 0) + (session.output_tokens ?? 0);
+  return (
+    (session.input_tokens ?? 0) +
+    (session.output_tokens ?? 0) +
+    (session.cache_read_tokens ?? 0) +
+    (session.cache_write_tokens ?? 0)
+  );
 }
 
 function diffStats(session: WorkspaceSessionListItem): string {
@@ -140,13 +169,31 @@ function updateSearchParams(
   return next;
 }
 
+function updateTags(
+  current: URLSearchParams,
+  tags: readonly string[],
+): URLSearchParams {
+  const next = new URLSearchParams(current);
+  next.delete("tag");
+  for (const tag of tags) next.append("tag", tag);
+  return next;
+}
+
 function DetailMetaGrid({
   session,
 }: {
   session: WorkspaceSessionListItem;
 }): JSX.Element {
+  const runId = session.task_run_id || "-";
+  const hasInvocation = runId !== "-" && Boolean(session.invocation_key);
   const cells = [
     ["Session", session.session_id],
+    ["Run", runId],
+    [
+      "Attempt",
+      !hasInvocation || session.attempt == null ? "-" : String(session.attempt),
+    ],
+    ["Invocation", runId === "-" ? "-" : session.invocation_key || "-"],
     ["Kind", session.kind ?? "-"],
     ["Started", formatDateTime(session.started_at)],
     ["Ended", formatDateTime(session.ended_at)],
@@ -168,50 +215,32 @@ function DetailMetaGrid({
   );
 }
 
-function EvalScoresCell({
-  session,
-}: {
-  session: WorkspaceSessionListItem;
-}): JSX.Element {
-  const scores = session.eval_scores;
-  if (scores) {
-    const title = `Outcome ${scores.outcome_success} · Adherence ${scores.instruction_adherence} · Efficiency ${scores.efficiency} · Tool use ${scores.tool_use_quality}`;
-    return (
-      <span
-        className={styles.evalScores}
-        title={title}
-        data-testid="trace-eval-scores"
-      >
-        {scores.outcome_success}/{scores.instruction_adherence}/
-        {scores.efficiency}/{scores.tool_use_quality}
-      </span>
-    );
-  }
-  if (session.eval_status === "failed") {
-    return (
-      <span className={styles.evalScoresFailed} title="Eval failed">
-        failed
-      </span>
-    );
-  }
-  return <span className={styles.indicator}>-</span>;
-}
-
 function SessionRows({
   sessions,
+  scoreDimensions,
   selectedId,
+  includeRun,
   onSelect,
+  onRunClick,
+  onTagClick,
 }: {
   sessions: WorkspaceSessionListItem[];
+  scoreDimensions: string[];
   selectedId: string | null;
+  includeRun: boolean;
   onSelect: (sessionId: string) => void;
+  onRunClick?: (taskRunId: string) => void;
+  onTagClick?: (tag: string) => void;
 }): JSX.Element {
   return (
     <div className={styles.tableWrap}>
-      <table className={styles.table}>
+      <table className={styles.table} data-testid="trace-session-table">
         <thead>
           <tr>
             <th>Session</th>
+            {includeRun && <th>Run</th>}
+            <th className={styles.attemptColumn}>Attempt</th>
+            <th>Invocation</th>
             <th>Agent</th>
             <th>Kind</th>
             <th>Status</th>
@@ -219,68 +248,134 @@ function SessionRows({
             <th>Duration</th>
             <th>Tokens</th>
             <th>Files</th>
-            <th title="Eval scores: outcome / adherence / efficiency / tool use">
-              Eval
-            </th>
-            <th>T</th>
-            <th>D</th>
+            <th>Tags</th>
+            {scoreDimensions.map((dimension) => (
+              <th key={dimension} title={dimension}>
+                {formatScoreDimension(dimension)}
+              </th>
+            ))}
+            <th title="Transcript">T</th>
+            <th title="Diff">D</th>
           </tr>
         </thead>
         <tbody>
-          {sessions.map((session) => (
-            <tr
-              key={session.session_id}
-              className={styles.row}
-              data-selected={selectedId === session.session_id || undefined}
-              onClick={() => onSelect(session.session_id)}
-            >
-              <td className={styles.mono} title={session.session_id}>
-                {shortId(session.session_id)}
-              </td>
-              <td className={styles.agentCell} title={session.agent_name}>
-                {session.agent_name}
-              </td>
-              <td>
-                <span className={styles.kindBadge}>{session.kind ?? "-"}</span>
-              </td>
-              <td>
-                <span
-                  className={styles.statusChip}
-                  data-status={session.status}
-                >
-                  <span className={styles.statusDot} />
-                  {formatStatusLabel(session.status)}
-                </span>
-              </td>
-              <td>{formatDateTime(session.started_at)}</td>
-              <td>{formatDuration(session.duration_s)}</td>
-              <td>{formatTokens(totalTokens(session))}</td>
-              <td>{session.files_changed}</td>
-              <td>
-                <EvalScoresCell session={session} />
-              </td>
-              <td>
-                <span
-                  className={styles.indicator}
-                  data-on={session.has_transcript || undefined}
-                  title={
-                    session.has_transcript ? "Has transcript" : "No transcript"
-                  }
-                >
-                  {session.has_transcript ? "yes" : "-"}
-                </span>
-              </td>
-              <td>
-                <span
-                  className={styles.indicator}
-                  data-on={session.has_diff || undefined}
-                  title={session.has_diff ? "Has diff" : "No diff"}
-                >
-                  {session.has_diff ? "yes" : "-"}
-                </span>
-              </td>
-            </tr>
-          ))}
+          {sessions.map((session) => {
+            const runId = session.task_run_id || "";
+            const hasInvocation = Boolean(runId && session.invocation_key);
+            return (
+              <tr
+                key={session.session_id}
+                className={styles.row}
+                data-selected={selectedId === session.session_id || undefined}
+                onClick={() => onSelect(session.session_id)}
+              >
+                <td className={styles.mono} title={session.session_id}>
+                  {shortId(session.session_id)}
+                </td>
+                {includeRun && (
+                  <td className={styles.mono}>
+                    {runId && onRunClick ? (
+                      <button
+                        type="button"
+                        className={styles.tableLink}
+                        title={runId}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onRunClick(runId);
+                        }}
+                      >
+                        {shortId(runId)}
+                      </button>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
+                )}
+                <td className={`${styles.mono} ${styles.attemptColumn}`}>
+                  {hasInvocation && session.attempt != null
+                    ? session.attempt
+                    : "-"}
+                </td>
+                <td className={styles.mono} title={session.invocation_key}>
+                  {runId ? session.invocation_key || "-" : "-"}
+                </td>
+                <td className={styles.agentCell} title={session.agent_name}>
+                  {session.agent_name}
+                </td>
+                <td>
+                  <span className={styles.kindBadge}>
+                    {session.kind ?? "-"}
+                  </span>
+                </td>
+                <td>
+                  <span
+                    className={styles.statusChip}
+                    data-status={session.status}
+                  >
+                    <span className={styles.statusDot} />
+                    {formatStatusLabel(session.status)}
+                  </span>
+                </td>
+                <td>{formatDateTime(session.started_at)}</td>
+                <td>{formatDuration(session.duration_s)}</td>
+                <td>{formatTokens(totalTokens(session))}</td>
+                <td>{session.files_changed}</td>
+                <td>
+                  <div className={styles.tagList}>
+                    {(session.tags ?? []).length === 0 && (
+                      <span className={styles.indicator}>-</span>
+                    )}
+                    {(session.tags ?? []).map((tag) =>
+                      onTagClick ? (
+                        <button
+                          type="button"
+                          className={styles.tagPill}
+                          key={tag}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onTagClick(tag);
+                          }}
+                        >
+                          {tag}
+                        </button>
+                      ) : (
+                        <span className={styles.tagPillStatic} key={tag}>
+                          {tag}
+                        </span>
+                      ),
+                    )}
+                  </div>
+                </td>
+                {scoreDimensions.map((dimension) => (
+                  <td className={styles.scoreCell} key={dimension}>
+                    {session.eval_scores?.[dimension] ?? "-"}
+                  </td>
+                ))}
+                <td>
+                  <span
+                    className={styles.indicator}
+                    data-on={session.has_transcript || undefined}
+                    title={
+                      session.has_transcript
+                        ? "Has transcript"
+                        : "No transcript"
+                    }
+                  >
+                    {session.has_transcript ? "yes" : "-"}
+                  </span>
+                </td>
+                <td>
+                  <span
+                    className={styles.indicator}
+                    data-on={session.has_diff || undefined}
+                    title={session.has_diff ? "Has diff" : "No diff"}
+                  >
+                    {session.has_diff ? "yes" : "-"}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -373,29 +468,70 @@ function SubagentsSection({
   );
 }
 
-function TraceDetail({
-  selected,
+function JudgeTranscript({
+  judgeSessionId,
 }: {
-  selected: WorkspaceSessionListItem | null;
+  judgeSessionId: string | null;
+}): JSX.Element {
+  const { entries, isLoading, error } = useWorkspaceSessionTranscript(
+    judgeSessionId,
+    false,
+  );
+
+  if (!judgeSessionId) {
+    return (
+      <div className={styles.detailEmpty}>
+        No judge transcript is linked to the current eval.
+      </div>
+    );
+  }
+
+  return (
+    <TranscriptView
+      entries={entries}
+      isLoading={isLoading}
+      error={error}
+      emptyMessage="No judge transcript entries"
+      toolbar={
+        <div className={styles.judgeTranscriptHeader}>
+          Judge session <span className={styles.mono}>{judgeSessionId}</span>
+        </div>
+      }
+    />
+  );
+}
+
+function TraceDetail({
+  sessionId,
+  initialSession,
+  onFollowSession,
+}: {
+  sessionId: string | null;
+  initialSession: WorkspaceSessionListItem | null;
+  onFollowSession: (sessionId: string) => void;
 }): JSX.Element {
   const [tab, setTab] = useState<DetailTab>("transcript");
-  const sessionId = selected?.session_id ?? null;
   const {
     session: detailSession,
     isLoading: detailLoading,
     error: detailError,
   } = useWorkspaceSession(sessionId);
   const merged = useMemo<WorkspaceSessionListItem | null>(() => {
-    const base = selected ?? detailSession;
+    const base = initialSession ?? detailSession;
     if (!base) return null;
-    const kindValue = selected?.kind ?? detailSession?.kind;
-    const next = {
-      ...base,
-      ...(detailSession ?? {}),
-    };
+    const kindValue = initialSession?.kind ?? detailSession?.kind;
+    const next = { ...base, ...(detailSession ?? {}) };
     return kindValue ? { ...next, kind: kindValue } : next;
-  }, [selected, detailSession]);
+  }, [initialSession, detailSession]);
+  const defaultKind = initialSession?.kind ?? detailSession?.kind;
 
+  const {
+    evalState,
+    isLoading: evalLoading,
+    isRejudging,
+    error: evalError,
+    requestRejudge,
+  } = useSessionEval(sessionId, Boolean(sessionId));
   const {
     entries,
     isLoading: transcriptLoading,
@@ -411,15 +547,14 @@ function TraceDetail({
   );
 
   useEffect(() => {
-    setTab("transcript");
-  }, [sessionId]);
+    setTab(defaultKind === "task" ? "eval" : "transcript");
+  }, [sessionId, defaultKind]);
 
-  if (!selected) {
+  if (!sessionId) {
     return (
       <div className={styles.detailEmpty}>Select a trace to inspect it.</div>
     );
   }
-
   if (detailError && !merged) {
     return (
       <div className={styles.detailEmpty}>
@@ -427,15 +562,34 @@ function TraceDetail({
       </div>
     );
   }
-
-  if (!merged || detailLoading) {
+  if (!merged || (detailLoading && !initialSession)) {
     return <div className={styles.detailEmpty}>Loading session...</div>;
   }
 
+  const judgeSessionId = evalState?.eval?.judge_session_id || null;
   const toolbar = (
     <>
       <DetailMetaGrid session={merged} />
-      <div className={styles.tabBar}>
+      {merged.judged_session_id && (
+        <div className={styles.detailLinks}>
+          <button
+            type="button"
+            className={styles.inlineLink}
+            onClick={() => onFollowSession(merged.judged_session_id!)}
+          >
+            Judged session: {shortId(merged.judged_session_id)}
+          </button>
+        </div>
+      )}
+      <div className={styles.tabBar} data-testid="trace-detail-tabs">
+        <button
+          type="button"
+          className={styles.tab}
+          data-active={tab === "eval" || undefined}
+          onClick={() => setTab("eval")}
+        >
+          Eval
+        </button>
         <button
           type="button"
           className={styles.tab}
@@ -456,10 +610,11 @@ function TraceDetail({
         <button
           type="button"
           className={styles.tab}
-          data-active={tab === "eval" || undefined}
-          onClick={() => setTab("eval")}
+          data-active={tab === "judge" || undefined}
+          disabled={!evalState?.eval}
+          onClick={() => setTab("judge")}
         >
-          Eval
+          Judge
         </button>
       </div>
     </>
@@ -482,7 +637,16 @@ function TraceDetail({
         }
       />
       {tab === "eval" && (
-        <TraceEvalPanel sessionId={sessionId} enabled={tab === "eval"} />
+        <TraceEvalPanel
+          sessionId={sessionId}
+          {...(merged.kind ? { kind: merged.kind } : {})}
+          evalState={evalState}
+          isLoading={evalLoading}
+          isRejudging={isRejudging}
+          error={evalError}
+          requestRejudge={requestRejudge}
+          onOpenJudge={() => setTab("judge")}
+        />
       )}
       {tab === "diff" && (
         <div className={styles.diffPane} data-testid="trace-session-diff">
@@ -509,11 +673,31 @@ function TraceDetail({
           )}
         </div>
       )}
+      {tab === "judge" && <JudgeTranscript judgeSessionId={judgeSessionId} />}
     </>
   );
 }
 
-export function TracesView(): JSX.Element {
+function FilterChip({
+  label,
+  onClear,
+}: {
+  label: string;
+  onClear: () => void;
+}): JSX.Element {
+  return (
+    <span className={styles.filterChip}>
+      {label}
+      <button type="button" aria-label={`Clear ${label}`} onClick={onClear}>
+        ×
+      </button>
+    </span>
+  );
+}
+
+function TracesListView(): JSX.Element {
+  const navigate = useNavigate();
+  const { workspaceId = "" } = useParams<{ workspaceId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const range = parseRange(searchParams.get("range"));
@@ -522,6 +706,8 @@ export function TracesView(): JSX.Element {
   ) as WorkspaceSessionStatusFilter | null;
   const agentId = searchParams.get("agent_id") ?? "";
   const kind = searchParams.get("kind") as WorkspaceSessionKind | null;
+  const taskRunId = searchParams.get("task_run_id") ?? "";
+  const tags = useMemo(() => searchParams.getAll("tag"), [searchParams]);
   const customSince = searchParams.get("since");
   const customUntil = searchParams.get("until");
 
@@ -535,28 +721,36 @@ export function TracesView(): JSX.Element {
     if (status) next.status = status;
     if (agentId) next.agent_id = agentId;
     if (kind) next.kind = kind;
+    if (taskRunId) next.task_run_id = taskRunId;
+    if (tags.length > 0) next.tags = tags;
     return next;
-  }, [range, customSince, customUntil, status, agentId, kind]);
+  }, [range, customSince, customUntil, status, agentId, kind, taskRunId, tags]);
 
-  const { sessions, total, limit, isLoading, error, refetch } =
+  const { sessions, total, limit, scoreDimensions, isLoading, error, refetch } =
     useWorkspaceSessions(filters);
-
-  useEffect(() => {
-    if (sessions.length === 0) {
-      setSelectedId(null);
-      return;
-    }
-    if (!selectedId || !sessions.some((s) => s.session_id === selectedId)) {
-      const firstSession = sessions[0];
-      if (firstSession) setSelectedId(firstSession.session_id);
-    }
-  }, [sessions, selectedId]);
-
-  const selected = sessions.find((s) => s.session_id === selectedId) ?? null;
+  const visibleSessions = useMemo(
+    () =>
+      kind ? sessions : sessions.filter((session) => session.kind !== "judge"),
+    [kind, sessions],
+  );
+  const selected =
+    sessions.find((session) => session.session_id === selectedId) ?? null;
   const banner = getTruncationBannerText(total, sessions.length, limit);
 
   const setParam = (updates: Record<string, string | null>) => {
     setSearchParams((prev) => updateSearchParams(prev, updates));
+  };
+  const addTag = (tag: string) => {
+    if (tags.includes(tag)) return;
+    setSearchParams((prev) => updateTags(prev, [...tags, tag]));
+  };
+  const removeTag = (tag: string) => {
+    setSearchParams((prev) =>
+      updateTags(
+        prev,
+        tags.filter((item) => item !== tag),
+      ),
+    );
   };
 
   return (
@@ -652,7 +846,7 @@ export function TracesView(): JSX.Element {
             value={kind ?? ""}
             onChange={(event) => setParam({ kind: event.target.value || null })}
           >
-            <option value="">All kinds</option>
+            <option value="">All except Judge</option>
             {KIND_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -667,9 +861,29 @@ export function TracesView(): JSX.Element {
         >
           Refresh
         </button>
+        {(taskRunId || tags.length > 0) && (
+          <div className={styles.filterChips} aria-label="Active filters">
+            {taskRunId && (
+              <FilterChip
+                label={`Run: ${taskRunId}`}
+                onClear={() => navigate(`/ws/${workspaceId}/traces`)}
+              />
+            )}
+            {tags.map((tag) => (
+              <FilterChip
+                key={tag}
+                label={`Tag: ${tag}`}
+                onClear={() => removeTag(tag)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className={styles.content}>
+      <div
+        className={styles.content}
+        data-panel-open={Boolean(selectedId) || undefined}
+      >
         <section className={styles.listPane} aria-label="Sessions">
           {banner && <div className={styles.banner}>{banner}</div>}
           {isLoading && sessions.length === 0 && (
@@ -678,23 +892,209 @@ export function TracesView(): JSX.Element {
           {error && sessions.length === 0 && (
             <div className={styles.listError}>{error.message}</div>
           )}
-          {!isLoading && !error && sessions.length === 0 && (
+          {!isLoading && !error && visibleSessions.length === 0 && (
             <div className={styles.listStatus}>
               No sessions matched this range.
             </div>
           )}
-          {sessions.length > 0 && (
+          {visibleSessions.length > 0 && (
             <SessionRows
-              sessions={sessions}
+              sessions={visibleSessions}
+              scoreDimensions={scoreDimensions}
               selectedId={selectedId}
+              includeRun
               onSelect={setSelectedId}
+              onRunClick={(runId) =>
+                navigate(
+                  `/ws/${workspaceId}/traces/runs/${encodeURIComponent(runId)}`,
+                )
+              }
+              onTagClick={addTag}
             />
           )}
         </section>
-        <section className={styles.detailPane} aria-label="Session detail">
-          <TraceDetail selected={selected} />
-        </section>
+        {selectedId && (
+          <aside className={styles.detailPane} aria-label="Session detail">
+            <div className={styles.panelHeader}>
+              <strong>Trace detail</strong>
+              <div className={styles.panelActions}>
+                {selected?.task_run_id && (
+                  <button
+                    type="button"
+                    className={styles.panelButton}
+                    onClick={() =>
+                      navigate(
+                        `/ws/${workspaceId}/traces/runs/${encodeURIComponent(selected.task_run_id!)}` +
+                          `?session=${encodeURIComponent(selectedId)}`,
+                      )
+                    }
+                  >
+                    Expand
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={styles.panelButton}
+                  aria-label="Close trace detail"
+                  onClick={() => setSelectedId(null)}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+            <TraceDetail
+              sessionId={selectedId}
+              initialSession={selected}
+              onFollowSession={setSelectedId}
+            />
+          </aside>
+        )}
       </div>
     </div>
+  );
+}
+
+function TraceRunView({ taskRunId }: { taskRunId: string }): JSX.Element {
+  const navigate = useNavigate();
+  const { workspaceId = "" } = useParams<{ workspaceId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedId = searchParams.get("session");
+  const { run, isLoading, error } = useWorkspaceTraceRun(taskRunId);
+  const sessions = useMemo(() => run?.sessions ?? [], [run?.sessions]);
+  const scoreDimensions = useMemo(
+    () => scoreDimensionsForSessions(sessions),
+    [sessions],
+  );
+  const selected =
+    sessions.find((session) => session.session_id === selectedId) ?? null;
+
+  const selectSession = (sessionId: string | null) => {
+    setSearchParams((prev) => updateSearchParams(prev, { session: sessionId }));
+  };
+
+  return (
+    <div className={styles.runPage} data-testid="trace-run-view">
+      <div className={styles.runNav}>
+        <Link to={`/ws/${workspaceId}/traces`}>← All traces</Link>
+        <Link
+          to={`/ws/${workspaceId}/traces?task_run_id=${encodeURIComponent(taskRunId)}`}
+        >
+          view in list ↗
+        </Link>
+      </div>
+      {isLoading && !run && (
+        <div className={styles.listStatus}>Loading run...</div>
+      )}
+      {error && !run && (
+        <div className={styles.listError}>
+          Failed to load run: {error.message}
+        </div>
+      )}
+      {run && (
+        <>
+          <header className={styles.runHeader}>
+            <div className={styles.runTitleRow}>
+              <div>
+                <span className={styles.runEyebrow}>Task run</span>
+                <h2 className={styles.runTitle}>{run.task_run_id}</h2>
+              </div>
+              {run.task_id && (
+                <Link
+                  className={styles.taskLink}
+                  to={`/ws/${workspaceId}/issues/${encodeURIComponent(run.task_id)}`}
+                >
+                  {run.task_id}
+                </Link>
+              )}
+            </div>
+            {run.task_run_missing && (
+              <div className={styles.missingNotice}>
+                task run record missing
+              </div>
+            )}
+            <div className={styles.runStats}>
+              <div>
+                <span>Status</span>
+                <strong>
+                  {run.task_run ? formatStatusLabel(run.task_run.status) : "-"}
+                </strong>
+              </div>
+              <div>
+                <span>Attempts</span>
+                <strong>{run.attempt_count}</strong>
+              </div>
+              <div>
+                <span>Tokens</span>
+                <strong>
+                  {run.task_run ? formatTokens(run.total_tokens) : "-"}
+                </strong>
+              </div>
+              <div>
+                <span>Duration</span>
+                <strong>
+                  {run.task_run ? formatDuration(run.duration_seconds) : "-"}
+                </strong>
+              </div>
+              <div>
+                <span>Files changed</span>
+                <strong>{run.files_changed}</strong>
+              </div>
+            </div>
+          </header>
+          <section className={styles.runSessions} aria-label="Run sessions">
+            {sessions.length === 0 ? (
+              <div className={styles.runEmpty}>
+                No sessions were recorded for this run.
+              </div>
+            ) : (
+              <SessionRows
+                sessions={sessions}
+                scoreDimensions={scoreDimensions}
+                selectedId={selectedId}
+                includeRun={false}
+                onSelect={(sessionId) => selectSession(sessionId)}
+                onTagClick={(tag) =>
+                  navigate(
+                    `/ws/${workspaceId}/traces?tag=${encodeURIComponent(tag)}`,
+                  )
+                }
+              />
+            )}
+          </section>
+          {selectedId && (
+            <section
+              className={styles.runDetail}
+              aria-label="Selected session detail"
+            >
+              <div className={styles.panelHeader}>
+                <strong>Trace detail</strong>
+                <button
+                  type="button"
+                  className={styles.panelButton}
+                  aria-label="Close trace detail"
+                  onClick={() => selectSession(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <TraceDetail
+                sessionId={selectedId}
+                initialSession={selected}
+                onFollowSession={(sessionId) => selectSession(sessionId)}
+              />
+            </section>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+export function TracesView(): JSX.Element {
+  const { taskRunId } = useParams<{ taskRunId: string }>();
+  return taskRunId ? (
+    <TraceRunView taskRunId={taskRunId} />
+  ) : (
+    <TracesListView />
   );
 }
