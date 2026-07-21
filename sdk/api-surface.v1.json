@@ -36,11 +36,20 @@
     },
     "agentExec": {
       "namespace": "TaskRunClient.agent.exec",
-      "form": "process",
-      "argvRequired": true,
-      "futureInvokeForm": "disjoint",
+      "forms": ["process", "invoke"],
+      "process": {
+        "argvRequired": true,
+        "closeModes": ["auto", "deferred"]
+      },
+      "invoke": {
+        "method": "TaskRunClient.agent.exec.invoke",
+        "invokeRequired": true,
+        "transcriptCollectorRequired": true,
+        "closeMode": "auto",
+        "usageSource": "response.usage",
+        "capture": "host-memory-crash-lossy"
+      },
       "openRetriesDefault": 2,
-      "closeModes": ["auto", "deferred"],
       "agentInvocationsOnly": true
     }
   },

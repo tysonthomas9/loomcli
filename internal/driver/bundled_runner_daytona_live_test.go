@@ -80,8 +80,8 @@ func TestRunBundledRunner_DaytonaLive(t *testing.T) {
 	if jerr := json.Unmarshal(raw, &result); jerr != nil {
 		t.Fatalf("decode result: %v\nraw: %s", jerr, tailStr(string(raw), 2000))
 	}
-	t.Logf("[daytona-live] status=%q sandbox_id=%v entries=%d usage in=%d out=%d",
-		result.Status, result.RuntimeMetadata["daytona_sandbox_id"], len(result.TranscriptEntries),
+	t.Logf("[daytona-live] status=%q sandbox_id=%v patch_bytes=%d usage in=%d out=%d",
+		result.Status, result.RuntimeMetadata["daytona_sandbox_id"], len(result.Patch),
 		result.InputTokens, result.OutputTokens)
 
 	if result.Status != "completed" {
@@ -93,7 +93,13 @@ func TestRunBundledRunner_DaytonaLive(t *testing.T) {
 	if sid, _ := result.RuntimeMetadata["daytona_sandbox_id"].(string); sid == "" {
 		t.Errorf("no daytona_sandbox_id in metadata (did a real sandbox provision?): %v", result.RuntimeMetadata)
 	}
-	if len(result.TranscriptEntries) == 0 {
-		t.Errorf("no transcript_entries from the sandbox run")
+	if result.Patch == "" {
+		t.Errorf("no inline patch from the degraded standalone run")
+	}
+	if got := result.RuntimeMetadata["observability_degraded"]; got != "true" {
+		t.Errorf("observability_degraded=%v, want true; metadata: %v", got, result.RuntimeMetadata)
+	}
+	if got := result.RuntimeMetadata["observability_degraded_code"]; got != "taskrunapi_unavailable" {
+		t.Errorf("observability_degraded_code=%v, want taskrunapi_unavailable; metadata: %v", got, result.RuntimeMetadata)
 	}
 }

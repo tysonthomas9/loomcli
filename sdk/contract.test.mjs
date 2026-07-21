@@ -17,6 +17,7 @@ import {
   WorkflowSuspended,
   isWorkflowSuspended,
 } from "./driver.js";
+import { TaskRunClient } from "./runner.js";
 
 const manifest = JSON.parse(readFileSync(new URL("./api-surface.v1.json", import.meta.url), "utf8"));
 
@@ -52,6 +53,29 @@ test("contract: client namespace surface matches the manifest exactly", () => {
   for (const helper of manifest.client.resultHelpers) {
     assert.equal(typeof client[helper], "function", `result helper ${helper} missing`);
   }
+});
+
+test("contract: task-run agent.exec exposes the frozen disjoint process and invoke forms", () => {
+  const client = new TaskRunClient({
+    apiUrl: "http://127.0.0.1:1",
+    workspace: "WS",
+    taskRunId: "task-run-1",
+    nodeId: "node-1",
+    leaseId: "lease-1",
+    leaseToken: "lease-token",
+    fencingToken: "1",
+    fetch: async () => new Response("{}"),
+  });
+  const spec = manifest.taskRunApi.agentExec;
+  assert.deepEqual(spec.forms, ["process", "invoke"]);
+  assert.equal(spec.process.argvRequired, true);
+  assert.equal(spec.invoke.method, "TaskRunClient.agent.exec.invoke");
+  assert.equal(spec.invoke.transcriptCollectorRequired, true);
+  assert.equal(spec.invoke.closeMode, "auto");
+  assert.equal(spec.invoke.usageSource, "response.usage");
+  assert.equal(spec.agentInvocationsOnly, true);
+  assert.equal(typeof client.agent.exec, "function");
+  assert.equal(typeof client.agent.exec.invoke, "function");
 });
 
 test("contract: every op sends only frozen camelCase wire fields to its frozen path", async () => {

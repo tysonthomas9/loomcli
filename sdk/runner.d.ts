@@ -284,7 +284,7 @@ export interface AgentExecSpec {
   kind?: AgentSessionKind;
   tags?: string[];
   metadata?: Record<string, string | number | boolean>;
-  /** The process form is deliberately required and disjoint from future invoke. */
+  /** Process form only. It is deliberately disjoint from agent.exec.invoke. */
   argv: string[];
   cwd?: string;
   env?: Record<string, string | undefined>;
@@ -297,6 +297,33 @@ export interface AgentExecSpec {
   /** Retries after the first open attempt; default 2. */
   openRetries?: number;
   close?: "auto" | "deferred";
+}
+
+/**
+ * In-process harness form. The leaf owns `invoke` (normally one prompt call)
+ * and supplies canonical entries from its event collector. The SDK owns the
+ * session open/upload/close lifecycle and always auto-closes before resolving.
+ *
+ * This is for agent invocations only. Never wrap deterministic sandbox
+ * commands such as clone, checkout, diff, or tests: they must create no
+ * AgentSession. Entries are host-memory/crash-lossy until invoke returns.
+ */
+export interface AgentExecInvokeSpec<Response = unknown> {
+  invocationKey: string;
+  backend: string;
+  model?: string;
+  parentSessionId?: string;
+  kind?: AgentSessionKind;
+  tags?: string[];
+  metadata?: Record<string, string | number | boolean>;
+  /** Leaf-owned in-process prompt call. Rejection is returned as invokeError. */
+  invoke: () => Response | Promise<Response>;
+  /** In-process canonical event collector, snapshotted after invoke settles. */
+  transcriptCollector: { entries: object[] };
+  /** Explicit values redacted from returned entries and the uploaded artifact. */
+  redactSecrets?: string[] | Record<string, string>;
+  /** Retries after the first open attempt; default 2. */
+  openRetries?: number;
 }
 
 export interface AgentExecSession {
@@ -335,6 +362,26 @@ export interface AgentExecResult {
   finalize?: (input?: AgentExecFinalizeInput) => Promise<{ ok: boolean }>;
 }
 
+export interface AgentExecInvokeResult<Response = unknown> {
+  /** Structured response returned by the leaf-owned prompt call, or null on rejection. */
+  response: Response | null;
+  /** Prompt-call failure returned as an invocation outcome, never thrown by the SDK. */
+  invokeError: string | null;
+  durationMs: number;
+  entries: Record<string, unknown>[];
+  /** Derived only from response.usage; absent usage remains null (never zero). */
+  usage: AgentSessionUsage | null;
+  session: AgentExecSession;
+  /** Merge this into the leaf's TaskRun runtimeMetadata on completion. */
+  runtimeMetadata: Record<string, string>;
+}
+
+/** Callable process form with an explicitly named, disjoint invoke form. */
+export interface AgentExec {
+  (spec: AgentExecSpec): Promise<AgentExecResult>;
+  invoke<Response = unknown>(spec: AgentExecInvokeSpec<Response>): Promise<AgentExecInvokeResult<Response>>;
+}
+
 export declare class LoomAPIError extends Error {
   status: number;
   code: string;
@@ -343,7 +390,7 @@ export declare class LoomAPIError extends Error {
   responseBody: string;
 }
 
-/** Thrown only for invalid agent.exec caller input, never process failures. */
+/** Thrown only for invalid agent.exec caller input, never process or prompt failures. */
 export declare class AgentExecSpecError extends Error {}
 
 export declare class TaskRunClient {
@@ -373,10 +420,10 @@ export declare class TaskRunClient {
   };
   /**
    * Agent Invocation helpers. agent.exec opens sessions only for AGENT
-   * invocations; never use it to capture deterministic commands.
+   * invocations; never use either form to capture deterministic commands.
    */
   readonly agent: {
-    exec(spec: AgentExecSpec): Promise<AgentExecResult>;
+    exec: AgentExec;
   };
 
   constructor(options: TaskRunClientOptions);

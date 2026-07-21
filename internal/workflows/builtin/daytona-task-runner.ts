@@ -7,8 +7,6 @@ import { TaskRunClient } from "@loom/sdk/runner";
 import {
   createFlueTranscriptCollector,
   flueUsageToTaskUsage,
-  redactTranscriptEntries,
-  serializeTranscriptJSONL,
 } from "@loom/sdk/runtime-adapters";
 
 // Flue HEAD (durable-streams) requires every workflow module to default-export a
@@ -43,6 +41,9 @@ function toJsonResult(value) {
 
 const DEFAULT_MODEL = "openai-codex/gpt-5.3-codex-spark";
 const DEFAULT_REPO_DIR = "/tmp/loom-daytona-task-repo";
+// This leaf makes exactly one in-process harness prompt call. Keep its
+// invocation key stable: one prompt is one Agent Invocation/AgentSession.
+const AGENT_INVOCATION_KEY = "agent";
 // DEMO_MODES gates the e2e-only task modes that fabricate scaffolding instead of
 // implementing real task work. They stay reachable for the e2e harness only when
 // explicitly enabled by environment; request input cannot open these paths.
@@ -69,6 +70,7 @@ export async function run(ctx = {}) {
   const secrets = [];
   let sandbox;
   let sandboxId = "";
+  let invocationRuntimeMetadata = {};
 
   try {
     const imports = await loadRuntimeImports();
@@ -201,7 +203,45 @@ export async function run(ctx = {}) {
     const flueSession = `task-${taskRunId}`;
     const session = await harness.session(flueSession);
     const prompt = buildPrompt(request, task, repoDir);
-    const response = await session.prompt(prompt);
+    // The harness prompt loop lives in this leaf process; Daytona is only its
+    // fs/exec tool backend. agent.exec.invoke owns the prompt session/open,
+    // host-memory collector artifact, and auto-close. The deterministic
+    // sandbox commands above and below remain deliberately session-free.
+    let invocation = null;
+    let response;
+    if (taskContext.client?.agent?.exec?.invoke) {
+      invocation = await invokeDaytonaAgentPrompt(taskContext.client, {
+        model,
+        transcriptCollector,
+        secrets,
+        prompt: () => session.prompt(prompt),
+      });
+      invocationRuntimeMetadata = invocation.runtimeMetadata || {};
+      if (invocation.invokeError) {
+        return failed(
+          "daytona_agent_invoke_failed",
+          invocation.invokeError,
+          taskRunId,
+          request,
+          logs,
+          sandboxId,
+          secrets,
+          invocationRuntimeMetadata,
+        );
+      }
+      response = invocation.response;
+    } else {
+      // Standalone/daemon-leaf runs deliberately allow TaskRunClient.fromEnv()
+      // to be unavailable. The coding work still runs, but there is no task-run
+      // session or transcript artifact in this topology. Keep the degradation
+      // metadata live before calling the prompt so a thrown prompt returns an
+      // honest degraded failure instead of losing the observability signal.
+      invocationRuntimeMetadata = {
+        observability_degraded: "true",
+        observability_degraded_code: "taskrunapi_unavailable",
+      };
+      response = await session.prompt(prompt);
+    }
     const markUntracked = await setup.shell("git -C " + shellQuote(repoDir) + " add -N -- . || true", { timeout: 30 });
     logs.push(commandLog("git add -N", markUntracked));
     const diffStat = await setup.shell("git -C " + shellQuote(repoDir) + " diff --stat -- . || true", { timeout: 30 });
@@ -242,8 +282,6 @@ export async function run(ctx = {}) {
           commitSha: published.commitSha,
         }, logs)
       : null;
-    const transcriptEntries = redactTranscriptEntries(transcriptCollector.entries, secrets);
-    const transcriptJSONL = serializeTranscriptJSONL(transcriptEntries);
     const usage = flueUsageToTaskUsage(response && response.usage, { costUnit: "usd" });
 
     logs.push("codex/flue response:");
@@ -256,8 +294,6 @@ export async function run(ctx = {}) {
       exitCode: 0,
       ...usage,
       logs: redact(logs.join("\n") + "\n", secrets),
-      transcript: transcriptJSONL,
-      transcript_entries: transcriptEntries,
       // Inline patch when there was no artifact client (daemon-leaf path).
       ...(patchArtifact && patchArtifact.inline ? { patch: patchArtifact.diff } : {}),
       artifactIds: [patchArtifact, prArtifact].filter(Boolean).map((artifact) => artifact.id).filter(Boolean),
@@ -269,7 +305,8 @@ export async function run(ctx = {}) {
         runner_entrypoint: request.runner_entrypoint || request.runnerEntrypoint || process.env.LOOM_TASK_RUNNER_ENTRYPOINT,
         task_id: taskId,
         phase: "flue_agent",
-        loom_task_session_id: "flue-" + taskRunId,
+        agent_session_id: invocation && invocation.session && invocation.session.id,
+        agent_invocation_key: AGENT_INVOCATION_KEY,
         flue_session: flueSession,
         flue_harness: "daytona-task-agent",
         model,
@@ -293,10 +330,11 @@ export async function run(ctx = {}) {
         github_pr_commit: published && published.commitSha,
         daytona_sandbox_env_leak_count: "0",
         response_text: redact(textTail(stringValue(response && response.text), 1000), secrets),
+        ...invocationRuntimeMetadata,
       }),
     };
   } catch (error) {
-    return failed("daytona_task_runner_failed", errorMessage(error), taskRunId, request, logs, sandboxId, secrets);
+    return failed("daytona_task_runner_failed", errorMessage(error), taskRunId, request, logs, sandboxId, secrets, invocationRuntimeMetadata);
   } finally {
     if (sandbox && process.env.KEEP_DAYTONA_SANDBOX !== "1") {
       try {
@@ -306,6 +344,20 @@ export async function run(ctx = {}) {
       }
     }
   }
+}
+
+// Exported for the workflow unit test: this is the only Daytona agent-session
+// boundary. Callers deliberately do not pass deterministic sandbox commands
+// through it, so clone/checkout/diff remain session-free by construction.
+export async function invokeDaytonaAgentPrompt(client, options) {
+  return client.agent.exec.invoke({
+    invocationKey: AGENT_INVOCATION_KEY,
+    backend: "codex",
+    model: options.model,
+    transcriptCollector: options.transcriptCollector,
+    redactSecrets: (options.secrets || []).filter(Boolean),
+    invoke: options.prompt,
+  });
 }
 
 async function loadRuntimeImports() {
@@ -1027,7 +1079,7 @@ function buildPrompt(request, task, repoDir) {
   ].join("\n");
 }
 
-function failed(errorClass, message, taskRunId, request, logs = [], sandboxId = "", secrets = []) {
+function failed(errorClass, message, taskRunId, request, logs = [], sandboxId = "", secrets = [], runtimeMetadata = {}) {
   return {
     status: "failed",
     exitCode: 1,
@@ -1041,6 +1093,7 @@ function failed(errorClass, message, taskRunId, request, logs = [], sandboxId = 
       task_id: request.task_id || request.taskId || "",
       daytona_sandbox_id: sandboxId,
       phase: errorClass,
+      ...runtimeMetadata,
     }),
   };
 }
