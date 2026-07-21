@@ -140,52 +140,7 @@ func (s *agentSessionStore) Get(ctx context.Context, ws, sessionID string) (*dom
 	return &out, nil
 }
 
-func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, error) {
-	q := url.Values{}
-	if filter.AgentID != "" {
-		q.Set("agent_id", filter.AgentID)
-	}
-	if filter.NodeID != "" {
-		q.Set("node_id", filter.NodeID)
-	}
-	if filter.TaskID != "" {
-		q.Set("task_id", filter.TaskID)
-	}
-	if filter.TaskRunID != "" {
-		q.Set("task_run_id", filter.TaskRunID)
-	}
-	if filter.Status != "" {
-		q.Set("status", string(filter.Status))
-	}
-	if filter.Attempt != nil {
-		q.Set("attempt", strconv.Itoa(*filter.Attempt))
-	}
-	if filter.NonTerminal {
-		q.Set("non_terminal", "true")
-	}
-	if filter.Kind != "" {
-		q.Set("kind", string(filter.Kind))
-	}
-	if filter.ParentSessionID != "" {
-		q.Set("parent_session_id", filter.ParentSessionID)
-	}
-	if filter.Limit > 0 {
-		q.Set("limit", strconv.Itoa(filter.Limit))
-	}
-	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-sessions", q)
-	var resp struct {
-		AgentSessions []*domain.AgentSession `json:"agent_sessions"`
-	}
-	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
-		return nil, err
-	}
-	if resp.AgentSessions == nil {
-		resp.AgentSessions = []*domain.AgentSession{}
-	}
-	return resp.AgentSessions, nil
-}
-
-func (s *agentSessionStore) ListPage(ctx context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, int, error) {
+func agentSessionListQuery(filter store.AgentSessionFilter) url.Values {
 	q := url.Values{}
 	if filter.AgentID != "" {
 		q.Set("agent_id", filter.AgentID)
@@ -223,7 +178,25 @@ func (s *agentSessionStore) ListPage(ctx context.Context, ws string, filter stor
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}
-	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-sessions", q)
+	return q
+}
+
+func (s *agentSessionStore) List(ctx context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, error) {
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-sessions", agentSessionListQuery(filter))
+	var resp struct {
+		AgentSessions []*domain.AgentSession `json:"agent_sessions"`
+	}
+	if err := s.client.do(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	if resp.AgentSessions == nil {
+		resp.AgentSessions = []*domain.AgentSession{}
+	}
+	return resp.AgentSessions, nil
+}
+
+func (s *agentSessionStore) ListPage(ctx context.Context, ws string, filter store.AgentSessionFilter) ([]*domain.AgentSession, int, error) {
+	path := withQuery("/api/v1/"+pathEscape(ws)+"/agent-sessions", agentSessionListQuery(filter))
 	var resp struct {
 		AgentSessions []*domain.AgentSession `json:"agent_sessions"`
 		Total         *int                   `json:"total"`
