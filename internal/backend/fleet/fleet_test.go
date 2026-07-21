@@ -1757,8 +1757,8 @@ func TestReady_ClientFiltersSourceReposWithoutServerLimit(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
 		respondOK(w, []*readyIssueWithParent{
-			{fleetIssueWire: fleetIssueWire{ID: "repo-a", Title: "A", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoA},
-			{fleetIssueWire: fleetIssueWire{ID: "repo-b", Title: "B", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoB},
+			{fleetIssueWire: fleetIssueWire{ID: "repo-a", Title: "A", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, SourceRepo: &repoA},
+			{fleetIssueWire: fleetIssueWire{ID: "repo-b", Title: "B", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, SourceRepo: &repoB},
 		})
 	})
 	defer ts.Close()

@@ -134,6 +134,7 @@ type readyIssueWithParent struct {
 	Parent      *string `json:"parent,omitempty"`
 	ParentTitle *string `json:"parent_title,omitempty"`
 	Repo        *string `json:"repo,omitempty"`
+	SourceRepo  *string `json:"source_repo,omitempty"`
 }
 
 // blockedIssueWire mirrors types.BlockedIssue but embeds fleetIssueWire so
@@ -378,7 +379,9 @@ func readyIssuesToData(issues []*readyIssueWithParent) []backend.IssueData {
 		if riwp.Parent != nil {
 			d.Parent = *riwp.Parent
 		}
-		if riwp.Repo != nil {
+		if riwp.SourceRepo != nil {
+			d.SourceRepo = *riwp.SourceRepo
+		} else if riwp.Repo != nil {
 			d.SourceRepo = *riwp.Repo
 		}
 		result = append(result, d)
