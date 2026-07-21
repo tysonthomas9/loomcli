@@ -20,6 +20,21 @@ type runOutcomeRuntimeTestExecution struct {
 	execution.DriverRunAPI
 }
 
+func (runOutcomeRuntimeTestExecution) RecoverTerminalDriverRunWork(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverTerminalDriverRunWorkCommand,
+) (execution.RecoverTerminalDriverRunWorkResult, error) {
+	return execution.RecoverTerminalDriverRunWorkResult{
+		ActionID: command.RequestID,
+		Committed: &execution.RecoverTerminalDriverRunWorkCommit{
+			WorkspaceKey: command.WorkspaceKey, DriverRunID: command.DriverRunID,
+			ParentStatus: command.ParentStatus, Reason: command.Reason,
+			ErrorClass: command.ErrorClass, RecoveredAt: command.RecoveredAt,
+		},
+	}, nil
+}
+
 func (runOutcomeRuntimeTestExecution) RecoverChildDriverRunCascade(
 	_ context.Context,
 	_ authority.SystemAuthority,
@@ -45,7 +60,7 @@ func TestNewRunOutcomeRuntimeRegistrationDoesNotRequireAutomationPublisher(t *te
 	registration, err := NewRunOutcomeRuntimeRegistrationWithExecution(
 		st.Awaits(), st.TriggerEvents(), st.Workspaces(), nil, "WS",
 		runOutcomeRuntimeTestExecution{DriverRunAPI: capability.DriverRunAPI()},
-		capability.DriverRunOutcomeAPI(), capability.SystemAuthorityResolver(),
+		capability.DriverRunOutcomeAPI(), capability.TerminalDriverRunWorkRecoveryQueueAPI(), capability.SystemAuthorityResolver(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +140,7 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 	registration, err := NewRunOutcomeRuntimeRegistrationWithExecution(
 		st.Awaits(), st.TriggerEvents(), st.Workspaces(), publisher, workspace,
 		runOutcomeRuntimeTestExecution{DriverRunAPI: capability.DriverRunAPI()},
-		capability.DriverRunOutcomeAPI(), capability.SystemAuthorityResolver(),
+		capability.DriverRunOutcomeAPI(), capability.TerminalDriverRunWorkRecoveryQueueAPI(), capability.SystemAuthorityResolver(),
 	)
 	if err != nil {
 		t.Fatal(err)

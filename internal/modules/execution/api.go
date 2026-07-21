@@ -16,12 +16,15 @@ const (
 	ActionRecover        authority.Action = "execution.recover"
 	ActionAwait          authority.Action = "execution.await"
 
-	ActionClaimAwaitEventNotifications   authority.Action = "execution.claim-await-event-notifications"
-	ActionCompleteAwaitEventNotification authority.Action = "execution.complete-await-event-notification"
-	ActionRetryAwaitEventNotification    authority.Action = "execution.retry-await-event-notification"
-	ActionClaimDriverRunOutcomes         authority.Action = "execution.claim-driver-run-outcomes"
-	ActionCompleteDriverRunOutcome       authority.Action = "execution.complete-driver-run-outcome"
-	ActionRetryDriverRunOutcome          authority.Action = "execution.retry-driver-run-outcome"
+	ActionClaimAwaitEventNotifications          authority.Action = "execution.claim-await-event-notifications"
+	ActionCompleteAwaitEventNotification        authority.Action = "execution.complete-await-event-notification"
+	ActionRetryAwaitEventNotification           authority.Action = "execution.retry-await-event-notification"
+	ActionClaimDriverRunOutcomes                authority.Action = "execution.claim-driver-run-outcomes"
+	ActionCompleteDriverRunOutcome              authority.Action = "execution.complete-driver-run-outcome"
+	ActionRetryDriverRunOutcome                 authority.Action = "execution.retry-driver-run-outcome"
+	ActionClaimTerminalDriverRunWorkRecoveries  authority.Action = "execution.claim-terminal-driver-run-work-recoveries"
+	ActionCompleteTerminalDriverRunWorkRecovery authority.Action = "execution.complete-terminal-driver-run-work-recovery"
+	ActionRetryTerminalDriverRunWorkRecovery    authority.Action = "execution.retry-terminal-driver-run-work-recovery"
 )
 
 func OperationRules() []authority.OperationRule {
@@ -54,6 +57,9 @@ func OperationRules() []authority.OperationRule {
 		authority.Allow(ActionClaimDriverRunOutcomes, authority.ClassSystem),
 		authority.Allow(ActionCompleteDriverRunOutcome, authority.ClassSystem),
 		authority.Allow(ActionRetryDriverRunOutcome, authority.ClassSystem),
+		authority.Allow(ActionClaimTerminalDriverRunWorkRecoveries, authority.ClassSystem),
+		authority.Allow(ActionCompleteTerminalDriverRunWorkRecovery, authority.ClassSystem),
+		authority.Allow(ActionRetryTerminalDriverRunWorkRecovery, authority.ClassSystem),
 	}
 }
 

@@ -38,6 +38,12 @@ import (
 // kilobytes; this is generous.
 const maxResponseBody = 16 << 20
 
+// ErrRateLimited identifies a retryable FleetDB admission failure. It must
+// never be collapsed into a domain conflict: doing so makes Execution treat a
+// transient 429 as a deterministic ownership/generation rejection and can
+// strand an otherwise valid Work Item claim.
+var ErrRateLimited = errors.New("fleetdb: rate limited")
+
 // Config holds connection parameters for the fleet-db HTTP client.
 type Config struct {
 	// BaseURL is the fleet-db base URL, e.g. "http://localhost:8080".
@@ -456,53 +462,72 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 	case http.StatusNotFound:
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotFound)
 	case http.StatusConflict:
-		switch code {
-		case "revision_conflict":
-			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogRevisionConflict)
-		case "already_claimed":
-			return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyClaimed)
-		case "invalid_transition":
-			return fmt.Errorf("%s: %w", prefix, domain.ErrInvalidTransition)
-		case "conflict":
-			return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
-		case "driver_run_already_resumed":
-			// Pending->suspend window: the await resolved before the suspend
-			// landed — the run must continue inline, never suspend.
-			return fmt.Errorf("%s: %w", prefix, domain.ErrDriverRunAlreadyResumed)
-		}
-		return fmt.Errorf("%s: %w", prefix, domain.ErrAlreadyExists)
+		return classifyConflictHTTPError(prefix, code)
 	case http.StatusForbidden:
-		if code == "await_actor_forbidden" {
-			return fmt.Errorf("%s: %w", prefix, domain.ErrAwaitActorForbidden)
-		}
-		if strings.Contains(path, "/driver-runs/") || strings.Contains(path, "/task-runs/") || strings.Contains(path, "/artifact-commands/") || strings.Contains(path, "/artifacts/") {
-			return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
-		}
-		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+		return classifyForbiddenHTTPError(prefix, path, code)
 	case http.StatusBadRequest, http.StatusUnprocessableEntity, http.StatusRequestEntityTooLarge:
-		switch code {
-		case "workflow_catalog_version_ownership":
-			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionOwnership)
-		case "workflow_catalog_version_not_validated":
-			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionNotValidated)
-		case "workflow_catalog_version_not_approved":
-			return fmt.Errorf("%s: %w", prefix, ErrWorkflowCatalogVersionNotApproved)
-		}
-		// Structured await validation codes map back onto their domain
-		// sentinels (each wraps domain.ErrInvalid).
-		if sentinel := awaitErrSentinel(code); sentinel != nil {
-			return fmt.Errorf("%s: %w", prefix, sentinel)
-		}
-		return fmt.Errorf("%s: %w", prefix, domain.ErrInvalid)
+		return classifyInvalidHTTPError(prefix, code)
 	case http.StatusGone:
 		// fleet-db heartbeat: lease exists, token is ours, but it is no
 		// longer live (expired or released) — re-acquire is safe.
 		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
+	case http.StatusTooManyRequests:
+		return fmt.Errorf("%s: %w", prefix, ErrRateLimited)
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
 	}
 	return errors.New(prefix)
+}
+
+func classifyConflictHTTPError(prefix, code string) error {
+	sentinel := domain.ErrAlreadyExists
+	switch code {
+	case "revision_conflict":
+		sentinel = ErrWorkflowCatalogRevisionConflict
+	case "already_claimed":
+		sentinel = domain.ErrAlreadyClaimed
+	case "invalid_transition":
+		sentinel = domain.ErrInvalidTransition
+	case "conflict":
+		sentinel = domain.ErrConflict
+	case "driver_run_already_resumed":
+		// Pending->suspend window: the await resolved before the suspend
+		// landed — the run must continue inline, never suspend.
+		sentinel = domain.ErrDriverRunAlreadyResumed
+	}
+	return fmt.Errorf("%s: %w", prefix, sentinel)
+}
+
+func classifyForbiddenHTTPError(prefix, path, code string) error {
+	if code == "await_actor_forbidden" {
+		return fmt.Errorf("%s: %w", prefix, domain.ErrAwaitActorForbidden)
+	}
+	if strings.Contains(path, "/driver-runs/") || strings.Contains(path, "/task-runs/") ||
+		strings.Contains(path, "/artifact-commands/") || strings.Contains(path, "/artifacts/") {
+		return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
+	}
+	return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)
+}
+
+func classifyInvalidHTTPError(prefix, code string) error {
+	var sentinel error
+	switch code {
+	case "workflow_catalog_version_ownership":
+		sentinel = ErrWorkflowCatalogVersionOwnership
+	case "workflow_catalog_version_not_validated":
+		sentinel = ErrWorkflowCatalogVersionNotValidated
+	case "workflow_catalog_version_not_approved":
+		sentinel = ErrWorkflowCatalogVersionNotApproved
+	default:
+		// Structured await validation codes map back onto their domain
+		// sentinels (each wraps domain.ErrInvalid).
+		sentinel = awaitErrSentinel(code)
+	}
+	if sentinel == nil {
+		sentinel = domain.ErrInvalid
+	}
+	return fmt.Errorf("%s: %w", prefix, sentinel)
 }
 
 var automationHTTPErrorSentinels = map[string]error{

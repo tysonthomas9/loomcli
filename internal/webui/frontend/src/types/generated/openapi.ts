@@ -395,6 +395,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/repository": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Assign an issue's canonical source repository
+     * @description Atomically assigns the workspace repository and conditionally restores
+     *     a repository-required blocked issue to open. The response is FleetDB's
+     *     authoritative post-command issue projection; clients must not issue a
+     *     separate reopen mutation.
+     */
+    put: operations["setIssueRepository"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/issues/{id}/move": {
     parameters: {
       query?: never;
@@ -675,6 +698,26 @@ export interface paths {
     };
     /** List sessions for a task */
     get: operations["listTaskSessions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/tasks/{taskId}/workflow-runs": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List task workflow runs not represented by an agent session
+     * @description Returns trigger-admitted DriverRuns joined to the task by the exact immutable TriggerEvent subject_ref. Runs that already created an AgentSession row for this task are excluded because they are already represented by the task sessions endpoint. A TaskRun without an AgentSession remains visible here.
+     */
+    get: operations["listTaskWorkflowRuns"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3377,6 +3420,11 @@ export interface components {
       agent_id: string;
       runs: components["schemas"]["DriverRun"][];
     };
+    TaskWorkflowRunsResponse: {
+      task_id: string;
+      subject_ref: string;
+      runs: components["schemas"]["DriverRun"][];
+    };
     DriverRun: {
       workspace_key: string;
       run_id: string;
@@ -4937,6 +4985,67 @@ export interface operations {
       };
     };
   };
+  setIssueRepository: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Issue identifier */
+        id: components["parameters"]["IssueId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          repo: string;
+        };
+      };
+    };
+    responses: {
+      /** @description Repository assigned and canonical issue returned */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: components["schemas"]["Issue"];
+          };
+        };
+      };
+      /** @description Invalid issue or repository */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Issue or repository not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      /** @description Issue changed concurrently or repository assignment conflicts */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
   moveIssue: {
     parameters: {
       query?: never;
@@ -5420,6 +5529,39 @@ export interface operations {
               sessions?: components["schemas"]["SessionResponse"][];
             };
           };
+        };
+      };
+    };
+  };
+  listTaskWorkflowRuns: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        taskId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Task workflow run list */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskWorkflowRunsResponse"];
+        };
+      };
+      /** @description Invalid task identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
         };
       };
     };

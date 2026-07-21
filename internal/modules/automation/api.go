@@ -317,9 +317,10 @@ type RetryDeliveriesCommand struct {
 }
 
 type RetryDeliveriesResult struct {
-	Claimed    int `json:"claimed"`
-	Dispatched int `json:"dispatched"`
-	Held       int `json:"held"`
-	Failed     int `json:"failed"`
-	Exhausted  int `json:"exhausted"`
+	Claimed      int `json:"claimed"`
+	Dispatched   int `json:"dispatched"`
+	Deduplicated int `json:"deduplicated"`
+	Held         int `json:"held"`
+	Failed       int `json:"failed"`
+	Exhausted    int `json:"exhausted"`
 }

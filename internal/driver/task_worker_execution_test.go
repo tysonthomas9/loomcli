@@ -122,6 +122,7 @@ func wireExecutorTestExecution(executor *Executor, st store.Store) {
 	}
 	executor.Execution = adapter
 	executor.RunOutcomeQueue = queue
+	executor.TerminalWorkRecoveryQueue = noOpTerminalDriverRunWorkRecoveryQueue{}
 	executor.ExecutionWorkers = adapter
 	executor.ExecutionAuthorities = taskWorkerTestAuthorities{}
 	executor.SystemAuthorities = systemAuthorities
@@ -173,6 +174,14 @@ func (adapter taskWorkerTestExecution) CascadeChildDriverRuns(
 		},
 		ActionID: command.RequestID,
 	}, nil
+}
+
+func (taskWorkerTestExecution) RecoverTerminalDriverRunWork(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverTerminalDriverRunWorkCommand,
+) (execution.RecoverTerminalDriverRunWorkResult, error) {
+	return execution.RecoverTerminalDriverRunWorkResult{ActionID: command.RequestID}, nil
 }
 
 func (adapter taskWorkerTestExecution) RecoverChildDriverRunCascade(

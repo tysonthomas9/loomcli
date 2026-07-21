@@ -104,6 +104,7 @@ func cloneTaskRun(r *domain.TaskRun) *domain.TaskRun {
 	out.RuntimeMetadata = cloneMap(r.RuntimeMetadata)
 	out.Input = cloneRawMessage(r.Input)
 	out.FinishedAt = clonePtr(r.FinishedAt)
+	out.TerminalConvergedAt = clonePtr(r.TerminalConvergedAt)
 	return &out
 }
 

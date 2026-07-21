@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -474,8 +475,8 @@ func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error
 	if err != nil {
 		return nil, nil
 	}
-	if !processRunning(info.PID) {
-		if processRunning(info.ServePID) {
+	if !runtimePIDRunning(info, info.PID) {
+		if runtimePIDRunning(info, info.ServePID) {
 			if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
 				return nil, fmt.Errorf("stop orphaned local runtime: %w", err)
 			}
@@ -599,16 +600,63 @@ func stopRuntimeProcess(pid int, timeout time.Duration) error {
 }
 
 func stopRuntimeProcesses(info *runtimeInfo, timeout time.Duration) error {
-	return stopRuntimePIDs(runtimePIDs(info), timeout)
+	return stopRuntimePIDs(ownedRuntimePIDs(info), timeout)
 }
 
 func runtimeProcessRunning(info *runtimeInfo) bool {
 	for _, pid := range runtimePIDs(info) {
-		if processRunning(pid) {
+		if runtimePIDRunning(info, pid) {
 			return true
 		}
 	}
 	return false
+}
+
+// runtimePIDRunning distinguishes a recorded runtime process from an unrelated
+// process that inherited the same PID after a crash or host reboot. A bare
+// kill(pid, 0) liveness check is not sufficient because PIDs are reusable.
+func runtimePIDRunning(info *runtimeInfo, pid int) bool {
+	return processRunning(pid) && runtimeOwnsPID(info, pid)
+}
+
+func runtimeOwnsPID(info *runtimeInfo, pid int) bool {
+	if info == nil || pid <= 0 {
+		return false
+	}
+	// Runtime files written before executable fingerprinting cannot be checked
+	// more precisely, so preserve their legacy liveness behavior.
+	if strings.TrimSpace(info.Executable) == "" || !processExecutableInspectionSupported {
+		return true
+	}
+	actual, err := processExecutablePathFn(pid)
+	if err != nil {
+		// On supported hosts, fail closed: an unverified PID must never receive
+		// a signal merely because it appears in stale runtime metadata.
+		return false
+	}
+	return executablePathsMatch(info.Executable, actual)
+}
+
+func ownedRuntimePIDs(info *runtimeInfo) []int {
+	pids := runtimePIDs(info)
+	owned := make([]int, 0, len(pids))
+	for _, pid := range pids {
+		if runtimePIDRunning(info, pid) {
+			owned = append(owned, pid)
+		}
+	}
+	return owned
+}
+
+func executablePathsMatch(recorded, actual string) bool {
+	recorded = filepath.Clean(strings.TrimSpace(recorded))
+	actual = filepath.Clean(strings.TrimSpace(actual))
+	if recorded == actual {
+		return true
+	}
+	recordedResolved, recordedErr := filepath.EvalSymlinks(recorded)
+	actualResolved, actualErr := filepath.EvalSymlinks(actual)
+	return recordedErr == nil && actualErr == nil && filepath.Clean(recordedResolved) == filepath.Clean(actualResolved)
 }
 
 func runtimePIDs(info *runtimeInfo) []int {
@@ -703,7 +751,7 @@ func updatePauseState(paused bool) error {
 	info.ClaimsPaused = paused
 	if paused {
 		info.Status = "draining"
-	} else if processRunning(info.PID) {
+	} else if runtimePIDRunning(info, info.PID) {
 		info.Status = "running"
 	}
 	return writeRuntime(dataDir, info)

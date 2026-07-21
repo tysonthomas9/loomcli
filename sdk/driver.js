@@ -123,6 +123,7 @@ export class LoomDriverClient {
       listComments: (input = {}) => this.#httpCall("issue-list-comments", { issueId: input.issueId }),
       comment: (input = {}) => this.#httpCall("issue-comment", { issueId: input.issueId, body: input.body }),
       update: (input = {}) => this.#httpCall("issue-update", { issueId: input.issueId, status: input.status, priority: input.priority, labels: input.labels, assignee: input.assignee, externalRef: input.externalRef }),
+      blockRepositoryRequired: (input = {}) => this.#httpCall("issue-block-repository-required", { issueId: input.issueId }),
       addLabel: (input = {}) => this.#httpCall("issue-add-label", { issueId: input.issueId, label: input.label }),
       removeLabel: (input = {}) => this.#httpCall("issue-remove-label", { issueId: input.issueId, label: input.label }),
     });

@@ -123,6 +123,7 @@ type fleetExecutionTransportStub struct {
 	workItemRelease       fleetdb.ExecutionDriverRunWorkItemReleaseCommand
 	workItemClaimResult   *fleetdb.ExecutionDriverRunWorkItemResult
 	workItemReleaseResult *fleetdb.ExecutionDriverRunWorkItemResult
+	terminalWork          fleetdb.ExecutionTerminalDriverRunWorkRecoveryCommand
 }
 
 func (*fleetExecutionTransportStub) RequestTaskRun(context.Context, fleetdb.ExecutionTaskRunRequestCommand) (*fleetdb.ExecutionTaskRunRequestResult, error) {
@@ -218,6 +219,25 @@ func (*fleetExecutionTransportStub) StartChildDriverRun(context.Context, fleetdb
 
 func (*fleetExecutionTransportStub) CascadeChildDriverRuns(context.Context, fleetdb.ExecutionDriverRunCascadeCommand) (*fleetdb.ExecutionDriverRunCascadeResult, error) {
 	return nil, nil
+}
+
+func (stub *fleetExecutionTransportStub) RecoverTerminalDriverRunWork(
+	_ context.Context,
+	command fleetdb.ExecutionTerminalDriverRunWorkRecoveryCommand,
+) (*fleetdb.ExecutionTerminalDriverRunWorkRecoveryResult, error) {
+	stub.terminalWork = command
+	appliedAt := command.RecoveredAt
+	return &fleetdb.ExecutionTerminalDriverRunWorkRecoveryResult{
+		WorkspaceKey: command.WorkspaceKey, DriverRunID: command.DriverRunID,
+		ParentStatus: command.ParentStatus, Reason: command.Reason, ErrorClass: command.ErrorClass,
+		RecoveredAt: command.RecoveredAt, RecoveredTaskRunIDs: []string{}, ReleasedWorkItemIDs: []string{},
+		PreservedSuccessorWorkItemIDs: []string{}, ActionID: command.RequestID,
+		Action: &fleetdb.ExecutionActionLedger{
+			WorkspaceKey: command.WorkspaceKey, ActionID: command.RequestID,
+			ActionType: "recover_terminal_driver_run_work", Status: "applied",
+			CreatedAt: command.RecoveredAt, AppliedAt: &appliedAt,
+		},
+	}, nil
 }
 
 func TestFleetTaskRunWorkItemDesignPortForwardsOnlyOwnerCommand(t *testing.T) {
@@ -338,6 +358,32 @@ func TestFleetDriverRunWorkItemPortForwardsOpaqueOwnerAndClaimAction(t *testing.
 	if transport.workItemRelease.LeaseToken != "raw-secret" || transport.workItemRelease.ClaimActionID != claimActionID ||
 		transport.workItemRelease.CommandID != releaseRequestID {
 		t.Fatalf("release transport command=%+v", transport.workItemRelease)
+	}
+}
+
+func TestFleetDriverRunPortForwardsTerminalWorkRecoveryEnvelope(t *testing.T) {
+	recoveredAt := time.Date(2026, 7, 18, 12, 30, 0, 0, time.UTC)
+	transport := &fleetExecutionTransportStub{}
+	port, err := newFleetDriverRunCommandPort(transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := execution.RecoverTerminalDriverRunWorkCommand{
+		WorkspaceKey: "WS", DriverRunID: "run-1", ParentStatus: execution.DriverRunFailed,
+		Reason: "parent driver run became failed", ErrorClass: "parent_run_terminal", RecoveredAt: recoveredAt,
+	}
+	command.RequestID = execution.RecoverTerminalDriverRunWorkRequestID(command.DriverRunID, command.ParentStatus)
+	result, err := port.RecoverTerminalDriverRunWork(t.Context(), command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport.terminalWork.RequestID != command.RequestID || transport.terminalWork.DriverRunID != command.DriverRunID ||
+		transport.terminalWork.ParentStatus != domain.DriverRunFailed || !transport.terminalWork.RecoveredAt.Equal(recoveredAt) {
+		t.Fatalf("terminal work transport command = %+v", transport.terminalWork)
+	}
+	if result.Committed == nil || result.ActionID != command.RequestID || result.Committed.DriverRunID != command.DriverRunID ||
+		!result.Committed.RecoveredAt.Equal(recoveredAt) {
+		t.Fatalf("terminal work result = %+v", result)
 	}
 }
 

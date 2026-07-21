@@ -20,6 +20,7 @@ import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { SessionRecord } from "@/types/agent";
 import {
   updateIssue,
+  setIssueRepository,
   startWorkflowRun,
   createWorkspaceAgent,
   deleteWorkspaceAgent,
@@ -107,6 +108,7 @@ const {
 vi.mock("@/api", () => ({
   EPIC_RUNNER_WORKFLOW_NAME: "epic-runner",
   updateIssue: vi.fn(),
+  setIssueRepository: vi.fn(),
   createWorkspaceAgent: vi.fn(),
   deleteWorkspaceAgent: vi.fn().mockResolvedValue(undefined),
   startAgent: vi.fn().mockResolvedValue(undefined),
@@ -379,6 +381,10 @@ describe("IssueDetailPanel", () => {
     >;
     mockDeleteWorkspaceAgent.mockReset();
     mockDeleteWorkspaceAgent.mockResolvedValue(undefined);
+    const mockSetIssueRepository = setIssueRepository as ReturnType<
+      typeof vi.fn
+    >;
+    mockSetIssueRepository.mockReset();
   });
 
   // Reset body overflow after each test
@@ -928,6 +934,61 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("repo-dropdown-trigger")).toHaveTextContent(
         "source-repo",
       );
+    });
+
+    it("uses the canonical repository command and consumes its recovered issue", async () => {
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          workspaceId: "test-ws",
+          repos: [
+            { name: "loomcli", path: "/repos/loomcli" },
+            {
+              name: "hello-world",
+              source_repo_id: "github-hello-world",
+              path: "/repos/hello-world",
+            },
+          ],
+        }),
+      );
+      const blockedIssue = createTestIssueDetails({
+        id: "task-11",
+        status: "blocked",
+        labels: [],
+      });
+      const recoveredIssue = createTestIssue({
+        id: "task-11",
+        status: "open",
+        source_repo: "github-hello-world",
+        repo: "github-hello-world",
+      });
+      const mockSetIssueRepository = setIssueRepository as ReturnType<
+        typeof vi.fn
+      >;
+      mockSetIssueRepository.mockResolvedValue(recoveredIssue);
+      const onIssueUpdate = vi.fn();
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={blockedIssue}
+          onClose={() => {}}
+          onIssueUpdate={onIssueUpdate}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("repo-dropdown-trigger"));
+      expect(screen.queryByTestId("repo-option-none")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("repo-option-hello-world"));
+
+      await waitFor(() => {
+        expect(mockSetIssueRepository).toHaveBeenCalledWith(
+          "test-ws",
+          "task-11",
+          "hello-world",
+        );
+        expect(onIssueUpdate).toHaveBeenCalledWith(recoveredIssue);
+      });
+      expect(updateIssue).not.toHaveBeenCalled();
     });
 
     it("renders created date formatted correctly", () => {

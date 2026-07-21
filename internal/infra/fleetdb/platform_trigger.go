@@ -76,6 +76,9 @@ func (s *triggerEventStore) List(ctx context.Context, ws string, filter store.Tr
 	if filter.TriggerBindingID != "" {
 		q.Set("trigger_binding_id", filter.TriggerBindingID)
 	}
+	if filter.SubjectRef != "" {
+		q.Set("subject_ref", filter.SubjectRef)
+	}
 	if filter.Limit > 0 {
 		q.Set("limit", strconv.Itoa(filter.Limit))
 	}

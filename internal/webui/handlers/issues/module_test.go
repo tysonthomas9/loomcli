@@ -26,6 +26,7 @@ func TestIssueModule_RegisterRoutes(t *testing.T) {
 		{"PATCH", "/api/workspaces/test-ws/issues/abc"},
 		{"POST", "/api/workspaces/test-ws/issues/abc/close"},
 		{"POST", "/api/workspaces/test-ws/issues/abc/reopen"},
+		{"PUT", "/api/workspaces/test-ws/issues/abc/repository"},
 		{"POST", "/api/workspaces/test-ws/issues/abc/claim"},
 		{"POST", "/api/workspaces/test-ws/issues/abc/move"},
 		{"DELETE", "/api/workspaces/test-ws/issues/abc"},

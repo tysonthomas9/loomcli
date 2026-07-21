@@ -22,16 +22,8 @@ type RuntimeStatus = {
   error?: string;
 };
 
-type BrowserSessionInfo = {
-  runtime_url: string;
-  workspace: string;
-  launch_code: string;
-  expires_at: string;
-};
-
 type WorkspaceRecovery = {
   route: string;
-  workspace: string;
 };
 
 type StageMode = "starting" | "ready" | "error";
@@ -219,84 +211,15 @@ function workspaceEntryUrl(runtimeUrl: string, route = "/") {
   return route.startsWith("/") ? `${base}${route}` : `${base}/${route}`;
 }
 
-function routeMatchesWorkspace(entry: URL, workspace: string) {
-  const segments = entry.pathname.split("/");
-  if (segments[1] !== "ws") {
-    return true;
-  }
-  try {
-    return (
-      Boolean(segments[2]) && decodeURIComponent(segments[2]) === workspace
-    );
-  } catch {
-    return false;
-  }
-}
-
-async function trustedWorkspaceEntry(
+function localWorkspaceEntry(
   runtimeUrl: string,
   route = "/",
-  recoveredWorkspace = "",
 ) {
-  // The durable mode-0600 operator token stays in the sidecar. Desktop receives
-  // only a 30-second, single-use launch code and places it in the fragment so
-  // it is never sent in the initial HTTP request or retained in server logs.
-  // Only native recovery state may select an explicit workspace. Never derive
-  // authority from the runtime webview's route, which web content controls.
-  const requestedWorkspace = recoveredWorkspace.trim();
-  const sessionArgs = ["local", "browser-session"];
-  if (requestedWorkspace) {
-    sessionArgs.push("--workspace", requestedWorkspace);
-  }
-  const result = await runLoom(sessionArgs);
-  if (result.code !== 0) {
-    throw new Error(
-      result.stderr || "Could not create a trusted browser session.",
-    );
-  }
-  let session: BrowserSessionInfo;
-  try {
-    session = JSON.parse(result.stdout) as BrowserSessionInfo;
-  } catch {
-    throw new Error("Loom returned an invalid trusted browser session.");
-  }
-  if (
-    !session.workspace?.trim() ||
-    !/^[0-9a-f]{64}$/.test(session.launch_code ?? "")
-  ) {
-    throw new Error("Loom returned an incomplete trusted browser session.");
-  }
-  if (requestedWorkspace && session.workspace !== requestedWorkspace) {
-    throw new Error("Loom authorized a different workspace than requested.");
-  }
-
-  let entry = new URL(workspaceEntryUrl(runtimeUrl, route));
-  const issuedFor = new URL(session.runtime_url);
-  if (entry.origin !== issuedFor.origin) {
+  const entry = new URL(workspaceEntryUrl(runtimeUrl, route));
+  if (entry.origin !== new URL(runtimeUrl).origin) {
     throw new Error("The local runtime changed while opening the workspace.");
   }
-  // Never let the SPA's root/localStorage redirect choose a workspace that
-  // differs from the launch authority. A fresh launch enters the authorized
-  // workspace explicitly; a recovery route must already match it.
-  if (requestedWorkspace) {
-    if (!routeMatchesWorkspace(entry, session.workspace)) {
-      throw new Error("The recovered route belongs to a different workspace.");
-    }
-  } else {
-    entry = new URL(
-      workspaceEntryUrl(
-        runtimeUrl,
-        `/ws/${encodeURIComponent(session.workspace)}`,
-      ),
-    );
-  }
-  const fragment = new URLSearchParams(
-    entry.hash.startsWith("#") ? entry.hash.slice(1) : entry.hash,
-  );
-  fragment.set("loom_launch", session.launch_code);
-  fragment.set("loom_workspace", session.workspace);
-  entry.hash = fragment.toString();
-  return { url: entry.toString(), workspace: session.workspace };
+  return entry.toString();
 }
 
 async function openWorkspaceWindow(
@@ -304,14 +227,9 @@ async function openWorkspaceWindow(
   options: { forceNew?: boolean; recovery?: WorkspaceRecovery } = {},
 ) {
   setStage("starting", "Opening Workspace", "Loading the workspace window.");
-  const entry = await trustedWorkspaceEntry(
-    runtimeUrl,
-    options.recovery?.route,
-    options.recovery?.workspace,
-  );
+  const entry = localWorkspaceEntry(runtimeUrl, options.recovery?.route);
   await invoke("open_workspace_window", {
-    runtimeUrl: entry.url,
-    authorizedWorkspace: entry.workspace,
+    runtimeUrl: entry,
     forceNew: Boolean(options.forceNew),
   });
 }
@@ -320,11 +238,9 @@ async function readPendingRecovery() {
   if (pendingRecovery) {
     return pendingRecovery;
   }
-  const recovery = await invoke<[string, string] | null>(
-    "take_workspace_recovery",
-  );
-  if (recovery?.[0] && recovery[1]) {
-    pendingRecovery = { route: recovery[0], workspace: recovery[1] };
+  const recovery = await invoke<string | null>("take_workspace_recovery");
+  if (recovery) {
+    pendingRecovery = { route: recovery };
   }
   return pendingRecovery;
 }

@@ -218,11 +218,13 @@ func TestDriverAPIWorkflowsAwaitTerminalChildInline(t *testing.T) {
 	ctx := context.Background()
 	childID := startChildViaAPI(t, h, "fast")
 
-	driverRuns := testDriverRunExecution{DriverRunAPI: h.execution.DriverRunAPI(), store: h.store}
+	driverRuns := testNoOpTerminalWorkRecoveryExecution{testDriverRunExecution{
+		DriverRunAPI: h.execution.DriverRunAPI(), store: h.store,
+	}}
 	if _, err := (&driverpkg.Executor{
 		Store: h.store, WorkspaceKey: "WS", RunID: childID,
 		WorkDir: t.TempDir(), HeartbeatInterval: -1,
-		Execution: driverRuns, RunOutcomeQueue: h.execution.DriverRunOutcomeAPI(),
+		Execution: driverRuns, RunOutcomeQueue: h.execution.DriverRunOutcomeAPI(), TerminalWorkRecoveryQueue: h.execution.TerminalDriverRunWorkRecoveryQueueAPI(),
 		ExecutionWorkers:     h.execution.TaskRunWorkerAPI(),
 		ExecutionAuthorities: h.execution.DriverRunAuthorityResolver(), SystemAuthorities: h.execution.SystemAuthorityResolver(),
 	}).RunOnce(ctx); err != nil {

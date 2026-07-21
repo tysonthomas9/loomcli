@@ -52,12 +52,14 @@ type ExecutionCapability interface {
 	WorkerProfileAPI() execution.WorkerProfileAPI
 	TaskRunConvergenceAPI() execution.TaskRunConvergenceAPI
 	TaskRunConvergenceSource() execution.TaskRunConvergenceSource
+	TaskRunConvergenceCheckpoints() execution.TaskRunConvergenceCheckpointPort
 	TaskRunRecoveryAPI() execution.TaskRunRecoveryAPI
 	TaskRunRecoveryScopes() execution.TaskRunRecoveryScopePort
 	TaskRunAuthorityResolver() execution.TaskRunAuthorityResolver
 	DriverRunAPI() execution.DriverRunAPI
 	AwaitEventNotificationAPI() execution.AwaitEventNotificationAPI
 	DriverRunOutcomeAPI() execution.DriverRunOutcomeAPI
+	TerminalDriverRunWorkRecoveryQueueAPI() execution.TerminalDriverRunWorkRecoveryQueueAPI
 	DriverRunAuthorityResolver() execution.DriverRunAuthorityResolver
 	SystemAuthorityResolver() execution.SystemAuthorityResolver
 	OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver

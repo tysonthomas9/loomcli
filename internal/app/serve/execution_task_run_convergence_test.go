@@ -83,8 +83,12 @@ func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing
 	if !ok {
 		t.Fatal("memstore DriverSteps does not expose terminal repair store")
 	}
+	checkpoints, ok := st.TaskRuns().(store.TaskRunTerminalConvergenceStore)
+	if !ok {
+		t.Fatal("memstore TaskRuns does not expose terminal convergence checkpoints")
+	}
 	dependencies, err := NewExecutionTaskRunConvergenceDependencies(ExecutionTaskRunConvergenceDependencies{
-		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: repairStore,
+		TaskRuns: st.TaskRuns(), Checkpoints: checkpoints, DriverRuns: st.DriverRuns(), DriverSteps: repairStore,
 		Events: st.TaskRunEvents(), Agents: st.Agents(), Outbox: st.Outbox(),
 	})
 	if err != nil {
@@ -180,8 +184,9 @@ func TestExecutionTaskRunConvergenceAdapterAcceptsCancelledToSkippedOnly(t *test
 		t.Fatal(err)
 	}
 	repairs := st.DriverSteps().(store.TerminalDriverStepRepairStore)
+	checkpoints := st.TaskRuns().(store.TaskRunTerminalConvergenceStore)
 	dependencies, err := NewExecutionTaskRunConvergenceDependencies(ExecutionTaskRunConvergenceDependencies{
-		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: repairs,
+		TaskRuns: st.TaskRuns(), Checkpoints: checkpoints, DriverRuns: st.DriverRuns(), DriverSteps: repairs,
 		Events: st.TaskRunEvents(), Agents: st.Agents(), Outbox: st.Outbox(),
 	})
 	if err != nil {

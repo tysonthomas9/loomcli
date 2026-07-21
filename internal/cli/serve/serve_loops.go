@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
@@ -71,21 +72,24 @@ func buildExecutionRuntimePasses(
 	if err != nil {
 		return serveadapter.ExecutionRuntimePasses{}, fmt.Errorf("compose Execution driver executor: resolve work dir: %w", err)
 	}
-	executor, ok := buildDriverExecutor(st, workDir, runOutcomes, executionCapability)
+	// Executor and TaskWorker slots register the same process node. Resolve the
+	// configured concurrency once and pass that one capacity to every registrar
+	// so a later DriverRun claim cannot downgrade the shared node to capacity 1.
+	nodeCapacity := driverTaskWorkerConcurrency()
+	executor, ok := buildDriverExecutor(st, workDir, runOutcomes, executionCapability, nodeCapacity)
 	if !ok {
 		return serveadapter.ExecutionRuntimePasses{}, fmt.Errorf("compose Execution driver executor: sandbox configuration rejected")
 	}
-	passes.DriverExecutor = serveadapter.BuildDriverExecutorRuntimePass(executor)
 	taskWorkerTemplate := driverexecutor.TaskWorker{
 		Store: st, WorkspaceKey: executor.WorkspaceKey, WorkDir: workDir,
 		Artifacts: artifactsCapability.ArtifactsAPI(),
-		NodeID:    executor.NodeID, RunnerID: os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
+		NodeID:    executor.NodeID, NodeCapacity: nodeCapacity, RunnerID: os.Getenv("LOOM_DRIVER_TASK_WORKER_RUNNER_ID"),
 		MaxAttempts: driverTaskRunMaxAttempts(), APIBaseURL: driverAPIBaseURL(),
 		LocalSettingsDir: bootstrap.LoomDir(), Execution: executionCapability.TaskRunWorkerAPI(),
 		TaskRunAuthorities: executionCapability.TaskRunAuthorityResolver(),
 		Convergence:        executionCapability.TaskRunConvergenceAPI(), ExecutionAuthorities: executionCapability.SystemAuthorityResolver(),
 	}
-	passes.TaskWorkers = serveadapter.BuildTaskWorkerRuntimePasses(taskWorkerTemplate, driverTaskWorkerConcurrency())
+	passes.DriverExecutor, passes.TaskWorkers = serveadapter.BuildSharedNodeExecutionRuntimePasses(executor, taskWorkerTemplate, nodeCapacity)
 	return passes, nil
 }
 
@@ -143,28 +147,69 @@ func startOutboxDispatcher(ctx context.Context, st store.Store) {
 // matching the sweepers, capped at one hour); LOOM_ISSUE_BRIDGE_STATE_PATH
 // overrides the cursor file; LOOM_ISSUE_BRIDGE_REPLAY=1 opts into
 // replay-from-zero on first observation (handled inside the bridge).
-func startIssueJournalBridge(ctx context.Context, st store.Store, issueLookup func(ctx context.Context, workspace, issueID string) (string, []string, string, error), source trigger.InternalEventEmitter) {
+func startIssueJournalBridge(
+	ctx context.Context,
+	st store.Store,
+	issueLookup trigger.TaskReadyIssueLookup,
+	readySnapshots trigger.TaskReadySnapshotLister,
+	repositoryRequiredBlocker trigger.TaskReadyRepositoryRequiredBlocker,
+	source trigger.InternalEventEmitter,
+) {
+	bridge := buildIssueJournalBridge(st, issueLookup, readySnapshots, repositoryRequiredBlocker, source)
+	if bridge == nil {
+		return
+	}
+	interval := issueBridgeInterval()
+	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval,
+		"state_path", issueBridgeStatePath(), "task_ready_events", bridge.EmitTaskReady)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			if result, err := bridge.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				slog.Error("issue journal bridge pass failed", "err", err)
+			} else if result != nil && (result.Emitted > 0 || result.TaskReadyEmitted > 0 || result.TaskReadyBlocked > 0 || result.FastForwarded > 0) {
+				slog.Info("issue journal bridge pass", "emitted", result.Emitted, "task_ready_emitted", result.TaskReadyEmitted,
+					"task_ready_blocked", result.TaskReadyBlocked, "skipped", result.Skipped,
+					"fast_forwarded", result.FastForwarded, "backed_off", result.BackedOff)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+func buildIssueJournalBridge(
+	st store.Store,
+	issueLookup trigger.TaskReadyIssueLookup,
+	readySnapshots trigger.TaskReadySnapshotLister,
+	repositoryRequiredBlocker trigger.TaskReadyRepositoryRequiredBlocker,
+	source trigger.InternalEventEmitter,
+) *trigger.IssueJournalBridge {
 	if st == nil || source == nil {
 		if st != nil {
 			slog.Info("issue journal bridge disabled: Automation system eventing is unavailable")
 		}
-		return
+		return nil
 	}
 	if issueBridgeDisabled() {
 		slog.Info("issue journal bridge disabled: LOOM_ISSUE_BRIDGE_DISABLED set")
-		return
+		return nil
 	}
 	reader, ok := st.TriggerEvents().(store.IssueJournalReader)
 	if !ok {
 		slog.Info("issue journal bridge disabled: store has no journal reader")
-		return
+		return nil
 	}
 	cursors, err := trigger.NewFileIssueJournalCursorStore(issueBridgeStatePath(), slog.Default())
 	if err != nil {
 		slog.Error("issue journal bridge disabled: cannot load cursor state", "err", err)
-		return
+		return nil
 	}
-	bridge := &trigger.IssueJournalBridge{
+	return &trigger.IssueJournalBridge{
 		Store:  st,
 		Source: source,
 		Reader: reader,
@@ -174,29 +219,13 @@ func startIssueJournalBridge(ctx context.Context, st store.Store, issueLookup fu
 		// ingested in a workspace the executor won't run in, those runs queue
 		// forever (the SANDBOX-vs-LOCALMODE bug). Keeps the env-override pattern:
 		// LOOM_DRIVER_EXECUTOR_WORKSPACE overrides, "*" unscopes to all workspaces.
-		WorkspaceKey:  driverAutomationWorkspaceScope(),
-		Cursors:       cursors,
-		EmitTaskReady: taskReadyEventsEnabled(),
-		IssueLookup:   issueLookup,
+		WorkspaceKey:              driverAutomationWorkspaceScope(),
+		Cursors:                   cursors,
+		EmitTaskReady:             taskReadyEventsEnabled(),
+		IssueLookup:               issueLookup,
+		ReadySnapshots:            readySnapshots,
+		RepositoryRequiredBlocker: repositoryRequiredBlocker,
 	}
-	interval := issueBridgeInterval()
-	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval, "state_path", issueBridgeStatePath())
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			if result, err := bridge.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				slog.Error("issue journal bridge pass failed", "err", err)
-			} else if result != nil && (result.Emitted > 0 || result.FastForwarded > 0) {
-				slog.Info("issue journal bridge pass", "emitted", result.Emitted, "skipped", result.Skipped, "fast_forwarded", result.FastForwarded, "backed_off", result.BackedOff)
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
 }
 
 // driverStaleTaskMaxAge reads the stale TaskRun heartbeat threshold in
@@ -226,16 +255,106 @@ func issueBridgeDisabled() bool {
 	}
 }
 
-// taskReadyEventsEnabled reports whether LOOM_TASK_READY_EVENTS opts the
-// issue-journal bridge into the flag-gated task.ready lane (1/true/yes/on).
-// Default off so the bridge's default behavior is unchanged.
+// taskReadyEventsEnabled reports whether the issue-journal bridge emits the
+// task.ready lane. It defaults on because task-ready bindings are the normal
+// autonomous-agent launch path; LOOM_TASK_READY_EVENTS remains an explicit
+// rollback switch for deployments that need to disable it.
 func taskReadyEventsEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomTaskReadyEvents))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
+	case "0", "false", "off", "no":
 		return false
+	default:
+		return true
 	}
+}
+
+// taskReadyRepositoryRequired reports whether a runnable issue without an
+// explicit source repo lacks an unambiguous checkout. Exactly one workspace
+// repo is safe because the local resolver has a deliberate single-repo
+// fallback. Zero repos and multiple repos both require operator action. Epics
+// remain workspace-scoped and an explicit source repo is always unambiguous.
+func taskReadyRepositoryRequired(issueType, sourceRepo string, repoCount int) bool {
+	return !strings.EqualFold(strings.TrimSpace(issueType), "epic") &&
+		strings.TrimSpace(sourceRepo) == "" && repoCount != 1
+}
+
+// blockRepositoryRequiredTask invokes the Work Items owner's atomic
+// repository-requirement command. It deliberately has no generic Update
+// fallback: without commit-time revalidation, a stale ready snapshot could
+// overwrite a concurrent claim or repository assignment.
+func blockRepositoryRequiredTask(
+	ctx context.Context,
+	issueBackend backend.IssueBackend,
+	issueID string,
+) (trigger.TaskReadyRepositoryRequiredResult, error) {
+	repositoryBackend, ok := issueBackend.(backend.RepositoryRequirementBackend)
+	if !ok {
+		return trigger.TaskReadyRepositoryRequiredResult{}, backend.ErrNotImplemented(
+			"BlockRepositoryRequired",
+			"issue backend does not support atomic repository-required admission",
+		)
+	}
+	result, err := repositoryBackend.BlockRepositoryRequired(ctx, issueID)
+	if err != nil {
+		if backend.IsKind(err, backend.KindNotFound) {
+			return trigger.TaskReadyRepositoryRequiredResult{}, nil
+		}
+		return trigger.TaskReadyRepositoryRequiredResult{}, fmt.Errorf("move repository-required task to blocked: %w", err)
+	}
+	if result == nil {
+		return trigger.TaskReadyRepositoryRequiredResult{}, backend.ErrInternal(
+			"BlockRepositoryRequired",
+			"atomic repository-required admission returned no result",
+			nil,
+		)
+	}
+
+	// Applied and replayed repository blocks are terminal for this admission
+	// generation. Changed retains the previous sweep-counter semantics: only a
+	// newly moved card increments TaskReadyBlocked.
+	if result.Changed || result.Replayed || result.Blocked {
+		return trigger.TaskReadyRepositoryRequiredResult{Blocked: result.Changed}, nil
+	}
+	if !result.DispatchReady {
+		// A stale request observed a claimed, closed, ordinary-blocked, epic, or
+		// otherwise non-ready issue. Suppress it without trusting the old payload.
+		return trigger.TaskReadyRepositoryRequiredResult{}, nil
+	}
+	canonical, err := repositoryRequiredDispatchSnapshot(result)
+	if err != nil {
+		return trigger.TaskReadyRepositoryRequiredResult{}, err
+	}
+	if canonical == nil {
+		return trigger.TaskReadyRepositoryRequiredResult{}, nil
+	}
+	return trigger.TaskReadyRepositoryRequiredResult{DispatchReady: canonical}, nil
+}
+
+func repositoryRequiredDispatchSnapshot(result *backend.RepositoryRequirementResult) (*trigger.TaskReadySnapshot, error) {
+	if result.Issue == nil || strings.TrimSpace(result.Issue.ID) == "" {
+		return nil, backend.ErrInternal(
+			"BlockRepositoryRequired",
+			"dispatch-ready result is missing the canonical issue",
+			nil,
+		)
+	}
+	canonical := trigger.TaskReadySnapshot{
+		TaskID:     result.Issue.ID,
+		Status:     result.Issue.Status,
+		HasDesign:  result.Issue.HasDesign,
+		Labels:     append([]string(nil), result.Issue.Labels...),
+		IssueType:  result.Issue.IssueType,
+		SourceRepo: result.Issue.SourceRepo,
+		// DispatchReady is the Work Items owner's commit-time proof that the
+		// repository policy is satisfied, including the single-repo fallback.
+		RepositoryRequired: false,
+		UpdatedAt:          result.Issue.UpdatedAt,
+	}
+	if !strings.EqualFold(strings.TrimSpace(canonical.Status), "open") ||
+		strings.EqualFold(strings.TrimSpace(canonical.IssueType), "epic") {
+		return nil, nil
+	}
+	return &canonical, nil
 }
 
 // issueBridgeStatePath resolves the cursor state file: LOOM_ISSUE_BRIDGE_STATE_PATH

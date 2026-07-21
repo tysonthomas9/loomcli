@@ -7,19 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/authmode"
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
 const responseLimit = 8 << 20
@@ -30,14 +25,12 @@ type httpDoer interface {
 
 // Client is the shared standalone-CLI adapter for authenticated Loom
 // management routes. It never opens Store or constructs capability authority
-// locally; open-mode loopback servers receive the durable local operator
-// credential, while externally authenticated clients retain their configured
-// HTTP transport.
+// locally. Open-mode clients send no credential; OIDC clients retain the
+// authenticated HTTP transport configured by httpclient.
 type Client struct {
 	serverURL string
 	workspace string
 	doer      httpDoer
-	bearer    string
 }
 
 type SubmitDriverRunRequest struct {
@@ -78,30 +71,7 @@ func New(_ context.Context, purpose string) (*Client, error) {
 		return nil, fmt.Errorf("%s endpoint discovery: %w", purpose, err)
 	}
 	client := &Client{serverURL: serverURL, workspace: workspace, doer: authClient}
-	if authClient.AuthMode().Mode == authmode.ModeOpen {
-		if err := validateOpenEndpoint(parsed); err != nil {
-			return nil, err
-		}
-		credentialDir := filepath.Join(cli.GetWorkspaceRuntimeDir(), ".loom", "operator")
-		token, err := authority.ReadLocalOperatorToken(credentialDir)
-		if err != nil {
-			return nil, fmt.Errorf("%s local authentication: %w", purpose, err)
-		}
-		client.bearer = token
-	}
 	return client, nil
-}
-
-func validateOpenEndpoint(parsed *url.URL) error {
-	if parsed == nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Host == "" ||
-		parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") || parsed.Port() == "" {
-		return fmt.Errorf("loom management open-mode endpoint must be an HTTP loopback IP with an explicit port")
-	}
-	ip := net.ParseIP(parsed.Hostname())
-	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("loom management open-mode endpoint must use a loopback IP")
-	}
-	return nil
 }
 
 func (client *Client) Workspace() string {
@@ -192,9 +162,6 @@ func (client *Client) doJSON(ctx context.Context, method, path string, input, ou
 	req.Header.Set("Accept", "application/json")
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")
-	}
-	if client.bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+client.bearer)
 	}
 	response, err := client.doer.Do(req)
 	if err != nil {

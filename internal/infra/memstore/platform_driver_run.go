@@ -12,15 +12,16 @@ import (
 )
 
 type driverRunStore struct {
-	mu       sync.RWMutex
-	items    map[string]map[string]*domain.DriverRun
-	outcomes map[string]map[string]*memDriverRunOutcome
-	versions *driverVersionStore
-	bindings *triggerBindingStore
-	events   *triggerEventStore
-	taskRuns *taskRunStore
-	steps    *driverStepStore
-	next     int64
+	mu                     sync.RWMutex
+	items                  map[string]map[string]*domain.DriverRun
+	outcomes               map[string]map[string]*memDriverRunOutcome
+	terminalWorkRecoveries map[string]map[string]*memDriverRunOutcome
+	versions               *driverVersionStore
+	bindings               *triggerBindingStore
+	events                 *triggerEventStore
+	taskRuns               *taskRunStore
+	steps                  *driverStepStore
+	next                   int64
 	// awaitResumeEligible probes whether an await cycle has resolved
 	// (satisfied/timed_out) — ResumeAwaiting's security gate. Wired by the
 	// Store constructor after the await store exists; called OUTSIDE s.mu.
@@ -39,7 +40,8 @@ type memDriverRunOutcome struct {
 func newDriverRunStore(versions *driverVersionStore, bindings *triggerBindingStore) *driverRunStore {
 	return &driverRunStore{
 		items: make(map[string]map[string]*domain.DriverRun), outcomes: make(map[string]map[string]*memDriverRunOutcome),
-		versions: versions, bindings: bindings,
+		terminalWorkRecoveries: make(map[string]map[string]*memDriverRunOutcome),
+		versions:               versions, bindings: bindings,
 	}
 }
 
@@ -51,9 +53,10 @@ func (s *driverRunStore) setAwaitResumeEligible(probe func(ws, instanceKey strin
 }
 
 var (
-	_ store.DriverRunStore         = (*driverRunStore)(nil)
-	_ store.DriverRunCancelSupport = (*driverRunStore)(nil)
-	_ store.DriverRunOutcomeStore  = (*driverRunStore)(nil)
+	_ store.DriverRunStore                          = (*driverRunStore)(nil)
+	_ store.DriverRunCancelSupport                  = (*driverRunStore)(nil)
+	_ store.DriverRunOutcomeStore                   = (*driverRunStore)(nil)
+	_ store.TerminalDriverRunWorkRecoveryQueueStore = (*driverRunStore)(nil)
 )
 
 func (s *driverRunStore) Create(ctx context.Context, in store.DriverRunCreate) (*domain.DriverRun, error) { //nolint:funlen // Validation and persisted run assembly stay adjacent.
@@ -552,6 +555,13 @@ func (s *driverRunStore) enqueueRunOutcomeLocked(run *domain.DriverRun) {
 		},
 		state: "pending", availableAt: occurredAt,
 	}
+	if s.terminalWorkRecoveries[run.WorkspaceKey] == nil {
+		s.terminalWorkRecoveries[run.WorkspaceKey] = make(map[string]*memDriverRunOutcome)
+	}
+	recoverySnapshot := s.outcomes[run.WorkspaceKey][run.RunID].value
+	s.terminalWorkRecoveries[run.WorkspaceKey][run.RunID] = &memDriverRunOutcome{
+		value: recoverySnapshot, state: "pending", availableAt: occurredAt,
+	}
 }
 
 func (s *driverRunStore) ClaimDriverRunOutcomes(_ context.Context, claim store.DriverRunOutcomeClaim) ([]store.DriverRunOutcome, error) {
@@ -618,6 +628,93 @@ func (s *driverRunStore) RetryDriverRunOutcome(_ context.Context, retry store.Dr
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row := s.outcomes[retry.WorkspaceKey][retry.RunID]
+	if row == nil {
+		return domain.ErrNotFound
+	}
+	if row.state != "claimed" || row.claimID != retry.ClaimID {
+		return domain.ErrNotOwner
+	}
+	row.state = "pending"
+	row.claimID = ""
+	row.claimUntil = time.Time{}
+	row.availableAt = retry.AvailableAt
+	row.lastError = retry.Error
+	return nil
+}
+
+func (s *driverRunStore) ClaimTerminalDriverRunWorkRecoveries(
+	_ context.Context,
+	claim store.TerminalDriverRunWorkRecoveryClaim,
+) ([]store.DriverRunOutcome, error) {
+	if claim.WorkspaceKey == "" || claim.ClaimID == "" || claim.Limit < 0 || claim.ClaimUntil.IsZero() || !claim.ClaimUntil.After(claim.Before) {
+		return nil, fmt.Errorf("invalid terminal DriverRun work recovery claim: %w", domain.ErrInvalid)
+	}
+	limit := claim.Limit
+	if limit == 0 {
+		limit = 50
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows := make([]*memDriverRunOutcome, 0, len(s.terminalWorkRecoveries[claim.WorkspaceKey]))
+	for _, row := range s.terminalWorkRecoveries[claim.WorkspaceKey] {
+		due := row.state == "pending" && !row.availableAt.After(claim.Before)
+		expired := row.state == "claimed" && !row.claimUntil.After(claim.Before)
+		if due || expired {
+			rows = append(rows, row)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].availableAt.Equal(rows[j].availableAt) {
+			return rows[i].value.RunID < rows[j].value.RunID
+		}
+		return rows[i].availableAt.Before(rows[j].availableAt)
+	})
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	out := make([]store.DriverRunOutcome, 0, len(rows))
+	for _, row := range rows {
+		row.state = "claimed"
+		row.claimID = claim.ClaimID
+		row.claimUntil = claim.ClaimUntil
+		row.value.Attempt++
+		out = append(out, row.value)
+	}
+	return out, nil
+}
+
+func (s *driverRunStore) CompleteTerminalDriverRunWorkRecovery(
+	_ context.Context,
+	completion store.TerminalDriverRunWorkRecoveryCompletion,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row := s.terminalWorkRecoveries[completion.WorkspaceKey][completion.RunID]
+	if row == nil {
+		return domain.ErrNotFound
+	}
+	if row.state == "completed" && row.claimID == completion.ClaimID {
+		return nil
+	}
+	if row.state != "claimed" || row.claimID != completion.ClaimID {
+		return domain.ErrNotOwner
+	}
+	row.state = "completed"
+	row.claimUntil = time.Time{}
+	row.lastError = ""
+	return nil
+}
+
+func (s *driverRunStore) RetryTerminalDriverRunWorkRecovery(
+	_ context.Context,
+	retry store.TerminalDriverRunWorkRecoveryRetry,
+) error {
+	if retry.AvailableAt.IsZero() {
+		return fmt.Errorf("terminal DriverRun work recovery retry available_at required: %w", domain.ErrInvalid)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row := s.terminalWorkRecoveries[retry.WorkspaceKey][retry.RunID]
 	if row == nil {
 		return domain.ErrNotFound
 	}

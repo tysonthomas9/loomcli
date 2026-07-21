@@ -37,6 +37,25 @@ type journalPage struct {
 	hasMore bool
 }
 
+type failingInternalEmitter struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+}
+
+func (e *failingInternalEmitter) Emit(context.Context, string, trigger.InternalEvent) (*trigger.InternalEmitResult, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.calls++
+	return nil, e.err
+}
+
+func (e *failingInternalEmitter) callCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.calls
+}
+
 func (r *fakeIssueJournalReader) ListIssueEvents(_ context.Context, _, afterCursor string, _ int) ([]store.JournalEvent, string, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -523,6 +542,55 @@ func TestIssueJournalBridgeBackoffAfterFailures(t *testing.T) {
 	}
 	if !strings.Contains(audit.String(), "failure backoff") {
 		t.Fatalf("audit %q missing backoff record", audit.String())
+	}
+}
+
+// TestIssueJournalBridgeBackoffAfterPersistentEmissionFailure is the
+// regression for the serve log/disk incident: a durable admission rejection
+// used to be retried and logged on every two-second tick because only reader
+// failures participated in backoff. Every workspace-pass failure now shares
+// the same exponential window.
+func TestIssueJournalBridgeBackoffAfterPersistentEmissionFailure(t *testing.T) {
+	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
+		"": {events: []store.JournalEvent{
+			issueEvent("emit-1", "issue.create", "user:alice", "TASK-1", `{"status":"open"}`),
+		}, next: "emit-1"},
+	}}
+	cursors := newFixedCursorStore()
+	seenStart(cursors, "WS")
+	emitter := &failingInternalEmitter{err: errors.New("persistent admission rejection")}
+	bridge := &trigger.IssueJournalBridge{
+		Store: memstore.New(), Source: emitter, Reader: reader,
+		WorkspaceKey: "WS", Cursors: cursors,
+	}
+
+	if _, err := bridge.RunOnce(t.Context()); err == nil {
+		t.Fatal("pass 1 error = nil, want admission failure")
+	}
+	if reader.callCount() != 1 || emitter.callCount() != 1 {
+		t.Fatalf("pass 1 reader/emitter calls = %d/%d, want 1/1", reader.callCount(), emitter.callCount())
+	}
+	if out, err := bridge.RunOnce(t.Context()); err != nil || out.BackedOff != 1 {
+		t.Fatalf("pass 2 result/error = %+v/%v, want one backed-off workspace", out, err)
+	}
+	if reader.callCount() != 1 || emitter.callCount() != 1 {
+		t.Fatalf("backoff performed work: reader/emitter calls = %d/%d", reader.callCount(), emitter.callCount())
+	}
+	if _, err := bridge.RunOnce(t.Context()); err == nil {
+		t.Fatal("pass 3 error = nil, want second admission failure")
+	}
+	if reader.callCount() != 2 || emitter.callCount() != 2 {
+		t.Fatalf("pass 3 reader/emitter calls = %d/%d, want 2/2", reader.callCount(), emitter.callCount())
+	}
+	// Two consecutive failures produce a three-pass skip window.
+	for pass := 4; pass <= 6; pass++ {
+		out, err := bridge.RunOnce(t.Context())
+		if err != nil || out.BackedOff != 1 {
+			t.Fatalf("pass %d result/error = %+v/%v, want backed off", pass, out, err)
+		}
+	}
+	if reader.callCount() != 2 || emitter.callCount() != 2 {
+		t.Fatalf("expanded backoff performed work: reader/emitter calls = %d/%d", reader.callCount(), emitter.callCount())
 	}
 }
 

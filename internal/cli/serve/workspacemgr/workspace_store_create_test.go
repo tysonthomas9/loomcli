@@ -458,6 +458,7 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	}
 
 	src := initTestGitRepo(t, t.TempDir(), "Hello-World")
+	sourceBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
 	addFn := BuildStoreBackedAddRepos(st)
 	result, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
@@ -477,7 +478,8 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list repos: %v", err)
 	}
-	if len(repos) != 1 || repos[0].Name != "hello-world" || repos[0].RemoteURL != src || repos[0].SourceRepoID != "hello-world" {
+	if len(repos) != 1 || repos[0].Name != "hello-world" || repos[0].RemoteURL != src ||
+		repos[0].SourceRepoID != "hello-world" || repos[0].DefaultBranch != sourceBranch {
 		t.Fatalf("repos = %#v, want cloned hello-world repo", repos)
 	}
 
@@ -488,6 +490,120 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	local := sc.Workspaces["MY-WS"]
 	if local.Repos["hello-world"] != filepath.Join(wsPath, "hello-world") {
 		t.Fatalf("local repo path = %q", local.Repos["hello-world"])
+	}
+}
+
+func TestStoreBackedAddReposPersistsEachClonesDetectedDefaultBranch(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	alpha := initTestGitRepo(t, t.TempDir(), "alpha")
+	beta := initTestGitRepo(t, t.TempDir(), "beta")
+	runGit(t, alpha, "branch", "-m", "main")
+	runGit(t, beta, "branch", "-m", "master")
+
+	addFn := BuildStoreBackedAddRepos(st)
+	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		CloneURLs:   []string{alpha, beta},
+	}); err != nil {
+		t.Fatalf("add mixed-default clones: %v", err)
+	}
+
+	repos, err := st.Repos().List(context.Background(), "MY-WS")
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	branches := make(map[string]string, len(repos))
+	for _, repo := range repos {
+		branches[repo.Name] = repo.DefaultBranch
+	}
+	if branches["alpha"] != "main" || branches["beta"] != "master" {
+		t.Fatalf("detected branches = %#v, want alpha=main beta=master", branches)
+	}
+}
+
+func TestStoreBackedAddReposRejectsExplicitMissingCloneBranch(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	src := initTestGitRepo(t, t.TempDir(), "hello-world")
+	runGit(t, src, "branch", "-m", "master")
+	addFn := BuildStoreBackedAddRepos(st)
+	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		CloneURLs:   []string{src},
+		Branch:      "main",
+	})
+	if err == nil || !strings.Contains(err.Error(), `default branch "main" does not exist`) {
+		t.Fatalf("add clone error = %v, want missing explicit default branch", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(wsPath, "hello-world")); !os.IsNotExist(statErr) {
+		t.Fatalf("failed clone checkout was not rolled back: %v", statErr)
+	}
+	repos, listErr := st.Repos().List(context.Background(), "MY-WS")
+	if listErr != nil || len(repos) != 0 {
+		t.Fatalf("repos after rejected clone = %#v, err=%v", repos, listErr)
+	}
+}
+
+func TestStoreBackedAddReposRejectsEmptyRemoteWithoutCommittedDefaultBranch(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	emptyRemote := filepath.Join(t.TempDir(), "empty-remote")
+	if err := os.MkdirAll(emptyRemote, 0o755); err != nil {
+		t.Fatalf("create empty remote: %v", err)
+	}
+	runGit(t, emptyRemote, "init")
+
+	addFn := BuildStoreBackedAddRepos(st)
+	_, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		CloneURLs:   []string{emptyRemote},
+	})
+	if err == nil || !strings.Contains(err.Error(), "do not resolve to a committed branch") {
+		t.Fatalf("add empty remote error = %v, want committed-branch validation", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(wsPath, "empty-remote")); !os.IsNotExist(statErr) {
+		t.Fatalf("empty remote clone was not rolled back: %v", statErr)
+	}
+	repos, listErr := st.Repos().List(context.Background(), "MY-WS")
+	if listErr != nil || len(repos) != 0 {
+		t.Fatalf("repos after rejected empty remote = %#v, err=%v", repos, listErr)
 	}
 }
 
@@ -585,6 +701,7 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	src := initTestGitRepo(t, t.TempDir(), "app")
+	sourceBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
@@ -593,7 +710,6 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 		Name:      "clone-ws",
 		Type:      "clone",
 		CloneURLs: []string{src},
-		Branch:    "main",
 		Path:      wsPath,
 	})
 	if err != nil {
@@ -613,8 +729,12 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	if err != nil {
 		t.Fatalf("list repos: %v", err)
 	}
-	if len(repos) != 1 || repos[0].Name != "app" || repos[0].RemoteURL != src || repos[0].SourceRepoID != "app" {
+	if len(repos) != 1 || repos[0].Name != "app" || repos[0].RemoteURL != src ||
+		repos[0].SourceRepoID != "app" || repos[0].DefaultBranch != sourceBranch {
 		t.Fatalf("repos = %#v, want cloned app repo with remote URL", repos)
+	}
+	if ws.DefaultBranch != sourceBranch {
+		t.Fatalf("workspace default branch = %q, want detected %q", ws.DefaultBranch, sourceBranch)
 	}
 	roles, err := st.Roles().List(context.Background(), "CLONE-WS")
 	if err != nil {
@@ -643,6 +763,7 @@ func TestStoreBackedCreateCloneWorkspaceNormalizesRepoNameForFleetStore(t *testi
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)
 
 	src := initTestGitRepo(t, t.TempDir(), "Hello-World")
+	sourceBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
 	st := memstore.New()
 	createFn := BuildStoreBackedCreateWorkspace(st)
 	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
@@ -651,7 +772,6 @@ func TestStoreBackedCreateCloneWorkspaceNormalizesRepoNameForFleetStore(t *testi
 		Name:      "clone-ws",
 		Type:      "clone",
 		CloneURLs: []string{src},
-		Branch:    "main",
 		Path:      wsPath,
 	})
 	if err != nil {
@@ -662,7 +782,8 @@ func TestStoreBackedCreateCloneWorkspaceNormalizesRepoNameForFleetStore(t *testi
 	if err != nil {
 		t.Fatalf("list repos: %v", err)
 	}
-	if len(repos) != 1 || repos[0].Name != "hello-world" || repos[0].SourceRepoID != "hello-world" {
+	if len(repos) != 1 || repos[0].Name != "hello-world" || repos[0].SourceRepoID != "hello-world" ||
+		repos[0].DefaultBranch != sourceBranch {
 		t.Fatalf("repos = %#v, want normalized hello-world repo", repos)
 	}
 	if _, err := os.Stat(filepath.Join(wsPath, "hello-world", ".git")); err != nil {

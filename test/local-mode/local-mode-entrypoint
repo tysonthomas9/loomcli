@@ -43,7 +43,6 @@ TS_PLAN_BINDING="${LOOM_LOCAL_MODE_TS_PLAN_BINDING:-local-mode-ts-planner}"
 TS_CODE_BINDING="${LOOM_LOCAL_MODE_TS_CODE_BINDING:-local-mode-ts-coder}"
 PLAN_AGENT_RECORD_ID=""
 CODE_AGENT_RECORD_ID=""
-OPERATOR_BEARER=""
 FLEET_API_BASE="${LOOM_FLEET_DB_URL:-http://fleet-db:8080}"
 FLEET_API_KEY="${LOOM_FLEET_DB_API_KEY:-}"
 FLEET_API_ACTOR="${LOOM_FLEET_DB_ACTOR:-local-mode-harness@fixture.local}"
@@ -203,11 +202,7 @@ http_request_json() {
   method="$1"
   url="$2"
   body="${3:-}"
-  bearer="${4:-}"
   args=(-fsS --max-time 180 -X "$method" -H "Accept: application/json" -H "Content-Type: application/json")
-  if [ "$bearer" != "" ]; then
-    args+=(-H "Authorization: Bearer ${bearer}")
-  fi
   if [ "$body" != "" ]; then
     args+=(--data "$body")
   fi
@@ -446,38 +441,6 @@ issues_api() {
   printf 'http://127.0.0.1:%s/api/workspaces/%s' "$LOOM_PORT" "$WORKSPACE"
 }
 
-mint_local_operator_bearer() {
-  operator_token="${WORKSPACE_ROOT}/.loom/operator/operator.token"
-  deadline=$((SECONDS + 60))
-  while [ ! -s "$operator_token" ]; do
-    if [ "$SECONDS" -ge "$deadline" ]; then
-      echo "[local-mode] FATAL: loom serve did not publish its local operator credential" >&2
-      return 1
-    fi
-    sleep 1
-  done
-  durable_bearer="$(cat "$operator_token")"
-  launch="$(http_request_json POST "$(issues_api)/operator-sessions/launch" '{}' "$durable_bearer")" || {
-    echo "[local-mode] FATAL: could not create a local operator launch" >&2
-    return 1
-  }
-  launch_code="$(printf '%s' "$launch" | jq -r '.launch_code // empty')"
-  if [ "$launch_code" = "" ]; then
-    echo "[local-mode] FATAL: local operator launch omitted launch_code" >&2
-    return 1
-  fi
-  exchange_body="$(jq -cn --arg launch_code "$launch_code" '{launch_code:$launch_code}')"
-  session="$(http_request_json POST "$(issues_api)/operator-sessions/exchange" "$exchange_body")" || {
-    echo "[local-mode] FATAL: could not exchange the local operator launch" >&2
-    return 1
-  }
-  OPERATOR_BEARER="$(printf '%s' "$session" | jq -r --arg workspace "$WORKSPACE" 'select(.workspace == $workspace and .token_type == "Bearer") | .access_token // empty')"
-  if [ "$OPERATOR_BEARER" = "" ]; then
-    echo "[local-mode] FATAL: local operator exchange returned an invalid session" >&2
-    return 1
-  fi
-}
-
 prompt_agent_by_name() {
   name="$1"
   http_get "$(issues_api)/agents" |
@@ -501,7 +464,7 @@ seed_prompt_agent() {
       --arg task_filter "$task_filter" \
       --arg prompt "$prompt" \
       '{kind:"prompt",name:$name,backend:$backend,behavior:{role_name:$role,role_create:{description:"Deterministic supervisor-disabled execution proof",prompt:$prompt,prompt_filename:($role + ".md"),task_filter:$task_filter,backend:$backend}},trigger:{source_kind:"internal",binding_id:$binding,event_type_patterns:["internal.task.ready"]},enabled:true}')"
-    record="$(http_request_json POST "$(issues_api)/agents" "$body" "$OPERATOR_BEARER")" || {
+    record="$(http_request_json POST "$(issues_api)/agents" "$body")" || {
       echo "[local-mode] FATAL: public API failed to create prompt agent ${name}" >&2
       return 1
     }
@@ -528,8 +491,6 @@ seed_prompt_agent() {
 }
 
 seed_ts_prompt_agents() {
-  mint_local_operator_bearer
-
   # The task-run host resolves the local runner backend from the durable
   # workspace profile. Configure that profile through FleetDB's authenticated
   # public API: localdogfood is a harness-only backend and is intentionally not

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -31,18 +32,21 @@ import (
 // touch need real implementations; anything else panics loudly.
 type fakeIssueBackend struct {
 	backend.IssueBackend
-	ready            []backend.IssueData
-	readyOpts        []backend.ReadyOpts
-	blocked          []backend.IssueData
-	children         []backend.IssueData
-	epic             *backend.IssueDetailData
-	actor            string
-	claimed          []string
-	releases         []fakeRelease
-	typedClaims      []execution.ClaimDriverRunWorkItemCommand
-	typedReleases    []execution.ReleaseDriverRunWorkItemCommand
-	typedClaimErrors map[string]error
-	typedClaimItems  map[string]*execution.DriverRunWorkItem
+	ready                 []backend.IssueData
+	readyOpts             []backend.ReadyOpts
+	blocked               []backend.IssueData
+	children              []backend.IssueData
+	epic                  *backend.IssueDetailData
+	actor                 string
+	claimed               []string
+	releases              []fakeRelease
+	typedClaims           []execution.ClaimDriverRunWorkItemCommand
+	typedReleases         []execution.ReleaseDriverRunWorkItemCommand
+	typedClaimErrors      map[string]error
+	typedClaimItems       map[string]*execution.DriverRunWorkItem
+	repositoryBlocks      []string
+	repositoryBlockResult *backend.RepositoryRequirementResult
+	repositoryBlockErr    error
 }
 
 type fakeRelease struct {
@@ -140,6 +144,21 @@ func (f *fakeIssueBackend) Get(_ context.Context, _ string) (*backend.IssueDetai
 	return f.epic, nil
 }
 
+func (f *fakeIssueBackend) BlockRepositoryRequired(_ context.Context, id string) (*backend.RepositoryRequirementResult, error) {
+	f.repositoryBlocks = append(f.repositoryBlocks, id)
+	if f.repositoryBlockErr != nil {
+		return nil, f.repositoryBlockErr
+	}
+	if f.repositoryBlockResult != nil {
+		return f.repositoryBlockResult, nil
+	}
+	return &backend.RepositoryRequirementResult{Changed: true}, nil
+}
+
+func (f *fakeIssueBackend) SetIssueRepository(_ context.Context, id, repo string) (*backend.IssueData, error) {
+	return &backend.IssueData{ID: id, SourceRepo: repo}, nil
+}
+
 type testHarness struct {
 	server      *httptest.Server
 	store       store.Store
@@ -157,6 +176,33 @@ type testDriverRunExecution struct {
 	execution.DriverRunAPI
 	store  store.Store
 	issues *fakeIssueBackend
+}
+
+// testNoOpTerminalWorkRecoveryExecution supplies the atomic Fleet-only
+// convergence command to executor tests backed by the in-memory store. The
+// driver API tests exercise outcome/await delivery; terminal TaskRun and Work
+// Item recovery has its own command-level coverage.
+type testNoOpTerminalWorkRecoveryExecution struct {
+	testDriverRunExecution
+}
+
+func (testNoOpTerminalWorkRecoveryExecution) RecoverTerminalDriverRunWork(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverTerminalDriverRunWorkCommand,
+) (execution.RecoverTerminalDriverRunWorkResult, error) {
+	commit := &execution.RecoverTerminalDriverRunWorkCommit{
+		WorkspaceKey: command.WorkspaceKey,
+		DriverRunID:  command.DriverRunID,
+		ParentStatus: command.ParentStatus,
+		Reason:       command.Reason,
+		ErrorClass:   command.ErrorClass,
+		RecoveredAt:  command.RecoveredAt,
+	}
+	return execution.RecoverTerminalDriverRunWorkResult{
+		Committed: commit,
+		ActionID:  command.RequestID,
+	}, nil
 }
 
 func (adapter testDriverRunExecution) HeartbeatDriverRun(
@@ -748,6 +794,42 @@ func TestDriverAPIUnknownOp(t *testing.T) {
 	}
 	if code := errorCode(t, decoded); code != "unknown_op" {
 		t.Fatalf("error code = %q, want unknown_op", code)
+	}
+}
+
+func TestDriverAPIBlocksRepositoryRequiredIssueThroughAtomicBackend(t *testing.T) {
+	h := newTestHarness(t, "")
+	h.backend.repositoryBlockResult = &backend.RepositoryRequirementResult{
+		Issue:   &backend.IssueData{ID: "TASK-REPO", Status: "blocked"},
+		Changed: true,
+	}
+	resp, decoded := h.do(t, opRequest{
+		op: "issue-block-repository-required", body: map[string]any{"issueId": "TASK-REPO"}, headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status/body = %d/%v, want 200", resp.StatusCode, decoded)
+	}
+	if !slices.Equal(h.backend.repositoryBlocks, []string{"TASK-REPO"}) || decoded["changed"] != true {
+		t.Fatalf("repository blocks/body = %v/%v", h.backend.repositoryBlocks, decoded)
+	}
+	issue, _ := decoded["issue"].(map[string]any)
+	if issue["id"] != "TASK-REPO" || issue["status"] != "blocked" {
+		t.Fatalf("canonical issue = %v", issue)
+	}
+}
+
+func TestDriverAPIRepositoryBlockMapsBackendUnavailable(t *testing.T) {
+	h := newTestHarness(t, "")
+	h.backend.repositoryBlockErr = backend.ErrUnavailable("BlockRepositoryRequired", "fleet unavailable", nil)
+	resp, decoded := h.do(t, opRequest{
+		op: "issue-block-repository-required", body: map[string]any{"issueId": "TASK-REPO"}, headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusServiceUnavailable || errorCode(t, decoded) != "unavailable" {
+		t.Fatalf("status/body = %d/%v, want 503 unavailable", resp.StatusCode, decoded)
+	}
+	errorBody, _ := decoded["error"].(map[string]any)
+	if errorBody["retryable"] != true {
+		t.Fatalf("error = %v, want retryable", errorBody)
 	}
 }
 

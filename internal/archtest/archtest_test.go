@@ -79,7 +79,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.AnalysisProfilesEnforced, 11; got != want {
 		t.Fatalf("enforced analysis profiles = %d, want %d", got, want)
 	}
-	if got, want := report.MutationCommands, 56; got != want {
+	if got, want := report.MutationCommands, 60; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 86; got != want {
@@ -197,7 +197,7 @@ func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T)
 		t.Fatalf("Execution action exclusions observed = %v, want all documented exclusions %v", observedExclusions, exclusions)
 	}
 	slices.Sort(want)
-	if gotCount, wantCount := len(got), 35; gotCount != wantCount {
+	if gotCount, wantCount := len(got), 39; gotCount != wantCount {
 		t.Fatalf("Execution mutation commands = %d, want %d; commands = %v", gotCount, wantCount, got)
 	}
 	if !slices.Equal(got, want) {
@@ -254,6 +254,7 @@ func TestExecutionQueueLedgerDistinguishesLeaseRecoveryFromReceiptReplay(t *test
 	for _, id := range []string{
 		"execution.claim-await-event-notifications",
 		"execution.claim-driver-run-outcomes",
+		"execution.claim-terminal-driver-run-work-recoveries",
 	} {
 		command := commands[id]
 		if !strings.Contains(command.IdempotencyKey, "no exact claim replay receipt") ||
@@ -265,6 +266,7 @@ func TestExecutionQueueLedgerDistinguishesLeaseRecoveryFromReceiptReplay(t *test
 	for _, id := range []string{
 		"execution.retry-await-event-notification",
 		"execution.retry-driver-run-outcome",
+		"execution.retry-terminal-driver-run-work-recovery",
 	} {
 		command := commands[id]
 		if !strings.Contains(command.IdempotencyKey, "no exact replay receipt") ||
@@ -276,6 +278,7 @@ func TestExecutionQueueLedgerDistinguishesLeaseRecoveryFromReceiptReplay(t *test
 	for _, id := range []string{
 		"execution.complete-await-event-notification",
 		"execution.complete-driver-run-outcome",
+		"execution.complete-terminal-driver-run-work-recovery",
 	} {
 		command := commands[id]
 		if !strings.Contains(command.RetryRestartBehavior, "Exact completion replay is idempotent") {
@@ -372,8 +375,8 @@ func TestCheckedInPhase4ArchitectureContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Commands) != 56 {
-		t.Fatalf("mutation commands = %d, want 56", len(ledger.Commands))
+	if len(ledger.Commands) != 60 {
+		t.Fatalf("mutation commands = %d, want 60", len(ledger.Commands))
 	}
 }
 

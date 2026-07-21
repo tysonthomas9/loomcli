@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -777,16 +778,91 @@ func TestExhaustTaskRunRetriesCanonicalizesArtifactsAndRejectsNonFiniteUsage(t *
 }
 
 type convergenceSourceStub struct {
-	record *TerminalTaskRunRecord
+	records  map[string]*TerminalTaskRunRecord
+	getCalls int
 }
 
-func (stub *convergenceSourceStub) GetTerminalTaskRun(_ context.Context, _, _ string) (*TerminalTaskRunRecord, error) {
-	copy := *stub.record
+func newConvergenceSourceStub(records ...*TerminalTaskRunRecord) *convergenceSourceStub {
+	stub := &convergenceSourceStub{records: make(map[string]*TerminalTaskRunRecord, len(records))}
+	for _, record := range records {
+		stub.records[record.TaskRunID] = record
+	}
+	return stub
+}
+
+func (stub *convergenceSourceStub) GetTerminalTaskRun(_ context.Context, _, taskRunID string) (*TerminalTaskRunRecord, error) {
+	stub.getCalls++
+	record := stub.records[taskRunID]
+	if record == nil {
+		return nil, ErrNotFound
+	}
+	copy := *record
 	return &copy, nil
 }
 
-func (stub *convergenceSourceStub) ListTaskRunConvergenceCandidates(_ context.Context, _ TaskRunConvergenceCandidateQuery) (TaskRunConvergenceCandidatePage, error) {
-	return TaskRunConvergenceCandidatePage{TaskRunIDs: []string{stub.record.TaskRunID}}, nil
+type convergenceCheckpointStub struct {
+	source        *convergenceSourceStub
+	versions      map[string]int
+	completedAt   map[string]time.Time
+	failures      int
+	listCalls     int
+	completeCalls int
+}
+
+func newConvergenceCheckpointStub(source *convergenceSourceStub) *convergenceCheckpointStub {
+	return &convergenceCheckpointStub{
+		source: source, versions: map[string]int{}, completedAt: map[string]time.Time{},
+	}
+}
+
+func (stub *convergenceCheckpointStub) ListTaskRunConvergenceCandidates(
+	_ context.Context,
+	query TaskRunConvergenceCandidateQuery,
+) (TaskRunConvergenceCandidatePage, error) {
+	stub.listCalls++
+	ids := make([]string, 0)
+	for id, record := range stub.source.records {
+		if record.WorkspaceKey == query.WorkspaceKey && id > query.After && stub.versions[id] < query.RequiredVersion {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	limit := query.Limit
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	page := TaskRunConvergenceCandidatePage{}
+	if len(ids) > limit {
+		page.TaskRunIDs = append([]string(nil), ids[:limit]...)
+		page.Next = page.TaskRunIDs[len(page.TaskRunIDs)-1]
+	} else {
+		page.TaskRunIDs = append([]string(nil), ids...)
+	}
+	return page, nil
+}
+
+func (stub *convergenceCheckpointStub) CompleteTaskRunTerminalConvergence(
+	_ context.Context,
+	command CompleteTaskRunTerminalConvergence,
+) (TaskRunTerminalConvergenceCheckpoint, error) {
+	stub.completeCalls++
+	if stub.failures > 0 {
+		stub.failures--
+		return TaskRunTerminalConvergenceCheckpoint{}, errors.New("injected checkpoint failure")
+	}
+	version := stub.versions[command.TaskRunID]
+	completedAt := stub.completedAt[command.TaskRunID]
+	replayed := version >= command.RequiredVersion && !completedAt.IsZero()
+	if !replayed {
+		version = command.RequiredVersion
+		completedAt = command.CompletedAt
+		stub.versions[command.TaskRunID] = version
+		stub.completedAt[command.TaskRunID] = completedAt
+	}
+	return TaskRunTerminalConvergenceCheckpoint{
+		WorkspaceKey: command.WorkspaceKey, TaskRunID: command.TaskRunID,
+		Version: version, CompletedAt: completedAt, Replayed: replayed,
+	}, nil
 }
 
 type convergenceEventPortStub struct {
@@ -858,21 +934,23 @@ func (stub convergenceAuthorityResolverStub) ResolveExecutionSystemAuthority(_ c
 
 func TestTaskRunConvergenceRepairsLostStepAndNotificationAfterRestart(t *testing.T) {
 	now := time.Now().UTC()
-	source := &convergenceSourceStub{record: &TerminalTaskRunRecord{
+	source := newConvergenceSourceStub(&TerminalTaskRunRecord{
 		WorkspaceKey: "TEST", TaskRunID: "task-run-1", DriverRunID: "run-1", DriverStepID: "step-1",
 		WorkItemID: "TASK-1", EpicID: "EPIC-1", Status: StatusSucceeded, Attempt: 1,
 		LogsRef: "logs://1", ArtifactsRef: "artifacts://1", FinishedAt: now,
 		ParentOwner: Owner{ResourceKind: ResourceDriverRun, ResourceID: "run-1", NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "driver-token-1", FencingToken: 3},
-	}}
+	})
+	checkpoints := newConvergenceCheckpointStub(source)
 	events := &convergenceEventPortStub{}
 	steps := &convergenceStepPortStub{failures: 1}
 	notifications := &convergenceNotificationPortStub{}
 	service, issuer := newTestService(t, Dependencies{Convergence: TaskRunConvergenceDependencies{
-		Source: source, Events: events, DriverSteps: steps, LeadResolver: convergenceLeadStub{}, Notifications: notifications,
+		Source: source, Checkpoints: checkpoints, Events: events, DriverSteps: steps,
+		LeadResolver: convergenceLeadStub{}, Notifications: notifications,
 	}})
 	newPass := func() *TaskRunConvergencePass {
 		return &TaskRunConvergencePass{
-			WorkspaceKey: "TEST", Source: source, API: service,
+			WorkspaceKey: "TEST", Checkpoints: checkpoints, API: service,
 			Authorities: convergenceAuthorityResolverStub{issuer: issuer},
 		}
 	}
@@ -882,6 +960,9 @@ func TestTaskRunConvergenceRepairsLostStepAndNotificationAfterRestart(t *testing
 	if len(events.writes) != 1 || len(steps.writes) != 0 || len(notifications.writes) != 0 {
 		t.Fatalf("after fault events=%v steps=%v notifications=%v", events.writes, steps.writes, notifications.writes)
 	}
+	if checkpoints.versions["task-run-1"] != 0 || checkpoints.completeCalls != 0 {
+		t.Fatalf("partial failure advanced checkpoint: versions=%v calls=%d", checkpoints.versions, checkpoints.completeCalls)
+	}
 	// Reconstruct the runtime pass to model a serve restart. The durable
 	// terminal record is scanned again and every already-written leg replays.
 	if err := newPass().RunOnce(context.Background()); err != nil {
@@ -889,6 +970,17 @@ func TestTaskRunConvergenceRepairsLostStepAndNotificationAfterRestart(t *testing
 	}
 	if len(events.writes) != 1 || len(steps.writes) != 1 || len(notifications.writes) != 1 {
 		t.Fatalf("after restart events=%v steps=%v notifications=%v", events.writes, steps.writes, notifications.writes)
+	}
+	if checkpoints.versions["task-run-1"] != CurrentTaskRunTerminalConvergenceVersion || checkpoints.completeCalls != 1 {
+		t.Fatalf("durable checkpoint=%v completion calls=%d", checkpoints.versions, checkpoints.completeCalls)
+	}
+	getCalls, eventCalls, completionCalls := source.getCalls, events.calls, checkpoints.completeCalls
+	if err := newPass().RunOnce(context.Background()); err != nil {
+		t.Fatalf("post-restart durable skip: %v", err)
+	}
+	if source.getCalls != getCalls || events.calls != eventCalls || checkpoints.completeCalls != completionCalls {
+		t.Fatalf("completed run replayed after restart: gets %d->%d events %d->%d checkpoints %d->%d",
+			getCalls, source.getCalls, eventCalls, events.calls, completionCalls, checkpoints.completeCalls)
 	}
 	for _, event := range events.writes {
 		wire, err := json.Marshal(event)
@@ -898,6 +990,57 @@ func TestTaskRunConvergenceRepairsLostStepAndNotificationAfterRestart(t *testing
 		if strings.Contains(string(wire), "lease") || strings.Contains(string(wire), "token") {
 			t.Fatalf("terminal event exposed credential-shaped field: %s", wire)
 		}
+	}
+}
+
+func TestTaskRunConvergenceCheckpointFailureRetriesPagesAndDiscoversNewLowerID(t *testing.T) {
+	now := time.Now().UTC()
+	record := func(id string) *TerminalTaskRunRecord {
+		return &TerminalTaskRunRecord{
+			WorkspaceKey: "TEST", TaskRunID: id, WorkItemID: "TASK-" + id,
+			Status: StatusSucceeded, Attempt: 1, FinishedAt: now,
+		}
+	}
+	source := newConvergenceSourceStub(record("task-m"), record("task-z"))
+	checkpoints := newConvergenceCheckpointStub(source)
+	checkpoints.failures = 1
+	events := &convergenceEventPortStub{}
+	service, issuer := newTestService(t, Dependencies{Convergence: TaskRunConvergenceDependencies{
+		Source: source, Checkpoints: checkpoints, Events: events,
+	}})
+	newPass := func() *TaskRunConvergencePass {
+		return &TaskRunConvergencePass{
+			WorkspaceKey: "TEST", Checkpoints: checkpoints, API: service, Limit: 1,
+			Authorities: convergenceAuthorityResolverStub{issuer: issuer},
+		}
+	}
+
+	if err := newPass().RunOnce(context.Background()); err == nil {
+		t.Fatal("checkpoint failure pass succeeded")
+	}
+	if checkpoints.versions["task-m"] != 0 {
+		t.Fatalf("failed checkpoint advanced version: %v", checkpoints.versions)
+	}
+	if err := newPass().RunOnce(context.Background()); err != nil {
+		t.Fatalf("restart checkpoint retry and pagination: %v", err)
+	}
+	for _, id := range []string{"task-m", "task-z"} {
+		if checkpoints.versions[id] != CurrentTaskRunTerminalConvergenceVersion {
+			t.Fatalf("versions=%v missing %s", checkpoints.versions, id)
+		}
+	}
+	if checkpoints.listCalls < 3 {
+		t.Fatalf("list calls=%d, want failed pass plus multiple restart pages", checkpoints.listCalls)
+	}
+
+	// The next periodic pass deliberately resets its cursor. A newly terminal
+	// ID that sorts behind the prior pass's final cursor must still be found.
+	source.records["task-a"] = record("task-a")
+	if err := newPass().RunOnce(context.Background()); err != nil {
+		t.Fatalf("discover new lower TaskRun ID: %v", err)
+	}
+	if checkpoints.versions["task-a"] != CurrentTaskRunTerminalConvergenceVersion {
+		t.Fatalf("new terminal TaskRun not discovered: %v", checkpoints.versions)
 	}
 }
 

@@ -63,11 +63,15 @@ func ResolveSandboxLauncher() (SandboxLauncher, error) {
 }
 
 type Executor struct {
-	Store             store.Store
-	WorkspaceKey      string
-	RunID             string
-	WorkDir           string
-	NodeID            string
+	Store        store.Store
+	WorkspaceKey string
+	RunID        string
+	WorkDir      string
+	NodeID       string
+	// NodeCapacity is the configured capacity of the process node shared with
+	// TaskWorker runtime slots. Values below one preserve the standalone safe
+	// default of one.
+	NodeCapacity      int
 	LeaseID           string
 	Runner            Runner
 	HeartbeatInterval time.Duration
@@ -100,11 +104,12 @@ type Executor struct {
 	// Serve always supplies this API and its typed authority resolvers. Nil
 	// retains the legacy direct-store compatibility path for standalone CLI
 	// callers and existing isolated tests until their command family migrates.
-	Execution            execution.DriverRunAPI
-	RunOutcomeQueue      execution.DriverRunOutcomeAPI
-	ExecutionWorkers     execution.TaskRunWorkerAPI
-	ExecutionAuthorities execution.DriverRunAuthorityResolver
-	SystemAuthorities    execution.SystemAuthorityResolver
+	Execution                 execution.DriverRunAPI
+	RunOutcomeQueue           execution.DriverRunOutcomeAPI
+	TerminalWorkRecoveryQueue execution.TerminalDriverRunWorkRecoveryQueueAPI
+	ExecutionWorkers          execution.TaskRunWorkerAPI
+	ExecutionAuthorities      execution.DriverRunAuthorityResolver
+	SystemAuthorities         execution.SystemAuthorityResolver
 }
 
 type ExecutionResult struct {
@@ -118,7 +123,7 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 	if e == nil || e.Store == nil {
 		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
 	}
-	if e.Execution == nil || e.RunOutcomeQueue == nil || e.ExecutionWorkers == nil || e.ExecutionAuthorities == nil || e.SystemAuthorities == nil {
+	if e.Execution == nil || e.RunOutcomeQueue == nil || e.TerminalWorkRecoveryQueue == nil || e.ExecutionWorkers == nil || e.ExecutionAuthorities == nil || e.SystemAuthorities == nil {
 		return nil, fmt.Errorf("execution DriverRun, outcome queue, and worker-node APIs are required: %w", execution.ErrUnavailable)
 	}
 	workDir, err := e.resolveWorkDir()
@@ -393,7 +398,7 @@ func (e *Executor) finish(ctx context.Context, claimed *domain.DriverRun, leaseT
 func (e *Executor) publishRunFinished(ctx context.Context, run *domain.DriverRun) {
 	awaitNotifier := e.executionRunOutcomeAwaitNotifier()
 	emitRunFinishedEventWithExecution(
-		ctx, e.Store, e.RunOutcomes, run, e.RunOutcomeQueue, e.Execution,
+		ctx, e.Store, e.RunOutcomes, run, e.RunOutcomeQueue, e.TerminalWorkRecoveryQueue, e.Execution,
 		e.SystemAuthorities, awaitNotifier,
 	)
 }
@@ -524,6 +529,13 @@ func (e *Executor) leaseID(runID string) string {
 	return fmt.Sprintf("%s-%d", runID, time.Now().UTC().UnixNano())
 }
 
+func (e *Executor) nodeCapacity() int {
+	if e.NodeCapacity < 1 {
+		return 1
+	}
+	return e.NodeCapacity
+}
+
 func (e *Executor) ensureNode(ctx context.Context, ws, nodeID string) error {
 	if e.ExecutionWorkers == nil || e.SystemAuthorities == nil {
 		return fmt.Errorf("execution system authority and worker-node API required: %w", execution.ErrUnavailable)
@@ -541,7 +553,7 @@ func (e *Executor) ensureNode(ctx context.Context, ws, nodeID string) error {
 		OwnerActor: executorOwnerActor(), RuntimeProvider: string(domain.RuntimeProviderLocal),
 		Labels:        []string{"loom-driver-executor"},
 		Capabilities:  []string{"driver-runner", "task-runner", "flue-local"},
-		ToolInventory: []string{"loom-driver"}, Version: "loom-serve", Capacity: 1, TTL: ttl, RegisteredAt: now,
+		ToolInventory: []string{"loom-driver"}, Version: "loom-serve", Capacity: e.nodeCapacity(), TTL: ttl, RegisteredAt: now,
 	})
 	if err != nil {
 		return fmt.Errorf("register executor node through Execution: %w", err)

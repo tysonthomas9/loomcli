@@ -18,6 +18,8 @@ import (
 
 var ErrNoQueuedTaskRun = errors.New("task worker: no queued task run")
 
+var errTaskWorkerNodeLifecycleInFlight = errors.New("task worker: node lifecycle pass already in flight")
+
 type taskWorkerClaimState struct {
 	runMu   sync.Mutex
 	pending *execution.ClaimTaskRunCommand
@@ -25,12 +27,38 @@ type taskWorkerClaimState struct {
 
 var taskWorkerClaimStateInitMu sync.Mutex
 
+type taskWorkerNodeLifecycleEntry struct {
+	registered      bool
+	heartbeatSent   bool
+	active          bool
+	nextHeartbeatAt time.Time
+}
+
+type taskWorkerNodeLifecycleKeyState struct {
+	mu    sync.Mutex
+	entry taskWorkerNodeLifecycleEntry
+}
+
+// taskWorkerNodeLifecycleState is shared by every concurrency slot cloned
+// from one serve TaskWorker template. The slots use the same process node, so
+// registering, activating, and heartbeating that node once per workspace is
+// sufficient; claims remain independent and concurrent.
+type taskWorkerNodeLifecycleState struct {
+	mu      sync.Mutex
+	entries map[string]*taskWorkerNodeLifecycleKeyState
+}
+
+var taskWorkerNodeLifecycleStateInitMu sync.Mutex
+
 type TaskWorker struct {
-	Store              store.Store
-	WorkspaceKey       string
-	TaskRunID          string
-	WorkDir            string
-	NodeID             string
+	Store        store.Store
+	WorkspaceKey string
+	TaskRunID    string
+	WorkDir      string
+	NodeID       string
+	// NodeCapacity is the number of concurrent TaskRun slots advertised by the
+	// shared worker node. Values below one preserve the standalone default of one.
+	NodeCapacity       int
 	RunnerID           string
 	LeaseID            string
 	LeaseToken         string
@@ -72,6 +100,10 @@ type TaskWorker struct {
 	// ambiguous response so the next pass can replay FleetDB's durable receipt.
 	// It is intentionally per worker and never copied into public results.
 	claimState *taskWorkerClaimState
+	// nodeLifecycle is shared across runtime clones that represent concurrent
+	// claim slots on the same process node. It bounds node lifecycle traffic
+	// independently from the one-second queued-work claim cadence.
+	nodeLifecycle *taskWorkerNodeLifecycleState
 }
 
 func (w *TaskWorker) RunOnce(ctx context.Context) (*TaskRunRequestOutcome, error) {
@@ -141,6 +173,12 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 		return nil, fmt.Errorf("worker node id required: %w", domain.ErrInvalid)
 	}
 	if err := w.ensureNode(ctx, ws, nodeID); err != nil {
+		if errors.Is(err, errTaskWorkerNodeLifecycleInFlight) {
+			pending := w.taskWorkerRuntimeClaimState().pending
+			if pending == nil || pending.WorkspaceKey != ws {
+				return nil, ErrNoQueuedTaskRun
+			}
+		}
 		return nil, err
 	}
 	executor := w.Executor
@@ -289,10 +327,37 @@ func (w *TaskWorker) taskWorkerRuntimeClaimState() *taskWorkerClaimState {
 
 // CloneForRuntime returns an independent worker execution slot. The retained
 // claim envelope is runtime-local and must never be shared when the serve
-// template fans out into concurrent worker passes.
-func (w TaskWorker) CloneForRuntime() TaskWorker {
-	w.claimState = &taskWorkerClaimState{}
-	return w
+// template fans out into concurrent worker passes. Node lifecycle state is
+// deliberately shared because every slot registers the same process node.
+func (w *TaskWorker) CloneForRuntime() TaskWorker {
+	nodeLifecycle := w.taskWorkerRuntimeNodeLifecycleState()
+	clone := *w
+	clone.claimState = &taskWorkerClaimState{}
+	clone.nodeLifecycle = nodeLifecycle
+	return clone
+}
+
+func (w *TaskWorker) taskWorkerRuntimeNodeLifecycleState() *taskWorkerNodeLifecycleState {
+	taskWorkerNodeLifecycleStateInitMu.Lock()
+	defer taskWorkerNodeLifecycleStateInitMu.Unlock()
+	if w.nodeLifecycle == nil {
+		w.nodeLifecycle = &taskWorkerNodeLifecycleState{entries: make(map[string]*taskWorkerNodeLifecycleKeyState)}
+	}
+	return w.nodeLifecycle
+}
+
+func (state *taskWorkerNodeLifecycleState) keyState(key string) *taskWorkerNodeLifecycleKeyState {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.entries == nil {
+		state.entries = make(map[string]*taskWorkerNodeLifecycleKeyState)
+	}
+	entry := state.entries[key]
+	if entry == nil {
+		entry = &taskWorkerNodeLifecycleKeyState{}
+		state.entries[key] = entry
+	}
+	return entry
 }
 
 func (w *TaskWorker) taskRunLease(nodeID string) (string, string) {
@@ -563,6 +628,13 @@ func (w *TaskWorker) nodeID() string {
 	return fmt.Sprintf("loom-task-worker-%s-%d", host, os.Getpid())
 }
 
+func (w *TaskWorker) nodeCapacity() int {
+	if w.NodeCapacity < 1 {
+		return 1
+	}
+	return w.NodeCapacity
+}
+
 func (w *TaskWorker) runnerPlacement(nodeID string) domain.TaskRunPlacement {
 	placement := w.RunnerPlacement
 	if placement.Provider == "" {
@@ -588,37 +660,99 @@ func (w *TaskWorker) ensureNode(ctx context.Context, ws, nodeID string) error {
 	ttl := (&Executor{HeartbeatInterval: w.HeartbeatInterval}).nodeTTL()
 	now := taskRunNow(w.Now)
 	componentID := strings.TrimSpace(w.ExecutionComponentID)
+	lifecycle := w.taskWorkerRuntimeNodeLifecycleState()
+	key := ws + "\x00" + nodeID
+	keyState := lifecycle.keyState(key)
+	if !keyState.mu.TryLock() {
+		return errTaskWorkerNodeLifecycleInFlight
+	}
+	defer keyState.mu.Unlock()
+	entry := keyState.entry
+
+	if !entry.registered {
+		if err := w.registerTaskWorkerRuntimeNode(ctx, ws, nodeID, componentID, ttl, now); err != nil {
+			return err
+		}
+		entry.registered = true
+		keyState.entry = entry
+	}
+
+	heartbeatInterval := taskWorkerNodeHeartbeatInterval(w.HeartbeatInterval)
+	heartbeatDue := !entry.heartbeatSent || !now.Before(entry.nextHeartbeatAt)
+	if heartbeatDue {
+		if err := w.heartbeatTaskWorkerRuntimeNode(ctx, ws, nodeID, componentID, ttl, now); err != nil {
+			if errors.Is(err, execution.ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
+				keyState.entry = taskWorkerNodeLifecycleEntry{}
+			}
+			return err
+		}
+		entry.heartbeatSent = true
+		entry.nextHeartbeatAt = now.Add(heartbeatInterval)
+		keyState.entry = entry
+	}
+
+	if !entry.active {
+		if err := w.activateTaskWorkerRuntimeNode(ctx, ws, nodeID, componentID, now); err != nil {
+			if errors.Is(err, execution.ErrNotFound) || errors.Is(err, domain.ErrNotFound) {
+				keyState.entry = taskWorkerNodeLifecycleEntry{}
+			}
+			return err
+		}
+		entry.active = true
+		keyState.entry = entry
+	}
+	return nil
+}
+
+func (w *TaskWorker) registerTaskWorkerRuntimeNode(
+	ctx context.Context, ws, nodeID, componentID string, ttl time.Duration, now time.Time,
+) error {
 	registerAuth, err := w.ExecutionAuthorities.ResolveExecutionSystemAuthority(ctx, ws, execution.ActionRegisterWorkerNode, componentID)
 	if err != nil {
 		return fmt.Errorf("resolve task worker registration authority: %w", err)
 	}
-	if _, err := w.Execution.RegisterWorkerNode(ctx, registerAuth, execution.RegisterWorkerNodeCommand{
+	_, err = w.Execution.RegisterWorkerNode(ctx, registerAuth, execution.RegisterWorkerNodeCommand{
 		WorkspaceKey: ws, RequestID: "register-task-worker:" + componentID + ":" + nodeID,
 		NodeID: nodeID, OwnerActor: executorOwnerActor(), RuntimeProvider: string(domain.RuntimeProviderLocal),
 		Labels: []string{"loom-driver-executor", "loom-task-worker"}, Capabilities: w.nodeCapabilities(),
-		ToolInventory: []string{"loom-driver", "loom-task-worker"}, Version: "loom-serve", Capacity: 1,
+		ToolInventory: []string{"loom-driver", "loom-task-worker"}, Version: "loom-serve", Capacity: w.nodeCapacity(),
 		TTL: ttl, RegisteredAt: now,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("register task worker node: %w", err)
 	}
+	return nil
+}
+
+func (w *TaskWorker) heartbeatTaskWorkerRuntimeNode(
+	ctx context.Context, ws, nodeID, componentID string, ttl time.Duration, now time.Time,
+) error {
 	heartbeatAuth, err := w.ExecutionAuthorities.ResolveExecutionSystemAuthority(ctx, ws, execution.ActionHeartbeatWorkerNode, componentID)
 	if err != nil {
 		return fmt.Errorf("resolve task worker node heartbeat authority: %w", err)
 	}
-	if _, err := w.Execution.HeartbeatWorkerNode(ctx, heartbeatAuth, execution.HeartbeatWorkerNodeCommand{
+	_, err = w.Execution.HeartbeatWorkerNode(ctx, heartbeatAuth, execution.HeartbeatWorkerNodeCommand{
 		WorkspaceKey: ws, RequestID: fmt.Sprintf("heartbeat-task-worker:%s:%d", componentID, now.UnixNano()),
 		NodeID: nodeID, TTL: ttl, HeartbeatAt: now,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("heartbeat task worker node: %w", err)
 	}
+	return nil
+}
+
+func (w *TaskWorker) activateTaskWorkerRuntimeNode(
+	ctx context.Context, ws, nodeID, componentID string, now time.Time,
+) error {
 	drainAuth, err := w.ExecutionAuthorities.ResolveExecutionSystemAuthority(ctx, ws, execution.ActionSetWorkerNodeDrain, componentID)
 	if err != nil {
 		return fmt.Errorf("resolve task worker drain authority: %w", err)
 	}
-	if _, err := w.Execution.SetWorkerNodeDrain(ctx, drainAuth, execution.SetWorkerNodeDrainCommand{
+	_, err = w.Execution.SetWorkerNodeDrain(ctx, drainAuth, execution.SetWorkerNodeDrainCommand{
 		WorkspaceKey: ws, RequestID: "activate-task-worker:" + componentID + ":" + nodeID,
 		NodeID: nodeID, DrainState: execution.WorkerNodeActive, ChangedAt: now,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("activate task worker node: %w", err)
 	}
 	return nil
@@ -638,6 +772,17 @@ func taskRunHeartbeatInterval(interval time.Duration) time.Duration {
 	}
 	if interval < 0 {
 		return 0
+	}
+	return interval
+}
+
+// taskWorkerNodeHeartbeatInterval is intentionally independent from the
+// TaskRun execution heartbeat switch. Tests and one-shot workers may disable
+// claimed-run heartbeats with a negative interval, but the shared worker node
+// still has a FleetDB TTL and must remain alive for future claims.
+func taskWorkerNodeHeartbeatInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return 30 * time.Second
 	}
 	return interval
 }

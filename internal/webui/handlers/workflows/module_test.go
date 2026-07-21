@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
@@ -116,6 +117,9 @@ func (adapter workflowRunStoreTestExecution) SubmitDriverRun(
 func newWorkflowTestModule(st store.Store) *Module {
 	return NewModule(Config{
 		Store: st, Execution: workflowRunStoreTestExecution{store: st}, OperatorAuthority: workflowOperatorAuthorityStub{},
+		TaskWorkflowRuns: readprojection.NewTaskWorkflowRunReader(
+			st.AgentSessions(), st.TaskRuns(), st.TriggerEvents(), st.TriggerDeliveries(), st.DriverRuns(),
+		),
 	})
 }
 
@@ -676,7 +680,7 @@ func driveTerminalTaskRun(t *testing.T, ctx context.Context, st store.Store, dri
 		t.Fatalf("create Execution admission: %v", err)
 	}
 	service, err := execution.New(execution.Dependencies{Convergence: execution.TaskRunConvergenceDependencies{
-		Source: ports, Events: ports, LeadResolver: ports, Notifications: ports,
+		Source: ports, Checkpoints: ports, Events: ports, LeadResolver: ports, Notifications: ports,
 	}}, admission)
 	if err != nil {
 		t.Fatalf("create Execution service: %v", err)
@@ -738,6 +742,33 @@ func (ports *workflowTaskRunConvergencePorts) GetTerminalTaskRun(ctx context.Con
 
 func (*workflowTaskRunConvergencePorts) ListTaskRunConvergenceCandidates(context.Context, execution.TaskRunConvergenceCandidateQuery) (execution.TaskRunConvergenceCandidatePage, error) {
 	return execution.TaskRunConvergenceCandidatePage{}, nil
+}
+
+func (ports *workflowTaskRunConvergencePorts) CompleteTaskRunTerminalConvergence(
+	ctx context.Context,
+	command execution.CompleteTaskRunTerminalConvergence,
+) (execution.TaskRunTerminalConvergenceCheckpoint, error) {
+	checkpoints, ok := ports.store.TaskRuns().(store.TaskRunTerminalConvergenceStore)
+	if !ok {
+		return execution.TaskRunTerminalConvergenceCheckpoint{}, execution.ErrUnavailable
+	}
+	result, err := checkpoints.CompleteTaskRunTerminalConvergence(ctx, store.TaskRunTerminalConvergenceComplete{
+		WorkspaceKey: command.WorkspaceKey, TaskRunID: command.TaskRunID,
+		RequiredVersion: command.RequiredVersion, CompletedAt: command.CompletedAt,
+	})
+	if err != nil {
+		return execution.TaskRunTerminalConvergenceCheckpoint{}, err
+	}
+	if result == nil || result.TaskRun == nil || result.TaskRun.TerminalConvergedAt == nil {
+		return execution.TaskRunTerminalConvergenceCheckpoint{}, execution.ErrConflict
+	}
+	return execution.TaskRunTerminalConvergenceCheckpoint{
+		WorkspaceKey: result.TaskRun.WorkspaceKey,
+		TaskRunID:    result.TaskRun.TaskRunID,
+		Version:      result.TaskRun.TerminalConvergenceVersion,
+		CompletedAt:  *result.TaskRun.TerminalConvergedAt,
+		Replayed:     result.Replayed,
+	}, nil
 }
 
 func (ports *workflowTaskRunConvergencePorts) EnsureTaskRunTerminalEvent(ctx context.Context, event execution.TaskRunTerminalEvent) error {

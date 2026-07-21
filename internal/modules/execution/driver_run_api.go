@@ -11,6 +11,7 @@ const (
 	ActionStartChildDriverRun          authority.Action = "execution.start-child-driver-run"
 	ActionCascadeChildDriverRuns       authority.Action = "execution.cascade-child-driver-runs"
 	ActionRecoverChildDriverRunCascade authority.Action = "execution.recover-child-driver-run-cascade"
+	ActionRecoverTerminalDriverRunWork authority.Action = "execution.recover-terminal-driver-run-work"
 	ActionClaimDriverRun               authority.Action = "execution.claim-driver-run"
 	ActionHeartbeatDriverRun           authority.Action = "execution.heartbeat-driver-run"
 	ActionClaimDriverRunWorkItem       authority.Action = "execution.claim-driver-run-work-item"
@@ -31,6 +32,7 @@ func DriverRunOperationRules() []authority.OperationRule {
 		authority.Allow(ActionStartChildDriverRun, authority.ClassExecution),
 		authority.Allow(ActionCascadeChildDriverRuns, authority.ClassExecution),
 		authority.Allow(ActionRecoverChildDriverRunCascade, authority.ClassSystem),
+		authority.Allow(ActionRecoverTerminalDriverRunWork, authority.ClassSystem),
 		authority.Allow(ActionClaimDriverRun, authority.ClassSystem),
 		authority.Allow(ActionHeartbeatDriverRun, authority.ClassExecution),
 		authority.Allow(ActionClaimDriverRunWorkItem, authority.ClassExecution),
@@ -51,6 +53,7 @@ type DriverRunAPI interface {
 	StartChildDriverRun(context.Context, authority.ExecutionAuthority, StartChildDriverRunCommand) (*DriverRun, error)
 	CascadeChildDriverRuns(context.Context, authority.ExecutionAuthority, CascadeChildDriverRunsCommand) (CascadeChildDriverRunsResult, error)
 	RecoverChildDriverRunCascade(context.Context, authority.SystemAuthority, RecoverChildDriverRunCascadeCommand) (CascadeChildDriverRunsResult, error)
+	RecoverTerminalDriverRunWork(context.Context, authority.SystemAuthority, RecoverTerminalDriverRunWorkCommand) (RecoverTerminalDriverRunWorkResult, error)
 	ClaimDriverRun(context.Context, authority.SystemAuthority, ClaimDriverRunCommand) (*DriverRun, error)
 	HeartbeatDriverRun(context.Context, authority.ExecutionAuthority, DriverRunHeartbeatCommand) (*DriverRun, error)
 	ClaimDriverRunWorkItem(context.Context, authority.ExecutionAuthority, ClaimDriverRunWorkItemCommand) (DriverRunWorkItemMutationResult, error)

@@ -169,6 +169,40 @@ func TestExecutorEnsureNodeRefreshesExistingNodeCapabilities(t *testing.T) {
 	}
 }
 
+func TestExecutorEnsureNodePreservesConfiguredSharedNodeCapacity(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "TEST", Name: "test"}); err != nil {
+		t.Fatalf("Create workspace: %v", err)
+	}
+	if _, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey: "TEST", NodeID: "shared-node", RuntimeProvider: domain.RuntimeProviderLocal,
+		Capacity: 4, DrainState: domain.NodeDrainActive, TTL: time.Minute,
+	}); err != nil {
+		t.Fatalf("Create shared node: %v", err)
+	}
+
+	executor := testExecutor(st, Executor{
+		Store: st, NodeCapacity: 4, HeartbeatInterval: -1,
+	})
+	if err := executor.ensureNode(ctx, "TEST", "shared-node"); err != nil {
+		t.Fatalf("ensureNode: %v", err)
+	}
+	node, err := st.Nodes().Get(ctx, "TEST", "shared-node")
+	if err != nil {
+		t.Fatalf("Get shared node: %v", err)
+	}
+	if node.Capacity != 4 {
+		t.Fatalf("shared node capacity = %d, want 4 after executor registration", node.Capacity)
+	}
+}
+
+func TestExecutorNodeCapacityDefaultsToOne(t *testing.T) {
+	if got := (&Executor{}).nodeCapacity(); got != 1 {
+		t.Fatalf("nodeCapacity() = %d, want safe default 1", got)
+	}
+}
+
 func TestExecutorRunOnceFailsNonTerminalRunnerResult(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

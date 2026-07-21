@@ -18,10 +18,6 @@ import {
   unapproveWorkflowVersion,
   updateTriggerBinding,
 } from "../workflows";
-import {
-  clearLocalWorkflowLifecycleSession,
-  exchangeLocalOperatorLaunch,
-} from "../localOperatorSession";
 
 vi.mock("@/api/common", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/common")>();
@@ -42,11 +38,9 @@ const mockPost = vi.mocked(post);
 describe("workflows API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    clearLocalWorkflowLifecycleSession();
   });
 
   afterEach(() => {
-    clearLocalWorkflowLifecycleSession();
     vi.restoreAllMocks();
   });
 
@@ -118,21 +112,7 @@ describe("workflows API", () => {
     expect(isTerminalWorkflowRunStatus("running")).toBe(false);
   });
 
-  it("attaches a local Desktop bearer to workflow-version lifecycle mutations only", async () => {
-    const launchCode = "ab".repeat(32);
-    const accessToken = "cd".repeat(32);
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          access_token: accessToken,
-          token_type: "Bearer",
-          workspace: "TEST",
-          expires_at: new Date(Date.now() + 60_000).toISOString(),
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-    await exchangeLocalOperatorLaunch({ launchCode, workspace: "TEST" });
+  it("sends workflow-version lifecycle mutations without a local credential", async () => {
     mockPost.mockResolvedValue({});
     mockGet.mockResolvedValue({ versions: [] });
 
@@ -146,24 +126,20 @@ describe("workflows API", () => {
       activate: false,
     });
 
-    const localAuth = { headers: { Authorization: `Bearer ${accessToken}` } };
     expect(mockPost).toHaveBeenNthCalledWith(
       1,
       "/api/workspaces/TEST/workflows/demo/versions/v1/approve",
       {},
-      localAuth,
     );
     expect(mockPost).toHaveBeenNthCalledWith(
       2,
       "/api/workspaces/TEST/workflows/demo/versions/v1/unapprove",
       {},
-      localAuth,
     );
     expect(mockPost).toHaveBeenNthCalledWith(
       3,
       "/api/workspaces/TEST/workflows/demo/versions/v1/activate",
       {},
-      localAuth,
     );
     expect(mockGet).toHaveBeenCalledWith(
       "/api/workspaces/TEST/workflows/demo/versions",
@@ -176,21 +152,7 @@ describe("workflows API", () => {
     );
   });
 
-  it("attaches the local operator bearer to every binding mutation", async () => {
-    const launchCode = "ab".repeat(32);
-    const accessToken = "cd".repeat(32);
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          access_token: accessToken,
-          token_type: "Bearer",
-          workspace: "TEST",
-          expires_at: new Date(Date.now() + 60_000).toISOString(),
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-    await exchangeLocalOperatorLaunch({ launchCode, workspace: "TEST" });
+  it("sends every binding mutation without a local credential", async () => {
     mockPost.mockResolvedValue({});
     mockPatch.mockResolvedValue({});
     mockDel.mockResolvedValue({});
@@ -202,51 +164,31 @@ describe("workflows API", () => {
     await updateTriggerBinding("TEST", "binding/one", { name: "Renamed" });
     await deleteTriggerBinding("TEST", "binding/one");
 
-    const localAuth = { headers: { Authorization: `Bearer ${accessToken}` } };
     expect(mockPost).toHaveBeenNthCalledWith(
       1,
       "/api/workspaces/TEST/trigger-bindings",
       create,
-      localAuth,
     );
     expect(mockPost).toHaveBeenNthCalledWith(
       2,
       "/api/workspaces/TEST/trigger-bindings/binding%2Fone/run",
       {},
-      localAuth,
     );
     expect(mockPost).toHaveBeenNthCalledWith(
       3,
       "/api/workspaces/TEST/trigger-bindings/binding%2Fone/disable",
       {},
-      localAuth,
     );
     expect(mockPatch).toHaveBeenCalledWith(
       "/api/workspaces/TEST/trigger-bindings/binding%2Fone",
       { name: "Renamed" },
-      localAuth,
     );
     expect(mockDel).toHaveBeenCalledWith(
       "/api/workspaces/TEST/trigger-bindings/binding%2Fone",
-      localAuth,
     );
   });
 
-  it("does not attach or retain a Desktop bearer across workspaces", async () => {
-    const launchCode = "ab".repeat(32);
-    const accessToken = "cd".repeat(32);
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          access_token: accessToken,
-          token_type: "Bearer",
-          workspace: "TEST",
-          expires_at: new Date(Date.now() + 60_000).toISOString(),
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-    await exchangeLocalOperatorLaunch({ launchCode, workspace: "TEST" });
+  it("uses the route workspace without retaining browser authority", async () => {
     mockPost.mockResolvedValue({});
 
     await approveWorkflowVersion("OTHER", "demo", "v1");
@@ -256,13 +198,11 @@ describe("workflows API", () => {
       1,
       "/api/workspaces/OTHER/workflows/demo/versions/v1/approve",
       {},
-      undefined,
     );
     expect(mockPost).toHaveBeenNthCalledWith(
       2,
       "/api/workspaces/TEST/workflows/demo/versions/v1/approve",
       {},
-      undefined,
     );
   });
 });

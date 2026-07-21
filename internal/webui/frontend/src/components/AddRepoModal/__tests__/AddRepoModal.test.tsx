@@ -54,12 +54,12 @@ describe("AddRepoModal", () => {
     expect(overlay.parentElement).toBe(document.body);
   });
 
-  it("seeds the URL field from initialUrl and defaults branch to main", () => {
+  it("seeds the URL field and leaves branch empty for remote HEAD detection", () => {
     renderModal({ initialUrl: "https://github.com/octocat/Hello-World" });
     expect(screen.getByLabelText("Repository URL")).toHaveValue(
       "https://github.com/octocat/Hello-World",
     );
-    expect(screen.getByLabelText("Default branch")).toHaveValue("main");
+    expect(screen.getByLabelText("Default branch")).toHaveValue("");
   });
 
   it("submits a clone URL with the chosen branch", async () => {
@@ -92,7 +92,6 @@ describe("AddRepoModal", () => {
     await waitFor(() =>
       expect(mockAddWorkspaceRepos).toHaveBeenCalledWith(WS, {
         repos: ["/repos/local"],
-        branch: "main",
       }),
     );
   });

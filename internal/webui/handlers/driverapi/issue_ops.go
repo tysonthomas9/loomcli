@@ -125,6 +125,34 @@ func (m *Module) issueUpdate(ctx context.Context, ws string, id driverIdentity, 
 	return map[string]any{"id": params.IssueID}, nil
 }
 
+func (m *Module) issueBlockRepositoryRequired(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	params, err := decodeParams[struct {
+		IssueID string `json:"issueId"`
+	}](body)
+	if err != nil {
+		return nil, err
+	}
+	issueBackend, _, err := m.issueBackendForRun(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(params.IssueID) == "" {
+		return nil, fmt.Errorf("issueId required: %w", domain.ErrInvalid)
+	}
+	repositoryBackend, ok := issueBackend.(backend.RepositoryRequirementBackend)
+	if !ok {
+		return nil, backend.ErrNotImplemented(
+			"BlockRepositoryRequired",
+			"issue backend does not support atomic repository-required admission",
+		)
+	}
+	result, err := repositoryBackend.BlockRepositoryRequired(ctx, params.IssueID)
+	if err != nil {
+		return nil, fmt.Errorf("block repository-required issue: %w", err)
+	}
+	return result, nil
+}
+
 func (m *Module) issueAddLabel(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	return m.issueLabelOp(ctx, ws, id, body, true)
 }

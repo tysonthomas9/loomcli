@@ -7,18 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/authmode"
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
 const workflowManagementResponseLimit = 4 << 20
@@ -34,7 +29,6 @@ type workflowManagementClient struct {
 	serverURL string
 	workspace string
 	doer      workflowHTTPDoer
-	bearer    string
 }
 
 type workflowListAPIResponse struct {
@@ -106,34 +100,7 @@ func newWorkflowManagementClient(_ context.Context) (*workflowManagementClient, 
 		doer:      authClient,
 	}
 
-	if authClient.AuthMode().Mode == authmode.ModeOpen {
-		if err := validateOpenWorkflowManagementEndpoint(parsed); err != nil {
-			return nil, err
-		}
-		credentialDir := filepath.Join(cli.GetWorkspaceRuntimeDir(), ".loom", "operator")
-		token, err := authority.ReadLocalOperatorToken(credentialDir)
-		if err != nil {
-			return nil, fmt.Errorf("workflow management local authentication: %w", err)
-		}
-		client.bearer = token
-	}
 	return client, nil
-}
-
-// validateOpenWorkflowManagementEndpoint prevents a remote server from
-// claiming open mode to make the CLI disclose the durable local operator
-// credential. Local/open management is intentionally bound to the same
-// explicit loopback-IP shape used by Desktop browser-session launch.
-func validateOpenWorkflowManagementEndpoint(parsed *url.URL) error {
-	if parsed == nil || parsed.Scheme != "http" || parsed.User != nil || parsed.Host == "" ||
-		parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") || parsed.Port() == "" {
-		return fmt.Errorf("workflow management open-mode endpoint must be an HTTP loopback IP with an explicit port")
-	}
-	ip := net.ParseIP(parsed.Hostname())
-	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("workflow management open-mode endpoint must use a loopback IP")
-	}
-	return nil
 }
 
 func (c *workflowManagementClient) listWorkflows(ctx context.Context) (*workflowListAPIResponse, error) {
@@ -223,9 +190,6 @@ func (c *workflowManagementClient) doJSON(ctx context.Context, method, path stri
 	req.Header.Set("Accept", "application/json")
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")
-	}
-	if c.bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+c.bearer)
 	}
 
 	resp, err := c.doer.Do(req)

@@ -9,7 +9,7 @@
  * task status categories from the loom server API.
  */
 
-import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import type { LoomTaskLists } from "@/types";
 
@@ -28,10 +28,6 @@ import {
   updateAgentRecord,
   type FetchStatusResult,
 } from "../agents";
-import {
-  clearLocalWorkflowLifecycleSession,
-  exchangeLocalOperatorLaunch,
-} from "../../workflows/localOperatorSession";
 
 vi.mock("@/api/common", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/common")>();
@@ -57,9 +53,6 @@ const mockGet = vi.mocked(get);
 const mockPost = vi.mocked(post);
 const mockPatch = vi.mocked(patch);
 const mockDel = vi.mocked(del);
-
-beforeEach(() => clearLocalWorkflowLifecycleSession());
-afterEach(() => clearLocalWorkflowLifecycleSession());
 
 describe("durable agent record lifecycle", () => {
   beforeEach(() => {
@@ -102,7 +95,6 @@ describe("durable agent record lifecycle", () => {
     expect(mockPatch).toHaveBeenCalledWith(
       "/api/workspaces/TEAM%20A/agents/agent%2Fone",
       { name: "Renamed agent" },
-      undefined,
     );
   });
 
@@ -118,28 +110,10 @@ describe("durable agent record lifecycle", () => {
 
     expect(mockDel).toHaveBeenCalledWith(
       "/api/workspaces/TEAM%20A/agents/agent%2Fone",
-      undefined,
     );
   });
 
-  it("attaches local operator authority to every record mutation", async () => {
-    const launchCode = "ab".repeat(32);
-    const accessToken = "cd".repeat(32);
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          access_token: accessToken,
-          token_type: "Bearer",
-          workspace: "TEAM A",
-          expires_at: new Date(Date.now() + 60_000).toISOString(),
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-    await exchangeLocalOperatorLaunch({
-      launchCode,
-      workspace: "TEAM A",
-    });
+  it("sends record mutations without a local operator credential", async () => {
     mockPost.mockResolvedValue({});
     mockPatch.mockResolvedValue({});
     mockDel.mockResolvedValue({});
@@ -154,27 +128,23 @@ describe("durable agent record lifecycle", () => {
     };
     await createPromptAgentRecord("TEAM A", create);
 
-    const localAuth = { headers: { Authorization: `Bearer ${accessToken}` } };
     expect(mockPost).toHaveBeenNthCalledWith(
       1,
       "/api/workspaces/TEAM%20A/agents/agent%2Fone/enable",
       undefined,
-      localAuth,
     );
     expect(mockPatch).toHaveBeenCalledWith(
       "/api/workspaces/TEAM%20A/agents/agent%2Fone",
       { name: "Renamed" },
-      localAuth,
     );
     expect(mockDel).toHaveBeenCalledWith(
       "/api/workspaces/TEAM%20A/agents/agent%2Fone",
-      localAuth,
     );
     expect(mockPost).toHaveBeenNthCalledWith(
       2,
       "/api/workspaces/TEAM%20A/agents",
       create,
-      { ...localAuth, timeout: 120_000 },
+      { timeout: 120_000 },
     );
   });
 });

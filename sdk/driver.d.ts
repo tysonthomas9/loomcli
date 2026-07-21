@@ -540,6 +540,7 @@ export declare class LoomDriverClient {
     listComments(input: { issueId: string }): Promise<Record<string, unknown>[] | null>;
     comment(input: { issueId: string; body: string }): Promise<Record<string, unknown> | null>;
     update(input: { issueId: string; status?: string; priority?: number; labels?: string[]; assignee?: string; externalRef?: string }): Promise<Record<string, unknown> | null>;
+    blockRepositoryRequired(input: { issueId: string }): Promise<Record<string, unknown> | null>;
     addLabel(input: { issueId: string; label: string }): Promise<Record<string, unknown> | null>;
     removeLabel(input: { issueId: string; label: string }): Promise<Record<string, unknown> | null>;
   };

@@ -181,6 +181,27 @@ type CursorMutationBackend interface {
 	WaitForMutationsAfter(ctx context.Context, since string, timeoutMs int64) ([]MutationData, error)
 }
 
+// RepositoryRequirementResult is the canonical outcome of atomically moving
+// a repository-less task to the repository-required blocked state.
+type RepositoryRequirementResult struct {
+	Issue         *IssueData `json:"issue,omitempty"`
+	Changed       bool       `json:"changed"`
+	Replayed      bool       `json:"replayed"`
+	DispatchReady bool       `json:"dispatch_ready"`
+	Blocked       bool       `json:"blocked,omitempty"`
+	Reopened      bool       `json:"reopened,omitempty"`
+	Outcome       string     `json:"outcome,omitempty"`
+}
+
+// RepositoryRequirementBackend is an optional IssueBackend extension for the
+// repository-required admission and recovery workflow. Implementations expose
+// the fleet-owned atomic commands without widening the core IssueBackend
+// contract for backends that cannot provide the same guarantees.
+type RepositoryRequirementBackend interface {
+	BlockRepositoryRequired(ctx context.Context, id string) (*RepositoryRequirementResult, error)
+	SetIssueRepository(ctx context.Context, id, repo string) (*IssueData, error)
+}
+
 // ---------------------------------------------------------------------------
 // Section 2: Option structs (query parameters)
 // ---------------------------------------------------------------------------

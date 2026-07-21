@@ -23,6 +23,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
@@ -39,6 +40,7 @@ type Module struct {
 	catalog           workflowcatalog.API
 	execution         execution.DriverRunAPI
 	operatorAuthority workflowcataloghttp.OperatorAuthorityResolver
+	taskWorkflowRuns  readprojection.TaskWorkflowRunReader
 }
 
 type Config struct {
@@ -46,6 +48,7 @@ type Config struct {
 	Catalog           workflowcatalog.API
 	Execution         execution.DriverRunAPI
 	OperatorAuthority workflowcataloghttp.OperatorAuthorityResolver
+	TaskWorkflowRuns  readprojection.TaskWorkflowRunReader
 }
 
 // NewModule accepts Config in production. The store-only form remains a
@@ -54,7 +57,10 @@ type Config struct {
 func NewModule(input any) *Module {
 	switch value := input.(type) {
 	case Config:
-		return &Module{store: value.Store, catalog: value.Catalog, execution: value.Execution, operatorAuthority: value.OperatorAuthority}
+		return &Module{
+			store: value.Store, catalog: value.Catalog, execution: value.Execution,
+			operatorAuthority: value.OperatorAuthority, taskWorkflowRuns: value.TaskWorkflowRuns,
+		}
 	case store.Store:
 		return &Module{store: value}
 	default:
@@ -73,6 +79,11 @@ func (m *Module) Register(mux *http.ServeMux) {
 	// so the UI can show past/active runs (Phase 1). Unlike the run/version
 	// mutation paths it must not self-heal a driver, so it uses ResolveDriver.
 	mux.HandleFunc("GET /api/workspaces/{ws}/workflows/{name}/runs", m.listWorkflowRuns)
+	// Task-scoped workflow runs supplement task sessions when an automation has
+	// no AgentSession row yet (for example, a repository admission guard or a
+	// queued pre-session TaskRun). The handler joins through the TriggerEvent's
+	// immutable subject_ref rather than inspecting workflow-defined payloads.
+	mux.HandleFunc("GET /api/workspaces/{ws}/tasks/{taskId}/workflow-runs", m.listTaskWorkflowRuns)
 	mux.HandleFunc("POST /api/workspaces/{ws}/workflows/{name}", m.createWorkflowRun)
 	mux.HandleFunc("POST /api/workspaces/{ws}/execution/driver-runs", m.createDriverRun)
 	mux.HandleFunc("GET /api/workspaces/{ws}/runs/{runId}", m.getRun)
@@ -812,7 +823,6 @@ func writeDomainError(w http.ResponseWriter, err error, fallback string) {
 		writeError(w, http.StatusNotImplemented, err.Error())
 	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
 		errors.Is(err, authority.ErrInvalidPrincipal),
-		errors.Is(err, authority.ErrInvalidOperatorToken),
 		errors.Is(err, authority.ErrPrincipalExpired),
 		errors.Is(err, authority.ErrOpaqueAuthority):
 		writeError(w, http.StatusUnauthorized, "authentication required")

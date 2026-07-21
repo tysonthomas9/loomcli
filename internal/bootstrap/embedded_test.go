@@ -80,6 +80,9 @@ func TestAppendEmbeddedFleetDBEnvDefaultsAddsWhenMissing(t *testing.T) {
 	if !envHas(env, EnvFleetRateLimitEnabled+"="+defaultEmbeddedFleetRateLimitEnabled) {
 		t.Fatalf("missing default %s in env %v", EnvFleetRateLimitEnabled, env)
 	}
+	if !envHas(env, EnvFleetLogLevel+"="+defaultEmbeddedFleetLogLevel) {
+		t.Fatalf("missing default %s in env %v", EnvFleetLogLevel, env)
+	}
 }
 
 func TestAppendEmbeddedFleetDBEnvDefaultsPreservesConfiguredValues(t *testing.T) {
@@ -87,6 +90,7 @@ func TestAppendEmbeddedFleetDBEnvDefaultsPreservesConfiguredValues(t *testing.T)
 		EnvFleetRedisPoolSize + "=7",
 		EnvFleetRedisMinIdleConns + "=2",
 		EnvFleetRateLimitEnabled + "=true",
+		EnvFleetLogLevel + "=debug",
 	})
 
 	if !envHas(env, EnvFleetRedisPoolSize+"=7") {
@@ -98,6 +102,9 @@ func TestAppendEmbeddedFleetDBEnvDefaultsPreservesConfiguredValues(t *testing.T)
 	if !envHas(env, EnvFleetRateLimitEnabled+"=true") {
 		t.Fatalf("expected configured rate-limit setting to be preserved in env %v", env)
 	}
+	if !envHas(env, EnvFleetLogLevel+"=debug") {
+		t.Fatalf("expected configured log level to be preserved in env %v", env)
+	}
 }
 
 func TestAppendEmbeddedFleetDBEnvDefaultsReplacesEmptyValues(t *testing.T) {
@@ -105,6 +112,7 @@ func TestAppendEmbeddedFleetDBEnvDefaultsReplacesEmptyValues(t *testing.T) {
 		EnvFleetRedisPoolSize + "=",
 		EnvFleetRedisMinIdleConns + "=   ",
 		EnvFleetRateLimitEnabled + "=",
+		EnvFleetLogLevel + "=   ",
 	})
 
 	if !envHas(env, EnvFleetRedisPoolSize+"="+defaultEmbeddedFleetRedisPoolSize) {
@@ -115,6 +123,30 @@ func TestAppendEmbeddedFleetDBEnvDefaultsReplacesEmptyValues(t *testing.T) {
 	}
 	if !envHas(env, EnvFleetRateLimitEnabled+"="+defaultEmbeddedFleetRateLimitEnabled) {
 		t.Fatalf("expected empty rate-limit setting to receive default in env %v", env)
+	}
+	if !envHas(env, EnvFleetLogLevel+"="+defaultEmbeddedFleetLogLevel) {
+		t.Fatalf("expected empty log level to receive default in env %v", env)
+	}
+}
+
+func TestConfigureEmbeddedFleetDBRedisSubscriptionOnlyForOwnedMiniredis(t *testing.T) {
+	inherited := []string{
+		"EXISTING=value",
+		EnvFleetRedisEventSubscribePollInterval + "=5s",
+		EnvFleetRedisEventSubscribePollInterval + "=1ms",
+	}
+
+	miniredisEnv := configureEmbeddedFleetDBRedisSubscription(inherited, true)
+	want := EnvFleetRedisEventSubscribePollInterval + "=" + defaultEmbeddedFleetRedisEventSubscribePollInterval
+	if envKeyCount(miniredisEnv, EnvFleetRedisEventSubscribePollInterval) != 1 || !envHas(miniredisEnv, want) {
+		t.Fatalf("owned miniredis env = %v, want exactly one %q", miniredisEnv, want)
+	}
+
+	externalEnv := configureEmbeddedFleetDBRedisSubscription(inherited, false)
+	if envKeyCount(externalEnv, EnvFleetRedisEventSubscribePollInterval) != 2 ||
+		!envHas(externalEnv, EnvFleetRedisEventSubscribePollInterval+"=5s") ||
+		!envHas(externalEnv, EnvFleetRedisEventSubscribePollInterval+"=1ms") {
+		t.Fatalf("external Redis operator configuration was not preserved: %v", externalEnv)
 	}
 }
 

@@ -127,6 +127,14 @@ type awaitE2EDriverRunAPI struct {
 	store store.Store
 }
 
+func (awaitE2EDriverRunAPI) RecoverTerminalDriverRunWork(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverTerminalDriverRunWorkCommand,
+) (execution.RecoverTerminalDriverRunWorkResult, error) {
+	return execution.RecoverTerminalDriverRunWorkResult{ActionID: command.RequestID}, nil
+}
+
 func (api awaitE2EDriverRunAPI) StartChildDriverRun(
 	ctx context.Context,
 	_ authority.ExecutionAuthority,
@@ -319,7 +327,7 @@ func (h *awaitFlows) runExecutorOnce(t *testing.T, node, runID string, runner dr
 		Store: h.st, WorkspaceKey: h.ws, RunID: runID, WorkDir: h.root,
 		NodeID: node, LeaseID: fmt.Sprintf("%s-lease-%d", node, awaitE2ELeaseSeq.Add(1)),
 		Runner: runner, HeartbeatInterval: -1, RunTokenKey: h.runTokenKey,
-		Execution: driverRuns, RunOutcomeQueue: h.execution.DriverRunOutcomeAPI(), ExecutionWorkers: h.execution.TaskRunWorkerAPI(),
+		Execution: driverRuns, RunOutcomeQueue: h.execution.DriverRunOutcomeAPI(), TerminalWorkRecoveryQueue: h.execution.TerminalDriverRunWorkRecoveryQueueAPI(), ExecutionWorkers: h.execution.TaskRunWorkerAPI(),
 		ExecutionAuthorities: h.execution.DriverRunAuthorityResolver(), SystemAuthorities: h.execution.SystemAuthorityResolver(),
 	}).RunOnce(h.ctx)
 	if err != nil {
@@ -662,7 +670,7 @@ func testApprovalGateFlow(t *testing.T, h *awaitFlows) {
 	driverRuns := awaitE2EDriverRunAPI{DriverRunAPI: h.execution.DriverRunAPI(), store: h.st}
 	if _, err := (&driver.Executor{Store: h.st, WorkspaceKey: h.ws, RunID: "run-gate", WorkDir: h.root,
 		NodeID: "node-2", Runner: runner, HeartbeatInterval: -1,
-		Execution: driverRuns, RunOutcomeQueue: h.execution.DriverRunOutcomeAPI(), ExecutionWorkers: h.execution.TaskRunWorkerAPI(),
+		Execution: driverRuns, RunOutcomeQueue: h.execution.DriverRunOutcomeAPI(), TerminalWorkRecoveryQueue: h.execution.TerminalDriverRunWorkRecoveryQueueAPI(), ExecutionWorkers: h.execution.TaskRunWorkerAPI(),
 		ExecutionAuthorities: h.execution.DriverRunAuthorityResolver(), SystemAuthorities: h.execution.SystemAuthorityResolver(),
 	}).RunOnce(h.ctx); !errors.Is(err, driver.ErrNoQueuedRun) {
 		t.Fatalf("RunOnce on suspended run err = %v, want ErrNoQueuedRun", err)

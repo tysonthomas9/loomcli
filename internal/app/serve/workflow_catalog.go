@@ -6,10 +6,8 @@ package serve
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -81,26 +79,11 @@ type OperatorAuthorityResolver interface {
 // sentinel and must be returned for an absent verified identity.
 type ExternalOperatorResolverFactory func(*authority.Issuer, error) OperatorAuthorityResolver
 
-// BrowserSessionRouteFactory constructs the local trusted-browser exchange
-// transport without making the application composition package depend on a
-// concrete HTTP adapter package.
-type BrowserSessionRouteFactory func(*authority.LocalBrowserSessionBroker, func(context.Context) string) RouteModule
-
 // RouteModule is the only value the web server needs from capability
 // composition. Keeping this interface here prevents webui from learning about
 // Workflow Catalog persistence, authority, or its low-level FleetDB client.
 type RouteModule interface {
 	Register(*http.ServeMux)
-}
-
-type routeModules []RouteModule
-
-func (modules routeModules) Register(mux *http.ServeMux) {
-	for _, module := range modules {
-		if module != nil {
-			module.Register(mux)
-		}
-	}
 }
 
 // WorkflowCatalogCapability is the composition-owned handle for the active
@@ -112,7 +95,6 @@ type WorkflowCatalogCapability struct {
 	catalog          workflowcatalog.API
 	issuer           *authority.Issuer
 	operatorResolver httpapi.OperatorAuthorityResolver
-	browserSession   *authority.LocalBrowserSessionBroker
 	automation       *AutomationCapability
 	// automationAwaitResolver is bound only after the shared Execution
 	// capability has been composed. Automation is assembled with Workflow
@@ -266,7 +248,6 @@ func (c *WorkflowCatalogCapability) issueAutomationEffectiveVersionAuthority(wor
 type WorkflowCatalogConfig struct {
 	Enabled       bool
 	FleetDBClient *infrafleetdb.Client
-	RuntimeDir    string
 	// Workspace is Automation's optional fixed runtime scope. Empty means the
 	// runtime lists current workspaces on every pass. Request authority remains
 	// derived from the canonical per-request workspace in either mode.
@@ -275,10 +256,8 @@ type WorkflowCatalogConfig struct {
 	WorkspaceFromContext            func(context.Context) string
 	BuiltinWorkflow                 func(string) bool
 	ExternalOperatorResolverFactory ExternalOperatorResolverFactory
-	BrowserSessionRouteFactory      BrowserSessionRouteFactory
-	// AutomationEnabled extends the one platform browser-session broker with
-	// Automation's exact operator-only actions. Callers cannot supply arbitrary
-	// actions or create a second broker/credential namespace.
+	// AutomationEnabled extends the local open-mode resolver with Automation's
+	// exact operator-only actions. Callers cannot supply arbitrary actions.
 	AutomationEnabled bool
 	// These narrow stores are used only by composition-time compatibility
 	// adapters whose owner capabilities land in later phases. Automation core
@@ -311,29 +290,16 @@ func NewWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogCap
 	}
 
 	issuer := authority.NewIssuer()
-	admission, resolver, browserSession, err := composeWorkflowCatalogAuthority(config, issuer)
+	admission, resolver, err := composeWorkflowCatalogAuthority(config, issuer)
 	if err != nil {
 		return nil, err
 	}
 
 	catalog := workflowcatalog.New(adapter, adapter, admission)
 	catalogHTTP := httpapi.New(catalog, resolver, config.WorkspaceFromContext, config.BuiltinWorkflow)
-	var capability *WorkflowCatalogCapability
-	if browserSession == nil {
-		capability = &WorkflowCatalogCapability{
-			routes: catalogHTTP, catalog: catalog, issuer: issuer,
-			operatorResolver: resolver,
-		}
-	} else {
-		browserSessionRoutes := config.BrowserSessionRouteFactory(browserSession, config.WorkspaceFromContext)
-		if browserSessionRoutes == nil {
-			return nil, fmt.Errorf("compose workflow catalog local authorization: browser session routes are unavailable")
-		}
-		routes := routeModules{catalogHTTP, browserSessionRoutes}
-		capability = &WorkflowCatalogCapability{
-			routes: routes, catalog: catalog, issuer: issuer,
-			operatorResolver: resolver, browserSession: browserSession,
-		}
+	capability := &WorkflowCatalogCapability{
+		routes: catalogHTTP, catalog: catalog, issuer: issuer,
+		operatorResolver: resolver,
 	}
 	if !config.AutomationEnabled {
 		return capability, nil
@@ -350,9 +316,6 @@ func validateWorkflowCatalogHTTPConfig(config WorkflowCatalogConfig) error {
 	}
 	if config.ExternalAuth && config.ExternalOperatorResolverFactory == nil {
 		return fmt.Errorf("compose workflow catalog external authorization: operator resolver factory is required")
-	}
-	if !config.ExternalAuth && config.BrowserSessionRouteFactory == nil {
-		return fmt.Errorf("compose workflow catalog local authorization: browser session route factory is required")
 	}
 	return nil
 }
@@ -396,43 +359,37 @@ func composeWorkflowCatalogAutomation(config WorkflowCatalogConfig, capability *
 	return nil
 }
 
-func composeWorkflowCatalogAuthority(config WorkflowCatalogConfig, issuer *authority.Issuer) (*authority.Admission, httpapi.OperatorAuthorityResolver, *authority.LocalBrowserSessionBroker, error) {
+func composeWorkflowCatalogAuthority(config WorkflowCatalogConfig, issuer *authority.Issuer) (*authority.Admission, httpapi.OperatorAuthorityResolver, error) {
 	if config.ExternalAuth {
 		admission, err := workflowCatalogAdmission(issuer)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		resolver := config.ExternalOperatorResolverFactory(issuer, httpapi.ErrUnauthenticated)
 		if resolver == nil {
-			return nil, nil, nil, fmt.Errorf("compose workflow catalog external authorization: operator resolver is unavailable")
+			return nil, nil, fmt.Errorf("compose workflow catalog external authorization: operator resolver is unavailable")
 		}
-		return admission, resolver, nil, nil
+		return admission, resolver, nil
 	}
-	credentialDir := filepath.Join(config.RuntimeDir, ".loom", "operator")
-	localIssuer, err := authority.LoadOrCreateLocalRuntimeOperatorCredentialWithIssuer(credentialDir, issuer)
+	admission, err := workflowCatalogAdmission(issuer)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("compose workflow catalog local operator credential: %w", err)
+		return nil, nil, err
 	}
-	admission, err := localIssuer.NewAdmission(workflowCatalogOperationRules()...)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("compose workflow catalog admission: %w", err)
-	}
-	browserActions := workflowCatalogOperatorActions()
-	browserActions = append(browserActions,
+	operatorActions := workflowCatalogOperatorActions()
+	operatorActions = append(operatorActions,
 		execution.ActionSubmitDriverRun,
 		execution.ActionCreateWorkerProfile,
 		execution.ActionUpdateWorkerProfile,
 		execution.ActionDeleteWorkerProfile,
 	)
 	if config.AutomationEnabled {
-		browserActions = append(browserActions, automationOperatorActions()...)
+		operatorActions = append(operatorActions, automationOperatorActions()...)
 	}
-	browserSession, err := authority.NewLocalBrowserSessionBroker(localIssuer, browserActions...)
+	resolver, err := newLocalOpenOperatorResolver(issuer, operatorActions...)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("compose workflow catalog browser authority: %w", err)
+		return nil, nil, fmt.Errorf("compose workflow catalog local open authority: %w", err)
 	}
-	resolver := &localOperatorResolver{issuer: localIssuer, browserSession: browserSession}
-	return admission, resolver, browserSession, nil
+	return admission, resolver, nil
 }
 
 func workflowCatalogAdmission(issuer *authority.Issuer) (*authority.Admission, error) {
@@ -455,38 +412,63 @@ func workflowCatalogOperationRules() []authority.OperationRule {
 
 func workflowCatalogOperatorActions() []authority.Action {
 	return []authority.Action{
+		workflowcatalog.ActionResolveRequestedVersion,
 		workflowcatalog.ActionApproveVersion,
 		workflowcatalog.ActionUnapproveVersion,
 		workflowcatalog.ActionActivateVersion,
 	}
 }
 
-type localOperatorResolver struct {
-	issuer         *authority.LocalOperatorIssuer
-	browserSession *authority.LocalBrowserSessionBroker
+const localOpenOperatorSubject = "local-open-operator"
+
+type localOpenOperatorResolver struct {
+	issuer  *authority.Issuer
+	actions map[authority.Action]struct{}
 }
 
-func (r *localOperatorResolver) ResolveOperatorAuthority(request *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, error) {
-	if request == nil || strings.TrimSpace(request.Header.Get("Authorization")) == "" {
+func newLocalOpenOperatorResolver(issuer *authority.Issuer, actions ...authority.Action) (*localOpenOperatorResolver, error) {
+	if issuer == nil {
+		return nil, authority.ErrInvalidIssuer
+	}
+	allowed := make(map[authority.Action]struct{}, len(actions))
+	for _, action := range actions {
+		if strings.TrimSpace(string(action)) == "" {
+			return nil, authority.ErrActionNotAllowed
+		}
+		allowed[action] = struct{}{}
+	}
+	if len(allowed) == 0 {
+		return nil, authority.ErrActionNotAllowed
+	}
+	return &localOpenOperatorResolver{issuer: issuer, actions: allowed}, nil
+}
+
+// ResolveOperatorAuthority treats reachability of the intentionally exposed
+// open-mode endpoint as the deployment trust boundary. It still derives a
+// sealed, short-lived authority for one canonical workspace and one
+// route-selected action; request bodies and headers cannot select or widen
+// either scope.
+func (r *localOpenOperatorResolver) ResolveOperatorAuthority(request *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, error) {
+	if request == nil {
 		return authority.OperatorAuthority{}, httpapi.ErrUnauthenticated
 	}
-	bearer := request.Header.Get("Authorization")
-	durable, durableErr := authority.IssueOperator(r.issuer, bearer, workspace, action)
-	if durableErr == nil {
-		return durable, nil
+	if r == nil || r.issuer == nil {
+		return authority.OperatorAuthority{}, authority.ErrInvalidIssuer
 	}
-	if r.browserSession == nil {
-		return authority.OperatorAuthority{}, durableErr
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return authority.OperatorAuthority{}, authority.ErrInvalidScope
 	}
-	delegated, delegatedErr := r.browserSession.IssueOperator(bearer, workspace, action)
-	if delegatedErr == nil {
-		return delegated, nil
+	if _, ok := r.actions[action]; !ok {
+		return authority.OperatorAuthority{}, authority.ErrActionNotAllowed
 	}
-	// Preserve the more precise scope denial for a valid durable credential;
-	// otherwise report the delegated credential result without revealing which
-	// credential class was presented.
-	if errors.Is(durableErr, authority.ErrWorkspaceMismatch) {
-		return authority.OperatorAuthority{}, durableErr
+	principal, err := r.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: localOpenOperatorSubject, Class: authority.ClassOperator,
+		Workspace: workspace, Actions: []authority.Action{action},
+		ExpiresAt: time.Now().Add(externalOperatorAuthorityTTL),
+	})
+	if err != nil {
+		return authority.OperatorAuthority{}, err
 	}
-	return authority.OperatorAuthority{}, delegatedErr
+	return r.issuer.IssueOperator(principal, workspace, action)
 }

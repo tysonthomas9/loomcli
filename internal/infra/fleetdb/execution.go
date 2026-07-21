@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -369,6 +371,35 @@ type ExecutionDriverRunCascadeResult struct {
 	Replay              bool                             `json:"replay"`
 }
 
+// ExecutionTerminalDriverRunWorkRecoveryCommand asks FleetDB to atomically
+// converge all TaskRuns and exact Work Item claim generations still owned by
+// a durably terminal DriverRun. It carries no lease token because the parent
+// owner is necessarily gone; the route is system-authorized instead.
+type ExecutionTerminalDriverRunWorkRecoveryCommand struct {
+	WorkspaceKey string
+	RequestID    string
+	DriverRunID  string
+	ParentStatus domain.DriverRunStatus
+	Reason       string
+	ErrorClass   string
+	RecoveredAt  time.Time
+}
+
+type ExecutionTerminalDriverRunWorkRecoveryResult struct {
+	WorkspaceKey                  string                 `json:"workspace_key"`
+	DriverRunID                   string                 `json:"driver_run_id"`
+	ParentStatus                  domain.DriverRunStatus `json:"parent_status"`
+	Reason                        string                 `json:"reason"`
+	ErrorClass                    string                 `json:"error_class"`
+	RecoveredAt                   time.Time              `json:"recovered_at"`
+	RecoveredTaskRunIDs           []string               `json:"recovered_task_run_ids"`
+	ReleasedWorkItemIDs           []string               `json:"released_work_item_ids"`
+	PreservedSuccessorWorkItemIDs []string               `json:"preserved_successor_work_item_ids"`
+	Action                        *ExecutionActionLedger `json:"action"`
+	ActionID                      string                 `json:"action_id"`
+	Replayed                      bool                   `json:"replayed"`
+}
+
 // ExecutionIssue is the claim result subset needed to verify that FleetDB
 // claimed the exact Work Item backing the started TaskRun.
 type ExecutionIssue struct {
@@ -423,6 +454,14 @@ type ExecutionTransport interface {
 	RecoverStaleChildTaskRuns(context.Context, ExecutionDriverRunStaleTaskRecoveryCommand) (*ExecutionDriverRunStaleTaskRecoveryResult, error)
 	StartChildDriverRun(context.Context, ExecutionDriverRunChildStartCommand) (*ExecutionDriverRunChildStartResult, error)
 	CascadeChildDriverRuns(context.Context, ExecutionDriverRunCascadeCommand) (*ExecutionDriverRunCascadeResult, error)
+	RecoverTerminalDriverRunWork(context.Context, ExecutionTerminalDriverRunWorkRecoveryCommand) (*ExecutionTerminalDriverRunWorkRecoveryResult, error)
+}
+
+// TaskRunTerminalConvergenceTransport is the typed, service-only checkpoint
+// surface. Keeping it separate avoids widening focused ExecutionTransport
+// test doubles while making the production foundation contract explicit.
+type TaskRunTerminalConvergenceTransport interface {
+	store.TaskRunTerminalConvergenceStore
 }
 
 // ExecutionFoundationTransport is the production composition surface. Keep
@@ -432,6 +471,7 @@ type ExecutionTransport interface {
 type ExecutionFoundationTransport interface {
 	ExecutionTransport
 	store.TerminalDriverStepRepairStore
+	TaskRunTerminalConvergenceTransport
 }
 
 type executionStore struct{ client *Client }
@@ -455,6 +495,74 @@ func executionChecksPass(checks ...bool) bool {
 		}
 	}
 	return true
+}
+
+func (s *executionStore) ListTaskRunTerminalConvergenceCandidates(
+	ctx context.Context,
+	query store.TaskRunTerminalConvergenceQuery,
+) (store.TaskRunTerminalConvergencePage, error) {
+	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
+	query.After = strings.TrimSpace(query.After)
+	if query.WorkspaceKey == "" || query.RequiredVersion <= 0 {
+		return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence workspace and positive version are required: %w", ErrExecutionInvalid)
+	}
+	limit := query.Limit
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	values := url.Values{}
+	values.Set("required_version", strconv.Itoa(query.RequiredVersion))
+	values.Set("limit", strconv.Itoa(limit))
+	if query.After != "" {
+		values.Set("after", query.After)
+	}
+	path := "/api/v1/" + pathEscape(query.WorkspaceKey) + "/task-runs/terminal-convergence-candidates?" + values.Encode()
+	var page store.TaskRunTerminalConvergencePage
+	if err := s.client.do(ctx, http.MethodGet, path, nil, &page); err != nil {
+		return store.TaskRunTerminalConvergencePage{}, mapExecutionTransportError("list terminal TaskRun convergence candidates", err)
+	}
+	if len(page.TaskRunIDs) > limit {
+		return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence page exceeds requested limit: %w", ErrExecutionUnavailable)
+	}
+	previous := query.After
+	for _, taskRunID := range page.TaskRunIDs {
+		if strings.TrimSpace(taskRunID) == "" || taskRunID <= previous {
+			return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence page is not strictly ordered after cursor: %w", ErrExecutionUnavailable)
+		}
+		previous = taskRunID
+	}
+	if page.Next != "" && (len(page.TaskRunIDs) == 0 || page.Next != page.TaskRunIDs[len(page.TaskRunIDs)-1]) {
+		return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence page returned divergent cursor: %w", ErrExecutionUnavailable)
+	}
+	page.TaskRunIDs = append([]string(nil), page.TaskRunIDs...)
+	return page, nil
+}
+
+func (s *executionStore) CompleteTaskRunTerminalConvergence(
+	ctx context.Context,
+	command store.TaskRunTerminalConvergenceComplete,
+) (*store.TaskRunTerminalConvergenceResult, error) {
+	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
+	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
+	command.CompletedAt = command.CompletedAt.UTC()
+	if !executionStringsPresent(command.WorkspaceKey, command.TaskRunID) || command.RequiredVersion <= 0 || command.CompletedAt.IsZero() {
+		return nil, fmt.Errorf("terminal convergence identity, positive version, and completion time are required: %w", ErrExecutionInvalid)
+	}
+	body := struct {
+		RequiredVersion int       `json:"required_version"`
+		CompletedAt     time.Time `json:"completed_at"`
+	}{RequiredVersion: command.RequiredVersion, CompletedAt: command.CompletedAt}
+	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/task-runs/" + pathEscape(command.TaskRunID) + "/complete-terminal-convergence"
+	var result store.TaskRunTerminalConvergenceResult
+	if err := s.client.do(ctx, http.MethodPost, path, body, &result); err != nil {
+		return nil, mapExecutionTransportError("complete terminal TaskRun convergence", err)
+	}
+	if result.TaskRun == nil || result.TaskRun.WorkspaceKey != command.WorkspaceKey ||
+		result.TaskRun.TaskRunID != command.TaskRunID || !result.TaskRun.Status.IsTerminal() ||
+		result.TaskRun.TerminalConvergenceVersion < command.RequiredVersion || result.TaskRun.TerminalConvergedAt == nil {
+		return nil, fmt.Errorf("terminal convergence completion returned divergent marker: %w", ErrExecutionUnavailable)
+	}
+	return &result, nil
 }
 
 func (s *executionStore) RequeueTaskRunAndResetStep(ctx context.Context, command ExecutionTaskRunRequeueCommand) (*ExecutionTaskRunRequeueResult, error) {
@@ -846,116 +954,4 @@ func (s *executionStore) CascadeChildDriverRuns(ctx context.Context, command Exe
 		return nil, fmt.Errorf("DriverRun cascade returned divergent receipt: %w", ErrExecutionUnavailable)
 	}
 	return &result, nil
-}
-
-// RepairTerminalDriverStep invokes FleetDB's system-only convergence command.
-// It deliberately carries no DriverRun owner token: the committed terminal
-// TaskRun and exact backlinks are the authority for this repair lane.
-func (s *executionStore) RepairTerminalDriverStep(ctx context.Context, repair store.TerminalDriverStepRepair) (*domain.DriverStep, bool, error) {
-	if !executionStringsPresent(
-		repair.RequestID, repair.WorkspaceKey, repair.DriverRunID, repair.DriverStepID, repair.TaskRunID,
-	) || !repair.Status.IsTerminal() {
-		return nil, false, fmt.Errorf("terminal DriverStep repair identity and terminal projection are required: %w", ErrExecutionInvalid)
-	}
-	body := struct {
-		CommandID   string                  `json:"command_id"`
-		DriverRunID string                  `json:"driver_run_id"`
-		TaskRunID   string                  `json:"task_run_id"`
-		Status      domain.DriverStepStatus `json:"status"`
-		OutputRef   string                  `json:"output_ref,omitempty"`
-	}{repair.RequestID, repair.DriverRunID, repair.TaskRunID, repair.Status, repair.OutputRef}
-	var result struct {
-		DriverStep *domain.DriverStep `json:"driver_step"`
-		Replayed   bool               `json:"replayed"`
-	}
-	path := "/api/v1/" + pathEscape(repair.WorkspaceKey) + "/driver-steps/" + pathEscape(repair.DriverStepID) + "/repair-terminal"
-	if err := s.client.do(ctx, http.MethodPost, path, body, &result); err != nil {
-		return nil, false, mapExecutionTransportError("repair terminal DriverStep", err)
-	}
-	if result.DriverStep == nil {
-		return nil, false, fmt.Errorf("terminal DriverStep repair returned no projection: %w", ErrExecutionUnavailable)
-	}
-	if !executionChecksPass(
-		result.DriverStep.WorkspaceKey == repair.WorkspaceKey,
-		result.DriverStep.StepID == repair.DriverStepID,
-		result.DriverStep.DriverRunID == repair.DriverRunID,
-		result.DriverStep.TaskRunID == repair.TaskRunID,
-		result.DriverStep.Status == repair.Status,
-		result.DriverStep.OutputRef == repair.OutputRef,
-	) {
-		return nil, false, fmt.Errorf("terminal DriverStep repair returned divergent projection: %w", ErrExecutionUnavailable)
-	}
-	return result.DriverStep, result.Replayed, nil
-}
-
-var _ store.DriverRunOutcomeStore = (*driverRunStore)(nil)
-
-func (s *driverRunStore) ClaimDriverRunOutcomes(ctx context.Context, claim store.DriverRunOutcomeClaim) ([]store.DriverRunOutcome, error) {
-	body := map[string]any{
-		"claim_id": claim.ClaimID, "before": claim.Before, "claim_until": claim.ClaimUntil, "limit": claim.Limit,
-	}
-	var response struct {
-		Outcomes []store.DriverRunOutcome `json:"outcomes"`
-	}
-	path := "/api/v1/" + pathEscape(claim.WorkspaceKey) + "/driver-run-outcomes/claim"
-	if err := s.client.do(ctx, "POST", path, body, &response); err != nil {
-		return nil, err
-	}
-	if response.Outcomes == nil {
-		response.Outcomes = []store.DriverRunOutcome{}
-	}
-	return response.Outcomes, nil
-}
-
-func (s *driverRunStore) CompleteDriverRunOutcome(ctx context.Context, completion store.DriverRunOutcomeCompletion) error {
-	completedAt := completion.CompletedAt
-	if completedAt.IsZero() {
-		completedAt = time.Now().UTC()
-	}
-	body := map[string]any{"run_id": completion.RunID, "claim_id": completion.ClaimID, "completed_at": completedAt}
-	path := "/api/v1/" + pathEscape(completion.WorkspaceKey) + "/driver-run-outcomes/complete"
-	return s.client.do(ctx, "POST", path, body, nil)
-}
-
-func (s *driverRunStore) RetryDriverRunOutcome(ctx context.Context, retry store.DriverRunOutcomeRetry) error {
-	body := map[string]any{"run_id": retry.RunID, "claim_id": retry.ClaimID, "available_at": retry.AvailableAt, "error": retry.Error}
-	path := "/api/v1/" + pathEscape(retry.WorkspaceKey) + "/driver-run-outcomes/retry"
-	return s.client.do(ctx, "POST", path, body, nil)
-}
-
-func mapExecutionTransportError(operation string, err error) error {
-	if err == nil {
-		return nil
-	}
-	var sentinel error
-	switch {
-	case errors.Is(err, ErrExecutionNotFound), errors.Is(err, ErrExecutionInvalid), errors.Is(err, ErrExecutionConflict), errors.Is(err, ErrExecutionNotOwner), errors.Is(err, ErrExecutionInvalidTransition), errors.Is(err, ErrExecutionAlreadyResumed), errors.Is(err, ErrExecutionUnavailable):
-		return err
-	case errors.Is(err, domain.ErrNotFound):
-		sentinel = ErrExecutionNotFound
-	case errors.Is(err, domain.ErrNotOwner), errors.Is(err, domain.ErrGone):
-		sentinel = ErrExecutionNotOwner
-	case errors.Is(err, domain.ErrInvalidTransition):
-		sentinel = ErrExecutionInvalidTransition
-	case errors.Is(err, domain.ErrDriverRunAlreadyResumed):
-		sentinel = ErrExecutionAlreadyResumed
-	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrAlreadyClaimed), errors.Is(err, domain.ErrConflict):
-		sentinel = ErrExecutionConflict
-	case errors.Is(err, domain.ErrInvalid):
-		sentinel = ErrExecutionInvalid
-	default:
-		sentinel = ErrExecutionUnavailable
-	}
-	return fmt.Errorf("%s: %w", operation, errors.Join(sentinel, err))
-}
-
-func cloneExecutionTransportStringMap(source map[string]string) map[string]string {
-	if source == nil {
-		return nil
-	}
-	cloned := make(map[string]string, len(source))
-	for key, value := range source {
-		cloned[key] = value
-	}
-	return cloned
 }

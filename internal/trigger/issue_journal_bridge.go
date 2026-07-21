@@ -131,9 +131,10 @@ type IssueJournalBridge struct {
 	// normal allowlisted re-emission, an entry that marks a task becoming ready
 	// (issue.create / issue.update to an open status) also emits a task.ready
 	// internal event carrying the task id, so a prompt-agent binding on
-	// internal.task.ready can claim THAT task. Default false — wired from
-	// LOOM_TASK_READY_EVENTS in serve so default behavior is unchanged. See
-	// issue_journal_bridge_task_ready.go.
+	// internal.task.ready can claim THAT task. The field itself defaults false
+	// for explicit construction in tests and alternate hosts; loom serve enables
+	// it by default and keeps LOOM_TASK_READY_EVENTS as an opt-out rollback knob.
+	// See issue_journal_bridge_task_ready.go.
 	EmitTaskReady bool
 	// IssueLookup resolves the CURRENT design/labels/type of an issue for
 	// task.ready payload enrichment. It is needed because an issue.update
@@ -142,7 +143,23 @@ type IssueJournalBridge struct {
 	// false hasDesign mis-routes the planner/coder phase gate both ways (the
 	// 2026-07-07 approve-transition bug). Nil disables lookup; the payload then
 	// OMITS unknowable keys so the claim gate falls back to claim-then-check.
-	IssueLookup func(ctx context.Context, workspace, issueID string) (design string, labels []string, issueType string, err error)
+	IssueLookup TaskReadyIssueLookup
+	// ReadySnapshots lists the CURRENT canonical Ready view for startup
+	// reconciliation. Unlike replaying the journal from zero, this admits only
+	// tasks that are ready now, so enabling task-ready events after the shared
+	// journal cursor has advanced cannot strand an existing task or create a
+	// historical triage storm. Nil preserves the journal-only compatibility path.
+	ReadySnapshots TaskReadySnapshotLister
+	// RepositoryRequiredBlocker is the Work Items-owned command used when the
+	// current task-ready projection proves that an open task has no unambiguous
+	// repository. The bridge never writes an issue directly: production adapts
+	// the Work Items owner's atomic repository-admission command here. A
+	// successful block suppresses task.ready delivery; when the command instead
+	// observes a commit-time ready task (for example, after a concurrent repo
+	// assignment), its canonical projection replaces the stale event payload and
+	// dispatch continues. Nil preserves the event-only compatibility path used
+	// by alternate hosts.
+	RepositoryRequiredBlocker TaskReadyRepositoryRequiredBlocker
 	// WorkspaceKey scopes the sweep to one workspace. Empty sweeps every known
 	// workspace (mirrors DeliverySweeper/CronScheduler).
 	WorkspaceKey string
@@ -155,13 +172,22 @@ type IssueJournalBridge struct {
 	mu sync.Mutex
 	// memCursors backs the in-memory cursor store when Cursors is nil.
 	memCursors map[string]string
-	// failures counts consecutive reader failures per workspace, driving the
-	// exponential skip backoff; reset on the first clean poll.
+	// failures counts consecutive workspace-pass failures (snapshot, reader or
+	// admission), driving exponential skip backoff; reset after a clean pass.
 	failures map[string]int
 	// skipRemaining counts how many upcoming sweeps a workspace is still paused
 	// for by the failure backoff; decremented each pass, replenished on a fresh
 	// failure (clock-free window — no wall clock needed in serve or tests).
 	skipRemaining map[string]int
+	// taskReadyReconciled records workspaces whose current Ready view completed
+	// its once-per-process reconciliation. A failed/partial pass is retried; the
+	// synthetic event IDs make every replay idempotent.
+	taskReadyReconciled map[string]bool
+	// taskReadyGenerations remembers the UpdatedAt generation emitted by the
+	// reconciliation lane. Journal catch-up suppresses an equal/older natural
+	// task.ready occurrence so startup cannot admit two runs for the same ready
+	// generation.
+	taskReadyGenerations map[string]map[string]taskReadyGeneration
 }
 
 // IssueJournalSweepResult summarizes one RunOnce pass across every swept
@@ -175,6 +201,9 @@ type IssueJournalSweepResult struct {
 	// TaskReadyEmitted counts task.ready events emitted by the flag-gated
 	// task-ready lane (EmitTaskReady); zero when the flag is off.
 	TaskReadyEmitted int
+	// TaskReadyBlocked counts current repository-required tasks moved to the
+	// Work Items blocked state instead of being emitted to Automation.
+	TaskReadyBlocked int
 	// FastForwarded counts workspaces bootstrapped to the journal tail without
 	// emitting (first observation, replay disabled).
 	FastForwarded int
@@ -217,11 +246,26 @@ func (b *IssueJournalBridge) sweepWorkspace(ctx context.Context, ws string, out 
 		out.BackedOff++
 		return nil
 	}
-	cursor, found := b.loadCursor(ws)
-	if !found {
-		return b.bootstrap(ctx, ws, out)
+	if err := b.reconcileTaskReadyOnce(ctx, ws, out); err != nil {
+		b.recordFailure(ws)
+		return err
 	}
-	return b.drainFrom(ctx, ws, cursor, out)
+	cursor, found := b.loadCursor(ws)
+	var err error
+	if !found {
+		err = b.bootstrap(ctx, ws, out)
+	} else {
+		err = b.drainFrom(ctx, ws, cursor, out)
+	}
+	if err != nil {
+		b.recordFailure(ws)
+		return err
+	}
+	// Clear the failure window only after the entire workspace pass is clean.
+	// Reconciliation, journal reads and event admission are one health unit: a
+	// persistent failure in any lane must not recreate a two-second log loop.
+	b.recordSuccess(ws)
+	return nil
 }
 
 // bootstrap handles the first observation of a workspace. Replay opt-in drains
@@ -234,10 +278,8 @@ func (b *IssueJournalBridge) bootstrap(ctx context.Context, ws string, out *Issu
 	}
 	tail, err := b.journalTail(ctx, ws)
 	if err != nil {
-		b.recordFailure(ws)
 		return err
 	}
-	b.recordSuccess(ws)
 	b.saveCursor(ws, tail)
 	out.FastForwarded++
 	return nil
@@ -285,10 +327,8 @@ func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, o
 	for {
 		events, nextCursor, hasMore, err := b.Reader.ListIssueEvents(ctx, ws, cursor, b.batchLimit())
 		if err != nil {
-			b.recordFailure(ws)
 			return fmt.Errorf("poll issue journal in workspace %q: %w", ws, err)
 		}
-		b.recordSuccess(ws)
 		emitted, perr := b.emitBatch(ctx, ws, events, out)
 		if perr != nil {
 			// Mid-batch Emit failure: advance only past durably-handled entries so
@@ -345,10 +385,24 @@ func (b *IssueJournalBridge) emitBatch(ctx context.Context, ws string, events []
 			out.Skipped++
 		}
 		if b.EmitTaskReady && isTaskReadyEntry(ev) {
-			if err := b.emitTaskReady(ctx, ws, ev); err != nil {
+			reconciled, err := b.taskReadyJournalGenerationReconciled(ctx, ws, ev)
+			if err != nil {
 				return advanced, err
 			}
-			out.TaskReadyEmitted++
+			if reconciled {
+				advanced = ev.ID
+				continue
+			}
+			emitted, blocked, err := b.emitTaskReady(ctx, ws, ev)
+			if err != nil {
+				return advanced, err
+			}
+			if emitted {
+				out.TaskReadyEmitted++
+			}
+			if blocked {
+				out.TaskReadyBlocked++
+			}
 		}
 		advanced = ev.ID
 	}
@@ -471,11 +525,11 @@ func (b *IssueJournalBridge) saveCursor(ws, cursor string) {
 }
 
 // inBackoffWindow reports whether this pass should skip the workspace because
-// of recent consecutive reader failures, decrementing the paused-sweep
+// of recent consecutive pass failures, decrementing the paused-sweep
 // countdown. The window doubles per consecutive failure (recordFailure sets
 // 2^min(f,cap)-1 upcoming sweeps to skip), so a flapping reader is retried with
 // exponential backoff measured in sweeps — clock-free, like CronScheduler's
-// window. A clean poll clears it.
+// window. A fully clean workspace pass clears it.
 func (b *IssueJournalBridge) inBackoffWindow(ws string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -509,7 +563,7 @@ func (b *IssueJournalBridge) recordFailure(ws string) {
 	b.skipRemaining[ws] = (1 << shift) - 1
 }
 
-// recordSuccess clears the workspace's failure backoff after a clean poll.
+// recordSuccess clears the workspace's failure backoff after a clean pass.
 func (b *IssueJournalBridge) recordSuccess(ws string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

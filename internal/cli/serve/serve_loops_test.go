@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -19,6 +20,22 @@ import (
 // client takes). memstore deliberately does not implement IssueJournalReader.
 type readerCapableEvents struct {
 	store.TriggerEventStore
+}
+
+type repositoryRequirementTestBackend struct {
+	backend.IssueBackend
+	result *backend.RepositoryRequirementResult
+	err    error
+	ids    []string
+}
+
+func (b *repositoryRequirementTestBackend) BlockRepositoryRequired(_ context.Context, id string) (*backend.RepositoryRequirementResult, error) {
+	b.ids = append(b.ids, id)
+	return b.result, b.err
+}
+
+func (*repositoryRequirementTestBackend) SetIssueRepository(_ context.Context, id, repo string) (*backend.IssueData, error) {
+	return &backend.IssueData{ID: id, SourceRepo: repo}, nil
 }
 
 func (readerCapableEvents) ListIssueEvents(_ context.Context, _, afterCursor string, _ int) ([]store.JournalEvent, string, bool, error) {
@@ -55,10 +72,10 @@ func TestStartIssueJournalBridge_MemstoreGatedNoLoop(t *testing.T) {
 	// memstore does not implement store.IssueJournalReader, so the bridge must
 	// not start: no cursor state file is ever created.
 	mem := memstore.New()
-	startIssueJournalBridge(ctx, mem, nil, &trigger.InternalSource{Store: mem})
+	startIssueJournalBridge(ctx, mem, nil, nil, nil, &trigger.InternalSource{Store: mem})
 
 	// Also a nil store is a clean no-op.
-	startIssueJournalBridge(ctx, nil, nil, nil)
+	startIssueJournalBridge(ctx, nil, nil, nil, nil, nil)
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created for memstore-gated serve: stat err = %v", err)
@@ -77,7 +94,7 @@ func TestStartIssueJournalBridge_DisabledFlagHonored(t *testing.T) {
 	// Even with a reader-capable store the disabled flag wins: no loop, no
 	// cursor file.
 	mem := memstore.New()
-	startIssueJournalBridge(ctx, readerCapableStore{Store: mem}, nil, &trigger.InternalSource{Store: mem})
+	startIssueJournalBridge(ctx, readerCapableStore{Store: mem}, nil, nil, nil, &trigger.InternalSource{Store: mem})
 
 	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
 		t.Fatalf("cursor state file created while bridge disabled: stat err = %v", err)
@@ -101,7 +118,7 @@ func TestStartIssueJournalBridge_EnabledLoopWritesCursorState(t *testing.T) {
 	// A reader-capable store passes the gate; the first pass fast-forwards the
 	// seeded workspace to the (empty) journal tail and persists its cursor, so
 	// the state file appears.
-	startIssueJournalBridge(ctx, readerCapableStore{Store: mem}, nil, &trigger.InternalSource{Store: mem})
+	startIssueJournalBridge(ctx, readerCapableStore{Store: mem}, nil, nil, nil, &trigger.InternalSource{Store: mem})
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -175,5 +192,112 @@ func TestDriverStaleTaskMaxAgeMatchesSweeperDefault(t *testing.T) {
 	t.Setenv(envLoomDriverStaleTaskMaxAge, "")
 	if got := driverStaleTaskMaxAge(); got != driverexecutor.DefaultStaleTaskRunMaxAge {
 		t.Fatalf("driverStaleTaskMaxAge() = %v, want driver default %v", got, driverexecutor.DefaultStaleTaskRunMaxAge)
+	}
+}
+
+func TestTaskReadyEventsEnabledDefaultsOnWithExplicitOptOut(t *testing.T) {
+	for _, value := range []string{"", "1", "true", "TRUE", "yes", "on", "unexpected"} {
+		t.Run("enabled_"+value, func(t *testing.T) {
+			t.Setenv(envLoomTaskReadyEvents, value)
+			if !taskReadyEventsEnabled() {
+				t.Fatalf("taskReadyEventsEnabled() = false for %q", value)
+			}
+		})
+	}
+	for _, value := range []string{"0", "false", "FALSE", "off", "no"} {
+		t.Run("disabled_"+value, func(t *testing.T) {
+			t.Setenv(envLoomTaskReadyEvents, value)
+			if taskReadyEventsEnabled() {
+				t.Fatalf("taskReadyEventsEnabled() = true for %q", value)
+			}
+		})
+	}
+}
+
+func TestTaskReadyRepositoryRequired(t *testing.T) {
+	tests := []struct {
+		name       string
+		issueType  string
+		sourceRepo string
+		repoCount  int
+		want       bool
+	}{
+		{name: "single repo fallback", issueType: "task", repoCount: 1, want: false},
+		{name: "zero repos", issueType: "task", repoCount: 0, want: true},
+		{name: "multiple repos", issueType: "task", repoCount: 2, want: true},
+		{name: "explicit repo", issueType: "task", sourceRepo: "acme/app", repoCount: 2, want: false},
+		{name: "workspace scoped epic", issueType: "epic", repoCount: 2, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := taskReadyRepositoryRequired(tt.issueType, tt.sourceRepo, tt.repoCount); got != tt.want {
+				t.Fatalf("taskReadyRepositoryRequired(%q, %q, %d) = %v, want %v",
+					tt.issueType, tt.sourceRepo, tt.repoCount, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
+	atomic := &repositoryRequirementTestBackend{result: &backend.RepositoryRequirementResult{Changed: true}}
+	result, err := blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
+	if err != nil || !result.Blocked || result.DispatchReady != nil || len(atomic.ids) != 1 || atomic.ids[0] != "TASK-1" {
+		t.Fatalf("block result/error/calls = %+v/%v/%v, want changed TASK-1", result, err, atomic.ids)
+	}
+
+	atomic.result = &backend.RepositoryRequirementResult{Replayed: true, Blocked: true}
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
+	if err != nil || result.Blocked || result.DispatchReady != nil {
+		t.Fatalf("replayed block result/error = %+v/%v, want suppressed no-op", result, err)
+	}
+
+	atomic.result = &backend.RepositoryRequirementResult{
+		DispatchReady: true,
+		Issue: &backend.IssueData{
+			ID: "TASK-1", Status: "open", IssueType: "task", SourceRepo: "fleet-source",
+			HasDesign: true, Labels: []string{"phase4"}, UpdatedAt: time.Date(2026, 7, 18, 23, 0, 0, 0, time.UTC),
+		},
+	}
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
+	if err != nil || result.Blocked || result.DispatchReady == nil {
+		t.Fatalf("dispatch-ready result/error = %+v/%v", result, err)
+	}
+	if got := result.DispatchReady; got.TaskID != "TASK-1" || got.Status != "open" || got.SourceRepo != "fleet-source" ||
+		got.RepositoryRequired || !got.HasDesign || len(got.Labels) != 1 || got.Labels[0] != "phase4" {
+		t.Fatalf("canonical dispatch snapshot = %+v", got)
+	}
+
+	// An exactly-single-repository workspace satisfies admission without
+	// assigning the Issue. DispatchReady still carries a known-empty source repo
+	// and must not be reclassified as repository-required by Loom.
+	atomic.result = &backend.RepositoryRequirementResult{
+		DispatchReady: true,
+		Issue:         &backend.IssueData{ID: "TASK-COUNT", Status: "open", IssueType: "task"},
+	}
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-COUNT")
+	if err != nil || result.DispatchReady == nil || result.DispatchReady.SourceRepo != "" || result.DispatchReady.RepositoryRequired {
+		t.Fatalf("single-repo dispatch result/error = %+v/%v", result, err)
+	}
+
+	atomic.result = &backend.RepositoryRequirementResult{
+		Issue: &backend.IssueData{ID: "TASK-1", Status: "in_progress", IssueType: "task", SourceRepo: "fleet-source"},
+	}
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-1")
+	if err != nil || result.Blocked || result.DispatchReady != nil {
+		t.Fatalf("stale non-ready result/error = %+v/%v, want suppressed no-op", result, err)
+	}
+
+	atomic.err = backend.ErrNotFound("BlockRepositoryRequired", "issue deleted")
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-GONE")
+	if err != nil || result.Blocked || result.DispatchReady != nil {
+		t.Fatalf("deleted block result/error = %+v/%v, want durably stale no-op", result, err)
+	}
+}
+
+func TestBlockRepositoryRequiredTaskFailsClosedWithoutAtomicExtension(t *testing.T) {
+	unsupported := struct{ backend.IssueBackend }{}
+	result, err := blockRepositoryRequiredTask(t.Context(), unsupported, "TASK-1")
+	if result.Blocked || result.DispatchReady != nil || !backend.IsKind(err, backend.KindNotImplemented) {
+		t.Fatalf("unsupported result/error = %+v/%v, want not_implemented", result, err)
 	}
 }

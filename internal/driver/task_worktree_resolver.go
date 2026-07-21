@@ -342,24 +342,68 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 }
 
 func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey string, repos []*domain.Repo, req TaskExecRequest) (*domain.Repo, error) {
-	selectors := taskWorktreeRepoSelectors(req)
+	taskSelectors := taskWorktreeRepoSelectors(req)
+	var profileSelectors []string
 	if req.WorkerProfileID != "" {
-		if profile, err := r.Store.WorkerProfiles().Get(ctx, workspaceKey, req.WorkerProfileID); err == nil && profile != nil {
-			selectors = append(selectors, profile.Repos...)
+		if r.Store == nil {
+			return nil, fmt.Errorf("worker profile store required for repo scope: %w", domain.ErrInvalid)
+		}
+		profile, err := r.Store.WorkerProfiles().Get(ctx, workspaceKey, req.WorkerProfileID)
+		if err != nil {
+			return nil, fmt.Errorf("get worker profile %q for repo scope: %w", req.WorkerProfileID, err)
+		}
+		if profile != nil {
+			profileSelectors = normalizeStringList(profile.Repos)
 		}
 	}
-	for _, selector := range selectors {
+
+	// Task/run placement is the selector; WorkerProfile.Repos is an allowed
+	// scope, not an ordered fallback. Combining them used to make a repo-less
+	// task with profile scope [alpha,beta] silently choose alpha.
+	for _, selector := range taskSelectors {
 		if repo := findRepoBySelector(repos, selector); repo != nil {
+			if len(profileSelectors) > 0 {
+				inScope := false
+				for _, profileSelector := range profileSelectors {
+					if repoMatchesExactSelector(repo, profileSelector) {
+						inScope = true
+						break
+					}
+				}
+				if !inScope {
+					return nil, fmt.Errorf("task repo selector %q is outside worker profile %q repo scope", selector, req.WorkerProfileID)
+				}
+			}
 			return repo, nil
+		}
+	}
+	if len(taskSelectors) > 0 {
+		return nil, fmt.Errorf("no workspace repo matches task repo selector %q", strings.Join(taskSelectors, ", "))
+	}
+
+	if len(profileSelectors) > 0 {
+		matches := make([]*domain.Repo, 0, len(repos))
+		for _, repo := range repos {
+			for _, selector := range profileSelectors {
+				if repoMatchesExactSelector(repo, selector) {
+					matches = append(matches, repo)
+					break
+				}
+			}
+		}
+		switch len(matches) {
+		case 0:
+			return nil, fmt.Errorf("no workspace repo matches worker profile %q repo scope %q", req.WorkerProfileID, strings.Join(profileSelectors, ", "))
+		case 1:
+			return matches[0], nil
+		default:
+			return nil, fmt.Errorf("task repo selector required: worker profile %q scope matches %d workspace repos", req.WorkerProfileID, len(matches))
 		}
 	}
 	if len(repos) == 1 {
 		return repos[0], nil
 	}
-	if len(selectors) > 0 {
-		return nil, fmt.Errorf("no workspace repo matches task repo selector %q", strings.Join(selectors, ", "))
-	}
-	return repos[0], nil
+	return nil, fmt.Errorf("task repo selector required: workspace %q has %d repos", workspaceKey, len(repos))
 }
 
 func taskWorktreeRepoSelectors(req TaskExecRequest) []string {
@@ -417,6 +461,23 @@ func findRepoBySelector(repos []*domain.Repo, selector string) *domain.Repo {
 	}
 	want := normalizedRepoToken(selector)
 	wantBase := normalizedRepoToken(repoBasename(selector))
+	var exact []*domain.Repo
+	for _, repo := range repos {
+		if repoMatchesExactSelector(repo, want) {
+			exact = append(exact, repo)
+		}
+	}
+	if len(exact) == 1 {
+		return exact[0]
+	}
+	if len(exact) > 1 {
+		return nil
+	}
+
+	// Backward-compatible basename fallback is allowed only when it identifies
+	// exactly one workspace repo. Qualified selectors such as org-a/app must
+	// never silently select org-b/app just because both basenames are "app".
+	var fallback []*domain.Repo
 	for _, repo := range repos {
 		if repo == nil {
 			continue
@@ -425,16 +486,67 @@ func findRepoBySelector(repos []*domain.Repo, selector string) *domain.Repo {
 			repo.Name,
 			firstNonEmpty(repo.SourceRepoID, repo.Name),
 			repo.RemoteURL,
+			repo.Remote,
 			repoBasename(repo.RemoteURL),
+			repoBasename(repo.Remote),
 		}
 		for _, candidate := range candidates {
 			got := normalizedRepoToken(candidate)
-			if got != "" && (got == want || got == wantBase) {
-				return repo
+			if got != "" && got == wantBase {
+				fallback = append(fallback, repo)
+				break
 			}
 		}
 	}
+	if len(fallback) == 1 {
+		return fallback[0]
+	}
 	return nil
+}
+
+func repoMatchesExactSelector(repo *domain.Repo, selector string) bool {
+	if repo == nil {
+		return false
+	}
+	want := normalizedRepoToken(selector)
+	if want == "" {
+		return false
+	}
+	for _, candidate := range []string{
+		repo.Name,
+		firstNonEmpty(repo.SourceRepoID, repo.Name),
+		repo.RemoteURL,
+		repo.Remote,
+		repoRemotePath(repo.RemoteURL),
+		repoRemotePath(repo.Remote),
+	} {
+		if got := normalizedRepoToken(candidate); got != "" && got == want {
+			return true
+		}
+	}
+	return false
+}
+
+func repoRemotePath(value string) string {
+	value = strings.TrimSpace(strings.TrimSuffix(value, ".git"))
+	value = strings.TrimRight(value, "/")
+	if value == "" {
+		return ""
+	}
+	if scheme := strings.Index(value, "://"); scheme >= 0 {
+		rest := value[scheme+3:]
+		if slash := strings.Index(rest, "/"); slash >= 0 {
+			return rest[slash+1:]
+		}
+		return ""
+	}
+	if colon := strings.Index(value, ":"); colon >= 0 && !strings.Contains(value[:colon], "/") {
+		return value[colon+1:]
+	}
+	if slash := strings.Index(value, "/"); slash >= 0 && strings.Contains(value[:slash], ".") {
+		return value[slash+1:]
+	}
+	return value
 }
 
 func normalizedRepoToken(value string) string {

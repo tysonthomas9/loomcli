@@ -89,6 +89,40 @@ func (adapter *fleetDriverRunCommandPort) ReleaseDriverRunWorkItem(
 	return executionDriverRunWorkItemMutationResult(result)
 }
 
+func (adapter *fleetDriverRunCommandPort) RecoverTerminalDriverRunWork(
+	ctx context.Context,
+	command execution.RecoverTerminalDriverRunWorkCommand,
+) (execution.RecoverTerminalDriverRunWorkResult, error) {
+	result, err := adapter.transport.RecoverTerminalDriverRunWork(ctx, fleetdb.ExecutionTerminalDriverRunWorkRecoveryCommand{
+		WorkspaceKey: command.WorkspaceKey, RequestID: command.RequestID, DriverRunID: command.DriverRunID,
+		ParentStatus: domain.DriverRunStatus(command.ParentStatus), Reason: command.Reason,
+		ErrorClass: command.ErrorClass, RecoveredAt: command.RecoveredAt,
+	})
+	if err != nil {
+		return execution.RecoverTerminalDriverRunWorkResult{}, mapFleetExecutionPortError(err)
+	}
+	if result == nil {
+		return execution.RecoverTerminalDriverRunWorkResult{}, execution.ErrConflict
+	}
+	recoveredTaskRunIDs := append([]string(nil), result.RecoveredTaskRunIDs...)
+	releasedWorkItemIDs := append([]string(nil), result.ReleasedWorkItemIDs...)
+	preservedSuccessorWorkItemIDs := append([]string(nil), result.PreservedSuccessorWorkItemIDs...)
+	return execution.RecoverTerminalDriverRunWorkResult{
+		RecoveredTaskRunIDs:           recoveredTaskRunIDs,
+		ReleasedWorkItemIDs:           releasedWorkItemIDs,
+		PreservedSuccessorWorkItemIDs: preservedSuccessorWorkItemIDs,
+		Committed: &execution.RecoverTerminalDriverRunWorkCommit{
+			WorkspaceKey: result.WorkspaceKey, DriverRunID: result.DriverRunID,
+			ParentStatus: execution.DriverRunStatus(result.ParentStatus), Reason: result.Reason,
+			ErrorClass: result.ErrorClass, RecoveredAt: result.RecoveredAt,
+			RecoveredTaskRunIDs: recoveredTaskRunIDs, ReleasedWorkItemIDs: releasedWorkItemIDs,
+			PreservedSuccessorWorkItemIDs: preservedSuccessorWorkItemIDs,
+		},
+		ActionID: result.ActionID,
+		Replay:   result.Replayed,
+	}, nil
+}
+
 func executionDriverRunWorkItemMutationResult(
 	result *fleetdb.ExecutionDriverRunWorkItemResult,
 ) (execution.DriverRunWorkItemMutationResult, error) {

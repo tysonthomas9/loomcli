@@ -24,6 +24,9 @@ export type {
 export { useTaskSessions } from "./useTaskSessions";
 export type { UseTaskSessionsResult } from "./useTaskSessions";
 
+export { useTaskWorkflowRuns } from "./useTaskWorkflowRuns";
+export type { UseTaskWorkflowRunsResult } from "./useTaskWorkflowRuns";
+
 export {
   useTerminalFont,
   applyTerminalFont,

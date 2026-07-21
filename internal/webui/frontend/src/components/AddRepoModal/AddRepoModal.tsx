@@ -2,8 +2,9 @@
  * AddRepoModal — "Add Repo" dialog.
  *
  * Replaces the old inline sidebar form with a focused two-field modal:
- * Repository URL + Default branch. Both are wired to the real
- * addWorkspaceRepos API (which accepts an optional `branch`). A clone-style
+ * Repository URL + optional Default branch. Both are wired to the real
+ * addWorkspaceRepos API (which accepts an optional `branch`). When omitted,
+ * cloned repositories use their advertised remote HEAD. A clone-style
  * URL (https:// or git@) is sent as `clone_urls`; anything else is treated as
  * a local `repos` path, preserving loom's existing behaviour.
  */
@@ -35,7 +36,7 @@ export function AddRepoModal({
   initialUrl = "",
 }: AddRepoModalProps): JSX.Element | null {
   const [url, setUrl] = useState(initialUrl);
-  const [branch, setBranch] = useState("main");
+  const [branch, setBranch] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const urlRef = useRef<HTMLInputElement>(null);
@@ -44,7 +45,7 @@ export function AddRepoModal({
   useEffect(() => {
     if (!isOpen) return;
     setUrl(initialUrl);
-    setBranch("main");
+    setBranch("");
     setError(null);
     setIsSubmitting(false);
     const id = window.setTimeout(() => urlRef.current?.focus(), 0);
@@ -128,7 +129,7 @@ export function AddRepoModal({
             className={`${styles.input} ${styles.mono}`}
             value={branch}
             onChange={(event) => setBranch(event.target.value)}
-            placeholder="main"
+            placeholder="Auto-detect from remote HEAD"
             disabled={isSubmitting}
           />
         </div>

@@ -42,10 +42,11 @@ func NewRunOutcomeRuntimeRegistrationWithExecution(
 	workspace string,
 	api execution.DriverRunAPI,
 	queue execution.DriverRunOutcomeAPI,
+	terminalWorkQueue execution.TerminalDriverRunWorkRecoveryQueueAPI,
 	authorities execution.SystemAuthorityResolver,
 ) (platformruntime.Registration, error) {
-	if api == nil || queue == nil || authorities == nil {
-		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: Execution await and queue APIs are unavailable")
+	if api == nil || queue == nil || terminalWorkQueue == nil || authorities == nil {
+		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: Execution await and recovery queue APIs are unavailable")
 	}
 	resolver := &driver.ExecutionAwaitResolver{
 		API: api, Authorities: authorities, ComponentID: driver.RunOutcomeAwaitComponentID,
@@ -63,7 +64,7 @@ func NewRunOutcomeRuntimeRegistrationWithExecution(
 	}
 	workspaces := driver.RunOutcomeWorkspaceLister(newAutomationWorkspaceLister(workspacesStore))
 	reconciler, err := driver.NewRunOutcomeReconcilerWithExecution(
-		queue, notifier, journal, publisher, workspace, workspaces, api, authorities,
+		queue, terminalWorkQueue, notifier, journal, publisher, workspace, workspaces, api, authorities,
 		string(execution.DriverRunOutcomeComponentID),
 	)
 	if err != nil {

@@ -12,13 +12,15 @@ import (
 // from Execution's queue commands to the legacy Store capability interfaces.
 // Callers receive the typed module API, never this adapter or either Store.
 type executionReconciliationQueueAdapter struct {
-	awaitEvents store.AwaitEventNotificationStore
-	runOutcomes store.DriverRunOutcomeStore
+	awaitEvents            store.AwaitEventNotificationStore
+	runOutcomes            store.DriverRunOutcomeStore
+	terminalWorkRecoveries store.TerminalDriverRunWorkRecoveryQueueStore
 }
 
 var (
-	_ execution.AwaitEventNotificationQueuePort = (*executionReconciliationQueueAdapter)(nil)
-	_ execution.DriverRunOutcomeQueuePort       = (*executionReconciliationQueueAdapter)(nil)
+	_ execution.AwaitEventNotificationQueuePort        = (*executionReconciliationQueueAdapter)(nil)
+	_ execution.DriverRunOutcomeQueuePort              = (*executionReconciliationQueueAdapter)(nil)
+	_ execution.TerminalDriverRunWorkRecoveryQueuePort = (*executionReconciliationQueueAdapter)(nil)
 )
 
 func newExecutionReconciliationQueueAdapter(
@@ -33,7 +35,13 @@ func newExecutionReconciliationQueueAdapter(
 	if !ok {
 		return nil, fmt.Errorf("compose Execution: DriverRun store lacks durable outcome commands")
 	}
-	return &executionReconciliationQueueAdapter{awaitEvents: awaitEvents, runOutcomes: runOutcomes}, nil
+	terminalWorkRecoveries, ok := driverRuns.(store.TerminalDriverRunWorkRecoveryQueueStore)
+	if !ok {
+		return nil, fmt.Errorf("compose Execution: DriverRun store lacks durable terminal-work recovery commands")
+	}
+	return &executionReconciliationQueueAdapter{
+		awaitEvents: awaitEvents, runOutcomes: runOutcomes, terminalWorkRecoveries: terminalWorkRecoveries,
+	}, nil
 }
 
 func (adapter *executionReconciliationQueueAdapter) ClaimAwaitEventNotifications(
@@ -154,4 +162,63 @@ func (adapter *executionReconciliationQueueAdapter) RetryDriverRunOutcome(
 		AvailableAt:  retry.AvailableAt,
 		Error:        retry.Error,
 	})
+}
+
+func (adapter *executionReconciliationQueueAdapter) ClaimTerminalDriverRunWorkRecoveries(
+	ctx context.Context,
+	lease execution.TerminalDriverRunWorkRecoveryLease,
+) ([]execution.DriverRunOutcome, error) {
+	values, err := adapter.terminalWorkRecoveries.ClaimTerminalDriverRunWorkRecoveries(
+		ctx,
+		store.TerminalDriverRunWorkRecoveryClaim{
+			WorkspaceKey: lease.WorkspaceKey,
+			ClaimID:      lease.ClaimID,
+			Before:       lease.Before,
+			ClaimUntil:   lease.ClaimUntil,
+			Limit:        lease.Limit,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]execution.DriverRunOutcome, 0, len(values))
+	for _, value := range values {
+		out = append(out, execution.DriverRunOutcome{
+			WorkspaceKey: value.WorkspaceKey, RunID: value.RunID, Status: execution.DriverRunStatus(value.Status),
+			Summary: value.Summary, ErrorClass: value.ErrorClass, ParentRunID: value.ParentRunID,
+			ParentEventID: value.ParentEventID, EpicID: value.EpicID, OccurredAt: value.OccurredAt, Attempt: value.Attempt,
+		})
+	}
+	return out, nil
+}
+
+func (adapter *executionReconciliationQueueAdapter) CompleteTerminalDriverRunWorkRecovery(
+	ctx context.Context,
+	completion execution.TerminalDriverRunWorkRecoveryCompletion,
+) error {
+	return adapter.terminalWorkRecoveries.CompleteTerminalDriverRunWorkRecovery(
+		ctx,
+		store.TerminalDriverRunWorkRecoveryCompletion{
+			WorkspaceKey: completion.WorkspaceKey,
+			RunID:        completion.RunID,
+			ClaimID:      completion.ClaimID,
+			CompletedAt:  completion.CompletedAt,
+		},
+	)
+}
+
+func (adapter *executionReconciliationQueueAdapter) RetryTerminalDriverRunWorkRecovery(
+	ctx context.Context,
+	retry execution.TerminalDriverRunWorkRecoveryRetry,
+) error {
+	return adapter.terminalWorkRecoveries.RetryTerminalDriverRunWorkRecovery(
+		ctx,
+		store.TerminalDriverRunWorkRecoveryRetry{
+			WorkspaceKey: retry.WorkspaceKey,
+			RunID:        retry.RunID,
+			ClaimID:      retry.ClaimID,
+			AvailableAt:  retry.AvailableAt,
+			Error:        retry.Error,
+		},
+	)
 }

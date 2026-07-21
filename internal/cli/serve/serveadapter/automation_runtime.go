@@ -37,12 +37,14 @@ func BuildServeRuntimeHost(
 	}
 	if executionCapability == nil || executionCapability.DriverRunAPI() == nil ||
 		executionCapability.AwaitEventNotificationAPI() == nil || executionCapability.DriverRunOutcomeAPI() == nil ||
+		executionCapability.TerminalDriverRunWorkRecoveryQueueAPI() == nil ||
 		executionCapability.SystemAuthorityResolver() == nil {
 		return nil, fmt.Errorf("compose serve runtime host: Execution await capability is unavailable")
 	}
 	runOutcomeRegistration, err := appserve.NewRunOutcomeRuntimeRegistrationWithExecution(
 		awaits, events, workspaces, runOutcomes, workspace,
-		executionCapability.DriverRunAPI(), executionCapability.DriverRunOutcomeAPI(), executionCapability.SystemAuthorityResolver(),
+		executionCapability.DriverRunAPI(), executionCapability.DriverRunOutcomeAPI(),
+		executionCapability.TerminalDriverRunWorkRecoveryQueueAPI(), executionCapability.SystemAuthorityResolver(),
 	)
 	if err != nil {
 		return nil, err

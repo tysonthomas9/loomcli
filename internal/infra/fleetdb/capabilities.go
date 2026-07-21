@@ -28,6 +28,11 @@ const (
 	// Phase 3 Automation core, ingress workflows, and runtime components. The
 	// running FleetDB advertises it only for a backend with full contract parity.
 	AutomationTriggerAdmissionCapability = "automation.trigger_admission.v1"
+	// WorkItemsRepositoryRequirementCapability certifies the conditional
+	// repository-required block and repository-assignment recovery commands.
+	// Loom has no safe generic-update fallback for these race-sensitive state
+	// transitions.
+	WorkItemsRepositoryRequirementCapability = "work_items.repository_requirement.v1"
 	// ExecutionAwaitAtomicResumeCapability is required by every Loom serve
 	// profile. Await dispatch and run-outcome reconciliation must never fall
 	// back to separate resolve/resume writes, even when the Catalog and
@@ -49,12 +54,15 @@ const (
 	// ExecutionTaskRunWorkItemDesignCapability certifies the exact TaskRun
 	// owner-fenced command that derives run.TaskID and persists its Work Item
 	// design in the same backend transaction as lease/fence validation.
-	ExecutionTaskRunWorkItemDesignCapability  = "execution.task_run_work_item_design.v1"
-	ExecutionDriverRunChildStartCapability    = "execution.driver_run_child_start.v1"
-	ExecutionDriverRunChildCascadeCapability  = "execution.driver_run_child_cascade.v1"
-	ExecutionDriverRunLeaseFencingCapability  = "execution.driver_run_lease_fencing.v1"
-	ExecutionDriverRunWorkItemClaimCapability = "execution.driver_run_work_item_claim.v1"
-	ExecutionTaskRunLogIdempotencyCapability  = "execution.task_run_log_idempotency.v1"
+	ExecutionTaskRunWorkItemDesignCapability              = "execution.task_run_work_item_design.v1"
+	ExecutionTaskRunTerminalConvergenceCapability         = "execution.task_run_terminal_convergence.v1"
+	ExecutionDriverRunChildStartCapability                = "execution.driver_run_child_start.v1"
+	ExecutionDriverRunChildCascadeCapability              = "execution.driver_run_child_cascade.v1"
+	ExecutionTerminalDriverRunWorkRecoveryCapability      = "execution.terminal_driver_run_work_recovery.v1"
+	ExecutionTerminalDriverRunWorkRecoveryQueueCapability = "execution.terminal_driver_run_work_recovery_queue.v1"
+	ExecutionDriverRunLeaseFencingCapability              = "execution.driver_run_lease_fencing.v1"
+	ExecutionDriverRunWorkItemClaimCapability             = "execution.driver_run_work_item_claim.v1"
+	ExecutionTaskRunLogIdempotencyCapability              = "execution.task_run_log_idempotency.v1"
 	// ArtifactsOwnerFencedLifecycleCapability certifies owner-fenced,
 	// idempotent Artifact create/upload/finalize/reference commands.
 	ArtifactsOwnerFencedLifecycleCapability = "artifacts.owner_fenced_lifecycle.v1"
@@ -66,6 +74,7 @@ const (
 func Phase4FoundationCapabilities() []string {
 	return []string{
 		ArtifactsOwnerFencedLifecycleCapability,
+		WorkItemsRepositoryRequirementCapability,
 		ExecutionIssueClaimTaskRunStartCapability,
 		ExecutionTaskRunLeaseFencingCapability,
 		ExecutionIssueClaimNextTaskRunStartCapability,
@@ -74,8 +83,11 @@ func Phase4FoundationCapabilities() []string {
 		ExecutionTaskRunRequeueCapability,
 		ExecutionTaskRunRetryExhaustionCapability,
 		ExecutionTaskRunWorkItemDesignCapability,
+		ExecutionTaskRunTerminalConvergenceCapability,
 		ExecutionDriverRunChildStartCapability,
 		ExecutionDriverRunChildCascadeCapability,
+		ExecutionTerminalDriverRunWorkRecoveryCapability,
+		ExecutionTerminalDriverRunWorkRecoveryQueueCapability,
 		ExecutionDriverRunLeaseFencingCapability,
 		ExecutionDriverRunWorkItemClaimCapability,
 		ExecutionTaskRunLogIdempotencyCapability,

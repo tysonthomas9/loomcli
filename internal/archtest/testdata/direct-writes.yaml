@@ -203,6 +203,7 @@ method_sets:
       - ListIssueEvents
       - ListLogs
       - ListSince
+      - ListTaskRunTerminalConvergenceCandidates
       - ReadContent
       - ResolveInboundSecret
       - ResolveOutboundCredentialSealed
@@ -221,9 +222,12 @@ method_sets:
       - ClaimDriverRunOutcomes
       - ClaimNext
       - ClaimQueued
+      - ClaimTerminalDriverRunWorkRecoveries
       - Complete
       - CompleteAwaitEventNotification
       - CompleteDriverRunOutcome
+      - CompleteTaskRunTerminalConvergence
+      - CompleteTerminalDriverRunWorkRecovery
       - Create
       - CreateEpic
       - CreateForRun
@@ -248,6 +252,7 @@ method_sets:
       - ResumeAwaiting
       - RetryAwaitEventNotification
       - RetryDriverRunOutcome
+      - RetryTerminalDriverRunWorkRecovery
       - Revoke
       - RotateSecrets
       - Suspend
@@ -452,6 +457,14 @@ receiver_surfaces:
     method_set: store_repository
     capability_owner: execution
   - receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
+    package: github.com/tysonthomas9/loomcli/internal/store
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunTerminalConvergenceStore
+    package: github.com/tysonthomas9/loomcli/internal/store
+    method_set: store_repository
+    capability_owner: execution
+  - receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: execution
@@ -733,6 +746,24 @@ writes:
     count: 1
     aggregate_owner: execution
     expires_after_phase: 7
+  - file: internal/app/serve/execution_reconciliation_queues.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
+    method: ClaimTerminalDriverRunWorkRecoveries
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/app/serve/execution_reconciliation_queues.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
+    method: CompleteTerminalDriverRunWorkRecovery
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/app/serve/execution_reconciliation_queues.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
+    method: RetryTerminalDriverRunWorkRecovery
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
   - file: internal/app/serve/execution_task_run_convergence.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.OutboxStore
     method: Create
@@ -742,6 +773,12 @@ writes:
   - file: internal/app/serve/execution_task_run_convergence.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunEventStore
     method: Append
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/app/serve/execution_task_run_convergence.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunTerminalConvergenceStore
+    method: CompleteTaskRunTerminalConvergence
     count: 1
     aggregate_owner: execution
     expires_after_phase: 7
@@ -1438,6 +1475,30 @@ writes:
   - file: internal/cli/cmdstore/store_tracing_platform.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunStore
     method: Requeue
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_platform.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.TaskRunTerminalConvergenceStore
+    method: CompleteTaskRunTerminalConvergence
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_platform.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
+    method: ClaimTerminalDriverRunWorkRecoveries
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_platform.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
+    method: CompleteTerminalDriverRunWorkRecovery
+    count: 1
+    aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_platform.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.TerminalDriverRunWorkRecoveryQueueStore
+    method: RetryTerminalDriverRunWorkRecovery
     count: 1
     aggregate_owner: execution
     expires_after_phase: 7

@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Build the epic-runner workflow bundle from the embedded TS sources via the
-# sibling Flue CLI, and refresh source-digest.txt so it matches
+# Build one built-in workflow bundle from the embedded TS sources via the
+# pinned Flue CLI, and refresh source-digest.txt so it matches
 # SourceDigest(spec.Files). Generated bundle output is not committed; set
-# BUILTIN_DIST_DEST to choose a specific output directory.
+# BUILTIN_DIST_DEST to choose a specific output directory. epic-runner remains
+# the default for existing CI callers; desktop packaging selects prompt-agent.
 #
-# Run this whenever any of internal/workflows/builtin/{epic-runner,local-task-runner,
-# daytona-task-runner,openshell-task-runner}.ts changes.
-#
-#   usage: scripts/rebuild-builtin-bundle.sh        (requires ../flue built)
+#   usage: scripts/rebuild-builtin-bundle.sh        (requires pinned Flue built)
 #   env:   FLUE_REPO=/path/to/flue  (default: ../flue)
 #          BUILTIN_DIST_DEST=/path/to/output
+#          BUILTIN_WORKFLOW=epic-runner|prompt-agent (default: epic-runner)
 #
 # Note: DEST is replaced wholesale (rm -rf + copy) so content-hashed assets from
 # prior builds never accrete.
@@ -37,14 +36,27 @@ if [ -f "$PIN_FILE" ] && [ "${ALLOW_FLUE_PIN_DRIFT:-}" != "1" ]; then
 fi
 
 SRC="$ROOT/internal/workflows/builtin"
+BUILTIN_WORKFLOW="${BUILTIN_WORKFLOW:-epic-runner}"
 # BUILTIN_DIST_DEST lets CI and local callers choose a scratch dir without
 # recreating deleted generated bundle files in the repo.
 DEST="${BUILTIN_DIST_DEST:-$(mktemp -d -t loom-builtin-dist.XXXXXX)}"
-# The 4 files that make up the epic-runner spec (builtinEpicRunnerSpec in workflows.go).
-SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts openshell-task-runner.ts)
+case "$BUILTIN_WORKFLOW" in
+  epic-runner)
+    # builtinEpicRunnerSpec in internal/workflows/workflows.go.
+    SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts openshell-task-runner.ts)
+    ;;
+  prompt-agent)
+    # builtinPromptAgentSpec in internal/workflows/workflows.go.
+    SPEC_FILES=(prompt-agent.ts local-task-runner.ts)
+    ;;
+  *)
+    echo "ERROR: unsupported BUILTIN_WORKFLOW=$BUILTIN_WORKFLOW (expected epic-runner or prompt-agent)" >&2
+    exit 2
+    ;;
+esac
 
 STAGE="$(mktemp -d -t loom-bundle-regen.XXXXXX)"
-echo "==> staging epic-runner workflow repo at $STAGE"
+echo "==> staging $BUILTIN_WORKFLOW workflow repo at $STAGE"
 mkdir -p "$STAGE/workflows"
 # shellcheck source=scripts/stage-builtin-modules.sh
 source "$ROOT/scripts/stage-builtin-modules.sh"

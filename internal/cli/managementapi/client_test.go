@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -20,18 +19,17 @@ func (do managementRoundTripper) Do(request *http.Request) (*http.Response, erro
 	return do(request)
 }
 
-func TestSubmitDriverRunUsesAuthenticatedWorkspaceManagementRoute(t *testing.T) {
+func TestSubmitDriverRunUsesWorkspaceManagementRouteWithoutOpenModeCredential(t *testing.T) {
 	var captured SubmitDriverRunRequest
 	client := &Client{
 		serverURL: "http://127.0.0.1:8484",
 		workspace: "space/name",
-		bearer:    "operator-token",
 		doer: managementRoundTripper(func(request *http.Request) (*http.Response, error) {
 			if request.Method != http.MethodPost || request.URL.EscapedPath() != "/api/workspaces/space%2Fname/execution/driver-runs" {
 				t.Fatalf("request = %s %s", request.Method, request.URL.EscapedPath())
 			}
-			if got := request.Header.Get("Authorization"); got != "Bearer operator-token" {
-				t.Fatalf("Authorization = %q", got)
+			if got := request.Header.Get("Authorization"); got != "" {
+				t.Fatalf("Authorization = %q, want none in open mode", got)
 			}
 			if err := json.NewDecoder(request.Body).Decode(&captured); err != nil {
 				t.Fatalf("decode request: %v", err)
@@ -76,14 +74,14 @@ func TestManagementStatusErrorPreservesDomainClass(t *testing.T) {
 	}
 }
 
-func TestWorkerProfileMutationsUseAuthenticatedManagementRoutesWithoutWorkspaceBody(t *testing.T) {
+func TestWorkerProfileMutationsUseOpenManagementRoutesWithoutCredentialOrWorkspaceBody(t *testing.T) {
 	requests := 0
 	client := &Client{
-		serverURL: "http://127.0.0.1:8484", workspace: "space/name", bearer: "operator-token",
+		serverURL: "http://127.0.0.1:8484", workspace: "space/name",
 		doer: managementRoundTripper(func(request *http.Request) (*http.Response, error) {
 			requests++
-			if request.Header.Get("Authorization") != "Bearer operator-token" {
-				t.Fatalf("Authorization = %q", request.Header.Get("Authorization"))
+			if request.Header.Get("Authorization") != "" {
+				t.Fatalf("Authorization = %q, want none in open mode", request.Header.Get("Authorization"))
 			}
 			response := &http.Response{Header: make(http.Header)}
 			switch requests {
@@ -174,7 +172,7 @@ func TestWorkerProfileMutationsFailClosedOnBlankOrMismatchedIdentity(t *testing.
 func TestWorkerProfileManagementAuthorizationFailureHasNoFallback(t *testing.T) {
 	requests := 0
 	client := &Client{
-		serverURL: "http://127.0.0.1:8484", workspace: "WS", bearer: "operator-token",
+		serverURL: "http://127.0.0.1:8484", workspace: "WS",
 		doer: managementRoundTripper(func(_ *http.Request) (*http.Response, error) {
 			requests++
 			return &http.Response{
@@ -188,30 +186,5 @@ func TestWorkerProfileManagementAuthorizationFailureHasNoFallback(t *testing.T) 
 	}
 	if requests != 1 {
 		t.Fatalf("forbidden create transport calls = %d, want exactly 1", requests)
-	}
-}
-
-func TestValidateOpenEndpointRejectsCredentialExfiltrationShapes(t *testing.T) {
-	for _, raw := range []string{
-		"http://localhost:8484",
-		"https://127.0.0.1:8484",
-		"http://127.0.0.1:8484/path",
-		"http://127.0.0.1:8484?redirect=remote",
-		"http://192.0.2.1:8484",
-	} {
-		parsed, err := url.Parse(raw)
-		if err != nil {
-			t.Fatalf("parse %q: %v", raw, err)
-		}
-		if err := validateOpenEndpoint(parsed); err == nil {
-			t.Errorf("validateOpenEndpoint(%q) succeeded", raw)
-		}
-	}
-	parsed, err := url.Parse("http://127.0.0.1:8484")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := validateOpenEndpoint(parsed); err != nil {
-		t.Fatalf("loopback endpoint rejected: %v", err)
 	}
 }

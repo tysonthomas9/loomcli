@@ -403,15 +403,91 @@ func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, s
 			cleanupClonedRepos(repos)
 			return nil, workspaceerrors.New(workspaceerrors.GitFailed, err.Error(), err)
 		}
+		defaultBranch, err := detectClonedRepoDefaultBranch(clonePath, "origin")
+		if err != nil {
+			_ = os.RemoveAll(clonePath)
+			cleanupClonedRepos(repos)
+			return nil, workspaceerrors.New(
+				workspaceerrors.GitFailed,
+				fmt.Sprintf("detect default branch for cloned repo %q", repoName),
+				err,
+			)
+		}
 
 		repos = append(repos, config.RepoConfig{
-			Name:         repoName,
-			Path:         clonePath,
-			Remote:       "origin",
-			SourceRepoID: repoName,
+			Name:          repoName,
+			Path:          clonePath,
+			Remote:        "origin",
+			DefaultBranch: defaultBranch,
+			SourceRepoID:  repoName,
 		})
 	}
 	return repos, nil
+}
+
+// detectClonedRepoDefaultBranch resolves the branch selected by git clone.
+// Prefer the remote's symbolic HEAD because it is the repository contract;
+// fall back to the clone's symbolic HEAD for local/file remotes that do not
+// advertise refs/remotes/<remote>/HEAD. A clone with no resolvable branch is
+// not runnable and must not be registered with guessed metadata.
+func detectClonedRepoDefaultBranch(repoPath, remote string) (string, error) {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		remote = "origin"
+	}
+	remoteHead := "refs/remotes/" + remote + "/HEAD"
+	if out, err := cli.RunGitCommand(repoPath, "symbolic-ref", "--quiet", "--short", remoteHead); err == nil {
+		shortRef := strings.TrimSpace(out)
+		branch := strings.TrimPrefix(shortRef, remote+"/")
+		if branch != "" && gitRefResolvesToCommit(repoPath, shortRef) {
+			return branch, nil
+		}
+	}
+	if out, err := cli.RunGitCommand(repoPath, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
+		if branch := strings.TrimSpace(out); branch != "" && gitRefResolvesToCommit(repoPath, "HEAD") {
+			return branch, nil
+		}
+	}
+	return "", fmt.Errorf("remote %q and clone HEAD do not resolve to a committed branch", remote)
+}
+
+func gitRefResolvesToCommit(repoPath, ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false
+	}
+	_, err := cli.RunGitCommand(repoPath, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	return err == nil
+}
+
+// applyRequestedCloneBranch validates an explicit branch against every cloned
+// repository. With no explicit branch, each clone keeps its independently
+// detected remote HEAD. This prevents one shared workspace default from
+// corrupting mixed-repository metadata.
+func applyRequestedCloneBranch(repos []config.RepoConfig, requested string) error {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return nil
+	}
+	for i := range repos {
+		repo := &repos[i]
+		if _, err := cli.RunGitCommand(repo.Path, "check-ref-format", "--branch", requested); err != nil {
+			return fmt.Errorf("invalid default branch %q for repo %q: %w", requested, repo.Name, err)
+		}
+		remote := strings.TrimSpace(repo.Remote)
+		if remote == "" {
+			remote = "origin"
+		}
+		remoteRef := "refs/remotes/" + remote + "/" + requested + "^{commit}"
+		localRef := "refs/heads/" + requested + "^{commit}"
+		if _, err := cli.RunGitCommand(repo.Path, "rev-parse", "--verify", "--quiet", remoteRef); err != nil {
+			if _, localErr := cli.RunGitCommand(repo.Path, "rev-parse", "--verify", "--quiet", localRef); localErr != nil {
+				return fmt.Errorf("default branch %q does not exist in cloned repo %q", requested, repo.Name)
+			}
+		}
+		repo.DefaultBranch = requested
+	}
+	return nil
 }
 
 func cleanupClonedRepos(repos []config.RepoConfig) {

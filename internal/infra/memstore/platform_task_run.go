@@ -67,6 +67,80 @@ func newTaskRunStore(parent *driverRunStore, steps *driverStepStore, artifacts *
 }
 
 var _ store.TaskRunStore = (*taskRunStore)(nil)
+var _ store.TaskRunTerminalConvergenceStore = (*taskRunStore)(nil)
+
+func (s *taskRunStore) ListTaskRunTerminalConvergenceCandidates(
+	_ context.Context,
+	query store.TaskRunTerminalConvergenceQuery,
+) (store.TaskRunTerminalConvergencePage, error) {
+	query.WorkspaceKey = strings.TrimSpace(query.WorkspaceKey)
+	query.After = strings.TrimSpace(query.After)
+	if query.WorkspaceKey == "" || query.RequiredVersion <= 0 {
+		return store.TaskRunTerminalConvergencePage{}, fmt.Errorf("terminal convergence workspace and positive version are required: %w", domain.ErrInvalid)
+	}
+	limit := query.Limit
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+
+	s.mu.RLock()
+	ids := make([]string, 0)
+	for id, run := range s.items[query.WorkspaceKey] {
+		if id <= query.After || run == nil || !run.Status.IsTerminal() ||
+			taskRunTerminalConvergenceSatisfiedMem(run, query.RequiredVersion) {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	s.mu.RUnlock()
+	sort.Strings(ids)
+
+	page := store.TaskRunTerminalConvergencePage{}
+	if len(ids) > limit {
+		page.TaskRunIDs = append([]string(nil), ids[:limit]...)
+		page.Next = page.TaskRunIDs[len(page.TaskRunIDs)-1]
+	} else {
+		page.TaskRunIDs = append([]string(nil), ids...)
+	}
+	return page, nil
+}
+
+func (s *taskRunStore) CompleteTaskRunTerminalConvergence(
+	_ context.Context,
+	command store.TaskRunTerminalConvergenceComplete,
+) (*store.TaskRunTerminalConvergenceResult, error) {
+	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
+	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
+	command.CompletedAt = command.CompletedAt.UTC()
+	if command.WorkspaceKey == "" || command.TaskRunID == "" || command.RequiredVersion <= 0 || command.CompletedAt.IsZero() {
+		return nil, fmt.Errorf("terminal convergence identity, positive version, and completion time are required: %w", domain.ErrInvalid)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.items[command.WorkspaceKey][command.TaskRunID]
+	if !ok {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", command.TaskRunID, command.WorkspaceKey, domain.ErrNotFound)
+	}
+	if !run.Status.IsTerminal() {
+		return nil, fmt.Errorf("task run %q in workspace %q: %w", command.TaskRunID, command.WorkspaceKey, domain.ErrInvalidTransition)
+	}
+	if taskRunTerminalConvergenceSatisfiedMem(run, command.RequiredVersion) {
+		return &store.TaskRunTerminalConvergenceResult{TaskRun: cloneTaskRun(run), Replayed: true}, nil
+	}
+	if run.TerminalConvergenceVersion < 0 ||
+		(run.TerminalConvergenceVersion == 0) != (run.TerminalConvergedAt == nil) ||
+		run.TerminalConvergenceVersion >= command.RequiredVersion {
+		return nil, fmt.Errorf("task run %q in workspace %q has an invalid terminal convergence marker: %w", command.TaskRunID, command.WorkspaceKey, domain.ErrInvalidTransition)
+	}
+	run.TerminalConvergenceVersion = command.RequiredVersion
+	run.TerminalConvergedAt = &command.CompletedAt
+	return &store.TaskRunTerminalConvergenceResult{TaskRun: cloneTaskRun(run)}, nil
+}
+
+func taskRunTerminalConvergenceSatisfiedMem(run *domain.TaskRun, requiredVersion int) bool {
+	return run != nil && run.TerminalConvergenceVersion >= requiredVersion && run.TerminalConvergedAt != nil
+}
 
 func (s *taskRunStore) Create(ctx context.Context, in store.TaskRunCreate) (*domain.TaskRun, error) {
 	prepared, err := s.prepareTaskRunCreateMem(ctx, in)

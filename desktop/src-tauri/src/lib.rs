@@ -7,7 +7,6 @@ use std::{
     time::Duration,
 };
 
-use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use tauri::{
     menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem, Submenu, WINDOW_SUBMENU_ID},
     AppHandle, LogicalPosition, LogicalSize, Manager, RunEvent, Runtime, Url, WebviewUrl,
@@ -26,13 +25,7 @@ const STALE_RUNTIME_HEALTH_TIMEOUT: Duration = Duration::from_millis(300);
 
 #[derive(Default)]
 struct WorkspaceRecoveryState {
-    pending: Mutex<HashMap<String, WorkspaceRecovery>>,
-    bound_workspaces: Mutex<HashMap<String, String>>,
-}
-
-struct WorkspaceRecovery {
-    route: String,
-    workspace: String,
+    pending: Mutex<HashMap<String, String>>,
 }
 
 /// True when macOS is running this bundle from a read-only/randomized location
@@ -105,17 +98,10 @@ fn open_workspace_window<R: Runtime>(
     app: AppHandle<R>,
     caller: WebviewWindow<R>,
     runtime_url: String,
-    authorized_workspace: String,
     force_new: bool,
 ) -> Result<(), String> {
-    open_workspace_window_native(
-        &app,
-        &caller,
-        &runtime_url,
-        &authorized_workspace,
-        force_new,
-    )
-    .map_err(|err| err.to_string())
+    open_workspace_window_native(&app, &caller, &runtime_url, force_new)
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -123,7 +109,7 @@ fn take_workspace_recovery<R: Runtime>(
     app: AppHandle<R>,
     caller: WebviewWindow<R>,
     state: tauri::State<'_, WorkspaceRecoveryState>,
-) -> Result<Option<(String, String)>, String> {
+) -> Result<Option<String>, String> {
     let caller_url = caller.url().map_err(|err| err.to_string())?;
     let launcher = launcher_url(&app).map_err(|err| err.to_string())?;
     if caller_url != launcher {
@@ -133,8 +119,7 @@ fn take_workspace_recovery<R: Runtime>(
         .pending
         .lock()
         .ok()
-        .and_then(|mut pending| pending.remove(caller.label()))
-        .map(|recovery| (recovery.route, recovery.workspace)))
+        .and_then(|mut pending| pending.remove(caller.label())))
 }
 
 #[tauri::command]
@@ -321,22 +306,12 @@ fn recover_stale_workspace_window<R: Runtime>(
     }
 
     let state = app.state::<WorkspaceRecoveryState>();
-    let workspace = state
-        .bound_workspaces
-        .lock()
-        .map_err(|_| invalid_workspace_url("workspace binding state is unavailable"))?
-        .get(window.label())
-        .cloned()
-        .ok_or_else(|| invalid_workspace_url("workspace window has no native authority binding"))?;
-    let route = workspace_recovery_route_for_workspace(&url, &workspace);
+    let route = workspace_recovery_route(&url);
     state
         .pending
         .lock()
         .map_err(|_| invalid_workspace_url("workspace recovery state is unavailable"))?
-        .insert(
-            window.label().to_string(),
-            WorkspaceRecovery { route, workspace },
-        );
+        .insert(window.label().to_string(), route);
 
     window.navigate(launcher)?;
     reveal_window(app, window);
@@ -363,75 +338,11 @@ fn workspace_recovery_route(url: &Url) -> String {
         route.push('?');
         route.push_str(query);
     }
-    if let Some(fragment) = sanitized_workspace_fragment(url.fragment()) {
+    if let Some(fragment) = url.fragment().filter(|value| !value.trim().is_empty()) {
         route.push('#');
-        route.push_str(&fragment);
+        route.push_str(fragment);
     }
     route
-}
-
-fn workspace_recovery_route_for_workspace(url: &Url, workspace: &str) -> String {
-    // A same-window SPA workspace switch intentionally clears browser
-    // authority. Keep the native window binding immutable: recovery may
-    // preserve a route only for that bound workspace and otherwise returns to
-    // its root. Minting authority for the web-controlled destination would
-    // turn an authority-clearing switch (or XSS route change) into escalation.
-    if workspace_from_runtime_url(url).as_deref() == Some(workspace) {
-        return workspace_recovery_route(url);
-    }
-    format!("/ws/{}", utf8_percent_encode(workspace, NON_ALPHANUMERIC))
-}
-
-fn workspace_from_runtime_url(url: &Url) -> Option<String> {
-    let mut segments = url.path_segments()?;
-    if segments.next()? != "ws" {
-        return None;
-    }
-    let workspace = percent_decode_str(segments.next()?).decode_utf8().ok()?;
-    if workspace.is_empty() {
-        return None;
-    }
-    Some(workspace.into_owned())
-}
-
-fn workspace_from_launch_fragment(url: &Url) -> Option<String> {
-    url::form_urlencoded::parse(url.fragment()?.as_bytes())
-        .find_map(|(key, value)| (key == "loom_workspace").then(|| value.into_owned()))
-        .filter(|workspace| !workspace.is_empty())
-}
-
-fn valid_launch_code_from_fragment(url: &Url) -> bool {
-    let Some(code) = url::form_urlencoded::parse(url.fragment().unwrap_or_default().as_bytes())
-        .find_map(|(key, value)| (key == "loom_launch").then(|| value.into_owned()))
-    else {
-        return false;
-    };
-    code.len() == 64
-        && code
-            .bytes()
-            .all(|value| value.is_ascii_digit() || (b'a'..=b'f').contains(&value))
-        && code.bytes().any(|value| value != b'0')
-}
-
-fn sanitized_workspace_fragment(fragment: Option<&str>) -> Option<String> {
-    let fragment = fragment?.trim();
-    if fragment.is_empty() {
-        return None;
-    }
-    let retained = fragment
-        .split('&')
-        .filter(|part| !part.is_empty())
-        .filter(|part| {
-            let key = url::form_urlencoded::parse(part.as_bytes())
-                .next()
-                .map(|(key, _)| key);
-            !matches!(key.as_deref(), Some("loom_launch" | "loom_workspace"))
-        })
-        .collect::<Vec<_>>();
-    if retained.is_empty() {
-        return None;
-    }
-    Some(retained.join("&"))
 }
 
 fn runtime_health_probe(url: &Url, timeout: Duration) -> bool {
@@ -527,7 +438,6 @@ fn open_workspace_window_native<R: Runtime>(
     app: &AppHandle<R>,
     caller: &WebviewWindow<R>,
     runtime_url: &str,
-    authorized_workspace: &str,
     force_new: bool,
 ) -> tauri::Result<()> {
     let url = workspace_entry_url(runtime_url)?;
@@ -546,22 +456,9 @@ fn open_workspace_window_native<R: Runtime>(
             "workspace navigation caller does not match the target window",
         ));
     }
-    let workspace = authorized_workspace.trim();
-    if workspace.is_empty()
-        || workspace_from_runtime_url(&url).as_deref() != Some(workspace)
-        || workspace_from_launch_fragment(&url).as_deref() != Some(workspace)
-        || !valid_launch_code_from_fragment(&url)
-    {
-        return Err(invalid_workspace_url(
-            "workspace entry does not match its native authority binding",
-        ));
-    }
-
-    // A user-created additional window starts as bundled launcher content so
-    // it can ask the sidecar for its own one-time browser launch code. Reuse
-    // that exact invoking launcher only after verifying it has not already
-    // navigated to runtime content. This prevents cloning an existing URL (and
-    // its consumed launch fragment) into another workspace window.
+    // A user-created additional window starts as bundled launcher content.
+    // Reuse that exact invoking launcher only after verifying it has not
+    // already navigated to runtime content.
     if force_new {
         if !is_additional_workspace_launcher(app, caller)? {
             return Err(tauri::Error::InvalidWebviewUrl(
@@ -569,7 +466,6 @@ fn open_workspace_window_native<R: Runtime>(
             ));
         }
         configure_workspace_window(caller)?;
-        bind_workspace_window(app, caller.label(), workspace)?;
         caller.navigate(url)?;
         reveal_window(app, caller);
         return Ok(());
@@ -577,7 +473,6 @@ fn open_workspace_window_native<R: Runtime>(
 
     if let Some(window) = app.get_webview_window(PRIMARY_WORKSPACE_WINDOW_LABEL) {
         configure_workspace_window(&window)?;
-        bind_workspace_window(app, window.label(), workspace)?;
         window.navigate(url)?;
         reveal_window(app, &window);
         return Ok(());
@@ -594,21 +489,7 @@ fn open_workspace_window_native<R: Runtime>(
     .content_protected(false)
     .focused(true)
     .build()?;
-    bind_workspace_window(app, window.label(), workspace)?;
     reveal_window(app, &window);
-    Ok(())
-}
-
-fn bind_workspace_window<R: Runtime>(
-    app: &AppHandle<R>,
-    label: &str,
-    workspace: &str,
-) -> tauri::Result<()> {
-    app.state::<WorkspaceRecoveryState>()
-        .bound_workspaces
-        .lock()
-        .map_err(|_| invalid_workspace_url("workspace binding state is unavailable"))?
-        .insert(label.to_string(), workspace.to_string());
     Ok(())
 }
 
@@ -683,10 +564,8 @@ fn current_time_millis() -> u128 {
 mod tests {
     use super::{
         additional_workspace_launcher_init_script, is_additional_workspace_launcher_url,
-        is_loopback_runtime_url, path_needs_relocation, runtime_health_probe,
-        valid_launch_code_from_fragment, workspace_entry_url, workspace_from_launch_fragment,
-        workspace_from_runtime_url, workspace_recovery_route,
-        workspace_recovery_route_for_workspace,
+        is_loopback_runtime_url, path_needs_relocation, runtime_health_probe, workspace_entry_url,
+        workspace_recovery_route,
     };
     use std::{
         io::{Read, Write},
@@ -720,21 +599,16 @@ mod tests {
     }
 
     #[test]
-    fn additional_workspace_launcher_requests_fresh_browser_authority() {
+    fn additional_workspace_launcher_stays_on_bundled_content() {
         let script = additional_workspace_launcher_init_script();
         assert!(script.contains("__LOOM_OPEN_ADDITIONAL_WORKSPACE_WINDOW__ = true"));
-        assert!(!script.contains("loom_launch"));
-        assert!(!script.contains("loom_workspace"));
         assert!(!script.contains("http://"));
     }
 
     #[test]
     fn only_bundled_additional_launcher_can_reuse_its_window() {
         let launcher = Url::parse("tauri://localhost").unwrap();
-        let runtime = Url::parse(
-            "http://127.0.0.1:4567/ws/DESKTOP#loom_launch=consumed&loom_workspace=DESKTOP",
-        )
-        .unwrap();
+        let runtime = Url::parse("http://127.0.0.1:4567/ws/DESKTOP").unwrap();
 
         assert!(is_additional_workspace_launcher_url(
             "workspace-1-1",
@@ -783,74 +657,6 @@ mod tests {
             workspace_recovery_route(&url),
             "/ws/DESKTOP/list?search=abc#section"
         );
-    }
-
-    #[test]
-    fn recovery_strips_one_time_browser_authority() {
-        let url = Url::parse(
-			"http://127.0.0.1:4567/ws/DESKTOP/list?search=abc#section=versions&loom_launch=secret&loom_workspace=DESKTOP",
-		)
-		.unwrap();
-        assert_eq!(
-            workspace_recovery_route(&url),
-            "/ws/DESKTOP/list?search=abc#section=versions"
-        );
-        let only_secret = Url::parse(
-            "http://127.0.0.1:4567/ws/DESKTOP#loom_launch=secret&loom_workspace=DESKTOP",
-        )
-        .unwrap();
-        assert_eq!(workspace_recovery_route(&only_secret), "/ws/DESKTOP");
-
-        let encoded_secret = Url::parse(
-            "http://127.0.0.1:4567/ws/DESKTOP#section&loom%5Flaunch=secret&loom%5Fworkspace=DESKTOP",
-        )
-        .unwrap();
-        assert_eq!(
-            workspace_recovery_route(&encoded_secret),
-            "/ws/DESKTOP#section"
-        );
-    }
-
-    #[test]
-    fn recovery_rejects_a_web_controlled_cross_workspace_route() {
-        let malicious =
-            Url::parse("http://127.0.0.1:4567/ws/OTHER/list?search=abc#section=versions").unwrap();
-        assert_eq!(
-            workspace_recovery_route_for_workspace(&malicious, "DESKTOP"),
-            "/ws/DESKTOP"
-        );
-
-        let matching =
-            Url::parse("http://127.0.0.1:4567/ws/DESKTOP/list?search=abc#section").unwrap();
-        assert_eq!(
-            workspace_recovery_route_for_workspace(&matching, "DESKTOP"),
-            "/ws/DESKTOP/list?search=abc#section"
-        );
-    }
-
-    #[test]
-    fn workspace_entry_carries_matching_route_and_launch_authority() {
-        let launch_code = "ab".repeat(32);
-        let url = Url::parse(&format!(
-            "http://127.0.0.1:4567/ws/PHASE%2D4#loom_launch={launch_code}&loom_workspace=PHASE-4"
-        ))
-        .unwrap();
-        assert_eq!(workspace_from_runtime_url(&url).as_deref(), Some("PHASE-4"));
-        assert_eq!(
-            workspace_from_launch_fragment(&url).as_deref(),
-            Some("PHASE-4")
-        );
-        assert!(valid_launch_code_from_fragment(&url));
-
-        let missing =
-            Url::parse("http://127.0.0.1:4567/ws/PHASE-4#loom_workspace=PHASE-4").unwrap();
-        assert!(!valid_launch_code_from_fragment(&missing));
-        let zero = Url::parse(&format!(
-            "http://127.0.0.1:4567/ws/PHASE-4#loom_launch={}&loom_workspace=PHASE-4",
-            "0".repeat(64)
-        ))
-        .unwrap();
-        assert!(!valid_launch_code_from_fragment(&zero));
     }
 
     #[test]

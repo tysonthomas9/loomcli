@@ -91,8 +91,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	if config.HSTSEnabled {
 		logger.Info("HSTS enabled: ensure this server is behind a TLS-terminating proxy")
 	}
-	if config.ExtAuthURL == "" && config.BindAddress != "127.0.0.1" && config.BindAddress != "::1" {
-		logger.Warn("no authentication configured and server is exposed to network", "bind_address", config.BindAddress)
+	if config.ExtAuthURL == "" && !isLoopbackBindAddress(config.BindAddress) {
+		logger.Warn("open auth mode is reachable on a non-loopback listener; restrict exposure at the host/container boundary or configure --auth-url", "bind_address", config.BindAddress)
 	}
 	if config.ExtAuthURL != "" && config.WorkspaceRoleResolver == nil {
 		logger.Warn("remote file-browser requests will be DENIED (403): file browser RBAC not configured; configure a workspace role resolver to enable remote file access")

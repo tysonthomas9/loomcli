@@ -14,6 +14,10 @@ import (
 const (
 	ActionConvergeTaskRun          authority.Action = "execution.converge-task-run"
 	ActionRepairTerminalDriverStep authority.Action = "execution.repair-terminal-driver-step"
+	// CurrentTaskRunTerminalConvergenceVersion advances only when the set or
+	// meaning of durable convergence legs changes. Older markers are then
+	// rediscovered for upgrade backfill.
+	CurrentTaskRunTerminalConvergenceVersion = 1
 )
 
 type TaskRunTerminalEventType string
@@ -58,6 +62,9 @@ type ConvergeTaskRunResult struct {
 	DriverStepEnsured   bool
 	NotificationEnsured bool
 	NotificationSkipped bool
+	ConvergenceEnsured  bool
+	ConvergenceReplayed bool
+	ConvergenceVersion  int
 }
 
 type TaskRunTerminalEvent struct {
@@ -114,9 +121,10 @@ type LeadTaskNotification struct {
 }
 
 type TaskRunConvergenceCandidateQuery struct {
-	WorkspaceKey string
-	After        string
-	Limit        int
+	WorkspaceKey    string
+	RequiredVersion int
+	After           string
+	Limit           int
 }
 
 type TaskRunConvergenceCandidatePage struct {
@@ -126,7 +134,29 @@ type TaskRunConvergenceCandidatePage struct {
 
 type TaskRunConvergenceSource interface {
 	GetTerminalTaskRun(context.Context, string, string) (*TerminalTaskRunRecord, error)
+}
+
+type CompleteTaskRunTerminalConvergence struct {
+	WorkspaceKey    string
+	TaskRunID       string
+	RequiredVersion int
+	CompletedAt     time.Time
+}
+
+type TaskRunTerminalConvergenceCheckpoint struct {
+	WorkspaceKey string
+	TaskRunID    string
+	Version      int
+	CompletedAt  time.Time
+	Replayed     bool
+}
+
+// TaskRunConvergenceCheckpointPort owns both candidate discovery and durable
+// completion. It is deliberately separate from the terminal record reader:
+// only this typed Execution command can make a TaskRun ineligible next pass.
+type TaskRunConvergenceCheckpointPort interface {
 	ListTaskRunConvergenceCandidates(context.Context, TaskRunConvergenceCandidateQuery) (TaskRunConvergenceCandidatePage, error)
+	CompleteTaskRunTerminalConvergence(context.Context, CompleteTaskRunTerminalConvergence) (TaskRunTerminalConvergenceCheckpoint, error)
 }
 
 type TaskRunTerminalEventPort interface {
@@ -151,6 +181,7 @@ type LeadTaskNotificationPort interface {
 
 type TaskRunConvergenceDependencies struct {
 	Source        TaskRunConvergenceSource
+	Checkpoints   TaskRunConvergenceCheckpointPort
 	Events        TaskRunTerminalEventPort
 	DriverSteps   DriverStepTerminalPort
 	LeadResolver  EpicLeadQueryPort
@@ -170,7 +201,7 @@ func (service *Service) ConvergeTaskRun(ctx context.Context, auth authority.Syst
 		return ConvergeTaskRunResult{}, ErrInvalid
 	}
 	dependencies := service.dependencies.Convergence
-	if dependencies.Source == nil || dependencies.Events == nil {
+	if dependencies.Source == nil || dependencies.Checkpoints == nil || dependencies.Events == nil {
 		return ConvergeTaskRunResult{}, ErrUnavailable
 	}
 	record, err := dependencies.Source.GetTerminalTaskRun(ctx, command.WorkspaceKey, command.TaskRunID)
@@ -193,6 +224,20 @@ func (service *Service) ConvergeTaskRun(ctx context.Context, auth authority.Syst
 	if err != nil {
 		return result, err
 	}
+	checkpoint, err := dependencies.Checkpoints.CompleteTaskRunTerminalConvergence(ctx, CompleteTaskRunTerminalConvergence{
+		WorkspaceKey: record.WorkspaceKey, TaskRunID: record.TaskRunID,
+		RequiredVersion: CurrentTaskRunTerminalConvergenceVersion, CompletedAt: command.ObservedAt,
+	})
+	if err != nil {
+		return result, fmt.Errorf("complete terminal TaskRun convergence: %w", err)
+	}
+	if checkpoint.WorkspaceKey != record.WorkspaceKey || checkpoint.TaskRunID != record.TaskRunID ||
+		checkpoint.Version < CurrentTaskRunTerminalConvergenceVersion || checkpoint.CompletedAt.IsZero() {
+		return result, fmt.Errorf("%w: terminal TaskRun convergence checkpoint escaped requested envelope", ErrConflict)
+	}
+	result.ConvergenceEnsured = true
+	result.ConvergenceReplayed = checkpoint.Replayed
+	result.ConvergenceVersion = checkpoint.Version
 	return result, nil
 }
 
@@ -336,14 +381,14 @@ func terminalLeadTaskNotification(record *TerminalTaskRunRecord, lead string) Le
 type TaskRunConvergencePass struct {
 	WorkspaceKey string
 	Scopes       TaskRunRecoveryScopePort
-	Source       TaskRunConvergenceSource
+	Checkpoints  TaskRunConvergenceCheckpointPort
 	API          TaskRunConvergenceAPI
 	Authorities  SystemAuthorityResolver
 	Limit        int
 }
 
 func (pass *TaskRunConvergencePass) RunOnce(ctx context.Context) error {
-	if pass == nil || pass.Source == nil || pass.API == nil || pass.Authorities == nil {
+	if pass == nil || pass.Checkpoints == nil || pass.API == nil || pass.Authorities == nil {
 		return ErrUnavailable
 	}
 	workspaces, err := taskRunConvergenceWorkspaces(ctx, pass.WorkspaceKey, pass.Scopes)
@@ -370,8 +415,9 @@ func (pass *TaskRunConvergencePass) runWorkspace(ctx context.Context, workspace 
 	after := ""
 	seen := map[string]struct{}{}
 	for {
-		page, err := pass.Source.ListTaskRunConvergenceCandidates(ctx, TaskRunConvergenceCandidateQuery{
-			WorkspaceKey: workspace, After: after, Limit: limit,
+		page, err := pass.Checkpoints.ListTaskRunConvergenceCandidates(ctx, TaskRunConvergenceCandidateQuery{
+			WorkspaceKey: workspace, RequiredVersion: CurrentTaskRunTerminalConvergenceVersion,
+			After: after, Limit: limit,
 		})
 		if err != nil {
 			return err

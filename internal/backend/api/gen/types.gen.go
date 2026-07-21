@@ -3292,6 +3292,13 @@ type TabPutRequest struct {
 	SortOrder int    `json:"sort_order"`
 }
 
+// TaskWorkflowRunsResponse defines model for TaskWorkflowRunsResponse.
+type TaskWorkflowRunsResponse struct {
+	Runs       []DriverRun `json:"runs"`
+	SubjectRef string      `json:"subject_ref"`
+	TaskId     string      `json:"task_id"`
+}
+
 // TerminalSessionInfo defines model for TerminalSessionInfo.
 type TerminalSessionInfo struct {
 	// Created Unix timestamp
@@ -3959,6 +3966,11 @@ type GetGraphParams struct {
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
 
+// SetIssueRepositoryJSONBody defines parameters for SetIssueRepository.
+type SetIssueRepositoryJSONBody struct {
+	Repo string `json:"repo"`
+}
+
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.
 type SaveIssueTabsJSONBody struct {
 	ActiveTabId string     `json:"active_tab_id"`
@@ -4148,6 +4160,9 @@ type AddDependencyJSONRequestBody = AddDependencyRequest
 
 // MoveIssueJSONRequestBody defines body for MoveIssue for application/json ContentType.
 type MoveIssueJSONRequestBody = MoveIssueRequest
+
+// SetIssueRepositoryJSONRequestBody defines body for SetIssueRepository for application/json ContentType.
+type SetIssueRepositoryJSONRequestBody SetIssueRepositoryJSONBody
 
 // SaveIssueTabsJSONRequestBody defines body for SaveIssueTabs for application/json ContentType.
 type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody

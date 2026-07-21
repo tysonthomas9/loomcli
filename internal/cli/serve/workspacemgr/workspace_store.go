@@ -176,7 +176,7 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
-	clonedRepos, err := materializeAddReposClones(ctx, req.CloneURLs, wsDir, seen, created)
+	clonedRepos, err := materializeAddReposClones(ctx, req.CloneURLs, wsDir, seen, created, req.Branch)
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
@@ -293,7 +293,7 @@ func materializeAddReposWorktrees(ctx context.Context, resolved []resolvedRepo, 
 
 // materializeAddReposClones clones any --clone-url repos under the workspace
 // directory, rolling back previously-attached worktrees on failure.
-func materializeAddReposClones(ctx context.Context, cloneURLs []string, wsDir string, seen map[string]bool, created []createdWorktree) ([]config.RepoConfig, error) {
+func materializeAddReposClones(ctx context.Context, cloneURLs []string, wsDir string, seen map[string]bool, created []createdWorktree, requestedBranch string) ([]config.RepoConfig, error) {
 	if len(cloneURLs) == 0 {
 		return nil, nil
 	}
@@ -301,6 +301,11 @@ func materializeAddReposClones(ctx context.Context, cloneURLs []string, wsDir st
 	if err != nil {
 		cleanupAttachedWorktrees(created)
 		return nil, err
+	}
+	if err := applyRequestedCloneBranch(cloned, requestedBranch); err != nil {
+		cleanupAttachedWorktrees(created)
+		cleanupClonedRepos(cloned)
+		return nil, workspaceerrors.New(workspaceerrors.GitFailed, "validate cloned repository default branch", err)
 	}
 	return cloned, nil
 }
@@ -340,12 +345,16 @@ func createStoreRepo(ctx context.Context, s storepkg.Store, key, branch string, 
 	if remoteName == "" {
 		remoteName = "origin"
 	}
+	defaultBranch := strings.TrimSpace(r.DefaultBranch)
+	if defaultBranch == "" {
+		defaultBranch = strings.TrimSpace(branch)
+	}
 	if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
 		WorkspaceKey:  key,
 		Name:          r.Name,
 		RemoteURL:     gitRemoteURL(r.Path, remoteName),
 		Remote:        remoteName,
-		DefaultBranch: branch,
+		DefaultBranch: defaultBranch,
 		SourceRepoID:  r.SourceRepoID,
 	}); err != nil {
 		return fmt.Errorf("create repo %q in store: %w", r.Name, err)
@@ -383,10 +392,8 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 	if len(cloneURLs) == 0 {
 		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.PathNotFound, "no clone URLs specified", nil)
 	}
-	if existing, err := s.Workspaces().GetByName(ctx, req.Name); err == nil && existing != nil {
-		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
-	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
-		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace name: %w", err)
+	if err := ensureCloneWorkspaceNameAvailable(ctx, s, req.Name); err != nil {
+		return service.WorkspaceCreateResult{}, err
 	}
 
 	wsPlan, err := resolveWorkspaceDirForCreate(req.Path, req.Name)
@@ -399,10 +406,8 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 		branch = "main"
 	}
 	key := service.WorkspaceKeyFromName(req.Name)
-	if _, err := s.Workspaces().Get(ctx, key); err == nil {
-		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", req.Name), nil)
-	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
-		return service.WorkspaceCreateResult{}, fmt.Errorf("check workspace key: %w", err)
+	if err := ensureCloneWorkspaceKeyAvailable(ctx, s, req.Name, key); err != nil {
+		return service.WorkspaceCreateResult{}, err
 	}
 
 	if _, err := s.Workspaces().Create(ctx, storepkg.WorkspaceCreate{
@@ -443,19 +448,38 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, err
 	}
+	if err := applyRequestedCloneBranch(repos, req.Branch); err != nil {
+		cleanupCloneWorkspace(wsPlan, repos)
+		rollbackStore()
+		return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.GitFailed, "validate cloned repository default branch", err)
+	}
+	detectedBranch := ""
+	if strings.TrimSpace(req.Branch) == "" && len(repos) > 0 {
+		branch = strings.TrimSpace(repos[0].DefaultBranch)
+		if branch == "" {
+			cleanupCloneWorkspace(wsPlan, repos)
+			rollbackStore()
+			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.GitFailed, "cloned repository default branch is empty", nil)
+		}
+		detectedBranch = branch
+	}
 
-	if err := updateStoreWorkspaceState(ctx, s, key, domain.WorkspaceStateInitializing); err != nil {
+	if err := updateStoreWorkspaceStateAndDefaultBranch(ctx, s, key, domain.WorkspaceStateInitializing, detectedBranch); err != nil {
 		cleanupCloneWorkspace(wsPlan, repos)
 		rollbackStore()
 		return service.WorkspaceCreateResult{}, fmt.Errorf("mark workspace initializing: %w", err)
 	}
 	for _, r := range repos {
 		remoteURL := gitRemoteURL(r.Path, "origin")
+		defaultBranch := strings.TrimSpace(r.DefaultBranch)
+		if defaultBranch == "" {
+			defaultBranch = branch
+		}
 		if _, err := s.Repos().Create(ctx, storepkg.RepoCreate{
 			WorkspaceKey:  key,
 			Name:          r.Name,
 			RemoteURL:     remoteURL,
-			DefaultBranch: branch,
+			DefaultBranch: defaultBranch,
 			SourceRepoID:  r.SourceRepoID,
 		}); err != nil {
 			cleanupCloneWorkspace(wsPlan, repos)
@@ -477,12 +501,45 @@ func createStoreBackedCloneWorkspace(ctx context.Context, s storepkg.Store, req 
 	return service.WorkspaceCreateResult{WorkspaceID: key, WorkspacePath: wsDir}, nil
 }
 
+func ensureCloneWorkspaceNameAvailable(ctx context.Context, s storepkg.Store, name string) error {
+	existing, err := s.Workspaces().GetByName(ctx, name)
+	if err == nil && existing != nil {
+		return workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", name), nil)
+	}
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return fmt.Errorf("check workspace name: %w", err)
+	}
+	return nil
+}
+
+func ensureCloneWorkspaceKeyAvailable(ctx context.Context, s storepkg.Store, name, key string) error {
+	_, err := s.Workspaces().Get(ctx, key)
+	if err == nil {
+		return workspaceerrors.New(workspaceerrors.AlreadyExists, fmt.Sprintf("workspace %q already exists", name), nil)
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		return fmt.Errorf("check workspace key: %w", err)
+	}
+	return nil
+}
+
 func updateStoreWorkspaceState(ctx context.Context, s storepkg.Store, key string, state domain.WorkspaceState) error {
+	return updateStoreWorkspaceStateAndDefaultBranch(ctx, s, key, state, "")
+}
+
+// updateStoreWorkspaceStateAndDefaultBranch keeps workspace lifecycle and
+// clone-derived branch persistence on the existing workspace mutation seam.
+// An empty branch leaves the stored default unchanged.
+func updateStoreWorkspaceStateAndDefaultBranch(ctx context.Context, s storepkg.Store, key string, state domain.WorkspaceState, defaultBranch string) error {
 	msg := ""
-	_, err := s.Workspaces().Update(ctx, key, storepkg.WorkspaceUpdate{
+	update := storepkg.WorkspaceUpdate{
 		State:        &state,
 		ErrorMessage: &msg,
-	})
+	}
+	if defaultBranch = strings.TrimSpace(defaultBranch); defaultBranch != "" {
+		update.DefaultBranch = &defaultBranch
+	}
+	_, err := s.Workspaces().Update(ctx, key, update)
 	return err
 }
 

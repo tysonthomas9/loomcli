@@ -43,10 +43,23 @@ const (
 	// connects over the same loopback address, so the production default would
 	// combine unrelated local workers into one self-throttling bucket.
 	EnvFleetRateLimitEnabled = "FLEET_RATE_LIMIT_ENABLED"
+	// EnvFleetLogLevel controls the embedded FleetDB child logger. FleetDB's
+	// production INFO level writes two access-log records for every request.
+	// Loom's always-on workers poll every local workspace, so forwarding those
+	// successful request records into the persistent desktop serve log causes
+	// unbounded high-volume growth while idle. Embedded mode defaults to WARN;
+	// operators can still opt back into INFO or DEBUG when diagnosing FleetDB.
+	EnvFleetLogLevel = "FLEET_LOG_LEVEL"
+	// EnvFleetRedisEventSubscribePollInterval opts FleetDB's EventStore out of
+	// XREAD BLOCK 0. Loom sets it only for the in-process miniredis it owns;
+	// external/real Redis retains the blocking subscription path.
+	EnvFleetRedisEventSubscribePollInterval = "FLEET_REDIS_EVENT_SUBSCRIBE_POLL_INTERVAL"
 
-	defaultEmbeddedFleetRedisPoolSize     = "100"
-	defaultEmbeddedFleetRedisMinIdleConns = "10"
-	defaultEmbeddedFleetRateLimitEnabled  = "false"
+	defaultEmbeddedFleetRedisPoolSize                   = "100"
+	defaultEmbeddedFleetRedisMinIdleConns               = "10"
+	defaultEmbeddedFleetRateLimitEnabled                = "false"
+	defaultEmbeddedFleetLogLevel                        = "warn"
+	defaultEmbeddedFleetRedisEventSubscribePollInterval = "250ms"
 
 	embeddedFleetDBServiceActor = "loom-local-service"
 	embeddedFleetDBAuthDirName  = "auth"
@@ -407,6 +420,7 @@ func StartEmbedded(ctx context.Context, dataDir string, logger *slog.Logger) (*E
 	cmd.Env = withEnvValue(cmd.Env, embeddedFleetDBArtifactBackendEnv, "local")
 	cmd.Env = withEnvValue(cmd.Env, embeddedFleetDBArtifactDirEnv, filepath.Join(fleetDir, "artifacts"))
 	cmd.Env = appendEmbeddedFleetDBEnvDefaults(cmd.Env)
+	cmd.Env = configureEmbeddedFleetDBRedisSubscription(cmd.Env, redisMgr != nil)
 	// Propagate the active trace context to the spawned fleet-db so its
 	// bootstrap work shows up as a child of the loom span that triggered
 	// the spawn. Per-request tracing flows through the inbound HTTP header
@@ -651,7 +665,21 @@ func appendEmbeddedFleetDBEnvDefaults(env []string) []string {
 	env = withDefaultEnv(env, EnvFleetRedisPoolSize, defaultEmbeddedFleetRedisPoolSize)
 	env = withDefaultEnv(env, EnvFleetRedisMinIdleConns, defaultEmbeddedFleetRedisMinIdleConns)
 	env = withDefaultEnv(env, EnvFleetRateLimitEnabled, defaultEmbeddedFleetRateLimitEnabled)
+	env = withDefaultEnv(env, EnvFleetLogLevel, defaultEmbeddedFleetLogLevel)
 	return env
+}
+
+func configureEmbeddedFleetDBRedisSubscription(env []string, miniredisOwned bool) []string {
+	if !miniredisOwned {
+		// Absence keeps XREAD BLOCK 0 for real Redis. Preserve an explicit
+		// operator override just like every other FleetDB environment setting.
+		return env
+	}
+	return withEnvValue(
+		env,
+		EnvFleetRedisEventSubscribePollInterval,
+		defaultEmbeddedFleetRedisEventSubscribePollInterval,
+	)
 }
 
 func withDefaultEnv(env []string, key, value string) []string {

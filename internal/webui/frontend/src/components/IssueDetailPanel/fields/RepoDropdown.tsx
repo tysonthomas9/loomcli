@@ -21,6 +21,8 @@ export interface RepoDropdownProps {
   isSaving?: boolean;
   /** Whether editing is disabled */
   disabled?: boolean;
+  /** Whether the dropdown offers a None option. Defaults to true. */
+  allowUnassigned?: boolean;
   /** Additional CSS class name */
   className?: string;
 }
@@ -44,6 +46,7 @@ export function RepoDropdown({
   onSave,
   isSaving,
   disabled,
+  allowUnassigned = true,
   className,
 }: RepoDropdownProps): JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
@@ -60,10 +63,10 @@ export function RepoDropdown({
   // Build options: "None" first, then each repo
   const options: RepoOption[] = useMemo(
     () => [
-      { value: null, label: "None" },
+      ...(allowUnassigned ? [{ value: null, label: "None" }] : []),
       ...repos.map((r) => ({ value: r, label: r })),
     ],
-    [repos],
+    [allowUnassigned, repos],
   );
 
   // Sync optimistic value when prop changes

@@ -20,23 +20,25 @@ import (
 // exact-purpose authority resolver, never the Store, issuer, or outbound
 // persistence adapter.
 type ExecutionCapability struct {
-	issuer               *authority.Issuer
-	taskRuns             execution.TaskRunAPI
-	taskRunRequests      execution.TaskRunRequestAPI
-	taskRunWorkers       execution.TaskRunWorkerAPI
-	taskRunScheduling    execution.TaskRunSchedulingAPI
-	workerProfiles       execution.WorkerProfileAPI
-	taskRunConvergence   execution.TaskRunConvergenceAPI
-	convergenceSource    execution.TaskRunConvergenceSource
-	taskRunRecovery      execution.TaskRunRecoveryAPI
-	recoveryScopes       execution.TaskRunRecoveryScopePort
-	taskRunAuthorities   execution.TaskRunAuthorityResolver
-	driverRuns           execution.DriverRunAPI
-	driverRunAuthorities execution.DriverRunAuthorityResolver
-	systemAuthorities    execution.SystemAuthorityResolver
-	operatorAuthorities  workflowcataloghttp.OperatorAuthorityResolver
-	awaitEvents          execution.AwaitEventNotificationAPI
-	runOutcomes          execution.DriverRunOutcomeAPI
+	issuer                 *authority.Issuer
+	taskRuns               execution.TaskRunAPI
+	taskRunRequests        execution.TaskRunRequestAPI
+	taskRunWorkers         execution.TaskRunWorkerAPI
+	taskRunScheduling      execution.TaskRunSchedulingAPI
+	workerProfiles         execution.WorkerProfileAPI
+	taskRunConvergence     execution.TaskRunConvergenceAPI
+	convergenceSource      execution.TaskRunConvergenceSource
+	convergenceCheckpoints execution.TaskRunConvergenceCheckpointPort
+	taskRunRecovery        execution.TaskRunRecoveryAPI
+	recoveryScopes         execution.TaskRunRecoveryScopePort
+	taskRunAuthorities     execution.TaskRunAuthorityResolver
+	driverRuns             execution.DriverRunAPI
+	driverRunAuthorities   execution.DriverRunAuthorityResolver
+	systemAuthorities      execution.SystemAuthorityResolver
+	operatorAuthorities    workflowcataloghttp.OperatorAuthorityResolver
+	awaitEvents            execution.AwaitEventNotificationAPI
+	runOutcomes            execution.DriverRunOutcomeAPI
+	terminalWorkRecoveries execution.TerminalDriverRunWorkRecoveryQueueAPI
 }
 
 func (capability *ExecutionCapability) AwaitEventNotificationAPI() execution.AwaitEventNotificationAPI {
@@ -51,6 +53,13 @@ func (capability *ExecutionCapability) DriverRunOutcomeAPI() execution.DriverRun
 		return nil
 	}
 	return capability.runOutcomes
+}
+
+func (capability *ExecutionCapability) TerminalDriverRunWorkRecoveryQueueAPI() execution.TerminalDriverRunWorkRecoveryQueueAPI {
+	if capability == nil {
+		return nil
+	}
+	return capability.terminalWorkRecoveries
 }
 
 func (capability *ExecutionCapability) TaskRunRequestAPI() execution.TaskRunRequestAPI {
@@ -93,6 +102,13 @@ func (capability *ExecutionCapability) TaskRunConvergenceSource() execution.Task
 		return nil
 	}
 	return capability.convergenceSource
+}
+
+func (capability *ExecutionCapability) TaskRunConvergenceCheckpoints() execution.TaskRunConvergenceCheckpointPort {
+	if capability == nil {
+		return nil
+	}
+	return capability.convergenceCheckpoints
 }
 
 func (capability *ExecutionCapability) TaskRunRecoveryAPI() execution.TaskRunRecoveryAPI {
@@ -202,7 +218,7 @@ func newExecutionCapability(
 	if err != nil {
 		return nil, fmt.Errorf("compose Execution admission: %w", err)
 	}
-	serviceDependencies, convergenceSource, recoveryScopes, err := newExecutionServiceDependencies(dependencies)
+	serviceDependencies, convergenceSource, convergenceCheckpoints, recoveryScopes, err := newExecutionServiceDependencies(dependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +226,7 @@ func newExecutionCapability(
 	if err != nil {
 		return nil, fmt.Errorf("compose Execution service: %w", err)
 	}
-	return newExecutionCapabilityHandle(service, issuer, operatorAuthorities, convergenceSource, recoveryScopes), nil
+	return newExecutionCapabilityHandle(service, issuer, operatorAuthorities, convergenceSource, convergenceCheckpoints, recoveryScopes), nil
 }
 
 func newExecutionTaskRunMutationPort(dependencies ExecutionDependencies) executionTaskRunMutationPort {
@@ -224,6 +240,7 @@ func newExecutionDriverRunDependencies(dependencies ExecutionDependencies) (exec
 	driverRunAdapter := &executionDriverRunStoreAdapter{driverRuns: dependencies.DriverRuns, awaits: dependencies.Awaits}
 	var driverRunChildStarts execution.DriverRunChildStartPort
 	var driverRunCascades execution.DriverRunCascadePort
+	var driverRunTerminalWorkRecovery execution.DriverRunTerminalWorkRecoveryPort
 	var driverRunClaims execution.DriverRunClaimPort = driverRunAdapter
 	var driverRunHeartbeats execution.DriverRunHeartbeatPort = driverRunAdapter
 	var driverRunWorkItems execution.DriverRunWorkItemPort
@@ -235,6 +252,7 @@ func newExecutionDriverRunDependencies(dependencies ExecutionDependencies) (exec
 			return execution.DriverRunDependencies{}, fmt.Errorf("compose Fleet DriverRun commands: %w", err)
 		}
 		driverRunChildStarts, driverRunCascades = fleetDriverRuns, fleetDriverRuns
+		driverRunTerminalWorkRecovery = fleetDriverRuns
 		driverRunClaims, driverRunHeartbeats, driverRunFinalizer = fleetDriverRuns, fleetDriverRuns, fleetDriverRuns
 		driverRunWorkItems = fleetDriverRuns
 		driverRunAwaits = &executionDriverAwaitFleetPort{queries: driverRunAdapter, suspensions: fleetDriverRuns}
@@ -242,7 +260,8 @@ func newExecutionDriverRunDependencies(dependencies ExecutionDependencies) (exec
 	return execution.DriverRunDependencies{
 		Submissions: driverRunAdapter, ChildStarts: driverRunChildStarts, Cascades: driverRunCascades,
 		Claims: driverRunClaims, Heartbeats: driverRunHeartbeats, WorkItems: driverRunWorkItems, Finalizer: driverRunFinalizer,
-		Recovery: driverRunAdapter, Awaits: driverRunAwaits, Queries: driverRunAdapter, Resolutions: driverRunAdapter,
+		TerminalWorkRecovery: driverRunTerminalWorkRecovery,
+		Recovery:             driverRunAdapter, Awaits: driverRunAwaits, Queries: driverRunAdapter, Resolutions: driverRunAdapter,
 	}, nil
 }
 
@@ -256,8 +275,16 @@ func newExecutionTaskRunDependencies(dependencies ExecutionDependencies) (execut
 }
 
 func newExecutionConvergenceDependencies(dependencies ExecutionDependencies) (execution.TaskRunConvergenceDependencies, error) {
+	var checkpoints store.TaskRunTerminalConvergenceStore
+	if fleetCheckpoints, ok := dependencies.FleetExecution.(store.TaskRunTerminalConvergenceStore); ok {
+		checkpoints = fleetCheckpoints
+	}
+	if checkpoints == nil {
+		checkpoints, _ = dependencies.TaskRuns.(store.TaskRunTerminalConvergenceStore)
+	}
 	return NewExecutionTaskRunConvergenceDependencies(ExecutionTaskRunConvergenceDependencies{
-		TaskRuns: dependencies.TaskRuns, DriverRuns: dependencies.DriverRuns, DriverSteps: dependencies.TerminalStepRepairs,
+		TaskRuns: dependencies.TaskRuns, Checkpoints: checkpoints,
+		DriverRuns: dependencies.DriverRuns, DriverSteps: dependencies.TerminalStepRepairs,
 		Events: dependencies.TaskRunEvents, Agents: dependencies.Agents, Outbox: dependencies.Outbox,
 	})
 }
@@ -271,33 +298,34 @@ func newExecutionRecoveryDependencies(dependencies ExecutionDependencies) (execu
 
 func newExecutionServiceDependencies(
 	dependencies ExecutionDependencies,
-) (execution.Dependencies, execution.TaskRunConvergenceSource, execution.TaskRunRecoveryScopePort, error) {
+) (execution.Dependencies, execution.TaskRunConvergenceSource, execution.TaskRunConvergenceCheckpointPort, execution.TaskRunRecoveryScopePort, error) {
 	driverRuns, err := newExecutionDriverRunDependencies(dependencies)
 	if err != nil {
-		return execution.Dependencies{}, nil, nil, err
+		return execution.Dependencies{}, nil, nil, nil, err
 	}
 	queueAdapter, err := newExecutionReconciliationQueueAdapter(dependencies.TriggerEvents, dependencies.DriverRuns)
 	if err != nil {
-		return execution.Dependencies{}, nil, nil, err
+		return execution.Dependencies{}, nil, nil, nil, err
 	}
 	taskRuns, workers, err := newExecutionTaskRunDependencies(dependencies)
 	if err != nil {
-		return execution.Dependencies{}, nil, nil, err
+		return execution.Dependencies{}, nil, nil, nil, err
 	}
 	convergence, err := newExecutionConvergenceDependencies(dependencies)
 	if err != nil {
-		return execution.Dependencies{}, nil, nil, err
+		return execution.Dependencies{}, nil, nil, nil, err
 	}
 	recovery, err := newExecutionRecoveryDependencies(dependencies)
 	if err != nil {
-		return execution.Dependencies{}, nil, nil, err
+		return execution.Dependencies{}, nil, nil, nil, err
 	}
 	taskRunMutations := newExecutionTaskRunMutationPort(dependencies)
 	return execution.Dependencies{
 		Heartbeats: taskRunMutations, Logs: taskRunMutations, Finalizer: taskRunMutations,
 		DriverRuns: driverRuns, TaskRuns: taskRuns, Workers: workers, Convergence: convergence,
 		TaskRunRecovery: recovery, AwaitEvents: queueAdapter, RunOutcomes: queueAdapter,
-	}, convergence.Source, recovery.Scopes, nil
+		TerminalWorkRecoveries: queueAdapter,
+	}, convergence.Source, convergence.Checkpoints, recovery.Scopes, nil
 }
 
 func newExecutionCapabilityHandle(
@@ -305,26 +333,29 @@ func newExecutionCapabilityHandle(
 	issuer *authority.Issuer,
 	operatorAuthorities workflowcataloghttp.OperatorAuthorityResolver,
 	convergenceSource execution.TaskRunConvergenceSource,
+	convergenceCheckpoints execution.TaskRunConvergenceCheckpointPort,
 	recoveryScopes execution.TaskRunRecoveryScopePort,
 ) *ExecutionCapability {
 	return &ExecutionCapability{
-		issuer:               issuer,
-		taskRuns:             service,
-		taskRunRequests:      service,
-		taskRunWorkers:       service,
-		taskRunScheduling:    service,
-		workerProfiles:       service,
-		taskRunConvergence:   service,
-		convergenceSource:    convergenceSource,
-		taskRunRecovery:      service,
-		recoveryScopes:       recoveryScopes,
-		taskRunAuthorities:   &executionTaskRunAuthorityResolver{issuer: issuer, now: time.Now},
-		driverRuns:           service,
-		driverRunAuthorities: &executionDriverRunAuthorityResolver{issuer: issuer, now: time.Now},
-		systemAuthorities:    &executionSystemAuthorityResolver{issuer: issuer, now: time.Now},
-		operatorAuthorities:  operatorAuthorities,
-		awaitEvents:          service,
-		runOutcomes:          service,
+		issuer:                 issuer,
+		taskRuns:               service,
+		taskRunRequests:        service,
+		taskRunWorkers:         service,
+		taskRunScheduling:      service,
+		workerProfiles:         service,
+		taskRunConvergence:     service,
+		convergenceSource:      convergenceSource,
+		convergenceCheckpoints: convergenceCheckpoints,
+		taskRunRecovery:        service,
+		recoveryScopes:         recoveryScopes,
+		taskRunAuthorities:     &executionTaskRunAuthorityResolver{issuer: issuer, now: time.Now},
+		driverRuns:             service,
+		driverRunAuthorities:   &executionDriverRunAuthorityResolver{issuer: issuer, now: time.Now},
+		systemAuthorities:      &executionSystemAuthorityResolver{issuer: issuer, now: time.Now},
+		operatorAuthorities:    operatorAuthorities,
+		awaitEvents:            service,
+		runOutcomes:            service,
+		terminalWorkRecoveries: service,
 	}
 }
 

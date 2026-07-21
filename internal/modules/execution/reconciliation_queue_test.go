@@ -10,15 +10,19 @@ import (
 )
 
 type reconciliationQueuePortStub struct {
-	awaitValues   []AwaitEventNotification
-	outcomeValues []DriverRunOutcome
-	awaitLease    AwaitEventNotificationLease
-	outcomeLease  DriverRunOutcomeLease
-	awaitRetry    AwaitEventNotificationRetry
-	outcomeRetry  DriverRunOutcomeRetry
-	awaitDone     AwaitEventNotificationCompletion
-	outcomeDone   DriverRunOutcomeCompletion
-	claimCalls    int
+	awaitValues    []AwaitEventNotification
+	outcomeValues  []DriverRunOutcome
+	awaitLease     AwaitEventNotificationLease
+	outcomeLease   DriverRunOutcomeLease
+	awaitRetry     AwaitEventNotificationRetry
+	outcomeRetry   DriverRunOutcomeRetry
+	awaitDone      AwaitEventNotificationCompletion
+	outcomeDone    DriverRunOutcomeCompletion
+	terminalValues []DriverRunOutcome
+	terminalLease  TerminalDriverRunWorkRecoveryLease
+	terminalRetry  TerminalDriverRunWorkRecoveryRetry
+	terminalDone   TerminalDriverRunWorkRecoveryCompletion
+	claimCalls     int
 }
 
 func (stub *reconciliationQueuePortStub) ClaimAwaitEventNotifications(
@@ -68,6 +72,31 @@ func (stub *reconciliationQueuePortStub) RetryDriverRunOutcome(
 	retry DriverRunOutcomeRetry,
 ) error {
 	stub.outcomeRetry = retry
+	return nil
+}
+
+func (stub *reconciliationQueuePortStub) ClaimTerminalDriverRunWorkRecoveries(
+	_ context.Context,
+	lease TerminalDriverRunWorkRecoveryLease,
+) ([]DriverRunOutcome, error) {
+	stub.claimCalls++
+	stub.terminalLease = lease
+	return stub.terminalValues, nil
+}
+
+func (stub *reconciliationQueuePortStub) CompleteTerminalDriverRunWorkRecovery(
+	_ context.Context,
+	completion TerminalDriverRunWorkRecoveryCompletion,
+) error {
+	stub.terminalDone = completion
+	return nil
+}
+
+func (stub *reconciliationQueuePortStub) RetryTerminalDriverRunWorkRecovery(
+	_ context.Context,
+	retry TerminalDriverRunWorkRecoveryRetry,
+) error {
+	stub.terminalRetry = retry
 	return nil
 }
 
@@ -162,5 +191,52 @@ func TestReconciliationQueueCompletionIsExactWorkspaceAuthorized(t *testing.T) {
 	}
 	if port.outcomeDone.RunID != "" {
 		t.Fatalf("denied completion reached port: %+v", port.outcomeDone)
+	}
+}
+
+func TestTerminalDriverRunWorkRecoveryQueueUsesDistinctActionsAndLeaseState(t *testing.T) {
+	now := time.Now().UTC()
+	port := &reconciliationQueuePortStub{terminalValues: []DriverRunOutcome{{
+		WorkspaceKey: "TEST", RunID: " run/1 ", Status: DriverRunCompleted, OccurredAt: now, Attempt: 2,
+	}}}
+	service, issuer := newTestService(t, Dependencies{TerminalWorkRecoveries: port})
+	values, err := service.ClaimTerminalDriverRunWorkRecoveries(
+		t.Context(), issueSystem(t, issuer, ActionClaimTerminalDriverRunWorkRecoveries),
+		ClaimTerminalDriverRunWorkRecoveriesCommand{WorkspaceKey: "TEST", ClaimID: "recovery-1", Before: now, Limit: 3},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].RunID != " run/1 " ||
+		port.terminalLease.ClaimUntil.Sub(port.terminalLease.Before) != ReconciliationClaimLease || port.terminalLease.Limit != 3 {
+		t.Fatalf("values=%+v lease=%+v", values, port.terminalLease)
+	}
+	if _, err := service.ClaimTerminalDriverRunWorkRecoveries(
+		t.Context(), issueSystem(t, issuer, ActionClaimDriverRunOutcomes),
+		ClaimTerminalDriverRunWorkRecoveriesCommand{WorkspaceKey: "TEST", ClaimID: "recovery-2", Before: now, Limit: 1},
+	); err == nil {
+		t.Fatal("ordinary outcome claim authority was accepted by terminal-work queue")
+	}
+	if err := service.RetryTerminalDriverRunWorkRecovery(
+		t.Context(), issueSystem(t, issuer, ActionRetryTerminalDriverRunWorkRecovery),
+		RetryTerminalDriverRunWorkRecoveryCommand{
+			WorkspaceKey: "TEST", RunID: " run/1 ", ClaimID: "recovery-1", Attempt: 2, FailedAt: now, Cause: "temporary",
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !port.terminalRetry.AvailableAt.Equal(now.Add(2*time.Second)) || port.terminalRetry.Error != "temporary" {
+		t.Fatalf("retry=%+v", port.terminalRetry)
+	}
+	if err := service.CompleteTerminalDriverRunWorkRecovery(
+		t.Context(), issueSystem(t, issuer, ActionCompleteTerminalDriverRunWorkRecovery),
+		CompleteTerminalDriverRunWorkRecoveryCommand{
+			WorkspaceKey: "TEST", RunID: " run/1 ", ClaimID: "recovery-1", CompletedAt: now,
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if port.terminalDone.RunID != " run/1 " || port.terminalDone.ClaimID != "recovery-1" {
+		t.Fatalf("completion=%+v", port.terminalDone)
 	}
 }

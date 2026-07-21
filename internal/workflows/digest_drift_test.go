@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
@@ -296,6 +297,9 @@ func TestEnsureBoundPromptAgentWorkflowsFailsClosedOnDigestDriftWithoutBuildTool
 	workDir := t.TempDir()
 	t.Chdir(workDir)
 	t.Setenv("LOOM_SDK_ROOT", "")
+	previousFS := packagedBuiltinFS
+	packagedBuiltinFS = absentPackagedBuiltinFS{}
+	t.Cleanup(func() { packagedBuiltinFS = previousFS })
 
 	const driftedDigest = "sha256:00000000000000000000000000000000000000000000000000000000000000cf"
 	versionID := registerPromptAgentAt(t, st, "BOUND-NO-TOOLCHAIN", workDir, driftedDigest)
@@ -317,6 +321,100 @@ func TestEnsureBoundPromptAgentWorkflowsFailsClosedOnDigestDriftWithoutBuildTool
 	}
 	if driverRecord.ActiveVersionID != versionID {
 		t.Fatalf("failed refresh changed active version to %q, want %q", driverRecord.ActiveVersionID, versionID)
+	}
+}
+
+func TestEnsureBoundPromptAgentWorkflowsUsesPackagedBundleWithoutBuildToolchain(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	const workspace = "BOUND-PACKAGED"
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: workspace, Name: "Bound packaged"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", workDir)
+	t.Setenv("LOOM_SDK_ROOT", "")
+	t.Setenv("LOOM_FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_RUNTIME_ROOT", "")
+	t.Setenv("FLUE_REPO", "")
+
+	const driftedDigest = "sha256:00000000000000000000000000000000000000000000000000000000000000ce"
+	versionID := registerPromptAgentAt(t, st, workspace, workDir, driftedDigest)
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey: workspace, BindingID: "planner-packaged", Name: "Planner packaged",
+		SourceKind: store.InternalSourceKind, DriverID: BuiltinPromptAgentWorkflowName,
+		DriverVersionID: versionID, Enabled: true,
+	}); err != nil {
+		t.Fatalf("create existing prompt-agent binding: %v", err)
+	}
+
+	spec, ok := BuiltinWorkflow(BuiltinPromptAgentWorkflowName)
+	if !ok {
+		t.Fatal("prompt-agent builtin missing")
+	}
+	digest := SourceDigest(spec.Files)
+	previousFS := packagedBuiltinFS
+	packagedBuiltinFS = fstest.MapFS{
+		"builtin-dist/prompt-agent/dist/server.mjs":        {Data: []byte("export const packaged = true;\n"), Mode: 0o644},
+		"builtin-dist/prompt-agent/dist/source-digest.txt": {Data: []byte(digest + "\n"), Mode: 0o644},
+	}
+	t.Cleanup(func() { packagedBuiltinFS = previousFS })
+
+	if err := EnsureBoundPromptAgentWorkflows(ctx, st); err != nil {
+		t.Fatalf("EnsureBoundPromptAgentWorkflows with packaged bundle: %v", err)
+	}
+	driverRecord, err := st.Drivers().Get(ctx, workspace, BuiltinPromptAgentWorkflowName)
+	if err != nil {
+		t.Fatalf("get prompt-agent driver: %v", err)
+	}
+	if driverRecord.ActiveVersionID == versionID {
+		t.Fatalf("packaged refresh left drifted version active: %q", versionID)
+	}
+	version, err := st.DriverVersions().Get(ctx, workspace, driverRecord.ActiveVersionID)
+	if err != nil {
+		t.Fatalf("get packaged prompt-agent version: %v", err)
+	}
+	if version.SourceDigest != digest || version.CreatedBy != "system" {
+		t.Fatalf("packaged version provenance = digest %q created_by %q, want %q/system", version.SourceDigest, version.CreatedBy, digest)
+	}
+	if want := "builtin://workflows/prompt-agent/versions/" + digest; version.SourceRef != want {
+		t.Fatalf("packaged version source_ref = %q, want %q", version.SourceRef, want)
+	}
+	if got := driverpkg.DriverVersionEffectiveTrust(driverRecord, version); got != domain.DriverTrustTrusted {
+		t.Fatalf("packaged version trust = %q, want trusted", got)
+	}
+	if !strings.Contains(version.Manifest["runners"], "local-task-runner") {
+		t.Fatalf("packaged version runners = %q, want local-task-runner", version.Manifest["runners"])
+	}
+	serverPath := filepath.Join(workDir, filepath.FromSlash(version.BundleRef), "dist", "server.mjs")
+	server, err := os.ReadFile(serverPath)
+	if err != nil {
+		t.Fatalf("read staged packaged server: %v", err)
+	}
+	if !strings.Contains(string(server), "packaged = true") {
+		t.Fatalf("staged server did not come from packaged FS: %q", server)
+	}
+}
+
+func TestPackagedBuiltinDigestMarkerMustMatch(t *testing.T) {
+	const distPath = "builtin-dist/prompt-agent/dist"
+	for _, tc := range []struct {
+		name string
+		fs   fstest.MapFS
+	}{
+		{name: "missing", fs: fstest.MapFS{}},
+		{name: "stale", fs: fstest.MapFS{distPath + "/source-digest.txt": {Data: []byte("sha256:stale\n")}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			matches, err := packagedBuiltinDigestMatches(tc.fs, distPath, "sha256:current")
+			if err != nil {
+				t.Fatalf("packagedBuiltinDigestMatches: %v", err)
+			}
+			if matches {
+				t.Fatal("missing/stale packaged digest marker matched current source")
+			}
+		})
 	}
 }
 

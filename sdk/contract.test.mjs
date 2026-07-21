@@ -130,6 +130,7 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     await client.issues.listComments({ issueId: "ISSUE-1" });
     await client.issues.comment({ issueId: "ISSUE-1", body: "looks good" });
     await client.issues.update({ issueId: "ISSUE-1", status: "open", priority: 1, labels: ["review-cycle:1"], assignee: "agent", externalRef: "octo/hello#1" });
+    await client.issues.blockRepositoryRequired({ issueId: "ISSUE-1" });
     await client.issues.addLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
     await client.issues.removeLabel({ issueId: "ISSUE-1", label: "review-cycle:1" });
     await client.roles.get({ name: "docs-assistant" });

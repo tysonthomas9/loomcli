@@ -58,6 +58,9 @@ func ensureBuiltinWorkflow(ctx context.Context, st DriverCatalog, ws, name strin
 }
 
 func registerBuiltinWorkflow(ctx context.Context, st DriverCatalog, ws, name string, spec Spec, digest string) error {
+	if found, err := registerPackagedBuiltinWorkflow(ctx, st, ws, name, spec, digest); found || err != nil {
+		return err
+	}
 	_, _, err := BuildAndRegister(ctx, st, BuildAndRegisterOptions{
 		WorkspaceKey:  ws,
 		Name:          name,

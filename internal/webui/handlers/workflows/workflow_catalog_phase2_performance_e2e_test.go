@@ -38,7 +38,6 @@ func TestE2E_WorkflowCatalogPhase2ApprovePerformance(t *testing.T) {
 	proxyURL, fleetRequests := startWorkflowCatalogCountingProxy(t, e2e.fleetURL)
 	e2e.fleetURL = proxyURL
 	e2e.startLoomServe()
-	token := e2e.readLocalOperatorToken()
 
 	revision := uint64(1)
 	durationsMS := make([]float64, 0, workflowCatalogApproveSamples)
@@ -51,7 +50,7 @@ func TestE2E_WorkflowCatalogPhase2ApprovePerformance(t *testing.T) {
 			http.MethodPost,
 			e2e.lifecyclePath(e2e.workspace, "approve"),
 			map[string]uint64{"expected_revision": revision},
-			token,
+			"",
 			http.StatusOK,
 			&approved,
 		)
@@ -79,7 +78,7 @@ func TestE2E_WorkflowCatalogPhase2ApprovePerformance(t *testing.T) {
 				http.MethodPost,
 				e2e.lifecyclePath(e2e.workspace, "unapprove"),
 				map[string]uint64{"expected_revision": revision},
-				token,
+				"",
 				http.StatusOK,
 				&unapproved,
 			)

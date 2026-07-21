@@ -2,10 +2,8 @@ package serve
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,19 +20,18 @@ import (
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	catalogfleetdb "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	authorityhttp "github.com/tysonthomas9/loomcli/internal/platform/authority/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 func TestNewWorkflowCatalogModuleDisabledConstructsNothing(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
 	module, err := NewWorkflowCatalogModule(WorkflowCatalogConfig{
-		Enabled:    false,
-		RuntimeDir: runtimeDir,
+		Enabled: false,
 	})
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule: %v", err)
@@ -42,7 +39,6 @@ func TestNewWorkflowCatalogModuleDisabledConstructsNothing(t *testing.T) {
 	if module != nil {
 		t.Fatalf("disabled module = %#v, want nil", module)
 	}
-	assertPathDoesNotExist(t, filepath.Join(runtimeDir, ".loom", "operator"))
 }
 
 func TestNewWorkflowCatalogModuleRejectsAutomationWithoutCatalog(t *testing.T) {
@@ -62,7 +58,6 @@ func TestWorkflowCatalogComposesProductionAutomationCapability(t *testing.T) {
 			Bindings: state.TriggerBindings(), Connectors: state.Connectors(),
 		}),
 		AutomationAwaits: state.Awaits(),
-		RuntimeDir:       t.TempDir(),
 	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule: %v", err)
@@ -104,11 +99,9 @@ func TestConfiguredWorkflowTargetPreparerProjectsTarget(t *testing.T) {
 }
 
 func TestNewWorkflowCatalogModuleRejectsNilSharedFleetDBClient(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
 	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
-		Enabled:    true,
-		RuntimeDir: runtimeDir,
-		Workspace:  "TEST",
+		Enabled:   true,
+		Workspace: "TEST",
 	}))
 	if module != nil {
 		t.Fatalf("module = %#v, want nil", module)
@@ -116,13 +109,12 @@ func TestNewWorkflowCatalogModuleRejectsNilSharedFleetDBClient(t *testing.T) {
 	if !errors.Is(err, workflowcatalog.ErrUnavailable) {
 		t.Fatalf("error = %v, want workflowcatalog.ErrUnavailable", err)
 	}
-	assertPathDoesNotExist(t, filepath.Join(runtimeDir, ".loom", "operator"))
 }
 
 func TestWorkflowCatalogCompositionStartsUnscopedAndExposesNarrowSystemResolver(t *testing.T) {
 	client, _ := newCatalogFleetClient(t)
 	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
-		Enabled: true, FleetDBClient: client, RuntimeDir: t.TempDir(),
+		Enabled: true, FleetDBClient: client,
 	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule without startup workspace: %v", err)
@@ -146,7 +138,7 @@ func TestWorkflowCatalogCompositionStartsUnscopedAndExposesNarrowSystemResolver(
 func TestWorkflowCatalogCompositionRejectsUnregisteredSystemAuthorityComponent(t *testing.T) {
 	client, _ := newCatalogFleetClient(t)
 	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
-		Enabled: true, FleetDBClient: client, RuntimeDir: t.TempDir(),
+		Enabled: true, FleetDBClient: client,
 	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule: %v", err)
@@ -225,13 +217,11 @@ func TestWorkflowCatalogFleetDBBridgeOwnsItsDTOAndErrorVocabulary(t *testing.T) 
 	}
 }
 
-func TestLocalWorkflowCatalogCompositionCreatesSecureCredentialAndRequiresIt(t *testing.T) {
+func TestLocalOpenWorkflowCatalogDerivesExactAuthorityWithoutCredential(t *testing.T) {
 	client, fleet := newCatalogFleetClient(t)
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
 	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled:       true,
 		FleetDBClient: client,
-		RuntimeDir:    runtimeDir,
 		Workspace:     "TEST",
 	}))
 	if err != nil {
@@ -241,46 +231,12 @@ func TestLocalWorkflowCatalogCompositionCreatesSecureCredentialAndRequiresIt(t *
 		t.Fatal("NewWorkflowCatalogModule returned nil module")
 	}
 
-	credentialDir := filepath.Join(runtimeDir, ".loom", "operator")
-	dirInfo, err := os.Lstat(credentialDir)
-	if err != nil {
-		t.Fatalf("stat credential directory: %v", err)
-	}
-	if !dirInfo.IsDir() || dirInfo.Mode().Perm() != 0o700 {
-		t.Fatalf("credential directory mode = %v/%04o, want directory/0700", dirInfo.Mode().Type(), dirInfo.Mode().Perm())
-	}
-	tokenPath := filepath.Join(credentialDir, authority.LocalOperatorTokenFileName)
-	tokenInfo, err := os.Lstat(tokenPath)
-	if err != nil {
-		t.Fatalf("stat operator token: %v", err)
-	}
-	if !tokenInfo.Mode().IsRegular() || tokenInfo.Mode().Perm() != 0o600 {
-		t.Fatalf("operator token mode = %v/%04o, want regular/0600", tokenInfo.Mode().Type(), tokenInfo.Mode().Perm())
-	}
-	tokenBytes, err := os.ReadFile(tokenPath)
-	if err != nil {
-		t.Fatalf("read operator token: %v", err)
-	}
-	if len(tokenBytes) != 64 {
-		t.Fatalf("operator token length = %d, want 64", len(tokenBytes))
-	}
-	if _, err := hex.DecodeString(string(tokenBytes)); err != nil {
-		t.Fatalf("operator token is not lowercase-compatible hex: %v", err)
-	}
-	token := string(tokenBytes)
-
 	mux := http.NewServeMux()
 	module.Register(mux)
 
-	assertCatalogStatus(t, mux, "TEST", "", nil, http.StatusUnauthorized)
-	assertCatalogStatus(t, mux, "TEST", "Bearer "+differentToken(token), nil, http.StatusUnauthorized)
-	if calls := fleet.Calls(); len(calls) != 0 {
-		t.Fatalf("unauthorized requests reached FleetDB: %v", calls)
-	}
-
 	// A path alias cannot widen authority or persistence scope; middleware's
 	// canonical workspace is the only value admitted and sent to FleetDB.
-	response := assertCatalogStatusWithCanonical(t, mux, "alias", "TEST", "Bearer "+token, nil, http.StatusOK)
+	response := assertCatalogStatusWithCanonical(t, mux, "alias", "TEST", "", nil, http.StatusOK)
 	var result struct {
 		Action string `json:"action"`
 	}
@@ -295,115 +251,66 @@ func TestLocalWorkflowCatalogCompositionCreatesSecureCredentialAndRequiresIt(t *
 	}
 }
 
-func TestLocalWorkflowCatalogBrowserLaunchIsSingleUseAndActionScoped(t *testing.T) {
-	client, fleet := newCatalogFleetClient(t)
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
+func TestLocalOpenWorkflowCatalogHasNoOperatorSessionRoutes(t *testing.T) {
+	client, _ := newCatalogFleetClient(t)
 	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
-		Enabled: true, FleetDBClient: client, RuntimeDir: runtimeDir, Workspace: "TEST",
+		Enabled: true, FleetDBClient: client, Workspace: "TEST",
 	}))
 	if err != nil {
 		t.Fatalf("NewWorkflowCatalogModule: %v", err)
 	}
-	token, err := authority.ReadLocalOperatorToken(filepath.Join(runtimeDir, ".loom", "operator"))
-	if err != nil {
-		t.Fatalf("ReadLocalOperatorToken: %v", err)
-	}
 	mux := http.NewServeMux()
 	module.Register(mux)
 
-	launchReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/operator-sessions/launch", nil)
-	launchReq.Header.Set("Authorization", "Bearer "+token)
-	launchReq = launchReq.WithContext(middleware.WithWorkspace(launchReq.Context(), "TEST"))
-	launchRec := httptest.NewRecorder()
-	mux.ServeHTTP(launchRec, launchReq)
-	if launchRec.Code != http.StatusCreated {
-		t.Fatalf("launch status = %d body=%s", launchRec.Code, launchRec.Body.String())
-	}
-	var launch struct {
-		LaunchCode string `json:"launch_code"`
-		Workspace  string `json:"workspace"`
-	}
-	if err := json.Unmarshal(launchRec.Body.Bytes(), &launch); err != nil || launch.LaunchCode == "" || launch.LaunchCode == token || launch.Workspace != "TEST" {
-		t.Fatalf("launch response = %+v err=%v", launch, err)
-	}
-	if calls := fleet.Calls(); len(calls) != 0 {
-		t.Fatalf("launch reached FleetDB: %v", calls)
-	}
-
-	// A launch code is not a product-operation bearer.
-	assertCatalogStatus(t, mux, "TEST", "Bearer "+launch.LaunchCode, nil, http.StatusUnauthorized)
-
-	exchangeBody := `{"launch_code":"` + launch.LaunchCode + `"}`
-	exchangeReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/operator-sessions/exchange", strings.NewReader(exchangeBody))
-	exchangeReq = exchangeReq.WithContext(middleware.WithWorkspace(exchangeReq.Context(), "TEST"))
-	exchangeRec := httptest.NewRecorder()
-	mux.ServeHTTP(exchangeRec, exchangeReq)
-	if exchangeRec.Code != http.StatusOK {
-		t.Fatalf("exchange status = %d body=%s", exchangeRec.Code, exchangeRec.Body.String())
-	}
-	var session struct {
-		AccessToken string `json:"access_token"`
-	}
-	if err := json.Unmarshal(exchangeRec.Body.Bytes(), &session); err != nil || session.AccessToken == "" || session.AccessToken == token || session.AccessToken == launch.LaunchCode {
-		t.Fatalf("exchange response = token-len %d err=%v", len(session.AccessToken), err)
-	}
-
-	replayReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/operator-sessions/exchange", strings.NewReader(exchangeBody))
-	replayReq = replayReq.WithContext(middleware.WithWorkspace(replayReq.Context(), "TEST"))
-	replayRec := httptest.NewRecorder()
-	mux.ServeHTTP(replayRec, replayReq)
-	if replayRec.Code != http.StatusUnauthorized {
-		t.Fatalf("replay status = %d body=%s", replayRec.Code, replayRec.Body.String())
-	}
-
-	assertCatalogStatus(t, mux, "TEST", "Bearer "+session.AccessToken, nil, http.StatusOK)
-	if calls := fleet.Calls(); len(calls) != 4 {
-		t.Fatalf("browser-authorized request FleetDB calls = %v, want four", calls)
+	for _, suffix := range []string{"launch", "exchange"} {
+		request := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/operator-sessions/"+suffix, nil)
+		request = request.WithContext(middleware.WithWorkspace(request.Context(), "TEST"))
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("operator session %s status = %d, want 404", suffix, response.Code)
+		}
 	}
 }
 
-func TestLocalBrowserBrokerDelegatesEnabledAutomationOperatorActionsOnly(t *testing.T) {
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
-	_, _, browserSession, err := composeWorkflowCatalogAuthority(WorkflowCatalogConfig{
-		Enabled: true, RuntimeDir: runtimeDir, Workspace: "TEST", AutomationEnabled: true,
+func TestLocalOpenResolverAllowsEveryRegisteredOperatorActionOnly(t *testing.T) {
+	_, resolver, err := composeWorkflowCatalogAuthority(WorkflowCatalogConfig{
+		Enabled: true, Workspace: "TEST", AutomationEnabled: true,
 	}, authority.NewIssuer())
 	if err != nil {
 		t.Fatalf("composeWorkflowCatalogAuthority: %v", err)
 	}
-	if browserSession == nil {
-		t.Fatal("local browser session broker is nil")
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST/trigger-bindings", nil)
+	actions := append(workflowCatalogOperatorActions(),
+		execution.ActionSubmitDriverRun,
+		execution.ActionCreateWorkerProfile,
+		execution.ActionUpdateWorkerProfile,
+		execution.ActionDeleteWorkerProfile,
+	)
+	actions = append(actions, automationOperatorActions()...)
+	for _, action := range actions {
+		value, resolveErr := resolver.ResolveOperatorAuthority(request, "TEST", action)
+		if resolveErr != nil {
+			t.Errorf("ResolveOperatorAuthority(%q): %v", action, resolveErr)
+			continue
+		}
+		if value.Subject() != localOpenOperatorSubject || value.Workspace() != "TEST" || value.Action() != action {
+			t.Errorf("operator authority for %q = subject:%q workspace:%q action:%q", action, value.Subject(), value.Workspace(), value.Action())
+		}
 	}
-	token, err := authority.ReadLocalOperatorToken(filepath.Join(runtimeDir, ".loom", "operator"))
-	if err != nil {
-		t.Fatalf("ReadLocalOperatorToken: %v", err)
+	if _, err := resolver.ResolveOperatorAuthority(request, "TEST", automation.ActionAdmitEvent); !errors.Is(err, authority.ErrActionNotAllowed) {
+		t.Fatalf("local open event-ingestion authority error = %v, want %v", err, authority.ErrActionNotAllowed)
 	}
-	launch, err := browserSession.MintLaunchCode("Bearer "+token, "TEST")
-	if err != nil {
-		t.Fatalf("MintLaunchCode: %v", err)
-	}
-	session, err := browserSession.ExchangeLaunchCode(launch.Code, "TEST")
-	if err != nil {
-		t.Fatalf("ExchangeLaunchCode: %v", err)
-	}
-	value, err := browserSession.IssueOperator(session.Bearer, "TEST", automation.ActionCreateBinding)
-	if err != nil {
-		t.Fatalf("IssueOperator create binding: %v", err)
-	}
-	if value.Workspace() != "TEST" || value.Action() != automation.ActionCreateBinding {
-		t.Fatalf("automation operator authority = workspace:%q action:%q", value.Workspace(), value.Action())
-	}
-	if _, err := browserSession.IssueOperator(session.Bearer, "TEST", automation.ActionAdmitEvent); !errors.Is(err, authority.ErrActionNotAllowed) {
-		t.Fatalf("browser event-ingestion authority error = %v, want %v", err, authority.ErrActionNotAllowed)
+	if _, err := resolver.ResolveOperatorAuthority(nil, "TEST", workflowcatalog.ActionApproveVersion); !errors.Is(err, httpapi.ErrUnauthenticated) {
+		t.Fatalf("nil request authority error = %v, want %v", err, httpapi.ErrUnauthenticated)
 	}
 }
 
 func TestExternalWorkflowCatalogCompositionTrustsOnlyVerifiedMiddlewareIdentity(t *testing.T) {
 	client, fleet := newCatalogFleetClient(t)
-	runtimeDir := filepath.Join(t.TempDir(), "runtime")
 	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
 		Enabled:       true,
 		FleetDBClient: client,
-		RuntimeDir:    runtimeDir,
 		Workspace:     "TEST",
 		ExternalAuth:  true,
 		ExternalOperatorResolverFactory: testExternalOperatorResolverFactory(func(_ context.Context, workspace string, identity middleware.UserIdentity) (string, error) {
@@ -419,8 +326,6 @@ func TestExternalWorkflowCatalogCompositionTrustsOnlyVerifiedMiddlewareIdentity(
 	if module == nil {
 		t.Fatal("NewWorkflowCatalogModule returned nil module")
 	}
-	assertPathDoesNotExist(t, filepath.Join(runtimeDir, ".loom", "operator"))
-
 	mux := http.NewServeMux()
 	module.Register(mux)
 
@@ -444,10 +349,7 @@ func TestExternalWorkflowCatalogCompositionTrustsOnlyVerifiedMiddlewareIdentity(
 
 func TestExternalWorkflowCatalogCompositionFailsClosedWithoutRoleResolver(t *testing.T) {
 	module, err := NewWorkflowCatalogModule(testWorkflowCatalogConfig(WorkflowCatalogConfig{
-		Enabled:      true,
-		RuntimeDir:   t.TempDir(),
-		Workspace:    "TEST",
-		ExternalAuth: true,
+		Enabled: true, Workspace: "TEST", ExternalAuth: true,
 	}))
 	if err == nil || !strings.Contains(err.Error(), "operator resolver factory is required") {
 		t.Fatalf("NewWorkflowCatalogModule error = %v, want missing resolver error", err)
@@ -460,12 +362,6 @@ func TestExternalWorkflowCatalogCompositionFailsClosedWithoutRoleResolver(t *tes
 func testWorkflowCatalogConfig(config WorkflowCatalogConfig) WorkflowCatalogConfig {
 	config.WorkspaceFromContext = middleware.WorkspaceFromContext
 	config.BuiltinWorkflow = func(string) bool { return false }
-	config.BrowserSessionRouteFactory = func(
-		broker *authority.LocalBrowserSessionBroker,
-		workspaceFromContext func(context.Context) string,
-	) RouteModule {
-		return authorityhttp.New(broker, workspaceFromContext)
-	}
 	if config.PrepareWorkflowTarget == nil {
 		config.PrepareWorkflowTarget = func(error) WorkflowTargetPreparation {
 			return func(context.Context, string, string) (WorkflowTarget, error) {
@@ -544,24 +440,6 @@ func assertCatalogStatusWithCanonical(t *testing.T, handler http.Handler, pathWo
 		t.Fatalf("POST path-workspace=%q canonical-workspace=%q status=%d body=%s, want %d", pathWorkspace, canonicalWorkspace, response.Code, response.Body.String(), want)
 	}
 	return response
-}
-
-func differentToken(token string) string {
-	if token == "" {
-		return strings.Repeat("0", 64)
-	}
-	replacement := byte('0')
-	if token[0] == replacement {
-		replacement = '1'
-	}
-	return string(replacement) + token[1:]
-}
-
-func assertPathDoesNotExist(t *testing.T, path string) {
-	t.Helper()
-	if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("path %q unexpectedly exists or returned another error: %v", path, err)
-	}
 }
 
 type catalogFleetStub struct {

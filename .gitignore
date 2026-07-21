@@ -23,6 +23,11 @@ desktop/dist-release/
 desktop/src-tauri/target/
 desktop/src-tauri/binaries/
 desktop/src-tauri/resources/webui/
+desktop/src-tauri/resources/runtime/
+desktop/src-tauri/resources/licenses/
+
+# Local validation artifacts
+/artifacts/
 
 # E2E test artifacts
 internal/webui/frontend/tests/e2e/.e2e-state.json

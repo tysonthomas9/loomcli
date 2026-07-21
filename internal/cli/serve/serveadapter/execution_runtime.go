@@ -87,9 +87,30 @@ func BuildDriverExecutorRuntimePass(executor *driverexecutor.Executor) execution
 	})
 }
 
+// BuildSharedNodeExecutionRuntimePasses composes the DriverRun executor and
+// TaskRun worker slots that share one process node. Every registrar receives
+// the same normalized capacity so registration order cannot change admission
+// capacity. Serve passes its once-resolved task-worker concurrency here; the
+// fallback keeps standalone composition fail-safe.
+func BuildSharedNodeExecutionRuntimePasses(
+	executor *driverexecutor.Executor,
+	taskWorkerTemplate driverexecutor.TaskWorker,
+	configuredCapacity int,
+) (execution.RuntimePass, []execution.RuntimePass) {
+	if configuredCapacity < 1 {
+		configuredCapacity = 1
+	}
+	executor.NodeCapacity = configuredCapacity
+	taskWorkerTemplate.NodeCapacity = configuredCapacity
+	return BuildDriverExecutorRuntimePass(executor), BuildTaskWorkerRuntimePasses(taskWorkerTemplate, configuredCapacity)
+}
+
 // BuildTaskWorkerRuntimePasses adapts the requested number of legacy TaskRun
 // workers to inert Execution runtime passes.
 func BuildTaskWorkerRuntimePasses(template driverexecutor.TaskWorker, concurrency int) []execution.RuntimePass {
+	if concurrency > 0 {
+		template.NodeCapacity = concurrency
+	}
 	passes := make([]execution.RuntimePass, 0, concurrency)
 	for index := 0; index < concurrency; index++ {
 		worker := template.CloneForRuntime()
@@ -121,7 +142,8 @@ func BuildExecutionRuntimeContributor(
 		executionCapability.DriverRunOutcomeAPI() == nil ||
 		executionCapability.DriverRunAuthorityResolver() == nil || executionCapability.SystemAuthorityResolver() == nil ||
 		executionCapability.TaskRunRecoveryScopes() == nil ||
-		executionCapability.TaskRunConvergenceAPI() == nil || executionCapability.TaskRunConvergenceSource() == nil {
+		executionCapability.TaskRunConvergenceAPI() == nil || executionCapability.TaskRunConvergenceSource() == nil ||
+		executionCapability.TaskRunConvergenceCheckpoints() == nil {
 		return nil, fmt.Errorf("compose Execution runtime: DriverRun and TaskRun convergence APIs and authority resolvers are required")
 	}
 	if passes.AwaitTimeouts == nil {
@@ -129,7 +151,7 @@ func BuildExecutionRuntimeContributor(
 	}
 	convergencePass := &execution.TaskRunConvergencePass{
 		WorkspaceKey: workspace, Scopes: executionCapability.TaskRunRecoveryScopes(),
-		Source: executionCapability.TaskRunConvergenceSource(), API: executionCapability.TaskRunConvergenceAPI(),
+		Checkpoints: executionCapability.TaskRunConvergenceCheckpoints(), API: executionCapability.TaskRunConvergenceAPI(),
 		Authorities: executionCapability.SystemAuthorityResolver(),
 	}
 	config := execution.RuntimeConfig{

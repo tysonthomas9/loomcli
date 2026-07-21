@@ -17,7 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	authorityhttp "github.com/tysonthomas9/loomcli/internal/platform/authority/httpapi"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/webhooks"
@@ -105,7 +104,6 @@ type WorkflowCatalogConfig struct {
 	Enabled               bool
 	AutomationEnabled     bool
 	StoreHandle           *bootstrap.StoreHandle
-	RuntimeDir            string
 	Workspace             string
 	ExternalAuth          bool
 	WorkspaceRoleResolver middleware.WorkspaceRoleResolver
@@ -200,13 +198,6 @@ func newLegacyWorkflowTargetPreparation(catalog workflowdefs.DriverCatalog) apps
 			}, nil
 		}
 	}
-}
-
-func newBrowserSessionRoutes(
-	broker *authority.LocalBrowserSessionBroker,
-	workspaceFromContext func(context.Context) string,
-) appserve.RouteModule {
-	return authorityhttp.New(broker, workspaceFromContext)
 }
 
 // AutomationCapability is the CLI composition view of Automation. The web
@@ -315,13 +306,11 @@ func BuildWorkflowCatalogModule(config WorkflowCatalogConfig) (*WorkflowCatalogM
 	appConfig := appserve.WorkflowCatalogConfig{
 		Enabled:                         config.Enabled,
 		AutomationEnabled:               config.AutomationEnabled,
-		RuntimeDir:                      config.RuntimeDir,
 		Workspace:                       config.Workspace,
 		ExternalAuth:                    config.ExternalAuth,
 		WorkspaceFromContext:            middleware.WorkspaceFromContext,
 		BuiltinWorkflow:                 workflowdefs.IsBuiltinWorkflow,
 		ExternalOperatorResolverFactory: newExternalOperatorResolverFactory(config.WorkspaceRoleResolver),
-		BrowserSessionRouteFactory:      newBrowserSessionRoutes,
 	}
 	if config.StoreHandle != nil {
 		appConfig.FleetDBClient = config.StoreHandle.FleetDBClient()

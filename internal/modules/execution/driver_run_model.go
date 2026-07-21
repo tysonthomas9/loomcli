@@ -152,6 +152,46 @@ type CascadeChildDriverRunsResult struct {
 	Replay              bool
 }
 
+// RecoverTerminalDriverRunWorkCommand converges TaskRuns and exact Work Item
+// claim generations after their parent DriverRun is durably terminal. It is a
+// system-only command because the terminal parent no longer has a live owner
+// authority with which to fence the mutation.
+type RecoverTerminalDriverRunWorkCommand struct {
+	WorkspaceKey string
+	RequestID    string
+	DriverRunID  string
+	ParentStatus DriverRunStatus
+	Reason       string
+	ErrorClass   string
+	RecoveredAt  time.Time
+}
+
+// RecoverTerminalDriverRunWorkCommit is the immutable semantic receipt used
+// to validate both the first response and a replay after response loss.
+type RecoverTerminalDriverRunWorkCommit struct {
+	WorkspaceKey                  string
+	DriverRunID                   string
+	ParentStatus                  DriverRunStatus
+	Reason                        string
+	ErrorClass                    string
+	RecoveredAt                   time.Time
+	RecoveredTaskRunIDs           []string
+	ReleasedWorkItemIDs           []string
+	PreservedSuccessorWorkItemIDs []string
+}
+
+// RecoverTerminalDriverRunWorkResult contains immutable identities from the
+// committed recovery receipt. PreservedSuccessorWorkItemIDs explicitly proves
+// that stale parent cleanup did not rewrite a newer Work Item generation.
+type RecoverTerminalDriverRunWorkResult struct {
+	RecoveredTaskRunIDs           []string
+	ReleasedWorkItemIDs           []string
+	PreservedSuccessorWorkItemIDs []string
+	Committed                     *RecoverTerminalDriverRunWorkCommit
+	ActionID                      string
+	Replay                        bool
+}
+
 type ClaimDriverRunCommand struct {
 	WorkspaceKey string
 	RequestID    string

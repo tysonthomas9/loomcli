@@ -59,6 +59,45 @@ export async function run(ctx) {
   const input = ctx.payload || {};
   const loom = createLoomDriverClient({ input });
 
+  // A repository-less task in a zero- or multi-repo workspace cannot be
+  // checked out safely. This is an admission decision, so it deliberately
+  // precedes role/config/prompt resolution: an explanatory no-claim result must
+  // not turn into prompt_agent_missing_prompt because an unrelated role record
+  // is stale. Automation dispatches the TriggerEvent payload flat; legacy
+  // InternalSource fixtures may still carry it under input.event.
+  const event = eventPayload(input);
+  if (event && event.repositoryRequired === true) {
+    const blockedTaskId = resolveTargetTaskId(input);
+    if (!blockedTaskId) {
+      return loom.failed({
+        summary: "prompt-agent: repository-required event is missing its target task id",
+        errorClass: "prompt_agent_repository_block_target_missing",
+      });
+    }
+    // Production blocks this condition at the task-ready boundary before a
+    // DriverRun is created. Keep the workflow-side guard authoritative for
+    // alternate/manual hosts, using the same conditional Work Items command:
+    // a stale event must never overwrite a concurrent claim or repository
+    // assignment. It deliberately precedes role/prompt resolution.
+    try {
+      await loom.issues.blockRepositoryRequired({ issueId: blockedTaskId });
+    } catch (err) {
+      return loom.failed({
+        summary: "prompt-agent: could not move repository-required task " + blockedTaskId
+          + " to blocked: " + errorMessage(err),
+        errorClass: "prompt_agent_repository_block_failed",
+      });
+    }
+    return loom.completed({
+      summary: "prompt-agent: target task " + (blockedTaskId || "?")
+        + " requires a repository before it can run",
+      issueId: blockedTaskId,
+      claimed: false,
+      skipped: true,
+      blocker: "repository_required",
+    });
+  }
+
   // 1. Resolve the role prompt as DATA. Precedence (documented):
   //    input.prompt (explicit one-off override) > input.roleName >
   //    binding.config().roleName (config by reference) > input.taskPrompt /
@@ -90,7 +129,6 @@ export async function run(ctx) {
   //     decide the phase BEFORE claiming so a mismatch costs zero dispatch (no
   //     codex spend). An old emitter without hasDesign falls through to the
   //     post-claim check below rather than guessing.
-  const event = eventPayload(input);
   const eventHasDesign = event && typeof event.hasDesign === "boolean" ? event.hasDesign : undefined;
   const gatedByEvent = isGatingFilter(taskFilter) && eventHasDesign !== undefined;
   if (gatedByEvent && !phaseAllows(taskFilter, eventHasDesign, eventLabels(event))) {
@@ -456,11 +494,20 @@ function resolveTargetTaskId(input) {
   return "";
 }
 
-// eventPayload returns the InternalSource task-ready envelope (input.event) when
-// present — the pinned payload contract is { taskId, status, hasDesign?,
-// labels?, issueType? } — else null (cron / run-now / explicit dispatch).
+// eventPayload returns either the legacy InternalSource envelope (input.event)
+// or Automation's real flat TriggerEvent payload. A flat manual/run-now input
+// is not treated as task.ready merely because it targets a task: it must also
+// carry an open status or a typed task-ready gate. This preserves explicit
+// one-off taskId dispatch while making already-persisted flat events (including
+// Phase 4's repositoryRequired failure) retry correctly.
 function eventPayload(input) {
-  return input && typeof input.event === "object" && input.event ? input.event : null;
+  if (!input || typeof input !== "object") return null;
+  if (typeof input.event === "object" && input.event) return input.event;
+  if (!stringValue(input.taskId)) return null;
+  const openStatus = stringValue(input.status).toLowerCase() === "open";
+  const typedTaskReadyGate = typeof input.repositoryRequired === "boolean"
+    || typeof input.hasDesign === "boolean";
+  return openStatus || typedTaskReadyGate ? input : null;
 }
 
 // isGatingFilter reports whether a role's TaskFilter participates in phase

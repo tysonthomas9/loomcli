@@ -31,6 +31,7 @@ var frozenDriverOps = []string{
 	"epic-snapshot",
 	"exec-task",
 	"issue-add-label",
+	"issue-block-repository-required",
 	"issue-comment",
 	"issue-get",
 	"issue-list",

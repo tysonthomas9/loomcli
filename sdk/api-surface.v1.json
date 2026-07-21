@@ -352,6 +352,12 @@
     "binding-config": {
       "method": "POST",
       "fields": []
+    },
+    "issue-block-repository-required": {
+      "method": "POST",
+      "fields": [
+        "issueId"
+      ]
     }
   },
   "client": {
@@ -402,6 +408,7 @@
         "listComments",
         "comment",
         "update",
+        "blockRepositoryRequired",
         "addLabel",
         "removeLabel"
       ],

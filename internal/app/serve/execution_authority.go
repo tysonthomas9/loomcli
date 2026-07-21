@@ -214,8 +214,12 @@ func awaitEventNotificationSystemAction(action authority.Action) bool {
 func driverRunOutcomeSystemAction(action authority.Action) bool {
 	switch action {
 	case execution.ActionResolveDriverAwait, execution.ActionRecoverChildDriverRunCascade,
+		execution.ActionRecoverTerminalDriverRunWork,
 		execution.ActionClaimDriverRunOutcomes, execution.ActionCompleteDriverRunOutcome,
-		execution.ActionRetryDriverRunOutcome:
+		execution.ActionRetryDriverRunOutcome,
+		execution.ActionClaimTerminalDriverRunWorkRecoveries,
+		execution.ActionCompleteTerminalDriverRunWorkRecovery,
+		execution.ActionRetryTerminalDriverRunWorkRecovery:
 		return true
 	default:
 		return false

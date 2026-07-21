@@ -233,12 +233,35 @@
   color: #ca8a04;
 }
 
+.statusLabel[data-status="queued"],
+.statusLabel[data-status="suspended_awaiting_event"] {
+  color: #ca8a04;
+}
+
+.statusLabel[data-status="needs_review"] {
+  color: #6366f1;
+}
+
+.statusLabel[data-status="cancelled"] {
+  color: #6b7280;
+}
+
 .errorSummary {
   min-width: 0;
   margin-top: 1px;
   font-size: 11px;
   font-weight: 600;
   color: #dc2626;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowSummary {
+  min-width: 0;
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -262,6 +285,20 @@
 .statusDot[data-status="running"] {
   background-color: #facc15;
   animation: statusPulse 1.5s ease-in-out infinite;
+}
+
+.statusDot[data-status="queued"],
+.statusDot[data-status="suspended_awaiting_event"] {
+  background-color: #facc15;
+  animation: statusPulse 1.5s ease-in-out infinite;
+}
+
+.statusDot[data-status="needs_review"] {
+  background-color: #6366f1;
+}
+
+.statusDot[data-status="cancelled"] {
+  background-color: #9ca3af;
 }
 
 .statusDot[data-status="aborted"] {
@@ -299,6 +336,166 @@
 .cost {
   white-space: nowrap;
   font-weight: 500;
+}
+
+.runIdentifier {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+/* ============= Sessionless Workflow Detail ============= */
+
+.workflowDetail {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  color: var(--color-text-primary);
+}
+
+.workflowDetailHeader {
+  padding: 18px;
+  border-bottom: 1px solid var(--color-border-light);
+  background: var(--color-panel-bg);
+}
+
+.workflowDetailTitleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.workflowDetailTitle {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.workflowDetailSubtitle {
+  margin-top: 3px;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.workflowStatusBadge {
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workflowStatusBadge[data-status="completed"] {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+.workflowStatusBadge[data-status="failed"] {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.workflowStatusBadge[data-status="queued"],
+.workflowStatusBadge[data-status="running"],
+.workflowStatusBadge[data-status="suspended_awaiting_event"] {
+  background: rgba(250, 204, 21, 0.15);
+  color: #ca8a04;
+}
+
+.workflowExplanation {
+  margin-top: 16px;
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.workflowExplanationLabel {
+  margin-bottom: 3px;
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.workflowError {
+  margin-top: 10px;
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  font-size: 12px;
+}
+
+.workflowDetailBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+}
+
+.workflowMetadata,
+.workflowOutput dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.workflowMetadata > div,
+.workflowOutput dl > div {
+  min-width: 0;
+}
+
+.workflowMetadata dt,
+.workflowOutput dt {
+  color: var(--color-text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workflowMetadata dd,
+.workflowOutput dd {
+  margin: 3px 0 0;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.workflowOutput {
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.workflowOutput h4 {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.workflowNoSessionNote {
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 /* ============= Detail View (right column) ============= */

@@ -10,22 +10,23 @@ import (
 )
 
 type Dependencies struct {
-	Preflight       PreflightPort
-	Claims          ClaimStartPort
-	Launcher        Launcher
-	Heartbeats      HeartbeatPort
-	Logs            LogPort
-	Classifier      Classifier
-	Finalizer       FinalizePort
-	Recovery        RecoveryPort
-	Awaits          AwaitPort
-	DriverRuns      DriverRunDependencies
-	TaskRuns        TaskRunDependencies
-	Workers         WorkerDependencies
-	Convergence     TaskRunConvergenceDependencies
-	TaskRunRecovery TaskRunRecoveryDependencies
-	AwaitEvents     AwaitEventNotificationQueuePort
-	RunOutcomes     DriverRunOutcomeQueuePort
+	Preflight              PreflightPort
+	Claims                 ClaimStartPort
+	Launcher               Launcher
+	Heartbeats             HeartbeatPort
+	Logs                   LogPort
+	Classifier             Classifier
+	Finalizer              FinalizePort
+	Recovery               RecoveryPort
+	Awaits                 AwaitPort
+	DriverRuns             DriverRunDependencies
+	TaskRuns               TaskRunDependencies
+	Workers                WorkerDependencies
+	Convergence            TaskRunConvergenceDependencies
+	TaskRunRecovery        TaskRunRecoveryDependencies
+	AwaitEvents            AwaitEventNotificationQueuePort
+	RunOutcomes            DriverRunOutcomeQueuePort
+	TerminalWorkRecoveries TerminalDriverRunWorkRecoveryQueuePort
 }
 
 type Service struct {

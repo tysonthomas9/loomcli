@@ -19,20 +19,16 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/daemonwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/observability"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/monitorwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/usagecmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 // envLoomFleetMode is the env var that toggles --fleet-mode when no flag is
@@ -135,7 +131,7 @@ ENVIRONMENT VARIABLES
   LOOM_ISSUE_BRIDGE_DISABLED            Disable the issue-journal bridge loop (set 1/true)
   LOOM_ISSUE_BRIDGE_STATE_PATH          Bridge cursor state file (default: <state dir>/issue-bridge-cursor.json)
   LOOM_ISSUE_BRIDGE_REPLAY              Replay journal from zero on first observation (set 1/true)
-  LOOM_TASK_READY_EVENTS                Emit task.ready internal events when a task becomes ready (set 1/true)
+  LOOM_TASK_READY_EVENTS                Task-ready internal event toggle (default: on; set 0/false/off/no to disable)
 
 EXAMPLES
   loom serve                                              # Default port 8080
@@ -252,19 +248,7 @@ func runServe(cmd *cobra.Command, args []string) {
 		storeHandle.FleetDBClientAPIKey(),
 		fleetState.clientCfg.Actor,
 	)
-	// task.ready payload enrichment: an issue.update journal delta can't say
-	// whether the card has a design, so the bridge looks the live card up
-	// through the same per-workspace issue backend the monitor uses.
-	issueLookup := func(lctx context.Context, ws, issueID string) (string, []string, string, error) {
-		detail, err := issueBackendFn(middleware.WithWorkspace(lctx, ws)).Get(lctx, issueID)
-		if err != nil {
-			return "", nil, "", err
-		}
-		if detail == nil {
-			return "", nil, "", fmt.Errorf("issue %q not found in workspace %q", issueID, ws)
-		}
-		return detail.Design, detail.Labels, detail.IssueType, nil
-	}
+	taskReadyCallbacks := buildTaskReadyBridgeCallbacks(storeHandle.Store.Repos(), issueBackendFn)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
 	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, issueBackendFn)
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)
@@ -272,55 +256,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	if err != nil {
 		log.Fatalf("failed to compose serve capabilities: %v", err)
 	}
-	// Existing bindings bypass the create-time builtin self-heal. Only an
-	// enabled Automation slice can dispatch those bindings, so refresh after
-	// slice policy has been resolved and before any Automation emitter/runtime
-	// starts. Catalog-disabled and Automation-disabled serve profiles must not
-	// touch their deliberately absent persistence surfaces.
-	if automationCapability != nil {
-		if err := serveadapter.RefreshBoundPromptAgentWorkflows(ctx, storeHandle); err != nil {
-			log.Fatalf("failed to refresh bound prompt-agent workflows: %v", err)
-		}
-	}
-	var issueJournalSource trigger.InternalEventEmitter
-	if automationCapability != nil {
-		awaitResolver := &driverexecutor.ExecutionAwaitResolver{
-			API:         cfg.ExecutionCapability.DriverRunAPI(),
-			Authorities: cfg.ExecutionCapability.SystemAuthorityResolver(),
-			ComponentID: "serve-await-event-notifications",
-		}
-		issueJournalSource = serveadapter.NewAutomationIssueJournalEmitter(
-			automationCapability.IssueJournalEmitter(),
-			trigger.NewAwaitMatcherWithResolver(storeHandle.Store.Awaits(), storeHandle.Store.DriverRuns(), awaitResolver),
-		)
-	}
-	var runOutcomes driverexecutor.RunOutcomePublisher
-	if automationCapability != nil {
-		runOutcomes = automationCapability.RunOutcomePublisher()
-	}
-	startIssueJournalBridge(ctx, storeHandle.Store, issueLookup, issueJournalSource)
-	executionPasses, err := buildExecutionRuntimePasses(storeHandle.Store, runOutcomes, cfg.ExecutionCapability, cfg.ArtifactsCapability)
+	stopRuntime, err := startServePlatformRuntime(ctx, storeHandle, cfg, automationCapability, taskReadyCallbacks)
 	if err != nil {
-		log.Fatalf("failed to compose Execution compatibility passes: %v", err)
-	}
-	executionRuntime, err := serveadapter.BuildExecutionRuntimeContributor(
-		executionPasses,
-		cfg.ExecutionCapability,
-		driverAutomationWorkspaceScope(),
-		time.Duration(boundedIntEnv(envLoomAwaitSweepInterval, 30, 3600))*time.Second,
-	)
-	if err != nil {
-		log.Fatalf("failed to compose Execution runtime: %v", err)
-	}
-	runtimeHost, err := serveadapter.BuildServeRuntimeHost(
-		storeHandle.Store.DriverRuns(), storeHandle.Store.Awaits(),
-		storeHandle.Store.TriggerEvents(), storeHandle.Store.Workspaces(),
-		runOutcomes, driverAutomationWorkspaceScope(), cfg.ExecutionCapability, executionRuntime, automationCapability,
-	)
-	if err != nil {
-		log.Fatalf("failed to compose platform runtime: %v", err)
-	}
-	if err := runtimeHost.Start(ctx); err != nil {
 		log.Fatalf("failed to start platform runtime: %v", err)
 	}
 
@@ -332,7 +269,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	logServerStartup()
 	serveErr := awaitShutdown(stop, webuiErr, cancel)
 	stopContext, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	if err := runtimeHost.Stop(stopContext); err != nil {
+	if err := stopRuntime(stopContext); err != nil {
 		slog.Error("platform runtime did not stop cleanly", "err", err)
 	}
 	stopCancel()
@@ -358,20 +295,11 @@ func configureServeLocalRuntimeMode() {
 }
 
 func buildMonitorCollectDataFn(workspaceHint string, issueBackendFn metricscmd.IssueBackendFn) metricscmd.CollectDataFn {
-	collectFn := func() *monitor.MonitorData {
-		if workspaceHint != "" && issueBackendFn != nil {
-			ctx := middleware.WithWorkspace(context.Background(), workspaceHint)
-			if be := issueBackendFn(ctx); be != nil {
-				return monitor.CollectMonitorDataWithIssueBackend(be, 10000, "")
-			}
-		}
-		return monitor.CollectMonitorData(10000, "")
-	}
 	// Refresh monitor data only when the UI asks for it. The frontend performs
 	// one initial fetch and then uses workspace SSE mutations to trigger
 	// additional refreshes, so an unconditional server-side warmer just creates
 	// idle fleet-db fanout and OTEL spans.
-	return metricscmd.NewCollectorFunc(monitorCollectionCacheTTL, collectFn)
+	return monitorwire.BuildCollectDataFn(workspaceHint, issueBackendFn, monitorCollectionCacheTTL)
 }
 
 func resolveMonitorCollectorWorkspace(st store.Store, fallbackWorkspace string) string {
@@ -408,6 +336,7 @@ func buildDriverExecutor(
 	workDir string,
 	runOutcomes driverexecutor.RunOutcomePublisher,
 	executionCapability webui.ExecutionCapability,
+	nodeCapacity int,
 ) (*driverexecutor.Executor, bool) {
 	sandboxLauncher, err := driverexecutor.ResolveSandboxLauncher()
 	if err != nil {
@@ -428,6 +357,7 @@ func buildDriverExecutor(
 		WorkspaceKey:    driverAutomationWorkspaceScope(),
 		WorkDir:         workDir,
 		NodeID:          os.Getenv("LOOM_DRIVER_EXECUTOR_NODE_ID"),
+		NodeCapacity:    nodeCapacity,
 		APIBaseURL:      driverAPIBaseURL(),
 		APIToken:        driverAPIToken(),
 		RunTokenKey:     driverRunTokenKey(),
@@ -437,6 +367,7 @@ func buildDriverExecutor(
 	if executionCapability != nil {
 		executor.Execution = executionCapability.DriverRunAPI()
 		executor.RunOutcomeQueue = executionCapability.DriverRunOutcomeAPI()
+		executor.TerminalWorkRecoveryQueue = executionCapability.TerminalDriverRunWorkRecoveryQueueAPI()
 		executor.ExecutionWorkers = executionCapability.TaskRunWorkerAPI()
 		executor.ExecutionAuthorities = executionCapability.DriverRunAuthorityResolver()
 		executor.SystemAuthorities = executionCapability.SystemAuthorityResolver()
@@ -447,7 +378,7 @@ func buildDriverExecutor(
 	}
 	slog.Info("Driver executor enabled", "workspace", workspaceScope, "work_dir", workDir, "sandbox", sandboxMode,
 		"sandbox_egress", sandboxEgress,
-		"task_worker_concurrency", driverTaskWorkerConcurrency(), "task_run_max_attempts", driverTaskRunMaxAttempts())
+		"task_worker_concurrency", nodeCapacity, "task_run_max_attempts", driverTaskRunMaxAttempts())
 	return executor, true
 }
 
@@ -656,30 +587,14 @@ func warnNonLocalBind() {
 }
 
 func initUsageStore() {
-	dir := cli.GetWorkspaceRuntimeDir()
-	if dir == "" {
-		dir = "."
-	}
-	usageHandler = usagecmd.HandleUsage(usagecmd.InitStore(dir))
+	usageHandler = monitorwire.BuildUsageHandler(cli.GetWorkspaceRuntimeDir())
 }
 
 func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc, st store.Store, issueBackendFn metricscmd.IssueBackendFn, defaultWorkspace string) webui.MonitorHandlers {
-	eventsDir := observability.ResolveEventsDir()
-	monitorDataSource := metricscmd.NewMonitorDataSourceWithDefaultWorkspace(collectDataFn, issueBackendFn, defaultWorkspace)
-	monitorStoreDataSource := metricscmd.NewMonitorStoreDataSource(st)
-	return webui.MonitorHandlers{
-		Status:               metricscmd.HandleStatusWithSources(monitorDataSource, monitorStoreDataSource),
-		Agents:               metricscmd.HandleAgentsWithSources(monitorDataSource, monitorStoreDataSource),
-		Tasks:                metricscmd.HandleTasksWithDataSource(monitorDataSource),
-		Stats:                metricscmd.HandleStatsWithDataSource(monitorDataSource),
-		Sync:                 metricscmd.HandleSync(collectDataFn),
-		Workspaces:           metricscmd.HandleWorkspaces(st),
-		StaleDetector:        staleDetectorHandler,
-		Usage:                usageHandler,
-		Metrics:              metricscmd.HandleMetrics(collectDataFn),
-		ObservabilityMetrics: observability.HandleMetrics(eventsDir, observability.NewMetricsCache(eventsDir)),
-		ObservabilityEvents:  observability.HandleEvents(eventsDir),
-	}
+	return monitorwire.BuildHandlers(
+		collectDataFn, staleDetectorHandler, issueBackendFn, defaultWorkspace, usageHandler,
+		metricscmd.NewMonitorStoreDataSource(st), metricscmd.HandleWorkspaces(st),
+	)
 }
 
 // automationWebCapabilityView deliberately narrows the concrete serve
@@ -769,7 +684,6 @@ func buildServeWorkflowCatalogModule(
 		Enabled:               enabled,
 		AutomationEnabled:     automationEnabled,
 		StoreHandle:           storeHandle,
-		RuntimeDir:            cli.GetWorkspaceRuntimeDir(),
 		Workspace:             driverAutomationWorkspaceScope(),
 		ExternalAuth:          cfg.ExtAuthURL != "",
 		WorkspaceRoleResolver: cfg.WorkspaceRoleResolver,

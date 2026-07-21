@@ -376,7 +376,7 @@ func (e HostBridgeTaskExecutor) runBuiltInFlueWorkflow(ctx context.Context, req 
 	}
 	defer cleanup()
 
-	cmd := exec.CommandContext(ctx, "node", launcherPath) //nolint:gosec // fixed local runtime for bundled Flue workflow runners.
+	cmd := exec.CommandContext(ctx, processNodePath(""), launcherPath) //nolint:gosec // resolved packaged/operator Node runtime; launcherPath is a temp file.
 	if worktree := strings.TrimSpace(e.WorktreePath); worktree != "" {
 		cmd.Dir = worktree
 	}

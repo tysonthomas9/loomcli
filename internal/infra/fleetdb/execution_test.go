@@ -72,6 +72,101 @@ func TestExecutionTerminalDriverStepRepairUsesSystemCommandRoute(t *testing.T) {
 	}
 }
 
+func TestExecutionTaskRunTerminalConvergenceUsesTypedSystemRoutes(t *testing.T) {
+	completedAt := time.Date(2026, 7, 18, 13, 0, 0, 123456000, time.UTC)
+	requestNumber := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNumber++
+		if token := r.Header.Get("X-Lease-Token"); token != "" {
+			t.Fatalf("terminal convergence unexpectedly sent owner token %q", token)
+		}
+		switch requestNumber {
+		case 1:
+			if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/task-runs/terminal-convergence-candidates" {
+				t.Fatalf("candidate request = %s %s", r.Method, r.URL.Path)
+			}
+			if r.URL.Query().Get("required_version") != "2" || r.URL.Query().Get("after") != "task-a" || r.URL.Query().Get("limit") != "7" {
+				t.Fatalf("candidate query = %s", r.URL.RawQuery)
+			}
+			writeJSON(t, w, store.TaskRunTerminalConvergencePage{TaskRunIDs: []string{"task-b", "task-c"}, Next: "task-c"})
+		case 2:
+			if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/task-runs/task-b/complete-terminal-convergence" {
+				t.Fatalf("completion request = %s %s", r.Method, r.URL.Path)
+			}
+			var body struct {
+				RequiredVersion int       `json:"required_version"`
+				CompletedAt     time.Time `json:"completed_at"`
+			}
+			decodeJSONBody(t, r, &body)
+			if body.RequiredVersion != 2 || !body.CompletedAt.Equal(completedAt) {
+				t.Fatalf("completion body = %+v", body)
+			}
+			writeJSON(t, w, store.TaskRunTerminalConvergenceResult{
+				TaskRun: &domain.TaskRun{
+					WorkspaceKey: "WS", TaskRunID: "task-b", TaskID: "TASK-1", Status: domain.TaskRunCompleted,
+					TerminalConvergenceVersion: 2, TerminalConvergedAt: &completedAt,
+				},
+				Replayed: true,
+			})
+		default:
+			t.Fatalf("unexpected request %d: %s %s", requestNumber, r.Method, r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := client.Execution().ListTaskRunTerminalConvergenceCandidates(t.Context(), store.TaskRunTerminalConvergenceQuery{
+		WorkspaceKey: "WS", RequiredVersion: 2, After: "task-a", Limit: 7,
+	})
+	if err != nil || len(page.TaskRunIDs) != 2 || page.Next != "task-c" {
+		t.Fatalf("candidate page = %+v, %v", page, err)
+	}
+	result, err := client.Execution().CompleteTaskRunTerminalConvergence(t.Context(), store.TaskRunTerminalConvergenceComplete{
+		WorkspaceKey: "WS", TaskRunID: "task-b", RequiredVersion: 2, CompletedAt: completedAt,
+	})
+	if err != nil || result == nil || !result.Replayed || result.TaskRun.TerminalConvergenceVersion != 2 {
+		t.Fatalf("completion result = %+v, %v", result, err)
+	}
+}
+
+func TestExecutionTaskRunTerminalConvergenceRejectsDivergentEnvelopes(t *testing.T) {
+	completedAt := time.Now().UTC()
+	for _, test := range []struct {
+		name string
+		body any
+		list bool
+	}{
+		{name: "unordered page", list: true, body: store.TaskRunTerminalConvergencePage{TaskRunIDs: []string{"task-c", "task-b"}}},
+		{name: "divergent marker", body: store.TaskRunTerminalConvergenceResult{TaskRun: &domain.TaskRun{
+			WorkspaceKey: "OTHER", TaskRunID: "task-b", Status: domain.TaskRunCompleted,
+			TerminalConvergenceVersion: 2, TerminalConvergedAt: &completedAt,
+		}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { writeJSON(t, w, test.body) }))
+			t.Cleanup(server.Close)
+			client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.list {
+				_, err = client.Execution().ListTaskRunTerminalConvergenceCandidates(t.Context(), store.TaskRunTerminalConvergenceQuery{
+					WorkspaceKey: "WS", RequiredVersion: 2, After: "task-a", Limit: 7,
+				})
+			} else {
+				_, err = client.Execution().CompleteTaskRunTerminalConvergence(t.Context(), store.TaskRunTerminalConvergenceComplete{
+					WorkspaceKey: "WS", TaskRunID: "task-b", RequiredVersion: 2, CompletedAt: completedAt,
+				})
+			}
+			if !errors.Is(err, ErrExecutionUnavailable) {
+				t.Fatalf("error = %v, want ErrExecutionUnavailable", err)
+			}
+		})
+	}
+}
+
 func TestExecutionTaskRunClaimUsesSpecificOrClaimNextRouteAndReturnsLinkedStep(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -597,5 +692,52 @@ func TestExecutionDriverRunCommandsRejectMissingRawTokenBeforeWire(t *testing.T)
 		FencingToken: 7, StaleBefore: time.Now(), ErrorClass: "stale", ErrorMessage: "stale",
 	}); !strings.Contains(err.Error(), "token") {
 		t.Fatalf("RecoverStaleChildTaskRuns missing token error = %v", err)
+	}
+}
+
+func TestExecutionTerminalDriverRunWorkRecoveryUsesSystemRouteAndStrictReceipt(t *testing.T) {
+	recoveredAt := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/driver-runs/run-1/commands/recover-terminal-work" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Lease-Token"); got != "" {
+			t.Fatalf("system recovery unexpectedly carried X-Lease-Token = %q", got)
+		}
+		var request struct {
+			RequestID    string                 `json:"request_id"`
+			ParentStatus domain.DriverRunStatus `json:"parent_status"`
+			Reason       string                 `json:"reason"`
+			ErrorClass   string                 `json:"error_class"`
+			RecoveredAt  time.Time              `json:"recovered_at"`
+		}
+		decodeJSONBody(t, r, &request)
+		if request.RequestID != "terminal-work-1" || request.ParentStatus != domain.DriverRunFailed ||
+			request.Reason != "parent driver run became failed" || request.ErrorClass != "parent_run_terminal" ||
+			!request.RecoveredAt.Equal(recoveredAt) {
+			t.Fatalf("recovery request = %+v", request)
+		}
+		appliedAt := recoveredAt
+		writeJSON(t, w, ExecutionTerminalDriverRunWorkRecoveryResult{
+			WorkspaceKey: "WS", DriverRunID: "run-1", ParentStatus: domain.DriverRunFailed,
+			Reason: "parent driver run became failed", ErrorClass: "parent_run_terminal", RecoveredAt: recoveredAt,
+			RecoveredTaskRunIDs: []string{"task-run-1"}, ReleasedWorkItemIDs: []string{"TASK-1"},
+			PreservedSuccessorWorkItemIDs: []string{}, ActionID: "action-1",
+			Action: &ExecutionActionLedger{WorkspaceKey: "WS", ActionID: "action-1",
+				ActionType: "recover_terminal_driver_run_work", Status: "applied", CreatedAt: recoveredAt, AppliedAt: &appliedAt},
+		})
+	}))
+	t.Cleanup(server.Close)
+	client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Execution().RecoverTerminalDriverRunWork(t.Context(), ExecutionTerminalDriverRunWorkRecoveryCommand{
+		WorkspaceKey: "WS", RequestID: "terminal-work-1", DriverRunID: "run-1",
+		ParentStatus: domain.DriverRunFailed, Reason: "parent driver run became failed",
+		ErrorClass: "parent_run_terminal", RecoveredAt: recoveredAt,
+	})
+	if err != nil || result.ActionID != "action-1" || len(result.RecoveredTaskRunIDs) != 1 || len(result.ReleasedWorkItemIDs) != 1 {
+		t.Fatalf("RecoverTerminalDriverRunWork() = %#v, %v", result, err)
 	}
 }

@@ -176,33 +176,34 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		deliverAssignment: driverpkg.DeliverLeadAssignmentForDriver,
 	}
 	m.ops = map[string]opHandler{
-		"claim-ready":                 m.claimReady,
-		"claim-task":                  m.claimTask,
-		"binding-config":              m.bindingConfig,
-		"role-get":                    m.roleGet,
-		"epic-get":                    m.epicGet,
-		"epic-snapshot":               m.epicSnapshot,
-		"list-agents":                 m.listAgents,
-		"agent-orchestration-session": m.agentOrchestrationSession,
-		"update-agent-parent":         m.updateAgentParent,
-		"deliver-lead-assignment":     m.deliverLeadAssignment,
-		"deliver-agent-message":       m.deliverAgentMessage,
-		"exec-task":                   m.execTask,
-		"task-run-get":                m.taskRunGet,
-		"active-task-runs":            m.activeTaskRuns,
-		"recover-stale-tasks":         m.recoverStaleTasks,
-		"complete-task":               m.completeTask,
-		"task-diff":                   m.taskDiff,
-		"release-task":                m.releaseTask,
-		"connector-dispatch":          m.connectorDispatch,
-		"emit-event":                  m.emitEvent,
-		"issue-get":                   m.issueGet,
-		"issue-list":                  m.issueList,
-		"issue-list-comments":         m.issueListComments,
-		"issue-comment":               m.issueComment,
-		"issue-update":                m.issueUpdate,
-		"issue-add-label":             m.issueAddLabel,
-		"issue-remove-label":          m.issueRemoveLabel,
+		"claim-ready":                     m.claimReady,
+		"claim-task":                      m.claimTask,
+		"binding-config":                  m.bindingConfig,
+		"role-get":                        m.roleGet,
+		"epic-get":                        m.epicGet,
+		"epic-snapshot":                   m.epicSnapshot,
+		"list-agents":                     m.listAgents,
+		"agent-orchestration-session":     m.agentOrchestrationSession,
+		"update-agent-parent":             m.updateAgentParent,
+		"deliver-lead-assignment":         m.deliverLeadAssignment,
+		"deliver-agent-message":           m.deliverAgentMessage,
+		"exec-task":                       m.execTask,
+		"task-run-get":                    m.taskRunGet,
+		"active-task-runs":                m.activeTaskRuns,
+		"recover-stale-tasks":             m.recoverStaleTasks,
+		"complete-task":                   m.completeTask,
+		"task-diff":                       m.taskDiff,
+		"release-task":                    m.releaseTask,
+		"connector-dispatch":              m.connectorDispatch,
+		"emit-event":                      m.emitEvent,
+		"issue-get":                       m.issueGet,
+		"issue-list":                      m.issueList,
+		"issue-list-comments":             m.issueListComments,
+		"issue-comment":                   m.issueComment,
+		"issue-update":                    m.issueUpdate,
+		"issue-block-repository-required": m.issueBlockRepositoryRequired,
+		"issue-add-label":                 m.issueAddLabel,
+		"issue-remove-label":              m.issueRemoveLabel,
 	}
 	if m.worktreePath == "" {
 		if wd, err := os.Getwd(); err == nil {
@@ -806,12 +807,39 @@ func writeSpecializedOpError(w http.ResponseWriter, err error) bool {
 // writeDomainOpError maps domain sentinel errors onto the structured error
 // envelope. Defaults to a non-retryable internal error: only transient
 // classes (timeouts, cancellation) advertise retryability.
-//
-//nolint:cyclop // This switch is the protocol's exhaustive domain-to-wire error classification table.
 func writeDomainOpError(w http.ResponseWriter, err error) {
-	if writeSpecializedOpError(w, err) {
+	if writeSpecializedOpError(w, err) || writeBackendDomainOpError(w, err) ||
+		writeAutomationDomainOpError(w, err) || writeExecutionDomainOpError(w, err) {
 		return
 	}
+	writeBaseDomainOpError(w, err)
+}
+
+func writeBackendDomainOpError(w http.ResponseWriter, err error) bool {
+	switch {
+	case backend.IsKind(err, backend.KindValidation):
+		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
+	case backend.IsKind(err, backend.KindNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
+	case backend.IsKind(err, backend.KindConflict):
+		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
+	case backend.IsKind(err, backend.KindNotImplemented):
+		writeOpError(w, http.StatusNotImplemented, "not_implemented", err.Error(), false)
+	case backend.IsKind(err, backend.KindUnavailable):
+		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
+	case backend.IsKind(err, backend.KindTimeout):
+		writeOpError(w, http.StatusGatewayTimeout, "timeout", err.Error(), true)
+	case backend.IsKind(err, backend.KindCanceled):
+		writeOpError(w, 499, "canceled", err.Error(), true)
+	case backend.IsKind(err, backend.KindInternal):
+		writeOpError(w, http.StatusInternalServerError, "internal", err.Error(), false)
+	default:
+		return false
+	}
+	return true
+}
+
+func writeAutomationDomainOpError(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.Is(err, workfloweventing.ErrInvalidRequest), errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace):
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
@@ -821,6 +849,14 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
 	case errors.Is(err, workfloweventing.ErrUnavailable), errors.Is(err, automation.ErrUnavailable):
 		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
+	default:
+		return false
+	}
+	return true
+}
+
+func writeExecutionDomainOpError(w http.ResponseWriter, err error) bool {
+	switch {
 	case errors.Is(err, execution.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, execution.ErrFenceConflict), errors.Is(err, authority.ErrInvalidScope):
@@ -835,6 +871,14 @@ func writeDomainOpError(w http.ResponseWriter, err error) {
 		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
 	case errors.Is(err, execution.ErrUnavailable):
 		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
+	default:
+		return false
+	}
+	return true
+}
+
+func writeBaseDomainOpError(w http.ResponseWriter, err error) {
+	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
 	case errors.Is(err, domain.ErrNotOwner):

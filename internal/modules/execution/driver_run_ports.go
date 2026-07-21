@@ -17,6 +17,10 @@ type DriverRunDependencies struct {
 	Awaits      DriverAwaitPort
 	Queries     DriverRunQueryPort
 	Resolutions DriverAwaitResolutionPort
+
+	// TerminalWorkRecovery is a system-only convergence seam for descendants
+	// and claims left behind after a DriverRun has reached terminal state.
+	TerminalWorkRecovery DriverRunTerminalWorkRecoveryPort
 }
 
 type DriverRunSubmissionPort interface {
@@ -35,6 +39,14 @@ type DriverRunChildStartPort interface {
 // list followed by per-child mutations.
 type DriverRunCascadePort interface {
 	CascadeChildDriverRuns(context.Context, CascadeChildDriverRunsCommand) (CascadeChildDriverRunsResult, error)
+}
+
+// DriverRunTerminalWorkRecoveryPort owns one atomic, idempotent convergence
+// command for TaskRuns and Work Item claim generations left behind by a
+// terminal DriverRun. Implementations must preserve any successor generation
+// rather than releasing it through a stale parent recovery.
+type DriverRunTerminalWorkRecoveryPort interface {
+	RecoverTerminalDriverRunWork(context.Context, RecoverTerminalDriverRunWorkCommand) (RecoverTerminalDriverRunWorkResult, error)
 }
 
 type DriverRunClaimPort interface {

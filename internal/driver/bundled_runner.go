@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -80,7 +81,7 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 	}
 	defer cleanup()
 
-	cmd := exec.CommandContext(ctx, "node", launcherPath) //nolint:gosec // fixed local runtime for the bundled Flue runner.
+	cmd := exec.CommandContext(ctx, processNodePath(""), launcherPath) //nolint:gosec // resolved packaged/operator Node runtime; launcherPath is a temp file.
 	if wt := strings.TrimSpace(opts.Worktree); wt != "" {
 		cmd.Dir = wt
 	}
@@ -197,10 +198,7 @@ type NodeRunner struct {
 }
 
 func (r NodeRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
-	node := r.NodePath
-	if node == "" {
-		node = "node"
-	}
+	node := processNodePath(r.NodePath)
 	payload := req.Run.Payload
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{}`)
@@ -464,4 +462,45 @@ func workflowName(req RunRequest) string {
 		return req.Run.DriverID
 	}
 	return EntrypointRun
+}
+
+// processNodePath resolves the Node executable for host-process Flue runtimes.
+// An explicit caller override wins. Packaged desktop builds place a pinned Node
+// runtime under Contents/Resources/runtime, so prefer that copy before the
+// legacy executable sibling and PATH fallbacks used by CLI/development installs.
+func processNodePath(override string) string {
+	executable, _ := os.Executable()
+	return resolveProcessNodePath(override, executable)
+}
+
+func resolveProcessNodePath(override, executable string) string {
+	if override = strings.TrimSpace(override); override != "" {
+		return override
+	}
+	if executable = strings.TrimSpace(executable); executable != "" {
+		executableDir := filepath.Dir(executable)
+		for _, name := range []string{"node", "node.exe"} {
+			candidates := []string{
+				filepath.Clean(filepath.Join(executableDir, "..", "Resources", "runtime", name)),
+				filepath.Join(executableDir, name),
+			}
+			for _, candidate := range candidates {
+				if isProcessExecutable(candidate) {
+					return candidate
+				}
+			}
+		}
+	}
+	return "node"
+}
+
+func isProcessExecutable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode()&0o111 != 0
 }

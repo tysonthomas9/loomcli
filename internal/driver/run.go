@@ -348,6 +348,7 @@ func emitRunFinishedEventWithExecution(
 	publisher RunOutcomePublisher,
 	run *domain.DriverRun,
 	queue execution.DriverRunOutcomeAPI,
+	terminalWorkQueue execution.TerminalDriverRunWorkRecoveryQueueAPI,
 	cascades execution.DriverRunAPI,
 	authorities execution.SystemAuthorityResolver,
 	notifier RunOutcomeAwaitNotifier,
@@ -355,7 +356,7 @@ func emitRunFinishedEventWithExecution(
 	if s == nil || run == nil || !run.Status.IsTerminal() {
 		return
 	}
-	if queue == nil || cascades == nil || authorities == nil || notifier == nil {
+	if queue == nil || terminalWorkQueue == nil || cascades == nil || authorities == nil || notifier == nil {
 		slog.WarnContext(ctx, "Execution run.finished queue is unavailable",
 			"runID", run.RunID, "status", string(run.Status))
 		return
@@ -367,7 +368,7 @@ func emitRunFinishedEventWithExecution(
 		return
 	}
 	reconciler, err := NewRunOutcomeReconcilerWithExecution(
-		queue, notifier, journal, publisher, run.WorkspaceKey, nil,
+		queue, terminalWorkQueue, notifier, journal, publisher, run.WorkspaceKey, nil,
 		cascades, authorities, string(execution.DriverRunOutcomeComponentID),
 	)
 	if err == nil {

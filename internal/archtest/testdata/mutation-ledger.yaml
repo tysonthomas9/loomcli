@@ -365,6 +365,20 @@ commands:
     retry_restart_behavior: Duplicate or lost-response replay returns the same TaskRun owner and action receipt; a competing claimant cannot reuse the lease token or fence.
     negative_tests: [expired_system_authority, lease_missing, task_not_ready, unauthenticated, wrong_action, wrong_component, wrong_workspace]
     fault_injection_tests: [concurrent_claimants, duplicate_request, lost_response_after_commit, transaction_rollback]
+  - id: execution.claim-terminal-driver-run-work-recoveries
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: terminal_driver_run_work_recovery_claim
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-run-outcomes/terminal-work/claim"]
+    transaction_or_saga_boundary: Execution fixes the bounded batch size and claim lease; one FleetDB command atomically leases due or expired terminal-work recovery rows whose immutable DriverRun snapshots drive the atomic recovery command.
+    idempotency_key: "lease-based: workspace_id:driver_run_id is owned by the recovery claim_id only until claim_until; there is no exact claim replay receipt"
+    semantic_events_or_read_models: [execution.terminal_driver_run_work_recovery.v1]
+    retry_restart_behavior: Retrying after a lost claim response before claim_until returns no row because the recovery lease remains authoritative; after expiry or persisted retry time a new claim increments only this lane's attempt and reuses the deterministic recovery request identity.
+    negative_tests: [expired_system_authority, oversized_limit, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [claim_before_lease_expiry_returns_empty, process_stop_after_claim, restart_reclaim_after_lease_expiry]
   - id: execution.complete-await-event-notification
     phase: 4
     aggregate_owner: execution
@@ -393,6 +407,20 @@ commands:
     retry_restart_behavior: Exact completion replay is idempotent; a lost response replays deterministic downstream identities and cannot let another claim owner acknowledge the row.
     negative_tests: [claim_owner_mismatch, expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
     fault_injection_tests: [duplicate_completion, lost_response_after_commit]
+  - id: execution.complete-terminal-driver-run-work-recovery
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: terminal_driver_run_work_recovery_completion
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-run-outcomes/terminal-work/complete"]
+    transaction_or_saga_boundary: One FleetDB owner-checked command completes only the independently claimed terminal-work recovery row after the deterministic atomic recovery command converges; ordinary outcome delivery state is untouched.
+    idempotency_key: workspace_id:driver_run_id:recovery_claim_id:complete
+    semantic_events_or_read_models: [execution.terminal_driver_run_work_recovery.v1]
+    retry_restart_behavior: Exact completion replay is idempotent; a lost response cannot let another recovery claim owner acknowledge the row and cannot complete the ordinary outcome-delivery lane.
+    negative_tests: [claim_owner_mismatch, expired_system_authority, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [duplicate_completion, lost_response_after_commit]
   - id: execution.converge-task-run
     phase: 4
     aggregate_owner: execution
@@ -400,13 +428,13 @@ commands:
     mechanism_discriminator: task_run_terminal_convergence
     instance_owner: execution
     accepted_authority: [system]
-    durable_commands: ["POST /api/v1/{workspace}/driver-steps/{step_id}/repair-terminal", "POST /api/v1/{workspace}/outbox", "POST /api/v1/{workspace}/task-run-events"]
-    transaction_or_saga_boundary: The runtime repeatedly scans durable terminal TaskRuns and idempotently ensures the terminal event, linked DriverStep projection, and deduplicated Interaction notification as three state-backed convergence legs.
-    idempotency_key: workspace_id:task_run_id:terminal_status
-    semantic_events_or_read_models: [execution.driver_step.v1, execution.task_run_event.v1, interaction.lead_notification.v1]
-    retry_restart_behavior: A stop after any leg is safe because deterministic event, repair request, and outbox dedupe identities let the next scan resume from the terminal TaskRun source.
-    negative_tests: [expired_system_authority, invalid_terminal_source, unauthenticated, wrong_action, wrong_component, wrong_workspace]
-    fault_injection_tests: [process_stop_after_event, process_stop_after_notification, process_stop_after_step_repair]
+    durable_commands: ["GET /api/v1/{workspace}/task-runs/terminal-convergence-candidates", "POST /api/v1/{workspace}/driver-steps/{step_id}/repair-terminal", "POST /api/v1/{workspace}/outbox", "POST /api/v1/{workspace}/task-run-events", "POST /api/v1/{workspace}/task-runs/{task_run_id}/complete-terminal-convergence"]
+    transaction_or_saga_boundary: The runtime pages only terminal TaskRuns below the required typed convergence version, idempotently ensures the terminal event, linked DriverStep projection, and deduplicated Interaction notification as three state-backed legs, then advances the monotonic completion marker.
+    idempotency_key: workspace_id:task_run_id:terminal_status:convergence_version
+    semantic_events_or_read_models: [execution.driver_step.v1, execution.task_run_event.v1, execution.task_run_terminal_convergence.v1, interaction.lead_notification.v1]
+    retry_restart_behavior: A stop after any leg is safe because deterministic event, repair request, and outbox dedupe identities let the next scan resume from the terminal TaskRun source; partial failure leaves the marker pending, while completed versions are durably skipped and an older completion replay cannot lower a newer marker.
+    negative_tests: [expired_system_authority, invalid_terminal_source, nonterminal_checkpoint, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [lost_response_after_marker_commit, process_stop_after_event, process_stop_after_notification, process_stop_after_step_repair]
   - id: execution.create-worker-profile
     phase: 4
     aggregate_owner: execution
@@ -561,6 +589,20 @@ commands:
     retry_restart_behavior: Deterministic cutoff replay returns or skips the same recovered children; a fresh heartbeat or successor fence wins.
     negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
     fault_injection_tests: [duplicate_request, heartbeat_race, lost_response_after_commit]
+  - id: execution.recover-terminal-driver-run-work
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: terminal_driver_run_task_and_work_item_recovery
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/commands/recover-terminal-work"]
+    transaction_or_saga_boundary: One FleetDB transaction validates the immutable terminal parent snapshot, terminalizes eligible linked TaskRuns, and releases only matching DriverRun-generation Work Item claims before recording the exact action receipt.
+    idempotency_key: workspace_id:driver_run_id:parent_status:request_id
+    semantic_events_or_read_models: [execution.task_run.v1, execution.terminal_driver_run_work_recovery.v1, workitems.claim.v1]
+    retry_restart_behavior: Exact request replay returns the immutable recovery receipt; concurrent ordinary and dedicated recovery lanes use the same deterministic request identity, while a divergent terminal snapshot conflicts without mutating successor claims.
+    negative_tests: [divergent_terminal_snapshot, expired_system_authority, successor_claim_generation, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [concurrent_request, duplicate_request, lost_response_after_commit, transaction_rollback]
   - id: execution.register-worker-node
     phase: 4
     aggregate_owner: execution
@@ -671,6 +713,20 @@ commands:
     idempotency_key: "state-based: workspace_id:driver_run_id:current_claim_id; a successful retry clears the claim and has no exact replay receipt"
     semantic_events_or_read_models: [execution.driver_run_outcome.v1]
     retry_restart_behavior: The persisted retry time survives restart and gates the next claim. If the retry response is lost, repeating the same retry observes the already-cleared claim as an ownership conflict; later reclamation resumes downstream work under deterministic cascade, journal, Await, and Automation identities.
+    negative_tests: [claim_owner_mismatch, expired_system_authority, invalid_attempt, unauthenticated, wrong_action, wrong_component, wrong_workspace]
+    fault_injection_tests: [process_stop_after_retry, restart_reclaim_at_persisted_time]
+  - id: execution.retry-terminal-driver-run-work-recovery
+    phase: 4
+    aggregate_owner: execution
+    coordinating_owner: execution
+    mechanism_discriminator: terminal_driver_run_work_recovery_retry
+    instance_owner: execution
+    accepted_authority: [system]
+    durable_commands: ["POST /api/v1/{workspace}/driver-run-outcomes/terminal-work/retry"]
+    transaction_or_saga_boundary: Execution derives capped exponential backoff and UTF-8-safe bounded error text; one FleetDB owner-checked command releases only the exact terminal-work recovery claim at that retry time.
+    idempotency_key: "state-based: workspace_id:driver_run_id:current_recovery_claim_id; a successful retry clears the claim and has no exact replay receipt"
+    semantic_events_or_read_models: [execution.terminal_driver_run_work_recovery.v1]
+    retry_restart_behavior: The persisted recovery retry time survives restart and gates the next recovery claim. If the response is lost, repeating the retry observes an ownership conflict; later reclamation reuses the deterministic atomic recovery identity without touching ordinary delivery state.
     negative_tests: [claim_owner_mismatch, expired_system_authority, invalid_attempt, unauthenticated, wrong_action, wrong_component, wrong_workspace]
     fault_injection_tests: [process_stop_after_retry, restart_reclaim_at_persisted_time]
   - id: execution.set-worker-node-drain

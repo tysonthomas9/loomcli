@@ -85,6 +85,14 @@ type step9DriverRunAPI struct {
 	execution.DriverRunAPI
 }
 
+func (step9DriverRunAPI) RecoverTerminalDriverRunWork(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverTerminalDriverRunWorkCommand,
+) (execution.RecoverTerminalDriverRunWorkResult, error) {
+	return execution.RecoverTerminalDriverRunWorkResult{ActionID: command.RequestID}, nil
+}
+
 func (step9DriverRunAPI) CascadeChildDriverRuns(
 	_ context.Context,
 	_ authority.ExecutionAuthority,
@@ -173,22 +181,23 @@ func (f *step9Fixture) queueRun(t *testing.T, runID, epicID string) {
 
 func (f *step9Fixture) executor(runID string, launcher driver.SandboxLauncher) *driver.Executor {
 	return &driver.Executor{
-		Store:                f.st,
-		WorkspaceKey:         "TEST",
-		RunID:                runID,
-		WorkDir:              f.root,
-		NodeID:               "step9-node",
-		LeaseID:              "step9-lease-" + runID,
-		HeartbeatInterval:    -1,
-		APIBaseURL:           "http://127.0.0.1:7777",
-		APIToken:             "node-shared-static-bearer",
-		RunTokenKey:          step9TokenKey,
-		SandboxLauncher:      launcher,
-		Execution:            step9DriverRunAPI{DriverRunAPI: f.exec.DriverRunAPI()},
-		RunOutcomeQueue:      f.exec.DriverRunOutcomeAPI(),
-		ExecutionWorkers:     f.exec.TaskRunWorkerAPI(),
-		ExecutionAuthorities: f.exec.DriverRunAuthorityResolver(),
-		SystemAuthorities:    f.exec.SystemAuthorityResolver(),
+		Store:                     f.st,
+		WorkspaceKey:              "TEST",
+		RunID:                     runID,
+		WorkDir:                   f.root,
+		NodeID:                    "step9-node",
+		LeaseID:                   "step9-lease-" + runID,
+		HeartbeatInterval:         -1,
+		APIBaseURL:                "http://127.0.0.1:7777",
+		APIToken:                  "node-shared-static-bearer",
+		RunTokenKey:               step9TokenKey,
+		SandboxLauncher:           launcher,
+		Execution:                 step9DriverRunAPI{DriverRunAPI: f.exec.DriverRunAPI()},
+		RunOutcomeQueue:           f.exec.DriverRunOutcomeAPI(),
+		TerminalWorkRecoveryQueue: f.exec.TerminalDriverRunWorkRecoveryQueueAPI(),
+		ExecutionWorkers:          f.exec.TaskRunWorkerAPI(),
+		ExecutionAuthorities:      f.exec.DriverRunAuthorityResolver(),
+		SystemAuthorities:         f.exec.SystemAuthorityResolver(),
 	}
 }
 

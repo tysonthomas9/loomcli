@@ -55,7 +55,7 @@ const (
 // package's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 202
+const expectedClientCallSites = 208
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -204,6 +204,9 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/driver-run-outcomes/claim"},
 	{"POST", "/api/v1/{}/driver-run-outcomes/complete"},
 	{"POST", "/api/v1/{}/driver-run-outcomes/retry"},
+	{"POST", "/api/v1/{}/driver-run-outcomes/terminal-work/claim"},
+	{"POST", "/api/v1/{}/driver-run-outcomes/terminal-work/complete"},
+	{"POST", "/api/v1/{}/driver-run-outcomes/terminal-work/retry"},
 
 	// await_event_notification.go — durable generic-event await reconciliation.
 	{"POST", "/api/v1/{}/await-event-notifications/claim"},
@@ -251,10 +254,13 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/task-runs/{}/requeue-and-reset-step"},
 	{"POST", "/api/v1/{}/task-runs/{}/exhaust-retries"},
 	{"POST", "/api/v1/{}/task-runs/{}/work-item/design"},
+	{"GET", "/api/v1/{}/task-runs/terminal-convergence-candidates"},
+	{"POST", "/api/v1/{}/task-runs/{}/complete-terminal-convergence"},
 	{"POST", "/api/v1/{}/driver-steps/{}/repair-terminal"},
 	{"POST", "/api/v1/{}/driver-runs/{}/children/start"},
 	{"POST", "/api/v1/{}/driver-runs/{}/commands/cascade-children"},
 	{"POST", "/api/v1/{}/driver-runs/{}/commands/recover-child-cascade"},
+	{"POST", "/api/v1/{}/driver-runs/{}/commands/recover-terminal-work"},
 	{"POST", "/api/v1/{}/driver-steps"},
 	{"POST", "/api/v1/{}/driver-runs/{}/steps"},
 	{"GET", "/api/v1/{}/driver-steps/{}"},

@@ -16,12 +16,23 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
+	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
 )
 
 // New preserves the established route registration order while grouping the
 // concrete HTTP adapters behind one workspace composition seam.
 func New(deps routecontracts.Deps, automationModules automationroutes.Modules) []interface{ Register(*http.ServeMux) } {
 	onboardingModule := supportroutes.New(deps.IssueSvc, deps.AgentSvc)
+	var taskWorkflowRuns readprojection.TaskWorkflowRunReader
+	if deps.Store != nil {
+		taskWorkflowRuns = readprojection.NewTaskWorkflowRunReader(
+			deps.Store.AgentSessions(),
+			deps.Store.TaskRuns(),
+			deps.Store.TriggerEvents(),
+			deps.Store.TriggerDeliveries(),
+			deps.Store.DriverRuns(),
+		)
+	}
 
 	return []interface{ Register(*http.ServeMux) }{
 		agents.New(agents.Config{
@@ -34,6 +45,7 @@ func New(deps routecontracts.Deps, automationModules automationroutes.Modules) [
 		workflows.NewModule(workflows.Config{
 			Store: deps.Store, Catalog: deps.WorkflowCatalog,
 			Execution: deps.ExecutionDriverRuns, OperatorAuthority: deps.ExecutionOperator,
+			TaskWorkflowRuns: taskWorkflowRuns,
 		}),
 		executionmanagement.New(executionmanagement.Config{
 			WorkerProfiles: deps.ExecutionWorkerProfiles, Authority: deps.ExecutionOperator,

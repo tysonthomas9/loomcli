@@ -3,7 +3,6 @@ package serve
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -18,6 +17,7 @@ import (
 // remain explicit consumer ports.
 type ExecutionTaskRunConvergenceDependencies struct {
 	TaskRuns    store.TaskRunStore
+	Checkpoints store.TaskRunTerminalConvergenceStore
 	DriverRuns  store.DriverRunStore
 	DriverSteps store.TerminalDriverStepRepairStore
 	Events      store.TaskRunEventStore
@@ -26,13 +26,13 @@ type ExecutionTaskRunConvergenceDependencies struct {
 }
 
 func NewExecutionTaskRunConvergenceDependencies(dependencies ExecutionTaskRunConvergenceDependencies) (execution.TaskRunConvergenceDependencies, error) {
-	if dependencies.TaskRuns == nil || dependencies.DriverRuns == nil || dependencies.DriverSteps == nil ||
+	if dependencies.TaskRuns == nil || dependencies.Checkpoints == nil || dependencies.DriverRuns == nil || dependencies.DriverSteps == nil ||
 		dependencies.Events == nil || dependencies.Agents == nil || dependencies.Outbox == nil {
 		return execution.TaskRunConvergenceDependencies{}, fmt.Errorf("compose TaskRun convergence: all narrow ports are required")
 	}
 	adapter := &executionTaskRunConvergenceAdapter{dependencies: dependencies}
 	return execution.TaskRunConvergenceDependencies{
-		Source: adapter, Events: adapter, DriverSteps: adapter, LeadResolver: adapter, Notifications: adapter,
+		Source: adapter, Checkpoints: adapter, Events: adapter, DriverSteps: adapter, LeadResolver: adapter, Notifications: adapter,
 	}, nil
 }
 
@@ -75,36 +75,37 @@ func (adapter *executionTaskRunConvergenceAdapter) GetTerminalTaskRun(ctx contex
 }
 
 func (adapter *executionTaskRunConvergenceAdapter) ListTaskRunConvergenceCandidates(ctx context.Context, query execution.TaskRunConvergenceCandidateQuery) (execution.TaskRunConvergenceCandidatePage, error) {
-	ids := make([]string, 0)
-	for _, status := range []domain.TaskRunStatus{domain.TaskRunCompleted, domain.TaskRunFailed, domain.TaskRunCancelled} {
-		runs, err := adapter.dependencies.TaskRuns.List(ctx, query.WorkspaceKey, store.TaskRunFilter{Status: status})
-		if err != nil {
-			return execution.TaskRunConvergenceCandidatePage{}, err
-		}
-		for _, run := range runs {
-			if run != nil && strings.TrimSpace(run.TaskRunID) != "" {
-				ids = append(ids, run.TaskRunID)
-			}
-		}
+	page, err := adapter.dependencies.Checkpoints.ListTaskRunTerminalConvergenceCandidates(ctx, store.TaskRunTerminalConvergenceQuery{
+		WorkspaceKey: query.WorkspaceKey, RequiredVersion: query.RequiredVersion,
+		After: query.After, Limit: query.Limit,
+	})
+	if err != nil {
+		return execution.TaskRunConvergenceCandidatePage{}, err
 	}
-	sort.Strings(ids)
-	start := sort.SearchStrings(ids, query.After)
-	for start < len(ids) && ids[start] <= query.After {
-		start++
+	return execution.TaskRunConvergenceCandidatePage{
+		TaskRunIDs: append([]string(nil), page.TaskRunIDs...), Next: page.Next,
+	}, nil
+}
+
+func (adapter *executionTaskRunConvergenceAdapter) CompleteTaskRunTerminalConvergence(
+	ctx context.Context,
+	command execution.CompleteTaskRunTerminalConvergence,
+) (execution.TaskRunTerminalConvergenceCheckpoint, error) {
+	result, err := adapter.dependencies.Checkpoints.CompleteTaskRunTerminalConvergence(ctx, store.TaskRunTerminalConvergenceComplete{
+		WorkspaceKey: command.WorkspaceKey, TaskRunID: command.TaskRunID,
+		RequiredVersion: command.RequiredVersion, CompletedAt: command.CompletedAt,
+	})
+	if err != nil {
+		return execution.TaskRunTerminalConvergenceCheckpoint{}, err
 	}
-	limit := query.Limit
-	if limit <= 0 || limit > 1000 {
-		limit = 100
+	if result == nil || result.TaskRun == nil || result.TaskRun.TerminalConvergedAt == nil {
+		return execution.TaskRunTerminalConvergenceCheckpoint{}, execution.ErrConflict
 	}
-	end := start + limit
-	if end > len(ids) {
-		end = len(ids)
-	}
-	page := execution.TaskRunConvergenceCandidatePage{TaskRunIDs: append([]string(nil), ids[start:end]...)}
-	if end < len(ids) && end > start {
-		page.Next = ids[end-1]
-	}
-	return page, nil
+	return execution.TaskRunTerminalConvergenceCheckpoint{
+		WorkspaceKey: result.TaskRun.WorkspaceKey, TaskRunID: result.TaskRun.TaskRunID,
+		Version: result.TaskRun.TerminalConvergenceVersion, CompletedAt: *result.TaskRun.TerminalConvergedAt,
+		Replayed: result.Replayed,
+	}, nil
 }
 
 func (adapter *executionTaskRunConvergenceAdapter) EnsureTaskRunTerminalEvent(ctx context.Context, event execution.TaskRunTerminalEvent) error {

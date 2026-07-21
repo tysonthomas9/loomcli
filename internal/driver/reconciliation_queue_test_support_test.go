@@ -169,6 +169,47 @@ type noOpRunOutcomeCascade struct {
 	execution.DriverRunAPI
 }
 
+type noOpTerminalDriverRunWorkRecoveryQueue struct{}
+
+func (noOpTerminalDriverRunWorkRecoveryQueue) ClaimTerminalDriverRunWorkRecoveries(
+	context.Context,
+	authority.SystemAuthority,
+	execution.ClaimTerminalDriverRunWorkRecoveriesCommand,
+) ([]execution.DriverRunOutcome, error) {
+	return []execution.DriverRunOutcome{}, nil
+}
+
+func (noOpTerminalDriverRunWorkRecoveryQueue) CompleteTerminalDriverRunWorkRecovery(
+	context.Context,
+	authority.SystemAuthority,
+	execution.CompleteTerminalDriverRunWorkRecoveryCommand,
+) error {
+	return nil
+}
+
+func (noOpTerminalDriverRunWorkRecoveryQueue) RetryTerminalDriverRunWorkRecovery(
+	context.Context,
+	authority.SystemAuthority,
+	execution.RetryTerminalDriverRunWorkRecoveryCommand,
+) error {
+	return nil
+}
+
+func (noOpRunOutcomeCascade) RecoverTerminalDriverRunWork(
+	_ context.Context,
+	_ authority.SystemAuthority,
+	command execution.RecoverTerminalDriverRunWorkCommand,
+) (execution.RecoverTerminalDriverRunWorkResult, error) {
+	return execution.RecoverTerminalDriverRunWorkResult{
+		ActionID: command.RequestID,
+		Committed: &execution.RecoverTerminalDriverRunWorkCommit{
+			WorkspaceKey: command.WorkspaceKey, DriverRunID: command.DriverRunID,
+			ParentStatus: command.ParentStatus, Reason: command.Reason,
+			ErrorClass: command.ErrorClass, RecoveredAt: command.RecoveredAt,
+		},
+	}, nil
+}
+
 func (noOpRunOutcomeCascade) RecoverChildDriverRunCascade(
 	_ context.Context,
 	_ authority.SystemAuthority,
@@ -198,7 +239,7 @@ func NewRunOutcomeReconciler(
 		return nil, err
 	}
 	return NewRunOutcomeReconcilerWithExecution(
-		queue, awaits, journal, publisher, workspace, workspaces,
+		queue, noOpTerminalDriverRunWorkRecoveryQueue{}, awaits, journal, publisher, workspace, workspaces,
 		noOpRunOutcomeCascade{}, authorities, string(execution.DriverRunOutcomeComponentID),
 	)
 }

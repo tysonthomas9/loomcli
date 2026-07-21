@@ -146,6 +146,16 @@ func TestExecutionAuthorityResolversAdmitOnlyRegisteredChildCascadeLanes(t *test
 	); err == nil {
 		t.Fatal("driver executor resolved outcome-only cascade recovery authority")
 	}
+	if _, err := capability.SystemAuthorityResolver().ResolveExecutionSystemAuthority(
+		t.Context(), "WS", execution.ActionRecoverTerminalDriverRunWork, string(execution.DriverRunOutcomeComponentID),
+	); err != nil {
+		t.Fatalf("resolve outcome terminal work recovery authority: %v", err)
+	}
+	if _, err := capability.SystemAuthorityResolver().ResolveExecutionSystemAuthority(
+		t.Context(), "WS", execution.ActionRecoverTerminalDriverRunWork, string(execution.DriverExecutorComponentID),
+	); err == nil {
+		t.Fatal("driver executor resolved outcome-only terminal work recovery authority")
+	}
 }
 
 func TestExecutionTaskRunAuthorityResolverAllowsExactWorkItemDesignAction(t *testing.T) {
@@ -199,6 +209,9 @@ func TestExecutionSystemAuthorityResolverKeepsReconciliationQueuesComponentScope
 				execution.ActionClaimDriverRunOutcomes,
 				execution.ActionCompleteDriverRunOutcome,
 				execution.ActionRetryDriverRunOutcome,
+				execution.ActionClaimTerminalDriverRunWorkRecoveries,
+				execution.ActionCompleteTerminalDriverRunWorkRecovery,
+				execution.ActionRetryTerminalDriverRunWorkRecovery,
 			},
 		},
 	} {

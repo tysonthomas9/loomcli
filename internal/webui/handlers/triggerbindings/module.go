@@ -764,7 +764,7 @@ func (m *Module) resolveOperator(w http.ResponseWriter, r *http.Request, workspa
 
 func writeAutomationError(w http.ResponseWriter, err error, fallback string) {
 	switch {
-	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated), errors.Is(err, authority.ErrInvalidOperatorToken),
+	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
 		errors.Is(err, authority.ErrInvalidPrincipal), errors.Is(err, authority.ErrPrincipalExpired):
 		handler.RespondError(w, http.StatusUnauthorized, "authentication required")
 	case errors.Is(err, authority.ErrWorkspaceMismatch), errors.Is(err, authority.ErrActionNotAllowed),

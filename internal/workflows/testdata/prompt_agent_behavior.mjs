@@ -69,6 +69,12 @@ function makeLoom(options = {}) {
       },
       addLabel: async (params) => call("issues.addLabel", params, options.addLabelResult || {}, options.addLabelError),
       update: async (params) => call("issues.update", params, options.updateResult || {}, options.updateError),
+      blockRepositoryRequired: async (params) => call(
+        "issues.blockRepositoryRequired",
+        params,
+        options.blockRepositoryRequiredResult || {},
+        options.blockRepositoryRequiredError,
+      ),
     },
     taskRuns: {
       request: async (params) => call("taskRuns.request", params, options.requestResult || {}, options.requestError),
@@ -151,6 +157,107 @@ test("coder rejects an event carrying needs-revision before claiming", async () 
   assert.equal(result.skipped, true);
   assert.equal(result.claimed, false);
   none(calls, "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("task-ready event requiring a repository stops before claiming", async () => {
+  const { result, calls, caught } = await invoke({}, {
+    roleName: "planner",
+    event: { taskId: TASK_ID, hasDesign: false, labels: [], sourceRepo: "", repositoryRequired: true },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  assert.equal(result.blocker, "repository_required");
+  assert.match(result.summary, /requires a repository/);
+  assert.deepEqual(one(calls, "issues.blockRepositoryRequired"), { issueId: TASK_ID });
+  none(calls, "binding.config", "roles.get", "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("flat Automation task-ready payload requiring a repository skips even when role lookup is broken", async () => {
+  const { result, calls, caught } = await invoke({
+    bindingError: error("unavailable", "binding config unavailable"),
+    roleError: error("unavailable", "role unavailable"),
+  }, {
+    roleName: "planner",
+    taskId: TASK_ID,
+    status: "open",
+    hasDesign: false,
+    labels: [],
+    sourceRepo: "",
+    repositoryRequired: true,
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.blocker, "repository_required");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  assert.deepEqual(one(calls, "issues.blockRepositoryRequired"), { issueId: TASK_ID });
+  none(calls, "binding.config", "roles.get", "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("repository-required block failure is terminal and never claims", async () => {
+  const { result, calls, caught } = await invoke({
+    blockRepositoryRequiredError: error("unavailable", "work items unavailable"),
+  }, {
+    roleName: "planner",
+    event: { taskId: TASK_ID, sourceRepo: "", repositoryRequired: true },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "failed");
+  assert.equal(result.errorClass, "prompt_agent_repository_block_failed");
+  assert.match(result.summary, /could not move.*to blocked.*work items unavailable/);
+  assert.deepEqual(one(calls, "issues.blockRepositoryRequired"), { issueId: TASK_ID });
+  none(calls, "binding.config", "roles.get", "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("flat Automation planner payload rejects a completed design before claiming", async () => {
+  const { result, calls, caught } = await invoke({ taskFilter: "needs_plan" }, {
+    roleName: "planner",
+    taskId: TASK_ID,
+    status: "open",
+    hasDesign: true,
+    labels: [],
+    repositoryRequired: false,
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  none(calls, "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("flat Automation coder payload rejects a missing design before claiming", async () => {
+  const { result, calls, caught } = await invoke({ taskFilter: "has_design" }, {
+    roleName: "coder",
+    taskId: TASK_ID,
+    status: "open",
+    hasDesign: false,
+    labels: [],
+    repositoryRequired: false,
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  none(calls, "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("task-ready event permits the single-repo empty-source fallback", async () => {
+  const { result, calls, caught } = await invoke({}, {
+    prompt: "single-repo task",
+    event: { taskId: TASK_ID, sourceRepo: "", repositoryRequired: false },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.deepEqual(one(calls, "tasks.claim"), { taskId: TASK_ID, actor: "prompt-agent" });
+  assert.equal(taskRunRequest(calls).taskId, TASK_ID);
 });
 
 test("coder rechecks needs-revision after a stale event and releases the typed claim", async () => {
