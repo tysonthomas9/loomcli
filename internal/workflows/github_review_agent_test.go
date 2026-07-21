@@ -386,7 +386,7 @@ func TestDaytonaTaskRunnerSourceContract(t *testing.T) {
 		`agent.exec.invoke(`,
 		`uploadPatchArtifact(taskContext.client`,
 		`patch_artifact_id`,
-		`loom_task_session_id`,
+		`agent_session_id: invocation && invocation.session && invocation.session.id`,
 		`runtime_strategy: "flue-daytona-codex"`,
 		`task_runner: "daytona-task-runner"`,
 		`daytona_sandbox_env_leak`,
