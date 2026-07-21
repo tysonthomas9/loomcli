@@ -53,6 +53,14 @@ fleet-db resource `session-evals` (generic control-plane kind, id field
 
 ## Chosen architecture (pragmatic 3-phase + versioned evals)
 
+*(Amendment, 2026-07-20, LOOMCLI-86: v1's bridge-minted 1:1
+`flue-<taskRunID>` session mechanics (`startFlueTaskSession`,
+`internal/driver/task_bridge_session.go`) are superseded post-v1 by
+`docs/design/flue-session-model.md`. That map's migration slice deletes the
+bridge mint and updates v1 e2e expectations in
+`test/local-mode/verify-evals.sh`, while the doctor `transcript_ref` check
+stays task-scoped and unchanged.)*
+
 Selected over a minimal-changes variant and a heavier clean-architecture
 variant after a three-way blueprint comparison. Key properties:
 
