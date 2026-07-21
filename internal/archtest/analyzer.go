@@ -92,6 +92,7 @@ func CheckRepository(root, manifestsDir string) (Report, error) {
 		return report, err
 	}
 	violations = append(violations, extended...)
+	violations = append(violations, checkedInSnapshotViolations(report)...)
 	slices.Sort(violations)
 	if len(violations) > 0 {
 		return report, &ViolationsError{Violations: violations}

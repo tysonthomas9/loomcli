@@ -26,6 +26,8 @@ type directWriteSnapshot struct {
 	Writes           []archtest.DirectWriteUse `yaml:"writes"`
 }
 
+type repositoryCheckFunc func(root, manifestDir string) (archtest.Report, error)
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -34,6 +36,10 @@ func main() {
 }
 
 func run(args []string, out io.Writer) error {
+	return runWithRepositoryCheck(args, out, archtest.CheckRepository)
+}
+
+func runWithRepositoryCheck(args []string, out io.Writer, checkRepository repositoryCheckFunc) error {
 	if len(args) != 1 || (args[0] != "check" && args[0] != "snapshot-direct-writes") {
 		return fmt.Errorf("usage: archcheck check|snapshot-direct-writes")
 	}
@@ -45,7 +51,7 @@ func run(args []string, out io.Writer) error {
 	if args[0] == "snapshot-direct-writes" {
 		return runDirectWriteSnapshot(root, manifestDir, out)
 	}
-	return runRepositoryCheck(root, manifestDir, out)
+	return runRepositoryCheck(root, manifestDir, out, checkRepository)
 }
 
 func runDirectWriteSnapshot(root, manifestDir string, out io.Writer) error {
@@ -73,8 +79,8 @@ func runDirectWriteSnapshot(root, manifestDir string, out io.Writer) error {
 	})
 }
 
-func runRepositoryCheck(root, manifestDir string, out io.Writer) error {
-	report, err := archtest.CheckRepository(root, manifestDir)
+func runRepositoryCheck(root, manifestDir string, out io.Writer, checkRepository repositoryCheckFunc) error {
+	report, err := checkRepository(root, manifestDir)
 	if err != nil {
 		return err
 	}

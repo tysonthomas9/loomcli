@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,8 +16,8 @@ import (
 
 const testSourceHead = "0123456789abcdef0123456789abcdef01234567"
 
-func TestRunChecksRepository(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", ".."))
+func TestRunRepositoryCheckFormatsSummary(t *testing.T) {
+	wantRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,20 +25,66 @@ func TestRunChecksRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chdir(root); err != nil {
+	if err := os.Chdir(wantRoot); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(previous) })
-
+	wantManifestDir := filepath.Join(wantRoot, "internal", "archtest", "testdata")
 	var output bytes.Buffer
-	if err := run([]string{"check"}, &output); err != nil {
+	check := func(root, manifestDir string) (archtest.Report, error) {
+		if root != wantRoot || manifestDir != wantManifestDir {
+			t.Fatalf("repository paths = (%q, %q), want (%q, %q)", root, manifestDir, wantRoot, wantManifestDir)
+		}
+		return archtest.Report{
+			CompositeStoreFiles:          make([]string, 2),
+			CompositeStoreOutside:        make([]string, 1),
+			CompositeStoreMaximum:        3,
+			CompositeStoreOutsideMaximum: 2,
+			LegacyHandlerImports:         make([]archtest.LegacyImportUse, 4),
+			LegacyHandlerImportMaximum:   5,
+			DirectPersistenceWrites:      6,
+			ModuleRoots:                  []string{"artifacts", "execution"},
+			MutationCommands:             7,
+			RuntimeComponents:            8,
+			RuntimeGoroutineLaunches:     9,
+			PerformanceMetrics:           10,
+			PerformanceMetricsMeasured:   9,
+			PerformanceMetricsDeferred:   1,
+			PendingDecisions:             []string{"decision"},
+			AnalysisProfilesEnforced:     11,
+			AnalysisProfileTotal:         12,
+		}, nil
+	}
+	if err := runWithRepositoryCheck([]string{"check"}, &output, check); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "Architecture guardrails passed") {
-		t.Fatalf("unexpected output: %s", output.String())
+	for _, want := range []string{
+		"Architecture guardrails passed",
+		"composite Store files: 2/3",
+		"outside composition: 1/2",
+		"legacy handler imports: 4/5",
+		"direct persistence-write rows: 6",
+		"capability module roots: 2",
+		"reviewed mutation commands: 7",
+		"named runtime components: 8",
+		"in-scope non-test goroutine launch definitions: 9",
+		"performance records: 10 (9 measured, 1 explicitly deferred)",
+		"pending architecture decisions: 1",
+		"build profiles enforced: 11/12",
+	} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, output.String())
+		}
 	}
-	if !strings.Contains(output.String(), "in-scope non-test goroutine launch definitions: 103") {
-		t.Fatalf("runtime launch count missing from output: %s", output.String())
+}
+
+func TestRunRepositoryCheckPropagatesCheckerError(t *testing.T) {
+	want := errors.New("repository check failed")
+	check := func(_, _ string) (archtest.Report, error) {
+		return archtest.Report{}, want
+	}
+	if err := runWithRepositoryCheck([]string{"check"}, &bytes.Buffer{}, check); !errors.Is(err, want) {
+		t.Fatalf("runWithRepositoryCheck error = %v, want %v", err, want)
 	}
 }
 

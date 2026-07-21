@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-architecture-memory check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-characterization check-supervisor-disabled test-supervisor-disabled test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-info local-mode-up local-mode-codex-up local-mode-codex-workflows-up local-mode-workflow-build-check local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend check-fleetdb-binary gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-architecture check-architecture-memory check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -434,7 +434,10 @@ check-control-plane-paths:
 	@./scripts/check-control-plane-paths.sh
 
 check-architecture:
-	@go run ./scripts/archcheck check
+	@case "$$(go env GOOS)" in \
+		darwin|linux) go run ./scripts/rsswatch $(ARCHCHECK_RSS_LIMIT_MIB) $(ARCHCHECK_RSS_TIMEOUT_SECONDS) go run ./scripts/archcheck check ;; \
+		*) go run ./scripts/archcheck check ;; \
+	esac
 
 ARCHCHECK_RSS_LIMIT_MIB ?= 2048
 ARCHCHECK_RSS_TIMEOUT_SECONDS ?= 1200
@@ -589,8 +592,8 @@ clean:
 # Frontend directory
 FRONTEND_DIR := internal/webui/frontend
 LOCAL_FLEET_DB_REPO := $(firstword $(wildcard $(CURDIR)/../fleet-db $(CURDIR)/../../fleet-db))
-LOCAL_FLEET_DB_BIN := $(firstword $(wildcard $(CURDIR)/../fleet-db/fleet-db $(CURDIR)/../../fleet-db/fleet-db))
 FLEET_DB_REPO ?= $(if $(LOCAL_FLEET_DB_REPO),$(LOCAL_FLEET_DB_REPO),../../fleet-db)
+LOCAL_FLEET_DB_BIN := $(firstword $(wildcard $(FLEET_DB_REPO)/bin/fleet-db $(FLEET_DB_REPO)/fleet-db))
 ifneq ($(LOCAL_FLEET_DB_BIN),)
 FLEET_DB_BIN ?= $(LOCAL_FLEET_DB_BIN)
 export FLEET_DB_BIN
@@ -614,9 +617,26 @@ build-all: build build-frontend
 frontend: build-frontend
 	@echo "Note: 'make frontend' is deprecated. Use 'make build-frontend'."
 
-# Go-only quality gate (no Node, no frontend dist)
+# Go-only quality gate (no Node, no frontend dist). Two package workers overlap
+# the longest independent race suites; callers can set this to 1 if needed.
+GATE_GO_TEST_PARALLELISM ?= 2
+
+check-fleetdb-binary:
+	@fleet_bin="$${FLEET_DB_BIN:-}"; \
+	if [ -z "$$fleet_bin" ]; then fleet_bin=$$(command -v fleet-db 2>/dev/null || true); fi; \
+	if [ -n "$$fleet_bin" ]; then \
+		help_output=$$("$$fleet_bin" --help 2>&1 || true); \
+		if ! printf '%s\n' "$$help_output" | grep -q -- 'Usage of fleet-db' || \
+		   ! printf '%s\n' "$$help_output" | grep -Eq '^[[:space:]]+--?auth-bootstrap-admin-actor([[:space:]]|$$)'; then \
+			echo "Error: fleet-db binary $$fleet_bin is incompatible with this Loom checkout (missing auth-bootstrap-admin-actor)." >&2; \
+			echo "Build the paired fleet-db checkout and set FLEET_DB_BIN=/path/to/fleet-db." >&2; \
+			exit 1; \
+		fi; \
+	fi
+
 check-go:
-	@echo "=== [1/16] Go: format check ==="
+	@echo "=== [1/16] Go: FleetDB compatibility + format check ==="
+	@$(MAKE) check-fleetdb-binary
 	@bad=$$(gofmt -l . 2>/dev/null | grep -v third_party | grep -v worktrees | grep -v vendor | grep -v node_modules | head -20); \
 	if [ -n "$$bad" ]; then echo "gofmt violations:"; echo "$$bad"; exit 1; fi
 	@echo "=== [2/16] Go: vet ==="
@@ -646,13 +666,31 @@ check-go:
 	@./scripts/check-no-beads-prod.sh
 	@echo "=== [14/16] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
+# The production architecture pass above already runs the full repository scan
+# and enforces the exact checked-in snapshot. Keep focused archtest coverage in
+# the race pass, but do not repeat its repository-scale integration test.
 	@echo "=== [15/16] Go: test with race detector ==="
-	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [16/16] Go: coverage threshold ==="
-	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
+	@set -e; coverage_profile=; \
+	cleanup_coverage() { \
+		rc=$$?; \
+		trap - EXIT HUP INT TERM; \
+		if [ -n "$$coverage_profile" ]; then rm -f "$$coverage_profile"; fi; \
+		exit "$$rc"; \
+	}; \
+	trap cleanup_coverage EXIT; \
+	trap 'exit 129' HUP; \
+	trap 'exit 130' INT; \
+	trap 'exit 143' TERM; \
+	coverage_profile=$$(mktemp "$${TMPDIR:-/tmp}/loom-coverage.XXXXXX"); \
+	./scripts/with-clean-loom-env.sh go test -p $(GATE_GO_TEST_PARALLELISM) -race -covermode=atomic \
+		-coverprofile="$$coverage_profile" -skip '^TestCheckedInManifestsAndRepository$$' -timeout 15m ./...; \
+	echo "=== [16/16] Go: coverage threshold ==="; \
+	COVERAGE_PROFILE="$$coverage_profile" COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)
+VITEST_MAX_WORKERS ?= auto
+
 check-frontend:
 	@echo "=== [1/6] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
@@ -665,18 +703,36 @@ check-frontend:
 	@echo "=== [5/6] Frontend: generated code staleness ==="
 	@cd $(FRONTEND_DIR) && npm run check:generated
 	@echo "=== [6/6] Frontend: unit tests + coverage (60% threshold) ==="
-	@cd $(FRONTEND_DIR) && npm run test:coverage
+	@cd $(FRONTEND_DIR) && workers='$(VITEST_MAX_WORKERS)'; \
+	if [ "$$workers" = auto ]; then \
+		workers=$$(node -e 'const os = require("node:os"); const n = typeof os.availableParallelism === "function" ? os.availableParallelism() : os.cpus().length; process.stdout.write(String(Math.max(1, Math.min(4, n - 1))))'); \
+	fi; \
+	VITEST_MAX_WORKERS="$$workers" npm run test:coverage
 	@echo "=== Frontend quality gates PASSED ==="
 
 # Unified quality gate — runs Go + frontend checks in parallel
 check:
 	@echo "=== Running Go and Frontend checks in parallel ==="
-	@go_log=$$(mktemp); fe_log=$$(mktemp); \
+	@set -e; go_log=; fe_log=; go_pid=; fe_pid=; \
+	cleanup() { \
+		rc=$$?; \
+		trap - EXIT HUP INT TERM; \
+		if [ -n "$$go_pid" ]; then kill "$$go_pid" 2>/dev/null || true; wait "$$go_pid" 2>/dev/null || true; fi; \
+		if [ -n "$$fe_pid" ]; then kill "$$fe_pid" 2>/dev/null || true; wait "$$fe_pid" 2>/dev/null || true; fi; \
+		if [ -n "$$go_log" ]; then rm -f "$$go_log"; fi; \
+		if [ -n "$$fe_log" ]; then rm -f "$$fe_log"; fi; \
+		exit "$$rc"; \
+	}; \
+	trap cleanup EXIT; \
+	trap 'exit 129' HUP; \
+	trap 'exit 130' INT; \
+	trap 'exit 143' TERM; \
+	go_log=$$(mktemp); fe_log=$$(mktemp); \
 	$(MAKE) check-go >"$$go_log" 2>&1 & go_pid=$$!; \
 	$(MAKE) check-frontend >"$$fe_log" 2>&1 & fe_pid=$$!; \
 	go_rc=0; fe_rc=0; \
-	wait $$go_pid || go_rc=$$?; \
-	wait $$fe_pid || fe_rc=$$?; \
+	wait "$$go_pid" || go_rc=$$?; go_pid=; \
+	wait "$$fe_pid" || fe_rc=$$?; fe_pid=; \
 	if [ $$go_rc -ne 0 ] || [ $$fe_rc -ne 0 ]; then \
 		if [ $$go_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Go output (FAILED) ━━━"; cat "$$go_log"; \
@@ -684,12 +740,10 @@ check:
 		if [ $$fe_rc -ne 0 ]; then \
 			echo ""; echo "━━━ Frontend output (FAILED) ━━━"; cat "$$fe_log"; \
 		fi; \
-		rm -f "$$go_log" "$$fe_log"; \
 		exit 1; \
 	fi; \
 	echo "=== Go quality gates PASSED ==="; \
-	echo "=== Frontend quality gates PASSED ==="; \
-	rm -f "$$go_log" "$$fe_log"
+	echo "=== Frontend quality gates PASSED ==="
 	@echo "=== All quality gates PASSED ==="
 
 # Backward-compatible alias for 'make check'
