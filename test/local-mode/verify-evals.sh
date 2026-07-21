@@ -381,6 +381,25 @@ browser_text() {
   agent-browser --profile "$AGENT_BROWSER_PROFILE" get text body
 }
 
+# browser_text_until <grep-args...> — poll the page body until the pattern
+# appears (cold profiles need several seconds for chunks + data to load).
+# Prints the final body; succeeds iff the pattern matched within the budget.
+browser_text_until() {
+  attempt=0
+  body=""
+  while [ "$attempt" -lt 6 ]; do
+    agent-browser --profile "$AGENT_BROWSER_PROFILE" wait 2500 >/dev/null
+    body="$(browser_text)"
+    if printf '%s' "$body" | grep "$@" >/dev/null; then
+      printf '%s' "$body"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+  done
+  printf '%s' "$body"
+  return 1
+}
+
 run_ui_assertions() {
   sid="$1"
   if ! command -v agent-browser >/dev/null 2>&1; then
@@ -395,9 +414,7 @@ run_ui_assertions() {
   traces_url="${UI_URL}/ws/${WORKSPACE}/traces?range=30d&status=completed&kind=task"
   log "UI: opening Traces view ${traces_url}"
   agent-browser --profile "$AGENT_BROWSER_PROFILE" open "$traces_url" >/dev/null
-  agent-browser --profile "$AGENT_BROWSER_PROFILE" wait 3000 >/dev/null
-  traces_body="$(browser_text)"
-  if ! printf '%s' "$traces_body" | grep -F "$short_sid" >/dev/null; then
+  if ! traces_body="$(browser_text_until -F "$short_sid")"; then
     printf '%s\n' "$traces_body" >"$EVALS_WORKDIR/traces-body.txt"
     fatal "UI Traces list did not show selected session ${sid}"
   fi
@@ -406,8 +423,7 @@ run_ui_assertions() {
   if agent-browser --profile "$AGENT_BROWSER_PROFILE" find text "$short_sid" click >/dev/null 2>&1; then
     agent-browser --profile "$AGENT_BROWSER_PROFILE" wait 3000 >/dev/null
   fi
-  traces_body="$(browser_text)"
-  if ! printf '%s' "$traces_body" | grep -E "Transcript|assistant|system|tool" >/dev/null; then
+  if ! traces_body="$(browser_text_until -E "Transcript|assistant|system|tool")"; then
     printf '%s\n' "$traces_body" >"$EVALS_WORKDIR/traces-detail-body.txt"
     fatal "UI Traces drill-in did not render transcript content"
   fi
@@ -416,9 +432,7 @@ run_ui_assertions() {
   obs_url="${UI_URL}/ws/${WORKSPACE}/observability"
   log "UI: opening Observability dashboard ${obs_url}"
   agent-browser --profile "$AGENT_BROWSER_PROFILE" open "$obs_url" >/dev/null
-  agent-browser --profile "$AGENT_BROWSER_PROFILE" wait 3000 >/dev/null
-  obs_body="$(browser_text)"
-  if ! printf '%s' "$obs_body" | grep -F "Hourly Completions" >/dev/null ||
+  if ! obs_body="$(browser_text_until -F "Hourly Completions")" ||
     ! printf '%s' "$obs_body" | grep -F "Agent Utilization" >/dev/null; then
     printf '%s\n' "$obs_body" >"$EVALS_WORKDIR/observability-body.txt"
     fatal "UI Observability dashboard did not render populated panels"
