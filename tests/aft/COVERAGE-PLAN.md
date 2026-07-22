@@ -166,3 +166,20 @@ Items **4** (the deeper dependencies/graph move-and-controls extension) and **7*
 client-errors/monitor/editors/onboarding API set) from the 2026-07-18 set remain open. This
 restructure deliberately does not count standalone contract probes as product-correct tier-1
 coverage.
+
+## 2026-07-22 — api: steps, mandatory intents, and the readable report
+
+The aft runner (pinned in `.github/workflows/aft.yml` like flue; currently `257fb9d`) gained a
+first-class `api:` step — runner-executed HTTP with JSON-path `assert:`, `save:` into per-test
+`${var:name}` variables mirrored to `$AFT_WORK_DIR/<name>` for shell interop — and a loader lint
+that refuses any `run:`, `api:`, or `wait.fn` step without an `intent:`. The HTML report headlines
+intents (auto-labels for browser steps) over the raw mechanism, shows api request/response bodies
+truncated behind a disclosure (no redaction — deliberate; the captured layer only ever carries the
+deterministic stack's synthetic values), and attributes page network requests to steps by
+timestamp.
+
+All eight suite tiers were converted in one sweep: single-request curl+python steps became `api:`
+steps with their assertions carried over; polls, pipelines, and git/seed-command steps stay `run:`
+with actor-named intents. Validated 46/46 live. The conversion itself surfaced FINDINGS §1.20
+(workspace-name resolution inconsistency, 500 instead of 404 on the reviewer route) — the
+structured `status:` expectation caught what `curl -sf` used to swallow.
