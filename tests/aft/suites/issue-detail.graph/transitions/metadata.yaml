@@ -1,0 +1,60 @@
+kind: graph-transitions
+version: 1
+flow: issue-detail
+group: metadata
+
+transitions:
+  change-priority:
+    intent: A human changes the issue from medium to high priority through the mounted priority menu.
+    actor: human
+    via: ui
+    steps:
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid priority-dropdown-trigger click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=priority-dropdown-menu]')" | grep -q true && exit 0;
+          done; echo "priority dropdown click never opened the menu"; exit 1
+        intent: A human retries the priority control until its mounted menu opens.
+      - click: { testid: priority-option-1 }
+
+  close-and-filter-priority:
+    intent: A human closes the panel and follows a fresh priority-filtered board URL to verify persistence.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - open: "/ws/${AFT_WS:-E2E-WS}/kanban?priority=1"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the priority-filtered board is ready.
+
+  add-label:
+    intent: A human adds a case-specific label through the mounted label editor.
+    actor: human
+    via: ui
+    steps:
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid add-label-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=label-input]')" | grep -q true && exit 0;
+          done; echo "add label click never opened the label editor"; exit 1
+        intent: A human retries the add-label control until its mounted input opens.
+      - fill:
+          testid: label-input
+          value: "graph-label-${RUN_ID:-local}-${AFT_CASE_ID}"
+      - press: Enter
+
+  close-and-filter-label:
+    intent: A human closes the panel and follows a fresh label-filtered board URL to verify persistence.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - open: "/ws/${AFT_WS:-E2E-WS}/kanban?labels=graph-label-${RUN_ID:-local}-${AFT_CASE_ID}"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the label-filtered board is ready.

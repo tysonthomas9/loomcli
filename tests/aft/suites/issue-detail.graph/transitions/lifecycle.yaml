@@ -1,0 +1,31 @@
+kind: graph-transitions
+version: 1
+flow: issue-detail
+group: lifecycle
+
+transitions:
+  start-work:
+    intent: A human changes the issue to in progress through the mounted status control.
+    actor: human
+    via: ui
+    steps:
+      - select: { testid: status-dropdown, value: in_progress }
+
+  set-status-closed:
+    intent: A human changes the in-progress issue to closed through the mounted status control.
+    actor: human
+    via: ui
+    steps:
+      - select: { testid: status-dropdown, value: closed }
+
+  return-to-closed-board:
+    intent: A human closes the detail panel and reloads the board to verify the issue remains closed.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the fresh workspace board is ready.

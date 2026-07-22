@@ -1,0 +1,20 @@
+kind: graph-transitions
+version: 1
+flow: issue-detail
+group: navigation
+
+transitions:
+  close-panel:
+    intent: A human closes the auto-opened detail panel with the keyboard and returns to the created issue card.
+    actor: human
+    via: ui
+    steps:
+      - press: Escape
+
+  reopen-card:
+    intent: A human selects the case-specific Ready card to reopen its detail panel.
+    actor: human
+    via: ui
+    steps:
+      - click:
+          selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"

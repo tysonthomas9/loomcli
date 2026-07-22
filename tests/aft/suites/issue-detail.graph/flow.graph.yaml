@@ -1,0 +1,76 @@
+kind: graph
+version: 1
+flow: issue-detail
+intent: A human creates an issue and exercises the editable issue-detail panel through mounted UI controls.
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: '"$AFT_TESTS_DIR/scripts/close-open-issues.sh"'
+
+imports:
+  - states.yaml
+  - transitions/entry-and-creation.yaml
+  - transitions/description.yaml
+  - transitions/metadata.yaml
+  - transitions/collaboration.yaml
+  - transitions/lifecycle.yaml
+  - transitions/navigation.yaml
+
+start: browser-ready
+
+graph:
+  browser-ready:
+    open-kanban: board-ready
+
+  board-ready:
+    open-create-modal: create-form-ready
+
+  create-form-ready:
+    create-open-issue: detail-panel-ready
+
+  detail-panel-ready:
+    edit-description: description-saved
+    change-priority: priority-saved
+    add-label: label-saved
+    post-comment: comment-visible
+    start-work: in-progress-detail
+    close-panel: issue-card-ready
+
+  description-saved:
+    reload-and-reopen-description: description-persisted
+
+  priority-saved:
+    close-and-filter-priority: priority-persisted
+
+  label-saved:
+    close-and-filter-label: label-persisted
+
+  comment-visible:
+    reload-and-reopen-comment: comment-persisted
+
+  in-progress-detail:
+    set-status-closed: closed-detail
+
+  closed-detail:
+    return-to-closed-board: closed-on-board
+
+  issue-card-ready:
+    reopen-card: reopened-detail-panel
+
+coverage:
+  strategy: transition
+  goldenJourneys:
+    - name: description-survives-fresh-page
+      path:
+        - open-kanban
+        - open-create-modal
+        - create-open-issue
+        - edit-description
+        - reload-and-reopen-description
+
+    - name: human-starts-and-closes-issue
+      path:
+        - open-kanban
+        - open-create-modal
+        - create-open-issue
+        - start-work
+        - set-status-closed
+        - return-to-closed-board

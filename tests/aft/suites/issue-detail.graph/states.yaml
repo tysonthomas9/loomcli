@@ -1,0 +1,229 @@
+kind: graph-states
+version: 1
+flow: issue-detail
+
+states:
+  browser-ready:
+    intent: A fresh graph path begins in the runner's blank browser page.
+    assert:
+      - expect: { url: "about:blank" }
+
+  board-ready:
+    intent: The Kanban board is hydrated and has no Ready card for this graph path.
+    assert:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the workspace board is ready.
+      - expect: { visible: { testid: board-toolbar } }
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            equals: 0
+
+  create-form-ready:
+    intent: The mounted New Issue form is ready for human input.
+    assert:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=create-issue-title]')
+        intent: Wait until the New Issue form is ready.
+      - expect: { visible: { testid: create-issue-title } }
+      - expect: { enabled: { testid: create-issue-submit, equals: false } }
+
+  detail-panel-ready:
+    intent: The newly created issue is loaded in the editable slide-over panel.
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const panel = document.querySelector('[data-testid=issue-detail-panel]');
+              return panel?.getAttribute('data-state') === 'open' &&
+                panel?.getAttribute('data-loading') === 'false' &&
+                !!document.querySelector('[data-testid=issue-id]') &&
+                !!document.querySelector('[data-testid=editable-description]') &&
+                !!document.querySelector('[data-testid=comment-form]');
+            })()
+        intent: Wait until the complete editable issue panel is ready.
+      - expect: { visible: { testid: issue-header } }
+      - expect: { visible: { testid: header-close-button } }
+      - expect: { visible: { testid: status-dropdown } }
+      - expect: { visible: { testid: priority-dropdown-trigger } }
+      - expect: { visible: { testid: label-editor } }
+      - expect: { visible: { testid: editable-description } }
+      - expect: { visible: { testid: comment-form } }
+      - expect: { text: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}" }
+
+  description-saved:
+    intent: The human-authored markdown is rendered immediately after saving.
+    assert:
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=markdown-content] strong'))
+              .some((node) => node.textContent === 'graph detail ${AFT_CASE_ID}')
+        intent: Wait until the saved markdown renders its case-specific bold text.
+      - expect: { text: "Description survives reload ${RUN_ID:-local}-${AFT_CASE_ID}." }
+
+  description-persisted:
+    intent: The saved markdown survives a fresh page load and card reopen.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=markdown-content] strong'))
+              .some((node) => node.textContent === 'graph detail ${AFT_CASE_ID}')
+        intent: Wait until the reloaded panel renders the saved bold text.
+      - expect: { text: "Description survives reload ${RUN_ID:-local}-${AFT_CASE_ID}." }
+
+  priority-saved:
+    intent: The open panel reflects the human's priority change.
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const trigger = document.querySelector('[data-testid=priority-dropdown-trigger]');
+              return trigger?.getAttribute('data-priority') === '1' &&
+                trigger?.getAttribute('data-saving') !== 'true' &&
+                !document.querySelector('[data-testid=priority-saving]') &&
+                !document.querySelector('[data-testid=priority-error]');
+            })()
+        intent: Wait until the priority 1 save completes without an error.
+      - expect:
+          attr:
+            testid: priority-dropdown-trigger
+            name: data-priority
+            equals: "1"
+
+  priority-persisted:
+    intent: A fresh priority-filtered board renders the changed issue.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}'][data-priority='1']").length === 1
+        intent: Wait until the filtered board renders this issue at priority 1.
+      - expect:
+          attr:
+            selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            name: data-priority
+            equals: "1"
+
+  label-saved:
+    intent: The open panel reflects the human's new label.
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const add = document.querySelector('[data-testid=add-label-button]');
+              return document.querySelector('[data-testid=label-list]')?.textContent.includes('graph-label-${RUN_ID:-local}-${AFT_CASE_ID}') &&
+                add && !add.disabled &&
+                !document.querySelector('[data-testid=label-error]');
+            })()
+        intent: Wait until the case-specific label save completes without an error.
+      - expect: { text: "graph-label-${RUN_ID:-local}-${AFT_CASE_ID}" }
+
+  label-persisted:
+    intent: A fresh label-filtered board renders the changed issue.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']").length === 1
+        intent: Wait until the label-filtered board renders this issue.
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            equals: 1
+
+  comment-visible:
+    intent: The submitted human comment appears once in the activity timeline.
+    assert:
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=activity-comment]'))
+              .filter((node) => node.textContent.includes('graph comment ${RUN_ID:-local}-${AFT_CASE_ID}') && node.textContent.includes('loom-e2e')).length === 1
+        intent: Wait until the case-specific comment appears with the configured web actor.
+      - expect: { value: { testid: comment-textarea, equals: "" } }
+
+  comment-persisted:
+    intent: The human comment survives a fresh page load and card reopen.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=activity-comment]'))
+              .filter((node) => node.textContent.includes('graph comment ${RUN_ID:-local}-${AFT_CASE_ID}') && node.textContent.includes('loom-e2e')).length === 1
+        intent: Wait until the reloaded activity log renders the case-specific comment once.
+      - expect: { text: "graph comment ${RUN_ID:-local}-${AFT_CASE_ID}" }
+
+  in-progress-detail:
+    intent: The open panel reflects the human's in-progress status change.
+    assert:
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=status-dropdown]')?.getAttribute('data-status') === 'in_progress'
+        intent: Wait until the status control reflects in-progress state.
+      - expect:
+          attr:
+            testid: status-dropdown
+            name: data-status
+            equals: in_progress
+
+  closed-detail:
+    intent: The open panel reflects the human's closed status change.
+    assert:
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=status-dropdown]')?.getAttribute('data-status') === 'closed'
+        intent: Wait until the status control reflects closed state.
+      - expect:
+          attr:
+            testid: status-dropdown
+            name: data-status
+            equals: closed
+
+  closed-on-board:
+    intent: A fresh board renders the human-closed issue in Done and not Ready.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            document.querySelectorAll("section[data-status=done] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']").length === 1
+        intent: Wait until the fresh board renders this issue in Done.
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            equals: 0
+
+  issue-card-ready:
+    intent: The auto-opened panel is closed and the created issue remains selectable on the board.
+    assert:
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'closed' &&
+              document.querySelectorAll("section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']").length === 1
+        intent: Wait until the panel closes and this issue's Ready card is available.
+      - expect:
+          count:
+            selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+            equals: 1
+
+  reopened-detail-panel:
+    intent: Selecting the created card reopens its complete editable panel.
+    terminal: true
+    assert:
+      - wait:
+          fn: >-
+            (() => {
+              const panel = document.querySelector('[data-testid=issue-detail-panel]');
+              return panel?.getAttribute('data-state') === 'open' &&
+                panel?.getAttribute('data-loading') === 'false' &&
+                !!document.querySelector('[data-testid=editable-description]') &&
+                !!document.querySelector('[data-testid=comment-form]');
+            })()
+        intent: Wait until the reopened editable issue panel is ready.
+      - expect: { visible: { testid: issue-header } }
+      - expect: { visible: { testid: status-dropdown } }
+      - expect: { visible: { testid: priority-dropdown-trigger } }
+      - expect: { visible: { testid: label-editor } }
+      - expect: { text: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}" }

@@ -60,6 +60,21 @@ The directory is the tier; there is no YAML flag that changes a test's meaning.
 The default run executes both directories together so ordering, reporting, and coverage
 describe one deterministic suite run.
 
+## Graph scenario packages
+
+Branching product flows may use a directory whose `flow.graph.yaml` manifest owns the
+complete topology. `states.yaml` contains observable UI contracts, while explicitly
+imported files under `transitions/` contain ordinary AFT mechanics. AFT discovers only
+the manifest—not its fragments—and validates the complete DAG before opening a browser.
+
+`tests/aft/suites/issue-detail.graph/` is the first product-correctness pilot. Its shared
+UI-create prefix fans out to description, priority, label, comment, lifecycle, and card
+reopen journeys. Transition coverage selects six complete root-to-terminal paths; two
+named golden journeys run independently, for eight fresh-browser replays total. Every
+path gets a stable `AFT_CASE_ID`, suite-level cleanup, source-line provenance, and a graph
+plan/evidence section in the reports. Read the package's `README.md` and manifest before
+editing mechanics in a fragment.
+
 ## Real codex tier
 
 `make test-aft-real` runs the opt-in real-codex tier: the server keeps every
@@ -182,7 +197,8 @@ Product-correctness (`tests/aft/suites/`):
 
 - `smoke`, `sse-resilience`, and `issue-lifecycle` — open-auth boot, live board delivery,
   reconnect catch-up, and agent-driven lifecycle transitions.
-- `issue-create-ui`, `issue-detail`, `comments`, and `markdown-safety` — human creation and
+- `issue-create-ui`, `issue-detail`, `issue-detail.graph`, `comments`, and `markdown-safety`
+  — human creation, the split graph pilot for complete detail-panel UI journeys,
   field/comment editing, API readbacks, activity ordering, and safe rendering.
 - `dependencies-graph`, `filters`, `views`, `table-bulk`, and `pages` — dependency/graph
   behavior, URL filtering, route/view switching, bulk actions, and page contracts.

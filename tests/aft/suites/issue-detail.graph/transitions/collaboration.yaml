@@ -1,0 +1,34 @@
+kind: graph-transitions
+version: 1
+flow: issue-detail
+group: collaboration
+
+transitions:
+  post-comment:
+    intent: A human submits a case-specific comment through the mounted CommentForm.
+    actor: human
+    via: ui
+    steps:
+      - fill:
+          testid: comment-textarea
+          value: "graph comment ${RUN_ID:-local}-${AFT_CASE_ID}"
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid comment-submit click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "document.querySelector('[data-testid=comment-textarea]')?.value === ''" | grep -q true && exit 0;
+          done; echo "comment submit click never posted the comment"; exit 1
+        intent: A human retries submission until the mounted comment form clears.
+
+  reload-and-reopen-comment:
+    intent: A human reloads the board and reopens the issue card to verify the comment persisted.
+    actor: human
+    via: ui
+    steps:
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the reloaded workspace board is ready.
+      - click:
+          selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"

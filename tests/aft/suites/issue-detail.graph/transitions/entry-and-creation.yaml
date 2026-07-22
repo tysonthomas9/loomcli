@@ -1,0 +1,33 @@
+kind: graph-transitions
+version: 1
+flow: issue-detail
+group: entry-and-creation
+
+transitions:
+  open-kanban:
+    intent: A human follows the workspace Kanban URL.
+    actor: human
+    via: ui
+    steps:
+      - open: "/ws/${AFT_WS:-E2E-WS}/kanban"
+
+  open-create-modal:
+    intent: A human opens the mounted New Issue modal from the hydrated board.
+    actor: human
+    via: ui
+    steps:
+      - wait: { load: networkidle }
+      - click: { testid: new-issue-button }
+
+  create-open-issue:
+    intent: A human creates this path's issue through the New Issue form and reaches its auto-opened detail panel.
+    actor: human
+    via: ui
+    steps:
+      - fill:
+          testid: create-issue-title
+          value: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
+      - fill:
+          testid: create-issue-description
+          value: "Initial issue detail description ${RUN_ID:-local}-${AFT_CASE_ID}."
+      - click: { testid: create-issue-submit }
