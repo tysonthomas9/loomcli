@@ -68,14 +68,18 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 		return err
 	}
 
+	// Resume the lead's previous conversation when one is still on disk, so a
+	// serve restart continues the thread instead of cold-starting a new one.
+	resumeThreadID := resolveResumeCodexThread(ctx, cfg, endpoint)
+
 	discoverCtx, cancelDiscover := context.WithCancel(ctx)
 	defer cancelDiscover()
-	go discoverCodexLeadThread(discoverCtx, cfg, runtime, runtimeStartedAt)
+	bindCodexLeadThread(ctx, discoverCtx, cfg, runtime, resumeThreadID, runtimeStartedAt)
 	drainCtx, cancelDrain := context.WithCancel(ctx)
 	defer cancelDrain()
 	go drainLeadMessageQueue(drainCtx, cfg.Store, cfg.Workspace, cfg.LeadName, cfg.Logger)
 
-	tuiErr := runCodexRemoteTUI(ctx, cfg, endpoint)
+	tuiErr := runCodexRemoteTUI(ctx, cfg, endpoint, resumeThreadID)
 
 	cancelDiscover()
 	cancelDrain()
@@ -140,23 +144,92 @@ func codexAppServerLogPath(runtimeHome string) string {
 	return filepath.Join(runtimeHome, "app-server.log")
 }
 
-func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint string) error {
-	_, _ = fmt.Fprintln(cfg.Stdout, "Launching controlled Codex lead session...")
+func runCodexRemoteTUI(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint, resumeThreadID string) error {
+	if resumeThreadID != "" {
+		_, _ = fmt.Fprintln(cfg.Stdout, "Resuming controlled Codex lead session...")
+	} else {
+		_, _ = fmt.Fprintln(cfg.Stdout, "Launching controlled Codex lead session...")
+	}
 	_, _ = fmt.Fprintln(cfg.Stdout, "")
 	// #nosec G204 -- cfg.CodexPath/workDir/prompt are the same trusted inputs used by interactive agent launch.
-	tuiCmd := exec.CommandContext(ctx, cfg.CodexPath,
-		"--remote", endpoint,
-		"--no-alt-screen",
-		"--dangerously-bypass-approvals-and-sandbox",
-		"-C", cfg.WorkDir,
-		cfg.Prompt,
-	)
+	tuiCmd := exec.CommandContext(ctx, cfg.CodexPath, codexTUIArgs(cfg, endpoint, resumeThreadID)...)
 	tuiCmd.Dir = cfg.WorkDir
 	tuiCmd.Env = os.Environ()
 	tuiCmd.Stdin = cfg.Stdin
 	tuiCmd.Stdout = cfg.Stdout
 	tuiCmd.Stderr = cfg.Stderr
 	return tuiCmd.Run()
+}
+
+// bindCodexLeadThread ties the session's thread metadata to this runtime. A
+// resumed thread is known up front and bound immediately — discovery only
+// accepts threads created after the runtime started, so it would never match
+// one. A cold start instead drops any inherited thread id before discovery runs,
+// so readers do not treat the abandoned conversation as this runtime's.
+func bindCodexLeadThread(ctx, discoverCtx context.Context, cfg CodexLeadRuntimeConfig, runtime CodexRuntimeMetadata, resumeThreadID string, runtimeStartedAt time.Time) {
+	if resumeThreadID != "" {
+		runtime.ThreadID = resumeThreadID
+		if err := UpdateCodexRuntimeMetadata(ctx, cfg.Store, cfg.Workspace, cfg.SessionID, runtime); err != nil {
+			cfg.Logger.Debug("failed to persist resumed codex thread metadata", "err", err)
+		}
+		return
+	}
+	if err := ClearCodexThreadID(ctx, cfg.Store, cfg.Workspace, cfg.SessionID); err != nil {
+		cfg.Logger.Debug("failed to clear stale codex thread metadata", "err", err)
+	}
+	go discoverCodexLeadThread(discoverCtx, cfg, runtime, runtimeStartedAt)
+}
+
+// codexTUIArgs builds the TUI invocation. A resume carries the thread id as the
+// subcommand's positional SESSION_ID and deliberately omits the role prompt:
+// codex submits a resume prompt as a fresh user message once the session is
+// configured, which would re-issue the role's opening request on every restart.
+func codexTUIArgs(cfg CodexLeadRuntimeConfig, endpoint, resumeThreadID string) []string {
+	args := []string{}
+	if resumeThreadID != "" {
+		args = append(args, "resume")
+	}
+	args = append(args,
+		"--remote", endpoint,
+		"--no-alt-screen",
+		"--dangerously-bypass-approvals-and-sandbox",
+		"-C", cfg.WorkDir,
+	)
+	if resumeThreadID != "" {
+		return append(args, resumeThreadID)
+	}
+	return append(args, cfg.Prompt)
+}
+
+// resolveResumeCodexThread finds the conversation this lead should continue, or
+// "" to cold-start. The session's own metadata wins when the orchestration
+// session survived the restart; otherwise the newest thread recorded for this
+// work dir is the same lead's previous conversation, since a lead's work dir is
+// stable across restarts (a PR reviewer's checkout, a lead's worktree) and codex
+// keeps rollouts in the shared codex home rather than the per-session sqlite
+// home. Both paths are best-effort: a missing thread just means a cold start.
+func resolveResumeCodexThread(ctx context.Context, cfg CodexLeadRuntimeConfig, endpoint string) string {
+	if id := priorCodexThreadID(ctx, cfg); id != "" {
+		return id
+	}
+	thread, err := findNewestCodexThread(ctx, endpoint, cfg.WorkDir, time.Time{})
+	if err != nil || thread == nil {
+		return ""
+	}
+	return strings.TrimSpace(thread.ID)
+}
+
+// priorCodexThreadID reads the thread id left on this lead's orchestration
+// session by a previous runtime.
+func priorCodexThreadID(ctx context.Context, cfg CodexLeadRuntimeConfig) string {
+	if cfg.Store == nil || cfg.Store.AgentSessions() == nil || cfg.Workspace == "" || cfg.SessionID == "" {
+		return ""
+	}
+	session, err := cfg.Store.AgentSessions().Get(ctx, cfg.Workspace, cfg.SessionID)
+	if err != nil || session == nil {
+		return ""
+	}
+	return RuntimeMetadataFromSession(session).ThreadID
 }
 
 func normalizeCodexLeadRuntimeConfig(cfg CodexLeadRuntimeConfig) CodexLeadRuntimeConfig {

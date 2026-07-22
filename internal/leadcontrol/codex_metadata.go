@@ -107,6 +107,36 @@ func UpdateCodexRuntimeMetadata(ctx context.Context, st store.Store, workspace, 
 	return err
 }
 
+// ClearCodexThreadID drops the thread id from a lead's session metadata.
+// UpdateCodexRuntimeMetadata only ever writes a non-empty thread id, so a
+// runtime that cold-starts (or whose discovery times out) would otherwise leave
+// the previous runtime's thread id in place and point readers at a conversation
+// this runtime is not driving.
+func ClearCodexThreadID(ctx context.Context, st store.Store, workspace, sessionID string) error {
+	if st == nil || st.AgentSessions() == nil {
+		return nil
+	}
+	workspace = strings.TrimSpace(workspace)
+	sessionID = strings.TrimSpace(sessionID)
+	if workspace == "" || sessionID == "" {
+		return nil
+	}
+	session, err := st.AgentSessions().Get(ctx, workspace, sessionID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(session.Metadata[MetadataCodexThreadID]) == "" {
+		return nil
+	}
+	metadata := cloneMetadata(session.Metadata)
+	delete(metadata, MetadataCodexThreadID)
+	_, err = st.AgentSessions().Update(ctx, workspace, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
+	return err
+}
+
 func MarkAssignmentDelivered(ctx context.Context, st store.Store, workspace, sessionID, epicID, version string) error {
 	if st == nil || st.AgentSessions() == nil {
 		return nil
