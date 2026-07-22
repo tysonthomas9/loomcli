@@ -1,6 +1,6 @@
 # Current-State Evidence
 
-- **Status:** Phase 4 complete — historical baseline, architecture ratchets, paired contract and gates, source-bound proof, measured performance, packaged Desktop journeys, and immutable validation snapshot recorded; Phase 5 has not started
+- **Status:** Phase 4 complete — historical validation remains immutable; the current owner-fenced recovery, repository lifecycle, actor-filter, and runner-publication hardening passes paired source gates, while refreshed packaged proof remains pending; Phase 5 has not started
 - **Snapshot:** 2026-07-15, pre-guardrail Loom code head `122d4d79` after refreshing `origin/v5`
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -66,10 +66,20 @@ The result does not prove modularity. Global domain, Store, orchestration, servi
 | Enable/pause or change role | Agent desired state and attached binding configuration update separately |
 | Delete binding/agent | Binding/grant ordering can leave authority drift after partial failure |
 | Approve workflow | Driver metadata is read/replaced without an operator check or explicit revision/CAS |
-| Trigger dispatch | Idempotency, hop depth, and actor filtering live in different places; actor filtering is not enforced |
+| Trigger dispatch | Idempotency and hop depth still span layers; `internal.issue.*` binding create/update now requires workflow-actor exclusion and legacy unsafe bindings fail closed at dispatch |
 | Claim/run/finish | Issue state, TaskRun, locks, and fencing cross record families |
 
 Transport-only authorization cannot fix these paths because CLI and internal callers reach the same capabilities. The migration must establish typed authority at every module command boundary and atomic fleet-db commands or recoverable process managers for cross-record writes.
+
+The current Phase 4 hardening closes three concrete failure modes without
+claiming the wider migration is complete. A healthy DriverRun now performs
+exact-parent-owner-fenced stale-child TaskRun recovery and drains that loop
+before parent finalization. First-class Repo lifecycle commands commit the Repo,
+audit event, and workspace admission mapping atomically and reject updates or
+deletes that would orphan Issue or TaskRun placement, including deletion of a
+sole implicit fallback while repo-less work is ready. Internal issue-event
+bindings must exclude workflow-origin actors, so a workflow cannot retrigger
+itself through its own Issue mutation.
 
 Two fleet-db mechanisms also defeat a simplistic “one table equals one module” split. `ActionLedger` records run-side-effect actions across task status/comments, PR creation/merge, and TaskRun start (`fleet-db/internal/models/platform.go:770-865`). The generic Lease record covers `agent_service`, `driver_run`, `task_run`, `terminal`, and `artifact_upload` (`fleet-db/internal/models/control_plane.go:435-492`). The target must assign ActionLedger coordination and each Lease instance to one owner without inventing a global shared business module.
 
@@ -120,7 +130,7 @@ git merge-base --is-ancestor origin/main HEAD
 shasum -a 256 api/openapi.yaml
 ```
 
-The Phase 1 architecture tooling generated and continues to validate capability edges, Store consumers, direct adapter writes, runtime components, performance records, and authority/transaction specifications. The frozen pre-extraction values remain zero capability module roots, 93 composite-Store files, 82 outside composition, and 233 direct-write rows. The Phase 3 pre-commit base-plus-diff snapshot has two active module roots, 88 composite-Store files, 77 outside composition, and 226 direct-write rows across 249 call sites. The final Phase 4 architecture check has four active roots, 82 composite-Store files, 71 outside composition, 90 legacy handler-import exceptions, and 243 primary direct-write rows across 265 call sites. A separate content-addressed `internal/driver` ratchet freezes its remaining 10 rows across 11 sites until Phase 6 completion. The primary inventory increases because 29 rows across 30 sites are now visible in centralized `internal/app/serve` Execution adapters, while 12 legacy handler/CLI rows across 14 sites disappear; it is not presented as a reduction in the primary total. The historical table above is therefore not presented as current source state. Immutable Phase 2 and Phase 3 snapshots preserve their provenance; the retained Phase 4 pre-commit snapshot remains explicitly provisional and the appended `phase4-execution-validation-53cbe2577` snapshot supersedes it for final paired Phase 4 status.
+The Phase 1 architecture tooling generated and continues to validate capability edges, Store consumers, direct adapter writes, runtime components, performance records, and authority/transaction specifications. The frozen pre-extraction values remain zero capability module roots, 93 composite-Store files, 82 outside composition, and 233 direct-write rows. The Phase 3 pre-commit base-plus-diff snapshot has two active module roots, 88 composite-Store files, 77 outside composition, and 226 direct-write rows across 249 call sites. The immutable Phase 4 validation check has four active roots, 82 composite-Store files, 71 outside composition, 90 legacy handler-import exceptions, and 243 primary direct-write rows across 265 call sites. The current reliability-hardening check retains the same four roots, Store `82/71`, and 90 handler exceptions while ratcheting 251 primary direct-write rows across 273 sites, 60 command namespaces, 86 runtime components, and 103 goroutine definitions across all 11 profiles plus the all-files AST pass. A separate content-addressed `internal/driver` ratchet freezes its remaining 10 rows across 11 sites until Phase 6 completion. The historical table above is therefore not presented as current source state. Immutable Phase 2 and Phase 3 snapshots preserve their provenance; the retained Phase 4 pre-commit snapshot remains explicitly provisional and the appended `phase4-execution-validation-53cbe2577` snapshot remains the immutable final Phase 4 product snapshot rather than being silently rewritten by the later source hardening.
 
 ---
 

@@ -1,13 +1,13 @@
 # Phase 4 Execution Decisions and Evidence
 
-- **Status:** The Phase 4 architecture slice is complete at its immutable validation snapshot; the current repository-admission hardening delta has paired implementation/contract/source-gate proof and split packaged Desktop evidence—the final package proves synchronous blocking, while the earlier v3 package proves repository selection and retry—but is not yet bound by a new immutable validation snapshot; Phase 5 has not started
-- **Date:** 2026-07-18
+- **Status:** The Phase 4 architecture slice is complete at its immutable validation snapshot; the current reliability hardening has paired implementation, contract, architecture, and full-source-gate proof but is not yet bound by refreshed packaged Desktop/Podman proof or a new immutable validation snapshot; Phase 5 has not started
+- **Date:** 2026-07-21
 - **Branch bases:** Loom `1353e2faf14ae121c93fe5eb92f779b56a2ad7ae`; FleetDB `f1c4e11199c2c7cdab52cce55899af4df328fbcb`
 - **Implementation commits:** Loom `510391c60f17c6e9fc951c710a07a8ef8768b67f`, `45a73889ab456e974d9cd4346bcb8873be172438`, `8037205dadec12cb8ddc83edcf5509d3acf89652`, `a240215be482b1efe4731a1a24485d4a5ccb8b76`, and `53cbe257715d55770c77d508c23620389b9c9de1`; FleetDB `424492070a0f26e798eabad51b11ee4ea0b6b58c`, `758842a7e3a703470f7afcced437f46935b5a12f`, and `afb6887682f777b0e7093b5dcdff0a5e236777f9`
 - **Architecture-analyzer and gate commits:** Loom `69e332697`, `02b62e5c7`, `88cb7f262`, `7d8118556`, and `e686b7a95`
-- **Current hardening heads:** Loom `54b338d61005799493463acdc559bf8a82022b1e`; FleetDB `c73c69a04f27490b54999fc8784cbc992ccff66c`
-- **Current paired contract:** byte-identical FleetDB and Loom OpenAPI snapshots at SHA-256 `bf2935fdbc785deaa70c2ac933dd5f63e44f9deb7ec2a61f332af1b889c8088c`
-- **Scope:** Minimal Artifacts lifecycle, Execution-owned DriverRun/DriverStep/TaskRun/worker/lease/await/recovery mutations, supervisor-disabled execution, SDK runner containment, Work Items repository admission and retry-placement hardening, and packaged Desktop proof
+- **Current hardening heads:** Loom `ee971be22feb3c93096d599b7e3a62bff2cb0fa2`; FleetDB `9ffa69f6028969c03913c08c1159910fc772bd8b`
+- **Current paired contract:** byte-identical FleetDB and Loom OpenAPI snapshots at SHA-256 `ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`
+- **Scope:** Minimal Artifacts lifecycle, Execution-owned DriverRun/DriverStep/TaskRun/worker/lease/await/recovery mutations, supervisor-disabled execution, SDK runner containment/publication, Work Items repository admission and retry placement, trigger-loop containment, and packaged Desktop proof
 
 ## Locked decisions
 
@@ -225,6 +225,17 @@ later attempt. The DriverRun executor and TaskRun workers also register the
 same once-normalized configured node capacity; registration order cannot
 downgrade the process node to one slot.
 
+First-class Repo create now commits the Repo projection, audit event, workspace
+set/list membership, and global admission mapping in one Redis script or
+Postgres transaction. Update and delete atomically reject any change that
+would orphan an Issue reference, pending Issue projection, current TaskRun
+placement, or immutable TaskRun origin. Deleting the sole implicit fallback is
+also rejected while an open repo-less non-epic task is dispatch-ready. Replay
+and recovery rebuild or remove mappings with compare-and-set ownership, and
+cross-workspace name collisions fail closed without partial projection writes.
+Workspace resolution accepts both first-class local handles and retained
+legacy `org/repo` aliases.
+
 Repository cloning no longer guesses `main` or copies one workspace-wide
 default to every repository. Each clone records the committed branch selected
 by its remote symbolic HEAD (with the clone's symbolic HEAD as the bounded
@@ -251,11 +262,32 @@ durable outcome path then converges its descendants through the child-cascade
 command. There is no tokenless, always-on global TaskRun lifecycle recovery
 pass; the service-only TaskRun convergence pass repairs only terminal
 projections and uses the durable versioned completion boundary above.
+The healthy-parent pass runs immediately after claim and periodically only
+after a successful parent heartbeat, stops and cancels the backend on an exact
+fence conflict, and is drained before the parent is terminalized. Its cadence
+is no faster than the owner heartbeat and otherwise one quarter of the stale
+threshold, avoiding a durable no-op receipt on every heartbeat.
+
+### Trigger-loop containment
+
+Automation binding create and update reject any route or event pattern that
+can match `internal.issue.*` unless its actor filter excludes `workflow`.
+Runtime dispatch applies the same rule to unsafe legacy records and fails
+closed, so a workflow-origin Issue mutation cannot recursively retrigger the
+workflow that produced it. Exact routes and broad segment patterns are both
+covered.
 
 `@loom/sdk/runner` uses only the Loom task-run facade selected by
 `LOOM_TASK_RUN_API_URL`. Direct FleetDB credentials and mutation routes are not
 accepted. The facade derives the exact TaskRun owner envelope from the
 lease-token-authenticated request and forwards only owner commands.
+The local task runner recursively redacts inherited secrets from logs and
+transcripts, scans patches, worktrees, and immutable commit objects for exact
+credential bytes, and fails closed when patch capture is incomplete. It scans
+the commit object that will be published, disables hooks, and pushes that exact
+SHA rather than symbolic `HEAD`; a concurrent post-scan HEAD movement therefore
+cannot publish unscanned content. A backend that already created a commit is
+reused instead of forcing an empty follow-up commit.
 
 TaskRun-scoped `loom data` permits only the exact `show` and design-only
 `update` leaves. A composition-root guard enforces that allowlist before
@@ -635,27 +667,35 @@ to Loom `53cbe257715d55770c77d508c23620389b9c9de1`, FleetDB
 subsequent evidence-only commit changes documentation and the append-only
 baseline, not the validated product source.
 
-The current repository-admission and local-authority hardening source is
-committed at Loom `54b338d61005799493463acdc559bf8a82022b1e` with FleetDB
-`c73c69a04f27490b54999fc8784cbc992ccff66c`. The FleetDB full gate passed in
-`775.61s` on the source staged into that commit; the only post-gate staging
-correction removed one trailing blank line from the new recovery-queue Lua
-file to satisfy `git diff --check`. The exact committed FleetDB sidecar has
-SHA-256 `06ebcc426453e9d7ada9f240f54ae5e1b0beeed9e29b17aa18ca607bea176505`.
-The Loom full gate then passed in `747.64s` at the exact Loom source commit
-against that FleetDB source checkout and binary. The paired OpenAPI snapshots
-are byte-identical at SHA-256
-`bf2935fdbc785deaa70c2ac933dd5f63e44f9deb7ec2a61f332af1b889c8088c`.
+The current reliability-hardening source is committed at Loom
+`ee971be22feb3c93096d599b7e3a62bff2cb0fa2` with FleetDB
+`9ffa69f6028969c03913c08c1159910fc772bd8b`. FleetDB `make gate` passes its
+static analysis, race/unit matrix, integration pipeline (`200.984s`), Redis and
+Postgres storage contracts, Postgres API integration (`11.641s`), aggregate
+coverage (`81.4%` with all 28 enforced packages above the 50% floor), container
+E2E (`99.309s`), and harness evaluation. The exact paired FleetDB binary used
+by Loom has SHA-256
+`3dbd0f4ab3748929707bf851fe5f046466316a53b2929a552c70db941cb3e3dc`.
+Loom `make gate` passes under a fresh HOME against that exact FleetDB source
+and binary, including Go, architecture, SDK, built-in workflow, and frontend
+test/build gates. The current architecture check passes all 11 profiles plus
+the all-files AST pass with Store `82/71`, 90 handler exceptions, 251 primary
+direct-write rows across 273 sites, four active roots, 60 required command-ID
+namespaces, 86 runtime components, and 103 goroutine definitions. The paired
+OpenAPI snapshots are byte-identical at SHA-256
+`ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`.
 
 Those results make the paired source, contract, architecture, SDK, frontend
-test/build, and component-boundary gates green. The split packaged Desktop
-evidence above remains narrower: the final package proves synchronous blocking
-with zero runs, while the earlier v3 package proves repository selection,
-reopening, and the bundled-Codex run. No single final package has yet proved
-blocked-card recovery after both fixes, and the final local-open packaged
-Desktop plus Podman/raw-browser journeys have not been rerun, so the product
-closure rows remain open. The delta is not yet bound by a new immutable
-validation snapshot. Phase 5 has not started.
+test/build, and component-boundary gates green. A lost successful Repo-create
+response still converges as a documented `409` retry rather than an
+idempotency-receipt replay; compensated Redis failures may consume a stream ID
+while leaving no visible projection or event. The split packaged Desktop
+evidence above remains narrower: no single refreshed package yet proves the
+new crash recovery, repository deletion/admission races, actor-loop guard, and
+runner publication hardening together. The final local-open packaged Desktop
+plus Podman/raw-browser journeys have not been rerun, so the product closure
+rows remain open. The delta is not yet bound by a new immutable validation
+snapshot. Phase 5 has not started.
 
 ---
 

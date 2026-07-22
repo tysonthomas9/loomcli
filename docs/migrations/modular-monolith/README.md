@@ -1,12 +1,13 @@
 # Modular Monolith Migration
 
-- **Status:** The Phase 4 architecture slice is complete; repository-admission
-  and local open-mode hardening are committed and source-gated, while refreshed
+- **Status:** The Phase 4 architecture slice is complete; owner-fenced child
+  recovery, repository lifecycle safety, trigger-loop containment, and local
+  runner publication hardening are committed and source-gated, while refreshed
   packaged Desktop and Podman/raw-browser proof remains pending; Phase 5 has not
   started
-- **Date:** 2026-07-18
+- **Date:** 2026-07-21
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
-- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at validated Loom product head `53cbe2577` with FleetDB `afb688768`, and the current source-gated hardening heads Loom `54b338d61` with FleetDB `c73c69a`
+- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at validated Loom product head `53cbe2577` with FleetDB `afb688768`, and the current source-gated reliability heads Loom `ee971be22` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
 
 ## Decision summary
@@ -89,14 +90,17 @@ snapshot records those results at Loom `53cbe2577` and FleetDB `afb688768`.
 Physical supervisor deletion remains Phase 6 work, and Phase 5 has not started.
 See the [Phase 4 record](09-phase-4-decisions-and-evidence.md).
 
-The current repository-admission and local-open authority hardening is
-committed at Loom `54b338d61` with FleetDB `c73c69a`. The paired OpenAPI
-snapshots match at SHA-256
-`bf2935fdbc785deaa70c2ac933dd5f63e44f9deb7ec2a61f332af1b889c8088c`, and
-both full source gates pass, including Loom's exact paired-source/binary run.
-These results do not rewrite the historical immutable Phase 4 snapshot. A new
-immutable snapshot and refreshed packaged Desktop plus Podman/raw-browser
-journeys remain pending.
+The current reliability closeout is committed at Loom `ee971be22` with
+FleetDB `9ffa69f60`. It adds healthy-parent, owner-fenced stale-child TaskRun
+recovery; atomic first-class Repo create/update/delete and replay protection;
+mandatory workflow-actor exclusion for `internal.issue.*` bindings; and
+fail-closed runner credential scanning, redaction, and exact-SHA publication.
+The paired OpenAPI snapshots match at SHA-256
+`ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`, and
+both full source gates pass, including Loom's clean-HOME run against the exact
+paired FleetDB source and binary. These results do not rewrite the historical
+immutable Phase 4 snapshot. A new immutable snapshot and refreshed packaged
+Desktop plus Podman/raw-browser journeys remain pending.
 
 ## Approved architecture decisions
 
