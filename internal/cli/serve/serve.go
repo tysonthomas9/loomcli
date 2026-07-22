@@ -371,6 +371,8 @@ func buildDriverExecutor(
 		executor.ExecutionWorkers = executionCapability.TaskRunWorkerAPI()
 		executor.ExecutionAuthorities = executionCapability.DriverRunAuthorityResolver()
 		executor.SystemAuthorities = executionCapability.SystemAuthorityResolver()
+		executor.TaskRunRecovery = executionCapability.TaskRunRecoveryAPI()
+		executor.StaleTaskRunMaxAge = driverStaleTaskMaxAge()
 	}
 	workspaceScope := executor.WorkspaceKey
 	if workspaceScope == "" {

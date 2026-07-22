@@ -72,12 +72,12 @@ goroutine_launches:
   - {file: "internal/cli/workspace/status.go", function: "runStatus", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "workspace status fan-out is channel-joined before command return"}
   - {file: "internal/cli/workspace/status.go", function: "runStatus", site: "go#2", callee: "<anonymous>", disposition: bounded, reason: "workspace status fan-out is channel-joined before command return"}
   - {file: "internal/cli/worktree_resolve.go", function: "Resolver.agentWorktreeInfos", site: "go#1", callee: "<anonymous>", disposition: bounded, reason: "worktree inspection fan-out is WaitGroup-joined before resolution returns"}
-  - {file: "internal/driver/executor.go", function: "Executor.RunOnce", site: "go#1", callee: "heartbeatDriverRun", disposition: component, component_ids: [driver-run-heartbeat]}
-  - {file: "internal/driver/executor.go", function: "Executor.RunOnce", site: "go#2", callee: "heartbeatExecutorNode", disposition: component, component_ids: [executor-node-heartbeat]}
   - {file: "internal/driver/sandbox/egress.go", function: "serveSocketRelay.acceptLoop", site: "go#1", callee: "r.forward", disposition: request, reason: "one forwarder is scoped to each accepted per-run relay connection"}
   - {file: "internal/driver/sandbox/egress.go", function: "serveSocketRelay.forward", site: "go#1", callee: "relayCopy", disposition: request, reason: "copy pump is scoped to one relay connection and joined when either direction finishes"}
   - {file: "internal/driver/sandbox/egress.go", function: "serveSocketRelay.forward", site: "go#2", callee: "relayCopy", disposition: request, reason: "copy pump is scoped to one relay connection and joined when either direction finishes"}
   - {file: "internal/driver/sandbox/egress.go", function: "startServeSocketRelay", site: "go#1", callee: "relay.acceptLoop", disposition: component, component_ids: [sandbox-serve-relay-accept]}
+  - {file: "internal/driver/stale_task_sweeper.go", function: "Executor.startHeartbeats", site: "go#1", callee: "heartbeatDriverRun", disposition: component, component_ids: [driver-run-heartbeat]}
+  - {file: "internal/driver/stale_task_sweeper.go", function: "Executor.startHeartbeats", site: "go#2", callee: "heartbeatExecutorNode", disposition: component, component_ids: [executor-node-heartbeat]}
   - {file: "internal/driver/task_bridge_session.go", function: "startFlueTaskSessionHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [flue-task-session-heartbeat]}
   - {file: "internal/driver/task_worker.go", function: "TaskWorker.startExecutionTaskRunHeartbeat", site: "go#1", callee: "<anonymous>", disposition: component, component_ids: [execution-task-run-heartbeat]}
   - {file: "internal/harness/fakeharness/mock/main.go", function: "installSignalCleanup", site: "go#1", callee: "<anonymous>", disposition: helper, reason: "explicitly test-only fake-harness signal helper included by the all-source scan"}
@@ -565,7 +565,7 @@ components:
 
   - id: driver-run-heartbeat
     kind: ticker
-    file: internal/driver/executor.go
+    file: internal/driver/stale_task_sweeper.go
     function: heartbeatDriverRun
     site: "time.NewTicker#1"
     capability: execution

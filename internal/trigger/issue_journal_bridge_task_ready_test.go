@@ -653,48 +653,61 @@ func TestIssueJournalBridgeTaskReadyDeletedIssueDoesNotPoisonCursor(t *testing.T
 }
 
 func TestIssueJournalBridgeBlocksRepositoryRequiredTaskBeforeDispatch(t *testing.T) {
-	reader := &fakeIssueJournalReader{pages: map[string]journalPage{
-		"": {events: []store.JournalEvent{
-			issueEvent("603", "issue.create", "user:alice", "PHASE4-TERRA-FRESH-20260718-10",
-				`{"status":"open","title":"Testing HTML design"}`),
-		}, next: "603"},
-	}}
-	cursors := newFixedCursorStore()
-	seenStart(cursors, "WS")
-	s := memstore.New()
-	setupTaskReadyBinding(t, s)
-	blockCalls := 0
-	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
-		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
-		IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
-			return trigger.TaskReadySnapshot{
-				TaskID: "PHASE4-TERRA-FRESH-20260718-10", Status: "open", IssueType: "task",
-				RepositoryRequired: true,
-			}, nil
-		},
-		RepositoryRequiredBlocker: func(_ context.Context, ws, taskID string) (trigger.TaskReadyRepositoryRequiredResult, error) {
-			blockCalls++
-			if ws != "WS" || taskID != "PHASE4-TERRA-FRESH-20260718-10" {
-				t.Fatalf("block command = %q/%q", ws, taskID)
+	for _, test := range []struct {
+		name               string
+		repositoryRequired bool
+	}{
+		{name: "snapshot already requires repository", repositoryRequired: true},
+		// The lookup saw one repository and considered its implicit fallback
+		// usable. Simulate deletion winning before the commit-time command: the
+		// task must be blocked instead of dispatching into a zero-repo workspace.
+		{name: "sole repository deleted after snapshot", repositoryRequired: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reader := &fakeIssueJournalReader{pages: map[string]journalPage{
+				"": {events: []store.JournalEvent{
+					issueEvent("603", "issue.create", "user:alice", "PHASE4-TERRA-FRESH-20260718-10",
+						`{"status":"open","title":"Testing HTML design"}`),
+				}, next: "603"},
+			}}
+			cursors := newFixedCursorStore()
+			seenStart(cursors, "WS")
+			s := memstore.New()
+			setupTaskReadyBinding(t, s)
+			blockCalls := 0
+			bridge := &trigger.IssueJournalBridge{
+				Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+				WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+				IssueLookup: func(context.Context, string, string) (trigger.TaskReadySnapshot, error) {
+					return trigger.TaskReadySnapshot{
+						TaskID: "PHASE4-TERRA-FRESH-20260718-10", Status: "open", IssueType: "task",
+						RepositoryRequired: test.repositoryRequired,
+					}, nil
+				},
+				RepositoryRequiredBlocker: func(_ context.Context, ws, taskID string) (trigger.TaskReadyRepositoryRequiredResult, error) {
+					blockCalls++
+					if ws != "WS" || taskID != "PHASE4-TERRA-FRESH-20260718-10" {
+						t.Fatalf("block command = %q/%q", ws, taskID)
+					}
+					return trigger.TaskReadyRepositoryRequiredResult{Blocked: true}, nil
+				},
 			}
-			return trigger.TaskReadyRepositoryRequiredResult{Blocked: true}, nil
-		},
-	}
 
-	out, err := bridge.RunOnce(t.Context())
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if blockCalls != 1 || out.TaskReadyBlocked != 1 || out.TaskReadyEmitted != 0 {
-		t.Fatalf("block calls/result = %d/%+v, want one block and no task.ready", blockCalls, out)
-	}
-	if cursor, _ := cursors.Load("WS"); cursor != "603" {
-		t.Fatalf("cursor = %q, want blocked entry durably handled", cursor)
-	}
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 0 {
-		t.Fatalf("runs after repository block = %v, %v; want none", runs, err)
+			out, err := bridge.RunOnce(t.Context())
+			if err != nil {
+				t.Fatalf("RunOnce: %v", err)
+			}
+			if blockCalls != 1 || out.TaskReadyBlocked != 1 || out.TaskReadyEmitted != 0 {
+				t.Fatalf("block calls/result = %d/%+v, want one block and no task.ready", blockCalls, out)
+			}
+			if cursor, _ := cursors.Load("WS"); cursor != "603" {
+				t.Fatalf("cursor = %q, want blocked entry durably handled", cursor)
+			}
+			runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
+			if err != nil || len(runs) != 0 {
+				t.Fatalf("runs after repository block = %v, %v; want none", runs, err)
+			}
+		})
 	}
 }
 
@@ -771,35 +784,41 @@ func TestIssueJournalBridgeRepositoryAdmissionRaceDispatchesCanonicalAssignedRep
 }
 
 func TestIssueJournalBridgeStartupReconcileBlocksExistingRepositoryRequiredTask(t *testing.T) {
-	reader := &fakeIssueJournalReader{pages: map[string]journalPage{"900": {next: "900"}}}
-	cursors := newFixedCursorStore()
-	cursors.Save("WS", "900")
-	s := memstore.New()
-	setupTaskReadyBinding(t, s)
-	bridge := &trigger.IssueJournalBridge{
-		Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
-		WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
-		ReadySnapshots: func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
-			return []trigger.TaskReadySnapshot{{
-				TaskID: "PHASE4-TERRA-FRESH-20260718-10", Status: "open", IssueType: "task",
-				RepositoryRequired: true, UpdatedAt: time.Date(2026, 7, 18, 20, 0, 0, 0, time.UTC),
-			}}, nil
-		},
-		RepositoryRequiredBlocker: func(context.Context, string, string) (trigger.TaskReadyRepositoryRequiredResult, error) {
-			return trigger.TaskReadyRepositoryRequiredResult{Blocked: true}, nil
-		},
-	}
+	for _, repositoryRequired := range []bool{true, false} {
+		t.Run(fmt.Sprintf("pre-read-required-%t", repositoryRequired), func(t *testing.T) {
+			reader := &fakeIssueJournalReader{pages: map[string]journalPage{"900": {next: "900"}}}
+			cursors := newFixedCursorStore()
+			cursors.Save("WS", "900")
+			s := memstore.New()
+			setupTaskReadyBinding(t, s)
+			blockCalls := 0
+			bridge := &trigger.IssueJournalBridge{
+				Store: s, Source: &trigger.InternalSource{Store: s}, Reader: reader,
+				WorkspaceKey: "WS", Cursors: cursors, EmitTaskReady: true,
+				ReadySnapshots: func(context.Context, string) ([]trigger.TaskReadySnapshot, error) {
+					return []trigger.TaskReadySnapshot{{
+						TaskID: "PHASE4-TERRA-FRESH-20260718-10", Status: "open", IssueType: "task",
+						RepositoryRequired: repositoryRequired, UpdatedAt: time.Date(2026, 7, 18, 20, 0, 0, 0, time.UTC),
+					}}, nil
+				},
+				RepositoryRequiredBlocker: func(context.Context, string, string) (trigger.TaskReadyRepositoryRequiredResult, error) {
+					blockCalls++
+					return trigger.TaskReadyRepositoryRequiredResult{Blocked: true}, nil
+				},
+			}
 
-	out, err := bridge.RunOnce(t.Context())
-	if err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-	if out.TaskReadyBlocked != 1 || out.TaskReadyEmitted != 0 {
-		t.Fatalf("result = %+v, want existing task blocked without dispatch", out)
-	}
-	runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
-	if err != nil || len(runs) != 0 {
-		t.Fatalf("runs after startup block = %v, %v; want none", runs, err)
+			out, err := bridge.RunOnce(t.Context())
+			if err != nil {
+				t.Fatalf("RunOnce: %v", err)
+			}
+			if blockCalls != 1 || out.TaskReadyBlocked != 1 || out.TaskReadyEmitted != 0 {
+				t.Fatalf("calls/result = %d/%+v, want existing task blocked without dispatch", blockCalls, out)
+			}
+			runs, err := s.DriverRuns().List(t.Context(), "WS", store.DriverRunFilter{})
+			if err != nil || len(runs) != 0 {
+				t.Fatalf("runs after startup block = %v, %v; want none", runs, err)
+			}
+		})
 	}
 }
 

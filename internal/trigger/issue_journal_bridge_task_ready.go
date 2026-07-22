@@ -112,7 +112,13 @@ func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev st
 			"workspace", ws, "event_id", IssueJournalEventIDPrefix+ev.ID+taskReadyEventIDSuffix, "task_id", ev.EntityID)
 		return false, false, nil
 	}
-	if snapshot != nil && snapshot.RepositoryRequired && b.RepositoryRequiredBlocker != nil {
+	// Every non-epic task without an explicit repository crosses the Work
+	// Items owner's commit-time admission command. RepositoryRequired is only a
+	// pre-read hint: a snapshot that observed the single-repository fallback can
+	// race deletion of that sole Repo before dispatch. The command serializes
+	// its repository-count decision with repository create/delete and either
+	// returns the canonical dispatchable task or blocks it.
+	if snapshot != nil && taskReadyNeedsRepositoryAdmission(*snapshot) && b.RepositoryRequiredBlocker != nil {
 		admission, blockErr := b.RepositoryRequiredBlocker(ctx, ws, snapshot.TaskID)
 		if blockErr != nil {
 			return false, false, fmt.Errorf("block repository-required task %q in workspace %q: %w", snapshot.TaskID, ws, blockErr)
@@ -152,6 +158,11 @@ func (b *IssueJournalBridge) emitTaskReady(ctx context.Context, ws string, ev st
 	default:
 		return false, false, fmt.Errorf("emit task.ready event %q in workspace %q: %w", ev.ID, ws, err)
 	}
+}
+
+func taskReadyNeedsRepositoryAdmission(snapshot TaskReadySnapshot) bool {
+	snapshot = normalizeTaskReadySnapshot(snapshot)
+	return !strings.EqualFold(snapshot.IssueType, "epic") && snapshot.SourceRepo == ""
 }
 
 // toTaskReadyEvent maps a ready-marking journal entry to the loopback

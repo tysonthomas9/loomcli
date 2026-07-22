@@ -110,6 +110,12 @@ type Executor struct {
 	ExecutionWorkers          execution.TaskRunWorkerAPI
 	ExecutionAuthorities      execution.DriverRunAuthorityResolver
 	SystemAuthorities         execution.SystemAuthorityResolver
+	// TaskRunRecovery is the owner-fenced child recovery API. It is invoked
+	// only while this executor holds and successfully heartbeats the exact
+	// parent DriverRun generation; crashed parents converge through DriverRun
+	// recovery instead of a tokenless TaskRun sweep.
+	TaskRunRecovery    execution.TaskRunRecoveryAPI
+	StaleTaskRunMaxAge time.Duration
 }
 
 type ExecutionResult struct {
@@ -154,18 +160,21 @@ func (e *Executor) RunOnce(ctx context.Context) (*ExecutionResult, error) {
 		return nil, fmt.Errorf("claim driver run: %w", err)
 	}
 	result := &ExecutionResult{Run: run, Claimed: claimed}
-	hbCtx, stopHeartbeat := context.WithCancel(ctx)
-	defer stopHeartbeat()
 	// runCtx is the runner's context: the heartbeat cancels it when it
 	// observes a cooperative cancel request (composition cascade, AW10),
 	// and the runner then reports cancelled through the normal finish.
 	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	if interval := e.heartbeatInterval(); interval > 0 {
-		go heartbeatDriverRun(hbCtx, e, claimed, leaseToken, interval, cancelRun)
-		go heartbeatExecutorNode(hbCtx, e, claimed.WorkspaceKey, nodeID, e.nodeTTL())
+	stopHeartbeat, ownerHeartbeatDone := e.startHeartbeats(ctx, claimed, nodeID, leaseToken, cancelRun)
+	defer stopHeartbeat()
+	runResult := e.runClaimed(runCtx, workDir, claimed)
+	// Stop and drain the owner heartbeat/recovery loop before terminalizing the
+	// parent so no in-flight stale-child command can race finalization.
+	stopHeartbeat()
+	if ownerHeartbeatDone != nil {
+		<-ownerHeartbeatDone
 	}
-	result.Final, err = e.settleClaimed(ctx, claimed, leaseToken, e.runClaimed(runCtx, workDir, claimed))
+	result.Final, err = e.settleClaimed(ctx, claimed, leaseToken, runResult)
 	if err != nil {
 		return result, err
 	}
@@ -632,26 +641,6 @@ func (e *Executor) nodeTTL() time.Duration {
 		ttl = interval * 3
 	}
 	return ttl
-}
-
-// heartbeatDriverRun renews the run lease and observes cooperative cancel
-// requests (composition cascade, AW10): a heartbeat that comes back with
-// CancelRequestedAt set fires onCancelRequested, canceling the runner's
-// context so the run terminalizes as cancelled through the normal finish.
-func heartbeatDriverRun(ctx context.Context, executor *Executor, claimed *domain.DriverRun, leaseToken string, interval time.Duration, onCancelRequested func()) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			run, err := executor.heartbeatDriverRun(ctx, claimed, leaseToken)
-			if err == nil && run != nil && run.CancelRequestedAt != nil && onCancelRequested != nil {
-				onCancelRequested()
-			}
-		}
-	}
 }
 
 func (e *Executor) claimDriverRun(ctx context.Context, queued *domain.DriverRun, nodeID, leaseID, leaseToken string) (*domain.DriverRun, error) {

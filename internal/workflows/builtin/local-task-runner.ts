@@ -151,7 +151,7 @@ export async function run(ctx = {}) {
   const filesystemOrigin = isFilesystemOrigin(originRemoteUrl);
   const localBranchRequested = deliveryMode === "local-branch";
   // Local-branch delivery is intentionally narrow: it is allowed only for local
-  // filesystem remotes, where `git push origin HEAD:...` publishes to the bare
+  // filesystem remotes, where an exact scanned commit SHA is pushed to the bare
   // repo used by local-mode. An explicit deliveryMode on a GitHub/http/ssh origin
   // does NOT activate this path; those deployments keep the existing patch-back
   // or PR behavior instead of silently inventing a "local" publish.
@@ -205,13 +205,33 @@ export async function run(ctx = {}) {
 
     logs.push(`${backend} CLI exit=${exitCode}`);
     if (stdout.trim()) {
-      logs.push(textTail(stdout, 4000));
+      logs.push(redactRunnerText(textTail(stdout, 4000)));
     }
     if (stderr.trim()) {
-      logs.push("stderr:\n" + textTail(stderr, 2000));
+      logs.push("stderr:\n" + redactRunnerText(textTail(stderr, 2000)));
     }
 
     patchInfo = await capturePatch(execWorktree, baseRef);
+    if (patchInfo.captureFailed || (patchInfo.gitBacked && await capturedChangesContainRunnerSecret(execWorktree, baseRef, patchInfo.patch))) {
+      logs.push(patchInfo.captureFailed
+        ? "captured changes rejected because inspection did not complete"
+        : "captured changes rejected because they contain an inherited credential");
+      const failureClass = patchInfo.captureFailed ? "local_patch_capture_failed" : "local_patch_contains_credential";
+      const failureMessage = patchInfo.captureFailed
+        ? "captured changes could not be inspected completely and were not published or persisted"
+        : "captured changes contain an inherited credential and were not published or persisted";
+      if (stacked) {
+        await discardRejectedStackedChanges(execWorktree, baseRef);
+      }
+      return failed(failureClass, failureMessage, {
+        taskRunId,
+        taskId,
+        backend,
+        request,
+        logs,
+        headBefore,
+      });
+    }
 
     // Local filesystem-origin delivery: commit (if needed) in the isolated
     // worktree and push the task branch to the ACTUAL origin remote. This path
@@ -228,10 +248,12 @@ export async function run(ctx = {}) {
           || stringValue(inputValue(request, "prTitle"))
           || stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
         try {
-          localBranchInfo = await deliverLocalBranch({ worktreePath: execWorktree, branch, title });
+          localBranchInfo = await deliverLocalBranch({ worktreePath: execWorktree, baseRef, branch, title });
           logs.push("pushed local branch " + localBranchInfo.branch + " @ " + localBranchInfo.head.slice(0, 12));
         } catch (error) {
-          prFailure = { class: "local_branch_push_failed", message: "failed to push local branch: " + errorMessage(error) };
+          prFailure = isRunnerCredentialDeliveryError(error)
+            ? { class: "local_patch_contains_credential", message: "captured changes contain an inherited credential and were not published" }
+            : { class: "local_branch_push_failed", message: "failed to push local branch: " + errorMessage(error) };
         }
       }
     // Stacked delivery: commit in place and push the canonical branch on the
@@ -251,10 +273,12 @@ export async function run(ctx = {}) {
         } else {
           const title = stringValue(inputValue(request, "prTitle")) || stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
           try {
-            stackInfo = await deliverStackBranch({ worktreePath: execWorktree, token, owner: slug.owner, repo: slug.repo, branch: stackBranch, title });
+            stackInfo = await deliverStackBranch({ worktreePath: execWorktree, baseRef, token, owner: slug.owner, repo: slug.repo, branch: stackBranch, title });
             logs.push("pushed stack branch " + stackInfo.branch + " @ " + stackInfo.head.slice(0, 12));
           } catch (error) {
-            prFailure = { class: "stack_push_failed", message: "failed to push stack branch: " + errorMessage(error) };
+            prFailure = isRunnerCredentialDeliveryError(error)
+              ? { class: "local_patch_contains_credential", message: "captured changes contain an inherited credential and were not published" }
+              : { class: "stack_push_failed", message: "failed to push stack branch: " + errorMessage(error) };
           }
         }
       }
@@ -276,10 +300,12 @@ export async function run(ctx = {}) {
           const title = stringValue(inputValue(request, "prTitle")) || stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
           const prBody = stringValue(inputValue(request, "prBody")) || ("Automated change by the Loom local-task-runner (" + backend + "). Task " + (taskId || taskRunId) + ".");
           try {
-            prInfo = await deliverPullRequest({ isolatedPath: isolated.path, token, owner: slug.owner, repo: slug.repo, base, branch, title, body: prBody });
+            prInfo = await deliverPullRequest({ isolatedPath: isolated.path, deliveryBaseRef: baseRef, token, owner: slug.owner, repo: slug.repo, base, branch, title, body: prBody });
             logs.push("opened pull request " + prInfo.url);
           } catch (error) {
-            prFailure = { class: "github_pr_failed", message: "failed to open pull request: " + errorMessage(error) };
+            prFailure = isRunnerCredentialDeliveryError(error)
+              ? { class: "local_patch_contains_credential", message: "captured changes contain an inherited credential and were not published" }
+              : { class: "github_pr_failed", message: "failed to open pull request: " + errorMessage(error) };
           }
         }
       }
@@ -354,11 +380,11 @@ export async function run(ctx = {}) {
     cli_exit_code: String(exitCode),
   });
   if (streamFailure) {
-    metadata.stream_error = streamFailure;
+    metadata.stream_error = redactRunnerText(streamFailure);
   }
   if (acceptedTaskOutcome) {
     metadata.task_outcome = acceptedTaskOutcome.disposition;
-    metadata.task_outcome_summary = acceptedTaskOutcome.summary;
+    metadata.task_outcome_summary = redactRunnerText(acceptedTaskOutcome.summary);
   }
 
   if (stackInfo) {
@@ -390,8 +416,8 @@ export async function run(ctx = {}) {
       status: "failed",
       exitCode: 1,
       errorClass: "local_task_outcome_invalid",
-      errorMessage: taskOutcome.invalid,
-      logs: logs.join("\n") + "\n",
+      errorMessage: redactRunnerText(taskOutcome.invalid),
+      logs: renderLogs(logs),
       logsRef: "logs://" + taskRunId,
       ...taskUsage,
       transcript_entries: transcriptEntries,
@@ -410,8 +436,8 @@ export async function run(ctx = {}) {
       status: "cancelled",
       exitCode: 0,
       errorClass: "task_needs_revision",
-      errorMessage: acceptedTaskOutcome.summary,
-      logs: logs.join("\n") + "\n",
+      errorMessage: redactRunnerText(acceptedTaskOutcome.summary),
+      logs: renderLogs(logs),
       logsRef: "logs://" + taskRunId,
       ...taskUsage,
       transcript_entries: transcriptEntries,
@@ -434,8 +460,8 @@ export async function run(ctx = {}) {
       status: "failed",
       exitCode: failureExitCode,
       errorClass: "local_agent_failed",
-      errorMessage: failureMessage,
-      logs: logs.join("\n") + "\n",
+      errorMessage: redactRunnerText(failureMessage),
+      logs: renderLogs(logs),
       logsRef: "logs://" + taskRunId,
       ...taskUsage,
       transcript_entries: transcriptEntries,
@@ -451,7 +477,7 @@ export async function run(ctx = {}) {
   const completed = {
     status: "completed",
     exitCode: 0,
-    logs: logs.join("\n") + "\n",
+    logs: renderLogs(logs),
     logsRef: "logs://" + taskRunId,
     ...taskUsage,
     transcript_entries: transcriptEntries,
@@ -711,12 +737,21 @@ async function execBackend(binary, args, options) {
       },
     );
     if (options.live === true && booleanValue(process.env.LOOM_TASK_RUNNER_STREAM_STDERR)) {
-      // Tee the backend's live output to OUR stderr so, when the daemon leaf runs this
+      // Signal backend activity on OUR stderr so, when the daemon leaf runs this
       // runner (Phase U), the supervisor's output-timeout watchdog — which stats the
-      // agent log mtime — sees per-turn activity, exactly as the Go leaf's wrapper PTY
-      // path did (internal/cli/agent/plan.go). stdout stays clean for the result line.
-      if (child.stdout) child.stdout.on("data", (chunk) => process.stderr.write(chunk));
-      if (child.stderr) child.stderr.on("data", (chunk) => process.stderr.write(chunk));
+      // agent log mtime — sees per-turn activity. Never tee the backend bytes themselves:
+      // a credential may be split across stream chunks, which makes per-chunk redaction
+      // unsafe. The persisted result carries the redacted diagnostic tail instead.
+      let lastSignalAt = 0;
+      const signalActivity = () => {
+        const now = Date.now();
+        if (lastSignalAt === 0 || now - lastSignalAt >= 1000) {
+          lastSignalAt = now;
+          process.stderr.write("[loom task-runner] backend activity\n");
+        }
+      };
+      if (child.stdout) child.stdout.on("data", signalActivity);
+      if (child.stderr) child.stderr.on("data", signalActivity);
     }
     // Always close the child's stdin. Backends that take the prompt over stdin
     // (opencode, headless codex) receive it here; positional-prompt backends
@@ -986,45 +1021,271 @@ export function redactSecretsInText(text) {
 // written: first the exact values of known secret env vars, then entropy/pattern
 // detection for secrets that are NOT in that env allowlist.
 function redactTranscriptSecrets(entries, env = process.env) {
-  const names = [
-    "GITHUB_TOKEN", "GH_TOKEN", "LOOM_PR_GIT_PASSWORD",
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY",
-    "GEMINI_API_KEY", "GOOGLE_API_KEY", "CURSOR_API_KEY",
-    "LOOM_FLEET_DB_API_KEY", "LOOM_TASK_RUN_LEASE_TOKEN",
-  ];
-  const secrets = [];
-  for (const name of names) {
-    const value = env[name];
-    if (value && String(value).length >= 8) {
-      secrets.push(String(value));
-    }
-  }
+  const secrets = runnerSecretValues(env);
   const redact = (value) => redactSecretsInText(secrets.length ? scrubToken(value, ...secrets) : value);
-  for (const entry of entries) {
-    if (entry.text) {
-      entry.text = redact(entry.text);
+  return entries.map((entry) => redactStructuredRunnerValue(entry, redact));
+}
+
+function redactStructuredRunnerValue(value, redact) {
+  if (typeof value === "string") {
+    return redact(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactStructuredRunnerValue(item, redact));
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      Object.defineProperty(out, redact(key), {
+        value: redactStructuredRunnerValue(item, redact),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
-    if (entry.output) {
-      entry.output = redact(entry.output);
+    return out;
+  }
+  return value;
+}
+
+// runnerSecretValues returns exact credential values inherited by the backend.
+// Exact-value scrubbing complements entropy/pattern detection and covers Loom's
+// run-scoped tokens even when a deterministic test token has deliberately low
+// entropy. Sorting longest-first avoids exposing a suffix when values overlap.
+function runnerSecretValues(env = process.env) {
+  const secretName = /(?:^|_)(?:TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL|PRIVATE_KEY|SIGNING_KEY|ACCESS_KEY)$/i;
+  return [...new Set(Object.entries(env || {})
+    .filter(([name, value]) => secretName.test(name) && value && String(value).length >= 8)
+    .map(([, value]) => String(value)))]
+    .sort((a, b) => b.length - a.length);
+}
+
+function redactRunnerText(value, env = process.env) {
+  const secrets = runnerSecretValues(env);
+  const text = secrets.length ? scrubToken(value, ...secrets) : String(value || "");
+  return redactSecretsInText(text);
+}
+
+function renderLogs(logs, env = process.env) {
+  return redactRunnerText((logs || []).join("\n") + "\n", env);
+}
+
+async function capturedChangesContainRunnerSecret(worktree, base, patch, env = process.env) {
+  const secrets = runnerSecretValues(env);
+  if (secrets.length === 0) {
+    return false;
+  }
+  const capturedPatch = String(patch || "");
+  if (secrets.some((secret) => capturedPatch.includes(secret))) {
+    return true;
+  }
+
+  let changed;
+  try {
+    const range = base ? [base] : [];
+    const result = await execBackend("git", ["-C", worktree, "diff", "--name-only", "-z", ...range, "--", "."], { cwd: worktree });
+    if (result.code !== 0) {
+      return true;
+    }
+    changed = result.stdout.split("\0").filter(Boolean);
+  } catch {
+    return true;
+  }
+
+  const root = path.resolve(worktree);
+  for (const relative of changed) {
+    const target = path.resolve(root, relative);
+    if (target !== root && !target.startsWith(root + path.sep)) {
+      return true;
+    }
+    let stat;
+    try {
+      stat = fs.lstatSync(target);
+    } catch (error) {
+      if (error && error.code === "ENOENT") {
+        continue;
+      }
+      return true;
+    }
+    if (stat.isSymbolicLink()) {
+      let link;
+      try {
+        link = fs.readlinkSync(target);
+      } catch {
+        return true;
+      }
+      if (secrets.some((secret) => link.includes(secret))) {
+        return true;
+      }
+      continue;
+    }
+    if (stat.isFile() && fileContainsRunnerSecret(target, secrets)) {
+      return true;
     }
   }
-  return entries;
+  return false;
+}
+
+function fileContainsRunnerSecret(file, secrets) {
+  const needles = secrets.map((secret) => Buffer.from(secret)).filter((secret) => secret.length > 0);
+  if (needles.length === 0) {
+    return false;
+  }
+  const overlap = Math.max(...needles.map((secret) => secret.length)) - 1;
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  let carry = Buffer.alloc(0);
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+    for (;;) {
+      const read = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (read === 0) {
+        return false;
+      }
+      const window = Buffer.concat([carry, buffer.subarray(0, read)]);
+      if (needles.some((secret) => window.includes(secret))) {
+        return true;
+      }
+      carry = overlap > 0 ? window.subarray(Math.max(0, window.length - overlap)) : Buffer.alloc(0);
+    }
+  } catch {
+    return true;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // A failed close does not change the completed scan result.
+      }
+    }
+  }
+}
+
+// committedChangesContainRunnerSecret scans the exact Git objects that would
+// be published, not the mutable worktree. The earlier worktree/patch scan
+// catches ordinary output before commit; this second boundary closes the race
+// where a detached backend child or Git clean filter changes the staged tree
+// between capture and branch delivery. Both sides of each changed path are
+// inspected so a deletion cannot publish a credential in a removed line.
+async function committedChangesContainRunnerSecret(worktree, base, head = "HEAD", extraSecrets = [], env = process.env) {
+  const secrets = [...new Set([
+    ...runnerSecretValues(env),
+    ...extraSecrets.map((value) => String(value || "")).filter((value) => value.length >= 8),
+  ])].sort((a, b) => b.length - a.length);
+  if (secrets.length === 0) {
+    return false;
+  }
+  try {
+    const patch = await execBackend("git", ["-C", worktree, "diff", "--no-ext-diff", "--binary", "--no-renames", base, head, "--", "."], { cwd: worktree });
+    if (patch.code !== 0 || secrets.some((secret) => patch.stdout.includes(secret))) {
+      return true;
+    }
+    const names = await execBackend("git", ["-C", worktree, "diff", "--no-renames", "--name-only", "-z", base, head, "--", "."], { cwd: worktree });
+    if (names.code !== 0) {
+      return true;
+    }
+    for (const relative of names.stdout.split("\0").filter(Boolean)) {
+      for (const revision of [base, head]) {
+        const entry = await execBackend("git", ["-C", worktree, "ls-tree", "-z", revision, "--", relative], { cwd: worktree });
+        if (entry.code !== 0) {
+          return true;
+        }
+        if (entry.stdout === "") {
+          continue;
+        }
+        const object = await execBackend("git", ["-C", worktree, "cat-file", "-p", `${revision}:./${relative}`], { cwd: worktree });
+        if (object.code !== 0 || secrets.some((secret) => object.stdout.includes(secret))) {
+          return true;
+        }
+      }
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function secureCommitForDelivery({ git, worktreePath, baseRef, title, extraSecrets = [] }) {
+  const requestedBase = stringValue(baseRef) || "HEAD";
+  const scanBase = stringValue((await git("rev-parse", requestedBase)).stdout).trim();
+  await git("add", "-A");
+  const staged = await capturePatch(worktreePath, scanBase);
+  if (staged.captureFailed || await capturedChangesContainRunnerSecret(worktreePath, scanBase, staged.patch)) {
+    await discardRejectedCredentialChanges(git, scanBase);
+    throw runnerCredentialDeliveryError(staged.captureFailed
+      ? "captured changes could not be inspected completely"
+      : "captured changes contain an inherited credential");
+  }
+  // A backend is allowed to commit its own output. In that case `git add -A`
+  // leaves the index equal to HEAD even though HEAD differs from scanBase. Reuse
+  // that commit instead of attempting an empty runner commit. Conversely, never
+  // turn a truly empty run into a branch publication if the pre-delivery state
+  // changed after the caller's initial patch capture.
+  const stagedNames = await git("diff", "--cached", "--name-only", "-z", "--", ".");
+  let head = stringValue((await git("rev-parse", "HEAD")).stdout).trim();
+  if (stagedNames.stdout !== "") {
+    await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "--no-verify", "-m", redactRunnerText(title));
+    head = stringValue((await git("rev-parse", "HEAD")).stdout).trim();
+  } else if (head === scanBase || staged.filesChanged === 0) {
+    throw new Error("no changes to deliver");
+  }
+  if (await committedChangesContainRunnerSecret(worktreePath, scanBase, head, extraSecrets)) {
+    await discardRejectedCredentialChanges(git, scanBase);
+    throw runnerCredentialDeliveryError("committed changes contain an inherited credential");
+  }
+  return head;
+}
+
+function branchPushRefspec(head, branch) {
+  return head + ":refs/heads/" + branch;
+}
+
+async function discardRejectedCredentialChanges(git, base) {
+  try {
+    await git("reset", "--hard", base);
+  } catch {
+    // Publication still fails closed even if best-effort local cleanup fails.
+  }
+  try {
+    await git("clean", "-fd");
+  } catch {
+    // The caller returns a credential-specific failure and never pushes.
+  }
+}
+
+async function discardRejectedStackedChanges(worktree, base) {
+  const resetBase = stringValue(base) || "HEAD";
+  try {
+    await execBackend("git", ["-C", worktree, "reset", "--hard", resetBase], { cwd: worktree });
+    await execBackend("git", ["-C", worktree, "clean", "-fd"], { cwd: worktree });
+  } catch {
+    // The failed TaskRun never returns or publishes the rejected patch.
+  }
+}
+
+function runnerCredentialDeliveryError(message) {
+  const error = new Error(message);
+  error.code = "LOCAL_PATCH_CONTAINS_CREDENTIAL";
+  return error;
+}
+
+function isRunnerCredentialDeliveryError(error) {
+  return error && error.code === "LOCAL_PATCH_CONTAINS_CREDENTIAL";
 }
 
 // deliverPullRequest commits the isolated worktree's changes onto a branch,
 // pushes it (token supplied via env-backed credential helper, never in argv),
 // and opens (or finds) a PR. Returns { url, number, branch }.
-async function deliverPullRequest({ isolatedPath, token, owner, repo, base, branch, title, body }) {
+async function deliverPullRequest({ isolatedPath, deliveryBaseRef, token, owner, repo, base, branch, title, body }) {
   const git = async (...args) => {
-    const r = await execBackend("git", ["-C", isolatedPath, ...args], { cwd: isolatedPath });
+    const r = await execBackend("git", ["-C", isolatedPath, "-c", "core.hooksPath=/dev/null", ...args], { cwd: isolatedPath });
     if (r.code !== 0) {
       throw new Error("git " + args[0] + " failed: " + textTail(r.stderr || r.stdout, 400));
     }
     return r;
   };
   await git("checkout", "-b", branch);
-  await git("add", "-A");
-  await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
+  const head = await secureCommitForDelivery({ git, worktreePath: isolatedPath, baseRef: deliveryBaseRef, title, extraSecrets: [token] });
   // Push WITHOUT the token in argv: supply it through a credential helper that
   // reads it from the subprocess ENV (LOOM_PR_GIT_PASSWORD), with a token-free
   // remote URL. This keeps the credential out of `ps`/argv and out of git's URL
@@ -1035,9 +1296,9 @@ async function deliverPullRequest({ isolatedPath, token, owner, repo, base, bran
       "-C", isolatedPath,
       "-c", "credential.helper=",
       "-c", 'credential.helper=!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f',
-      "push", "--force",
+      "push", "--no-verify", "--force",
       "https://github.com/" + owner + "/" + repo + ".git",
-      "HEAD:refs/heads/" + branch,
+      branchPushRefspec(head, branch),
     ],
     { cwd: isolatedPath, env: { ...process.env, LOOM_PR_GIT_PASSWORD: token, GIT_TERMINAL_PROMPT: "0" } },
   );
@@ -1071,17 +1332,15 @@ async function deliverPullRequest({ isolatedPath, token, owner, repo, base, bran
 // cut it there), so the commit lands directly on top of the predecessor and the
 // pushed branch's base == the predecessor branch by construction. The post-drain
 // reconcile opens/links the PR and sets bases. Returns { branch, head }.
-async function deliverStackBranch({ worktreePath, token, owner, repo, branch, title }) {
+async function deliverStackBranch({ worktreePath, baseRef, token, owner, repo, branch, title }) {
   const git = async (...args) => {
-    const r = await execBackend("git", ["-C", worktreePath, ...args], { cwd: worktreePath });
+    const r = await execBackend("git", ["-C", worktreePath, "-c", "core.hooksPath=/dev/null", ...args], { cwd: worktreePath });
     if (r.code !== 0) {
       throw new Error("git " + args[0] + " failed: " + textTail(r.stderr || r.stdout, 400));
     }
     return r;
   };
-  await git("add", "-A");
-  await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
-  const head = stringValue((await git("rev-parse", "HEAD")).stdout).trim();
+  const head = await secureCommitForDelivery({ git, worktreePath, baseRef, title, extraSecrets: [token] });
   // Push token via an env-backed credential helper (never in argv), token-free
   // remote URL — same hardening as deliverPullRequest. Each task owns its
   // canonical branch, so --force is safe (only this task pushes loom/stack/.../<task>).
@@ -1091,9 +1350,9 @@ async function deliverStackBranch({ worktreePath, token, owner, repo, branch, ti
       "-C", worktreePath,
       "-c", "credential.helper=",
       "-c", 'credential.helper=!f() { echo username=x-access-token; echo "password=$LOOM_PR_GIT_PASSWORD"; }; f',
-      "push", "--force",
+      "push", "--no-verify", "--force",
       "https://github.com/" + owner + "/" + repo + ".git",
-      "HEAD:refs/heads/" + branch,
+      branchPushRefspec(head, branch),
     ],
     { cwd: worktreePath, env: { ...process.env, LOOM_PR_GIT_PASSWORD: token, GIT_TERMINAL_PROMPT: "0" } },
   );
@@ -1108,29 +1367,22 @@ async function deliverStackBranch({ worktreePath, token, owner, repo, branch, ti
 // actual `origin` remote. There is deliberately no owner/repo parsing or GitHub
 // URL construction here; activation is gated before this helper on a filesystem
 // origin, so `git push origin ...` is the correct primitive.
-async function deliverLocalBranch({ worktreePath, branch, title }) {
+async function deliverLocalBranch({ worktreePath, baseRef, branch, title }) {
   const git = async (...args) => {
-    const r = await execBackend("git", ["-C", worktreePath, ...args], { cwd: worktreePath });
+    const r = await execBackend("git", ["-C", worktreePath, "-c", "core.hooksPath=/dev/null", ...args], { cwd: worktreePath });
     if (r.code !== 0) {
       throw new Error("git " + args[0] + " failed: " + textTail(r.stderr || r.stdout, 400));
     }
     return r;
   };
   await git("checkout", "-B", branch);
-  await git("add", "-A");
-  const staged = await execBackend("git", ["-C", worktreePath, "diff", "--cached", "--quiet"], { cwd: worktreePath });
-  if (staged.code === 1) {
-    await git("-c", "user.email=loom@example.test", "-c", "user.name=Loom", "commit", "-m", title);
-  } else if (staged.code !== 0) {
-    throw new Error("git diff failed: " + textTail(staged.stderr || staged.stdout, 400));
-  }
-  const head = stringValue((await git("rev-parse", "HEAD")).stdout).trim();
+  const head = await secureCommitForDelivery({ git, worktreePath, baseRef, title });
   // Each task owns its canonical loom/<task> branch. Rework runs start from the
   // host base again, so their isolated commits can diverge from the previous
   // pushed branch; a non-force push would reject and loop failed rework forever.
   const pushRes = await execBackend(
     "git",
-    ["-C", worktreePath, "push", "--force", "origin", "HEAD:refs/heads/" + branch],
+    ["-C", worktreePath, "push", "--no-verify", "--force", "origin", branchPushRefspec(head, branch)],
     { cwd: worktreePath, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
   );
   if (pushRes.code !== 0) {
@@ -1177,32 +1429,47 @@ async function gitHead(worktree) {
 // asks it to) or left the change in the working tree.
 async function capturePatch(worktree, base) {
   const head = await gitHead(worktree);
+  const gitBacked = head !== "" || stringValue(base) !== "";
+  let intentFailed = false;
   try {
-    await execBackend("git", ["-C", worktree, "add", "-N", "--", "."], { cwd: worktree });
+    const intent = await execBackend("git", ["-C", worktree, "add", "-N", "--", "."], { cwd: worktree });
+    intentFailed = intent.code !== 0;
   } catch {
-    // best-effort: an empty or non-git worktree just yields an empty patch.
+    intentFailed = true;
   }
   const range = base ? [base] : [];
   let patch = "";
+  let patchFailed = false;
   try {
     const diff = await execBackend("git", ["-C", worktree, "diff", "--binary", ...range, "--", "."], { cwd: worktree });
     if (diff.code === 0) {
       patch = diff.stdout;
+    } else {
+      patchFailed = true;
     }
   } catch {
-    patch = "";
+    patchFailed = true;
   }
   let stat = "";
+  let statFailed = false;
   try {
     const diffStat = await execBackend("git", ["-C", worktree, "diff", "--numstat", ...range, "--", "."], { cwd: worktree });
     if (diffStat.code === 0) {
       stat = diffStat.stdout;
+    } else {
+      statFailed = true;
     }
   } catch {
-    stat = "";
+    statFailed = true;
   }
   const counts = parseNumstat(stat);
-  return { head, patch, ...counts };
+  return {
+    head,
+    patch,
+    ...counts,
+    gitBacked,
+    captureFailed: gitBacked && (intentFailed || patchFailed || statFailed),
+  };
 }
 
 // parseNumstat sums added/removed lines and counts changed files from
@@ -1902,8 +2169,8 @@ function failed(errorClass, message, info) {
     status: "failed",
     exitCode: 1,
     errorClass,
-    errorMessage: textTail(message),
-    logs: logs.concat([errorClass + ": " + message]).join("\n") + "\n",
+    errorMessage: redactRunnerText(textTail(message)),
+    logs: renderLogs(logs.concat([errorClass + ": " + message])),
     logsRef: "logs://" + info.taskRunId,
     runtimeMetadata: stringMetadata({
       task_runner: "local-task-runner",

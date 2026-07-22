@@ -34,9 +34,10 @@ type TaskReadySnapshot struct {
 	Labels     []string
 	IssueType  string
 	SourceRepo string
-	// RepositoryRequired is true only when this non-epic task has no explicit
-	// source repository and its workspace does not have exactly one repository
-	// for the resolver's safe fallback.
+	// RepositoryRequired is the pre-read indication that this non-epic task has
+	// no explicit source repository and its workspace did not have exactly one
+	// repository. It is never dispatch authority: every repo-less task is
+	// revalidated by the Work Items owner at commit time when that port exists.
 	RepositoryRequired bool
 	UpdatedAt          time.Time
 }
@@ -150,7 +151,7 @@ func (b *IssueJournalBridge) admitTaskReadySnapshot(
 	if snapshot.Status != readyIssueStatus || strings.EqualFold(snapshot.IssueType, "epic") {
 		return snapshot, false, false, nil
 	}
-	if !snapshot.RepositoryRequired || b.RepositoryRequiredBlocker == nil {
+	if !taskReadyNeedsRepositoryAdmission(snapshot) || b.RepositoryRequiredBlocker == nil {
 		return snapshot, false, true, nil
 	}
 	admission, err := b.RepositoryRequiredBlocker(ctx, ws, snapshot.TaskID)

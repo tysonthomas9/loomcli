@@ -302,7 +302,7 @@ func (s *Service) buildDeliveryReservations(ctx context.Context, event *Event, b
 			Status:     DeliveryAccepted,
 			SubjectKey: renderDeliverySubjectKey(binding, event),
 		}
-		if actorFiltered(binding.ActorFilter, event.Origin, event.ActorRef) {
+		if unsafeLegacyWorkflowIssueBinding(binding, event) || actorFiltered(binding.ActorFilter, event.Origin, event.ActorRef) {
 			reservation.Status = DeliveryRejected
 			reservation.RejectionReason = RejectionReasonActorFilter
 			reservations = append(reservations, reservation)
@@ -788,6 +788,18 @@ func actorFiltered(filter *ActorFilter, origin EventOrigin, actor string) bool {
 		}
 	}
 	return true
+}
+
+// unsafeLegacyWorkflowIssueBinding fails closed for bindings persisted before
+// the create/update invariant required workflow actor exclusion. The binding
+// already matched this event, so an actual internal.issue.* route plus a
+// workflow actor is sufficient to identify the self-trigger risk. Recording a
+// rejected delivery preserves admission/audit behavior without dispatching the
+// loop-producing workflow.
+func unsafeLegacyWorkflowIssueBinding(binding *Binding, event *Event) bool {
+	return binding != nil && event != nil && isInternalIssueRoute(event.RouteKey) &&
+		eventActorKind(event.Origin, event.ActorRef) == string(EventOriginWorkflow) &&
+		!excludesWorkflowActor(binding.ActorFilter)
 }
 
 // eventActorKind classifies the trusted actor identity separately from event

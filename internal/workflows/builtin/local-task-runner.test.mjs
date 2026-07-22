@@ -34,12 +34,28 @@ if (process.env.FAKE_WRITE_FILE) {
     : path.join(process.cwd(), process.env.FAKE_WRITE_FILE);
   fs.writeFileSync(target, "hello from fake backend\\n");
 }
+if (process.env.FAKE_WRITE_SECRET_FILE) {
+  const target = path.isAbsolute(process.env.FAKE_WRITE_SECRET_FILE)
+    ? process.env.FAKE_WRITE_SECRET_FILE
+    : path.join(process.cwd(), process.env.FAKE_WRITE_SECRET_FILE);
+  fs.writeFileSync(target, String(process.env.LOOM_TASK_RUN_LEASE_TOKEN || "") + "\\n");
+}
+if (process.env.FAKE_COMMIT_CHANGES === "1") {
+  const { execFileSync } = await import("node:child_process");
+  execFileSync("git", ["add", "-A"], { cwd: process.cwd() });
+  execFileSync("git", ["-c", "user.email=fake@example.test", "-c", "user.name=Fake Backend", "commit", "--no-verify", "-m", "fake backend committed"], { cwd: process.cwd() });
+}
 if (process.env.FAKE_TASK_OUTCOME && process.env.LOOM_TASK_OUTCOME_FILE) {
   fs.writeFileSync(process.env.LOOM_TASK_OUTCOME_FILE, process.env.FAKE_TASK_OUTCOME);
 }
 if (process.env.FAKE_STREAM_ERROR) {
   process.stdout.write(JSON.stringify({ type: "error", error: { message: process.env.FAKE_STREAM_ERROR } }) + "\\n");
   process.exit(exit);
+}
+if (process.env.FAKE_ECHO_SECRET) {
+  process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "message-" + process.env.FAKE_ECHO_SECRET, type: "agent_message", text: "stdout-secret " + process.env.FAKE_ECHO_SECRET } }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "item.completed", item: { id: "command-" + process.env.FAKE_ECHO_SECRET, type: "command_execution", command: "echo " + process.env.FAKE_ECHO_SECRET, aggregated_output: "", exit_code: 0, status: "completed" } }) + "\\n");
+  process.stderr.write("stderr-secret " + process.env.FAKE_ECHO_SECRET + "\\n");
 }
 // Claude-shaped event (matched by the claude parser):
 process.stdout.write(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "did the work" }] } }) + "\\n");
@@ -98,7 +114,15 @@ const ENV_KEYS = [
   "LOOM_TASK_RUN_REQUEST_JSON",
   "FAKE_EXIT_CODE",
   "FAKE_WRITE_FILE",
+  "FAKE_WRITE_SECRET_FILE",
+  "FAKE_GIT_FAIL_BINARY_DIFF",
+  "FAKE_GIT_WRITE_SECRET_AFTER_CHECKOUT",
+  "FAKE_GIT_MOVE_HEAD_BEFORE_PUSH",
+  "FAKE_GIT_MOVE_HEAD_MARKER",
+  "FAKE_COMMIT_CHANGES",
+  "REAL_GIT_BIN",
   "FAKE_STREAM_ERROR",
+  "FAKE_ECHO_SECRET",
   "FAKE_STDIN_FILE",
   "FAKE_USAGE_TOKENS",
   "FAKE_TASK_OUTCOME",
@@ -117,6 +141,7 @@ const ENV_KEYS = [
   "LOOM_COST_PER_MTOK_INPUT",
   "LOOM_COST_PER_MTOK_OUTPUT",
   "LOOM_TASK_RUNNER_STREAM_STDERR",
+  "LOOM_TASK_RUN_LEASE_TOKEN",
   "LOOM_TASK_RUN_PROMPT",
 ];
 
@@ -129,6 +154,44 @@ function setEnv(key, value) {
   } else {
     process.env[key] = value;
   }
+}
+
+function installGitFaultWrapper() {
+  const dir = fs.mkdtempSync(path.join(tmpRoot, "git-fault-wrapper-"));
+  const realGit = execFileSync("/usr/bin/env", ["which", "git"], {
+    env: { ...process.env, PATH: savedPath },
+  }).toString().trim();
+  const wrapper = path.join(dir, "git");
+  fs.writeFileSync(wrapper, [
+    "#!/usr/bin/env node",
+    "import { spawnSync } from \"node:child_process\";",
+    "import fs from \"node:fs\";",
+    "import path from \"node:path\";",
+    "const args = process.argv.slice(2);",
+    "if (process.env.FAKE_GIT_FAIL_BINARY_DIFF === \"1\" && args.includes(\"diff\") && args.includes(\"--binary\")) process.exit(2);",
+    "if (process.env.FAKE_GIT_MOVE_HEAD_BEFORE_PUSH === \"1\" && args.includes(\"push\")) {",
+    "  const c = args.indexOf(\"-C\");",
+    "  const cwd = c >= 0 && args[c + 1] ? args[c + 1] : process.cwd();",
+    "  fs.writeFileSync(path.join(cwd, \"post-scan-head-move.txt\"), \"must not be published\\n\");",
+    "  let mutation = spawnSync(process.env.REAL_GIT_BIN, [\"-C\", cwd, \"add\", \"-A\"], { stdio: \"inherit\", env: process.env });",
+    "  if (mutation.error || mutation.status !== 0) process.exit(mutation.status == null ? 1 : mutation.status);",
+    "  mutation = spawnSync(process.env.REAL_GIT_BIN, [\"-C\", cwd, \"-c\", \"user.email=fault@example.test\", \"-c\", \"user.name=Fault Wrapper\", \"commit\", \"--no-verify\", \"-m\", \"post-scan head move\"], { stdio: \"inherit\", env: process.env });",
+    "  if (mutation.error || mutation.status !== 0) process.exit(mutation.status == null ? 1 : mutation.status);",
+    "  const moved = spawnSync(process.env.REAL_GIT_BIN, [\"-C\", cwd, \"rev-parse\", \"HEAD\"], { encoding: \"utf8\", env: process.env });",
+    "  if (moved.error || moved.status !== 0) process.exit(moved.status == null ? 1 : moved.status);",
+    "  if (process.env.FAKE_GIT_MOVE_HEAD_MARKER) fs.writeFileSync(process.env.FAKE_GIT_MOVE_HEAD_MARKER, moved.stdout.trim() + \"\\n\");",
+    "}",
+    "const result = spawnSync(process.env.REAL_GIT_BIN, args, { stdio: \"inherit\", env: process.env });",
+    "if (result.error || result.status !== 0) process.exit(result.status == null ? 1 : result.status);",
+    "if (process.env.FAKE_GIT_WRITE_SECRET_AFTER_CHECKOUT === \"1\" && args.includes(\"checkout\") && args.includes(\"-B\")) {",
+    "  const c = args.indexOf(\"-C\");",
+    "  const cwd = c >= 0 && args[c + 1] ? args[c + 1] : process.cwd();",
+    "  fs.writeFileSync(path.join(cwd, \"delayed-credential.txt\"), String(process.env.LOOM_TASK_RUN_LEASE_TOKEN || \"\") + \"\\n\");",
+    "}",
+    "",
+  ].join("\n"), { mode: 0o755 });
+  process.env.REAL_GIT_BIN = realGit;
+  process.env.PATH = dir + path.delimiter + savedPath;
 }
 
 beforeEach(() => {
@@ -808,7 +871,7 @@ describe("local-task-runner success", () => {
     assert.ok(out.estimated_cost_usd == null, "codex must not get a fabricated cost");
   });
 
-  it("live-streams backend output to stderr under LOOM_TASK_RUNNER_STREAM_STDERR (daemon-leaf watchdog feed)", async () => {
+  it("signals backend activity on stderr under LOOM_TASK_RUNNER_STREAM_STDERR (daemon-leaf watchdog feed)", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
     process.env.LOOM_CODEX_BIN = fakeBin;
@@ -824,9 +887,70 @@ describe("local-task-runner success", () => {
       process.stderr.write = orig;
     }
     assert.equal(out.status, "completed");
-    // The fake backend's stream-json (which contains "did the work") must be teed to
-    // stderr live so the supervisor output-timeout watchdog sees per-turn activity.
-    assert.ok(chunks.join("").includes("did the work"), "backend output must be teed to stderr when streaming is enabled");
+    // The watchdog needs activity, not unredacted backend bytes. A fixed signal
+    // cannot leak a credential that spans arbitrary stream chunk boundaries.
+    assert.ok(chunks.join("").includes("backend activity"), "backend activity must reach stderr when streaming is enabled");
+    assert.ok(!chunks.join("").includes("did the work"), "raw backend output must never be teed to stderr");
+  });
+
+  it("redacts an exact TaskRun lease canary from logs, transcript, metadata, and live stderr", async () => {
+    const canary = "lease-canary-low-entropy-00000000";
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_ECHO_SECRET = canary;
+    process.env.LOOM_TASK_RUN_LEASE_TOKEN = canary;
+    process.env.LOOM_TASK_RUNNER_STREAM_STDERR = "1";
+    const chunks = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (c) => { chunks.push(typeof c === "string" ? c : c.toString()); return true; };
+    let out;
+    try {
+      out = await run();
+    } finally {
+      process.stderr.write = orig;
+    }
+
+    assert.equal(out.status, "completed");
+    assert.ok(!JSON.stringify(out).includes(canary), "persisted TaskRun result must not contain the raw lease token");
+    assert.ok(out.logs.includes("REDACTED") || out.logs.includes("***"), "redacted diagnostics should remain useful");
+    assert.ok(!chunks.join("").includes(canary), "serve-facing live stderr must not contain the raw lease token");
+    const secretTool = out.transcript_entries.find((entry) => entry.tool_name === "shell" && entry.tool_input?.command?.includes("***"));
+    assert.ok(secretTool, "nested transcript tool input must retain a redacted command");
+  });
+
+  it("fails closed before persisting or publishing a patch containing an inherited credential", async () => {
+    const canary = "lease-canary-patch-000000000000";
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_SECRET_FILE = "credential.txt";
+    process.env.LOOM_TASK_RUN_LEASE_TOKEN = canary;
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_patch_contains_credential");
+    assert.equal(out.patch, undefined, "rejected credential patch must not be persisted");
+    assert.ok(!JSON.stringify(out).includes(canary), "rejected result must not echo the credential");
+  });
+
+  it("redacts a lease canary echoed through a terminal stream error", async () => {
+    const canary = "lease-canary-error-000000000000";
+    process.env.LOOM_TASK_RUNNER_BACKEND = "opencode";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_OPENCODE_BIN = fakeBin;
+    process.env.FAKE_STREAM_ERROR = "provider echoed " + canary;
+    process.env.LOOM_TASK_RUN_LEASE_TOKEN = canary;
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_agent_failed");
+    assert.ok(!JSON.stringify(out).includes(canary), "error details and metadata must not contain the raw lease token");
+    assert.ok(JSON.stringify(out).includes("***") || JSON.stringify(out).includes("REDACTED"));
   });
 
   it("does NOT tee backend output to stderr without the stream flag (driver path unaffected)", async () => {
@@ -917,6 +1041,22 @@ describe("local-task-runner success", () => {
 });
 
 describe("local-task-runner isolated worktree", () => {
+  it("fails closed when the Git binary patch cannot be captured completely", async () => {
+    installGitFaultWrapper();
+    process.env.FAKE_GIT_FAIL_BINARY_DIFF = "1";
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "capture-failure.txt";
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_patch_capture_failed");
+    assert.equal(out.patch, undefined, "an incompletely inspected patch must not be persisted");
+  });
+
   it("runs the CLI in an isolated worktree, leaving the host clean and returning base_ref=HEAD", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
@@ -1059,6 +1199,90 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.base_ref, undefined);
     const files = execFileSync("git", ["--git-dir", origin, "ls-tree", "-r", "--name-only", out.runtimeMetadata.head_sha]).toString();
     assert.ok(files.includes("local-branch.txt"), "pushed branch should contain the backend change");
+  });
+
+  it("deliveryMode=local-branch reuses backend output that is already committed", async () => {
+    const origin = createBareOrigin("backend-committed-origin");
+    const base = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "backend-committed.txt";
+    process.env.FAKE_COMMIT_CHANGES = "1";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-backend-committed",
+      task_id: "T-BACKEND-COMMITTED",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "Backend committed", deliveryMode: "local-branch" },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "completed");
+    const published = refSha(origin, "refs/heads/loom/T-BACKEND-COMMITTED");
+    assert.equal(out.runtimeMetadata.head_sha, published);
+    assert.equal(execFileSync("git", ["--git-dir", origin, "rev-list", "--count", `${base}..${published}`]).toString().trim(), "1", "runner must reuse the backend commit instead of creating another commit");
+    assert.equal(execFileSync("git", ["--git-dir", origin, "show", "-s", "--format=%s", published]).toString().trim(), "fake backend committed");
+  });
+
+  it("publishes the scanned immutable commit when HEAD moves after scanning", async () => {
+    const origin = createBareOrigin("immutable-head-origin");
+    const marker = path.join(tmpRoot, "moved-head.txt");
+    installGitFaultWrapper();
+    process.env.FAKE_GIT_MOVE_HEAD_BEFORE_PUSH = "1";
+    process.env.FAKE_GIT_MOVE_HEAD_MARKER = marker;
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "scanned-change.txt";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-immutable-head",
+      task_id: "T-IMMUTABLE-HEAD",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "Immutable head", deliveryMode: "local-branch" },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "completed");
+    const movedHead = fs.readFileSync(marker, "utf8").trim();
+    const published = refSha(origin, "refs/heads/loom/T-IMMUTABLE-HEAD");
+    assert.notEqual(movedHead, published, "fault wrapper must advance local HEAD after the credential scan");
+    assert.equal(published, out.runtimeMetadata.head_sha, "remote must receive the exact scanned SHA returned by secureCommitForDelivery");
+    const files = execFileSync("git", ["--git-dir", origin, "ls-tree", "-r", "--name-only", published]).toString();
+    assert.ok(files.includes("scanned-change.txt"));
+    assert.ok(!files.includes("post-scan-head-move.txt"), "post-scan commit must not be published");
+  });
+
+  it("rejects a credential written after initial capture before local-branch publication", async () => {
+    const origin = createBareOrigin("delayed-credential-origin");
+    installGitFaultWrapper();
+    const canary = "lease-canary-delayed-publication-00000000";
+    process.env.FAKE_GIT_WRITE_SECRET_AFTER_CHECKOUT = "1";
+    process.env.LOOM_TASK_RUN_LEASE_TOKEN = canary;
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "benign-before-delivery.txt";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-delayed-credential",
+      task_id: "T-DELAYED-CREDENTIAL",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { title: "Delayed credential", deliveryMode: "local-branch" },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_patch_contains_credential");
+    assert.ok(!JSON.stringify(out).includes(canary), "the rejected result must not echo the credential");
+    assert.equal(refExists(origin, "refs/heads/loom/T-DELAYED-CREDENTIAL"), false, "no credential-bearing branch may be published");
   });
 
   it("filesystem origin without deliveryMode stays on patch-back", async () => {

@@ -6537,6 +6537,13 @@ paths:
     post:
       tags: [Repos]
       summary: Create a Repo
+      description: >-
+        Atomically commits the first-class Repo, its `repo.create` audit event,
+        and the legacy workspace admission mapping. A 201 response means all
+        three are visible together; none survive a rejected request. Returns
+        409 when the Repo name already exists or its legacy mapping is owned by
+        another workspace. A retry after a lost successful response may
+        therefore receive 409 rather than replaying the original 201.
       operationId: createRepo
       requestBody:
         required: true
@@ -6588,6 +6595,11 @@ paths:
     patch:
       tags: [Repos]
       summary: Update a Repo
+      description: >-
+        Atomically updates the existing repository and appends its audit event.
+        Returns a conflict when the update is stale or when changing
+        `source_repo_id` would orphan an identifier still referenced by work or
+        execution provenance.
       operationId: updateRepo
       requestBody:
         required: true
@@ -6600,15 +6612,29 @@ paths:
           description: Repo updated
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
     delete:
       tags: [Repos]
       summary: Delete a Repo
+      description: >-
+        Deletes the first-class repository and its display-name workspace
+        admission mapping in one commit, but only when neither its `name` nor
+        effective source identifier (`source_repo_id`, falling back to `name`)
+        is referenced by a non-terminal Work Item or a queued/running TaskRun
+        placement. The last admitted Repo is also the implicit fallback for an
+        open, repo-less, non-epic Work Item and cannot be deleted while such a
+        card is dispatch-ready. A rejected deletion is atomic and leaves the
+        repository, workspace mapping, work, execution, and audit state
+        unchanged.
       operationId: deleteRepo
       responses:
         "204":
           description: Repo deleted
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   # ---------------------------------------------------------------------------
   # Agents (first-class entity, workspace-scoped)

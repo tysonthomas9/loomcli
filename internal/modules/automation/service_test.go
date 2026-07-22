@@ -1142,6 +1142,30 @@ func TestSystemIssueJournalAdmissionClassifiesDurableRunActorsAsWorkflow(t *test
 		})
 	}
 
+	t.Run("legacy unsafe binding fails closed for workflow actor", func(t *testing.T) {
+		h := newTestHarness(t)
+		binding := seedBinding("legacy-issue-created", "internal.issue.created")
+		binding.SourceKind = SourceKindInternal
+		binding.ActorFilter = nil // persisted before the create/update invariant
+		h.persistence.seedBinding(binding)
+
+		result, err := h.service.AdmitEvent(t.Context(), NewSystemEventAuthority(issueSystemAuthority(t, h, "driver-run:legacy")), AdmitEventCommand{
+			WorkspaceKey: "ws", SourceKind: SourceKindInternal,
+			SourceEventID: "fleet-journal-legacy", EventType: "issue.create", SubjectRef: "issue:WS-LEGACY",
+		})
+		if err != nil {
+			t.Fatalf("AdmitEvent: %v", err)
+		}
+		delivery := findDelivery(t, result, binding.BindingID)
+		if delivery.Status != DeliveryRejected || delivery.RejectionReason != RejectionReasonActorFilter {
+			t.Fatalf("legacy unsafe delivery = %+v, want actor-filter rejection", delivery)
+		}
+		if len(h.execution.calls) != 0 || len(h.persistence.lastReservation.CatalogGuards) != 0 {
+			t.Fatalf("legacy unsafe binding reached dispatch/catalog guards: calls=%d guards=%d",
+				len(h.execution.calls), len(h.persistence.lastReservation.CatalogGuards))
+		}
+	})
+
 	t.Run("human journal actor remains system", func(t *testing.T) {
 		h := newTestHarness(t)
 		binding := seedBinding("issue-created", "internal.issue.created")
@@ -1548,8 +1572,13 @@ func TestWorkflowAdmissionDerivesRunActorParentHopAndIgnoresForgedFields(t *test
 		event.IdempotencyKey != "internal:ws:emission-1" {
 		t.Fatalf("derived event = %+v", event)
 	}
-	if got := h.execution.calls[0]; got.ActorRef != "agent-trusted" || got.EpicID != "epic-trusted" || got.SourceRef != event.EventID {
-		t.Fatalf("dispatch context = %+v", got)
+	delivery := findDelivery(t, result, binding.BindingID)
+	if delivery.Status != DeliveryRejected || delivery.RejectionReason != RejectionReasonActorFilter {
+		t.Fatalf("workflow issue delivery = %+v, want actor-filter rejection", delivery)
+	}
+	if len(h.execution.calls) != 0 || len(h.persistence.lastReservation.CatalogGuards) != 0 {
+		t.Fatalf("workflow issue event reached dispatch/catalog guards: calls=%d guards=%d",
+			len(h.execution.calls), len(h.persistence.lastReservation.CatalogGuards))
 	}
 }
 

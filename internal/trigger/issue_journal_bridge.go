@@ -150,15 +150,14 @@ type IssueJournalBridge struct {
 	// journal cursor has advanced cannot strand an existing task or create a
 	// historical triage storm. Nil preserves the journal-only compatibility path.
 	ReadySnapshots TaskReadySnapshotLister
-	// RepositoryRequiredBlocker is the Work Items-owned command used when the
-	// current task-ready projection proves that an open task has no unambiguous
-	// repository. The bridge never writes an issue directly: production adapts
-	// the Work Items owner's atomic repository-admission command here. A
-	// successful block suppresses task.ready delivery; when the command instead
-	// observes a commit-time ready task (for example, after a concurrent repo
-	// assignment), its canonical projection replaces the stale event payload and
-	// dispatch continues. Nil preserves the event-only compatibility path used
-	// by alternate hosts.
+	// RepositoryRequiredBlocker is the Work Items-owned commit-time admission
+	// command used for every non-epic task without an explicit repository. The
+	// pre-read RepositoryRequired flag is not authority because a single-repo
+	// fallback can race deletion of that sole Repo. The bridge never writes an
+	// issue directly: a successful block suppresses task.ready delivery; when
+	// the command instead observes a commit-time ready task, its canonical
+	// projection replaces the stale event payload and dispatch continues. Nil
+	// preserves the event-only compatibility path used by alternate hosts.
 	RepositoryRequiredBlocker TaskReadyRepositoryRequiredBlocker
 	// WorkspaceKey scopes the sweep to one workspace. Empty sweeps every known
 	// workspace (mirrors DeliverySweeper/CronScheduler).

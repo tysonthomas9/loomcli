@@ -310,10 +310,51 @@ func validateBindingDefinition(definition BindingDefinition) error {
 			return err
 		}
 	}
+	if bindingMatchesInternalIssueEvent(definition) && !excludesWorkflowActor(definition.ActorFilter) {
+		return fmt.Errorf("internal issue-event bindings must include %q in actor_filter.exclude_actor_kinds; hop depth does not stop issue-journal system-root loops: %w", EventOriginWorkflow, ErrInvalid)
+	}
 	if err := validateSubjectTemplate(definition.SubjectKeyTemplate); err != nil {
 		return err
 	}
 	return validateBindingSchedule(definition)
+}
+
+// bindingMatchesInternalIssueEvent reports whether the binding can receive an
+// event in the issue-journal bridge's internal.issue.* namespace. Route keys
+// are exact addresses, while EventTypePatterns use Automation's segment
+// matcher; checking the namespace structurally also catches broad patterns
+// such as internal.*.* and *.*.* before they can admit a depth-zero loop.
+func bindingMatchesInternalIssueEvent(definition BindingDefinition) bool {
+	if isInternalIssueRoute(definition.RouteKey) {
+		return true
+	}
+	for _, pattern := range definition.EventTypePatterns {
+		segments, err := parsePattern(pattern)
+		if err != nil || len(segments) != 3 {
+			continue
+		}
+		if segments[0].matches("internal") && segments[1].matches("issue") {
+			return true
+		}
+	}
+	return false
+}
+
+func isInternalIssueRoute(routeKey string) bool {
+	segments := strings.Split(routeKey, ".")
+	return len(segments) >= 3 && segments[0] == "internal" && segments[1] == "issue"
+}
+
+func excludesWorkflowActor(filter *ActorFilter) bool {
+	if filter == nil {
+		return false
+	}
+	for _, excluded := range filter.ExcludeActorKinds {
+		if strings.ToLower(strings.TrimSpace(excluded)) == string(EventOriginWorkflow) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateBindingSchedule(definition BindingDefinition) error {

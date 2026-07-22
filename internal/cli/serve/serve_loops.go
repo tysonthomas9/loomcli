@@ -35,8 +35,9 @@ func validateExecutionRuntimePassCapabilities(
 		return fmt.Errorf("compose Execution compatibility passes: store is required")
 	}
 	if executionCapability == nil || executionCapability.DriverRunAPI() == nil ||
-		executionCapability.DriverRunAuthorityResolver() == nil || executionCapability.SystemAuthorityResolver() == nil {
-		return fmt.Errorf("compose Execution compatibility passes: DriverRun API and authority resolvers are required")
+		executionCapability.DriverRunAuthorityResolver() == nil || executionCapability.SystemAuthorityResolver() == nil ||
+		executionCapability.TaskRunRecoveryAPI() == nil {
+		return fmt.Errorf("compose Execution compatibility passes: DriverRun, stale TaskRun recovery, and authority APIs are required")
 	}
 	if artifactsCapability == nil || artifactsCapability.ArtifactsAPI() == nil {
 		return fmt.Errorf("compose Execution compatibility passes: Artifacts API is required")
@@ -230,8 +231,8 @@ func buildIssueJournalBridge(
 
 // driverStaleTaskMaxAge reads the stale TaskRun heartbeat threshold in
 // seconds from LOOM_DRIVER_STALE_TASK_MAX_AGE (default 1200s, capped at one
-// day). The default is sourced from driver.StaleTaskSweeper so serve cannot
-// silently override the recovery policy with a shorter threshold.
+// day). The compatibility alias is sourced from Execution's typed recovery
+// policy so serve cannot silently override it with a shorter threshold.
 func driverStaleTaskMaxAge() time.Duration {
 	defaultSeconds := int(driverexecutor.DefaultStaleTaskRunMaxAge / time.Second)
 	return time.Duration(boundedIntEnv(envLoomDriverStaleTaskMaxAge, defaultSeconds, 86400)) * time.Second
