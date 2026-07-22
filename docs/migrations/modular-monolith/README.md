@@ -1,13 +1,12 @@
 # Modular Monolith Migration
 
-- **Status:** The Phase 4 architecture slice is complete; owner-fenced child
-  recovery, repository lifecycle safety, trigger-loop containment, and local
-  runner publication hardening are committed and source-gated, while refreshed
-  packaged Desktop and Podman/raw-browser proof remains pending; Phase 5 has not
-  started
+- **Status:** Phase 4 and its reliability hardening are implemented; refreshed
+  packaged Desktop and Podman/raw-browser product journeys pass at Loom
+  `67c45972f` with FleetDB `9ffa69f60`; the exact-head architecture checks and
+  aggregate Loom gate pass; Phase 5 has not started
 - **Date:** 2026-07-21
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
-- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at validated Loom product head `53cbe2577` with FleetDB `afb688768`, and the current source-gated reliability heads Loom `ee971be22` with FleetDB `9ffa69f60`
+- **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
 
 ## Decision summary
@@ -90,17 +89,26 @@ snapshot records those results at Loom `53cbe2577` and FleetDB `afb688768`.
 Physical supervisor deletion remains Phase 6 work, and Phase 5 has not started.
 See the [Phase 4 record](09-phase-4-decisions-and-evidence.md).
 
-The current reliability closeout is committed at Loom `ee971be22` with
-FleetDB `9ffa69f60`. It adds healthy-parent, owner-fenced stale-child TaskRun
+The current reliability closeout is committed through Loom `67c45972f` with
+FleetDB `9ffa69f60`. Core hardening at `ee971be22` adds healthy-parent,
+owner-fenced stale-child TaskRun
 recovery; atomic first-class Repo create/update/delete and replay protection;
 mandatory workflow-actor exclusion for `internal.issue.*` bindings; and
 fail-closed runner credential scanning, redaction, and exact-SHA publication.
+The current UI commit adds repository-free workspace creation so the blocked
+repository-admission path is reachable from a fresh packaged product.
 The paired OpenAPI snapshots match at SHA-256
 `ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`, and
-both full source gates pass, including Loom's clean-HOME run against the exact
-paired FleetDB source and binary. These results do not rewrite the historical
-immutable Phase 4 snapshot. A new immutable snapshot and refreshed packaged
-Desktop plus Podman/raw-browser journeys remain pending.
+FleetDB's full gate and the earlier Loom clean-HOME gate against this paired
+hardening source pass. The refreshed package proves repo-free Blocked/no-run
+admission, repository selection, planning, a GPT-5.6 Terra coder transcript and
+diff, patch-back, and Closed convergence. The checkout-scoped Podman verifier
+and raw browser prove fresh planner/coder design, transcripts and diff plus zero
+supervisor artifacts. The appended
+`phase4-reliability-validation-67c45972f` snapshot binds that exact product
+proof, the passing exact-head architecture checks, and the bounded-memory Loom
+aggregate gate rather than inferring any result from the prior UI-independent
+gate.
 
 ## Approved architecture decisions
 

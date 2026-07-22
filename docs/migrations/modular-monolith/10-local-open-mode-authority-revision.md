@@ -1,7 +1,8 @@
 # Local Open-Mode Authority Revision
 
-- **Status:** Approved and implemented in the current Phase 4 branch; packaged
-  Desktop and local-stack browser evidence remains to be recorded
+- **Status:** Approved and implemented in the current Phase 4 branch; refreshed
+  packaged Desktop and direct raw-browser/Podman product evidence passes at
+  Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Date:** 2026-07-20
 - **Decision affected:** MM-2
 - **Scope:** The bundled local/open-mode Loom UI and its management API clients
@@ -175,8 +176,9 @@ The coordinated implementation updates:
 
 Focused deterministic Go, frontend, Desktop TypeScript/Rust, E2E compilation,
 shell-syntax, and compose-boundary checks are the implementation evidence in
-this branch. The packaged Desktop and running Podman/raw-browser journeys remain
-explicitly pending until they are rerun against the final built artifacts.
+this branch. The earlier source-gate record remains bound to its exact source;
+the refreshed packaged Desktop and Podman/raw-browser journeys below bind the
+current product proof to the newer exact heads.
 
 Current branch verification:
 
@@ -199,8 +201,33 @@ Current branch verification:
   is `bf2935fdbc785deaa70c2ac933dd5f63e44f9deb7ec2a61f332af1b889c8088c`.
   This source-gate result is not a new immutable validation snapshot.
 
-Running packaged Desktop and Podman/raw-browser product proofs have not been
-claimed by this revision run and remain pending.
+Current product verification adds:
+
+- a packaged `loom version dev (67c45972f)` journey in a fresh repository-free
+  workspace: the task began Blocked with zero runs, public Repo admission plus
+  explicit repository selection moved it Open, planning persisted design, and
+  the autonomous coder wrapper attested `gpt-5.6-terra`; the coder completed
+  exit zero with transcript, exact one-file diff, applied patch-back, and
+  terminal Closed state. The legacy planner used its ordinary configured Codex
+  model and is not claimed as Terra;
+- checkout-scoped Podman run
+  `phase4-raw-workflows-67c45972f286-20260722t061455z`, started with the
+  supported `make local-mode-codex-workflows-up` target, Codex `0.144.4`, TS
+  plane, and pinned Flue `492bf47b9f3d6c379d00471523987b8fe9511f7d`;
+  its verifier passed planner Review/design/transcript and coder
+  Closed/transcript/exact-diff assertions while proving zero automatic agent
+  definitions, daemon processes, and control sockets; and
+- a raw loopback browser against that stack rendered the planner design and
+  transcript plus the coder transcript and diff without a launch-code or
+  operator credential exchange; browser console and page error inspection were
+  empty. The raw run's model was not independently attested as Terra.
+
+The appended `phase4-reliability-validation-67c45972f` record binds these
+journeys to FleetDB `9ffa69f6028969c03913c08c1159910fc772bd8b` and paired
+OpenAPI SHA-256
+`ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`.
+Its exact-head architecture check, architecture package, and bounded-memory
+aggregate Loom gate pass.
 
 ---
 

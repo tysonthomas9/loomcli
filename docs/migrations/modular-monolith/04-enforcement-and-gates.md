@@ -1,21 +1,21 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** The Phase 4 architecture slice is complete; the current repository-admission hardening delta has paired contract/source-gate proof, while its refreshed packaged Desktop journey remains pending; Phase 5 has not started
+- **Status:** The Phase 4 architecture slice is complete; the current repository-admission hardening has paired contract, refreshed packaged Desktop, Podman/raw-browser, exact-head architecture, and aggregate Loom gate proof at Loom `67c45972f`; Phase 5 has not started
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
-**Phase 4 status:** Analyzer `1.0.0` enforces all four release and seven tag/race profiles plus the all-files AST pass, rejects undeclared module roots/edges and cycles, and detects forbidden signature/type leakage. Workflow Catalog, Automation, Execution, and minimal Artifacts roots are active at `completed_phase: 4`, and the mutation ledger contains 60 required command-ID namespaces grouped by prefix: three `workflowcatalog.*`, 14 `automation.*`, four `artifacts.*`, and 39 `execution.*`. Those prefix counts are not aggregate-ownership counts; each ledger row's `aggregate_owner`, `coordinating_owner`, and `instance_owner` remain authoritative. The current architecture check passes with 82 composite-Store files, 71 outside composition, 90 legacy handler-import exceptions, 251 primary direct-write rows across 273 sites, and a separate 10-row/11-site `internal/driver` digest ratchet. Runtime evidence names 86 components, 53 ticker sites, 58 managed components, and 103 in-scope non-test goroutine launch definitions. The source-bound Execution supervisor-disabled row passes against the paired Phase 4 FleetDB worktree; it remains a scoped Execution-lane proof, not the Phase 6 supervisor-deletion gate.
+**Phase 4 status:** Analyzer `1.0.0` enforces all four release and seven tag/race profiles plus the all-files AST pass, rejects undeclared module roots/edges and cycles, and detects forbidden signature/type leakage. Workflow Catalog, Automation, Execution, and minimal Artifacts roots are active at `completed_phase: 4`, and the mutation ledger contains 60 required command-ID namespaces grouped by prefix: three `workflowcatalog.*`, 14 `automation.*`, four `artifacts.*`, and 39 `execution.*`. Those prefix counts are not aggregate-ownership counts; each ledger row's `aggregate_owner`, `coordinating_owner`, and `instance_owner` remain authoritative. The latest completed architecture check passes with 82 composite-Store files, 71 outside composition, 90 legacy handler-import exceptions, 251 primary direct-write rows across 273 sites, and a separate 10-row/11-site `internal/driver` digest ratchet. Runtime evidence names 86 components, 53 ticker sites, 58 managed components, and 103 in-scope non-test goroutine launch definitions. The source-bound Execution supervisor-disabled row passes against the paired Phase 4 FleetDB worktree; it remains a scoped Execution-lane proof, not the Phase 6 supervisor-deletion gate.
 
-The current hardening source is committed at Loom `54b338d61` and FleetDB
-`c73c69a`; their OpenAPI snapshots are byte-identical at SHA-256
-`bf2935fdbc785deaa70c2ac933dd5f63e44f9deb7ec2a61f332af1b889c8088c`.
-FleetDB's full gate and Loom's exact paired-source/binary full gate pass. These
-source results do not close the refreshed packaged-product rows below or create
-a new immutable validation snapshot.
+The current hardening source is committed through Loom `67c45972f` and
+FleetDB `9ffa69f60`; their OpenAPI snapshots are byte-identical at SHA-256
+`ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`.
+FleetDB's full gate passes. Focused backend/frontend checks, the fresh package
+and local-stack journeys, the exact-head architecture check and package, and
+the bounded-memory aggregate Loom gate all pass at the exact current Loom head.
 
 ## Architecture source of truth
 
-Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog, Automation, Execution, and Artifacts are now `active`, `completed_phase` is `4`, and the ledger records the complete current 60-namespace inventory selected through Phase 4 and its hardening delta. The baseline retains the immutable Phase 2 snapshot, the self-reference-free Phase 3 base-plus-diff measurement, and the Phase 3 post-commit audit. Its retained Phase 4 pre-commit snapshot remains explicitly provisional and is not rewritten. The appended `phase4-execution-validation-53cbe2577` snapshot is the final paired source, contract, gate, performance, source-bound, and packaged-product record for the source it names. It remains historical evidence; it does not validate the later repository-admission hardening delta, whose refreshed packaged Desktop journey is still pending. The graph declares:
+Phase 1 established the checks in `internal/archtest/testdata/capability-graph.yaml`, with `analysis-matrix.yaml`, `migration-baseline.json`, `direct-writes.yaml`, `mutation-ledger.yaml`, `runtime-components.yaml`, and `performance-baseline.yaml` beside it. Workflow Catalog, Automation, Execution, and Artifacts are now `active`, `completed_phase` is `4`, and the ledger records the complete current 60-namespace inventory selected through Phase 4 and its hardening delta. The baseline retains the immutable Phase 2 snapshot, the self-reference-free Phase 3 base-plus-diff measurement, and the Phase 3 post-commit audit. Its retained Phase 4 pre-commit snapshot remains explicitly provisional and is not rewritten. The appended `phase4-execution-validation-53cbe2577` snapshot remains the source, contract, gate, performance, source-bound, and packaged-product record for the exact source it names. The newer `phase4-reliability-validation-67c45972f` record binds the current paired contract, FleetDB gate, focused source checks, packaged Desktop repository recovery/Terra coder, Podman/raw-browser journeys, exact-head architecture checks, and aggregate Loom gate without rewriting that history. The graph declares:
 
 - every capability root;
 - allowed capability-to-capability import, synchronous command/query, and durable event edges;
@@ -258,11 +258,14 @@ These are not assumed to be covered by the root Go/frontend gate:
 - SDK: `npm test`, deterministic generation diff, Go/operation-manifest parity, `npm pack --dry-run`, and API-surface compatibility.
 - Desktop: frontend typecheck, `cargo test`, capability-schema validation, loopback URL/native-command security tests, and packaged sidecar/web-assets smoke proof before signing.
 
-For the current repository-admission hardening delta, all applicable source and
-paired-contract gates may be recorded as green, but the Desktop row remains
-open until a freshly built package proves the blocked-card recovery and
-repository-selected retry through the product UI. Historical package evidence
-from `53cbe2577` is not a substitute for that journey.
+For the current repository-admission hardening delta, the freshly built package
+proves repository-free creation, blocked-card/zero-run admission, public Repo
+admission, explicit repository selection, planning, a GPT-5.6 Terra coder run,
+transcript and exact diff, applied patch-back, and terminal Closed convergence.
+The Podman verifier and raw browser independently prove fresh planner/coder
+design, transcript, diff, and zero supervisor artifacts. The exact-head
+architecture package and bounded-memory aggregate Loom gate complete the
+current validation record.
 
 ## Performance and operability
 

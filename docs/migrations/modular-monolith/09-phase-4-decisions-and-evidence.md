@@ -1,11 +1,11 @@
 # Phase 4 Execution Decisions and Evidence
 
-- **Status:** The Phase 4 architecture slice is complete at its immutable validation snapshot; the current reliability hardening has paired implementation, contract, architecture, and full-source-gate proof but is not yet bound by refreshed packaged Desktop/Podman proof or a new immutable validation snapshot; Phase 5 has not started
+- **Status:** The Phase 4 architecture slice is complete; the current reliability hardening is bound to refreshed packaged Desktop, Podman/raw-browser, exact-head architecture, and aggregate Loom gate proof at Loom `67c45972f` with FleetDB `9ffa69f60`; Phase 5 has not started
 - **Date:** 2026-07-21
 - **Branch bases:** Loom `1353e2faf14ae121c93fe5eb92f779b56a2ad7ae`; FleetDB `f1c4e11199c2c7cdab52cce55899af4df328fbcb`
 - **Implementation commits:** Loom `510391c60f17c6e9fc951c710a07a8ef8768b67f`, `45a73889ab456e974d9cd4346bcb8873be172438`, `8037205dadec12cb8ddc83edcf5509d3acf89652`, `a240215be482b1efe4731a1a24485d4a5ccb8b76`, and `53cbe257715d55770c77d508c23620389b9c9de1`; FleetDB `424492070a0f26e798eabad51b11ee4ea0b6b58c`, `758842a7e3a703470f7afcced437f46935b5a12f`, and `afb6887682f777b0e7093b5dcdff0a5e236777f9`
 - **Architecture-analyzer and gate commits:** Loom `69e332697`, `02b62e5c7`, `88cb7f262`, `7d8118556`, and `e686b7a95`
-- **Current hardening heads:** Loom `ee971be22feb3c93096d599b7e3a62bff2cb0fa2`; FleetDB `9ffa69f6028969c03913c08c1159910fc772bd8b`
+- **Current validation heads:** Loom `67c45972f286f2f6c111fde9306720728dc6c4b4` (core reliability hardening at `ee971be22feb3c93096d599b7e3a62bff2cb0fa2`); FleetDB `9ffa69f6028969c03913c08c1159910fc772bd8b`
 - **Current paired contract:** byte-identical FleetDB and Loom OpenAPI snapshots at SHA-256 `ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`
 - **Scope:** Minimal Artifacts lifecycle, Execution-owned DriverRun/DriverStep/TaskRun/worker/lease/await/recovery mutations, supervisor-disabled execution, SDK runner containment/publication, Work Items repository admission and retry placement, trigger-loop containment, and packaged Desktop proof
 
@@ -627,6 +627,85 @@ The final runtime used service PID `50694`, serve PID `50696`, FleetDB PID
 matches the bundled executable sidecar. This final-package evidence does
 not create a new immutable source validation snapshot.
 
+## Current reliability validation
+
+The refreshed package closes the split-evidence gap above against exact Loom
+head `67c45972f286f2f6c111fde9306720728dc6c4b4`. It reports
+`loom version dev (67c45972f)`; the bundled Loom executable SHA-256 is
+`ffb4c7de517d66f84274ce8d269d279a24a79399eac9429d42a6a5e2ea5e1e57`,
+and the packaged prompt-agent digest is
+`a05189181463581fa9e2317f92e8a3e4a33220a5fe04c2346a7a398bf369134e`.
+Actual packaged Desktop interaction through Computer Use produced this fresh
+journey:
+
+1. Create repository-free workspace `PHASE4-RELIABILITY-67C45972F` through
+   the fixed product form, then create task
+   `PHASE4-RELIABILITY-67C45972F-1`. The board and detail show Blocked,
+   `Repo: No repo`, and zero agent runs.
+2. Admit `https://github.com/octocat/Hello-World` through the product UI. The
+   task remains Blocked until `hello-world` is selected on the task, then moves
+   atomically to Open without a premature run.
+3. Run the legacy planner. It completes exit zero, persists the design, and
+   moves the task to Review. That planner used its normal configured Codex
+   model and is **not** claimed as GPT-5.6 Terra.
+4. After restarting with the transparent coder wrapper first on `PATH`, run the
+   autonomous coder. The wrapper records
+   `kind=exec model=gpt-5.6-terra prompt_mode=stdin`; the session completes exit
+   zero in `58.566574s` via `local-cli-codex`, reports one file / one added line
+   / zero removed lines, and exposes both transcript and exact diff. Patch-back
+   is `applied` in the durable task worktree at head `7fd1a60b01f9`; the task
+   converges to Closed. The added file is
+   `phase4-reliability-proof-67c45972f.txt`, containing exactly
+   `Phase 4 current packaged Desktop repository recovery proof on Loom 67c45972f.`
+   followed by LF. This does not claim mutation of the base clone, a delivery
+   branch, commit, push, or PR.
+
+Read-only task/session provenance agrees with the UI: the task is closed,
+bound to `hello-world`, and has persisted design; the coder session is
+completed with exit zero, transcript, diff, `patch_back_status=applied`, and
+the metrics above. Local screenshots, JSON captures, and the wrapper log remain
+ignored under `artifacts/phase4/desktop-reliability-67c45972f/`; this checked-in
+record and the machine snapshot are the portable evidence and do not depend on
+those local files being committed.
+
+The independent raw-browser proof used checkout-scoped run
+`phase4-raw-workflows-67c45972f286-20260722t061455z` and compose project
+`loomcli-phase4-raw-workflows-67c45972f286-20260722t061455z` on host-loopback
+ports FleetDB `8580`, Loom API `8582`, and UI `8583`. The supported
+`make local-mode-codex-workflows-up` target ran with the TS execution plane,
+Codex CLI `0.144.4`, the configured live Codex home, and pinned Flue
+`492bf47b9f3d6c379d00471523987b8fe9511f7d`. The verifier passed the exact fresh
+planner task in Review with released ownership, persisted design, a completed
+Codex exit-zero session and transcript; it passed the coder task in Closed with
+a completed Codex exit-zero session, transcript, and exact
+`local-mode-agent-output.txt` diff. It also asserted zero automatic agent
+definitions, daemon processes, and daemon control sockets. This raw run's model
+was not independently attested as Terra.
+
+Agent Browser opened the same loopback UI without a launch code or operator
+credential, rendered the fresh board, planner design and transcript, and coder
+transcript and exact diff. Its console and page-error inspections were empty.
+The ignored screenshots and run manifest under the corresponding
+`artifacts/phase4/podman-raw-browser-*` directory are convenience captures, not
+the portable source of truth.
+
+The appended `phase4-reliability-validation-67c45972f` snapshot binds those
+product journeys and the completed focused frontend (`32/32` Vitest, `2/2`
+Playwright, changed-file ESLint, production build), focused backend, exact
+paired-contract, FleetDB full-gate, and current architecture results to FleetDB
+`9ffa69f6028969c03913c08c1159910fc772bd8b` and OpenAPI SHA-256
+`ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`.
+The exact-head architecture check passed all 11 profiles plus the all-files AST
+pass with Store `82/71`, 90 handler exceptions, 251 direct-write rows across
+273 sites, four active roots, 60 mutation commands, 86 runtime components, 103
+goroutine definitions, six of six measured performance records, and zero
+pending decisions. The architecture package passed in `47.768s`, then passed
+again in `46.926s` after the final gate row was promoted. The aggregate
+Loom gate then passed against the exact paired FleetDB source and sidecar with
+an isolated HOME, `GOMAXPROCS=4`, `GOMEMLIMIT=3GiB`, and one Vitest worker. Its
+parallel Go and frontend lanes cover the complete checked-in gate; the record
+does not infer that pass from the prior UI-independent source gate.
+
 ## Completion evidence
 
 The baseline retains the appended
@@ -667,8 +746,10 @@ to Loom `53cbe257715d55770c77d508c23620389b9c9de1`, FleetDB
 subsequent evidence-only commit changes documentation and the append-only
 baseline, not the validated product source.
 
-The current reliability-hardening source is committed at Loom
-`ee971be22feb3c93096d599b7e3a62bff2cb0fa2` with FleetDB
+The core reliability-hardening source is committed at Loom
+`ee971be22feb3c93096d599b7e3a62bff2cb0fa2`; the current product-validation
+head adds repository-free workspace creation at
+`67c45972f286f2f6c111fde9306720728dc6c4b4`, paired with FleetDB
 `9ffa69f6028969c03913c08c1159910fc772bd8b`. FleetDB `make gate` passes its
 static analysis, race/unit matrix, integration pipeline (`200.984s`), Redis and
 Postgres storage contracts, Postgres API integration (`11.641s`), aggregate
@@ -676,26 +757,27 @@ coverage (`81.4%` with all 28 enforced packages above the 50% floor), container
 E2E (`99.309s`), and harness evaluation. The exact paired FleetDB binary used
 by Loom has SHA-256
 `3dbd0f4ab3748929707bf851fe5f046466316a53b2929a552c70db941cb3e3dc`.
-Loom `make gate` passes under a fresh HOME against that exact FleetDB source
-and binary, including Go, architecture, SDK, built-in workflow, and frontend
-test/build gates. The current architecture check passes all 11 profiles plus
-the all-files AST pass with Store `82/71`, 90 handler exceptions, 251 primary
-direct-write rows across 273 sites, four active roots, 60 required command-ID
-namespaces, 86 runtime components, and 103 goroutine definitions. The paired
+Loom `make gate` passes at the immediately preceding core-hardening source under
+a fresh HOME against that exact FleetDB source and binary, including Go,
+architecture, SDK, built-in workflow, and frontend test/build gates. The exact
+current-head architecture check passes all 11 profiles plus the all-files AST
+pass with Store `82/71`, 90 handler exceptions, 251 primary direct-write rows
+across 273 sites, four active roots, 60 required command-ID namespaces, 86
+runtime components, and 103 goroutine definitions; the architecture package
+passes in `47.768s` and its post-promotion rerun in `46.926s`. The paired
 OpenAPI snapshots are byte-identical at SHA-256
 `ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`.
 
-Those results make the paired source, contract, architecture, SDK, frontend
-test/build, and component-boundary gates green. A lost successful Repo-create
-response still converges as a documented `409` retry rather than an
-idempotency-receipt replay; compensated Redis failures may consume a stream ID
-while leaving no visible projection or event. The split packaged Desktop
-evidence above remains narrower: no single refreshed package yet proves the
-new crash recovery, repository deletion/admission races, actor-loop guard, and
-runner publication hardening together. The final local-open packaged Desktop
-plus Podman/raw-browser journeys have not been rerun, so the product closure
-rows remain open. The delta is not yet bound by a new immutable validation
-snapshot. Phase 5 has not started.
+Those results plus the current validation section make the paired contract,
+architecture, focused source, FleetDB gate, packaged Desktop, Podman verifier,
+and raw-browser rows green. A lost successful Repo-create response still
+converges as a documented `409` retry rather than an idempotency-receipt replay;
+compensated Redis failures may consume a stream ID while leaving no visible
+projection or event. The appended
+`phase4-reliability-validation-67c45972f` snapshot binds the exact current
+product and architecture proof instead of rewriting the historical snapshots.
+Its aggregate Loom gate also passes under the bounded-memory profile. Phase 5
+has not started.
 
 ---
 

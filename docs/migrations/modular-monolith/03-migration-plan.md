@@ -162,9 +162,15 @@ contract, FleetDB and Loom aggregate gates, source-bound supervisor-disabled
 rerun, measured artifact-backed design path, and exact packaged Desktop
 positive/fail-closed journeys pass at validated product heads Loom
 `53cbe2577` and FleetDB `afb688768`. The original Phase 4 pre-commit snapshot
-remains an immutable provisional historical record and the final
-`phase4-execution-validation-53cbe2577` snapshot supersedes it for current
-status. Phase 5 has not started. See the
+remains an immutable provisional historical record and
+`phase4-execution-validation-53cbe2577` remains immutable for the source it
+names. The appended `phase4-reliability-validation-67c45972f` snapshot binds
+the later recovery/repository hardening to refreshed packaged Desktop,
+Podman/raw-browser, paired-contract, FleetDB-gate, focused-source, and
+exact-head architecture proof at Loom `67c45972f` with FleetDB `9ffa69f60`;
+its aggregate Loom gate also passes under the bounded-memory profile. Phase 5
+has not started.
+See the
 [Phase 4 record](09-phase-4-decisions-and-evidence.md).
 
 - Extract the minimal Artifacts `Create`, `Upload`, `Finalize`, `Reference`, `Get`, `List`, and composed `CreateContent` API before Execution starts writing through it; leave unrelated artifact UI/query scope for Phase 7.

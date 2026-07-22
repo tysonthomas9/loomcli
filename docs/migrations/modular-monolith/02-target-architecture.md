@@ -1,6 +1,6 @@
 # Target Architecture and Capability Boundaries
 
-- **Status:** Target reviewed and approved; the Phase 4 architecture slice is complete, and its repository-admission hardening delta has paired contract/source-gate proof; refreshed packaged Desktop proof for that delta is pending; Phase 5 has not started
+- **Status:** Target reviewed and approved; the Phase 4 architecture slice is complete, and its repository-admission hardening has paired contract, refreshed packaged Desktop, Podman/raw-browser, exact-head architecture, and aggregate Loom gate proof at Loom `67c45972f`; Phase 5 has not started
 - **Scope:** In-process ownership and dependencies inside `loom serve`, operator CLI transport behavior, and corresponding frontend feature boundaries
 - **Migration:** [Modular Monolith Migration](README.md)
 
