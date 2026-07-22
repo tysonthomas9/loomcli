@@ -25,7 +25,7 @@ The tier-1 test rule that every mutation is attributable to the actor the scenar
 _Avoid_: realistic test, no-mocking
 
 **Readback**:
-An API read that verifies the outcome of a UI action inside the same scenario. Permitted in product-correctness suites; distinct from a standalone contract probe, which belongs in a [[surface-suite]].
+An API read that verifies the outcome of a UI action inside the same scenario. Permitted in product-correctness suites; distinct from a standalone contract probe, which belongs in a surface suite.
 _Avoid_: contract test (when a readback is meant)
 
 **Surface suite**:
