@@ -41,6 +41,12 @@
   margin: 4px 0 0;
 }
 
+.optionalHint {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin: 0 0 6px;
+}
+
 .error {
   color: var(--color-danger);
   font-size: 12px;
