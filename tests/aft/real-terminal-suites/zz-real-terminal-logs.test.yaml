@@ -13,32 +13,61 @@ tests:
     intent: A real codex auto-mode task agent creates a live tmux session; the Logs tab detects tmux mode, mounts EmbeddedTerminal, and renders non-empty backend output in the wterm grid.
     steps:
       # Seed a claimable child task with a tiny deterministic design.
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json" -d "{\"title\":\"real-terminal epic $RUN_ID\",\"issue_type\":\"epic\",\"priority\":2}" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])" > "$AFT_WORK_DIR/rt-epic.id"
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json" -d "{\"title\":\"real-terminal task $RUN_ID\",\"issue_type\":\"task\",\"priority\":2,\"parent\":\"$(cat "$AFT_WORK_DIR/rt-epic.id")\",\"design\":\"Print a short greeting, then wait.\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])" > "$AFT_WORK_DIR/rt-task.id"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "real-terminal epic $RUN_ID"
+            issue_type: "epic"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "rtEpicId"
+        intent: "An operator seeds the real-terminal epic at priority 2"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "real-terminal task $RUN_ID"
+            issue_type: "task"
+            priority: 2
+            parent: "${var:rtEpicId}"
+            design: "Print a short greeting, then wait."
+          save:
+            - from: "data.id"
+              as: "rtTaskId"
+        intent: "An operator seeds the claimable real-terminal child task"
       # Register a codex task agent so the CLI resolves a stable worktree/name.
       - run: >-
           curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/agents" -H "Content-Type: application/json" -d '{"name":"real-codex-term","role_name":"task","backend":"codex"}' >/dev/null 2>&1 || true
+        intent: "An operator ensures the real Codex terminal agent is registered"
       # RunAutoModeTmux launches `loom task <worktree> --daemon-mode --backend codex`
       # inside loom-<shortWs>-task-real-codex-term-<pid>. Point that inner
       # `loom` lookup and both processes at this run's isolated AFT binary/config.
       - run: >-
           rt_bin="$AFT_WORK_DIR/rt-bin"; mkdir -p "$rt_bin"; ln -sf "$AFT_TESTS_DIR/../../tmp/loom-e2e" "$rt_bin/loom"; detach=(); command -v setsid >/dev/null 2>&1 && detach=(setsid); LOOM_CONFIG_DIR="$AFT_TESTS_DIR/../../tmp/e2e-workspace/.loom-config" LOOM_SERVER_URL="$AFT_API_URL" LOOM_WORKSPACE_ID="${AFT_WS:-E2E-WS}" PATH="$rt_bin:$PATH" "${detach[@]}" "$AFT_TESTS_DIR/../../tmp/loom-e2e" --workspace "${AFT_WS:-E2E-WS}" --backend codex task real-codex-term --auto >"$AFT_WORK_DIR/rt-agent.log" 2>&1 </dev/null & echo started
+        intent: "An operator starts the real Codex task agent in isolated auto mode"
       # Each shell step stays below aft's 120s ceiling. The marker lets the
       # second window return immediately if the first observed transient tmux mode.
       - run: >-
           for i in $(seq 1 45); do m=$(curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/agents/real-codex-term/terminal/info" | python3 -c "import sys,json;print(json.load(sys.stdin).get('data',{}).get('mode',''))" 2>/dev/null); if [ "$m" = "tmux" ]; then touch "$AFT_WORK_DIR/rt-tmux.ready"; exit 0; fi; sleep 2; done; echo "agent has not entered tmux mode yet (continuing bounded poll)"; exit 0
+        intent: "Wait until the real task agent exposes a live tmux terminal session"
       - run: >-
           [ -f "$AFT_WORK_DIR/rt-tmux.ready" ] && exit 0; for i in $(seq 1 45); do m=$(curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/agents/real-codex-term/terminal/info" | python3 -c "import sys,json;print(json.load(sys.stdin).get('data',{}).get('mode',''))" 2>/dev/null); if [ "$m" = "tmux" ]; then touch "$AFT_WORK_DIR/rt-tmux.ready"; exit 0; fi; sleep 2; done; echo "real-codex-term never entered tmux mode; auto-mode log follows:"; cat "$AFT_WORK_DIR/rt-agent.log" 2>/dev/null || true; exit 1
+        intent: "Wait until the real task agent exposes a live tmux terminal session"
       - open: /ws/E2E-WS/agents?agent=real-codex-term
       - wait: { fn: "!!document.querySelector('[data-testid=agents-page]')" }
+        intent: "Wait until the agents page is ready"
       - wait:
           fn: >-
             Array.from(document.querySelectorAll('[data-testid=agent-editor-groups] button')).some((el) => el.textContent.trim() === 'Logs')
+        intent: "Wait until the live agent exposes its Logs tab"
       - click: { role: button, name: Logs, exact: true }
       - wait: { fn: "!!document.querySelector('[data-testid=embedded-terminal]')" }
+        intent: "Wait until the embedded terminal is mounted"
       - wait: { fn: "!!document.querySelector('[data-testid=terminal-wrapper] .wterm')" }
+        intent: "Wait until the terminal wrapper mounts the wterm grid"
       - wait:
           fn: >-
             (() => { const rows = document.querySelectorAll('[data-testid=terminal-wrapper] .term-row'); return rows.length > 0 && Array.from(rows).map((row) => row.textContent).join('').trim().length > 0; })()
+        intent: "Wait until the live terminal renders non-empty backend output"

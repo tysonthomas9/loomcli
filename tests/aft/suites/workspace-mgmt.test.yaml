@@ -17,11 +17,13 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - click: { selector: "button[aria-label^='Active workspace:']" }
       - click: { role: button, name: "+ New Workspace", exact: true }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=create-workspace-overlay]')
+        intent: "Wait until the workspace creation dialog is open"
       - fill:
           testid: create-workspace-name
           value: "aft-wm-${RUN_ID:-local}"
@@ -33,12 +35,14 @@ tests:
       - wait:
           fn: >-
             document.querySelector('[data-testid=create-workspace-error]')?.textContent.includes('clone URL must start with https:// or git@')
+        intent: "Wait until clone mode explains that the file URL is invalid"
       - expect: { visible: { testid: create-workspace-error } }
       - expect: { text: "clone URL must start with https:// or git@" }
       - click: { testid: create-workspace-mode-local }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=create-workspace-local-path]')
+        intent: "Wait until the local-workspace path control is ready"
       - fill:
           testid: create-workspace-local-path
           value: "${AFT_WORK_DIR}/wm-seed"
@@ -47,15 +51,19 @@ tests:
       # id, wait for its provisioning job, and only then navigate to the board.
       - run: >-
           target="aft-wm-${RUN_ID:-local}"; for i in $(seq 1 20); do curl -sf "$AFT_BASE_URL/api/workspaces" > "$AFT_WORK_DIR/wm-workspaces.json" && ws="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); target=sys.argv[2]; print(next((w.get("id","") for w in d.get("workspaces",[]) if w.get("name")==target), ""))' "$AFT_WORK_DIR/wm-workspaces.json" "$target")" && if [ -n "$ws" ]; then printf '%s\n' "$ws" > "$AFT_WORK_DIR/wm-ws.id"; break; fi; sleep 1; done; [ -s "$AFT_WORK_DIR/wm-ws.id" ] || { echo "modal-created workspace never appeared"; exit 1; }; ws="$(cat "$AFT_WORK_DIR/wm-ws.id")"; for i in $(seq 1 20); do code="$(curl -sS -o "$AFT_WORK_DIR/wm-workspace-job.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/jobs/$ws")"; if [ "$code" = 200 ] && python3 -c 'import json,sys; ws=sys.argv[2]; d=json.load(open(sys.argv[1])); assert d.get("success") is True, d; assert d.get("status")=="done", d; assert d.get("workspace_id")==ws, d; assert not d.get("error"), d' "$AFT_WORK_DIR/wm-workspace-job.json" "$ws"; then exit 0; fi; sleep 1; done; echo "workspace provisioning job never completed"; cat "$AFT_WORK_DIR/wm-workspace-job.json"; exit 1
+        intent: "An operator's readback waits for the local workspace provisioning job to complete"
       - run: >-
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$(cat "$AFT_WORK_DIR/wm-ws.id")/kanban"
+        intent: "An operator opens the server-assigned workspace route in the active browser session"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - click: { role: button, name: "+ Add Repo" }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=add-repo-overlay]')
+        intent: "Wait until the add-repository dialog is open"
       - fill:
           label: Repository URL
           value: "${AFT_WORK_DIR}/wm-extra"
@@ -65,14 +73,18 @@ tests:
       - click: { role: button, name: "Add Repository", exact: true }
       - run: >-
           ws="$(cat "$AFT_WORK_DIR/wm-ws.id")"; repo="$(cat "$AFT_WORK_DIR/wm-extra.repo")"; for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/$ws/repos" > "$AFT_WORK_DIR/wm-repos.json" && python3 -c 'import json,sys; repo=sys.argv[2]; d=json.load(open(sys.argv[1])); assert any(r.get("name")==repo for r in d.get("repos",[])), d' "$AFT_WORK_DIR/wm-repos.json" "$repo" && exit 0; sleep 1; done; echo "added repo never appeared"; exit 1
+        intent: "An operator's readback waits for the added repository to persist"
       - run: >-
           repo="$(cat "$AFT_WORK_DIR/wm-extra.repo")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "More actions for repo $repo" && exit 0 || true; sleep 1; done; echo "repo overflow button never clicked"; exit 1
+        intent: "An operator retries opening the added repository actions menu"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=confirm-dialog-overlay]')
+        intent: "Wait until the confirmation dialog is open"
       - click: { testid: confirm-dialog-confirm }
       - run: >-
           ws="$(cat "$AFT_WORK_DIR/wm-ws.id")"; repo="$(cat "$AFT_WORK_DIR/wm-extra.repo")"; for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/$ws/repos" > "$AFT_WORK_DIR/wm-repos-after-delete.json" && python3 -c 'import json,sys; repo=sys.argv[2]; d=json.load(open(sys.argv[1])); assert not any(r.get("name")==repo for r in d.get("repos",[])), d' "$AFT_WORK_DIR/wm-repos-after-delete.json" "$repo" && exit 0; sleep 1; done; echo "deleted repo still present"; exit 1
+        intent: "An operator's readback waits for the repository deletion to persist"
       # the primary workspace's display name is lowercase (e2e-ws), so switcher
       # name-matching is brittle — the workspaces suite covers switcher clicks;
       # navigate by URL here
@@ -81,6 +93,7 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       # rename via the real browser path (FINDINGS §1.12 fixed): the
       # per-workspace overflow → Rename now lives in the WorkspaceSwitcher
       # overlay. Open it and isolate the created workspace by search; the pinned
@@ -91,20 +104,24 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=search-input-field]')
+        intent: "Wait until the workspace search field is ready"
       - fill:
           testid: search-input-field
           value: "aft-wm-${RUN_ID:-local}"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid="workspace-overflow-aft-wm-${RUN_ID:-local}"]')
+        intent: "Wait until the created workspace exposes its actions menu trigger"
       - click: { testid: "workspace-overflow-aft-wm-${RUN_ID:-local}" }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=workspace-context-menu]')
+        intent: "Wait until the workspace actions menu is open"
       - click: { testid: workspace-context-menu-rename }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=workspace-rename-input]')
+        intent: "Wait until the workspace rename field is ready"
       - fill:
           testid: workspace-rename-input
           value: "aft-wm-ren-${RUN_ID:-local}"
@@ -114,3 +131,4 @@ tests:
       - press: Enter
       - run: >-
           ws="$(cat "$AFT_WORK_DIR/wm-ws.id")"; for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/$ws" > "$AFT_WORK_DIR/wm-renamed.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert d.get("name")==sys.argv[2], d.get("name")' "$AFT_WORK_DIR/wm-renamed.json" "aft-wm-ren-${RUN_ID:-local}" && exit 0; sleep 1; done; echo "workspace rename via UI did not persist"; exit 1
+        intent: "An operator's readback waits for the workspace rename to persist"

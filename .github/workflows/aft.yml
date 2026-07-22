@@ -35,6 +35,8 @@ jobs:
           repository: tysonthomas9/aft
           token: ${{ secrets.AFT_CHECKOUT_TOKEN }}
           path: .aft
+          # Pinned like the flue checkout below; update deliberately with AFT changes.
+          ref: 257fb9d2535c9645ca194faa592a5a9a3f6283f6
 
       - uses: actions/checkout@v4
         with:

@@ -12,15 +12,35 @@ tests:
   - name: health and config endpoints return expected payloads
     intent: Operators can probe process health and frontend runtime config without loading the SPA
     steps:
-      - run: >-
-          curl -sf "$AFT_BASE_URL/health" |
-          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("status") == "ok", data'
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/config" |
-          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("mode") == "open", data; assert data.get("issue_backend") == "fleet", data'
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/readyz" |
-          python3 -c 'import json,sys; data=json.load(sys.stdin); assert data.get("ready") is True, data; assert data.get("mode") == "fleet", data'
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/health" |
-          python3 -c 'import json,sys; data=json.load(sys.stdin); assert isinstance(data, dict) and data, data'
+      - api:
+          method: "GET"
+          path: "/health"
+          assert:
+            - path: "status"
+              equals: "ok"
+        intent: "An operator confirms the process health probe reports ok"
+      - api:
+          method: "GET"
+          path: "/api/config"
+          assert:
+            - path: "mode"
+              equals: "open"
+            - path: "issue_backend"
+              equals: "fleet"
+        intent: "An operator confirms the frontend config exposes open mode with the fleet backend"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/readyz"
+          assert:
+            - path: "ready"
+              equals: true
+            - path: "mode"
+              equals: "fleet"
+        intent: "An operator confirms workspace readiness in fleet mode"
+      - api:
+          method: "GET"
+          path: "/api/health"
+          assert:
+            - path: "status"
+              exists: true
+        intent: "An operator confirms the API health probe returns a structured status payload"

@@ -14,13 +14,20 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
-      - run: >-
-          python3 -c 'import json,os; print(json.dumps({"title":"markdown safety "+os.environ.get("RUN_ID","local"),"issue_type":"task","priority":2,"description":"safe **bold** signal\n[click me](javascript:window.__aftXss=1)\n<img src=x onerror=\"window.__aftXss=1\">\n<script>window.__aftXss=1</script>"}))'
-          | curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
-          -H "Content-Type: application/json" -d @-
-          | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])"
-          > "$AFT_WORK_DIR/markdown-safety.id"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "markdown safety ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+            description: "safe **bold** signal\n[click me](javascript:window.__aftXss=1)\n<img src=x onerror=\"window.__aftXss=1\">\n<script>window.__aftXss=1</script>"
+          save:
+            - from: "data.id"
+              as: "markdownSafetyId"
+        intent: "An agent creates an issue containing the malicious markdown fixture"
       - wait: { text: markdown safety }
       # column-scoped: a page-wide role/article locator can bind to a stale
       # closed card with the same title in Done on local reruns
@@ -28,13 +35,16 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=issue-detail-panel][data-state=open]')
+        intent: "Wait until the selected issue detail panel is open"
       - expect: { visible: { testid: editable-description } }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=editable-description] [data-testid=markdown-content]')
+        intent: "Wait until the issue description markdown is rendered"
       - wait:
           fn: >-
             document.querySelector('[data-testid=editable-description] strong')?.textContent === 'bold'
+        intent: "Wait until the sanitized markdown renders its bold signal"
       - wait: { ms: 250 }
       - wait:
           fn: >-
@@ -42,3 +52,4 @@ tests:
             !document.querySelector('[data-testid=editable-description] script') &&
             !document.querySelector('[data-testid=editable-description] img[onerror]') &&
             !document.querySelector('[data-testid=markdown-content] a[href^="javascript:"]')
+        intent: "Wait until the rendered markdown remains free of executable HTML"

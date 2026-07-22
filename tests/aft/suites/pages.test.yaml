@@ -11,27 +11,35 @@ tests:
   - name: standalone issue page renders from a deep link
     intent: An agent creates an issue through the API, then an operator follows its direct link and sees the standalone detail view without visiting the board first
     steps:
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
-          -H "Content-Type: application/json"
-          -d "{\"title\":\"pages detail $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
-          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
-          > "$AFT_WORK_DIR/pages-detail.id"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "pages detail $RUN_ID"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "pagesDetailId"
+        intent: "An agent creates the issue used by the standalone deep link"
       # a first regular open gives the session a page; the deep link then navigates
       # in-page via eval (keeps any recording alive and works with the dynamic id)
       - open: /ws/E2E-WS/kanban
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - run: >-
           agent-browser --session "$AFT_SESSION" eval
-          "location.href='$AFT_BASE_URL/ws/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/pages-detail.id")'"
+          "location.href='$AFT_BASE_URL/ws/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/pagesDetailId")'"
+        intent: "An operator follows the server-assigned issue deep link in the active browser session"
       - wait: { url: "**/ws/*/issues/**" }
       # the standalone page renders IssueDetailView (issue-detail-view), NOT the
       # slide-over's issue-detail-panel — asserting the right root catches route breakage
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=issue-detail-view]')
+        intent: "Wait until the standalone issue view is ready"
       - expect: { visible: { testid: issue-detail-view } }
       - expect: { visible: { testid: detail-title } }
       - expect: { text: "pages detail ${RUN_ID:-local}" }
@@ -44,6 +52,7 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=settings-view]')
+        intent: "Wait until the settings page is ready"
       - expect: { visible: { testid: settings-view } }
       - expect: { text: Project Default Backend }
       - expect: { visible: { testid: backend-select } }
@@ -72,6 +81,7 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=terminal-view]')
+        intent: "Wait until the terminal view is ready"
       - expect: { visible: { testid: terminal-view } }
       # The harness puts stub CLIs on the SERVER's PATH, so backends are detected and
       # the view auto-spawns a lead tab running the harmless stub (never a real LLM —
@@ -88,6 +98,7 @@ tests:
               view.setAttribute('data-aft-terminal-state', tabs ? 'tabs' : 'empty');
               return true;
             })()
+        intent: "Wait until the terminal view resolves to exactly one healthy state"
       - wait:
           fn: >-
             (() => {
@@ -103,6 +114,7 @@ tests:
               }
               return false;
             })()
+        intent: "Wait until the terminal view resolves to exactly one healthy state"
       - expect: { notText: Something went wrong }
 
   - name: files page renders the explorer toolbar
@@ -112,6 +124,7 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector("[role=tablist][aria-label='File explorer lens']")
+        intent: "Wait until the file explorer lens toolbar is ready"
       # toolbar anchors only — tree contents depend on repo checkout state, which
       # other suites may alter; the lens toolbar and resize handle are unconditional
       - expect: { visible: { selector: "[role=tablist][aria-label='File explorer lens']" } }
@@ -128,6 +141,7 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=workspace-tree-resize-handle]') ||
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace route resolves to a healthy workspace surface"
       - expect: { text: REPOS }
       - expect: { count: { testid: workspace-view, equals: 0 } }
       - expect: { notText: Something went wrong }
@@ -139,6 +153,7 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agents-page]')
+        intent: "Wait until the agents page is ready"
       - expect: { url: "**/ws/*/agents**" }
       - expect: { visible: { testid: agents-page } }
       - expect: { visible: { testid: agent-editor-groups } }

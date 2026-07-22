@@ -12,40 +12,70 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
-          -H "Content-Type: application/json"
-          -d "{\"title\":\"lifecycle $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
-          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
-          > "$AFT_WORK_DIR/lifecycle.id"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "lifecycle $RUN_ID"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "lifecycleId"
+        intent: "An agent creates the lifecycle issue at priority 2"
       - wait: { text: lifecycle }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
-      - run: >-
-          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/lifecycle.id")"
-          -H "Content-Type: application/json" -d '{"status":"in_progress"}'
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:lifecycleId}"
+          body:
+            status: "in_progress"
+        intent: "An agent starts work on the lifecycle issue"
       - wait:
           fn: >-
             document.querySelectorAll('section[data-status=in_progress] article').length === 1
+        intent: "Wait until the board renders the issue in progress"
       - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/lifecycle.id")/close"
-          -H "Content-Type: application/json" -d '{"reason":"aft lifecycle test"}'
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:lifecycleId}/close"
+          body:
+            reason: "aft lifecycle test"
+        intent: "An agent closes the lifecycle issue with its completion reason"
       - wait:
           fn: >-
             document.querySelectorAll('section[data-status=in_progress] article').length === 0
+        intent: "Wait until the board removes the closed issue from In Progress"
       # positive confirmation of the close: the server state is closed and the
       # SSE-closed card lands in Done. Scope to this run's title because closed
       # issues accumulate across suites and Done only renders the newest cards.
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:lifecycleId}"
+          assert:
+            - path: "data.status"
+              equals: "closed"
+            - path: "data.close_reason"
+              equals: "aft lifecycle test"
+            - path: "data.closed_at"
+              exists: true
+        intent: "An operator's readback confirms the close state, reason, and timestamp persisted"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:lifecycleId}/events"
+          save:
+            - from: "data"
+              as: "lifecycleEvents"
+        intent: "An operator reads back the lifecycle event history"
       - run: >-
-          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/lifecycle.id")"
-          | python3 -c "import sys,json; data=json.load(sys.stdin)['data']; assert data['status'] == 'closed', data; assert data.get('close_reason') == 'aft lifecycle test', data; assert data.get('closed_at'), data"
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/lifecycle.id")/events"
-          | python3 -c "import sys,json; events=json.load(sys.stdin)['data']; closes=[e for e in events if e.get('event_type')=='issue.closed']; assert len(closes)==1, events; event=closes[0]; assert event.get('comment')=='aft lifecycle test', event"
+          python3 -c 'import json,os; events=json.load(open(os.environ["AFT_WORK_DIR"]+"/lifecycleEvents")); closes=[e for e in events if e.get("event_type")=="issue.closed"]; assert len(closes)==1, events; assert closes[0].get("comment")=="aft lifecycle test", closes[0]'
+        intent: "An operator's readback confirms exactly one close event carries the completion reason"
       - wait:
           fn: >-
             document.querySelectorAll("section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']").length === 1
+        intent: "Wait until the board renders the lifecycle issue in Done"
       - expect: { count: { selector: "section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']", equals: 1 } }
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='lifecycle ${RUN_ID:-local}']", equals: 0 } }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }

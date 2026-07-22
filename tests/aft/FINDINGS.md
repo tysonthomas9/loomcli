@@ -265,6 +265,16 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
 - The two action tests moved to `tests/aft/surface-suites/review-actions.test.yaml`. Promote them
   when branch/commit review-content seeding exists; see §3.9.
 
+### 1.20 Workspace resolution by name is inconsistent across routes — reviewer route 500s
+- **Severity:** LOW (contract inconsistency) · **Fix:** loom · **Status:** OPEN (found 2026-07-22 by the pr-contracts surface suite)
+- `POST /api/workspaces/{ws}/repos` and `POST .../issues` accept the workspace **name**
+  (`aft-prc-<run>`) and return 201, but `POST .../pull-requests/{o}/{r}/{n}/reviewer` passes the
+  same value into a fleet-db admin lookup (`GET /api/v1/admin/workspaces/<name>`) and surfaces a
+  raw **500** instead of a clean 404. Either every workspace-scoped route should resolve names
+  like repos/issues do, or none should — and an unknown workspace should be a 404, never a 500.
+- The pr-contracts suite now creates its workspace via an `api:` step and uses the
+  server-assigned id (`${var:prcWs}`) everywhere, which is the correct client behavior regardless.
+
 ### Suspected / low-confidence (re-validate before acting)
 - **Local-task-runner stub sessions record zero diff evidence** — `has_diff:false`,
   `files_changed:0` on completed stub runs, while all four real-CLI tiers project

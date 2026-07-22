@@ -29,37 +29,44 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agents-page]')
+        intent: "Wait until the agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=create-agent-overlay]')
+        intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-lead }
       - fill: { testid: create-agent-name, value: nova }
       - click: { testid: create-agent-submit }
       - wait:
           fn: >-
             !document.querySelector('[data-testid=create-agent-overlay]') && document.body.textContent.includes('nova')
+        intent: "Wait until the created agent appears after the modal closes"
       # deep link straight to the agent detail route — the bare /agents auto-select
       # depends on the agent store's first fetch and can exceed the step timeout
       - open: /ws/E2E-WS-AGENT/agents/nova
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agents-page]')
+        intent: "Wait until the agents page is ready"
       - expect: { url: "**/ws/*/agents/nova**" }
       - expect: { visible: { testid: agents-page } }
       # textContent, not rendered text: the rail capitalizes names via CSS text-transform
       - wait:
           fn: >-
             document.body.textContent.includes('nova')
+        intent: "Wait until nova appears in the current agent surface"
       - click: { role: button, name: Logs, exact: true }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=log-viewer]')
+        intent: "Wait until the archived agent log viewer is ready"
       - expect: { visible: { testid: archive-empty } }
       - expect: { text: No logs available for this agent yet. }
       - run: >-
           printf '%s\n' "nova lead log line one" "nova lead AFT-LOG-MARKER $RUN_ID" |
           LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-log --workspace E2E-WS-AGENT --agent nova --content -
+        intent: "The local runtime seeds nova with an archived log marker"
       - click: { selector: "div:has(> [data-testid='log-viewer']) > button" }
       - wait: { text: AFT-LOG-MARKER }
       - expect: { visible: { testid: terminal-container } }
@@ -67,6 +74,7 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agent-activity-panel]')
+        intent: "Wait until the agent activity panel is ready"
       # the panel renders from the agent store, which refreshes on a 5s poll; after a
       # long run its first fetch can lag past the step timeout — let one poll cycle
       # pass, then reload so the mount fetch (server already lists nova) renders it
@@ -75,53 +83,78 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agent-activity-panel]')
+        intent: "Wait until the agent activity panel is ready"
       - wait:
           fn: >-
             document.body.textContent.includes('nova')
+        intent: "Wait until nova appears in the current agent surface"
       - expect: { notText: No agents found }
 
   # covers: LCLI-RA group partial — serve-driven epic run with stub backend
   - name: epic runner drives a stub agent to complete a task
     intent: An orchestration client triggers the epic-runner workflow so a stub-backed agent claims and closes its task while an operator observes the board and recorded session
     steps:
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/issues"
-          -H "Content-Type: application/json"
-          -d "{\"title\":\"agent-flow epic $RUN_ID\",\"issue_type\":\"epic\",\"priority\":2}"
-          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
-          > "$AFT_WORK_DIR/agent-epic.id"
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/issues"
-          -H "Content-Type: application/json"
-          -d "{\"title\":\"agent-flow task $RUN_ID\",\"issue_type\":\"task\",\"priority\":2,\"parent\":\"$(cat "$AFT_WORK_DIR/agent-epic.id")\"}"
-          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
-          > "$AFT_WORK_DIR/agent-task.id"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-AGENT/issues"
+          body:
+            title: "agent-flow epic $RUN_ID"
+            issue_type: "epic"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "agentEpicId"
+        intent: "An orchestration client creates the agent-flow epic at priority 2"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-AGENT/issues"
+          body:
+            title: "agent-flow task $RUN_ID"
+            issue_type: "task"
+            priority: 2
+            parent: "${var:agentEpicId}"
+          save:
+            - from: "data.id"
+              as: "agentTaskId"
+        intent: "An orchestration client creates the child task under the agent-flow epic"
       - open: /ws/E2E-WS-AGENT/kanban
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - wait: { text: agent-flow task }
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/workflows/epic-runner"
-          -H "Content-Type: application/json"
-          -d "{\"epicId\":\"$(cat "$AFT_WORK_DIR/agent-epic.id")\",\"runner\":\"local-task-runner\"}"
-          > "$AFT_WORK_DIR/agent-run.json"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-AGENT/workflows/epic-runner"
+          body:
+            epicId: "${var:agentEpicId}"
+            runner: "local-task-runner"
+          save:
+            - from: "run_id"
+              as: "agentRunId"
+        intent: "An orchestration client starts the local epic-runner workflow"
       # The POST above carries the (synchronous) workflow-bundle build; this step only
       # covers execution. Keep the poll well under the 120s run-step ceiling: 40 x ~2s
       # plus cheap grep instead of a python startup per iteration.
       - run: >-
           for i in $(seq 1 40); do
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/issues/$(cat "$AFT_WORK_DIR/agent-task.id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/issues/$(cat "$AFT_WORK_DIR/agentTaskId")"
           | grep -q '"status":"closed"' && exit 0; sleep 2; done;
           echo "task never closed"; exit 1
+        intent: "Wait until the stub-backed task reaches closed state in the workspace API"
       # a task session was recorded during execution — this is what the Runs tab reads
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$(cat "$AFT_WORK_DIR/agent-task.id")/sessions"
-          | python3 -c "import sys,json; d=json.load(sys.stdin); items=d.get('data', d if isinstance(d, list) else []); assert len(items) >= 1, d"
+      - api:
+          method: "GET"
+          path: "/api/workspaces/E2E-WS-AGENT/tasks/${var:agentTaskId}/sessions"
+          assert:
+            - path: "data.sessions.0"
+              exists: true
+        intent: "An operator confirms the completed task recorded at least one session"
       # board followed via SSE: the closed card is removed from the board entirely
       - wait:
           fn: >-
             !Array.from(document.querySelectorAll("section[data-status=ready] article")).some((el) => el.textContent.includes('agent-flow task'))
+        intent: "Wait until the completed agent-flow task leaves the Ready column"
       - expect: { count: { selector: "section[data-status=ready] article[aria-label*='agent-flow task ${RUN_ID:-local}']", equals: 0 } }
 
   # covers: seed-worktree runtime seam; agents/:name/diff/files; agents/:name/diff/file; DiffTab; DiffFileRow; DiffFileViewer
@@ -130,13 +163,16 @@ tests:
     steps:
       - run: >-
           file="aft-diff-${RUN_ID:-local}.txt"; printf '%s\n' "AFT-DIFF-MARKER ${RUN_ID:-local}" | LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-worktree --workspace E2E-WS-AGENT --agent nova --file "$file" --content - --message "aft diff ${RUN_ID:-local}"; printf '%s\n' "$file" > "$AFT_WORK_DIR/agent-diff-file.name"
+        intent: "The local runtime seeds nova's worktree with one changed file"
       - open: /ws/E2E-WS-AGENT/agents/nova
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agents-page]')
+        intent: "Wait until the agents page is ready"
       - click: { role: button, name: Diff, exact: true }
       - run: >-
           file="$(cat "$AFT_WORK_DIR/agent-diff-file.name")"; for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents/nova/diff/files?to=HEAD" > "$AFT_WORK_DIR/agent-diff-files.json" && python3 -c 'import json,sys; f=sys.argv[2]; d=json.load(open(sys.argv[1])); files=(d.get("data") or {}).get("files") or []; assert any(x.get("path")==f for x in files), files' "$AFT_WORK_DIR/agent-diff-files.json" "$file" && exit 0; sleep 1; done; echo "agent diff file never appeared"; exit 1
+        intent: "An operator waits until nova's seeded changed file appears in Diff"
       - wait: { text: "1 file changed" }
       - click: { role: button, name: "aft-diff-${RUN_ID:-local}.txt" }
       - wait: { text: AFT-DIFF-MARKER }
@@ -146,32 +182,41 @@ tests:
     intent: A reviewer expands an open epic's completed history, opens the closed task, and inspects its recorded transcript and unavailable-diff state in the Runs tab
     steps:
       - run: >-
-          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("run_id") or d.get("id") or d.get("data",{}).get("run_id") or d.get("data",{}).get("id") or "")' "$AFT_WORK_DIR/agent-run.json" > "$AFT_WORK_DIR/agent-run.id"; [ -n "$(cat "$AFT_WORK_DIR/agent-run.id" | tr -d "[:space:]")" ] || { echo "workflow run response did not contain a run id"; cat "$AFT_WORK_DIR/agent-run.json"; exit 1; }; curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/runs/$(cat "$AFT_WORK_DIR/agent-run.id")" > "$AFT_WORK_DIR/agent-run-detail.json"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/runs/$(cat "$AFT_WORK_DIR/agentRunId")" > "$AFT_WORK_DIR/agent-run-detail.json"
+        intent: "A reviewer reads back the completed epic-runner record for the later session scenario"
       - run: >-
-          task="$(cat "$AFT_WORK_DIR/agent-task.id")"; curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions" > "$AFT_WORK_DIR/agent-sessions.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d.get("data",{}); sessions=data.get("sessions") if isinstance(data,dict) else data; assert sessions, d; s=sessions[0]; assert s.get("session_id"), s; assert s.get("has_transcript") is True, s; assert s.get("has_diff") is False, s; assert s.get("files_changed")==0, s; print(s["session_id"])' "$AFT_WORK_DIR/agent-sessions.json" > "$AFT_WORK_DIR/agent-session.id"
+          task="$(cat "$AFT_WORK_DIR/agentTaskId")"; curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions" > "$AFT_WORK_DIR/agent-sessions.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); data=d.get("data",{}); sessions=data.get("sessions") if isinstance(data,dict) else data; assert sessions, d; s=sessions[0]; assert s.get("session_id"), s; assert s.get("has_transcript") is True, s; assert s.get("has_diff") is False, s; assert s.get("files_changed")==0, s; print(s["session_id"])' "$AFT_WORK_DIR/agent-sessions.json" > "$AFT_WORK_DIR/agentSessionId"
+        intent: "A reviewer records the completed task session and its artifact availability"
       - open: /ws/E2E-WS-AGENT/agents/nova
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agents-page]') && document.body.textContent.includes('agent-flow epic')
+        intent: "Wait until the agents page renders the completed epic history"
       # Closed children of an open epic now render through the idle-lead panel.
       # Use the accessible expand control, then the completed task's real role=button.
       - run: >-
-          epic="$(cat "$AFT_WORK_DIR/agent-epic.id")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "Expand epic $epic" && exit 0 || true; sleep 1; done; echo "epic expand control never clicked"; exit 1
+          epic="$(cat "$AFT_WORK_DIR/agentEpicId")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "Expand epic $epic" && exit 0 || true; sleep 1; done; echo "epic expand control never clicked"; exit 1
+        intent: "A reviewer retries expanding the epic until completed child history is visible"
       - run: >-
-          task="$(cat "$AFT_WORK_DIR/agent-task.id")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "$task" && exit 0 || true; sleep 1; done; echo "closed task card never clicked"; exit 1
+          task="$(cat "$AFT_WORK_DIR/agentTaskId")"; for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "$task" && exit 0 || true; sleep 1; done; echo "closed task card never clicked"; exit 1
+        intent: "A reviewer retries opening the completed task from epic history"
       - wait:
           fn: >-
             document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the selected issue detail panel is open"
       - click: { role: tab, name: Runs, exact: true }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=sessions-tab]') &&
             !!document.querySelector('[data-testid=session-timeline]')
+        intent: "Wait until the Runs tab renders the session timeline"
       - run: >-
-          sid="$(cat "$AFT_WORK_DIR/agent-session.id")"; agent-browser --session "$AFT_SESSION" click "[data-testid='session-row-$sid']"
+          sid="$(cat "$AFT_WORK_DIR/agentSessionId")"; agent-browser --session "$AFT_SESSION" click "[data-testid='session-row-$sid']"
+        intent: "A reviewer opens the recorded session from the Runs timeline"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=session-detail-view]')
+        intent: "Wait until the selected session detail is ready"
       - expect: { visible: { testid: session-inner-tab-transcript } }
       - expect: { visible: { testid: session-transcript } }
       # has_diff=false disables the tab, so the component cannot enter its diff pane.
@@ -181,7 +226,8 @@ tests:
       # Allowed readback: verify the session artifacts recorded by the UI scenario,
       # rather than treating these endpoints as a standalone contract test.
       - run: >-
-          task="$(cat "$AFT_WORK_DIR/agent-task.id")"; sid="$(cat "$AFT_WORK_DIR/agent-session.id")"; detail_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-detail.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid")"; transcript_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-transcript.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid/transcript")"; diff_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-diff.resp.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid/diff")"; python3 -c 'import json,sys; detail=json.load(open(sys.argv[1])); transcript=json.load(open(sys.argv[2])); no_diff=json.load(open(sys.argv[3])); assert sys.argv[4]=="200", (sys.argv[4],detail); assert sys.argv[5]=="200", (sys.argv[5],transcript); assert sys.argv[6]=="404", (sys.argv[6],no_diff); assert (detail.get("data") or {}).get("session_id")==sys.argv[7], detail; assert transcript.get("success") is True and (transcript.get("data") or {}).get("entries"), transcript; assert no_diff.get("success") is False and no_diff.get("error")=="diff not found", no_diff' "$AFT_WORK_DIR/agent-session-detail.json" "$AFT_WORK_DIR/agent-session-transcript.json" "$AFT_WORK_DIR/agent-session-diff.resp.json" "$detail_code" "$transcript_code" "$diff_code" "$sid"
+          task="$(cat "$AFT_WORK_DIR/agentTaskId")"; sid="$(cat "$AFT_WORK_DIR/agentSessionId")"; detail_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-detail.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid")"; transcript_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-transcript.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid/transcript")"; diff_code="$(curl -sS -o "$AFT_WORK_DIR/agent-session-diff.resp.json" -w "%{http_code}" "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/tasks/$task/sessions/$sid/diff")"; python3 -c 'import json,sys; detail=json.load(open(sys.argv[1])); transcript=json.load(open(sys.argv[2])); no_diff=json.load(open(sys.argv[3])); assert sys.argv[4]=="200", (sys.argv[4],detail); assert sys.argv[5]=="200", (sys.argv[5],transcript); assert sys.argv[6]=="404", (sys.argv[6],no_diff); assert (detail.get("data") or {}).get("session_id")==sys.argv[7], detail; assert transcript.get("success") is True and (transcript.get("data") or {}).get("entries"), transcript; assert no_diff.get("success") is False and no_diff.get("error")=="diff not found", no_diff' "$AFT_WORK_DIR/agent-session-detail.json" "$AFT_WORK_DIR/agent-session-transcript.json" "$AFT_WORK_DIR/agent-session-diff.resp.json" "$detail_code" "$transcript_code" "$diff_code" "$sid"
+        intent: "A reviewer reads back the session detail, transcript, and expected unavailable diff contract"
 
   # covers: CreateAgentModal task template; repo-scope chip; POST /api/workspaces/:ws/agents readback
   - name: create second agent from modal without starting it
@@ -191,10 +237,12 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=agents-page]')
+        intent: "Wait until the agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=create-agent-overlay]')
+        intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-task }
       - fill:
           testid: create-agent-name
@@ -205,3 +253,4 @@ tests:
       - click: { testid: create-agent-submit }
       - run: >-
           for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents" > "$AFT_WORK_DIR/agent-list-after-iris.json" && python3 -c 'import json,sys; name=sys.argv[2]; d=json.load(open(sys.argv[1])); data=d.get("data",d); agents=data.get("agents") if isinstance(data,dict) else data; assert any(a.get("name")==name for a in agents), agents' "$AFT_WORK_DIR/agent-list-after-iris.json" "iris-${RUN_ID:-local}" && exit 0; sleep 1; done; echo "iris agent never appeared"; exit 1
+        intent: "An operator's readback waits for the second agent definition to persist"

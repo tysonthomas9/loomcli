@@ -18,10 +18,12 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=settings-view]') &&
             !!document.querySelector('[data-testid=design-format-panel]')
+        intent: "Wait until the workspace design-format settings are ready"
       - select: { testid: design-format-select, value: html }
       - click: { testid: design-format-save-button }
       - run: >-
           for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS" > "$AFT_WORK_DIR/settings-design-html.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; assert d.get("design_format")=="html", d.get("design_format")' "$AFT_WORK_DIR/settings-design-html.json" && exit 0; sleep 1; done; echo "workspace design_format never became html"; exit 1
+        intent: "An operator's readback waits for the HTML design-format setting to persist"
 
   # covers: SettingsView; local settings GET/PATCH; Daytona credential save/clear; agent runtime default
   # VERIFY-AT-RUNTIME: the isolated stack should start without a Daytona credential; fail rather than clearing an unknown pre-existing secret.
@@ -33,24 +35,48 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=settings-view]') &&
             !!document.querySelector('[data-testid=remote-runtimes-panel]')
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-daytona-before.json"; python3 -c 'import json,sys; data=json.load(open(sys.argv[1])).get("data",{}); cfg=((data.get("runtime_credentials") or {}).get("daytona") or {}).get("configured"); assert not cfg, "VERIFY-AT-RUNTIME: expected no pre-existing Daytona credential in isolated AFT stack"' "$AFT_WORK_DIR/settings-daytona-before.json"
+        intent: "Wait until the remote-runtime settings are ready"
+      - api:
+          method: "GET"
+          path: "/api/local/settings"
+          assert:
+            - path: "data.runtime_credentials.daytona.configured"
+              equals: false
+        intent: "An operator confirms the isolated stack starts without a Daytona credential"
       - fill:
           testid: daytona-api-key-input
           value: "dtn_aft_${RUN_ID:-local}"
       - click: { testid: daytona-credential-save-button }
       - wait: { text: Daytona credential saved }
+      - api:
+          method: "GET"
+          path: "/api/local/settings"
+          assert:
+            - path: "data.runtime_credentials.daytona.configured"
+              equals: true
+          save:
+            - from: "data"
+              as: "daytonaSavedSettings"
+        intent: "An operator reads back the sanitized saved Daytona credential state"
       - run: >-
-          curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-daytona-saved.json"; python3 -c 'import json,sys; raw=open(sys.argv[1]).read(); d=json.loads(raw).get("data",{}); daytona=(d.get("runtime_credentials") or {}).get("daytona") or {}; assert daytona.get("configured") is True, daytona; assert "dtn_aft_" not in raw, raw; assert "sealed" not in raw, raw' "$AFT_WORK_DIR/settings-daytona-saved.json"
+          python3 -c 'import json,os; raw=open(os.environ["AFT_WORK_DIR"]+"/daytonaSavedSettings").read(); d=json.loads(raw); daytona=(d.get("runtime_credentials") or {}).get("daytona") or {}; assert daytona.get("configured") is True, daytona; assert "dtn_aft_" not in raw, raw; assert "sealed" not in raw, raw'
+        intent: "An operator's readback confirms no credential material or sealed value is exposed"
       - select: { testid: agent-runtime-select, value: daytona }
       - click: { testid: agent-runtime-save-button }
       - run: >-
           for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-runtime-daytona.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("data",{}); assert (d.get("agent_runtime") or {}).get("default")=="daytona", d.get("agent_runtime")' "$AFT_WORK_DIR/settings-runtime-daytona.json" && exit 0; sleep 1; done; echo "agent_runtime.default never became daytona"; exit 1
+        intent: "An operator's readback waits for Daytona to become the default runtime"
       - select: { testid: agent-runtime-select, value: local }
       - click: { testid: agent-runtime-save-button }
       - run: >-
           for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-runtime-local.json" && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("data",{}); assert (d.get("agent_runtime") or {}).get("default")=="local", d.get("agent_runtime")' "$AFT_WORK_DIR/settings-runtime-local.json" && exit 0; sleep 1; done; echo "agent_runtime.default never restored to local"; exit 1
+        intent: "An operator's readback waits for local to become the default runtime again"
       - click: { testid: daytona-credential-clear-button }
       - wait: { text: No Daytona credential saved }
-      - run: >-
-          curl -sf "$AFT_BASE_URL/api/local/settings" > "$AFT_WORK_DIR/settings-daytona-cleared.json"; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])).get("data",{}); daytona=(d.get("runtime_credentials") or {}).get("daytona") or {}; assert daytona.get("configured") is False, daytona' "$AFT_WORK_DIR/settings-daytona-cleared.json"
+      - api:
+          method: "GET"
+          path: "/api/local/settings"
+          assert:
+            - path: "data.runtime_credentials.daytona.configured"
+              equals: false
+        intent: "An operator confirms the cleared Daytona credential remains unconfigured"

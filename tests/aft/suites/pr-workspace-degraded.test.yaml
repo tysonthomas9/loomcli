@@ -14,15 +14,19 @@ tests:
     steps:
       - run: >-
           ws="$(cat "$AFT_WORK_DIR/pr-ws.id")"; repo="$AFT_WORK_DIR/pr-widgets-${RUN_ID:-local}"; rm -rf "$repo"; mkdir -p "$repo"; git -C "$repo" init -q; printf '%s\n' "widgets ${RUN_ID:-local}" > "$repo/README.md"; git -C "$repo" add README.md; git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -m init -q; git -C "$repo" branch -M main; git -C "$repo" remote add origin https://github.com/acme/widgets; basename "$repo" > "$AFT_WORK_DIR/pr-repo.name"; python3 -c 'import json,sys; print(json.dumps({"repos":[sys.argv[1]]}))' "$repo" > "$AFT_WORK_DIR/pr-add-repo.json"; repo_code="$(curl -sS -o "$AFT_WORK_DIR/pr-add-repo.resp.json" -w "%{http_code}" -X POST "$AFT_BASE_URL/api/workspaces/$ws/repos" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/pr-add-repo.json")"; [ "$repo_code" = 201 ] || { echo "repo add failed with HTTP $repo_code:"; cat "$AFT_WORK_DIR/pr-add-repo.resp.json"; exit 1; }; python3 -c 'import json,os,sys; run=os.environ.get("RUN_ID") or "local"; repo=open(sys.argv[1]).read().strip(); print(json.dumps({"title":"pr degraded "+run,"issue_type":"task","priority":2,"external_ref":"https://github.com/acme/widgets/pull/7","source_repo":repo}))' "$AFT_WORK_DIR/pr-repo.name" > "$AFT_WORK_DIR/pr-issue.json"; issue_code="$(curl -sS -o "$AFT_WORK_DIR/pr-issue.resp.json" -w "%{http_code}" -X POST "$AFT_BASE_URL/api/workspaces/$ws/issues" -H "Content-Type: application/json" -d @"$AFT_WORK_DIR/pr-issue.json")"; [ "$issue_code" = 201 ] || { echo "PR issue create failed with HTTP $issue_code:"; cat "$AFT_WORK_DIR/pr-issue.resp.json"; exit 1; }; python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"]["id"])' "$AFT_WORK_DIR/pr-issue.resp.json" > "$AFT_WORK_DIR/pr-issue.id"; review_code="$(curl -sS -o "$AFT_WORK_DIR/pr-issue-review.resp.json" -w "%{http_code}" -X PATCH "$AFT_BASE_URL/api/workspaces/$ws/issues/$(cat "$AFT_WORK_DIR/pr-issue.id")" -H "Content-Type: application/json" -d '{"status":"review"}')"; [ "$review_code" = 200 ] || { echo "PR issue review transition failed with HTTP $review_code:"; cat "$AFT_WORK_DIR/pr-issue-review.resp.json"; exit 1; }; python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert (d.get("data") or {}).get("status")=="review", d' "$AFT_WORK_DIR/pr-issue-review.resp.json"
+        intent: "An API client seeds the GitHub-shaped repository and review issue fixture"
       - run: >-
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$(cat "$AFT_WORK_DIR/pr-ws.id")/prs"
+        intent: "An operator opens the server-assigned workspace route in the active browser session"
       - wait: { text: "pr degraded ${RUN_ID:-local}" }
       # rows are li[role=button] aria-label="Review <title>"; GitHub enrichment can re-render them, so retry until the review param lands
       - run: >-
           for i in 1 2 3; do agent-browser --session "$AFT_SESSION" find role button click --name "pr degraded ${RUN_ID:-local}" || true; sleep 1; agent-browser --session "$AFT_SESSION" eval "location.search" | grep -q "review=" && exit 0; done; echo "PR row click never opened the review workspace"; exit 1
+        intent: "A reviewer retries the PR queue row until the review workspace opens"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=pr-review-workspace]')
+        intent: "Wait until the review workspace is ready"
       - expect: { visible: { testid: pr-review-workspace } }
       - click: { testid: pr-discuss-button }
       - wait:
@@ -30,4 +34,5 @@ tests:
             !!document.querySelector('[data-testid=pr-discussion-panel]') &&
             !!document.querySelector('[data-testid=pr-discussion-error]') &&
             !!document.querySelector('[data-testid=pr-discussion-retry]')
+        intent: "Wait until the PR discussion surface renders its degraded-state controls"
       - expect: { notText: Something went wrong }

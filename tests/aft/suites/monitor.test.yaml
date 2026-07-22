@@ -11,6 +11,7 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=monitor-dashboard]')
+        intent: "Wait until the monitor dashboard is ready"
       - expect: { visible: { testid: monitor-dashboard } }
       - expect: { visible: { testid: project-health-panel } }
       - expect: { visible: { testid: agent-activity-panel } }

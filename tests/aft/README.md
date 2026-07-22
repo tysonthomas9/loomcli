@@ -49,6 +49,9 @@ The directory is the tier; there is no YAML flag that changes a test's meaning.
 - Suite-level `setup:` and `teardown:` are fixture provisioning and cleanup, so they may use
   the API freely. A test-body API **readback** may verify the result of a human UI action;
   standalone API contract blocks do not belong in this tier.
+- Use `api:` for single-request API interactions so reports describe the operation clearly and
+  assertions stay structural. Keep `run:` for polls, pipelines, and other shell orchestration;
+  the aft loader requires intents on every `run:`, `api:`, and `wait:` step that uses `fn:`.
 - `tests/aft/surface-suites/` is the surface-wiring tier for intentionally UI-orphaned API
   contracts, fabricated or hollow fixtures, and compatibility surfaces that cannot yet form
   a faithful scenario. Every surface test explains why it is here and what change would

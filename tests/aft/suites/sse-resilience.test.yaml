@@ -16,12 +16,16 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - expect: { count: { selector: "section[data-status=ready] article", equals: 0 } }
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
-          -H "Content-Type: application/json"
-          -d "{\"title\":\"sse online seed ${RUN_ID:-local}\",\"issue_type\":\"task\",\"priority\":2}"
-          >/dev/null
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "sse online seed ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+        intent: "An agent creates the online seed issue before the disconnect"
       - wait: { text: sse online seed }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
       - offline: on
@@ -30,16 +34,21 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[role=alert][aria-live=assertive]')
+        intent: "Wait until the stale-data reconnect warning appears"
       - expect: { visible: { selector: "[role=alert][aria-live=assertive]" } }
       - expect: { text: Reconnecting }
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
-          -H "Content-Type: application/json"
-          -d "{\"title\":\"sse missed catchup ${RUN_ID:-local}\",\"issue_type\":\"task\",\"priority\":2}"
-          >/dev/null
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "sse missed catchup ${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+        intent: "An agent creates the catch-up issue while the operator is offline"
       - offline: off
       - wait:
           fn: >-
             !document.querySelector('[role=alert][aria-live=assertive]')
+        intent: "Wait until the reconnect warning clears"
       - wait: { text: sse missed catchup }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 2 } }

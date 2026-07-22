@@ -10,48 +10,60 @@ tests:
   - name: agent and human comments render in panel activity
     intent: An agent posts ordered comments and lifecycle transitions through the workspace API, then a human commenter submits through CommentForm while API readback verifies persistence under the configured web-stack actor
     steps:
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues"
-          -H "Content-Type: application/json"
-          -d "{\"title\":\"comments timeline $RUN_ID\",\"issue_type\":\"task\",\"priority\":2}"
-          | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['id'])"
-          > "$AFT_WORK_DIR/comments.id"
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments"
-          -H "Content-Type: application/json"
-          -d "{\"text\":\"first api comment $RUN_ID\"}"
-          >/dev/null
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments"
-          -H "Content-Type: application/json"
-          -d "{\"text\":\"second api comment $RUN_ID\"}"
-          >/dev/null
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/close"
-          -H "Content-Type: application/json"
-          -d '{"reason":"aft-close-evidence"}'
-          >/dev/null
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/reopen"
-          -H "Content-Type: application/json"
-          -d '{"reason":"aft-reopen-evidence"}'
-          >/dev/null
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "comments timeline $RUN_ID"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "commentsId"
+        intent: "An agent creates the comments timeline issue at priority 2"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/comments"
+          body:
+            text: "first api comment $RUN_ID"
+        intent: "An agent posts the first ordered comment on the timeline issue"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/comments"
+          body:
+            text: "second api comment $RUN_ID"
+        intent: "An agent posts the second ordered comment on the timeline issue"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/close"
+          body:
+            reason: "aft-close-evidence"
+        intent: "An agent closes the timeline issue with recorded evidence"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/reopen"
+          body:
+            reason: "aft-reopen-evidence"
+        intent: "An agent reopens the timeline issue for the human comment flow"
       - open: /ws/E2E-WS/kanban
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - wait: { text: comments timeline }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
       - click: { selector: "section[data-status=ready] article", first: true }
       - wait:
           fn: >-
             document.querySelector('[data-testid=issue-detail-panel]')?.getAttribute('data-state') === 'open'
+        intent: "Wait until the selected issue detail panel is open"
       - expect: { visible: { testid: activity-log } }
       # comments load async after the panel opens; close/reopen REASONS also
       # render as activity-comment nodes, so assert at-least rather than exact
       - wait:
           fn: >-
             document.querySelectorAll('[data-testid=activity-comment] time[datetime]').length >= 2
+        intent: "Wait until the activity log renders both timestamped API comments"
       - expect: { count: { testid: activity-comment, atLeast: 2 } }
       # author metadata must be asserted INSIDE a comment node: lifecycle events
       # also render the actor text, so a page-wide match cannot catch an author
@@ -59,11 +71,13 @@ tests:
       - wait:
           fn: >-
             Array.from(document.querySelectorAll('[data-testid=activity-comment]')).some((n) => n.textContent.includes('loom-e2e'))
+        intent: "Wait until an API comment renders its configured author metadata"
       - expect: { text: first api comment }
       - expect: { text: second api comment }
       - wait:
           fn: >-
             (() => { const text = document.querySelector('[data-testid=activity-log]')?.textContent || ''; return text.indexOf('first api comment') >= 0 && text.indexOf('second api comment') > text.indexOf('first api comment'); })()
+        intent: "Wait until the activity log preserves the API comment order"
       # lifecycle events render as activity-event nodes (close reason text is not
       # displayed; the reopen reason may surface as an extra comment via the
       # backend's best-effort comment post). Assert event existence, not reasons.
@@ -76,11 +90,21 @@ tests:
           sleep 1;
           agent-browser --session "$AFT_SESSION" eval "document.querySelector('[data-testid=comment-textarea]')?.value === ''" | grep -q true && exit 0;
           done; echo "comment submit click never posted the comment"; exit 1
+        intent: "A human commenter retries submission until the comment form clears"
       - wait:
           fn: >-
             Array.from(document.querySelectorAll('[data-testid=activity-comment]')).some((n) => n.textContent.includes('web ui comment ${RUN_ID:-local}') && n.textContent.includes('loom-e2e'))
+        intent: "Wait until the human comment appears with the configured author"
       - expect: { text: "web ui comment ${RUN_ID:-local}" }
       # Readback verifies the result of the human UI action; it is not a separate
       # API contract block.
+      - api:
+          method: "GET"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues/${var:commentsId}/comments"
+          save:
+            - from: "data"
+              as: "commentsReadback"
+        intent: "An operator reads back the issue comments after the human submission"
       - run: >-
-          curl -sf "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues/$(cat "$AFT_WORK_DIR/comments.id")/comments" > "$AFT_WORK_DIR/comments-after-ui.json"; python3 -c 'import json,os,sys; data=json.load(open(sys.argv[1])).get("data",[]); text="web ui comment "+os.environ["RUN_ID"]; matches=[c for c in data if c.get("text")==text]; assert len(matches)==1, data; assert matches[0].get("author")=="loom-e2e", matches[0]' "$AFT_WORK_DIR/comments-after-ui.json"
+          python3 -c 'import json,os; data=json.load(open(os.environ["AFT_WORK_DIR"]+"/commentsReadback")); text="web ui comment "+os.environ["RUN_ID"]; matches=[c for c in data if c.get("text")==text]; assert len(matches)==1, data; assert matches[0].get("author")=="loom-e2e", matches[0]'
+        intent: "An operator's readback confirms the human comment persisted once with the configured author"

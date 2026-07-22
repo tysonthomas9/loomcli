@@ -18,6 +18,7 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - expect: { visible: { selector: "[role=tablist][aria-label='View mode']" } }
       - wait: { text: views seed }
       - click: { role: tab, name: List, exact: true }
@@ -35,6 +36,7 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=issue-table]')
+        intent: "Wait until the issue table is ready"
       - expect: { visible: { testid: issue-table } }
       - expect: { text: views seed }
 
@@ -42,19 +44,31 @@ tests:
   - name: search survives list switch and table deep link
     intent: An agent creates matching and nonmatching issues through the API, then an operator sees a URL-backed search stay applied across Kanban, List, and a table deep link
     steps:
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
-          -d "{\"title\":\"views-filter-match-${RUN_ID:-local}\",\"issue_type\":\"task\",\"priority\":2}" >/dev/null
-      - run: >-
-          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/${AFT_WS:-E2E-WS}/issues" -H "Content-Type: application/json"
-          -d "{\"title\":\"views-filter-miss-${RUN_ID:-local}\",\"issue_type\":\"task\",\"priority\":2}" >/dev/null
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "views-filter-match-${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+        intent: "An agent creates the issue that matches the cross-view search"
+      - api:
+          method: "POST"
+          path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
+          body:
+            title: "views-filter-miss-${RUN_ID:-local}"
+            issue_type: "task"
+            priority: 2
+        intent: "An agent creates the issue excluded by the cross-view search"
       - open: /ws/E2E-WS/kanban
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - wait:
           fn: >-
             Array.from(document.querySelectorAll('section[data-status=ready] article')).some((el) => el.textContent.includes('views-filter-match-${RUN_ID:-local}'))
+        intent: "Wait until the board renders the issue matching the view filter"
       - fill: { testid: search-input-field, value: "views-filter-match-${RUN_ID:-local}" }
       - wait: { url: "**search=views-filter-match-${RUN_ID:-local}**" }
       - expect: { count: { selector: "section[data-status=ready] article", equals: 1 } }
@@ -70,9 +84,11 @@ tests:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
+        intent: "Wait until the workspace board is ready"
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=issue-table]')
+        intent: "Wait until the issue table is ready"
       - wait: { url: "**/ws/E2E-WS/table?search=views-filter-match-${RUN_ID:-local}**" }
       - expect: { visible: { testid: issue-table } }
       - expect: { value: { testid: search-input-field, equals: "views-filter-match-${RUN_ID:-local}" } }

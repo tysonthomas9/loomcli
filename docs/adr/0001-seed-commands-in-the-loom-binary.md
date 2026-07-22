@@ -1,6 +1,6 @@
 # Seed commands ship inside the loom binary, gated by an env var
 
-Browser and cross-process test harnesses need to create agent artifacts (worktrees, logs, session records) that are indistinguishable from what the runtime produces; before this decision they fabricated paths by hand in shell and TypeScript, which drifted from the real layout. We decided the seeding seam is a family of hidden `loom daemon seed-*` CLI subcommands (extending the existing `seed-transcript`), running the product's own creation flows (full fidelity — worktree registration, session finalize included) and refusing to run unless `LOOM_TESTSUPPORT=1` is set.
+Browser and cross-process test harnesses need to create agent artifacts (worktrees, logs, session records) that are indistinguishable from what the runtime produces; before this decision they fabricated paths by hand in shell and TypeScript, which drifted from the real layout. We decided the seeding seam is a family of hidden `loom daemon seed-*` CLI subcommands — `seed-worktree`, `seed-log`, and `seed-transcript` (which also creates the session record) — running the product's own creation flows (full fidelity — worktree registration, session creation included) and refusing to run unless `LOOM_TESTSUPPORT=1` is set.
 
 ## Considered Options
 
