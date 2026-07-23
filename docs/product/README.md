@@ -56,6 +56,7 @@ Related design docs:
 - `../design/distributed-control-plane.md`
 - `../design/distributed-control-plane-data-model.md`
 - `../design/2026-07-22-v6-execution-agent-layer-research.md`
+- `../design/2026-07-22-v6-execution-agent-priorities-and-typescript-examples.md`
 
 Related runbooks:
 

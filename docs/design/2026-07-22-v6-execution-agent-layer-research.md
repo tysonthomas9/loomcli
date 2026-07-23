@@ -2,12 +2,13 @@
 
 **Status:** Research synthesis and decision input; not an accepted contract<br>
 **Date:** 2026-07-22<br>
-**Loom base:** `b490a290b0ba66ca7965c58aeaf030d24940c99a`
+**Loom base:** `b490a290b0ba66ca7965c58aeaf030d24940c99a`<br>
 **Scope:** TypeScript SDK and runtime contracts for executing agents inside
 Loom-managed `TaskRun`s.
 
 **Related local contracts:**
 
+- [`2026-07-22-v6-execution-agent-priorities-and-typescript-examples.md`](2026-07-22-v6-execution-agent-priorities-and-typescript-examples.md)
 - [`native-flue-driver-integration.md`](native-flue-driver-integration.md)
 - [`fleetdb-agent-platform-v2-proposal.md`](fleetdb-agent-platform-v2-proposal.md)
 - [`fleetdb-agent-platform-v2-execution-topology-addendum.md`](fleetdb-agent-platform-v2-execution-topology-addendum.md)
