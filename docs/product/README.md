@@ -55,6 +55,7 @@ Related design docs:
 - `../design/agent-run-visibility-plan.md`
 - `../design/distributed-control-plane.md`
 - `../design/distributed-control-plane-data-model.md`
+- `../design/2026-07-22-v6-execution-agent-layer-research.md`
 
 Related runbooks:
 
