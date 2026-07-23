@@ -553,6 +553,43 @@ describe("SessionDetailView", () => {
       ).toBeInTheDocument();
     });
 
+    it("filters the current Codex plugin and environment envelope before the real prompt", () => {
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "user",
+            type: "text",
+            text: "<recommended_plugins>\n- Atlassian Rovo\n</recommended_plugins>",
+          }),
+          createEntry({
+            seq: 2,
+            role: "user",
+            type: "text",
+            text: "<environment_context>\n<cwd>/repo</cwd>\n</environment_context>",
+          }),
+          createEntry({
+            seq: 3,
+            role: "user",
+            type: "text",
+            text: "Implement the requested change",
+          }),
+          createEntry({ seq: 4, role: "assistant", text: "Done" }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+      expect(screen.queryByText(/recommended_plugins/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Atlassian Rovo/)).not.toBeInTheDocument();
+      expect(
+        screen.getByText("Implement the requested change"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("transcript-interjection"),
+      ).not.toBeInTheDocument();
+    });
+
     it("does not render tool_result entries as their own turns", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [

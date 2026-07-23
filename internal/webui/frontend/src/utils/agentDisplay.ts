@@ -20,6 +20,15 @@ function lastSegment(value: string): string {
   return "";
 }
 
+/** Mirror the backend's safeAgentSegment normalization for name matching. */
+function reviewerAgentSegment(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function repoHintFromAgent(
   agent: Pick<LoomAgentStatus, "display_name" | "repo">,
 ): string {
@@ -75,10 +84,14 @@ export function prReviewRefFromAgent(
   if (hashed?.[1] && hashed[3]) {
     const mid = hashed[1];
     const number = hashed[3];
-    const repoHint = repoHintFromAgent(agent).toLowerCase();
-    if (repoHint && (mid === repoHint || mid.endsWith(`-${repoHint}`))) {
+    const repoHint = repoHintFromAgent(agent);
+    const repoSegment = reviewerAgentSegment(repoHint);
+    if (
+      repoSegment &&
+      (mid === repoSegment || mid.endsWith(`-${repoSegment}`))
+    ) {
       const owner =
-        mid === repoHint ? "" : mid.slice(0, -(repoHint.length + 1));
+        mid === repoSegment ? "" : mid.slice(0, -(repoSegment.length + 1));
       if (owner) return `${owner}/${repoHint}#${number}`;
     }
     const split = mid.lastIndexOf("-");

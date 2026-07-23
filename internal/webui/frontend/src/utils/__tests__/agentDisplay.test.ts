@@ -59,6 +59,23 @@ describe("agentDisplay", () => {
     ).toBeNull();
   });
 
+  it("preserves dotted and underscored repo names in reviewer deep links", () => {
+    expect(
+      prReviewRefFromAgent({
+        name: "review-octocat-hello-world-3a8e1ebe-pr-220",
+        role: "pr-reviewer",
+        repo: "hello.world",
+      }),
+    ).toBe("octocat/hello.world#220");
+    expect(
+      prReviewRefFromAgent({
+        name: "review-octocat-hello-world-3a8e1ebe-pr-221",
+        role: "pr-reviewer",
+        repo: "hello_world",
+      }),
+    ).toBe("octocat/hello_world#221");
+  });
+
   it("uses #N as the compact avatar label for PR reviewers", () => {
     expect(
       agentCompactAvatarLabel({

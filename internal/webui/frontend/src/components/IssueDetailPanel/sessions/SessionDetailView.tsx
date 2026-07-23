@@ -117,6 +117,7 @@ interface GroupedEvents {
 function isSyntheticUserContext(text: string): boolean {
   const normalized = text.trimStart();
   return (
+    normalized.startsWith("<recommended_plugins>") ||
     normalized.startsWith("# AGENTS.md instructions for ") ||
     normalized.startsWith("<environment_context>") ||
     normalized.startsWith("<INSTRUCTIONS>")
