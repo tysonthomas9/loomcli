@@ -79,7 +79,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.AnalysisProfilesEnforced, 11; got != want {
 		t.Fatalf("enforced analysis profiles = %d, want %d", got, want)
 	}
-	if got, want := report.MutationCommands, 60; got != want {
+	if got, want := report.MutationCommands, 61; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeComponents, 86; got != want {
@@ -197,7 +197,7 @@ func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T)
 		t.Fatalf("Execution action exclusions observed = %v, want all documented exclusions %v", observedExclusions, exclusions)
 	}
 	slices.Sort(want)
-	if gotCount, wantCount := len(got), 39; gotCount != wantCount {
+	if gotCount, wantCount := len(got), 40; gotCount != wantCount {
 		t.Fatalf("Execution mutation commands = %d, want %d; commands = %v", gotCount, wantCount, got)
 	}
 	if !slices.Equal(got, want) {
@@ -298,22 +298,23 @@ func TestPhase4LedgerDistinguishesReceiptsFromStateConvergence(t *testing.T) {
 	}
 
 	immutableReceiptMarkers := map[string]string{
-		"artifacts.declare":                      "An exact retry returns",
-		"artifacts.finalize":                     "Exact command-receipt replay",
-		"artifacts.reference":                    "immutable receipt",
-		"artifacts.upload":                       "Exact command-receipt replay",
-		"execution.append-log":                   "Exact request replay",
-		"execution.claim-driver-run":             "Exact request replay",
-		"execution.claim-driver-run-work-item":   "Exact request replay",
-		"execution.claim-task-run":               "same TaskRun owner and action receipt",
-		"execution.exhaust-task-run-retries":     "Exact replay returns the committed exhaustion receipt",
-		"execution.finalize":                     "original terminal result",
-		"execution.finalize-driver-run":          "Exact request replay",
-		"execution.request-task-run":             "Exact request replay",
-		"execution.requeue-task-run":             "Exact replay returns the committed retry receipt",
-		"execution.release-driver-run-work-item": "Exact request replay",
-		"execution.start-child-driver-run":       "Exact replay",
-		"execution.submit-driver-run":            "stable DriverRun identity and exact submitted definition",
+		"artifacts.declare":                             "An exact retry returns",
+		"artifacts.finalize":                            "Exact command-receipt replay",
+		"artifacts.reference":                           "immutable receipt",
+		"artifacts.upload":                              "Exact command-receipt replay",
+		"execution.append-log":                          "Exact request replay",
+		"execution.claim-driver-run":                    "Exact request replay",
+		"execution.claim-driver-run-work-item":          "Exact request replay",
+		"execution.claim-task-run":                      "same TaskRun owner and action receipt",
+		"execution.exhaust-task-run-retries":            "Exact replay returns the committed exhaustion receipt",
+		"execution.finalize":                            "original terminal result",
+		"execution.finalize-driver-run":                 "Exact request replay",
+		"execution.handoff-driver-run-review-work-item": "Exact replay returns the committed handoff receipt",
+		"execution.request-task-run":                    "Exact request replay",
+		"execution.requeue-task-run":                    "Exact replay returns the committed retry receipt",
+		"execution.release-driver-run-work-item":        "Exact request replay",
+		"execution.start-child-driver-run":              "Exact replay",
+		"execution.submit-driver-run":                   "stable DriverRun identity and exact submitted definition",
 	}
 	for id, marker := range immutableReceiptMarkers {
 		command, ok := commands[id]
@@ -375,8 +376,8 @@ func TestCheckedInPhase4ArchitectureContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Commands) != 60 {
-		t.Fatalf("mutation commands = %d, want 60", len(ledger.Commands))
+	if len(ledger.Commands) != 61 {
+		t.Fatalf("mutation commands = %d, want 61", len(ledger.Commands))
 	}
 }
 

@@ -15,7 +15,7 @@ func TestCheckedInSnapshotViolations(t *testing.T) {
 	report.MutationCommands--
 	report.ModuleRoots = []string{"artifacts", "execution"}
 	violations := checkedInSnapshotViolations(report)
-	for _, want := range []string{"mutation commands = 59, want 60", "module roots = [artifacts execution]"} {
+	for _, want := range []string{"mutation commands = 60, want 61", "module roots = [artifacts execution]"} {
 		if !slices.ContainsFunc(violations, func(violation string) bool { return strings.Contains(violation, want) }) {
 			t.Fatalf("snapshot violations = %v, want entry containing %q", violations, want)
 		}
@@ -29,7 +29,7 @@ func checkedInSnapshotReport() Report {
 		LegacyHandlerImports:       make([]LegacyImportUse, 90),
 		ModuleRoots:                append([]string(nil), checkedInModuleRoots...),
 		AnalysisProfilesEnforced:   11,
-		MutationCommands:           60,
+		MutationCommands:           61,
 		RuntimeComponents:          86,
 		RuntimeGoroutineLaunches:   103,
 		PerformanceMetrics:         6,

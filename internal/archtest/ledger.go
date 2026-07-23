@@ -70,6 +70,7 @@ var requiredMutationCommandIDs = []string{
 	"execution.exhaust-task-run-retries",
 	"execution.finalize",
 	"execution.finalize-driver-run",
+	"execution.handoff-driver-run-review-work-item",
 	"execution.heartbeat",
 	"execution.heartbeat-driver-run",
 	"execution.heartbeat-worker-node",

@@ -2129,7 +2129,7 @@ writes:
   - file: internal/webui/handlers/roles/module.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.RoleStore
     method: Create
-    count: 3
+    count: 2
     aggregate_owner: agents
     expires_after_phase: 7
   - file: internal/webui/handlers/roles/module.go

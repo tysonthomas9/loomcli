@@ -505,6 +505,20 @@ commands:
     retry_restart_behavior: Exact request replay returns the immutable original finish receipt and outcome identity; a different terminal result or superseded fence conflicts.
     negative_tests: [expired_execution, owner_mismatch, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
     fault_injection_tests: [duplicate_request, lost_response_after_commit, outcome_enqueue_failure]
+  - id: execution.handoff-driver-run-review-work-item
+    phase: 4
+    aggregate_owner: workitems
+    coordinating_owner: execution
+    mechanism_discriminator: driver_run_review_work_item_handoff
+    instance_owner: workitems
+    accepted_authority: [execution]
+    durable_commands: ["POST /api/v1/{workspace}/driver-runs/{run_id}/work-items/{task_id}/review-handoff"]
+    transaction_or_saga_boundary: One owner-fenced FleetDB command validates the exact live DriverRun, retained Review-origin claim generation, and terminal child TaskRun before atomically moving the Work Item to the requested open or closed state, clearing ownership, and recording the immutable action receipt.
+    idempotency_key: workspace_id:run_id:task_id:task_run_id:fencing_token:request_id
+    semantic_events_or_read_models: [execution.driver_run.v1, workitems.status.v1]
+    retry_restart_behavior: Exact replay returns the committed handoff receipt; a changed target status, child TaskRun, claim generation, or superseded DriverRun fence conflicts without releasing a successor owner.
+    negative_tests: [expired_execution, invalid_child_task_run, owner_mismatch, stale_claim_generation, stale_fence, unauthenticated, wrong_action, wrong_resource, wrong_workspace]
+    fault_injection_tests: [duplicate_request, lost_response_after_commit, terminal_child_race, transaction_rollback]
   - id: execution.heartbeat
     phase: 4
     aggregate_owner: execution

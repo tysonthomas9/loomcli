@@ -21,8 +21,8 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 273 {
-		t.Fatalf("direct-write sites = %d, want strict baseline of 273", totalSites)
+	if totalSites != 272 {
+		t.Fatalf("direct-write sites = %d, want strict baseline of 272", totalSites)
 	}
 }
 

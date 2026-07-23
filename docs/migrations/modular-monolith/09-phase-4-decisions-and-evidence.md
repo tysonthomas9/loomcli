@@ -1,12 +1,13 @@
 # Phase 4 Execution Decisions and Evidence
 
-- **Status:** The Phase 4 architecture slice is complete; the current reliability hardening is bound to refreshed packaged Desktop, Podman/raw-browser, exact-head architecture, and aggregate Loom gate proof at Loom `67c45972f` with FleetDB `9ffa69f60`; Phase 5 has not started
-- **Date:** 2026-07-21
+- **Status:** The Phase 4 architecture slice and UI-created-agent reliability hardening are complete; this evidence commit records full FleetDB and Loom gates plus a fresh isolated real-Codex local-mode proof of Loom implementation `baca198e8` with FleetDB `80fa1bc63`; Phase 5 has not started
+- **Date:** 2026-07-23
 - **Branch bases:** Loom `1353e2faf14ae121c93fe5eb92f779b56a2ad7ae`; FleetDB `f1c4e11199c2c7cdab52cce55899af4df328fbcb`
 - **Implementation commits:** Loom `510391c60f17c6e9fc951c710a07a8ef8768b67f`, `45a73889ab456e974d9cd4346bcb8873be172438`, `8037205dadec12cb8ddc83edcf5509d3acf89652`, `a240215be482b1efe4731a1a24485d4a5ccb8b76`, and `53cbe257715d55770c77d508c23620389b9c9de1`; FleetDB `424492070a0f26e798eabad51b11ee4ea0b6b58c`, `758842a7e3a703470f7afcced437f46935b5a12f`, and `afb6887682f777b0e7093b5dcdff0a5e236777f9`
+- **Current reliability commits:** Loom `baca198e8bff506a4834e255f30e120510d39865`; FleetDB review handoff `9c5dff7cbd7cee979e62dcd0e730073d7a6678f9` and connector rotation fencing `80fa1bc6324fc67dfe2efa719b5943f66b7bfdbf`
 - **Architecture-analyzer and gate commits:** Loom `69e332697`, `02b62e5c7`, `88cb7f262`, `7d8118556`, and `e686b7a95`
-- **Current validation heads:** Loom `67c45972f286f2f6c111fde9306720728dc6c4b4` (core reliability hardening at `ee971be22feb3c93096d599b7e3a62bff2cb0fa2`); FleetDB `9ffa69f6028969c03913c08c1159910fc772bd8b`
-- **Current paired contract:** byte-identical FleetDB and Loom OpenAPI snapshots at SHA-256 `ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`
+- **Validated implementation heads:** Loom `baca198e8bff506a4834e255f30e120510d39865`; FleetDB `80fa1bc6324fc67dfe2efa719b5943f66b7bfdbf`
+- **Current paired contract:** byte-identical FleetDB and Loom OpenAPI snapshots at SHA-256 `3295729bd1a7e348387db44a50206bc723bcca612a45497f2c3e68acb508a3e4`
 - **Scope:** Minimal Artifacts lifecycle, Execution-owned DriverRun/DriverStep/TaskRun/worker/lease/await/recovery mutations, supervisor-disabled execution, SDK runner containment/publication, Work Items repository admission and retry placement, trigger-loop containment, and packaged Desktop proof
 
 ## Locked decisions
@@ -365,15 +366,15 @@ The machine-readable mutation ledger enumerates the exact public Execution and
 Artifacts mutations by method and route. Architecture tests freeze that list,
 reject fictional generic commands, require the public FleetDB OpenAPI contract,
 and forbid new direct Store or FleetDB mutation paths outside declared owner
-adapters. The current architecture pass reports four active roots, 60 required
+adapters. The current architecture pass reports four active roots, 61 required
 command-ID namespaces, 82 composite-Store files, 71 outside composition, 90
-legacy handler-import exceptions, 251 primary direct-write rows across 273
+legacy handler-import exceptions, 251 primary direct-write rows across 272
 sites, 86 runtime components, 103 goroutine definitions, all six existing architecture-inventory
 performance records measured, and zero pending decisions across all 11
 declared profiles plus the all-files AST pass. The three
 `workflowcatalog.*`, 14 `automation.*`, four `artifacts.*`, and 35
-`execution.*` prefixes at the immutable snapshot, now 39 after the terminal-work
-recovery delta, group IDs only; the ledger's aggregate, coordinating,
+`execution.*` prefixes at the immutable snapshot, now 40 after the retained-review
+handoff delta, group IDs only; the ledger's aggregate, coordinating,
 and instance owners remain authoritative. Phase 4 execution-path latency and
 round-trip proof is separate from those fixed baseline categories. The real
 artifact-backed 30-sample product test measured p50 `11.796 ms`, p95
@@ -627,7 +628,7 @@ The final runtime used service PID `50694`, serve PID `50696`, FleetDB PID
 matches the bundled executable sidecar. This final-package evidence does
 not create a new immutable source validation snapshot.
 
-## Current reliability validation
+## Prior reliability validation
 
 The refreshed package closes the split-evidence gap above against exact Loom
 head `67c45972f286f2f6c111fde9306720728dc6c4b4`. It reports
@@ -706,6 +707,113 @@ an isolated HOME, `GOMAXPROCS=4`, `GOMEMLIMIT=3GiB`, and one Vitest worker. Its
 parallel Go and frontend lanes cover the complete checked-in gate; the record
 does not infer that pass from the prior UI-independent source gate.
 
+## UI-created agent reliability validation
+
+The validated implementation heads are Loom
+`baca198e8bff506a4834e255f30e120510d39865` paired with FleetDB
+`80fa1bc6324fc67dfe2efa719b5943f66b7bfdbf`. The paired OpenAPI snapshots
+are byte-identical at SHA-256
+`3295729bd1a7e348387db44a50206bc723bcca612a45497f2c3e68acb508a3e4`.
+The exact FleetDB binary supplied to the Loom gate and fresh stack has SHA-256
+`a5ca578d88470a695dd08424fafe1c84ccd01fd75cbd5ce330658b8d379af0de`.
+
+This delta makes the agent definitions exposed by the UI obey their advertised
+runtime contracts. Behavior-backed and legacy definitions retain enough
+configuration to activate through the same product route that created them;
+local review produces a durable session instead of a silent no-op; bug triage
+has an explicit no-work terminal path; GitHub-dependent workflows check their
+connector prerequisite before creating partial bindings, grants, or versions;
+and stopped interactive terminals cannot respawn merely because a browser
+reattaches. Runtime PID reuse is also checked against executable identity
+before a recorded process is trusted or signalled.
+
+Daemon-supervised noninteractive definitions no longer advertise a PTY in the
+agent editor or mount a terminal view. The terminal-session ensure path,
+launch-spec builder, and WebSocket reauthorization independently reject a
+direct or stale-metadata worker launch, while Lead, PR Review, and custom
+interactive roles retain their terminal lifecycle. This prevents an Advanced
+Planner, Task Runner, or Bug triage definition from racing its daemon-owned
+worker with a second browser-owned process.
+
+The companion FleetDB review-handoff command atomically validates the live
+DriverRun fence, retained Review-origin claim generation, and terminal child
+TaskRun before reopening or closing the Work Item. Connector credential
+rotation now uses an authoritative `expected_updated_at` compare-and-swap:
+Redis performs the comparison and write under `WATCH`/`EXEC`, stale revisions
+map to the public conflict result with zero mutation, and `updated_at` remains
+monotonic even if wall time rolls backward. Loom serializes Settings PATCH
+load/apply/save, publishes replacement runtime-key files without overwriting an
+existing temporary name, wipes plaintext credential copies on every exit, and
+suppresses expired previous credentials at both the FleetDB and Loom
+boundaries. Failed role, prompt, and worktree setup retains inspectable state
+for recovery rather than issuing an unsafe best-effort delete.
+
+FleetDB `make gate` passed static analysis, the race/unit matrix, Redis
+integration pipeline (`205.273s`), PostgreSQL storage contracts (`403.129s`),
+archive checks (`13.883s`), API integration, aggregate coverage (`82.1%`, with
+all 28 enforced packages above the 50% floor), container E2E (`106.630s`), and
+harness evaluation. Loom `make gate` passed with that implementation, the
+architecture snapshot and ledger updates recorded in this evidence commit, and
+the exact paired FleetDB binary, using `GOMEMLIMIT=8GiB`, `GOMAXPROCS=4`, Go
+test parallelism two, and one Vitest worker, covering Go, architecture, SDK,
+built-in workflows, frontend format, type, lint, architecture, generated-code,
+unit-test, and coverage checks. `make build-frontend` then passed separately
+and stamped the mounted
+bundle with `git_hash=baca198e8`. During the final Go race/coverage stage the
+sampled coordinator RSS was `103024` KiB, approximately 101 MiB; that
+observation is not presented as a process-tree peak measurement.
+
+A clean isolated proof used run
+`phase4-all-ui-agents-exact-baca198e8-20260723`, checkout
+`phase4-all-ui-agents-exact`, and compose project
+`loomcli-phase4-agents-proof` on host-loopback ports FleetDB `8680`, Loom API
+`8682`, and UI `8683`. The supported real-Codex verifier passed planner task
+`LOCALMODE-2` in Review with released ownership, persisted design, completed
+exit-zero session, and transcript. It passed coder task `LOCALMODE-3` in
+Closed with a completed exit-zero session, transcript, diff metadata, and the
+exact `local-mode-agent-output.txt` patch. This exercised the configured live
+Codex home and may consume a paid external service. It does not attest that
+those two verifier runs used GPT-5.6 Terra.
+
+The final browser matrix created one instance of every runnable UI class.
+Behavior Planner, Behavior Coder, and Behavior New Role produced enabled
+`internal.task.ready` services. Local Review produced the enabled
+`s3-local-review` cron binding. Advanced Planner, Task Runner, and Bug triage
+produced active daemon-supervised assignments with Info/Git/Diff/Files but no
+Terminal; a direct terminal-session POST returned `400 validation_error` with
+daemon-supervised-worker guidance. Lead completed a
+Stop/reload/Start/new-session/Stop cycle. PR Review launched the built-in review
+prompt, and a custom interactive definition launched its stored
+release-readiness prompt; both were stopped after proof. Bug-fix and Review
+loop displayed the explicit Settings GitHub-token prerequisite and created no
+partial binding because this isolated stack intentionally had no GitHub token.
+
+The UI-created Behavior Coder `agt-exact-behavior-coder-717801d4` processed
+designed task `LOCALMODE-7` through DriverRun
+`automation-run-7f46555371e39a44e141d27ab6f75ed7`. It delivered
+`local-branch:loom/LOCALMODE-7@631070bc488e5eae847a850a75780e7956978f41`
+and left the task in Review. Its completed Codex session
+`flue-promptagent-automation-run-7f46555371e39a44e141d27ab6f75ed7-LOCALMODE-7`
+has transcript and diff metadata, reports one file and one line added, and
+contains only `local-review-exact-baca198e8.txt`.
+
+An explicit run of the UI-created Local Review binding then completed as
+DriverRun `automation-run-133d9201dc9898bdb3507cd711a393f9` with
+`reviewed 0, approved 1, skipped 0`. Its completed `codex-review` child session
+`flue-local-review-automation-run-133d9201dc9898bdb3507cd711a393f9-LOCALMODE-7-c1`
+has a four-entry transcript containing the exact diff and structured findings.
+The authoritative review handoff closed `LOCALMODE-7` and added the approval
+comment. The standalone diff remains correctly owned by the preceding coder
+session; the review child consumes that diff and does not claim to emit a new
+patch.
+
+The isolated Redis, FleetDB, Loom, and UI containers were newly created for the
+proof as `5e7089eba02e`, `e0ac12240b03`, `546803af6dfa`, and
+`4879bf7cc848`, respectively. Container identities for the separately running
+default-port stack were recorded before and after startup and remained
+`bcc01a5db560`, `3caf39c1998f`, `b208f5cabcca`, and `36f3cff253ea`, so the
+proof did not replace or restart that stack.
+
 ## Completion evidence
 
 The baseline retains the appended
@@ -768,16 +876,28 @@ passes in `47.768s` and its post-promotion rerun in `46.926s`. The paired
 OpenAPI snapshots are byte-identical at SHA-256
 `ebf2ec68fd5751fbb59747c7b3db7b66fe4f7f80f30cb7eead9b6b3fd35ccb9e`.
 
-Those results plus the current validation section make the paired contract,
+Those results plus the prior validation section made the paired contract,
 architecture, focused source, FleetDB gate, packaged Desktop, Podman verifier,
-and raw-browser rows green. A lost successful Repo-create response still
+and raw-browser rows green for that source head. A lost successful Repo-create
+response still
 converges as a documented `409` retry rather than an idempotency-receipt replay;
 compensated Redis failures may consume a stream ID while leaving no visible
 projection or event. The appended
 `phase4-reliability-validation-67c45972f` snapshot binds the exact current
-product and architecture proof instead of rewriting the historical snapshots.
-Its aggregate Loom gate also passes under the bounded-memory profile. Phase 5
-has not started.
+product and architecture proof for that head instead of rewriting the earlier
+historical snapshots. Its aggregate Loom gate also passed under the
+bounded-memory profile.
+
+The UI-created-agent reliability section supersedes that source head for
+current Phase 4 status. Its exact-head architecture check passes all 11
+profiles plus the all-files AST pass with Store `82/71`, 90 handler exceptions,
+251 primary direct-write rows across 272 sites, four active roots, 61 required
+command-ID namespaces, 86 runtime components, 103 goroutine definitions, six
+of six measured performance records, and zero pending decisions. The new
+Execution entry is the retained-review Work Item handoff, and one redundant
+legacy RoleStore create site was removed. Both full gates and the fresh
+real-Codex planner/coder verifier pass against the current paired sources.
+Phase 5 has not started.
 
 ---
 
