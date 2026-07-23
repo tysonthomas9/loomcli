@@ -62,7 +62,11 @@ const (
 	ExecutionTerminalDriverRunWorkRecoveryQueueCapability = "execution.terminal_driver_run_work_recovery_queue.v1"
 	ExecutionDriverRunLeaseFencingCapability              = "execution.driver_run_lease_fencing.v1"
 	ExecutionDriverRunWorkItemClaimCapability             = "execution.driver_run_work_item_claim.v1"
-	ExecutionTaskRunLogIdempotencyCapability              = "execution.task_run_log_idempotency.v1"
+	// ExecutionDriverRunReviewWorkItemHandoffCapability certifies the atomic
+	// completed-child handoff that validates retained claim generation and
+	// retires it while publishing the Work Item's open-or-closed lifecycle.
+	ExecutionDriverRunReviewWorkItemHandoffCapability = "execution.driver_run_review_work_item_handoff.v1"
+	ExecutionTaskRunLogIdempotencyCapability          = "execution.task_run_log_idempotency.v1"
 	// ArtifactsOwnerFencedLifecycleCapability certifies owner-fenced,
 	// idempotent Artifact create/upload/finalize/reference commands.
 	ArtifactsOwnerFencedLifecycleCapability = "artifacts.owner_fenced_lifecycle.v1"
@@ -90,6 +94,7 @@ func Phase4FoundationCapabilities() []string {
 		ExecutionTerminalDriverRunWorkRecoveryQueueCapability,
 		ExecutionDriverRunLeaseFencingCapability,
 		ExecutionDriverRunWorkItemClaimCapability,
+		ExecutionDriverRunReviewWorkItemHandoffCapability,
 		ExecutionTaskRunLogIdempotencyCapability,
 	}
 }

@@ -178,6 +178,8 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 	m.ops = map[string]opHandler{
 		"claim-ready":                     m.claimReady,
 		"claim-task":                      m.claimTask,
+		"claim-review":                    m.claimReview,
+		"handoff-review":                  m.handoffReview,
 		"binding-config":                  m.bindingConfig,
 		"role-get":                        m.roleGet,
 		"epic-get":                        m.epicGet,
@@ -194,6 +196,7 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		"complete-task":                   m.completeTask,
 		"task-diff":                       m.taskDiff,
 		"release-task":                    m.releaseTask,
+		"release-review":                  m.releaseReview,
 		"connector-dispatch":              m.connectorDispatch,
 		"emit-event":                      m.emitEvent,
 		"issue-get":                       m.issueGet,
@@ -420,8 +423,9 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 		Actor string `json:"actor"`
 		// Type optionally narrows the ready queue to one issue type (e.g.
 		// "bug"), applied server-side by the ready view.
-		Type  string `json:"type"`
-		Limit int    `json:"limit"`
+		Type       string `json:"type"`
+		SourceRepo string `json:"sourceRepo"`
+		Limit      int    `json:"limit"`
 	}](body)
 	if err != nil {
 		return nil, err
@@ -437,15 +441,14 @@ func (m *Module) claimReady(ctx context.Context, ws string, id driverIdentity, b
 		return nil, err
 	}
 	ready, err := driverpkg.ReadyTaskCandidates(ctx, issueBackend, driverpkg.TaskClaimOptions{
-		EpicID: epicID,
-		Type:   strings.TrimSpace(params.Type),
-		Limit:  params.Limit,
+		EpicID: epicID, Type: strings.TrimSpace(params.Type),
+		SourceRepo: strings.TrimSpace(params.SourceRepo), Limit: params.Limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list ready tasks: %w", err)
 	}
 	for _, issue := range ready {
-		claimed, claimErr := m.claimDriverRunWorkItem(ctx, ws, id, parent, issue)
+		claimed, claimErr := m.claimDriverRunWorkItem(ctx, ws, id, parent, issue, "")
 		if claimErr == nil {
 			return claimed, nil
 		}
@@ -499,9 +502,49 @@ func (m *Module) claimTask(ctx context.Context, ws string, id driverIdentity, bo
 	if err != nil {
 		return nil, fmt.Errorf("claim task: %w", err)
 	}
-	claimed, err := m.claimDriverRunWorkItem(ctx, ws, id, parent, *issue)
+	claimed, err := m.claimDriverRunWorkItem(ctx, ws, id, parent, *issue, "")
 	if err != nil {
 		return nil, fmt.Errorf("claim task: %w", err)
+	}
+	return claimed, nil
+}
+
+// claimReview claims one exact Review-column card without routing it through
+// the ready queue. The detail read provides an early, comprehensible conflict;
+// RequiredStatus carries the same precondition into FleetDB's atomic claim so a
+// concurrent status change cannot turn this into a claim of ordinary ready
+// work.
+func (m *Module) claimReview(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	params, err := decodeParams[struct {
+		TaskID string `json:"taskId"`
+	}](body)
+	if err != nil {
+		return nil, err
+	}
+	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	taskID := strings.TrimSpace(params.TaskID)
+	if taskID == "" {
+		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
+	}
+	issueBackend, err := m.issueBackends(ws, driverpkg.DriverRunActor(parent.RunID))
+	if err != nil {
+		return nil, err
+	}
+	detail, err := issueBackend.Get(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("get review task: %w", err)
+	}
+	if detail == nil || detail.Status != execution.DriverRunWorkItemRestoreReview {
+		return nil, fmt.Errorf("task %q is not in review: %w", taskID, execution.ErrConflict)
+	}
+	claimed, err := m.claimDriverRunWorkItem(
+		ctx, ws, id, parent, detail.IssueData, execution.DriverRunWorkItemRestoreReview,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("claim review task: %w", err)
 	}
 	return claimed, nil
 }
@@ -512,6 +555,7 @@ func (m *Module) claimDriverRunWorkItem(
 	id driverIdentity,
 	parent *domain.DriverRun,
 	issue backend.IssueData,
+	requiredStatus string,
 ) (*driverpkg.ClaimedTask, error) {
 	if m.execution == nil || m.executionAuthorities == nil {
 		return nil, fmt.Errorf("execution DriverRun Work Item claim capability is unavailable: %w", execution.ErrUnavailable)
@@ -526,7 +570,8 @@ func (m *Module) claimDriverRunWorkItem(
 	}
 	requestID := execution.ClaimDriverRunWorkItemRequestID(parent.RunID, issue.ID)
 	result, err := m.execution.ClaimDriverRunWorkItem(ctx, auth, execution.ClaimDriverRunWorkItemCommand{
-		WorkspaceKey: ws, RequestID: requestID, Owner: owner, WorkItemID: issue.ID, ClaimedAt: time.Now().UTC(),
+		WorkspaceKey: ws, RequestID: requestID, Owner: owner, WorkItemID: issue.ID,
+		RequiredStatus: requiredStatus, ClaimedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return nil, err

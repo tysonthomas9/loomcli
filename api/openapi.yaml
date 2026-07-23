@@ -2762,11 +2762,13 @@ paths:
     post:
       operationId: stopAgent
       tags: [agent-control]
-      summary: Stop an agent (yield by default, force with body)
+      summary: Stop an agent using its runtime owner
       description: |
-        Without `force` (or empty body): sends `agent_yield` to the daemon,
-        returns 202 Accepted. With `{"force": true}`: sends `agent_stop(force=true)`,
-        returns 200.
+        Supervised workers yield through their daemon by default and return
+        202 Accepted; `{"force": true}` sends `agent_stop(force=true)` and
+        returns 200. Interactive agents are owned by the web terminal runtime,
+        so Stop terminates their PTY synchronously and returns 200 without
+        enqueueing a daemon command.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2777,7 +2779,7 @@ paths:
               $ref: "#/components/schemas/StopAgentRequest"
       responses:
         "200":
-          description: Agent force-stopped
+          description: Interactive agent stopped or supervised worker force-stopped
           content:
             application/json:
               schema:

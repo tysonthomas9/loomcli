@@ -15,6 +15,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+const executionDriverRunReviewClaimFingerprintPrefix = "driver-run-work-item-claim-v2:"
+
 type executionTaskRunRequestBody struct {
 	CommandID            string                  `json:"command_id"`
 	TaskRunID            string                  `json:"task_run_id"`
@@ -190,8 +192,10 @@ func (s *executionStore) ClaimDriverRunWorkItem(
 	ctx context.Context,
 	command ExecutionDriverRunWorkItemClaimCommand,
 ) (*ExecutionDriverRunWorkItemResult, error) {
+	command.RequiredStatus = strings.TrimSpace(command.RequiredStatus)
 	if !validExecutionDriverRunWorkItemOwner(command.WorkspaceKey, command.CommandID, command.RunID, command.TaskID,
 		command.NodeID, command.LeaseID, command.LeaseToken, command.FencingToken) || command.ClaimedAt.IsZero() ||
+		(command.RequiredStatus != "" && command.RequiredStatus != "review") ||
 		command.ClaimTTL < 0 || (command.ClaimTTL > 0 && command.ClaimTTL < time.Second) {
 		return nil, fmt.Errorf("execution DriverRun Work Item claim identity, owner, token, TTL, and time are required: %w", ErrExecutionInvalid)
 	}
@@ -205,8 +209,12 @@ func (s *executionStore) ClaimDriverRunWorkItem(
 		LeaseID         string    `json:"lease_id"`
 		FencingToken    int64     `json:"fencing_token"`
 		ClaimTTLSeconds int64     `json:"claim_ttl_seconds,omitempty"`
+		RequiredStatus  string    `json:"required_status,omitempty"`
 		ClaimedAt       time.Time `json:"claimed_at"`
-	}{command.CommandID, command.NodeID, command.LeaseID, command.FencingToken, claimTTLSeconds, command.ClaimedAt}
+	}{
+		command.CommandID, command.NodeID, command.LeaseID, command.FencingToken,
+		claimTTLSeconds, command.RequiredStatus, command.ClaimedAt,
+	}
 	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.RunID) +
 		"/work-items/" + pathEscape(command.TaskID) + "/claim"
 	var result ExecutionDriverRunWorkItemResult
@@ -218,7 +226,7 @@ func (s *executionStore) ClaimDriverRunWorkItem(
 		return nil, fmt.Errorf("DriverRun Work Item claim returned unexpected HTTP status %d: %w", status, ErrExecutionUnavailable)
 	}
 	if !validExecutionDriverRunWorkItemResult(&result, command.WorkspaceKey, command.RunID, command.TaskID,
-		command.CommandID, "claim_work_item", "claimed", command.ClaimedAt, true) {
+		command.CommandID, "claim_work_item", "claimed", command.ClaimedAt, command.RequiredStatus, true) {
 		return nil, fmt.Errorf("DriverRun Work Item claim returned divergent receipt: %w", ErrExecutionUnavailable)
 	}
 	return &result, nil
@@ -228,9 +236,15 @@ func (s *executionStore) ReleaseDriverRunWorkItem(
 	ctx context.Context,
 	command ExecutionDriverRunWorkItemReleaseCommand,
 ) (*ExecutionDriverRunWorkItemResult, error) {
+	command.RestoreStatus = strings.TrimSpace(command.RestoreStatus)
+	if command.RestoreStatus == "" {
+		command.RestoreStatus = "open"
+	}
 	if !validExecutionDriverRunWorkItemOwner(command.WorkspaceKey, command.CommandID, command.RunID, command.TaskID,
 		command.NodeID, command.LeaseID, command.LeaseToken, command.FencingToken) ||
-		strings.TrimSpace(command.ClaimActionID) == "" || command.ReleasedAt.IsZero() {
+		strings.TrimSpace(command.ClaimActionID) == "" ||
+		(command.RestoreStatus != "open" && command.RestoreStatus != "review") ||
+		command.ReleasedAt.IsZero() {
 		return nil, fmt.Errorf("execution DriverRun Work Item release identity, owner, token, claim action, and time are required: %w", ErrExecutionInvalid)
 	}
 	body := struct {
@@ -239,8 +253,12 @@ func (s *executionStore) ReleaseDriverRunWorkItem(
 		LeaseID       string    `json:"lease_id"`
 		FencingToken  int64     `json:"fencing_token"`
 		ClaimActionID string    `json:"claim_action_id"`
+		RestoreStatus string    `json:"restore_status"`
 		ReleasedAt    time.Time `json:"released_at"`
-	}{command.CommandID, command.NodeID, command.LeaseID, command.FencingToken, command.ClaimActionID, command.ReleasedAt}
+	}{
+		command.CommandID, command.NodeID, command.LeaseID, command.FencingToken,
+		command.ClaimActionID, command.RestoreStatus, command.ReleasedAt,
+	}
 	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.RunID) +
 		"/work-items/" + pathEscape(command.TaskID) + "/release"
 	var result ExecutionDriverRunWorkItemResult
@@ -252,10 +270,78 @@ func (s *executionStore) ReleaseDriverRunWorkItem(
 		return nil, fmt.Errorf("DriverRun Work Item release returned unexpected HTTP status %d: %w", status, ErrExecutionUnavailable)
 	}
 	if !validExecutionDriverRunWorkItemResult(&result, command.WorkspaceKey, command.RunID, command.TaskID,
-		command.CommandID, "release_work_item", "released", command.ReleasedAt, false) {
+		command.CommandID, "release_work_item", "released", command.ReleasedAt, "", false) {
 		return nil, fmt.Errorf("DriverRun Work Item release returned divergent receipt: %w", ErrExecutionUnavailable)
 	}
 	return &result, nil
+}
+
+func (s *executionStore) HandoffDriverRunReviewWorkItem(
+	ctx context.Context,
+	command ExecutionDriverRunReviewWorkItemHandoffCommand,
+) (*ExecutionDriverRunWorkItemResult, error) {
+	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
+	command.TargetStatus = strings.TrimSpace(command.TargetStatus)
+	command.Reason = strings.TrimSpace(command.Reason)
+	if !validExecutionDriverRunWorkItemOwner(command.WorkspaceKey, command.CommandID, command.RunID, command.TaskID,
+		command.NodeID, command.LeaseID, command.LeaseToken, command.FencingToken) ||
+		strings.TrimSpace(command.ClaimActionID) == "" || command.TaskRunID == "" ||
+		(command.TargetStatus != "open" && command.TargetStatus != "closed") ||
+		command.HandedOffAt.IsZero() {
+		return nil, fmt.Errorf("execution DriverRun review handoff identity, owner, token, claim action, TaskRun, target, and time are required: %w", ErrExecutionInvalid)
+	}
+	body := struct {
+		CommandID     string    `json:"command_id"`
+		NodeID        string    `json:"node_id"`
+		LeaseID       string    `json:"lease_id"`
+		FencingToken  int64     `json:"fencing_token"`
+		ClaimActionID string    `json:"claim_action_id"`
+		TaskRunID     string    `json:"task_run_id"`
+		TargetStatus  string    `json:"target_status"`
+		Reason        string    `json:"reason"`
+		HandedOffAt   time.Time `json:"handed_off_at"`
+	}{
+		command.CommandID, command.NodeID, command.LeaseID, command.FencingToken,
+		command.ClaimActionID, command.TaskRunID, command.TargetStatus, command.Reason, command.HandedOffAt,
+	}
+	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.RunID) +
+		"/work-items/" + pathEscape(command.TaskID) + "/review-handoff"
+	var result ExecutionDriverRunWorkItemResult
+	status, err := s.client.doWithHeadersStatus(ctx, http.MethodPost, path, body, &result, map[string]string{"X-Lease-Token": command.LeaseToken})
+	if err != nil {
+		return nil, mapExecutionTransportError("handoff DriverRun review Work Item", err)
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("DriverRun review Work Item handoff returned unexpected HTTP status %d: %w", status, ErrExecutionUnavailable)
+	}
+	if !validExecutionDriverRunReviewWorkItemHandoffResult(&result, command) {
+		return nil, fmt.Errorf("DriverRun review Work Item handoff returned divergent receipt: %w", ErrExecutionUnavailable)
+	}
+	return &result, nil
+}
+
+func validExecutionDriverRunReviewWorkItemHandoffResult(
+	result *ExecutionDriverRunWorkItemResult,
+	command ExecutionDriverRunReviewWorkItemHandoffCommand,
+) bool {
+	if result == nil || result.Issue == nil || result.Action == nil ||
+		result.Issue.Workspace != command.WorkspaceKey || result.Issue.ID != command.TaskID ||
+		result.Issue.Status != command.TargetStatus || result.Issue.Assignee != "" ||
+		result.Issue.UpdatedAt.IsZero() {
+		return false
+	}
+	actor := "driver-run:" + command.RunID
+	wantActionID := "driver-run-review-work-item-handoff:" + command.CommandID
+	action := result.Action
+	return executionChecksPass(
+		action.WorkspaceKey == command.WorkspaceKey, action.ActionID == wantActionID,
+		action.IdempotencyKey == wantActionID, action.ActionType == "handoff_review_work_item",
+		action.TargetRef == command.TaskID, action.RequestedBy == actor, action.Status == "applied",
+		validExecutionCommandFingerprint(action.RequestRef),
+		action.ResponseRef == "issue://"+command.TaskID+"#handed-off", !action.CreatedAt.IsZero(),
+		action.AppliedAt != nil && !action.AppliedAt.IsZero() && action.AppliedAt.Equal(action.CreatedAt),
+		result.Replayed || executionPersistedCommandTimeMatches(action.CreatedAt, command.HandedOffAt),
+	)
 }
 
 func validExecutionDriverRunWorkItemOwner(workspace, commandID, runID, taskID, nodeID, leaseID, leaseToken string, fencingToken int64) bool {
@@ -267,6 +353,7 @@ func validExecutionDriverRunWorkItemResult(
 	result *ExecutionDriverRunWorkItemResult,
 	workspace, runID, taskID, commandID, actionType, responseState string,
 	requestedAt time.Time,
+	requiredStatus string,
 	claim bool,
 ) bool {
 	if result == nil || result.Issue == nil || result.Action == nil || result.Issue.Workspace != workspace ||
@@ -284,10 +371,17 @@ func validExecutionDriverRunWorkItemResult(
 	actionPrefix := "driver-run-work-item-" + strings.TrimSuffix(actionType, "_work_item") + ":"
 	wantActionID := actionPrefix + commandID
 	action := result.Action
+	validRequestRef := validExecutionCommandFingerprint(action.RequestRef)
+	if claim && requiredStatus == "review" {
+		validRequestRef = validExecutionPrefixedCommandFingerprint(
+			action.RequestRef,
+			executionDriverRunReviewClaimFingerprintPrefix,
+		)
+	}
 	return executionChecksPass(
 		action.WorkspaceKey == workspace, action.ActionID == wantActionID, action.IdempotencyKey == wantActionID,
 		action.ActionType == actionType, action.TargetRef == taskID, action.RequestedBy == actor,
-		action.Status == "applied", validExecutionCommandFingerprint(action.RequestRef),
+		action.Status == "applied", validRequestRef,
 		action.ResponseRef == "issue://"+taskID+"#"+responseState, !action.CreatedAt.IsZero(),
 		action.AppliedAt != nil && !action.AppliedAt.IsZero() && action.AppliedAt.Equal(action.CreatedAt),
 		result.Replayed || executionPersistedCommandTimeMatches(action.CreatedAt, requestedAt),
@@ -299,7 +393,7 @@ func validExecutionReleasedIssue(issue *ExecutionIssue, actor string) bool {
 		return false
 	}
 	switch issue.Status {
-	case "open":
+	case "open", "review":
 		return issue.Assignee == ""
 	case "closed", "tombstone":
 		return issue.Assignee == actor
@@ -314,6 +408,11 @@ func validExecutionCommandFingerprint(value string) bool {
 	}
 	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
 	return err == nil
+}
+
+func validExecutionPrefixedCommandFingerprint(value, prefix string) bool {
+	return strings.HasPrefix(value, prefix) &&
+		validExecutionCommandFingerprint(strings.TrimPrefix(value, prefix))
 }
 
 func executionPersistedCommandTimeMatches(got, want time.Time) bool {

@@ -53,7 +53,7 @@ func New(deps routecontracts.Deps, automationModules automationroutes.Modules) [
 		automationModules.Webhooks,
 		roles.NewModule(deps.Store),
 		automationModules.TriggerBindings,
-		connectors.NewModule(deps.Store, deps.LocalSettingsDir),
+		connectors.NewModule(deps.Store, deps.LocalSettingsDir, deps.AutomationOperator),
 		approvals.New(approvals.Config{Store: deps.Store, Awaits: automationModules.EventAwaits}),
 		taskrunapi.NewModule(taskrunapi.Config{
 			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL, LocalSettingsDir: deps.LocalSettingsDir,

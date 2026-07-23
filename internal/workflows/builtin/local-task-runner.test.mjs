@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
+  applyRolePolicy,
   backendArgs,
   parseNumstat,
   parseRepoSlug,
@@ -138,6 +139,9 @@ const ENV_KEYS = [
   "LOOM_AGENT_EFFORT",
   "LOOM_CLAUDE_EFFORT",
   "LOOM_OPENCODE_MODEL",
+  "LOOM_READ_ONLY",
+  "LOOM_ALLOWED_TOOLS",
+  "LOOM_DENIED_TOOLS",
   "LOOM_COST_PER_MTOK_INPUT",
   "LOOM_COST_PER_MTOK_OUTPUT",
   "LOOM_TASK_RUNNER_STREAM_STDERR",
@@ -241,6 +245,18 @@ afterEach(() => {
 });
 
 describe("local-task-runner pure helpers", () => {
+  it("prepends trusted role policy without changing an unconstrained prompt", () => {
+    assert.equal(applyRolePolicy("Do the work"), "Do the work");
+    process.env.LOOM_READ_ONLY = "1";
+    process.env.LOOM_ALLOWED_TOOLS = "read, grep,read";
+    process.env.LOOM_DENIED_TOOLS = "write";
+    const prompt = applyRolePolicy("Do the work");
+    assert.match(prompt, /READ-ONLY run/);
+    assert.match(prompt, /read, grep/);
+    assert.match(prompt, /Do not use these tool categories: write/);
+    assert.ok(prompt.endsWith("Do the work"));
+  });
+
   it("resolveBackend defaults to codex", () => {
     delete process.env.LOOM_TASK_RUNNER_BACKEND;
     assert.equal(resolveBackend(), "codex");
@@ -668,6 +684,22 @@ describe("local-task-runner pure helpers", () => {
 });
 
 describe("local-task-runner fail-closed classes", () => {
+  it("rejects and discards changes made by a read-only role", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.LOOM_READ_ONLY = "1";
+    process.env.FAKE_WRITE_FILE = "read-only-violation.txt";
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_read_only_violation");
+    assert.equal(out.patch, undefined);
+    assert.ok(!fs.existsSync(path.join(worktree, "read-only-violation.txt")));
+    assert.ok(out.transcript_entries.some((entry) => entry.role === "assistant"));
+  });
+
   it("fails with local_backend_unsupported for an unknown backend", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "frobnicate";
     process.env.LOOM_WORKTREE_PATH = worktree;
@@ -698,6 +730,7 @@ describe("local-task-runner fail-closed classes", () => {
     const out = await run();
     assert.equal(out.status, "failed");
     assert.equal(out.errorClass, "local_backend_unavailable");
+    assert.equal(out.transcript_entries, undefined, "pre-spawn failures have no model transcript");
   });
 
   it("fails with local_agent_failed when the CLI exits nonzero", async () => {
@@ -935,6 +968,10 @@ describe("local-task-runner success", () => {
     assert.equal(out.errorClass, "local_patch_contains_credential");
     assert.equal(out.patch, undefined, "rejected credential patch must not be persisted");
     assert.ok(!JSON.stringify(out).includes(canary), "rejected result must not echo the credential");
+    assert.ok(
+      out.transcript_entries.some((entry) => entry.role === "assistant" && entry.text === "did the work"),
+      "post-model patch rejection must preserve the redacted model transcript",
+    );
   });
 
   it("redacts a lease canary echoed through a terminal stream error", async () => {
@@ -1055,6 +1092,10 @@ describe("local-task-runner isolated worktree", () => {
     assert.equal(out.status, "failed");
     assert.equal(out.errorClass, "local_patch_capture_failed");
     assert.equal(out.patch, undefined, "an incompletely inspected patch must not be persisted");
+    assert.ok(
+      out.transcript_entries.some((entry) => entry.role === "assistant" && entry.text === "did the work"),
+      "post-model patch capture failure must preserve model evidence",
+    );
   });
 
   it("runs the CLI in an isolated worktree, leaving the host clean and returning base_ref=HEAD", async () => {
@@ -1175,7 +1216,7 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.runtimeMetadata.github_pr_url, undefined);
   });
 
-  it("deliveryMode=local-branch pushes loom/<task> to a filesystem origin and suppresses patch-back", async () => {
+  it("deliveryMode=local-branch pushes loom/<task> and returns exact review evidence", async () => {
     const origin = createBareOrigin();
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
@@ -1195,8 +1236,9 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.runtimeMetadata.delivery, "local_branch");
     assert.equal(out.runtimeMetadata.local_branch, "loom/T-LOCAL");
     assert.equal(out.runtimeMetadata.head_sha, refSha(origin, "refs/heads/loom/T-LOCAL"));
-    assert.equal(out.patch, undefined, "local branch is the deliverable, so patch-back must be skipped");
-    assert.equal(out.base_ref, undefined);
+    assert.ok(out.patch.includes("local-branch.txt"), "published local branch must retain its exact patch evidence");
+    assert.ok(out.base_ref && out.base_ref.length > 0, "published evidence must retain its comparison base");
+    assert.equal(out.patch_base_ref, out.base_ref);
     const files = execFileSync("git", ["--git-dir", origin, "ls-tree", "-r", "--name-only", out.runtimeMetadata.head_sha]).toString();
     assert.ok(files.includes("local-branch.txt"), "pushed branch should contain the backend change");
   });
@@ -1383,6 +1425,10 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.status, "failed");
     assert.equal(out.errorClass, "local_branch_push_failed");
     assert.equal(out.exitCode, 1);
+    assert.ok(
+      out.transcript_entries.some((entry) => entry.role === "assistant" && entry.text === "did the work"),
+      "post-model local delivery failure must preserve model evidence",
+    );
   });
 
   it("deliveryMode=local-branch never activates for GitHub/http origins (keeps patch-back)", async () => {
@@ -1431,6 +1477,10 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.status, "failed");
     assert.equal(out.errorClass, "github_credentials_missing");
     assert.equal(out.exitCode, 1);
+    assert.ok(
+      out.transcript_entries.some((entry) => entry.role === "assistant" && entry.text === "did the work"),
+      "post-model PR delivery failure must preserve model evidence",
+    );
   });
 
   it("openPullRequest=true but the agent produced no changes skips the PR (delivery=pull_request_skipped_no_changes)", async () => {
@@ -1484,6 +1534,10 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.status, "failed");
     assert.equal(out.errorClass, "github_credentials_missing");
     assert.equal(out.exitCode, 1);
+    assert.ok(
+      out.transcript_entries.some((entry) => entry.role === "assistant" && entry.text === "did the work"),
+      "post-model stacked delivery failure must preserve model evidence",
+    );
   });
 
   it("stacked mode with no changes records an empty unit (no branch pushed)", async () => {

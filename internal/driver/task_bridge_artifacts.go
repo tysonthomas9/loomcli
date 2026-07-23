@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -44,7 +45,7 @@ func (e HostBridgeTaskExecutor) registerRunnerArtifacts(ctx context.Context, req
 	for i, artifact := range artifacts {
 		artifactID := firstNonEmpty(artifact.ArtifactID, artifact.ArtifactIDCamel, artifact.ID)
 		if artifactID == "" {
-			artifactID = fmt.Sprintf("artifact-%s-%d", req.TaskRunID, i+1)
+			artifactID = taskRunAttemptArtifactID(req, fmt.Sprintf("artifact-%s-%d", req.TaskRunID, i+1))
 		}
 		uri := strings.TrimSpace(artifact.URI)
 		if uri == "" {
@@ -132,6 +133,7 @@ func runnerArtifactMetadataWithSource(req TaskExecRequest, source map[string]str
 	metadata["runner_entrypoint"] = req.RunnerEntrypoint
 	metadata["runner_driver_version_id"] = req.RunnerVersionID
 	metadata["provider_profile"] = req.ProviderProfile
+	metadata["task_run_attempt"] = strconv.Itoa(taskExecAttempt(req))
 	return metadata
 }
 
@@ -147,7 +149,7 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 		return TaskExecResult{}, err
 	}
 	if len(transcriptContent) > 0 && result.RuntimeMetadata["transcript_ref"] == "" {
-		artifactID := "transcript-" + req.TaskRunID
+		artifactID := taskRunAttemptArtifactID(req, "transcript-"+req.TaskRunID)
 		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
 		if err != nil {
 			return TaskExecResult{}, err
@@ -165,7 +167,7 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 		return TaskExecResult{}, err
 	}
 	if len(logContent) > 0 && result.LogsRef == "" {
-		artifactID := "logs-" + req.TaskRunID
+		artifactID := taskRunAttemptArtifactID(req, "logs-"+req.TaskRunID)
 		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
 		if err != nil {
 			return TaskExecResult{}, err
@@ -290,7 +292,7 @@ func (e HostBridgeTaskExecutor) createPatchArtifact(ctx context.Context, req Tas
 	}
 	artifactID := firstNonEmpty(runner.PatchArtifactID, runner.PatchArtifactIDCamel)
 	if artifactID == "" {
-		artifactID = "patch-" + req.TaskRunID
+		artifactID = taskRunAttemptArtifactID(req, "patch-"+req.TaskRunID)
 	}
 	summary := firstNonEmpty(runner.PatchSummary, runner.PatchSummaryCamel, "task patch")
 	mimeType := firstNonEmpty(runner.PatchMIMEType, runner.PatchMIMETypeCamel, "text/x-diff")
@@ -426,7 +428,27 @@ func runnerArtifactMetadata(req TaskExecRequest) map[string]string {
 		"provider_profile":         req.ProviderProfile,
 		"runtime":                  "flue",
 		"task_run_id":              req.TaskRunID,
+		"task_run_attempt":         strconv.Itoa(taskExecAttempt(req)),
 	}
+}
+
+func taskExecAttempt(req TaskExecRequest) int {
+	if req.TaskRunAttempt < 1 {
+		return 1
+	}
+	return req.TaskRunAttempt
+}
+
+// taskRunAttemptArtifactID preserves the long-standing first-attempt identity
+// used by transcript links while assigning each retry its own immutable
+// artifact. Replaying the same attempt remains idempotent; a later attempt can
+// persist different evidence without colliding with the failed attempt.
+func taskRunAttemptArtifactID(req TaskExecRequest, baseID string) string {
+	attempt := taskExecAttempt(req)
+	if attempt == 1 {
+		return baseID
+	}
+	return fmt.Sprintf("%s-attempt-%d", baseID, attempt)
 }
 
 func sessionIDFromFlueTaskSession(session *flueTaskSession) string {

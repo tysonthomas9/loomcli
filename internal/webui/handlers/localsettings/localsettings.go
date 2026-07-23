@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
@@ -16,6 +17,22 @@ type response struct {
 	Data    *runtimesettings.SanitizedSettings `json:"data,omitempty"`
 	Error   string                             `json:"error,omitempty"`
 	Message string                             `json:"message,omitempty"`
+}
+
+type runtimeCredentialPreflightRequest struct {
+	Provider string `json:"provider"`
+}
+
+type runtimeCredentialPreflightData struct {
+	Provider   string `json:"provider"`
+	Configured bool   `json:"configured"`
+	Usable     bool   `json:"usable"`
+}
+
+type runtimeCredentialPreflightResponse struct {
+	Success bool                            `json:"success"`
+	Data    *runtimeCredentialPreflightData `json:"data,omitempty"`
+	Error   string                          `json:"error,omitempty"`
 }
 
 type patchRequest struct {
@@ -61,6 +78,11 @@ type PatchOptions struct {
 	OnGitHubRuntimeCredentialChanged func()
 }
 
+// patchMu serializes the load/apply/save transaction. Save itself publishes
+// atomically, but without this owner lock two concurrent PATCH requests can
+// both read the same generation and silently discard each other's fields.
+var patchMu sync.Mutex
+
 // HandleGet returns sanitized desktop-local runtime settings.
 func HandleGet(dataDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
@@ -69,8 +91,64 @@ func HandleGet(dataDir string) http.HandlerFunc {
 			handler.WriteJSON(w, http.StatusInternalServerError, response{Success: false, Error: err.Error()})
 			return
 		}
-		sanitized := runtimesettings.Sanitize(settings)
+		sanitized := runtimesettings.SanitizeWithRuntimeCredentialReadiness(dataDir, settings)
 		handler.WriteJSON(w, http.StatusOK, response{Success: true, Data: &sanitized})
+	}
+}
+
+// HandleRuntimeCredentialPreflight verifies that the current sealed runtime
+// credential can be opened without returning the credential or its vault error.
+// Workflow activation calls this immediately before any connector, binding, or
+// grant mutation.
+func HandleRuntimeCredentialPreflight(dataDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, handler.MaxRequestBody)
+		var req runtimeCredentialPreflightRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				handler.WriteJSON(w, http.StatusRequestEntityTooLarge, runtimeCredentialPreflightResponse{
+					Success: false,
+					Error:   "request body too large",
+				})
+				return
+			}
+			handler.WriteJSON(w, http.StatusBadRequest, runtimeCredentialPreflightResponse{
+				Success: false,
+				Error:   "invalid request body",
+			})
+			return
+		}
+
+		provider := strings.ToLower(strings.TrimSpace(req.Provider))
+		switch provider {
+		case runtimesettings.RuntimeCredentialProviderDaytona,
+			runtimesettings.RuntimeCredentialProviderGitHub:
+		default:
+			handler.WriteJSON(w, http.StatusBadRequest, runtimeCredentialPreflightResponse{
+				Success: false,
+				Error:   "runtime credential provider is not supported",
+			})
+			return
+		}
+
+		settings, err := load(dataDir)
+		if err != nil {
+			handler.WriteJSON(w, http.StatusInternalServerError, runtimeCredentialPreflightResponse{
+				Success: false,
+				Error:   "runtime credential readiness is unavailable",
+			})
+			return
+		}
+		readiness := runtimesettings.RuntimeCredentialReadiness(dataDir, settings, provider)
+		handler.WriteJSON(w, http.StatusOK, runtimeCredentialPreflightResponse{
+			Success: true,
+			Data: &runtimeCredentialPreflightData{
+				Provider:   provider,
+				Configured: readiness.Configured,
+				Usable:     readiness.Usable,
+			},
+		})
 	}
 }
 
@@ -94,24 +172,29 @@ func HandlePatch(dataDir string, options ...PatchOptions) http.HandlerFunc {
 			return
 		}
 
+		patchMu.Lock()
 		settings, err := load(dataDir)
 		if err != nil {
+			patchMu.Unlock()
 			handler.WriteJSON(w, http.StatusInternalServerError, response{Success: false, Error: err.Error()})
 			return
 		}
 		githubCredentialChanged, err := applyPatchRequest(dataDir, &settings, req)
 		if err != nil {
+			patchMu.Unlock()
 			handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
 			return
 		}
 		if err := runtimesettings.Save(dataDir, settings); err != nil {
+			patchMu.Unlock()
 			handler.WriteJSON(w, http.StatusBadRequest, response{Success: false, Error: err.Error()})
 			return
 		}
+		patchMu.Unlock()
 		if githubCredentialChanged && opts.OnGitHubRuntimeCredentialChanged != nil {
 			opts.OnGitHubRuntimeCredentialChanged()
 		}
-		sanitized := runtimesettings.Sanitize(settings)
+		sanitized := runtimesettings.SanitizeWithRuntimeCredentialReadiness(dataDir, settings)
 		handler.WriteJSON(w, http.StatusOK, response{
 			Success: true,
 			Data:    &sanitized,

@@ -40,8 +40,9 @@ type CredentialSeedInvalidator interface {
 
 // LocalSettingsHandlers contains the non-workspace local settings routes.
 type LocalSettingsHandlers struct {
-	Get   http.HandlerFunc
-	Patch http.HandlerFunc
+	Get                        http.HandlerFunc
+	Patch                      http.HandlerFunc
+	RuntimeCredentialPreflight http.HandlerFunc
 }
 
 // NewIssueModules creates the issue and session modules.
@@ -117,8 +118,9 @@ func NewLocalSettingsHandlers(dataDir string, invalidator CredentialSeedInvalida
 		options.OnGitHubRuntimeCredentialChanged = invalidator.InvalidateCredentialSeeds
 	}
 	return LocalSettingsHandlers{
-		Get:   locsettings.HandleGet(dataDir),
-		Patch: locsettings.HandlePatch(dataDir, options),
+		Get:                        locsettings.HandleGet(dataDir),
+		Patch:                      locsettings.HandlePatch(dataDir, options),
+		RuntimeCredentialPreflight: locsettings.HandleRuntimeCredentialPreflight(dataDir),
 	}
 }
 

@@ -93,14 +93,19 @@ export function AgentDetailMain({
     () => setPendingAgentName(undefined),
     [],
   );
+  const interactiveAgent = agent != null && isInteractiveAgent(agent);
+  const daemonSupervisedWorker = agent != null && !interactiveAgent;
   const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
   const ephemeralWorker = agent != null && isEphemeralWorker(agent);
-  const shouldResolveLeadTerminal =
-    agent != null && isInteractiveAgent(agent) && terminalUnavailable;
+  const shouldResolveLeadTerminal = interactiveAgent && terminalUnavailable;
   const terminalEmptyState =
     agent != null && terminalUnavailable
       ? terminalUnavailableEmptyState(agent)
       : null;
+  const terminalAgentName =
+    !daemonSupervisedWorker && pendingAgentName === agentName
+      ? pendingAgentName
+      : undefined;
 
   if (!agentName) {
     return (
@@ -142,6 +147,11 @@ export function AgentDetailMain({
       >
         {ephemeralWorker ? (
           <EphemeralWorkerSummary agent={agent} />
+        ) : daemonSupervisedWorker ? (
+          <EmptyState
+            message="Worker terminal unavailable"
+            detail="This worker is daemon-supervised. Use worker logs or task session history instead of starting a second terminal process."
+          />
         ) : terminalUnavailable && !shouldResolveLeadTerminal ? (
           <EmptyState
             message={terminalEmptyState?.message ?? "Agent is stopped"}
@@ -154,7 +164,7 @@ export function AgentDetailMain({
           <Suspense fallback={<LoadingSkeleton.Terminal />}>
             <TerminalView
               isActive={true}
-              pendingAgentName={pendingAgentName}
+              pendingAgentName={terminalAgentName}
               onAgentNameConsumed={handleAgentNameConsumed}
               pendingTerminalInput={pendingTerminalInput}
               onTerminalInputConsumed={onTerminalInputConsumed}

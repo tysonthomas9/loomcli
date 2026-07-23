@@ -36,7 +36,10 @@ function makeLoom(options = {}) {
         if (options.roleError) throw options.roleError;
         return options.role || {
           prompt: "perform the role",
-          role: { task_filter: options.taskFilter || "has_design" },
+          role: {
+            task_filter: options.taskFilter === undefined ? "has_design" : options.taskFilter,
+            read_only: options.readOnly === true,
+          },
         };
       },
     },
@@ -246,6 +249,84 @@ test("flat Automation coder payload rejects a missing design before claiming", a
   assert.equal(result.skipped, true);
   assert.equal(result.claimed, false);
   none(calls, "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+for (const legacyFilter of ["", "any"]) {
+  test(`a named role with legacy ${JSON.stringify(legacyFilter)} filter cannot steal needs-plan work`, async () => {
+    const { result, calls, caught } = await invoke({ taskFilter: legacyFilter }, {
+      roleName: "custom-coder",
+      event: { taskId: TASK_ID, hasDesign: false, labels: [] },
+    });
+
+    assert.equal(caught, undefined);
+    assert.equal(result.disposition, "completed");
+    assert.equal(result.skipped, true);
+    assert.equal(result.claimed, false);
+    assert.match(result.summary, /filter has_design/);
+    none(calls, "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+  });
+
+  test(`a named role with legacy ${JSON.stringify(legacyFilter)} filter runs the coder lifecycle for designed work`, async () => {
+    const { result, calls, caught } = await invoke({ taskFilter: legacyFilter }, {
+      roleName: "custom-coder",
+      event: { taskId: TASK_ID, hasDesign: true, labels: [] },
+    });
+
+    assert.equal(caught, undefined);
+    assert.equal(result.disposition, "completed");
+    assert.deepEqual(one(calls, "tasks.claim"), { taskId: TASK_ID, actor: "prompt-agent" });
+    assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+    const request = taskRunRequest(calls);
+    assert.equal(request.input.deliveryMode, "local-branch");
+    assert.deepEqual(one(calls, "issues.update"), {
+      issueId: TASK_ID,
+      status: "closed",
+      assignee: "",
+    });
+  });
+}
+
+test("a named role with an unknown filter fails closed before claiming", async () => {
+  const { result, calls, caught } = await invoke({ taskFilter: "review" }, {
+    roleName: "custom-reviewer",
+    event: { taskId: TASK_ID, hasDesign: true, labels: [] },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "failed");
+  assert.equal(result.errorClass, "prompt_agent_unsupported_task_filter");
+  assert.equal(result.claimed, false);
+  assert.equal(result.roleName, "custom-reviewer");
+  assert.equal(result.taskFilter, "review");
+  assert.match(result.summary, /unsupported task_filter "review"/);
+  none(calls, "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("a read-only custom role hands designed work to review without closing it", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "has_design",
+    readOnly: true,
+    issue: { design: "approved design", labels: [] },
+    awaitResult: {
+      status: "completed",
+      runtime_metadata: { delivery: "patch_back", backend: "codex", files_changed: "0" },
+    },
+  }, {
+    roleName: "triage",
+    event: { taskId: TASK_ID, hasDesign: true, labels: [] },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.outcome, "read-only-review");
+  const request = taskRunRequest(calls);
+  assert.equal(request.input.deliveryMode, "patch-back");
+  assert.deepEqual(one(calls, "issues.update"), {
+    issueId: TASK_ID,
+    status: "review",
+    assignee: "",
+  });
+  none(calls, "tasks.release", "issues.addLabel", "needsReview");
 });
 
 test("task-ready event permits the single-repo empty-source fallback", async () => {

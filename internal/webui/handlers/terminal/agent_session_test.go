@@ -41,8 +41,23 @@ type failingPutTerminalService struct {
 	err error
 }
 
+type signalingPutTerminalService struct {
+	service.TerminalService
+	once      sync.Once
+	putCalled chan struct{}
+}
+
 func (s failingPutTerminalService) PutTab(context.Context, string, *tabmeta.TabMetadata) error {
 	return s.err
+}
+
+func (s *signalingPutTerminalService) PutTab(
+	ctx context.Context,
+	workspace string,
+	meta *tabmeta.TabMetadata,
+) error {
+	s.once.Do(func() { close(s.putCalled) })
+	return s.TerminalService.PutTab(ctx, workspace, meta)
 }
 
 func (s slowListTerminalService) ListTabs(ctx context.Context, wsID string) ([]tabmeta.TabMetadata, error) {
@@ -281,7 +296,7 @@ func TestBuildAgentLaunchSpecCustomInteractiveRoleUsesLeadRuntime(t *testing.T) 
 	}
 }
 
-func TestBuildAgentLaunchSpecCustomWorkerRoleUnchanged(t *testing.T) {
+func TestBuildAgentLaunchSpecRejectsDaemonSupervisedWorker(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -296,17 +311,12 @@ func TestBuildAgentLaunchSpecCustomWorkerRoleUnchanged(t *testing.T) {
 	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "review-a", RoleName: "reviewer", Parent: "EPIC-1"}
 
 	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "")
-	if err != nil {
-		t.Fatalf("buildAgentLaunchSpec: %v", err)
+	var svcErr *service.ServiceError
+	if launch != nil || !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("buildAgentLaunchSpec = (%#v, %v), want worker-terminal validation", launch, err)
 	}
-	cmd := strings.Join(launch.Argv, " ")
-	for _, want := range []string{"'agent' 'review-a'", "'--prompt' 'prompts/reviewer.md'", "'--auto'", "'--daemon-mode'", "'--task-filter' 'review'", "'--parent' 'EPIC-1'"} {
-		if !strings.Contains(cmd, want) {
-			t.Fatalf("launch command %q missing %q", cmd, want)
-		}
-	}
-	if strings.Contains(cmd, "'lead'") {
-		t.Fatalf("launch command %q contains lead runtime, want worker runtime", cmd)
+	if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
+		t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
 	}
 }
 
@@ -571,6 +581,100 @@ func TestEnsureAgentTerminalSessionSerializesConcurrentCreates(t *testing.T) {
 	}
 }
 
+func TestEnsureAgentTerminalSessionWaitsForStopLifecycleBoundary(t *testing.T) {
+	ctx := context.Background()
+	st, tabStore, rdb := newAgentSessionTestDeps(t)
+	baseSvc := webuiterminal.NewTerminalService(
+		nil,
+		tabStore,
+		nil,
+		rdb,
+		nil,
+		time.Now(),
+	)
+	putCalled := make(chan struct{})
+	svc := &signalingPutTerminalService{
+		TerminalService: baseSvc,
+		putCalled:       putCalled,
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "E2E",
+		Name:         "lead",
+		Kind:         string(domain.RoleKindInteractive),
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "E2E",
+		Name:         "first-terminal-race",
+		RoleName:     "lead",
+		DesiredState: domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	active := domain.AgentStateActive
+	if _, err := st.Agents().Update(ctx, "E2E", "first-terminal-race", store.AgentUpdate{State: &active}); err != nil {
+		t.Fatalf("activate agent: %v", err)
+	}
+
+	// Model Stop after its empty ownership snapshot. First-terminal metadata
+	// creation must wait until Stop makes the stopped state durable.
+	unlockStop := webuiterminal.LockAgentLifecycle("E2E", "first-terminal-race")
+	stopUnlocked := false
+	defer func() {
+		if !stopUnlocked {
+			unlockStop()
+		}
+	}()
+	type ensureResult struct {
+		meta *tabmeta.TabMetadata
+		err  error
+	}
+	resultCh := make(chan ensureResult, 1)
+	ensureStarted := make(chan struct{})
+	go func() {
+		close(ensureStarted)
+		meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "first-terminal-race")
+		resultCh <- ensureResult{meta: meta, err: err}
+	}()
+	<-ensureStarted
+	select {
+	case <-putCalled:
+		t.Fatal("first-terminal metadata was created inside Stop's snapshot-to-state-update gap")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	stopped := domain.AgentStateStopped
+	desiredStopped := domain.AgentDesiredStopped
+	if _, err := st.Agents().Update(ctx, "E2E", "first-terminal-race", store.AgentUpdate{
+		State:        &stopped,
+		DesiredState: &desiredStopped,
+	}); err != nil {
+		t.Fatalf("persist stopped lifecycle state: %v", err)
+	}
+	unlockStop()
+	stopUnlocked = true
+
+	var result ensureResult
+	select {
+	case result = <-resultCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("terminal metadata creation did not finish after Stop released the lifecycle boundary")
+	}
+	if result.err != nil {
+		t.Fatalf("ensureAgentTerminalSession: %v", result.err)
+	}
+	if result.meta == nil || result.meta.AgentID != "first-terminal-race" {
+		t.Fatalf("terminal metadata = %#v, want stopped interactive agent tab", result.meta)
+	}
+	select {
+	case <-putCalled:
+	default:
+		t.Fatal("terminal metadata was not created after Stop released the lifecycle boundary")
+	}
+}
+
 func TestEnsureAgentTerminalSessionRejectsStoppedAgentWithoutSession(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
@@ -602,6 +706,9 @@ func TestEnsureAgentTerminalSessionRejectsStoppedAgentWithoutSession(t *testing.
 	var svcErr *service.ServiceError
 	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
+	}
+	if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
+		t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
 	}
 }
 
@@ -639,8 +746,8 @@ func TestEnsureAgentTerminalSessionRejectsActiveEphemeralWorkerWithoutRelaunch(t
 	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
 	}
-	if !strings.Contains(svcErr.Message, "daemon-owned ephemeral worker") {
-		t.Fatalf("validation message = %q, want daemon-owned ephemeral worker guidance", svcErr.Message)
+	if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
+		t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
 	}
 
 	tabs, err := svc.ListTabs(ctx, "E2E")
@@ -648,7 +755,156 @@ func TestEnsureAgentTerminalSessionRejectsActiveEphemeralWorkerWithoutRelaunch(t
 		t.Fatalf("list tabs: %v", err)
 	}
 	if len(tabs) != 0 {
-		t.Fatalf("tab count = %d, want no terminal tab created for daemon-owned worker", len(tabs))
+		t.Fatalf("tab count = %d, want no terminal tab created for daemon-supervised worker", len(tabs))
+	}
+}
+
+func TestEnsureAgentTerminalSessionRejectsAdvancedServiceWorkersWithoutCreatingTabs(t *testing.T) {
+	tests := []struct {
+		name     string
+		roleName string
+		role     *store.RoleCreate
+	}{
+		{name: "planner", roleName: "plan"},
+		{name: "task runner", roleName: "task"},
+		{
+			name:     "bug triage",
+			roleName: "bug-triage",
+			role: &store.RoleCreate{
+				WorkspaceKey: "E2E",
+				Name:         "bug-triage",
+				Kind:         string(domain.RoleKindWorker),
+				PromptFile:   "prompts/bug-triage.md",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st, tabStore, rdb := newAgentSessionTestDeps(t)
+			svc := webuiterminal.NewTerminalService(
+				nil,
+				tabStore,
+				nil,
+				rdb,
+				nil,
+				time.Now(),
+			)
+			if tt.role != nil {
+				if _, err := st.Roles().Create(ctx, *tt.role); err != nil {
+					t.Fatalf("create role: %v", err)
+				}
+			}
+			if _, err := st.Agents().Create(ctx, store.AgentCreate{
+				WorkspaceKey: "E2E",
+				Name:         "advanced-worker",
+				RoleName:     tt.roleName,
+				Mode:         domain.AgentModeService,
+				DesiredState: domain.AgentDesiredRunning,
+			}); err != nil {
+				t.Fatalf("create agent: %v", err)
+			}
+			active := domain.AgentStateActive
+			if _, err := st.Agents().Update(ctx, "E2E", "advanced-worker", store.AgentUpdate{State: &active}); err != nil {
+				t.Fatalf("activate agent: %v", err)
+			}
+
+			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "advanced-worker")
+			var svcErr *service.ServiceError
+			if meta != nil || !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+				t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want validation", meta, err)
+			}
+			if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
+				t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
+			}
+			tabs, err := svc.ListTabs(ctx, "E2E")
+			if err != nil {
+				t.Fatalf("list tabs: %v", err)
+			}
+			if len(tabs) != 0 {
+				t.Fatalf("tab count = %d, want no worker terminal metadata", len(tabs))
+			}
+		})
+	}
+}
+
+func TestEnsureAgentTerminalSessionAllowsInteractiveLeadPRReviewAndCustomAssignments(t *testing.T) {
+	tests := []struct {
+		name       string
+		roleName   string
+		role       *store.RoleCreate
+		wantPrompt string
+	}{
+		{name: "lead", roleName: "lead"},
+		{
+			name:     "PR review",
+			roleName: "pr-review",
+			role: &store.RoleCreate{
+				WorkspaceKey: "E2E",
+				Name:         "pr-review",
+				Kind:         string(domain.RoleKindInteractive),
+				PromptFile:   "builtin:pr-review",
+			},
+			wantPrompt: "builtin:pr-review",
+		},
+		{
+			name:     "custom",
+			roleName: "operator",
+			role: &store.RoleCreate{
+				WorkspaceKey: "E2E",
+				Name:         "operator",
+				Kind:         string(domain.RoleKindInteractive),
+				Prompt:       "custom interactive prompt",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			st, tabStore, rdb := newAgentSessionTestDeps(t)
+			svc := webuiterminal.NewTerminalService(
+				nil,
+				tabStore,
+				nil,
+				rdb,
+				nil,
+				time.Now(),
+			)
+			if tt.role != nil {
+				if _, err := st.Roles().Create(ctx, *tt.role); err != nil {
+					t.Fatalf("create role: %v", err)
+				}
+			}
+			if _, err := st.Agents().Create(ctx, store.AgentCreate{
+				WorkspaceKey: "E2E",
+				Name:         "interactive-agent",
+				RoleName:     tt.roleName,
+				Mode:         domain.AgentModeService,
+				DesiredState: domain.AgentDesiredRunning,
+			}); err != nil {
+				t.Fatalf("create agent: %v", err)
+			}
+
+			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "interactive-agent")
+			if err != nil {
+				t.Fatalf("ensureAgentTerminalSession: %v", err)
+			}
+			if meta == nil || meta.Launch == nil || !meta.Writable {
+				t.Fatalf("interactive terminal metadata = %#v, want launchable tab", meta)
+			}
+			cmd := strings.Join(meta.Launch.Argv, " ")
+			if !strings.Contains(cmd, "'lead'") {
+				t.Fatalf("interactive launch command %q missing lead runtime", cmd)
+			}
+			if strings.Contains(cmd, "'--auto'") || strings.Contains(cmd, "'--daemon-mode'") {
+				t.Fatalf("interactive launch command %q contains worker runtime flags", cmd)
+			}
+			if tt.wantPrompt != "" && !strings.Contains(cmd, tt.wantPrompt) {
+				t.Fatalf("interactive launch command %q missing prompt %q", cmd, tt.wantPrompt)
+			}
+		})
 	}
 }
 
@@ -881,7 +1137,7 @@ func TestEnsureAgentTerminalSessionCreatesLaunchForStoppedUnassignedLead(t *test
 	}
 }
 
-func TestEnsureAgentTerminalSessionDoesNotRelaunchStoppedExistingAgentTab(t *testing.T) {
+func TestEnsureAgentTerminalSessionRejectsWorkerWithExistingTerminalTab(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
 	svc := webuiterminal.NewTerminalService(
@@ -928,24 +1184,23 @@ func TestEnsureAgentTerminalSessionDoesNotRelaunchStoppedExistingAgentTab(t *tes
 	}
 
 	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done")
+	var svcErr *service.ServiceError
+	if meta != nil || !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
+		t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want validation", meta, err)
+	}
+	if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
+		t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
+	}
+	stored, err := svc.GetTab(ctx, "E2E", "term_worker_done")
 	if err != nil {
-		t.Fatalf("ensureAgentTerminalSession: %v", err)
+		t.Fatalf("get existing worker tab: %v", err)
 	}
-	if meta.SessionName != "term_worker_done" {
-		t.Fatalf("session = %q, want existing stopped tab", meta.SessionName)
-	}
-	if meta.Launch != nil {
-		t.Fatalf("launch spec = %#v, want nil for stopped agent", meta.Launch)
-	}
-	if meta.Writable {
-		t.Fatal("writable = true, want false for stopped agent tab")
-	}
-	if meta.PTYAlive {
-		t.Fatal("PTYAlive = true, want false for stopped agent tab")
+	if stored.Launch == nil || !stored.Writable {
+		t.Fatalf("existing metadata was mutated during rejection: %#v", stored)
 	}
 }
 
-func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningAgentTab(t *testing.T) {
+func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgentTab(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
 	svc := webuiterminal.NewTerminalService(
@@ -959,8 +1214,8 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningAgentTab(t *tes
 
 	if _, err := st.Agents().Create(ctx, store.AgentCreate{
 		WorkspaceKey: "E2E",
-		Name:         "worker-live",
-		RoleName:     "task",
+		Name:         "lead-live",
+		RoleName:     "lead",
 		Backend:      "codex",
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -970,17 +1225,17 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningAgentTab(t *tes
 	if err := tabStore.Set(ctx, &tabmeta.TabMetadata{
 		SessionName: "term_worker_old",
 		Workspace:   "E2E",
-		Label:       "agent-worker-live",
+		Label:       "agent-lead-live",
 		Notes:       "old scrollback tab",
 		SortOrder:   3,
 		Pinned:      true,
 		Kind:        "agent",
-		AgentID:     "worker-live",
-		Role:        "task",
+		AgentID:     "lead-live",
+		Role:        "lead",
 		Backend:     "codex",
 		Writable:    true,
 		Launch: &tabmeta.LaunchSpec{
-			Argv: []string{"sh", "-c", "loom task worker-live --auto"},
+			Argv: []string{"sh", "-c", "loom lead"},
 		},
 		CreatedAt: oldTime,
 		UpdatedAt: oldTime,
@@ -988,7 +1243,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningAgentTab(t *tes
 		t.Fatalf("seed tab: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-live")
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -998,7 +1253,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningAgentTab(t *tes
 	if !strings.HasPrefix(meta.SessionName, "term_") {
 		t.Fatalf("session name = %q, want UUID term_ prefix", meta.SessionName)
 	}
-	if meta.SortOrder != 3 || !meta.Pinned || meta.Label != "agent-worker-live" || meta.Notes != "old scrollback tab" {
+	if meta.SortOrder != 3 || !meta.Pinned || meta.Label != "agent-lead-live" || meta.Notes != "old scrollback tab" {
 		t.Fatalf("metadata not preserved: sort=%d pinned=%v label=%q notes=%q", meta.SortOrder, meta.Pinned, meta.Label, meta.Notes)
 	}
 	if meta.Launch == nil {

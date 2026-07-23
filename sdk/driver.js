@@ -93,9 +93,12 @@ export class LoomDriverClient {
     this.tasks = Object.freeze({
       claimReady: (input = {}) => this.claimReady(input),
       claim: (input = {}) => this.claimTask(input),
+      claimReview: (input = {}) => this.claimReview(input),
+      handoffReview: (input = {}) => this.handoffReview(input),
       diff: (input = {}) => this.taskDiff(input),
       complete: (input = {}) => this.completeTask(input),
       release: (input = {}) => this.releaseTask(input),
+      releaseReview: (input = {}) => this.releaseReview(input),
     });
     this.taskRuns = Object.freeze({
       request: (input = {}) => this.requestTaskRun(input),
@@ -167,6 +170,7 @@ export class LoomDriverClient {
       // cross-agent lock takeover). Pass `type` to narrow the ready queue.
       actor: input.actor || "",
       type: input.type || "",
+      sourceRepo: input.sourceRepo || "",
       limit: input.limit || "",
     });
   }
@@ -189,6 +193,14 @@ export class LoomDriverClient {
       epicId: input.epicId || "",
       limit: input.limit || "",
     });
+  }
+
+  async claimReview(input = {}) {
+    const taskId = taskPayloadID(input);
+    if (!taskId) {
+      throw new Error("tasks.claimReview requires taskId");
+    }
+    return this.#httpCall("claim-review", { taskId: String(taskId) });
   }
 
   // taskDiff returns the bounded review diff for a card stamped with
@@ -369,6 +381,13 @@ export class LoomDriverClient {
     if (input.closeTask !== undefined && input.closeTask !== null) {
       params.closeTask = booleanInput(input.closeTask);
     }
+    // Review hosts may need the exact DriverRun Work Item claim to survive a
+    // successful child long enough to perform connector egress and the final
+    // lifecycle handoff. The server converts this opt-in into trusted TaskRun
+    // metadata; arbitrary runtime metadata is never accepted from the SDK.
+    if (input.retainWorkItemClaim === true) {
+      params.retainWorkItemClaim = true;
+    }
     let response;
     for (let attempt = 1; attempt <= TASK_RUN_REQUEST_MAX_ATTEMPTS; attempt += 1) {
       try {
@@ -465,6 +484,35 @@ export class LoomDriverClient {
     }
     const params = { taskId: String(taskId), actor: input.actor || "" };
     return this.#httpCall("release-task", params);
+  }
+
+  async releaseReview(input = {}) {
+    const taskId = taskPayloadID(input);
+    if (!taskId) {
+      throw new Error("tasks.releaseReview requires taskId");
+    }
+    return this.#httpCall("release-review", { taskId: String(taskId) });
+  }
+
+  async handoffReview(input = {}) {
+    const taskId = taskPayloadID(input);
+    const taskRunId = input && typeof input === "object" ? String(input.taskRunId || "") : "";
+    const status = input && typeof input === "object" ? String(input.status || "") : "";
+    if (!taskId) {
+      throw new Error("tasks.handoffReview requires taskId");
+    }
+    if (!taskRunId) {
+      throw new Error("tasks.handoffReview requires taskRunId");
+    }
+    if (status !== "open" && status !== "closed") {
+      throw new Error('tasks.handoffReview status must be "open" or "closed"');
+    }
+    return this.#httpCall("handoff-review", {
+      taskId: String(taskId),
+      taskRunId,
+      status,
+      reason: String(input.reason || ""),
+    });
   }
 
   // dispatchConnector posts one connector egress call to the run-scoped

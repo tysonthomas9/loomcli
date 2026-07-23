@@ -1388,10 +1388,12 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Stop an agent (yield by default, force with body)
-     * @description Without `force` (or empty body): sends `agent_yield` to the daemon,
-     *     returns 202 Accepted. With `{"force": true}`: sends `agent_stop(force=true)`,
-     *     returns 200.
+     * Stop an agent using its runtime owner
+     * @description Supervised workers yield through their daemon by default and return
+     *     202 Accepted; `{"force": true}` sends `agent_stop(force=true)` and
+     *     returns 200. Interactive agents are owned by the web terminal runtime,
+     *     so Stop terminates their PTY synchronously and returns 200 without
+     *     enqueueing a daemon command.
      */
     post: operations["stopAgent"];
     delete?: never;
@@ -7163,7 +7165,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Agent force-stopped */
+      /** @description Interactive agent stopped or supervised worker force-stopped */
       200: {
         headers: {
           [name: string]: unknown;

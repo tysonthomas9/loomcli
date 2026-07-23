@@ -60,7 +60,13 @@ export async function run(ctx) {
   //    bug (the BELT). The post-claim issue_type guard below stays as the
   //    SUSPENDERS — and now RELEASES the lease on a non-bug instead of parking
   //    an arbitrary task under this agent's claim until TTL.
-  const claimed = await loom.tasks.claimReady({ actor, limit: 1, type: "bug" });
+  const targetRepo = stringValue(input.targetRepo);
+  const claimed = await loom.tasks.claimReady({
+    actor,
+    limit: 1,
+    type: "bug",
+    ...(targetRepo ? { sourceRepo: targetRepo } : {}),
+  });
   const issueId = claimed && (claimed.id || claimed.ID);
   if (!issueId) {
     return loom.completed({ summary: "bug-fix: no ready bug to claim", claimed: false });
@@ -86,9 +92,11 @@ export async function run(ctx) {
     });
   }
 
-  // 2. Run codex with a custom fix prompt, delivered as a PR. Deterministic
-  //    taskRunId keeps a resumed run from double-enqueuing.
-  const taskRunId = "bugfix-" + issueId;
+  // 2. Run codex with a custom fix prompt, delivered as a PR. The deterministic
+  //    taskRunId is scoped to THIS driver run: the same bug may legitimately be
+  //    retried by a later workflow run, while a resumed copy of this run must
+  //    still replay the same child instead of double-enqueuing.
+  const taskRunId = "bugfix-" + (stringValue(loom.driverRunId) || "run") + "-" + issueId;
   // Prefer an explicit githubRepo input (the PR target) over card.source_repo:
   // in local-mode fleet-db forces source_repo to the mapped workspace repo name
   // (e.g. "source-repo"), which is not a valid owner/repo PR slug. In a real
@@ -110,21 +118,67 @@ export async function run(ctx) {
     },
   });
   const result = await loom.taskRuns.await({ taskRunId });
+  const status = stringValue(result && result.status) || "unknown";
+  if (status !== "completed") {
+    return loom.needsReview({
+      summary: "bug-fix: task-run " + taskRunId + " for " + issueId + " ended " + status
+        + (result && result.error_message ? " - " + stringValue(result.error_message) : ""),
+      errorClass: stringValue(result && (result.error_class || result.errorClass)) || "bug_fix_task_" + status,
+      taskRunId,
+    });
+  }
 
   // 3. Move the card to "review" + stamp external_ref = PR url (P0-3), so the
   //    code-review loop can link back to the PR. The daemon task worker auto-CLOSES
   //    the card on task success (task_worker.go CloseTaskOnSuccess is hardcoded), so
   //    it is terminal here. Reopen it first — update({status:"open"}) routes
   //    closed -> POST /reopen, which skips fleet-db's terminal guard — THEN set
-  //    review + external_ref on the now-modifiable card. Best-effort: a stamp
-  //    failure must NOT fail the fix/PR, which already landed.
+  //    review + external_ref on the now-modifiable card.
+  //
+  //    The PR and its review handoff are one workflow outcome. Never report the
+  //    workflow completed when the PR exists but the card is still closed/open
+  //    or unlinked: that hides the card from review-loop forever.
   const prUrl = extractPrUrl(result);
+  if (!prUrl && openPullRequest) {
+    return loom.needsReview({
+      summary: "bug-fix: task-run " + taskRunId + " completed for " + issueId
+        + " but PR delivery returned no github_pr_url; review handoff is incomplete",
+      errorClass: "bug_fix_pr_link_missing",
+      issueId,
+      taskRunId,
+      prUrl: null,
+      handoffStep: "pr-link",
+      reopenAcknowledged: false,
+    });
+  }
   if (prUrl) {
     try {
       await loom.issues.update({ issueId, status: "open" });
+    } catch (reopenErr) {
+      return loom.needsReview({
+        summary: "bug-fix: " + issueId + " delivered PR " + prUrl
+          + " but the closed card could not be reopened for review: " + errorMessage(reopenErr),
+        errorClass: "bug_fix_review_reopen_failed",
+        issueId,
+        taskRunId,
+        prUrl,
+        handoffStep: "reopen",
+        reopenAcknowledged: false,
+      });
+    }
+    try {
       await loom.issues.update({ issueId, status: "review", externalRef: prUrl });
-    } catch (_stampErr) {
-      // PR is the primary outcome; leave the linkage gap for the review-loop work.
+    } catch (stampErr) {
+      return loom.needsReview({
+        summary: "bug-fix: " + issueId + " delivered PR " + prUrl
+          + " and reopened the card, but review status/linkage failed: " + errorMessage(stampErr),
+        errorClass: "bug_fix_review_stamp_failed",
+        issueId,
+        taskRunId,
+        prUrl,
+        handoffStep: "review-link",
+        reopenAcknowledged: true,
+      });
     }
   }
 
@@ -167,6 +221,10 @@ function stringValue(v) {
   if (typeof v === "string") return v;
   if (v === undefined || v === null) return "";
   return String(v);
+}
+
+function errorMessage(err) {
+  return stringValue(err && (err.message || err.code)) || String(err);
 }
 
 // booleanValue mirrors the local-task-runner helper: workflow-run --input

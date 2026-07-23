@@ -41,8 +41,8 @@ func TestPhase4FoundationCapabilitiesIncludesWorkItemProfiles(t *testing.T) {
 	t.Parallel()
 
 	got := Phase4FoundationCapabilities()
-	if len(got) != 18 {
-		t.Fatalf("Phase4FoundationCapabilities length = %d, want 18", len(got))
+	if len(got) != 19 {
+		t.Fatalf("Phase4FoundationCapabilities length = %d, want 19", len(got))
 	}
 	found := map[string]bool{}
 	for _, capability := range got {
@@ -51,6 +51,7 @@ func TestPhase4FoundationCapabilitiesIncludesWorkItemProfiles(t *testing.T) {
 	for _, capability := range []string{
 		WorkItemsRepositoryRequirementCapability,
 		ExecutionDriverRunWorkItemClaimCapability,
+		ExecutionDriverRunReviewWorkItemHandoffCapability,
 		ExecutionTaskRunWorkItemDesignCapability,
 		ExecutionTaskRunTerminalConvergenceCapability,
 		ExecutionTerminalDriverRunWorkRecoveryCapability,

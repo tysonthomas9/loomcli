@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -27,6 +28,7 @@ import (
 
 var (
 	errAgentLaunchSpecMissing    = errors.New("agent terminal launch spec missing")
+	errAgentTerminalStopped      = errors.New("agent terminal is stopped; start the agent before connecting")
 	errTerminalLaunchMetaMissing = errors.New("terminal launch metadata missing")
 )
 
@@ -270,6 +272,12 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 	case errors.Is(err, errAgentLaunchSpecMissing):
 		slog.Error("agent terminal metadata missing launch spec", "session", session, "workspace", workspace)
 		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
+	case errors.Is(err, errAgentTerminalStopped):
+		slog.Info("stopped agent terminal attach refused", "session", session, "workspace", workspace)
+		return websocket.StatusPolicyViolation, err.Error() //nolint:staticcheck // SA1019
+	case errors.Is(err, errDaemonSupervisedWorkerTerminal):
+		slog.Info("daemon-supervised worker terminal attach refused", "session", session, "workspace", workspace)
+		return websocket.StatusPolicyViolation, err.Error() //nolint:staticcheck // SA1019
 	case errors.Is(err, errTerminalLaunchMetaMissing):
 		slog.Error("terminal metadata missing launch spec", "session", session, "workspace", workspace)
 		return websocket.StatusInternalError, err.Error() //nolint:staticcheck // SA1019
@@ -292,12 +300,7 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	key := webuterminal.SessionKey{Workspace: workspace, Name: session}
 	ensureWorkspacePTYRegistered(reqCtx, p, workspace)
 
-	launch, err := launchSpecForTerminalSession(reqCtx, p, workspace, session)
-	if err != nil {
-		return classifyAttachErr(err, session, workspace)
-	}
-
-	att, reattach, err := p.manager.AttachSession(key, initialCols, initialRows, launch)
+	att, reattach, err := attachTerminalSession(reqCtx, p, key, initialCols, initialRows)
 	if err != nil {
 		return classifyAttachErr(err, session, workspace)
 	}
@@ -346,6 +349,51 @@ func runTerminalRelay(reqCtx context.Context, conn *websocket.Conn, p *terminalW
 	return (<-crashCh).WSClose()
 }
 
+// attachTerminalSession resolves the server-owned launch contract before
+// asking the PTY manager to attach or spawn. Keeping the authorization check
+// on this boundary ensures a persisted tab cannot respawn a stopped
+// interactive agent through a direct or reconnecting WebSocket.
+func attachTerminalSession(
+	ctx context.Context,
+	p *terminalWSParams,
+	key webuterminal.SessionKey,
+	cols, rows uint16,
+) (webuterminal.Attachment, bool, error) {
+	launch, agentID, err := resolveTerminalLaunch(ctx, p, key.Workspace, key.Name)
+	if err != nil {
+		return nil, false, err
+	}
+	if agentID != "" {
+		// resolveTerminalLaunch may have observed running just before Stop
+		// entered its ownership snapshot. Re-authorize after taking Stop's
+		// ordering boundary so an attachment either completes before Stop
+		// snapshots/kills it or observes the durable stopped state afterward.
+		unlock := webuterminal.LockAgentLifecycle(key.Workspace, agentID)
+		defer unlock()
+		if err := authorizeAgentTerminalLaunch(ctx, p.store, key.Workspace, agentID); err != nil {
+			return nil, false, err
+		}
+	}
+	attachment, reattached, err := p.manager.AttachSession(key, cols, rows, launch)
+	if err != nil {
+		return nil, false, err
+	}
+	if agentID == "" {
+		return attachment, reattached, nil
+	}
+
+	// Keep the post-attach state check as a fail-closed defense if lifecycle
+	// state is changed by a path that does not participate in the ordering
+	// boundary.
+	if err := authorizeAgentTerminalLaunch(ctx, p.store, key.Workspace, agentID); err != nil {
+		if killErr := p.manager.Kill(key); killErr != nil {
+			return nil, false, fmt.Errorf("%w; additionally failed to fence spawned PTY: %v", err, killErr)
+		}
+		return nil, false, err
+	}
+	return attachment, reattached, nil
+}
+
 func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, workspace string) {
 	if p == nil || workspace == "" {
 		return
@@ -368,35 +416,72 @@ func ensureWorkspacePTYRegistered(ctx context.Context, p *terminalWSParams, work
 }
 
 func launchSpecForTerminalSession(ctx context.Context, p *terminalWSParams, workspace, session string) (*tabmeta.LaunchSpec, error) {
+	launch, _, err := resolveTerminalLaunch(ctx, p, workspace, session)
+	return launch, err
+}
+
+func resolveTerminalLaunch(
+	ctx context.Context,
+	p *terminalWSParams,
+	workspace, session string,
+) (*tabmeta.LaunchSpec, string, error) {
 	if p.tabMetaStore == nil {
 		if isUUIDTerminalSession(session) {
-			return nil, errTerminalLaunchMetaMissing
+			return nil, "", errTerminalLaunchMetaMissing
 		}
-		return legacyLaunchSpecForSession(session), nil
+		return legacyLaunchSpecForSession(session), "", nil
 	}
 	meta, err := p.tabMetaStore.Get(ctx, workspace, session)
 	if err != nil {
-		return nil, fmt.Errorf("load terminal metadata: %w", err)
+		return nil, "", fmt.Errorf("load terminal metadata: %w", err)
 	}
 	if meta == nil {
 		if isUUIDTerminalSession(session) {
-			return nil, errTerminalLaunchMetaMissing
+			return nil, "", errTerminalLaunchMetaMissing
 		}
-		return legacyLaunchSpecForSession(session), nil
+		return legacyLaunchSpecForSession(session), "", nil
 	}
 	if meta.Kind == "agent" {
+		if err := authorizeAgentTerminalLaunch(ctx, p.store, workspace, meta.AgentID); err != nil {
+			return nil, "", err
+		}
 		if meta.Launch == nil || (len(meta.Launch.Argv) == 0 && len(meta.Launch.Env) == 0) {
-			return nil, errAgentLaunchSpecMissing
+			return nil, "", errAgentLaunchSpecMissing
 		}
 		if len(meta.Launch.Argv) == 0 {
-			return nil, errAgentLaunchSpecMissing
+			return nil, "", errAgentLaunchSpecMissing
 		}
-		return meta.Launch, nil
+		return meta.Launch, meta.AgentID, nil
 	}
 	if meta.Launch != nil && (len(meta.Launch.Argv) > 0 || len(meta.Launch.Env) > 0) {
-		return meta.Launch, nil
+		return meta.Launch, "", nil
 	}
-	return legacyLaunchSpecForSession(session), nil
+	return legacyLaunchSpecForSession(session), "", nil
+}
+
+func authorizeAgentTerminalLaunch(ctx context.Context, st store.Store, workspace, agentID string) error {
+	if st == nil || st.Agents() == nil {
+		return errors.New("agent terminal state store unavailable")
+	}
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return errors.New("agent terminal metadata missing agent identity")
+	}
+	agent, err := st.Agents().Get(ctx, workspace, agentID)
+	if err != nil {
+		return fmt.Errorf("load agent terminal state: %w", err)
+	}
+	role, err := loadAgentLaunchRole(ctx, st, workspace, agent.RoleName)
+	if err != nil {
+		return fmt.Errorf("load agent terminal role: %w", err)
+	}
+	if isDaemonSupervisedWorker(agent, domain.ResolveRoleKind(role, agent.RoleName)) {
+		return errDaemonSupervisedWorkerTerminal
+	}
+	if agent.State == domain.AgentStateStopped || agent.DesiredState == domain.AgentDesiredStopped {
+		return errAgentTerminalStopped
+	}
+	return nil
 }
 
 func isUUIDTerminalSession(session string) bool {

@@ -316,8 +316,8 @@ func buildWorkspaceOpsStatus(
 	// reports daemons launched from arbitrary cwds.
 	status.Daemon.Registered = collectRegisteredDaemonStatus(ctx, st, ws.Key)
 	repoByName := collectOpsRepos(status, repos, localState)
-	roleNames := collectRoleNames(roles)
-	collectOpsAgents(status, agents, localState, repoByName, roleNames)
+	rolesByName := collectRolesByName(roles)
+	collectOpsAgents(status, agents, localState, repoByName, rolesByName)
 
 	status.Problems = append(status.Problems, workspaceOpsGlobalProblems(status)...)
 	status.OK = !hasErrorProblem(status.Problems)
@@ -457,22 +457,22 @@ func collectOpsRepos(status *WorkspaceOpsStatus, repos []*domain.Repo, localStat
 	return repoByName
 }
 
-func collectRoleNames(roles []*domain.Role) map[string]struct{} {
-	roleNames := map[string]struct{}{}
+func collectRolesByName(roles []*domain.Role) map[string]*domain.Role {
+	rolesByName := map[string]*domain.Role{}
 	for _, role := range roles {
 		if role != nil {
-			roleNames[role.Name] = struct{}{}
+			rolesByName[role.Name] = role
 		}
 	}
-	return roleNames
+	return rolesByName
 }
 
-func collectOpsAgents(status *WorkspaceOpsStatus, agents []*domain.Agent, localState bootstrap.WorkspaceLocalState, repoByName map[string]*domain.Repo, roleNames map[string]struct{}) {
+func collectOpsAgents(status *WorkspaceOpsStatus, agents []*domain.Agent, localState bootstrap.WorkspaceLocalState, repoByName map[string]*domain.Repo, rolesByName map[string]*domain.Role) {
 	for _, agent := range agents {
 		if agent == nil {
 			continue
 		}
-		item, problems := workspaceOpsAgentStatus(localState, repoByName, roleNames, agent)
+		item, problems := workspaceOpsAgentStatus(localState, repoByName, rolesByName, agent)
 		status.Agents = append(status.Agents, item)
 		status.Problems = append(status.Problems, problems...)
 	}
@@ -493,7 +493,7 @@ func repoLocalPath(localState bootstrap.WorkspaceLocalState, name string) string
 func workspaceOpsAgentStatus(
 	localState bootstrap.WorkspaceLocalState,
 	repoByName map[string]*domain.Repo,
-	roleNames map[string]struct{},
+	rolesByName map[string]*domain.Role,
 	agent *domain.Agent,
 ) (WorkspaceOpsAgent, []WorkspaceOpsProblem) {
 	item := WorkspaceOpsAgent{
@@ -514,7 +514,8 @@ func workspaceOpsAgentStatus(
 		}
 	}
 	var problems []WorkspaceOpsProblem
-	if _, ok := roleNames[agent.RoleName]; !ok {
+	role, roleExists := rolesByName[agent.RoleName]
+	if !roleExists {
 		item.Runnable = false
 		item.Reason = "unknown_role"
 		problems = append(problems, WorkspaceOpsProblem{
@@ -525,7 +526,8 @@ func workspaceOpsAgentStatus(
 			Fix:      "use `loom role list` and update the agent role",
 		})
 	}
-	if item.Runnable && localState.Path != "" && !item.WorktreeReady {
+	requiresWorktree := roleExists && domain.ResolveRoleKind(role, agent.RoleName) != domain.RoleKindInteractive
+	if item.Runnable && requiresWorktree && localState.Path != "" && !item.WorktreeReady {
 		if item.Reason == "" {
 			item.Reason = "missing_local_worktree"
 		}

@@ -197,7 +197,12 @@ function AgentsPageInner(): JSX.Element {
         selected.branch ||
         selected.repo,
       );
-      return { worktree: hasWorktree, pty: true, runs: false, config: true };
+      return {
+        worktree: hasWorktree,
+        pty: isInteractiveAgent(selected),
+        runs: false,
+        config: true,
+      };
     }
     return { worktree: false, pty: false, runs: false, config: true };
   }, [selected, selectedBinding]);

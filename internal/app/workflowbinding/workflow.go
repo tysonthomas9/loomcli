@@ -45,6 +45,39 @@ func New(preparer WorkflowTargetPreparer, creator BindingCreator) (*Workflow, er
 	}
 }
 
+// ResolveTarget prepares a workflow-name target without creating a binding.
+// Callers use this to verify that an idempotent ensure still addresses the
+// same immutable execution target as an existing binding.
+func (workflow *Workflow) ResolveTarget(
+	ctx context.Context,
+	workspaceKey, workflowName string,
+) (WorkflowTarget, error) {
+	if ctx == nil {
+		return WorkflowTarget{}, fmt.Errorf("%w: context is required", ErrInvalidRequest)
+	}
+	if workflow == nil || workflow.preparer == nil {
+		return WorkflowTarget{}, ErrUnavailable
+	}
+	workspaceKey = strings.TrimSpace(workspaceKey)
+	workflowName = strings.TrimSpace(workflowName)
+	if workspaceKey == "" {
+		return WorkflowTarget{}, fmt.Errorf("%w: workspace is required", ErrInvalidRequest)
+	}
+	if workflowName == "" {
+		return WorkflowTarget{}, fmt.Errorf("%w: workflow is required", ErrInvalidRequest)
+	}
+	target, err := workflow.preparer.PrepareWorkflowTarget(ctx, workspaceKey, workflowName)
+	if err != nil {
+		return WorkflowTarget{}, fmt.Errorf("prepare workflow target %q: %w", workflowName, err)
+	}
+	target.DriverID = strings.TrimSpace(target.DriverID)
+	target.DriverVersionID = strings.TrimSpace(target.DriverVersionID)
+	if target.DriverID == "" || target.DriverVersionID == "" {
+		return WorkflowTarget{}, fmt.Errorf("prepared workflow target must include driver id and version id: %w", automation.ErrInvalidPersistedState)
+	}
+	return target, nil
+}
+
 // Create prepares workflow-name targets and delegates the sole durable write
 // to Automation. Explicit driver targets never call the preparer.
 func (workflow *Workflow) Create(
@@ -71,21 +104,16 @@ func (workflow *Workflow) Create(
 		if request.Workflow == "" {
 			return nil, fmt.Errorf("%w: one of workflow or driver id is required", ErrInvalidRequest)
 		}
-		target, err := workflow.preparer.PrepareWorkflowTarget(ctx, request.WorkspaceKey, request.Workflow)
+		target, err := workflow.ResolveTarget(ctx, request.WorkspaceKey, request.Workflow)
 		if err != nil {
-			return nil, fmt.Errorf("prepare workflow target %q: %w", request.Workflow, err)
+			return nil, err
 		}
-		preparedDriverID := strings.TrimSpace(target.DriverID)
-		preparedVersionID := strings.TrimSpace(target.DriverVersionID)
-		if preparedDriverID == "" || preparedVersionID == "" {
-			return nil, fmt.Errorf("prepared workflow target must include driver id and version id: %w", automation.ErrInvalidPersistedState)
-		}
-		request.Definition.DriverID = preparedDriverID
+		request.Definition.DriverID = target.DriverID
 		// A caller-supplied version remains a requested-version guard for
 		// Automation to compare with the activated version. Only an omitted
 		// version is filled from preparation; never silently retarget a request.
 		if request.Definition.DriverVersionID == "" {
-			request.Definition.DriverVersionID = preparedVersionID
+			request.Definition.DriverVersionID = target.DriverVersionID
 		}
 	}
 

@@ -55,6 +55,36 @@ func TestEnsureGitWorktreeFromBranchUsesFetchedDefaultBranch(t *testing.T) {
 	}
 }
 
+func TestEnsureGitWorktreeReusesExistingCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	target := filepath.Join(root, "worktrees", "worker")
+	git(t, "", "init", "-b", "main", repo)
+	git(t, repo, "config", "user.name", "Test User")
+	git(t, repo, "config", "user.email", "test@example.test")
+	writeFile(t, filepath.Join(repo, "base.txt"), "base\n")
+	git(t, repo, "add", "base.txt")
+	git(t, repo, "commit", "-m", "base")
+
+	if err := EnsureGitWorktree(repo, target, "worker"); err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	sentinel := filepath.Join(target, "uncommitted.txt")
+	if err := os.WriteFile(sentinel, []byte("adopted\n"), 0o644); err != nil {
+		t.Fatalf("write adoption sentinel: %v", err)
+	}
+	if err := EnsureGitWorktree(repo, target, "worker"); err != nil {
+		t.Fatalf("reuse worktree: %v", err)
+	}
+	if data, err := os.ReadFile(sentinel); err != nil || string(data) != "adopted\n" {
+		t.Fatalf("reused worktree changed = %q err=%v", string(data), err)
+	}
+}
+
 func TestRunGitHonorsCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

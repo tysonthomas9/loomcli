@@ -42,6 +42,7 @@ type fakeIssueBackend struct {
 	releases              []fakeRelease
 	typedClaims           []execution.ClaimDriverRunWorkItemCommand
 	typedReleases         []execution.ReleaseDriverRunWorkItemCommand
+	typedHandoffs         []execution.HandoffDriverRunReviewWorkItemCommand
 	typedClaimErrors      map[string]error
 	typedClaimItems       map[string]*execution.DriverRunWorkItem
 	repositoryBlocks      []string
@@ -284,6 +285,29 @@ func (adapter testDriverRunExecution) ReleaseDriverRunWorkItem(
 			ActionType: "release_work_item", TargetRef: command.WorkItemID, RequestedBy: actor, Status: "applied",
 			RequestRef: "sha256:" + strings.Repeat("0", 64), ResponseRef: "issue://" + command.WorkItemID + "#released",
 			CreatedAt: command.ReleasedAt, AppliedAt: &appliedAt,
+		},
+	}, nil
+}
+
+func (adapter testDriverRunExecution) HandoffDriverRunReviewWorkItem(
+	_ context.Context,
+	_ authority.ExecutionAuthority,
+	command execution.HandoffDriverRunReviewWorkItemCommand,
+) (execution.DriverRunWorkItemMutationResult, error) {
+	adapter.issues.typedHandoffs = append(adapter.issues.typedHandoffs, command)
+	actor := driverpkg.DriverRunActor(command.Owner.ResourceID)
+	appliedAt := command.HandedOffAt
+	actionID := execution.DriverRunReviewWorkItemHandoffActionID(command.RequestID)
+	return execution.DriverRunWorkItemMutationResult{
+		WorkItem: &execution.DriverRunWorkItem{
+			WorkspaceKey: command.WorkspaceKey, WorkItemID: command.WorkItemID,
+			Status: command.TargetStatus, Assignee: "", UpdatedAt: command.HandedOffAt,
+		},
+		Action: &execution.DriverRunWorkItemAction{
+			WorkspaceKey: command.WorkspaceKey, ActionID: actionID, IdempotencyKey: actionID,
+			ActionType: "handoff_review_work_item", TargetRef: command.WorkItemID, RequestedBy: actor, Status: "applied",
+			RequestRef: "sha256:" + strings.Repeat("0", 64), ResponseRef: "issue://" + command.WorkItemID + "#handed-off",
+			CreatedAt: command.HandedOffAt, AppliedAt: &appliedAt,
 		},
 	}, nil
 }
@@ -1013,6 +1037,59 @@ func TestDriverAPIReleaseTaskIgnoresBodyActor(t *testing.T) {
 	}
 	if len(h.backend.releases) != 0 {
 		t.Fatalf("generic IssueBackend release was called: %+v", h.backend.releases)
+	}
+}
+
+func TestDriverAPIHandoffReviewBindsExactParentClaimAndChild(t *testing.T) {
+	h := newTestHarness(t, "")
+	taskID := "TASK-REVIEW-7"
+	taskRunID := "review-child-7"
+
+	resp, decoded := h.do(t, opRequest{
+		op: "handoff-review",
+		body: map[string]any{
+			"taskId": taskID, "taskRunId": taskRunID, "status": "closed", "reason": "approved",
+		},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusOK || decoded["id"] != taskID || decoded["status"] != "closed" {
+		t.Fatalf("status/body = %d/%v, want closed handoff", resp.StatusCode, decoded)
+	}
+	if len(h.backend.typedHandoffs) != 1 {
+		t.Fatalf("typed handoffs = %+v, want one", h.backend.typedHandoffs)
+	}
+	command := h.backend.typedHandoffs[0]
+	wantClaimActionID := execution.DriverRunWorkItemClaimActionID(
+		execution.ClaimDriverRunWorkItemRequestID(h.runID, taskID),
+	)
+	wantRequestID := execution.HandoffDriverRunReviewWorkItemRequestID(h.runID, taskID, taskRunID)
+	if command.Owner.ResourceID != h.runID || command.Owner.LeaseToken != "driver-test-token" ||
+		command.ClaimActionID != wantClaimActionID || command.RequestID != wantRequestID ||
+		command.TaskRunID != taskRunID || command.TargetStatus != "closed" || command.Reason != "approved" {
+		t.Fatalf("handoff command = %+v, want exact parent/claim/child envelope", command)
+	}
+}
+
+func TestTaskRunRequestMetadataRetainedClaimIsServerOwned(t *testing.T) {
+	closeTask := false
+	metadata := taskRunRequestMetadata(driverpkg.TaskRunRequestOptions{
+		DriverRunID: "run-review-1", CloseTaskOnSuccess: &closeTask, RetainWorkItemClaim: true,
+	})
+	if metadata[driverpkg.TaskRunCloseOnSuccessMetaKey] != "false" ||
+		metadata[driverpkg.TaskRunRetainWorkItemClaimMetaKey] != "true" {
+		t.Fatalf("metadata = %+v, want non-closing retained review policy", metadata)
+	}
+
+	h := newTestHarness(t, "")
+	resp, decoded := h.do(t, opRequest{
+		op: "exec-task",
+		body: map[string]any{
+			"taskId": "TASK-1", "taskRunId": "review-child-1", "retainWorkItemClaim": true,
+		},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != "invalid" {
+		t.Fatalf("retain without closeTask=false status/body=%d/%v", resp.StatusCode, decoded)
 	}
 }
 

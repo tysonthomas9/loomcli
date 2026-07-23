@@ -5,6 +5,21 @@ import path from "node:path";
 import { defineAgent, defineWorkflow } from "@flue/runtime";
 
 const CODEX = process.env.LOOM_CODEX_BIN || "codex";
+const TRANSCRIPT_PROMPT_LIMIT = 12000;
+const TRANSCRIPT_MESSAGE_LIMIT = 8000;
+const SECRET_ENV_NAME = /(?:^|_)(?:TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL|PRIVATE_KEY|SIGNING_KEY|ACCESS_KEY)$/i;
+const SECRET_PATTERNS = [
+  /-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----/g,
+  /AKIA[0-9A-Z]{16}/g,
+  /x-access-token:[^@\s]+@/gi,
+  /Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  /gh[pousr]_[A-Za-z0-9]{30,}/g,
+  /github_pat_[A-Za-z0-9_]{60,}/g,
+  /sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g,
+  /AIza[0-9A-Za-z_-]{35}/g,
+  /xox[baprs]-[A-Za-z0-9-]{10,}/g,
+  /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+];
 
 // Flue HEAD requires every workflow module to default-export defineWorkflow();
 // keep the named run export (invoker/shim path) AND add the flue-native default
@@ -34,7 +49,11 @@ export async function run(ctx = {}) {
   const diff = String(input.diff || "");
   const rubric = String(input.rubric || "Review the diff for correctness, security, and clarity.");
   if (!diff.trim()) {
-    return failed("empty_diff", "review task input carried no diff", taskRunId, request);
+    const message = "review task input carried no diff";
+    return failed("empty_diff", message, taskRunId, request, canonicalTranscriptEntries(taskRunId, {
+      status: "failed",
+      result: message,
+    }));
   }
 
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "loom-codex-review-"));
@@ -54,20 +73,39 @@ export async function run(ctx = {}) {
       "-",
     ], { input: prompt, stdio: ["pipe", "ignore", "inherit"], timeout: 5 * 60 * 1000 });
   } catch (err) {
-    return failed("codex_exec_failed", "codex exec failed: " + errorMessage(err), taskRunId, request);
+    const message = "codex exec failed: " + errorMessage(err);
+    return failed("codex_exec_failed", message, taskRunId, request, canonicalTranscriptEntries(taskRunId, {
+      prompt,
+      status: "failed",
+      result: message,
+    }));
   }
 
   let findings;
+  let rawFindings = "";
   try {
-    findings = parseFindings(fs.readFileSync(outPath, "utf8"));
+    rawFindings = fs.readFileSync(outPath, "utf8");
+    findings = parseFindings(rawFindings);
   } catch (err) {
-    return failed("codex_no_findings", "could not parse codex findings: " + errorMessage(err), taskRunId, request);
+    const message = "could not parse codex findings: " + errorMessage(err);
+    return failed("codex_no_findings", message, taskRunId, request, canonicalTranscriptEntries(taskRunId, {
+      prompt,
+      assistant: rawFindings,
+      status: "failed",
+      result: message,
+    }));
   }
 
+  const transcriptEntries = canonicalTranscriptEntries(taskRunId, {
+    prompt,
+    assistant: rawFindings,
+    status: "completed",
+  });
   return {
     status: "completed",
     exitCode: 0,
     logsRef: "logs://" + taskRunId,
+    transcript_entries: transcriptEntries,
     runtimeMetadata: {
       task_runner: "github-review-task-runner",
       runtime_strategy: "codex-review",
@@ -88,19 +126,74 @@ function requestPayload(ctx) {
   }
 }
 
-function failed(errorClass, message, taskRunId, request = {}) {
+function failed(errorClass, message, taskRunId, request = {}, transcriptEntries = []) {
   return {
     status: "failed",
     exitCode: 1,
     errorClass,
-    errorMessage: message,
+    errorMessage: redactTranscriptText(message, TRANSCRIPT_MESSAGE_LIMIT),
     logsRef: "logs://" + taskRunId,
+    ...(transcriptEntries.length > 0 ? { transcript_entries: transcriptEntries } : {}),
     runtimeMetadata: {
       task_runner: "github-review-task-runner",
       runtime_strategy: "codex-review",
       runner: String(request.runner || "github-review-task-runner"),
     },
   };
+}
+
+// canonicalTranscriptEntries returns the smallest faithful transcript for this
+// non-streaming Codex invocation: the exact review prompt (bounded and
+// credential-redacted), Codex's output-last-message, and an honest terminal
+// result. HostBridge persists this snake_case field as the task transcript.
+function canonicalTranscriptEntries(taskRunId, { prompt = "", assistant = "", status, result = "" } = {}) {
+  const timestamp = new Date().toISOString();
+  const entries = [{
+    timestamp,
+    role: "system",
+    type: "session_meta",
+    text: "codex-review session for " + redactTranscriptText(taskRunId, 200),
+  }];
+  if (String(prompt).trim()) {
+    entries.push({
+      timestamp,
+      role: "user",
+      type: "text",
+      text: redactTranscriptText(prompt, TRANSCRIPT_PROMPT_LIMIT),
+    });
+  }
+  if (String(assistant).trim()) {
+    entries.push({
+      timestamp,
+      role: "assistant",
+      type: "text",
+      text: redactTranscriptText(assistant, TRANSCRIPT_MESSAGE_LIMIT),
+    });
+  }
+  entries.push({
+    timestamp,
+    role: "system",
+    type: "result",
+    text: redactTranscriptText(result || status || "completed", TRANSCRIPT_MESSAGE_LIMIT),
+  });
+  return entries.map((entry, index) => ({ seq: index + 1, ...entry }));
+}
+
+function redactTranscriptText(value, limit) {
+  let text = String(value || "");
+  const secretValues = [...new Set(Object.entries(process.env)
+    .filter(([name, secret]) => SECRET_ENV_NAME.test(name) && secret && String(secret).length >= 8)
+    .map(([, secret]) => String(secret)))]
+    .sort((a, b) => b.length - a.length);
+  for (const secret of secretValues) {
+    text = text.split(secret).join("REDACTED");
+  }
+  for (const pattern of SECRET_PATTERNS) {
+    pattern.lastIndex = 0;
+    text = text.replace(pattern, "REDACTED");
+  }
+  if (text.length <= limit) return text;
+  return text.slice(0, limit) + "\n...[transcript truncated]";
 }
 
 function findingsSchema() {

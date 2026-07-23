@@ -82,13 +82,9 @@ type RotateRequest struct {
 	// cap; negative durations are invalid.
 	InboundWindow time.Duration
 
-	// ExpectedUpdatedAt, when non-zero, is a best-effort optimistic fence:
-	// the rotation is rejected with ErrRotationConflict when the connector's
-	// UpdatedAt no longer matches, so of two operators acting on the same
-	// read, the second writer is rejected. The check happens on a fresh read
-	// inside Rotate; the residual read-to-write race is accepted and
-	// documented (the authoritative conditional write belongs to the store
-	// op, mirroring the accepted-TOCTOU freshness decision).
+	// ExpectedUpdatedAt, when non-zero, is an optimistic fence supplied by the
+	// caller. Rotate rechecks it before sealing, then always sends its fresh
+	// connector generation to the store's authoritative atomic CAS.
 	ExpectedUpdatedAt time.Time
 
 	// Now overrides the clock for deterministic tests; nil means time.Now.
@@ -129,6 +125,7 @@ func (r RotateRequest) validate() error {
 // be nil for callers without a journal; sealer is only required when
 // NewCredential is supplied.
 func Rotate(ctx context.Context, connectors store.ConnectorStore, audit store.ConnectorAuditStore, sealer Sealer, req RotateRequest) (*domain.Connector, error) {
+	defer zeroBytes(req.NewCredential)
 	if err := req.validate(); err != nil {
 		return nil, err
 	}
@@ -158,6 +155,7 @@ func Rotate(ctx context.Context, connectors store.ConnectorStore, audit store.Co
 	rotation := store.ConnectorSecretRotation{
 		NewInboundSecret:         req.NewInboundSecret,
 		PreviousSecretValidUntil: validUntil,
+		ExpectedUpdatedAt:        current.UpdatedAt,
 	}
 	// (2) Seal before the store write; the plaintext buffer is wiped either
 	// way so it cannot outlive this call.
@@ -173,7 +171,7 @@ func Rotate(ctx context.Context, connectors store.ConnectorStore, audit store.Co
 	// (3) Single store write applies both legs atomically.
 	rotated, err := connectors.RotateSecrets(ctx, req.WorkspaceKey, req.ConnectorID, rotation)
 	if err != nil {
-		return nil, fmt.Errorf("connector rotate %q: %w", req.ConnectorID, err)
+		return nil, rotationStoreError(req.ConnectorID, err)
 	}
 
 	// (4) Journal the ceremony.
@@ -181,6 +179,13 @@ func Rotate(ctx context.Context, connectors store.ConnectorStore, audit store.Co
 		return rotated, aerr
 	}
 	return rotated, nil
+}
+
+func rotationStoreError(connectorID string, err error) error {
+	if errors.Is(err, domain.ErrConflict) {
+		err = errors.Join(ErrRotationConflict, err)
+	}
+	return fmt.Errorf("connector rotate %q: %w", connectorID, err)
 }
 
 // overlapWindow normalizes the requested dual-secret window: zero applies the
@@ -198,10 +203,11 @@ func overlapWindow(window time.Duration) time.Duration {
 }
 
 // appendRotationAudit appends the rotation record to the connector-call
-// journal. The run id embeds the store-assigned RotatedAt so every rotation
-// gets a distinct deterministic CallID; a duplicate append (retry) is treated
-// as success exactly like Dispatcher.appendAudit. The summary carries
-// timestamps and flags only — never secret material.
+// journal. The run id embeds the store-assigned monotonic UpdatedAt generation
+// so every rotation gets a distinct deterministic CallID even during clock
+// rollback; a duplicate append (retry) is treated as success exactly like
+// Dispatcher.appendAudit. The summary carries timestamps and flags only —
+// never secret material.
 func appendRotationAudit(ctx context.Context, audit store.ConnectorAuditStore, kind domain.ConnectorSourceKind, rotated *domain.Connector, validUntil time.Time, resealed bool, now func() time.Time) error {
 	if audit == nil {
 		return nil
@@ -210,7 +216,11 @@ func appendRotationAudit(ctx context.Context, audit store.ConnectorAuditStore, k
 	if rotated.RotatedAt != nil && !rotated.RotatedAt.IsZero() {
 		occurredAt = rotated.RotatedAt.UTC()
 	}
-	runID := fmt.Sprintf("rotation-%s-%d", rotated.ConnectorID, occurredAt.UnixNano())
+	generation := rotated.UpdatedAt.UTC()
+	if generation.IsZero() {
+		generation = occurredAt
+	}
+	runID := fmt.Sprintf("rotation-%s-%d", rotated.ConnectorID, generation.UnixNano())
 	rec := &domain.ConnectorCallRecord{
 		WorkspaceKey: rotated.WorkspaceKey,
 		CallID:       domain.ConnectorCallID(runID, RotationAuditAction, 0),

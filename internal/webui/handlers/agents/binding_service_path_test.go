@@ -150,7 +150,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 		automation.WithClock(func() time.Time { return now }),
 	)
 	st := newAgentRecordStore(t)
-	seedRole(t, st, "docs")
+	seedPromptAgentRole(t, st, "docs")
 	seedRole(t, st, "reviewer")
 	resolver := boundaryOperatorResolverFunc(func(_ *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, error) {
 		principal, err := issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{

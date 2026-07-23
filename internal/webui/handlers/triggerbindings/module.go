@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -279,7 +280,7 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	sourceKind := strings.TrimSpace(request.SourceKind)
+	sourceKind := strings.ToLower(strings.TrimSpace(request.SourceKind))
 	if sourceKind == "" {
 		sourceKind = "github"
 	}
@@ -319,6 +320,12 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 	if bindingID == "" {
 		bindingID = "binding-" + strings.ReplaceAll(routeKey, ".", "-")
 	}
+	driverID := strings.TrimSpace(request.DriverID)
+	workflowName := strings.TrimSpace(request.Workflow)
+	if driverID == "" && workflowName == "" {
+		writeAutomationError(w, fmt.Errorf("one of workflow or driver_id is required: %w", automation.ErrInvalid), "create trigger binding failed")
+		return
+	}
 	if existing, err := m.queries.GetBinding(r.Context(), workspace, bindingID); err == nil {
 		if existing == nil {
 			writeAutomationError(w, automation.ErrInvalidPersistedState, "get trigger binding failed")
@@ -332,6 +339,10 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 			writeAutomationError(w, fmt.Errorf("trigger binding %q already exists: %w", bindingID, automation.ErrConflict), "create trigger binding failed")
 			return
 		}
+		if err := m.validateEnsureIdentity(r.Context(), workspace, request, existing, sourceKind, routeKey, driverID, workflowName); err != nil {
+			writeAutomationError(w, err, "create trigger binding failed")
+			return
+		}
 		if !m.configureSecret(w, r, workspace, existing.BindingID, existing.SourceKind, secret) {
 			return
 		}
@@ -339,12 +350,6 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		return
 	} else if !errors.Is(err, automation.ErrNotFound) {
 		writeAutomationError(w, err, "get trigger binding failed")
-		return
-	}
-	driverID := strings.TrimSpace(request.DriverID)
-	workflowName := strings.TrimSpace(request.Workflow)
-	if driverID == "" && workflowName == "" {
-		writeAutomationError(w, fmt.Errorf("one of workflow or driver_id is required: %w", automation.ErrInvalid), "create trigger binding failed")
 		return
 	}
 	binding, err := m.createWorkflow.Create(r.Context(), auth, workflowbinding.CreateRequest{
@@ -373,6 +378,74 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		return
 	}
 	handler.WriteJSON(w, http.StatusCreated, binding)
+}
+
+// validateEnsureIdentity makes POST's browser-oriented ensure semantics safe:
+// a stable binding id may reconcile mutable display/schedule/run-input fields
+// later, but it must never alias a different source or execution target.
+func (m *Module) validateEnsureIdentity(
+	ctx context.Context,
+	workspace string,
+	request createBindingRequest,
+	existing *automation.Binding,
+	sourceKind, routeKey, driverID, workflowName string,
+) error {
+	requestedVersionID := strings.TrimSpace(request.DriverVersionID)
+	if driverID == "" {
+		target, err := m.createWorkflow.ResolveTarget(ctx, workspace, workflowName)
+		if err != nil {
+			return err
+		}
+		driverID = target.DriverID
+		if requestedVersionID != "" && requestedVersionID != target.DriverVersionID {
+			return bindingEnsureConflict(existing.BindingID, "workflow driver_version_id", target.DriverVersionID, requestedVersionID)
+		}
+		requestedVersionID = target.DriverVersionID
+	} else if requestedVersionID == "" {
+		return bindingEnsureConflict(existing.BindingID, "driver_version_id", existing.DriverVersionID, "<unspecified>")
+	}
+	if routeKey == "" {
+		switch sourceKind {
+		case automation.SourceKindCron:
+			routeKey = "cron:" + existing.BindingID
+		case automation.SourceKindInternal:
+			routeKey = "internal:" + existing.BindingID
+		}
+	}
+	requestedPatterns := normalizeEnsurePatterns(request.EventTypePatterns)
+	switch {
+	case existing.SourceKind != sourceKind:
+		return bindingEnsureConflict(existing.BindingID, "source_kind", existing.SourceKind, sourceKind)
+	case existing.RouteKey != routeKey:
+		return bindingEnsureConflict(existing.BindingID, "route_key", existing.RouteKey, routeKey)
+	case !slices.Equal(existing.EventTypePatterns, requestedPatterns):
+		return bindingEnsureConflict(existing.BindingID, "event_type_patterns", strings.Join(existing.EventTypePatterns, ","), strings.Join(requestedPatterns, ","))
+	case existing.DriverID != driverID:
+		return bindingEnsureConflict(existing.BindingID, "driver_id", existing.DriverID, driverID)
+	case requestedVersionID != "" && existing.DriverVersionID != requestedVersionID:
+		return bindingEnsureConflict(existing.BindingID, "driver_version_id", existing.DriverVersionID, requestedVersionID)
+	case existing.TargetEntrypoint != strings.TrimSpace(request.Entrypoint):
+		return bindingEnsureConflict(existing.BindingID, "entrypoint", existing.TargetEntrypoint, strings.TrimSpace(request.Entrypoint))
+	default:
+		return nil
+	}
+}
+
+func normalizeEnsurePatterns(patterns []string) []string {
+	normalized := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		if pattern = strings.TrimSpace(pattern); pattern != "" {
+			normalized = append(normalized, pattern)
+		}
+	}
+	return normalized
+}
+
+func bindingEnsureConflict(bindingID, field, existing, requested string) error {
+	return fmt.Errorf(
+		"trigger binding %q has %s %q, not requested %q: %w",
+		bindingID, field, existing, requested, automation.ErrConflict,
+	)
 }
 
 func (m *Module) configureSecret(w http.ResponseWriter, r *http.Request, workspace, bindingID, sourceKind, secret string) bool {
@@ -539,6 +612,7 @@ type updateBindingRequest struct {
 	EventTypePatterns   *[]string                            `json:"event_type_patterns,omitempty"`
 	Schedule            *string                              `json:"schedule,omitempty"`
 	ScheduleTimezone    *string                              `json:"schedule_timezone,omitempty"`
+	RunInput            json.RawMessage                      `json:"run_input,omitempty"`
 }
 
 func (m *Module) patchBinding(w http.ResponseWriter, r *http.Request) {
@@ -648,10 +722,19 @@ func buildBindingPatch(w http.ResponseWriter, existing *automation.Binding, requ
 		}
 		patch.ScheduleTimezone = &timezone
 	}
+	if request.RunInput != nil {
+		raw := strings.TrimSpace(string(request.RunInput))
+		var object map[string]json.RawMessage
+		if raw == "" || json.Unmarshal([]byte(raw), &object) != nil || object == nil {
+			handler.RespondError(w, http.StatusBadRequest, "run_input must be a JSON object")
+			return patch, false
+		}
+		patch.SourceConfigRef = &raw
+	}
 	if patch.Name == nil && patch.SubjectKeyTemplate == nil && patch.ConcurrencyPolicy == nil &&
 		patch.ActorFilter == nil && !patch.ClearActorFilter && patch.RetryMaxAttempts == nil &&
 		patch.RetryBackoffSeconds == nil && patch.EventTypePatterns == nil &&
-		patch.Schedule == nil && patch.ScheduleTimezone == nil {
+		patch.Schedule == nil && patch.ScheduleTimezone == nil && patch.SourceConfigRef == nil {
 		handler.RespondError(w, http.StatusBadRequest, "no fields to update")
 		return patch, false
 	}

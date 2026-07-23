@@ -43,7 +43,7 @@ export interface WorkspaceAgentInfo {
 export interface CreateAgentRequest {
   name: string;
   role_name: string;
-  kind?: string;
+  kind?: "interactive" | "worker" | "supervised";
   prompt?: string;
   prompt_file?: string;
   auto?: boolean;
@@ -365,10 +365,10 @@ export interface RoleWithPrompt {
 
 /**
  * Partial role update — every field is optional so the UI can PATCH just the
- * prompt without resending the whole role. Sending `prompt` rewrites the
- * role's prompt file (reusing its existing filename when `prompt_filename` is
- * omitted). Changes take effect on the agent's NEXT start/restart; a running
- * agent keeps the prompt it read at launch.
+ * prompt without resending the whole role. Sending `prompt` publishes a new
+ * immutable prompt file and repoints this role; `prompt_filename` optionally
+ * supplies its operator-facing base name. Changes take effect on the agent's
+ * NEXT start/restart; a running agent keeps the prompt it read at launch.
  */
 export interface UpdateRoleRequest {
   description?: string;
@@ -445,9 +445,10 @@ export async function getWorkspaceRole(
 }
 
 /**
- * Apply a partial edit to a role. Returns the updated role plus its (possibly
- * rewritten) prompt body. Sending `prompt` rewrites the prompt file; the change
- * takes effect on the agent's next start/restart, not on a running agent.
+ * Apply a partial edit to a role. Returns the updated role plus its current
+ * prompt body. Sending `prompt` publishes a new immutable file and repoints
+ * only this role; the change takes effect on the agent's next start/restart,
+ * not on a running agent.
  */
 export async function updateWorkspaceRole(
   workspaceId: string,

@@ -357,7 +357,11 @@ register_agents() {
   loom daemon profile set issue_backend fleetdb
   loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
   loom daemon profile set events_dir "${WORKSPACE_ROOT}/.loom/events"
-  loom daemon profile set max_agents 2
+  # The UI reliability proof deliberately creates every available legacy
+  # agent template in one workspace. Keep the local-mode profile aligned with
+  # Loom's default so those valid assignments do not brick daemon startup
+  # merely because the deterministic seed begins with two workers.
+  loom daemon profile set max_agents 20
   loom daemon profile set startup_timeout 30
 
   if [ "$AGENT_BACKEND" != "localdogfood" ]; then
@@ -758,21 +762,67 @@ start_serve() {
 
 workspace_daemon_pid() {
   ws_path="$1"
+  proc_root="${2:-/proc}"
   pid_file="${ws_path}/.loom/daemon.pid"
   if [ ! -f "$pid_file" ]; then
     return 1
   fi
 
-  pid="$(tr -dc '0-9' < "$pid_file" || true)"
-  if [ "$pid" = "" ]; then
+  raw_pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [[ ! "$raw_pid" =~ ^[[:space:]]*([1-9][0-9]*)[[:space:]]*$ ]]; then
     return 1
   fi
-  if kill -0 "$pid" >/dev/null 2>&1; then
-    printf '%s\n' "$pid"
-    return 0
+  pid="${BASH_REMATCH[1]}"
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    return 1
   fi
-  return 1
+  if ! workspace_daemon_process_matches "$pid" "$ws_path" "$proc_root"; then
+    return 1
+  fi
+
+  printf '%s\n' "$pid"
 }
+
+# workspace_daemon_process_matches prevents a preserved daemon.pid from
+# mistaking a reused PID for the workspace daemon. The local-mode manager runs
+# inside Linux, where /proc gives us both the exact argv and cwd. Fail closed
+# when either identity surface cannot be inspected: starting a replacement
+# daemon is safer than suppressing supervision because an unrelated process
+# happens to own the old PID.
+workspace_daemon_process_matches() {
+  pid="$1"
+  ws_path="$2"
+  proc_root="$3"
+  cmdline_file="${proc_root}/${pid}/cmdline"
+  cwd_path="${proc_root}/${pid}/cwd"
+  exe_path="${proc_root}/${pid}/exe"
+
+  if [ ! -r "$cmdline_file" ] || [ ! -e "$exe_path" ]; then
+    return 1
+  fi
+
+  loom_executable="$(command -v loom 2>/dev/null || true)"
+  if [ "$loom_executable" = "" ] || [ ! "$exe_path" -ef "$loom_executable" ]; then
+    return 1
+  fi
+  subcommand="$(LC_ALL=C tr '\000' '\n' < "$cmdline_file" | sed -n '2p')"
+  if [ "$subcommand" != "daemon" ]; then
+    return 1
+  fi
+
+  expected_cwd="$(cd "$ws_path" 2>/dev/null && pwd -P)" || return 1
+  actual_cwd="$(cd "$cwd_path" 2>/dev/null && pwd -P)" || return 1
+  [ "$actual_cwd" = "$expected_cwd" ]
+}
+
+if [ "${1:-}" = "--workspace-daemon-pid-only" ]; then
+  if [ "${2:-}" = "" ] || [ "${3:-}" = "" ]; then
+    echo "workspace path and proc root are required" >&2
+    exit 2
+  fi
+  workspace_daemon_pid "$2" "$3"
+  exit $?
+fi
 
 workspace_has_auto_agents() {
   ws_key="$1"
@@ -848,11 +898,19 @@ stop_workspace_daemons() {
     jq -r '.[] | select((.path // "") != "") | .path' 2>/dev/null |
     while read -r ws_path; do
       pid="$(workspace_daemon_pid "$ws_path" || true)"
-      if [ "$pid" != "" ]; then
+      # Re-check identity immediately before signaling. The daemon may exit
+      # and its PID may be reused while workspace enumeration is in progress.
+      verified_pid="$(workspace_daemon_pid "$ws_path" || true)"
+      if [ "$pid" != "" ] && [ "$verified_pid" = "$pid" ]; then
         kill "$pid" >/dev/null 2>&1 || true
       fi
     done
 }
+
+if [ "${1:-}" = "--stop-workspace-daemons-only" ]; then
+  stop_workspace_daemons
+  exit 0
+fi
 
 cleanup() {
   stop_workspace_daemons || true

@@ -211,13 +211,19 @@ type DriverRunHeartbeatCommand struct {
 // claim. RequestID is deterministic for the parent/task pair. ClaimTTL may be
 // zero to select the backend's bounded default, or at least one second.
 type ClaimDriverRunWorkItemCommand struct {
-	WorkspaceKey string
-	RequestID    string
-	Owner        Owner
-	WorkItemID   string
-	ClaimTTL     time.Duration
-	ClaimedAt    time.Time
+	WorkspaceKey   string
+	RequestID      string
+	Owner          Owner
+	WorkItemID     string
+	ClaimTTL       time.Duration
+	RequiredStatus string
+	ClaimedAt      time.Time
 }
+
+const (
+	DriverRunWorkItemRestoreOpen   = "open"
+	DriverRunWorkItemRestoreReview = "review"
+)
 
 // ReleaseDriverRunWorkItemCommand releases exactly the claim action created
 // for this parent/task pair. A caller cannot substitute an actor or release a
@@ -228,7 +234,24 @@ type ReleaseDriverRunWorkItemCommand struct {
 	Owner         Owner
 	WorkItemID    string
 	ClaimActionID string
+	RestoreStatus string
 	ReleasedAt    time.Time
+}
+
+// HandoffDriverRunReviewWorkItemCommand atomically publishes the outcome of a
+// completed review child while the parent still owns the exact retained claim.
+// The port must prove the child belongs to this parent/Work Item, completed
+// successfully, and opted into retained ownership before changing lifecycle.
+type HandoffDriverRunReviewWorkItemCommand struct {
+	WorkspaceKey  string
+	RequestID     string
+	Owner         Owner
+	WorkItemID    string
+	ClaimActionID string
+	TaskRunID     string
+	TargetStatus  string
+	Reason        string
+	HandedOffAt   time.Time
 }
 
 // DriverRunWorkItem is the Execution-owned projection returned by the

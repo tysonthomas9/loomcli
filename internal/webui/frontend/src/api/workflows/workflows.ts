@@ -320,6 +320,8 @@ export interface UpdateTriggerBindingRequest {
   schedule?: string;
   /** IANA timezone — only valid on a cron binding. */
   schedule_timezone?: string;
+  /** Replace the per-binding workflow input object (including an empty object). */
+  run_input?: Record<string, unknown>;
 }
 
 /**

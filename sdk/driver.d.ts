@@ -120,6 +120,8 @@ export interface LoomTaskClaimReadyInput extends LoomEpicInput {
    * issue type server-side. Empty/omitted means no type filter.
    */
   type?: string;
+  /** Optional workspace repository name used to isolate a workflow target. */
+  sourceRepo?: string;
   /**
    * Non-authoritative label. IGNORED server-side: the task lock is always keyed
    * by the run's derived actor, never caller input. Retained for wire-compat.
@@ -199,6 +201,17 @@ export interface LoomTaskRunRequest {
    * design to review instead of closing the task).
    */
   closeTask?: boolean;
+  /**
+   * Keep the parent DriverRun's exact Work Item claim after a successful
+   * non-closing child. The parent must finish with tasks.handoffReview().
+   */
+  retainWorkItemClaim?: boolean;
+}
+
+export interface LoomReviewHandoffInput extends LoomTaskSelector {
+  taskRunId: string;
+  status: "open" | "closed";
+  reason?: string;
 }
 
 export interface LoomEpicInput {
@@ -503,10 +516,16 @@ export declare class LoomDriverClient {
     claimReady(input?: LoomTaskClaimReadyInput): Promise<LoomClaimedTask | null>;
     /** Claim one SPECIFIC ready task by id; rejects DriverApiError code "conflict" when not ready or already claimed. */
     claim(input: LoomTaskClaimInput | string): Promise<LoomClaimedTask | null>;
+    /** Atomically claim one exact Review-column task. */
+    claimReview(input: LoomTaskSelector | string): Promise<LoomClaimedTask | null>;
+    /** Atomically publish a retained review claim's terminal lifecycle state. */
+    handoffReview(input: LoomReviewHandoffInput): Promise<Record<string, unknown> | null>;
     /** Bounded diff for a review card stamped external_ref="local-branch:<branch>@<sha>". */
     diff(input: LoomTaskSelector | string): Promise<LoomTaskDiffResult | null>;
     complete(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
     release(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
+    /** Atomically return an unbound review claim to Review instead of Ready. */
+    releaseReview(input: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   };
   readonly taskRuns: {
     request(input?: LoomTaskRunRequest): Promise<Record<string, unknown>>;
@@ -565,6 +584,8 @@ export declare class LoomDriverClient {
   }): LoomDriverResult;
   claimReady(input?: LoomTaskClaimReadyInput): Promise<LoomClaimedTask | null>;
   claimTask(input?: LoomTaskClaimInput | string): Promise<LoomClaimedTask | null>;
+  claimReview(input?: LoomTaskSelector | string): Promise<LoomClaimedTask | null>;
+  handoffReview(input: LoomReviewHandoffInput): Promise<Record<string, unknown> | null>;
   getEpic(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   epicSnapshot(input?: LoomEpicInput): Promise<Record<string, unknown> | null>;
   watchEpic(input?: LoomEpicWatchInput): AsyncGenerator<LoomEpicWatchEvent, void, undefined>;
@@ -581,6 +602,7 @@ export declare class LoomDriverClient {
   recoverStaleTaskRuns(input?: LoomTaskRunRecoverStaleInput): Promise<Record<string, unknown> | null>;
   completeTask(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   releaseTask(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
+  releaseReview(input?: LoomTaskSelector | string): Promise<Record<string, unknown> | null>;
   /**
    * Generic connector egress; throws SYNCHRONOUSLY (DriverApiError
    * precondition_required, before any network call) when a registered

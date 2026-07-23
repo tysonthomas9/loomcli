@@ -7,19 +7,20 @@ import (
 )
 
 const (
-	ActionSubmitDriverRun              authority.Action = "execution.submit-driver-run"
-	ActionStartChildDriverRun          authority.Action = "execution.start-child-driver-run"
-	ActionCascadeChildDriverRuns       authority.Action = "execution.cascade-child-driver-runs"
-	ActionRecoverChildDriverRunCascade authority.Action = "execution.recover-child-driver-run-cascade"
-	ActionRecoverTerminalDriverRunWork authority.Action = "execution.recover-terminal-driver-run-work"
-	ActionClaimDriverRun               authority.Action = "execution.claim-driver-run"
-	ActionHeartbeatDriverRun           authority.Action = "execution.heartbeat-driver-run"
-	ActionClaimDriverRunWorkItem       authority.Action = "execution.claim-driver-run-work-item"
-	ActionReleaseDriverRunWorkItem     authority.Action = "execution.release-driver-run-work-item"
-	ActionFinalizeDriverRun            authority.Action = "execution.finalize-driver-run"
-	ActionRecoverDriverRuns            authority.Action = "execution.recover-driver-runs"
-	ActionAwaitDriverRun               authority.Action = "execution.await-driver-run"
-	ActionResolveDriverAwait           authority.Action = "execution.resolve-driver-await"
+	ActionSubmitDriverRun                authority.Action = "execution.submit-driver-run"
+	ActionStartChildDriverRun            authority.Action = "execution.start-child-driver-run"
+	ActionCascadeChildDriverRuns         authority.Action = "execution.cascade-child-driver-runs"
+	ActionRecoverChildDriverRunCascade   authority.Action = "execution.recover-child-driver-run-cascade"
+	ActionRecoverTerminalDriverRunWork   authority.Action = "execution.recover-terminal-driver-run-work"
+	ActionClaimDriverRun                 authority.Action = "execution.claim-driver-run"
+	ActionHeartbeatDriverRun             authority.Action = "execution.heartbeat-driver-run"
+	ActionClaimDriverRunWorkItem         authority.Action = "execution.claim-driver-run-work-item"
+	ActionReleaseDriverRunWorkItem       authority.Action = "execution.release-driver-run-work-item"
+	ActionHandoffDriverRunReviewWorkItem authority.Action = "execution.handoff-driver-run-review-work-item"
+	ActionFinalizeDriverRun              authority.Action = "execution.finalize-driver-run"
+	ActionRecoverDriverRuns              authority.Action = "execution.recover-driver-runs"
+	ActionAwaitDriverRun                 authority.Action = "execution.await-driver-run"
+	ActionResolveDriverAwait             authority.Action = "execution.resolve-driver-await"
 )
 
 // DriverRunOperationRules is the default-deny registry for the DriverRun and
@@ -37,6 +38,7 @@ func DriverRunOperationRules() []authority.OperationRule {
 		authority.Allow(ActionHeartbeatDriverRun, authority.ClassExecution),
 		authority.Allow(ActionClaimDriverRunWorkItem, authority.ClassExecution),
 		authority.Allow(ActionReleaseDriverRunWorkItem, authority.ClassExecution),
+		authority.Allow(ActionHandoffDriverRunReviewWorkItem, authority.ClassExecution),
 		authority.Allow(ActionFinalizeDriverRun, authority.ClassExecution),
 		authority.Allow(ActionRecoverDriverRuns, authority.ClassSystem),
 		authority.Allow(ActionAwaitDriverRun, authority.ClassExecution),
@@ -58,6 +60,7 @@ type DriverRunAPI interface {
 	HeartbeatDriverRun(context.Context, authority.ExecutionAuthority, DriverRunHeartbeatCommand) (*DriverRun, error)
 	ClaimDriverRunWorkItem(context.Context, authority.ExecutionAuthority, ClaimDriverRunWorkItemCommand) (DriverRunWorkItemMutationResult, error)
 	ReleaseDriverRunWorkItem(context.Context, authority.ExecutionAuthority, ReleaseDriverRunWorkItemCommand) (DriverRunWorkItemMutationResult, error)
+	HandoffDriverRunReviewWorkItem(context.Context, authority.ExecutionAuthority, HandoffDriverRunReviewWorkItemCommand) (DriverRunWorkItemMutationResult, error)
 	FinalizeDriverRun(context.Context, authority.ExecutionAuthority, FinalizeDriverRunCommand) (*DriverRun, error)
 	RecoverDriverRuns(context.Context, authority.SystemAuthority, RecoverDriverRunsCommand) (*DriverRunRecoveryResult, error)
 	AwaitDriverRun(context.Context, authority.ExecutionAuthority, AwaitDriverRunCommand) (*DriverAwaitResult, error)

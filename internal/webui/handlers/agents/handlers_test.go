@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +16,41 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
+	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
+
+type handlerInteractiveRuntime struct {
+	live   map[terminal.SessionKey]bool
+	closed map[terminal.SessionKey]bool
+	owned  map[string][]svcimpl.InteractiveRuntimeSession
+	killed []terminal.SessionKey
+}
+
+func (r *handlerInteractiveRuntime) OwnedAgentSessions(
+	_ context.Context,
+	workspace string,
+	agentID string,
+) ([]svcimpl.InteractiveRuntimeSession, error) {
+	return append([]svcimpl.InteractiveRuntimeSession(nil), r.owned[workspace+"\x00"+agentID]...), nil
+}
+
+func (r *handlerInteractiveRuntime) HasSession(key terminal.SessionKey) bool {
+	return r.live[key]
+}
+
+func (r *handlerInteractiveRuntime) SessionClosed(key terminal.SessionKey) bool {
+	return r.closed[key]
+}
+
+func (r *handlerInteractiveRuntime) Kill(key terminal.SessionKey) error {
+	r.killed = append(r.killed, key)
+	delete(r.live, key)
+	if r.closed == nil {
+		r.closed = make(map[terminal.SessionKey]bool)
+	}
+	r.closed[key] = true
+	return nil
+}
 
 func TestHandleInteractivePromptsListsBuiltins(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/TEST2/interactive-prompts", nil)
@@ -79,16 +114,24 @@ func TestHandleCreateCarriesInteractiveKindAndPromptFile(t *testing.T) {
 		t.Fatalf("status = %d body = %s, want 201", rr.Code, rr.Body.String())
 	}
 	var created struct {
-		ID       string `json:"id"`
-		Kind     string `json:"kind"`
-		Name     string `json:"name"`
-		RoleName string `json:"role_name"`
+		ID         string   `json:"id"`
+		Kind       string   `json:"kind"`
+		Name       string   `json:"name"`
+		RoleName   string   `json:"role_name"`
+		Repos      []string `json:"repos"`
+		RepoGroups []string `json:"repo_groups"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode created agent: %v", err)
 	}
 	if created.ID != "review-nova" || created.Kind != agentRecordKindSupervised || created.Name != "review-nova" || created.RoleName != "pr-review" {
 		t.Fatalf("created agent = %#v, want review-nova/pr-review", created)
+	}
+	if created.Repos == nil || created.RepoGroups == nil {
+		t.Fatalf("created agent collections = repos:%#v repo_groups:%#v, want explicit empty arrays", created.Repos, created.RepoGroups)
+	}
+	if !bytes.Contains(rr.Body.Bytes(), []byte(`"cross_repo":false`)) {
+		t.Fatalf("created agent response omitted required cross_repo=false: %s", rr.Body.String())
 	}
 	role, err := st.Roles().Get(ctx, "TEST2", "pr-review")
 	if err != nil {
@@ -365,6 +408,146 @@ func TestModuleLifecycleHonorsStopAndRestartContract(t *testing.T) {
 	}
 	if commands[2].Type != "restart" {
 		t.Fatalf("restart command = %+v, want restart", commands[2])
+	}
+}
+
+func TestModuleStopTerminatesInteractiveRuntimeSynchronously(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "TEST2", Name: "lead", Kind: string(domain.RoleKindInteractive),
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST2", Name: "ui-lead", RoleName: "lead",
+		DesiredState: domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "TEST2", SessionID: "lead-ui", AgentID: "ui-lead",
+		Kind: domain.AgentSessionKindOrchestration, TerminalID: "term_ui_lead",
+		Status: domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	key := terminal.SessionKey{Workspace: "TEST2", Name: "term_ui_lead"}
+	runtime := &handlerInteractiveRuntime{
+		live: map[terminal.SessionKey]bool{key: true},
+		owned: map[string][]svcimpl.InteractiveRuntimeSession{
+			"TEST2\x00ui-lead": {{Key: key, Live: true}},
+		},
+	}
+	agentSvc := svcimpl.NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, runtime)
+	mux := http.NewServeMux()
+	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/ui-lead/stop", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("interactive stop status = %d body=%s, want 200", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"agent \"ui-lead\" stopped"`) {
+		t.Fatalf("interactive stop body = %s, want stopped confirmation", rr.Body.String())
+	}
+	if len(runtime.killed) != 2 || runtime.killed[0] != key || runtime.killed[1] != key {
+		t.Fatalf("killed runtimes = %+v, want two fenced kills of %+v", runtime.killed, key)
+	}
+	agent, err := st.Agents().Get(ctx, "TEST2", "ui-lead")
+	if err != nil {
+		t.Fatalf("get stopped agent: %v", err)
+	}
+	if agent.State != domain.AgentStateStopped || agent.DesiredState != domain.AgentDesiredStopped {
+		t.Fatalf("agent after stop = %+v, want stopped/stopped", agent)
+	}
+	commands, err := st.AgentCommands().List(ctx, "TEST2", store.AgentCommandFilter{
+		TargetAgentID: "ui-lead", Status: domain.AgentCommandQueued,
+	})
+	if err != nil {
+		t.Fatalf("list commands: %v", err)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("interactive stop queued daemon commands: %+v", commands)
+	}
+}
+
+func TestModuleRestartReplacesInteractiveRuntimeWithoutDaemonCommand(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
+		Key: "TEST2", Name: "Test 2", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "TEST2", Name: "custom", Kind: string(domain.RoleKindInteractive),
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "TEST2", Name: "custom-ui", RoleName: "custom",
+		DesiredState: domain.AgentDesiredRunning,
+	}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "TEST2", SessionID: "custom-ui-session", AgentID: "custom-ui",
+		Kind: domain.AgentSessionKindOrchestration, TerminalID: "term_custom_ui",
+		Status: domain.AgentSessionRunning,
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	key := terminal.SessionKey{Workspace: "TEST2", Name: "term_custom_ui"}
+	runtime := &handlerInteractiveRuntime{
+		live: map[terminal.SessionKey]bool{key: true},
+		owned: map[string][]svcimpl.InteractiveRuntimeSession{
+			"TEST2\x00custom-ui": {{Key: key, Live: true}},
+		},
+	}
+	agentSvc := svcimpl.NewAgentServiceWithInteractiveRuntime(nil, nil, nil, st, runtime)
+	mux := http.NewServeMux()
+	newTestAgentsModule(agentSvc, st, nil, "TEST2").Register(mux)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/TEST2/agents/custom-ui/restart", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("interactive restart status = %d body=%s, want 200", rr.Code, rr.Body.String())
+	}
+	if len(runtime.killed) != 1 || runtime.killed[0] != key {
+		t.Fatalf("killed runtimes = %+v, want [%+v]", runtime.killed, key)
+	}
+	agent, err := st.Agents().Get(ctx, "TEST2", "custom-ui")
+	if err != nil {
+		t.Fatalf("get restarted agent: %v", err)
+	}
+	if agent.State != domain.AgentStateActive || agent.DesiredState != domain.AgentDesiredRunning {
+		t.Fatalf("agent after restart = %+v, want active/running for fresh terminal attach", agent)
+	}
+	session, err := st.AgentSessions().Get(ctx, "TEST2", "custom-ui-session")
+	if err != nil {
+		t.Fatalf("get replaced session: %v", err)
+	}
+	if session.Status != domain.AgentSessionCancelled || session.FinishedAt == nil {
+		t.Fatalf("replaced session = %+v, want cancelled with finished_at", session)
+	}
+	commands, err := st.AgentCommands().List(ctx, "TEST2", store.AgentCommandFilter{
+		TargetAgentID: "custom-ui", Status: domain.AgentCommandQueued,
+	})
+	if err != nil {
+		t.Fatalf("list commands: %v", err)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("interactive restart queued daemon commands: %+v", commands)
 	}
 }
 

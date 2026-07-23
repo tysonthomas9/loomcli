@@ -184,6 +184,7 @@ vi.mock("@/components/FileExplorer", () => ({
 describe("AgentsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     mocks.routeAgentName = "lead-1";
     mocks.agents = [
       {
@@ -273,6 +274,58 @@ describe("AgentsPage", () => {
     expect(screen.queryByRole("button", { name: "Git" })).toBeNull();
     expect(screen.getByTestId("workflow-agent-run-now")).toBeTruthy();
   });
+
+  it("does not expose or seed Terminal for a daemon-supervised advanced worker", async () => {
+    mocks.routeAgentName = "triage-1";
+    mocks.agents = [
+      {
+        name: "triage-1",
+        role: "bug-triage",
+        role_kind: "worker",
+        daemon_managed: true,
+        status: "ready",
+        branch: "agent/triage-1",
+        repo: "loomcli",
+        worktree_path: "/tmp/triage-1",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByRole("button", { name: "Info" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Git" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Diff" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Files" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Terminal" })).toBeNull();
+    expect(screen.queryByTestId("agent-detail")).toBeNull();
+  });
+
+  it.each([
+    ["legacy lead", "lead", undefined],
+    ["PR review", "pr-review", "interactive"],
+    ["custom interactive", "operator", "interactive"],
+  ])(
+    "keeps Terminal available for %s agents",
+    async (_label, role, roleKind) => {
+      mocks.agents = [
+        {
+          name: "lead-1",
+          role,
+          ...(roleKind ? { role_kind: roleKind } : {}),
+          status: "ready",
+          branch: "agent/lead-1",
+          repo: "loomcli",
+          worktree_path: "/tmp/lead-1",
+        },
+      ];
+
+      render(<AgentsPage />);
+
+      const terminal = await screen.findByRole("button", { name: "Terminal" });
+      expect(terminal.getAttribute("aria-current")).toBe("page");
+      expect(screen.getByTestId("agent-detail")).toBeTruthy();
+    },
+  );
 
   it("passes local PR runtime payload from the lead-panel Run button", async () => {
     mocks.localSettings = {

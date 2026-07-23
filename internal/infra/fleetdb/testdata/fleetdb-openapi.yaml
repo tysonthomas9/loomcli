@@ -3150,7 +3150,9 @@ paths:
         Installs a new inbound signing secret, demoting the current secret
         to previous_inbound_secret until previous_secret_valid_until
         (default 15 minutes, capped at 24 hours), and optionally replaces
-        the sealed outbound credential. The response is redacted.
+        the sealed outbound credential. When expected_updated_at is present,
+        the rotation is rejected if the connector changed since that
+        generation was read. The response is redacted.
       operationId: rotateConnectorSecrets
       requestBody:
         required: true
@@ -3169,6 +3171,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /api/v1/{workspace}/connector-grants:
     parameters:
@@ -4979,6 +4983,8 @@ paths:
         Validates the live DriverRun owner tuple and the exact claim action.
         A claim already bound to a TaskRun cannot be released. The release is
         immutable and idempotent and requires an authenticated service actor.
+        restore_status defaults to open; review is available to review agents
+        that must return a pre-TaskRun claim to the Review column atomically.
       operationId: releaseDriverRunWorkItem
       parameters:
         - $ref: "#/components/parameters/XLeaseToken"
@@ -4990,6 +4996,40 @@ paths:
       responses:
         "200":
           description: Work-item release committed or replayed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriverRunWorkItemCommandResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/driver-runs/{run_id}/work-items/{task_id}/review-handoff:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverRunID"
+      - $ref: "#/components/parameters/TaskID"
+    post:
+      tags: [Driver Runs]
+      summary: Atomically hand off a completed review work item
+      description: >-
+        Validates the live parent owner, exact claim generation, completed
+        TaskRun lineage, and immutable retained-claim policy before moving the
+        work item to open or closed and retiring its claim in one transaction.
+        Requires an authenticated service actor.
+      operationId: handoffDriverRunReviewWorkItem
+      parameters:
+        - $ref: "#/components/parameters/XLeaseToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriverRunReviewWorkItemHandoffRequest" }
+      responses:
+        "200":
+          description: Review work-item handoff committed or replayed
           content:
             application/json:
               schema: { $ref: "#/components/schemas/DriverRunWorkItemCommandResult" }
@@ -9709,6 +9749,7 @@ components:
         - recover_terminal_driver_run_work
         - claim_work_item
         - release_work_item
+        - handoff_review_work_item
         - update_status
 
     GenericActionLedgerCreateType:
@@ -9926,7 +9967,7 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, work_items.repository_requirement.v1, workflow_catalog.version_lifecycle.v1]
+          example: [artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, work_items.repository_requirement.v1, workflow_catalog.version_lifecycle.v1]
 
     AutomationErrorResponse:
       type: object
@@ -10403,6 +10444,13 @@ components:
           type: string
           format: date-time
           description: Defaults to now+15m; capped at now+24h.
+        expected_updated_at:
+          type: string
+          format: date-time
+          description: |
+            Optional optimistic-concurrency generation. The rotation fails
+            with 409 conflict unless it equals the connector's current
+            updated_at.
         new_outbound_credential_sealed:
           type: string
           format: byte
@@ -12243,6 +12291,10 @@ components:
           minimum: 1
           maximum: 9223372036
           description: Optional claim TTL; omission selects FleetDB's bounded default.
+        required_status:
+          type: string
+          enum: [review]
+          description: Optional atomic status precondition used by review agents.
         claimed_at: { type: string, format: date-time }
 
     DriverRunWorkItemReleaseRequest:
@@ -12255,7 +12307,32 @@ components:
         lease_id: { type: string }
         fencing_token: { type: integer, format: int64, minimum: 1 }
         claim_action_id: { type: string }
+        restore_status:
+          type: string
+          enum: [open, review]
+          default: open
         released_at: { type: string, format: date-time }
+
+    DriverRunReviewWorkItemHandoffRequest:
+      type: object
+      additionalProperties: false
+      required: [command_id, node_id, lease_id, fencing_token, claim_action_id, task_run_id, target_status, handed_off_at]
+      properties:
+        command_id: { type: string, maxLength: 128 }
+        node_id: { type: string }
+        lease_id: { type: string }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        claim_action_id:
+          type: string
+          description: Exact immutable claim ActionLedger ID retained by the completed review TaskRun.
+        task_run_id: { type: string }
+        target_status:
+          type: string
+          enum: [open, closed]
+        reason:
+          type: string
+          description: Close reason when target_status is closed.
+        handed_off_at: { type: string, format: date-time }
 
     DriverRunWorkItemCommandResult:
       type: object

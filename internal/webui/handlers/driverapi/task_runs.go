@@ -36,6 +36,10 @@ type execTaskParams struct {
 	} `json:"sandboxPlacement"`
 	DeferCompletion bool `json:"deferCompletion"`
 	EnqueueOnly     bool `json:"enqueueOnly"`
+	// RetainWorkItemClaim is converted into trusted runtime metadata at this
+	// verified parent boundary. Workflow callers cannot provide arbitrary
+	// TaskRun metadata.
+	RetainWorkItemClaim bool `json:"retainWorkItemClaim"`
 	// CloseTask optionally overrides whether the serve task worker closes the
 	// underlying task issue on success. Pointer so an absent field preserves the
 	// worker default (true) byte-for-byte; a planner run passes false to leave
@@ -46,27 +50,34 @@ type execTaskParams struct {
 	Input json.RawMessage `json:"input,omitempty"`
 }
 
+const managedAgentPolicyInputKey = driverpkg.ManagedAgentPolicyInputKey
+
+// Keep the handler-local alias so tests describe the request-boundary
+// projection while the driver package owns the single wire contract.
+type managedAgentPolicyInput = driverpkg.ManagedAgentPolicy
+
 func (p execTaskParams) requestOptions(ws string, id driverIdentity, fencingToken int64) driverpkg.TaskRunRequestOptions {
 	opts := driverpkg.TaskRunRequestOptions{
-		WorkspaceKey:       ws,
-		DriverRunID:        id.RunID,
-		DriverStepID:       p.DriverStepID,
-		TaskRunID:          p.TaskRunID,
-		TaskID:             p.TaskID,
-		WorkerProfileID:    p.WorkerProfileID,
-		Runner:             p.Runner,
-		ProviderProfile:    p.ProviderProfile,
-		ParentSessionID:    p.ParentSessionID,
-		ParentNodeID:       id.NodeID,
-		ParentLeaseID:      id.LeaseID,
-		ParentFence:        fencingToken,
-		NodeID:             firstNonEmpty(p.NodeID, p.TargetNodeID),
-		RunnerID:           p.RunnerID,
-		SupportedProviders: p.SupportedProviders,
-		Capabilities:       p.Capabilities,
-		DeferCompletion:    p.DeferCompletion,
-		CloseTaskOnSuccess: p.CloseTask,
-		Input:              p.Input,
+		WorkspaceKey:        ws,
+		DriverRunID:         id.RunID,
+		DriverStepID:        p.DriverStepID,
+		TaskRunID:           p.TaskRunID,
+		TaskID:              p.TaskID,
+		WorkerProfileID:     p.WorkerProfileID,
+		Runner:              p.Runner,
+		ProviderProfile:     p.ProviderProfile,
+		ParentSessionID:     p.ParentSessionID,
+		ParentNodeID:        id.NodeID,
+		ParentLeaseID:       id.LeaseID,
+		ParentFence:         fencingToken,
+		NodeID:              firstNonEmpty(p.NodeID, p.TargetNodeID),
+		RunnerID:            p.RunnerID,
+		SupportedProviders:  p.SupportedProviders,
+		Capabilities:        p.Capabilities,
+		DeferCompletion:     p.DeferCompletion,
+		CloseTaskOnSuccess:  p.CloseTask,
+		RetainWorkItemClaim: p.RetainWorkItemClaim,
+		Input:               p.Input,
 		SandboxPlacement: domain.TaskRunPlacement{
 			Provider:  p.SandboxPlacement.Provider,
 			SandboxID: p.SandboxPlacement.SandboxID,
@@ -125,10 +136,17 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 	if strings.TrimSpace(params.TaskID) == "" {
 		return nil, fmt.Errorf("taskId required: %w", domain.ErrInvalid)
 	}
+	if params.RetainWorkItemClaim && (params.CloseTask == nil || *params.CloseTask) {
+		return nil, fmt.Errorf("retainWorkItemClaim requires closeTask=false: %w", domain.ErrInvalid)
+	}
 	if m.taskRunRequests == nil || m.executionAuthorities == nil {
 		return nil, fmt.Errorf("execution TaskRun request capability is unavailable: %w", execution.ErrUnavailable)
 	}
 	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	params.Input, err = m.snapshotManagedAgentPolicy(ctx, ws, parent, params.Input)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +174,112 @@ func (m *Module) execTask(ctx context.Context, ws string, id driverIdentity, bod
 	return taskRunResultFromExecution(run), nil
 }
 
+func (m *Module) snapshotManagedAgentPolicy(
+	ctx context.Context,
+	ws string,
+	parent *domain.DriverRun,
+	input json.RawMessage,
+) (json.RawMessage, error) {
+	agentServiceID := strings.TrimSpace(parent.AgentServiceID)
+	object, objectInput, err := taskRunInputObject(input)
+	if err != nil {
+		return nil, err
+	}
+	if agentServiceID == "" {
+		return stripUnmanagedAgentPolicyInput(input, object, objectInput)
+	}
+	if !objectInput {
+		return nil, fmt.Errorf("managed agent TaskRun input must be a JSON object: %w", domain.ErrInvalid)
+	}
+	policy, err := m.resolveManagedAgentPolicy(ctx, ws, agentServiceID)
+	if err != nil {
+		return nil, err
+	}
+	rawPolicy, err := json.Marshal(policy)
+	if err != nil {
+		return nil, fmt.Errorf("encode managed TaskRun policy: %w", err)
+	}
+	object[managedAgentPolicyInputKey] = rawPolicy
+	return json.Marshal(object)
+}
+
+func stripUnmanagedAgentPolicyInput(
+	input json.RawMessage,
+	object map[string]json.RawMessage,
+	objectInput bool,
+) (json.RawMessage, error) {
+	if !objectInput {
+		return append(json.RawMessage(nil), input...), nil
+	}
+	if _, reservedPresent := object[managedAgentPolicyInputKey]; !reservedPresent {
+		return append(json.RawMessage(nil), input...), nil
+	}
+	delete(object, managedAgentPolicyInputKey)
+	return json.Marshal(object)
+}
+
+func (m *Module) resolveManagedAgentPolicy(
+	ctx context.Context,
+	ws string,
+	agentServiceID string,
+) (managedAgentPolicyInput, error) {
+	service, err := m.store.AgentServices().Get(ctx, ws, agentServiceID)
+	if err != nil {
+		return managedAgentPolicyInput{}, fmt.Errorf("resolve managed TaskRun agent service: %w", err)
+	}
+	roleName := strings.TrimSpace(service.RoleName)
+	if roleName == "" {
+		return managedAgentPolicyInput{}, fmt.Errorf("managed agent %q has no role: %w", agentServiceID, domain.ErrInvalid)
+	}
+	role, err := m.store.Roles().Get(ctx, ws, roleName)
+	if err != nil {
+		return managedAgentPolicyInput{}, fmt.Errorf("resolve managed TaskRun role %q: %w", roleName, err)
+	}
+	backend := m.resolveManagedAgentBackend(ctx, ws, service, role)
+	policy := managedAgentPolicyInput{
+		Version: 1, AgentServiceID: agentServiceID, RoleName: roleName, Backend: backend,
+		Model: strings.TrimSpace(role.Model), Effort: strings.TrimSpace(role.Effort), ReadOnly: role.ReadOnly,
+		AllowedTools: append([]string(nil), role.AllowedTools...), DeniedTools: append([]string(nil), role.DeniedTools...),
+		MaxBudgetUSD: role.MaxBudgetUSD,
+	}
+	if !role.UpdatedAt.IsZero() {
+		policy.RoleUpdatedAt = role.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return policy, nil
+}
+
+func (m *Module) resolveManagedAgentBackend(
+	ctx context.Context,
+	ws string,
+	service *domain.AgentService,
+	role *domain.Role,
+) string {
+	backend := firstNonEmpty(strings.TrimSpace(service.Metadata["backend"]), strings.TrimSpace(role.Backend))
+	if backend == "" {
+		if profile, profileErr := m.store.Daemon().Get(ctx, ws); profileErr == nil && profile != nil {
+			backend = strings.TrimSpace(profile.AgentBackend)
+		}
+	}
+	if backend == "" {
+		backend = "codex"
+	}
+	return backend
+}
+
+func taskRunInputObject(input json.RawMessage) (map[string]json.RawMessage, bool, error) {
+	if len(input) == 0 {
+		return map[string]json.RawMessage{}, true, nil
+	}
+	if !json.Valid(input) {
+		return nil, false, fmt.Errorf("TaskRun input must be valid JSON: %w", domain.ErrInvalid)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(input, &object); err != nil || object == nil {
+		return nil, false, nil
+	}
+	return object, true, nil
+}
+
 func executionPlacementFromDomain(value domain.TaskRunPlacement) execution.Placement {
 	return execution.Placement{
 		Provider: value.Provider, NodeID: value.NodeID, RunnerID: value.RunnerID,
@@ -176,6 +300,9 @@ func taskRunRequestMetadata(opts driverpkg.TaskRunRequestOptions) map[string]str
 	}
 	if opts.CloseTaskOnSuccess != nil {
 		metadata[driverpkg.TaskRunCloseOnSuccessMetaKey] = strconv.FormatBool(*opts.CloseTaskOnSuccess)
+	}
+	if opts.RetainWorkItemClaim {
+		metadata[driverpkg.TaskRunRetainWorkItemClaimMetaKey] = "true"
 	}
 	return metadata
 }
@@ -403,6 +530,79 @@ func (m *Module) completeTask(ctx context.Context, ws string, id driverIdentity,
 }
 
 func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	return m.releaseTaskToStatus(ctx, ws, id, body, execution.DriverRunWorkItemRestoreOpen)
+}
+
+func (m *Module) releaseReview(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	return m.releaseTaskToStatus(ctx, ws, id, body, execution.DriverRunWorkItemRestoreReview)
+}
+
+type handoffReviewParams struct {
+	TaskID    string `json:"taskId"`
+	TaskRunID string `json:"taskRunId"`
+	Status    string `json:"status"`
+	Reason    string `json:"reason"`
+}
+
+func (m *Module) handoffReview(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
+	params, err := decodeParams[handoffReviewParams](body)
+	if err != nil {
+		return nil, err
+	}
+	parent, err := m.verifyParent(ctx, ws, id)
+	if err != nil {
+		return nil, err
+	}
+	taskID := strings.TrimSpace(params.TaskID)
+	taskRunID := strings.TrimSpace(params.TaskRunID)
+	targetStatus := strings.TrimSpace(params.Status)
+	if taskID == "" || taskRunID == "" ||
+		(targetStatus != execution.DriverRunWorkItemRestoreOpen && targetStatus != "closed") {
+		return nil, fmt.Errorf("taskId, taskRunId, and status open or closed are required: %w", domain.ErrInvalid)
+	}
+	if m.execution == nil || m.executionAuthorities == nil {
+		return nil, fmt.Errorf("execution DriverRun review handoff capability is unavailable: %w", execution.ErrUnavailable)
+	}
+	owner, err := driverRunExecutionOwner(id, parent.RunID)
+	if err != nil {
+		return nil, err
+	}
+	auth, err := m.executionAuthorities.ResolveDriverRunAuthority(
+		ctx, ws, execution.ActionHandoffDriverRunReviewWorkItem, owner,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("resolve DriverRun review handoff authority: %w", err)
+	}
+	claimRequestID := execution.ClaimDriverRunWorkItemRequestID(parent.RunID, taskID)
+	result, err := m.execution.HandoffDriverRunReviewWorkItem(ctx, auth, execution.HandoffDriverRunReviewWorkItemCommand{
+		WorkspaceKey:  ws,
+		RequestID:     execution.HandoffDriverRunReviewWorkItemRequestID(parent.RunID, taskID, taskRunID),
+		Owner:         owner,
+		WorkItemID:    taskID,
+		ClaimActionID: execution.DriverRunWorkItemClaimActionID(claimRequestID),
+		TaskRunID:     taskRunID,
+		TargetStatus:  targetStatus,
+		Reason:        strings.TrimSpace(params.Reason),
+		HandedOffAt:   time.Now().UTC(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("handoff review task: %w", err)
+	}
+	if result.WorkItem == nil {
+		return nil, fmt.Errorf("handoff review task returned no Work Item: %w", execution.ErrConflict)
+	}
+	return &driverpkg.TaskMutationResult{
+		ID: taskID, Status: result.WorkItem.Status, Released: true, Reason: strings.TrimSpace(params.Reason),
+	}, nil
+}
+
+func (m *Module) releaseTaskToStatus(
+	ctx context.Context,
+	ws string,
+	id driverIdentity,
+	body []byte,
+	restoreStatus string,
+) (any, error) {
 	params, err := decodeParams[struct {
 		TaskID string `json:"taskId"`
 		// Actor: accepted for wire-compat, IGNORED. SECURITY: the release
@@ -441,7 +641,7 @@ func (m *Module) releaseTask(ctx context.Context, ws string, id driverIdentity, 
 		RequestID:    execution.ReleaseDriverRunWorkItemRequestID(parent.RunID, params.TaskID),
 		Owner:        owner, WorkItemID: params.TaskID,
 		ClaimActionID: execution.DriverRunWorkItemClaimActionID(claimRequestID),
-		ReleasedAt:    time.Now().UTC(),
+		RestoreStatus: restoreStatus, ReleasedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("release task: %w", err)

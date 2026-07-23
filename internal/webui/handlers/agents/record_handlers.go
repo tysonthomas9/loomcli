@@ -1,7 +1,6 @@
 package agents
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	rolehandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -51,7 +49,7 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) { //nolint:c
 			continue
 		}
 		supervisedIDs[a.Name] = struct{}{}
-		items = append(items, supervisedAgentDTO{Agent: a, ID: a.Name, Kind: agentRecordKindSupervised})
+		items = append(items, newSupervisedAgentDTO(a))
 	}
 
 	// Load archived records for identity-collision detection even when the caller
@@ -159,20 +157,6 @@ func (m *Module) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func resetAgentCreateBody(r *http.Request, body []byte) {
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	r.ContentLength = int64(len(body))
-}
-
-func withoutJSONField(body []byte, field string) ([]byte, error) {
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, err
-	}
-	delete(payload, field)
-	return json.Marshal(payload)
-}
-
 func (m *Module) rejectSupervisedIdentityCollision(w http.ResponseWriter, ctx context.Context, ws, name string) bool {
 	if m.store == nil || strings.TrimSpace(name) == "" {
 		return false
@@ -204,6 +188,38 @@ func (m *Module) rejectSupervisedIdentityCollision(w http.ResponseWriter, ctx co
 
 func agentIdentifierCollisionError(id, first, second string) error {
 	return fmt.Errorf("agent identifier %q resolves to both %s and %s: %w", id, first, second, domain.ErrConflict)
+}
+
+func createUniqueAgentRecord(
+	ctx context.Context,
+	st store.Store,
+	ws, name, roleName string,
+	base store.AgentServiceCreate,
+) (*domain.AgentService, error) {
+	for attempt := 0; attempt < 5; attempt++ {
+		id, err := mintAgentRecordID(firstNonEmpty(name, roleName))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := st.Agents().Get(ctx, ws, id); err == nil {
+			continue
+		} else if !errors.Is(err, domain.ErrNotFound) {
+			return nil, err
+		}
+		base.ServiceID = id
+		created, err := st.AgentServices().Create(ctx, base)
+		if err != nil {
+			if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
+				continue
+			}
+			return nil, err
+		}
+		if created == nil {
+			return nil, errors.New("create agent record returned no record")
+		}
+		return created, nil
+	}
+	return nil, fmt.Errorf("mint unique agent id in workspace %q: %w", ws, domain.ErrAlreadyExists)
 }
 
 func (m *Module) createSupervisedAgent(w http.ResponseWriter, r *http.Request) {
@@ -255,6 +271,56 @@ func parsePromptAgentCreatePlan(body []byte) (promptAgentCreatePlan, error) {
 	}, nil
 }
 
+func (m *Module) compensatePromptAgentBindingFailure(
+	ctx context.Context,
+	ws string,
+	agentID string,
+) {
+	if err := m.store.AgentServices().Delete(context.WithoutCancel(ctx), ws, agentID); err != nil {
+		slog.Warn("prompt agent create: compensation failed, orphan agent record left behind",
+			"workspace", ws, "agent_id", agentID, "err", err)
+	}
+}
+
+func (m *Module) compensatePromptAgentGrantFailure(
+	ctx context.Context,
+	ws string,
+	bindingID string,
+	agentID string,
+	authorities promptAgentCreateAuthorities,
+) {
+	compensationCtx := context.WithoutCancel(ctx)
+	if _, err := m.deleteManagedBinding(
+		compensationCtx, ws, bindingID, agentID, authorities.disableBinding, authorities.deleteBinding,
+	); err != nil {
+		slog.Warn("prompt agent create: binding compensation failed after grant error",
+			"workspace", ws, "binding_id", bindingID, "err", err)
+	}
+	if err := m.store.AgentServices().Delete(compensationCtx, ws, agentID); err != nil {
+		slog.Warn("prompt agent create: record compensation failed after grant error, orphan agent record left behind",
+			"workspace", ws, "agent_id", agentID, "err", err)
+	}
+}
+
+func (m *Module) resolvePromptAgentDriverForCreate(
+	w http.ResponseWriter,
+	r *http.Request,
+	ws string,
+) (*domain.Driver, bool) {
+	driverRecord, err := m.resolvePromptAgentDriver(r.Context(), ws)
+	if err == nil {
+		return driverRecord, true
+	}
+	if errors.Is(err, workflowdefs.ErrBuildToolchainUnavailable) {
+		slog.Warn("prompt agent create: workflow build toolchain unavailable", "workspace", ws, "err", err)
+		handler.RespondError(w, http.StatusServiceUnavailable,
+			"prompt-agent workflow build toolchain is unavailable; configure the Loom SDK and Flue build runtime/CLI, including the target-platform Rolldown native binding")
+		return nil, false
+	}
+	handler.WriteDomainError(w, err, "resolve prompt-agent driver failed")
+	return nil, false
+}
+
 func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body []byte) { //nolint:funlen // Transaction and compensation stay visibly ordered.
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
@@ -270,135 +336,67 @@ func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body 
 		return
 	}
 	req := plan.request
-	createBindingAuth, ok := m.resolveBindingAuthority(w, r, ws, automation.ActionCreateManagedBinding)
+	authorities, ok := m.resolvePromptAgentCreateAuthorities(w, r, ws, len(req.Grants) > 0)
 	if !ok {
 		return
-	}
-	var disableBindingAuth, deleteBindingAuth authority.OperatorAuthority
-	if len(req.Grants) > 0 {
-		disableBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionDisableManagedBinding)
-		if !ok {
-			return
-		}
-		deleteBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionDeleteManagedBinding)
-		if !ok {
-			return
-		}
 	}
 	// Resolve and, for the embedded prompt-agent, materialize the executable
 	// driver before mutating role/service state. Some deployment profiles are
 	// intentionally read/run-only and omit the Flue build toolchain; those must
 	// fail atomically and advertise temporary capability unavailability rather
 	// than leaving a role behind and returning an opaque 500 after compensation.
-	driverRecord, err := m.resolvePromptAgentDriver(r.Context(), ws)
-	if err != nil {
-		if errors.Is(err, workflowdefs.ErrBuildToolchainUnavailable) {
-			slog.Warn("prompt agent create: workflow build toolchain unavailable", "workspace", ws, "err", err)
-			handler.RespondError(w, http.StatusServiceUnavailable,
-				"prompt-agent workflow build toolchain is unavailable; configure the Loom SDK and Flue build runtime/CLI, including the target-platform Rolldown native binding")
-			return
-		}
-		handler.WriteDomainError(w, err, "resolve prompt-agent driver failed")
+	driverRecord, ok := m.resolvePromptAgentDriverForCreate(w, r, ws)
+	if !ok {
 		return
 	}
-	if req.Behavior.RoleCreate != nil {
-		if _, _, err := rolehandlers.EnsureRole(r.Context(), m.store, ws, rolehandlers.EnsureRoleRequest{
-			Name:           plan.roleName,
-			Description:    req.Behavior.RoleCreate.Description,
-			Prompt:         req.Behavior.RoleCreate.Prompt,
-			PromptFilename: req.Behavior.RoleCreate.PromptFilename,
-			Model:          req.Behavior.RoleCreate.Model,
-			TaskFilter:     req.Behavior.RoleCreate.TaskFilter,
-			Backend:        req.Behavior.RoleCreate.Backend,
-			Effort:         req.Behavior.RoleCreate.Effort,
-			ReadOnly:       req.Behavior.RoleCreate.ReadOnly,
-			AllowedTools:   req.Behavior.RoleCreate.AllowedTools,
-			DeniedTools:    req.Behavior.RoleCreate.DeniedTools,
-			Skills:         req.Behavior.RoleCreate.Skills,
-		}); err != nil {
-			handler.WriteDomainError(w, err, "ensure role failed")
-			return
-		}
+	roleResolution, ok := m.resolvePromptAgentRoleForCreate(w, r, ws, plan)
+	if !ok {
+		return
 	}
 
-	agentID, err := createUniqueAgentRecord(r.Context(), m.store, ws, req.Name, plan.roleName, store.AgentServiceCreate{
+	agentMetadata := map[string]string{}
+	if backend := strings.TrimSpace(req.Backend); backend != "" {
+		agentMetadata["backend"] = backend
+	}
+	record, err := createUniqueAgentRecord(r.Context(), m.store, ws, req.Name, plan.roleName, store.AgentServiceCreate{
 		WorkspaceKey: ws,
 		Name:         firstNonEmpty(strings.TrimSpace(req.Name), plan.roleName),
 		Kind:         agentServiceKindForSource(plan.sourceKind),
 		DesiredState: plan.desired,
 		RoleName:     plan.roleName,
 		BudgetPolicy: strings.TrimSpace(req.BudgetPolicy),
+		Metadata:     agentMetadata,
 	})
 	if err != nil {
+		roleResolution.compensate(r.Context(), m, ws)
 		handler.WriteDomainError(w, err, "create agent record failed")
 		return
 	}
+	agentID := record.ServiceID
 
 	binding, err := m.createPromptAgentBinding(
-		r.Context(), createBindingAuth, ws, agentID, driverRecord, req, plan.roleName, plan.enabled, plan.sourceKind,
+		r.Context(), authorities.createBinding, ws, agentID, driverRecord, req, plan.roleName, plan.enabled, plan.sourceKind,
 	)
 	if err != nil {
 		// Compensation failures are non-fatal by design (§5: an orphan
 		// "unconfigured" agent is legal and deletable) but must never be
 		// silent — the serve log is the only trace an operator gets.
-		if compErr := m.store.AgentServices().Delete(context.WithoutCancel(r.Context()), ws, agentID); compErr != nil {
-			slog.Warn("prompt agent create: compensation failed, orphan agent record left behind",
-				"workspace", ws, "agent_id", agentID, "err", compErr)
-		}
+		m.compensatePromptAgentBindingFailure(r.Context(), ws, agentID)
+		roleResolution.compensate(r.Context(), m, ws)
 		writeBindingError(w, err, "create prompt agent binding failed")
 		return
 	}
 
 	if err := m.provisionPromptAgentGrants(r.Context(), ws, binding.BindingID, req.Grants); err != nil {
-		if _, compErr := m.deleteManagedBinding(
-			context.WithoutCancel(r.Context()), ws, binding.BindingID, agentID, disableBindingAuth, deleteBindingAuth,
-		); compErr != nil {
-			slog.Warn("prompt agent create: binding compensation failed after grant error",
-				"workspace", ws, "binding_id", binding.BindingID, "err", compErr)
-		}
-		if compErr := m.store.AgentServices().Delete(context.WithoutCancel(r.Context()), ws, agentID); compErr != nil {
-			slog.Warn("prompt agent create: record compensation failed after grant error, orphan agent record left behind",
-				"workspace", ws, "agent_id", agentID, "err", compErr)
-		}
+		m.compensatePromptAgentGrantFailure(r.Context(), ws, binding.BindingID, agentID, authorities)
+		roleResolution.compensate(r.Context(), m, ws)
 		handler.WriteDomainError(w, err, "provision connector grants failed")
 		return
 	}
 
-	record, err := m.store.AgentServices().Get(r.Context(), ws, agentID)
-	if err != nil {
-		handler.WriteDomainError(w, err, "get created agent record failed")
-		return
-	}
-	out, err := m.agentRecordDTO(r.Context(), ws, record, time.Now())
-	if err != nil {
-		handler.WriteDomainError(w, err, "decorate created agent record failed")
-		return
-	}
+	out := m.createdPromptAgentResponse(r.Context(), ws, record, binding, time.Now())
 	broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
 	handler.WriteJSON(w, http.StatusCreated, out)
-}
-
-func createUniqueAgentRecord(ctx context.Context, st store.Store, ws, name, roleName string, base store.AgentServiceCreate) (string, error) {
-	for attempt := 0; attempt < 5; attempt++ {
-		id, err := mintAgentRecordID(firstNonEmpty(name, roleName))
-		if err != nil {
-			return "", err
-		}
-		if _, err := st.Agents().Get(ctx, ws, id); err == nil {
-			continue
-		} else if !errors.Is(err, domain.ErrNotFound) {
-			return "", err
-		}
-		base.ServiceID = id
-		if _, err := st.AgentServices().Create(ctx, base); err != nil {
-			if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
-				continue
-			}
-			return "", err
-		}
-		return id, nil
-	}
-	return "", fmt.Errorf("mint unique agent id in workspace %q: %w", ws, domain.ErrAlreadyExists)
 }
 
 func (m *Module) resolvePromptAgentDriver(ctx context.Context, ws string) (*domain.Driver, error) {
@@ -499,7 +497,7 @@ func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
 		writeBindingError(w, err, "get supervised agent failed")
 		return
 	} else if ok {
-		handler.WriteJSON(w, http.StatusOK, supervisedAgentDTO{Agent: supervised, ID: supervised.Name, Kind: agentRecordKindSupervised})
+		handler.WriteJSON(w, http.StatusOK, newSupervisedAgentDTO(supervised))
 		return
 	}
 	record, err := m.store.AgentServices().Get(r.Context(), ws, id)

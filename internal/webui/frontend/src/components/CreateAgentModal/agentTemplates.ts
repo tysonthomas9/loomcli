@@ -87,6 +87,10 @@ export interface WorkflowSpec {
    * key from this so scheduled workflows do not collide on a shared route.
    */
   bindingId: string;
+  /** Backend that must be healthy before this workflow can be activated. */
+  requiredBackend?: string;
+  /** The workflow cannot run usefully without the configured GitHub runtime credential and a GitHub target remote. */
+  requiresGitHub?: boolean;
   /**
    * When set, the submit path also provisions a github connector (reusing the
    * Settings runtime credential) plus these grants, scoped to the target repo.
@@ -212,7 +216,7 @@ export const NEW_ROLE_TEMPLATE: AgentTemplate = {
   testId: "create-agent-template-new-role",
   roleCreate: {
     promptFilename: "custom-role.md",
-    taskFilter: "any",
+    taskFilter: "has_design",
   },
 };
 
@@ -231,6 +235,7 @@ const BUG_FIX_WORKFLOW_TEMPLATE: AgentTemplate = {
   workflow: {
     workflow: "bug-fix-agent",
     bindingId: "s1-bug-fix",
+    requiresGitHub: true,
   },
 };
 
@@ -249,6 +254,8 @@ const REVIEW_LOOP_WORKFLOW_TEMPLATE: AgentTemplate = {
   workflow: {
     workflow: "review-loop-agent",
     bindingId: "s2-review-loop",
+    requiredBackend: "codex",
+    requiresGitHub: true,
     grants: [
       { action: "github.pull_request.read", resource: "repo:<owner/name>" },
       { action: "github.compare.read", resource: "repo:<owner/name>" },
@@ -272,6 +279,7 @@ const LOCAL_REVIEW_WORKFLOW_TEMPLATE: AgentTemplate = {
   workflow: {
     workflow: "local-review-agent",
     bindingId: "s3-local-review",
+    requiredBackend: "codex",
   },
 };
 

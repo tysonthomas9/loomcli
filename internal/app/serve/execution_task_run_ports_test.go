@@ -121,8 +121,10 @@ type fleetExecutionTransportStub struct {
 	workItemDesignErr     error
 	workItemClaim         fleetdb.ExecutionDriverRunWorkItemClaimCommand
 	workItemRelease       fleetdb.ExecutionDriverRunWorkItemReleaseCommand
+	workItemHandoff       fleetdb.ExecutionDriverRunReviewWorkItemHandoffCommand
 	workItemClaimResult   *fleetdb.ExecutionDriverRunWorkItemResult
 	workItemReleaseResult *fleetdb.ExecutionDriverRunWorkItemResult
+	workItemHandoffResult *fleetdb.ExecutionDriverRunWorkItemResult
 	terminalWork          fleetdb.ExecutionTerminalDriverRunWorkRecoveryCommand
 }
 
@@ -199,6 +201,11 @@ func (stub *fleetExecutionTransportStub) ClaimDriverRunWorkItem(_ context.Contex
 func (stub *fleetExecutionTransportStub) ReleaseDriverRunWorkItem(_ context.Context, command fleetdb.ExecutionDriverRunWorkItemReleaseCommand) (*fleetdb.ExecutionDriverRunWorkItemResult, error) {
 	stub.workItemRelease = command
 	return stub.workItemReleaseResult, nil
+}
+
+func (stub *fleetExecutionTransportStub) HandoffDriverRunReviewWorkItem(_ context.Context, command fleetdb.ExecutionDriverRunReviewWorkItemHandoffCommand) (*fleetdb.ExecutionDriverRunWorkItemResult, error) {
+	stub.workItemHandoff = command
+	return stub.workItemHandoffResult, nil
 }
 
 func (*fleetExecutionTransportStub) SuspendDriverRun(context.Context, fleetdb.ExecutionDriverRunSuspendCommand) (*domain.DriverRun, error) {
@@ -358,6 +365,32 @@ func TestFleetDriverRunWorkItemPortForwardsOpaqueOwnerAndClaimAction(t *testing.
 	if transport.workItemRelease.LeaseToken != "raw-secret" || transport.workItemRelease.ClaimActionID != claimActionID ||
 		transport.workItemRelease.CommandID != releaseRequestID {
 		t.Fatalf("release transport command=%+v", transport.workItemRelease)
+	}
+
+	handoffAt := releaseAt.Add(time.Minute)
+	taskRunID := "review-child-1"
+	handoffRequestID := execution.HandoffDriverRunReviewWorkItemRequestID("run-1", "TASK-1", taskRunID)
+	transport.workItemHandoffResult = &fleetdb.ExecutionDriverRunWorkItemResult{
+		Issue: &fleetdb.ExecutionIssue{
+			Workspace: "WS", ID: "TASK-1", Status: "closed", Assignee: "", UpdatedAt: handoffAt,
+		},
+		Action: &fleetdb.ExecutionActionLedger{
+			WorkspaceKey: "WS", ActionID: execution.DriverRunReviewWorkItemHandoffActionID(handoffRequestID),
+		},
+	}
+	if _, err := port.HandoffDriverRunReviewWorkItem(context.Background(), execution.HandoffDriverRunReviewWorkItemCommand{
+		WorkspaceKey: "WS", RequestID: handoffRequestID, Owner: owner, WorkItemID: "TASK-1",
+		ClaimActionID: claimActionID, TaskRunID: taskRunID, TargetStatus: "closed",
+		Reason: "approved", HandedOffAt: handoffAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if transport.workItemHandoff.LeaseToken != "raw-secret" ||
+		transport.workItemHandoff.ClaimActionID != claimActionID ||
+		transport.workItemHandoff.TaskRunID != taskRunID ||
+		transport.workItemHandoff.CommandID != handoffRequestID ||
+		transport.workItemHandoff.TargetStatus != "closed" {
+		t.Fatalf("handoff transport command=%+v", transport.workItemHandoff)
 	}
 }
 

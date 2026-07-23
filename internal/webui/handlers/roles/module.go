@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -79,6 +79,12 @@ type EnsureRoleRequest struct {
 	Skills         []string
 }
 
+// EnsureRoleResult reports whether an ensure call created the durable role.
+type EnsureRoleResult struct {
+	Role    *domain.Role
+	Created bool
+}
+
 // roleWithPrompt is the GET/PATCH single-role response: the stored role plus its
 // current prompt body (read back from PromptFile; empty for builtin roles that
 // carry no prompt file).
@@ -91,7 +97,7 @@ type roleWithPrompt struct {
 // UI can PATCH just the prompt without resending the whole role.
 type updateRoleRequest struct {
 	Description    *string   `json:"description,omitempty"`
-	Prompt         *string   `json:"prompt,omitempty"`          // new prompt body (rewrites the file)
+	Prompt         *string   `json:"prompt,omitempty"`          // new prompt body (publishes a new immutable file)
 	PromptFilename *string   `json:"prompt_filename,omitempty"` // optional new filename
 	Model          *string   `json:"model,omitempty"`
 	TaskFilter     *string   `json:"task_filter,omitempty"`
@@ -120,19 +126,66 @@ func (m *Module) listRoles(w http.ResponseWriter, r *http.Request) {
 }
 
 func EnsureRole(ctx context.Context, st store.Store, ws string, req EnsureRoleRequest) (*domain.Role, bool, error) {
-	if st == nil {
-		return nil, false, fmt.Errorf("store is required: %w", domain.ErrInvalid)
-	}
-	name := strings.TrimSpace(req.Name)
-	if ws == "" || name == "" {
-		return nil, false, fmt.Errorf("workspace and role name are required: %w", domain.ErrInvalid)
-	}
-	if existing, err := st.Roles().Get(ctx, ws, name); err == nil && existing != nil {
-		return existing, false, nil
-	} else if err != nil && !errors.Is(err, domain.ErrNotFound) {
+	result, err := EnsureRoleWithReceipt(ctx, st, ws, req)
+	if err != nil {
 		return nil, false, err
 	}
+	return result.Role, result.Created, nil
+}
 
+// EnsureRoleWithReceipt is EnsureRole with a compensating ownership receipt.
+func EnsureRoleWithReceipt(ctx context.Context, st store.Store, ws string, req EnsureRoleRequest) (*EnsureRoleResult, error) {
+	if st == nil {
+		return nil, fmt.Errorf("store is required: %w", domain.ErrInvalid)
+	}
+	ws = strings.TrimSpace(ws)
+	name := strings.TrimSpace(req.Name)
+	if ws == "" || name == "" {
+		return nil, fmt.Errorf("workspace and role name are required: %w", domain.ErrInvalid)
+	}
+
+	existing, found, err := findEnsuredRole(ctx, st, ws, name, req)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return &EnsureRoleResult{Role: existing}, nil
+	}
+
+	in, _, err := buildEnsuredRoleCreate(ctx, st, ws, name, req)
+	if err != nil {
+		return nil, err
+	}
+	role, err := st.Roles().Create(ctx, in)
+	if err == nil {
+		return &EnsureRoleResult{Role: role, Created: true}, nil
+	}
+	if !errors.Is(err, domain.ErrAlreadyExists) {
+		// The immutable prompt is deliberately retained. Another concurrent
+		// ensure may already have adopted it, and there is no transaction that
+		// spans the role store and filesystem. Retention is retry-safe.
+		return nil, err
+	}
+
+	existing, getErr := st.Roles().Get(ctx, ws, name)
+	if getErr == nil && existing != nil {
+		if matchErr := validateEnsureRoleMatch(existing, req); matchErr != nil {
+			return nil, matchErr
+		}
+		return &EnsureRoleResult{Role: existing}, nil
+	}
+	// The create outcome is ambiguous when the winner cannot be read. Keep the
+	// prompt rather than risk deleting a file the committed role references.
+	return nil, err
+}
+
+func buildEnsuredRoleCreate(
+	ctx context.Context,
+	st store.Store,
+	ws string,
+	name string,
+	req EnsureRoleRequest,
+) (store.RoleCreate, roleprompts.PromptFileReceipt, error) {
 	in := store.RoleCreate{
 		WorkspaceKey: ws,
 		Name:         name,
@@ -142,33 +195,128 @@ func EnsureRole(ctx context.Context, st store.Store, ws string, req EnsureRoleRe
 		Backend:      strings.TrimSpace(req.Backend),
 		Effort:       strings.TrimSpace(req.Effort),
 		ReadOnly:     req.ReadOnly,
-		AllowedTools: req.AllowedTools,
-		DeniedTools:  req.DeniedTools,
-		Skills:       req.Skills,
+		AllowedTools: slices.Clone(req.AllowedTools),
+		DeniedTools:  slices.Clone(req.DeniedTools),
+		Skills:       slices.Clone(req.Skills),
 	}
+	var receipt roleprompts.PromptFileReceipt
 	if strings.TrimSpace(req.Prompt) != "" {
-		promptPath, err := writeRolePrompt(ctx, st, ws, name, req.PromptFilename, req.Prompt)
+		var err error
+		receipt, err = ensureRolePromptWithReceipt(ctx, st, ws, name, req.PromptFilename, req.Prompt)
 		if err != nil {
-			return nil, false, err
+			return store.RoleCreate{}, roleprompts.PromptFileReceipt{}, err
 		}
-		in.PromptFile = promptPath
+		in.PromptFile = receipt.Path
 	}
-	role, err := st.Roles().Create(ctx, in)
+	return in, receipt, nil
+}
+
+// Compensate intentionally retains a committed role and immutable prompt.
+// RoleStore exposes only name-based Delete, so check-then-delete could remove a
+// concurrently edited, recreated, or newly adopted role. An exact retry safely
+// reuses the retained definition.
+func (*EnsureRoleResult) Compensate(context.Context, store.Store, string) error {
+	return nil
+}
+
+func deleteRoleRecord(ctx context.Context, st store.Store, ws, name string) error {
+	return st.Roles().Delete(ctx, ws, name)
+}
+
+func findEnsuredRole(
+	ctx context.Context,
+	st store.Store,
+	ws string,
+	name string,
+	req EnsureRoleRequest,
+) (*domain.Role, bool, error) {
+	existing, err := st.Roles().Get(ctx, ws, name)
 	if err != nil {
-		if errors.Is(err, domain.ErrAlreadyExists) {
-			existing, getErr := st.Roles().Get(ctx, ws, name)
-			if getErr == nil && existing != nil {
-				return existing, false, nil
-			}
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, false, nil
 		}
 		return nil, false, err
 	}
-	return role, true, nil
+	if existing == nil {
+		return nil, false, nil
+	}
+	if err := validateEnsureRoleMatch(existing, req); err != nil {
+		return nil, false, err
+	}
+	return existing, true, nil
 }
 
-// createRole is an idempotent "ensure": if the named role already exists it is
-// returned unchanged (200), otherwise it is created (201). This lets the
-// template gallery call it on every custom-role agent creation without 409s.
+// validateEnsureRoleMatch makes "ensure" exact rather than name-only. A role
+// name is shared authority: silently reusing a role whose prompt or policy
+// differs from the requested definition could turn a read-only UI template
+// into a mutating agent. The error names only mismatched fields; prompt bodies
+// are deliberately never copied into logs or API errors.
+func validateEnsureRoleMatch(existing *domain.Role, req EnsureRoleRequest) error {
+	if existing == nil {
+		return fmt.Errorf("existing role is required: %w", domain.ErrInvalid)
+	}
+
+	var mismatches []string
+	addMismatch := func(field string, matches bool) {
+		if !matches {
+			mismatches = append(mismatches, field)
+		}
+	}
+	addMismatch("description", existing.Description == strings.TrimSpace(req.Description))
+	addMismatch("model", existing.Model == strings.TrimSpace(req.Model))
+	addMismatch("task_filter", existing.TaskFilter == strings.TrimSpace(req.TaskFilter))
+	addMismatch("backend", existing.Backend == strings.TrimSpace(req.Backend))
+	addMismatch("effort", existing.Effort == strings.TrimSpace(req.Effort))
+	addMismatch("read_only", existing.ReadOnly == req.ReadOnly)
+	addMismatch("allowed_tools", slices.Equal(existing.AllowedTools, req.AllowedTools))
+	addMismatch("denied_tools", slices.Equal(existing.DeniedTools, req.DeniedTools))
+	addMismatch("skills", slices.Equal(existing.Skills, req.Skills))
+
+	requestedPrompt := normalizePromptBody(req.Prompt)
+	existingPrompt := normalizePromptBody(ReadPromptBody(existing))
+	addMismatch("prompt", existingPrompt == requestedPrompt)
+
+	if len(mismatches) > 0 {
+		return fmt.Errorf(
+			"role %q already exists with incompatible configuration (%s): %w",
+			existing.Name, strings.Join(mismatches, ", "), domain.ErrConflict,
+		)
+	}
+	return nil
+}
+
+func normalizePromptBody(prompt string) string {
+	if strings.TrimSpace(prompt) == "" {
+		return ""
+	}
+	return prompt
+}
+
+// ValidatePromptAgentRole rejects role definitions that the prompt-agent
+// workflow cannot execute. Keep this set aligned with
+// builtin/prompt-agent.ts normalizeRoleTaskFilter: legacy empty/"any" roles
+// map to has_design, while plan/coder roles use the two explicit filters.
+func ValidatePromptAgentRole(role *domain.Role) error {
+	if role == nil {
+		return fmt.Errorf("prompt-agent role is required: %w", domain.ErrInvalid)
+	}
+	if strings.TrimSpace(ReadPromptBody(role)) == "" {
+		return fmt.Errorf("role %q requires a non-empty prompt or readable prompt_file: %w", role.Name, domain.ErrInvalid)
+	}
+	switch taskFilter := strings.TrimSpace(role.TaskFilter); taskFilter {
+	case "", "any", "needs_plan", "has_design":
+		return nil
+	default:
+		return fmt.Errorf(
+			"role %q task_filter %q is unsupported by prompt-agent; expected any, needs_plan, or has_design: %w",
+			role.Name, taskFilter, domain.ErrInvalid,
+		)
+	}
+}
+
+// createRole is an exact idempotent "ensure": an identical named role is
+// returned (200), a new role is created (201), and an incompatible collision
+// is rejected (409).
 func (m *Module) createRole(w http.ResponseWriter, r *http.Request) {
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	if ws == "" {
@@ -186,45 +334,29 @@ func (m *Module) createRole(w http.ResponseWriter, r *http.Request) {
 		handler.RespondError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-
-	// Fast idempotent path: an already-provisioned role is returned untouched.
-	fetch := func() (*domain.Role, bool) {
-		role, err := m.store.Roles().Get(r.Context(), ws, name)
-		return role, err == nil && role != nil
-	}
-	if handler.WriteExistingIfFound(w, fetch) {
+	role, created, err := EnsureRole(r.Context(), m.store, ws, EnsureRoleRequest{
+		Name:           name,
+		Description:    req.Description,
+		Prompt:         req.Prompt,
+		PromptFilename: req.PromptFilename,
+		Model:          req.Model,
+		TaskFilter:     req.TaskFilter,
+		Backend:        req.Backend,
+		Effort:         req.Effort,
+		ReadOnly:       req.ReadOnly,
+		AllowedTools:   req.AllowedTools,
+		DeniedTools:    req.DeniedTools,
+		Skills:         req.Skills,
+	})
+	if err != nil {
+		handler.WriteDomainError(w, err, "create role failed")
 		return
 	}
-
-	in := store.RoleCreate{
-		WorkspaceKey: ws,
-		Name:         name,
-		Description:  strings.TrimSpace(req.Description),
-		Model:        strings.TrimSpace(req.Model),
-		TaskFilter:   strings.TrimSpace(req.TaskFilter),
-		Backend:      strings.TrimSpace(req.Backend),
-		Effort:       strings.TrimSpace(req.Effort),
-		ReadOnly:     req.ReadOnly,
-		AllowedTools: req.AllowedTools,
-		DeniedTools:  req.DeniedTools,
-		Skills:       req.Skills,
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
 	}
-
-	// A custom (non-builtin) role MUST have a prompt file on disk — the daemon
-	// supervisor refuses to spawn a custom role without prompt_file. Persist it
-	// to a CWD-independent absolute path under the workspace so the agent
-	// process can read it at launch regardless of its working directory.
-	if strings.TrimSpace(req.Prompt) != "" {
-		promptPath, err := m.writeRolePrompt(r.Context(), ws, name, req.PromptFilename, req.Prompt)
-		if err != nil {
-			handler.RespondError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		in.PromptFile = promptPath
-	}
-
-	role, err := m.store.Roles().Create(r.Context(), in)
-	handler.WriteCreatedOrExisting(w, role, err, fetch, "create role failed")
+	handler.WriteJSON(w, status, role)
 }
 
 // getRole returns a single role plus its current prompt body so the UI can
@@ -244,10 +376,11 @@ func (m *Module) getRole(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusOK, roleWithPrompt{Role: role, Prompt: m.readRolePrompt(role)})
 }
 
-// updateRole applies a partial edit to a role. A new prompt body rewrites the
-// role's prompt file (reusing its existing filename so the stored path stays
-// stable). The change takes effect on the agent's next spawn — a running agent
-// keeps the prompt it read at launch.
+// updateRole applies a partial edit to a role. A new prompt body is published
+// under a fresh immutable filename, then the edited role is repointed to it.
+// The old file remains untouched in case another role still references it. The
+// change takes effect on the agent's next spawn — a running agent keeps the
+// prompt it read at launch.
 func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:funlen // Partial role updates are intentionally explicit.
 	ws := strings.TrimSpace(r.PathValue("ws"))
 	name := strings.TrimSpace(r.PathValue("name"))
@@ -260,9 +393,8 @@ func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:f
 		handler.RespondError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	// The role must exist to edit it — Get also gives us the current prompt file.
-	existing, err := m.store.Roles().Get(r.Context(), ws, name)
-	if err != nil {
+	// The role must exist to edit it.
+	if _, err := m.store.Roles().Get(r.Context(), ws, name); err != nil {
 		handler.WriteDomainError(w, err, "get role failed")
 		return
 	}
@@ -286,12 +418,9 @@ func (m *Module) updateRole(w http.ResponseWriter, r *http.Request) { //nolint:f
 		if req.PromptFilename != nil {
 			filename = strings.TrimSpace(*req.PromptFilename)
 		}
-		if filename == "" && strings.TrimSpace(existing.PromptFile) != "" {
-			filename = filepath.Base(existing.PromptFile)
-		}
-		promptPath, werr := m.writeRolePrompt(r.Context(), ws, name, filename, *req.Prompt)
+		promptPath, werr := ensureRolePrompt(r.Context(), m.store, ws, name, filename, *req.Prompt)
 		if werr != nil {
-			handler.RespondError(w, http.StatusInternalServerError, werr.Error())
+			handler.WriteDomainError(w, werr, "update role prompt failed")
 			return
 		}
 		patch.PromptFile = &promptPath
@@ -391,7 +520,7 @@ func (m *Module) deleteRole(w http.ResponseWriter, r *http.Request) {
 		handler.RespondError(w, http.StatusBadRequest, "cannot delete the built-in "+name+" role")
 		return
 	}
-	if err := m.store.Roles().Delete(r.Context(), ws, name); err != nil {
+	if err := deleteRoleRecord(r.Context(), m.store, ws, name); err != nil {
 		handler.WriteDomainError(w, err, "delete role failed")
 		return
 	}
@@ -405,15 +534,19 @@ func (m *Module) readRolePrompt(role *domain.Role) string {
 	return ReadPromptBody(role)
 }
 
-// ReadPromptBody reads a role's prompt body from its PromptFile, returning ""
-// when the role has no prompt file (builtin) or the file is unreadable. It is
+// ReadPromptBody reads a role's prompt body from its PromptFile, falling back
+// to the persisted inline Prompt when no file is configured. It returns ""
+// when a configured file is unreadable. It is
 // the single loader for role prompt bodies, shared by this module's read/clone
 // paths and the driver-op roles.get surface (internal/webui/handlers/driverapi)
 // so the on-disk prompt is read one way. PromptFile is an absolute path (the
 // roles API persists it that way via writeRolePrompt).
 func ReadPromptBody(role *domain.Role) string {
-	if role == nil || strings.TrimSpace(role.PromptFile) == "" {
+	if role == nil {
 		return ""
+	}
+	if strings.TrimSpace(role.PromptFile) == "" {
+		return role.Prompt
 	}
 	data, err := os.ReadFile(role.PromptFile)
 	if err != nil {
@@ -448,4 +581,27 @@ func writeRolePrompt(ctx context.Context, st store.Store, ws, roleName, filename
 		return "", fmt.Errorf("workspace path unavailable; cannot persist role prompt")
 	}
 	return roleprompts.WritePromptFile(wsPath, roleName, filename, content)
+}
+
+func ensureRolePrompt(ctx context.Context, st store.Store, ws, roleName, filename, content string) (string, error) {
+	receipt, err := ensureRolePromptWithReceipt(ctx, st, ws, roleName, filename, content)
+	return receipt.Path, err
+}
+
+func ensureRolePromptWithReceipt(
+	ctx context.Context,
+	st store.Store,
+	ws, roleName, filename, content string,
+) (roleprompts.PromptFileReceipt, error) {
+	wsPath := strings.TrimSpace(storeadapter.ResolveOrHealWorkspacePath(ctx, st, ws))
+	if wsPath == "" {
+		return roleprompts.PromptFileReceipt{}, fmt.Errorf("workspace path unavailable; cannot persist role prompt")
+	}
+	immutableFilename := roleprompts.ImmutablePromptFilename(roleName, filename, content)
+	receipt, err := roleprompts.EnsurePromptFileWithReceipt(wsPath, roleName, immutableFilename, content)
+	if errors.Is(err, roleprompts.ErrPromptFileConflict) {
+		return roleprompts.PromptFileReceipt{},
+			fmt.Errorf("role %q prompt file conflicts with an existing definition: %w", roleName, domain.ErrConflict)
+	}
+	return receipt, err
 }

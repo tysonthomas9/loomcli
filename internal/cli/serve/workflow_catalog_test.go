@@ -130,6 +130,51 @@ func TestOpenServeStoreRejectsMissingExecutionAwaitCapabilityBeforeRuntime(t *te
 	}
 }
 
+func TestOpenServeStoreRejectsFleetWithoutReviewHandoffCapability(t *testing.T) {
+	var capabilityCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != fleetdb.CapabilitiesAPIPath {
+			http.Error(w, "unexpected fallback request", http.StatusInternalServerError)
+			return
+		}
+		capabilityCalls.Add(1)
+		available := slices.DeleteFunc(
+			phase4RequiredCapabilities(false, false),
+			func(capability string) bool {
+				return capability == fleetdb.ExecutionDriverRunReviewWorkItemHandoffCapability
+			},
+		)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"api_revision": "v1", "capabilities": available})
+	}))
+	defer server.Close()
+
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv(bootstrap.EnvFleetDBURL, server.URL)
+	t.Setenv(serveadapter.WorkflowCatalogEnabledEnv, "false")
+	t.Setenv(serveadapter.AutomationEnabledEnv, "false")
+	originalAuthURL := serveAuthURL
+	serveAuthURL = ""
+	t.Cleanup(func() { serveAuthURL = originalAuthURL })
+
+	handle, err := openServeStore(context.Background(), fleetState{})
+	if handle != nil {
+		_ = handle.Close()
+		t.Fatal("store handle is non-nil for a Fleet deployment without atomic review handoff")
+	}
+	var incompatibility *fleetdb.CapabilityIncompatibilityError
+	if !errors.As(err, &incompatibility) {
+		t.Fatalf("error=%v, want *fleetdb.CapabilityIncompatibilityError", err)
+	}
+	if incompatibility.Kind != fleetdb.CapabilityKeysMissing ||
+		!reflect.DeepEqual(incompatibility.Missing, []string{fleetdb.ExecutionDriverRunReviewWorkItemHandoffCapability}) {
+		t.Fatalf("incompatibility=%+v", incompatibility)
+	}
+	if got := capabilityCalls.Load(); got != 1 {
+		t.Fatalf("capability calls=%d, want 1", got)
+	}
+}
+
 func TestOpenServeStoreRejectsMissingAutomationCapabilityWithoutFallback(t *testing.T) {
 	var capabilityCalls atomic.Int32
 	var fallbackCalls atomic.Int32

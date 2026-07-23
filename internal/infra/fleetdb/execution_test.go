@@ -560,6 +560,97 @@ func TestExecutionDriverRunWorkItemCommandsRejectUnexpectedStatusAndDivergentRec
 	}
 }
 
+func TestExecutionDriverRunReviewClaimAcceptsOnlyVersionedReceiptFingerprint(t *testing.T) {
+	at := time.Date(2026, 7, 23, 12, 44, 45, 841059362, time.UTC)
+	commandID := "claim-work-item:sha256:" + strings.Repeat("a", 64)
+	versionedRef := executionDriverRunReviewClaimFingerprintPrefix + "sha256:" + strings.Repeat("c", 64)
+	for _, tc := range []struct {
+		name           string
+		requiredStatus string
+		requestRef     string
+		wantErr        bool
+	}{
+		{name: "review_versioned", requiredStatus: "review", requestRef: versionedRef},
+		{name: "review_legacy_rejected", requiredStatus: "review", requestRef: "sha256:" + strings.Repeat("c", 64), wantErr: true},
+		{name: "open_versioned_rejected", requestRef: versionedRef, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var raw map[string]json.RawMessage
+				decodeJSONBody(t, r, &raw)
+				if got := strings.Trim(string(raw["required_status"]), `"`); got != tc.requiredStatus {
+					t.Fatalf("required_status = %q, want %q", got, tc.requiredStatus)
+				}
+				result := executionDriverRunWorkItemFixture("claim", commandID, at.Truncate(time.Microsecond))
+				result.Action.RequestRef = tc.requestRef
+				writeJSON(t, w, result)
+			}))
+			t.Cleanup(server.Close)
+			client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := client.Execution().ClaimDriverRunWorkItem(t.Context(), ExecutionDriverRunWorkItemClaimCommand{
+				WorkspaceKey: "WS", CommandID: commandID, RunID: "run-1", TaskID: "TASK-1",
+				NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "raw-driver-secret", FencingToken: 7,
+				RequiredStatus: tc.requiredStatus, ClaimedAt: at,
+			})
+			if tc.wantErr {
+				if !errors.Is(err, ErrExecutionUnavailable) {
+					t.Fatalf("error = %v, want ErrExecutionUnavailable", err)
+				}
+				return
+			}
+			if err != nil || result == nil || result.Action == nil {
+				t.Fatalf("ClaimDriverRunWorkItem() = %+v, %v", result, err)
+			}
+		})
+	}
+}
+
+func TestExecutionDriverRunReviewHandoffUsesFencedRouteAndStrictReceipt(t *testing.T) {
+	handedOffAt := time.Date(2026, 7, 23, 5, 30, 0, 123456789, time.UTC)
+	commandID := "handoff-review-work-item:sha256:" + strings.Repeat("d", 64)
+	claimActionID := "driver-run-work-item-claim:claim-work-item:sha256:" + strings.Repeat("a", 64)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost ||
+			r.URL.Path != "/api/v1/WS/driver-runs/run-1/work-items/TASK-1/review-handoff" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Lease-Token"); got != "raw-driver-secret" {
+			t.Fatalf("X-Lease-Token = %q", got)
+		}
+		var raw map[string]json.RawMessage
+		decodeJSONBody(t, r, &raw)
+		encoded, _ := json.Marshal(raw)
+		if strings.Contains(string(encoded), "raw-driver-secret") || raw["lease_token"] != nil {
+			t.Fatalf("body leaked raw token: %s", encoded)
+		}
+		if string(raw["command_id"]) != `"`+commandID+`"` ||
+			string(raw["claim_action_id"]) != `"`+claimActionID+`"` ||
+			string(raw["task_run_id"]) != `"review-child-1"` ||
+			string(raw["target_status"]) != `"closed"` ||
+			string(raw["reason"]) != `"approved"` {
+			t.Fatalf("handoff body = %s", encoded)
+		}
+		writeJSON(t, w, executionDriverRunWorkItemFixture("handoff", commandID, handedOffAt.Truncate(time.Microsecond)))
+	}))
+	t.Cleanup(server.Close)
+	client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Execution().HandoffDriverRunReviewWorkItem(t.Context(), ExecutionDriverRunReviewWorkItemHandoffCommand{
+		WorkspaceKey: "WS", CommandID: commandID, RunID: "run-1", TaskID: "TASK-1",
+		NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "raw-driver-secret", FencingToken: 7,
+		ClaimActionID: claimActionID, TaskRunID: "review-child-1", TargetStatus: "closed",
+		Reason: "approved", HandedOffAt: handedOffAt,
+	})
+	if err != nil || result.Issue == nil || result.Issue.Status != "closed" || result.Issue.Assignee != "" {
+		t.Fatalf("HandoffDriverRunReviewWorkItem() = %+v, %v", result, err)
+	}
+}
+
 func executionDriverRunWorkItemFixture(operation, commandID string, at time.Time) ExecutionDriverRunWorkItemResult {
 	appliedAt := at
 	status, assignee, actionType, responseState := "in_progress", "driver-run:run-1", "claim_work_item", "claimed"
@@ -567,6 +658,9 @@ func executionDriverRunWorkItemFixture(operation, commandID string, at time.Time
 	if operation == "release" {
 		status, assignee, actionType, responseState = "open", "", "release_work_item", "released"
 		actionPrefix = "driver-run-work-item-release:"
+	} else if operation == "handoff" {
+		status, assignee, actionType, responseState = "closed", "", "handoff_review_work_item", "handed-off"
+		actionPrefix = "driver-run-review-work-item-handoff:"
 	}
 	actionID := actionPrefix + commandID
 	return ExecutionDriverRunWorkItemResult{

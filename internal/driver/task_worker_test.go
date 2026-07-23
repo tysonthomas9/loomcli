@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -730,6 +732,100 @@ func TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun(t *testing.T) {
 	}
 	if step.Status != domain.DriverStepFailed || step.TaskRunID != "task-run-worker-retry" || step.OutputRef != "logs://task-run-worker-retry" {
 		t.Fatalf("step after blocked = %+v, want failed linked step with logs output", step)
+	}
+}
+
+func TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes(t *testing.T) {
+	ctx, st, run := setupRunningDriverRun(t)
+	const taskRunID = "task-run-worker-transcript-retry"
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:     "TEST",
+		TaskRunID:        taskRunID,
+		DriverRunID:      run.RunID,
+		TaskID:           "TEST-RETRY-TRANSCRIPT",
+		Runner:           "local-task-runner",
+		RunnerKind:       RunnerKindFlueWorkflow,
+		RunnerEntrypoint: LocalTaskRunnerEntrypoint,
+		Status:           domain.TaskRunQueued,
+		RuntimeMetadata: map[string]string{
+			"runner_trust_level": string(domain.DriverTrustTrusted),
+		},
+	}); err != nil {
+		t.Fatalf("Create queued task run: %v", err)
+	}
+	executor := HostBridgeTaskExecutor{
+		Store:        st,
+		WorktreePath: t.TempDir(),
+		APIBaseURL:   testTaskRunAPIURL,
+		Command:      hostBridgeHelperCommand(t, "flue-retry-transcript", "unused-base", "unused-patch"),
+	}
+	now := time.Now().UTC()
+	worker := &TaskWorker{
+		Store:             st,
+		WorkspaceKey:      "TEST",
+		NodeID:            "task-worker-node-transcript-retry",
+		RunnerID:          "task-worker-runner-transcript-retry",
+		HeartbeatInterval: -1,
+		MaxAttempts:       2,
+		Executor:          executor,
+		Now:               func() time.Time { return now },
+	}
+	wireTaskWorkerTestExecution(worker, st)
+
+	first, err := worker.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce first attempt: %v", err)
+	}
+	firstTranscriptID := "transcript-" + taskRunID
+	firstLogsID := "logs-" + taskRunID
+	if first.Run.Status != domain.TaskRunQueued ||
+		!slices.Equal(first.ArtifactIDs, []string{firstTranscriptID, firstLogsID}) {
+		t.Fatalf("first outcome = %+v artifacts=%v, want requeued with first-attempt evidence", first.Run, first.ArtifactIDs)
+	}
+	if first.Run.RuntimeMetadata["transcript_ref"] != "artifact://"+firstTranscriptID {
+		t.Fatalf("first transcript ref = %q, want first-attempt artifact", first.Run.RuntimeMetadata["transcript_ref"])
+	}
+
+	now = now.Add(taskRunRetryBackoff(1))
+	second, err := worker.RunOnce(ctx)
+	if err != nil {
+		t.Fatalf("RunOnce second attempt: %v", err)
+	}
+	secondTranscriptID := firstTranscriptID + "-attempt-2"
+	secondLogsID := firstLogsID + "-attempt-2"
+	if second.Run.Status != domain.TaskRunCompleted ||
+		!slices.Equal(second.ArtifactIDs, []string{secondTranscriptID, secondLogsID}) {
+		t.Fatalf("second outcome = %+v artifacts=%v, want successful retry with attempt-2 evidence", second.Run, second.ArtifactIDs)
+	}
+	if second.Run.RuntimeMetadata["transcript_ref"] != "artifact://"+secondTranscriptID {
+		t.Fatalf("successful retry transcript ref = %q, want attempt-2 artifact", second.Run.RuntimeMetadata["transcript_ref"])
+	}
+
+	contentReader, ok := st.Artifacts().(interface {
+		ReadContent(context.Context, string, string) ([]byte, error)
+	})
+	if !ok {
+		t.Fatal("artifact store does not expose ReadContent")
+	}
+	firstContent, err := contentReader.ReadContent(ctx, "TEST", firstTranscriptID)
+	if err != nil {
+		t.Fatalf("read first transcript: %v", err)
+	}
+	secondContent, err := contentReader.ReadContent(ctx, "TEST", secondTranscriptID)
+	if err != nil {
+		t.Fatalf("read second transcript: %v", err)
+	}
+	if !strings.Contains(string(firstContent), "transcript for attempt 1") ||
+		!strings.Contains(string(secondContent), "transcript for attempt 2") {
+		t.Fatalf("transcript contents first=%q second=%q, want distinct attempt evidence", firstContent, secondContent)
+	}
+	session, err := st.AgentSessions().Get(ctx, "TEST", "flue-"+taskRunID)
+	if err != nil {
+		t.Fatalf("get retry session: %v", err)
+	}
+	if session.Status != domain.AgentSessionCompleted ||
+		session.Metadata["transcript_ref"] != "artifact://"+secondTranscriptID {
+		t.Fatalf("session after successful retry = %+v, want completed with current transcript link", session)
 	}
 }
 

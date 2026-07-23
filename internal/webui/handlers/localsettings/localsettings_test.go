@@ -1,15 +1,149 @@
 package localsettings
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 )
+
+func TestHandleGet_ReportsConfiguredButUnusableCredentialWithoutLeakingIt(t *testing.T) {
+	dir := t.TempDir()
+	settings := runtimesettings.Default()
+	credential, err := runtimesettings.SealRuntimeCredential(
+		dir,
+		runtimesettings.RuntimeCredentialProviderGitHub,
+		"gh-secret",
+		time.Now(),
+	)
+	if err != nil {
+		t.Fatalf("seal GitHub credential: %v", err)
+	}
+	settings.RuntimeCredentials.GitHub = credential
+	if err := runtimesettings.Save(dir, settings); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	wrongKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	if err := os.WriteFile(filepath.Join(dir, "runtime-credentials.key"), []byte(wrongKey), 0600); err != nil {
+		t.Fatalf("replace runtime credential key: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	HandleGet(dir).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/local/settings", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp response
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data == nil {
+		t.Fatalf("missing settings data: %+v", resp)
+	}
+	status := resp.Data.RuntimeCredentials.GitHub
+	if !status.Configured || status.Usable {
+		t.Fatalf("GitHub readiness = %+v, want configured but unusable", status)
+	}
+	if strings.Contains(rec.Body.String(), "gh-secret") ||
+		strings.Contains(rec.Body.String(), credential.Sealed) ||
+		strings.Contains(strings.ToLower(rec.Body.String()), "unseal") {
+		t.Fatalf("readiness response leaked credential details: %s", rec.Body.String())
+	}
+}
+
+func TestHandleRuntimeCredentialPreflight_RejectsUnsealableCredentialWithoutDetails(t *testing.T) {
+	dir := t.TempDir()
+	settings := runtimesettings.Default()
+	credential, err := runtimesettings.SealRuntimeCredential(
+		dir,
+		runtimesettings.RuntimeCredentialProviderGitHub,
+		"gh-secret",
+		time.Now(),
+	)
+	if err != nil {
+		t.Fatalf("seal GitHub credential: %v", err)
+	}
+	settings.RuntimeCredentials.GitHub = credential
+	if err := runtimesettings.Save(dir, settings); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	wrongKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	if err := os.WriteFile(filepath.Join(dir, "runtime-credentials.key"), []byte(wrongKey), 0600); err != nil {
+		t.Fatalf("replace runtime credential key: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/local/settings/runtime-credentials/preflight",
+		strings.NewReader(`{"provider":"github"}`),
+	)
+	rec := httptest.NewRecorder()
+	HandleRuntimeCredentialPreflight(dir).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp runtimeCredentialPreflightResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Success || resp.Data == nil {
+		t.Fatalf("preflight response = %+v", resp)
+	}
+	if !resp.Data.Configured || resp.Data.Usable {
+		t.Fatalf("preflight data = %+v, want configured but unusable", resp.Data)
+	}
+	if strings.Contains(rec.Body.String(), "gh-secret") ||
+		strings.Contains(rec.Body.String(), credential.Sealed) ||
+		strings.Contains(strings.ToLower(rec.Body.String()), "unseal") {
+		t.Fatalf("preflight response leaked credential details: %s", rec.Body.String())
+	}
+}
+
+func TestHandleRuntimeCredentialPreflight_AcceptsUsableCredential(t *testing.T) {
+	dir := t.TempDir()
+	settings := runtimesettings.Default()
+	credential, err := runtimesettings.SealRuntimeCredential(
+		dir,
+		runtimesettings.RuntimeCredentialProviderGitHub,
+		"gh-secret",
+		time.Now(),
+	)
+	if err != nil {
+		t.Fatalf("seal GitHub credential: %v", err)
+	}
+	settings.RuntimeCredentials.GitHub = credential
+	if err := runtimesettings.Save(dir, settings); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/local/settings/runtime-credentials/preflight",
+		strings.NewReader(`{"provider":"github"}`),
+	)
+	rec := httptest.NewRecorder()
+	HandleRuntimeCredentialPreflight(dir).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var resp runtimeCredentialPreflightResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data == nil || !resp.Data.Configured || !resp.Data.Usable {
+		t.Fatalf("preflight data = %+v, want configured and usable", resp.Data)
+	}
+}
 
 func TestHandlePatch_SavesRedisURLWithoutReturningPassword(t *testing.T) {
 	dir := t.TempDir()
@@ -112,6 +246,42 @@ func TestHandlePatch_SavesRuntimeSettingsWithoutReturningCredentials(t *testing.
 	got, err := runtimesettings.UnsealRuntimeCredential(dir, settings, runtimesettings.RuntimeCredentialProviderDaytona)
 	if err != nil || got != "dtn-secret" {
 		t.Fatalf("unseal Daytona credential = %q, %v", got, err)
+	}
+}
+
+func TestHandlePatchSerializesLoadApplySave(t *testing.T) {
+	for attempt := 0; attempt < 25; attempt++ {
+		dir := t.TempDir()
+		patch := HandlePatch(dir)
+		start := make(chan struct{})
+		statuses := make(chan int, 2)
+		for _, body := range []string{
+			`{"agent_runtime":{"default":"daytona"}}`,
+			`{"local_task_runner":{"opencode_model":"open-model"}}`,
+		} {
+			body := body
+			go func() {
+				<-start
+				req := httptest.NewRequest(http.MethodPatch, "/api/local/settings", strings.NewReader(body))
+				rec := httptest.NewRecorder()
+				patch.ServeHTTP(rec, req)
+				statuses <- rec.Code
+			}()
+		}
+		close(start)
+		for range 2 {
+			if status := <-statuses; status != http.StatusOK {
+				t.Fatalf("attempt %d concurrent PATCH status = %d, want 200", attempt, status)
+			}
+		}
+		settings, err := runtimesettings.Load(dir)
+		if err != nil {
+			t.Fatalf("attempt %d load settings: %v", attempt, err)
+		}
+		if settings.AgentRuntime.Default != "daytona" ||
+			settings.LocalTaskRunner.OpenCodeModel != "open-model" {
+			t.Fatalf("attempt %d concurrent PATCH lost a field: %+v", attempt, settings)
+		}
 	}
 }
 

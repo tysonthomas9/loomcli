@@ -141,6 +141,68 @@ test("LoomDriverClient.taskRuns.request omits input from the wire when none is g
   });
 });
 
+test("LoomDriverClient carries the retained-review claim from child request to fenced handoff", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/exec-task") {
+      return { taskRunId: "review-child-1", taskId: "TASK-1", status: "queued" };
+    }
+    if (call.url === "/api/workspaces/WS/driver/handoff-review") {
+      return { id: "TASK-1", status: "open", released: true };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "review-parent-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    await client.taskRuns.request({
+      taskId: "TASK-1",
+      taskRunId: "review-child-1",
+      runner: "github-review-task-runner",
+      closeTask: false,
+      retainWorkItemClaim: true,
+    });
+    await client.tasks.handoffReview({
+      taskId: "TASK-1",
+      taskRunId: "review-child-1",
+      status: "open",
+      reason: "review findings require changes",
+    });
+
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0].body, {
+      taskId: "TASK-1",
+      taskRunId: "review-child-1",
+      runner: "github-review-task-runner",
+      deferCompletion: true,
+      closeTask: false,
+      retainWorkItemClaim: true,
+      enqueueOnly: true,
+    });
+    assert.deepEqual(calls[1].body, {
+      taskId: "TASK-1",
+      taskRunId: "review-child-1",
+      status: "open",
+      reason: "review findings require changes",
+    });
+  });
+});
+
+test("LoomDriverClient rejects incomplete review handoffs before HTTP", async () => {
+  await withDriverServer(async () => notFound(), async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "review-parent-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    await assert.rejects(client.tasks.handoffReview({ taskId: "TASK-1", status: "open" }), /requires taskRunId/);
+    await assert.rejects(
+      client.tasks.handoffReview({ taskId: "TASK-1", taskRunId: "review-child-1", status: "review" }),
+      /status must be "open" or "closed"/,
+    );
+    assert.equal(calls.length, 0);
+  });
+});
+
 test("LoomDriverClient.taskRuns.request serializes repoRef at both outgoing placement boundaries", async () => {
   await withDriverServer(async (call) => {
     if (call.url === "/api/workspaces/WS/driver/exec-task") {

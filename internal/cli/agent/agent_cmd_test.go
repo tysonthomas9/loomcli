@@ -287,6 +287,23 @@ Do the work!`
 	}
 }
 
+func TestMakeCustomPromptGen_PrependsReadOnlyPolicy(t *testing.T) {
+	t.Setenv("LOOM_READ_ONLY", "1")
+	promptFile := filepath.Join(t.TempDir(), "read-only-prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("Inspect {{.WorktreeName}}."), 0600); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	result := makeCustomPromptGen(promptFile)("falcon", nil)
+
+	if !strings.HasPrefix(result, "IMPORTANT: You are running in READ-ONLY mode.") {
+		t.Fatalf("custom role prompt missing read-only preamble: %q", result)
+	}
+	if !strings.Contains(result, "Inspect falcon.") {
+		t.Fatalf("custom role prompt missing role body: %q", result)
+	}
+}
+
 func TestMakeCustomPromptGen_RawFile(t *testing.T) {
 	t.Parallel()
 	// Create a temporary file without template syntax

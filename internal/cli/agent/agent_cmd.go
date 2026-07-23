@@ -273,8 +273,16 @@ func makeCustomPromptGen(promptFile string) func(string, *config.WorkspaceConfig
 			if readErr != nil {
 				return fmt.Sprintf("Error: could not load prompt file %s: %v", promptFile, err)
 			}
-			return string(content)
+			return prependReadOnlyPolicy(string(content))
 		}
+		return prependReadOnlyPolicy(prompt)
+	}
+}
+
+func prependReadOnlyPolicy(prompt string) string {
+	preamble := ReadOnlyPreamble()
+	if preamble == "" {
 		return prompt
 	}
+	return preamble + "\n\n" + prompt
 }

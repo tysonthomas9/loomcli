@@ -120,10 +120,26 @@ export async function run(ctx) {
 
   // Role phase (TaskFilter) drives BOTH claim gating and the completion
   // outcome: needs_plan => planner (design + review, no close); has_design =>
-  // coder (implement + close on success, today's behavior). A non-role prompt
-  // (input.prompt / taskPrompt) carries no filter and is never phase-gated.
-  const taskFilter = stringValue(resolved.taskFilter);
+  // coder (implement + close on success, today's behavior). UI-created roles
+  // historically persisted either an empty filter or "any"; treat both as the
+  // safe coder phase so they cannot claim work that still needs planning.
+  // Unknown named-role filters fail closed before any claim. A non-role prompt
+  // (input.prompt / taskPrompt) remains intentionally filterless.
+  const rolePhase = resolveRolePhase(resolved);
+  if (!rolePhase.supported) {
+    return loom.failed({
+      summary: "prompt-agent: role " + (stringValue(resolved.roleName) || "?")
+        + " has unsupported task_filter " + JSON.stringify(rolePhase.rawTaskFilter)
+        + "; expected needs_plan or has_design",
+      errorClass: "prompt_agent_unsupported_task_filter",
+      roleName: stringValue(resolved.roleName),
+      taskFilter: rolePhase.rawTaskFilter,
+      claimed: false,
+    });
+  }
+  const taskFilter = rolePhase.taskFilter;
   const isPlanner = taskFilter === "needs_plan";
+  const isReadOnly = resolved.readOnly === true;
 
   // 2a. WS2b event-path gate. A task.ready event carries a definite hasDesign;
   //     decide the phase BEFORE claiming so a mismatch costs zero dispatch (no
@@ -202,7 +218,7 @@ export async function run(ctx) {
   //    state, never with a falsely closed card.
   const taskRunId = "promptagent-" + (stringValue(loom.driverRunId) || "run") + "-" + issueId;
   const requestInput = { taskPrompt: prompt, openPullRequest: false };
-  requestInput.deliveryMode = isPlanner ? "patch-back" : "local-branch";
+  requestInput.deliveryMode = isPlanner || isReadOnly ? "patch-back" : "local-branch";
   if (backend) {
     // Informational: the backend is resolved host-side (resolveTaskRunnerBackend);
     // carry it so it shows in the task-run input for observability.
@@ -303,6 +319,28 @@ export async function run(ctx) {
         promptSource,
         backend: runBackend,
         outcome: "design-review",
+      });
+    }
+    if (isReadOnly) {
+      try {
+        await ensureCardInReview(loom, issueId, {});
+      } catch (err) {
+        return loom.needsReview({
+          summary: "prompt-agent: read-only TaskRun " + taskRunId
+            + " completed, but the host could not hand " + issueId + " to review: " + errorMessage(err),
+          errorClass: "prompt_agent_read_only_handoff_failed",
+          issueId,
+          taskRunId,
+        });
+      }
+      return loom.completed({
+        summary: "prompt-agent: " + issueId + " completed read-only analysis via "
+          + (runBackend || "backend") + " and was handed to review",
+        issueId,
+        taskRunId,
+        promptSource,
+        backend: runBackend,
+        outcome: "read-only-review",
       });
     }
     // Coder outcome: closeTask=false kept lifecycle authority with this host.
@@ -410,13 +448,15 @@ async function resolvePromptSource(loom, input) {
   if (roleName) {
     const record = (await loom.roles.get({ name: roleName })) || {};
     const rolePrompt = stringValue(record.prompt);
+    const role = record.role || {};
     // The role record (record.role) carries the TaskFilter that drives phase
     // gating and planner-vs-coder outcome. Go domain wire is snake_case.
-    const taskFilter = stringValue(record.role && (record.role.task_filter || record.role.taskFilter));
+    const taskFilter = stringValue(role.task_filter || role.taskFilter);
+    const readOnly = role.read_only === true || role.readOnly === true;
     if (rolePrompt) {
-      return { prompt: rolePrompt, source: "role:" + roleName, roleName, taskFilter };
+      return { prompt: rolePrompt, source: "role:" + roleName, roleName, taskFilter, readOnly };
     }
-    return { prompt: "", source: "", roleName, roleResolved: true, taskFilter };
+    return { prompt: "", source: "", roleName, roleResolved: true, taskFilter, readOnly };
   }
   if (stringValue(input.taskPrompt)) {
     return { prompt: stringValue(input.taskPrompt), source: "input.taskPrompt" };
@@ -441,6 +481,25 @@ async function bindingConfigRoleName(loom) {
   } catch {
     return "";
   }
+}
+
+// resolveRolePhase makes every named role choose one of the two supported
+// lifecycle owners before it can claim work. Empty and legacy "any" filters
+// came from the UI's custom-role path; preserving them as ungated would let a
+// coder-shaped lifecycle steal needs-plan work, so both migrate in place to
+// has_design. Explicit one-off prompts have no roleName and remain filterless.
+function resolveRolePhase(resolved) {
+  if (!stringValue(resolved && resolved.roleName)) {
+    return { supported: true, taskFilter: "", rawTaskFilter: "" };
+  }
+  const rawTaskFilter = stringValue(resolved.taskFilter).trim();
+  if (rawTaskFilter === "needs_plan" || rawTaskFilter === "has_design") {
+    return { supported: true, taskFilter: rawTaskFilter, rawTaskFilter };
+  }
+  if (rawTaskFilter === "" || rawTaskFilter === "any") {
+    return { supported: true, taskFilter: "has_design", rawTaskFilter };
+  }
+  return { supported: false, taskFilter: "", rawTaskFilter };
 }
 
 // claimTargetTask claims a ready task via the existing task lease. A specific
@@ -511,8 +570,8 @@ function eventPayload(input) {
 }
 
 // isGatingFilter reports whether a role's TaskFilter participates in phase
-// gating. Only the plan (needs_plan) and coder (has_design) filters do; a
-// filterless role or a non-role prompt is never gated.
+// gating. Named roles have already been normalized to plan (needs_plan) or
+// coder (has_design); only an explicit non-role prompt remains filterless.
 function isGatingFilter(taskFilter) {
   return taskFilter === "needs_plan" || taskFilter === "has_design";
 }

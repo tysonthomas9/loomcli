@@ -114,6 +114,7 @@ export async function run(ctx = {}) {
   // post-drain reconcile opens/links the PR with the right base — the runner
   // does not open an independent loom/<taskid> PR.
   const stacked = booleanValue(process.env.LOOM_TASK_RUN_STACKED);
+  const readOnly = booleanValue(process.env.LOOM_READ_ONLY);
   const stackBranch = stringValue(process.env.LOOM_TASK_RUN_OUTPUT_BRANCH);
   const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
   const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
@@ -121,6 +122,13 @@ export async function run(ctx = {}) {
   const isolated = stacked ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
   const execWorktree = isolated ? isolated.path : worktree;
   const baseRef = stacked ? stackBaseRef : (isolated ? isolated.base : "");
+  if (readOnly && !isolated) {
+    return failed(
+      "local_read_only_isolation_required",
+      "read-only role execution requires an isolated git worktree",
+      { taskRunId, taskId, backend, request, logs, headBefore },
+    );
+  }
   if (stacked) {
     logs.push("stacked mode: running in place at " + worktree + " (base " + (stackBaseRef || "?") + "), pushing " + (stackBranch || "?"));
   }
@@ -137,11 +145,12 @@ export async function run(ctx = {}) {
   // Precedence: the daemon-leaf env override (its exact composed prompt) wins,
   // then input.taskPrompt (custom workflows), else this runner's generic prompt.
   const inputPrompt = stringValue(inputValue(request, "taskPrompt"));
-  const prompt = typeof promptOverride === "string" && promptOverride.trim() !== ""
+  const basePrompt = typeof promptOverride === "string" && promptOverride.trim() !== ""
     ? promptOverride
     : inputPrompt.trim() !== ""
       ? inputPrompt
       : buildPrompt(request, task, execWorktree);
+  const prompt = applyRolePolicy(basePrompt);
   const args = backendArgs(backend, execWorktree, prompt);
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
@@ -167,6 +176,8 @@ export async function run(ctx = {}) {
   let stackInfo = null;
   let localBranchInfo = null;
   let prFailure = null;
+  let transcriptEntries = null;
+  let taskUsage = {};
   // A backend may discover that the reviewed design is fundamentally invalid.
   // It cannot mutate Work Item lifecycle while the typed TaskRun generation is
   // live, and free-form stdout is not a trustworthy terminal protocol. Give it
@@ -196,6 +207,12 @@ export async function run(ctx = {}) {
     exitCode = result.code;
     stdout = result.stdout;
     stderr = result.stderr;
+    // The model invocation is the evidence-producing boundary. Build and scrub
+    // its transcript before any patch inspection or delivery work so a later
+    // failure cannot discard real agent work. Spawn/preflight failures have no
+    // model evidence and therefore intentionally omit transcript_entries.
+    transcriptEntries = buildTranscriptEntries(backend, taskId || taskRunId, prompt, stdout);
+    taskUsage = taskUsageFromEntries(transcriptEntries);
     taskOutcome = readTaskOutcome(taskOutcomeChannel.file);
     if (taskOutcome) {
       logs.push(taskOutcome.invalid
@@ -230,6 +247,21 @@ export async function run(ctx = {}) {
         request,
         logs,
         headBefore,
+        transcriptEntries,
+        taskUsage,
+      });
+    }
+    if (readOnly && patchInfo.filesChanged > 0) {
+      logs.push("read-only role produced file changes; changes were discarded");
+      return failed("local_read_only_violation", "read-only role modified files; changes were not published or persisted", {
+        taskRunId,
+        taskId,
+        backend,
+        request,
+        logs,
+        headBefore,
+        transcriptEntries,
+        taskUsage,
       });
     }
 
@@ -319,30 +351,21 @@ export async function run(ctx = {}) {
 
   // Fail closed when PR delivery was requested but could not be completed.
   if (prFailure) {
-    return failed(prFailure.class, prFailure.message, { taskRunId, taskId, backend, request, logs, headBefore });
+    return failed(prFailure.class, prFailure.message, {
+      taskRunId,
+      taskId,
+      backend,
+      request,
+      logs,
+      headBefore,
+      transcriptEntries,
+      taskUsage,
+    });
   }
 
-  let transcriptEntries = STREAM_JSON_BACKENDS.has(backend)
-    ? parseStreamJSONTranscript(backend, stdout)
-    : minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
-  // Fall back to the prompt + stdout tail if a stream-json backend yielded no
-  // parseable content (non-JSON output / early exit), so evidence isn't lost.
-  if (STREAM_JSON_BACKENDS.has(backend) && !transcriptEntries.some((e) => e.role !== "system")) {
-    transcriptEntries = minimalTranscript(backend, taskId || taskRunId, prompt, stdout);
-  }
-  // Tool outputs now persist (the `output` field) and the agent inherits host
-  // secrets — scrub known secret values that may have been echoed into output.
-  transcriptEntries = redactTranscriptSecrets(transcriptEntries);
-  // Lead with a canonical session_meta entry. The stream-json parse paths emit
-  // text/tool_use/tool_result + a terminal result, but not session_meta (only the
-  // minimal fallback did) — and the canonical transcript vocabulary (aether #5d)
-  // requires a session_meta head. The daemon TS leaf surfaces this transcript
-  // verbatim, so adding it here fixes both the leaf and driver transcripts.
-  transcriptEntries = ensureSessionMetaLead(transcriptEntries, backend, taskId || taskRunId);
   // Surface the token usage the parser computed (embedded in the terminal result
   // entry) as top-level fields so the Go host-bridge ingests it into the fleet-db
   // TaskRun — without this, local-CLI runs report zero usage while daytona does not.
-  const taskUsage = taskUsageFromEntries(transcriptEntries);
   // Cost is taken ONLY from what the backend CLI itself reports — never estimated
   // from a price table. Verified per backend (real-CLI capture, 2026-06-23):
   //   claude   -> total_cost_usd (model-accurate: Opus vs Sonnet, cache tiers, web)
@@ -483,10 +506,19 @@ export async function run(ctx = {}) {
     transcript_entries: transcriptEntries,
     runtimeMetadata: metadata,
   };
-  if (prInfo || stackInfo || localBranchInfo || stacked) {
-    // PR / stacked / local-branch mode: the published ref IS the delivery (and
-    // stacked mode runs in place, so there is nothing to patch-back) — return no
-    // top-level patch so the driver host-bridge skips patch-back.
+  if (prInfo || stackInfo || localBranchInfo) {
+    // The published ref remains the delivery, but the exact captured patch is
+    // also durable review evidence. The trusted host bridge recognizes these
+    // delivery modes, persists the patch artifact, and deliberately skips
+    // patch-back so the host worktree remains untouched.
+    completed.patch = patchInfo.patch;
+    completed.base_ref = baseRef;
+    completed.patch_base_ref = baseRef;
+    return completed;
+  }
+  if (stacked) {
+    // No branch was published (the completed empty-unit path), so there is no
+    // patch evidence and nothing to patch back.
     return completed;
   }
   completed.patch = patchInfo.patch;
@@ -495,6 +527,28 @@ export async function run(ctx = {}) {
   completed.base_ref = baseRef;
   completed.patch_base_ref = baseRef;
   return completed;
+}
+
+// buildTranscriptEntries converts the bounded child-process stdout into the
+// canonical persisted transcript immediately after model execution. Structured
+// backends are capped by execBackend's maxBuffer; the minimal fallback keeps
+// only prompt/stdout tails. Redaction happens before the value is retained or
+// threaded through any later delivery-failure result.
+function buildTranscriptEntries(backend, label, prompt, stdout) {
+  let entries = STREAM_JSON_BACKENDS.has(backend)
+    ? parseStreamJSONTranscript(backend, stdout)
+    : minimalTranscript(backend, label, prompt, stdout);
+  // Fall back to the prompt + stdout tail if a stream-json backend yielded no
+  // parseable content (non-JSON output / early exit), so evidence isn't lost.
+  if (STREAM_JSON_BACKENDS.has(backend) && !entries.some((entry) => entry.role !== "system")) {
+    entries = minimalTranscript(backend, label, prompt, stdout);
+  }
+  // Tool outputs persist in the `output` field and the agent inherits host
+  // secrets. Scrub exact inherited values plus known/entropy-shaped secrets
+  // before the transcript can enter any result path.
+  entries = redactTranscriptSecrets(entries);
+  // The canonical transcript vocabulary requires session_meta at the head.
+  return ensureSessionMetaLead(entries, backend, label);
 }
 
 // resolveBackend reads the host-bridge-injected backend selection.
@@ -821,6 +875,38 @@ async function removeIsolatedWorktree(hostWorktree, isolatedPath, logs) {
 
 function booleanValue(value) {
   return ["1", "true", "yes", "on"].includes(stringValue(value).toLowerCase());
+}
+
+// applyRolePolicy makes the trusted, host-resolved Role constraints visible to
+// every supported backend. Read-only is also verified against the captured git
+// diff after execution; the prompt is guidance, not the enforcement boundary.
+export function applyRolePolicy(prompt) {
+  const readOnly = booleanValue(process.env.LOOM_READ_ONLY);
+  const allowed = commaSeparatedValues(process.env.LOOM_ALLOWED_TOOLS);
+  const denied = commaSeparatedValues(process.env.LOOM_DENIED_TOOLS);
+  if (!readOnly && allowed.length === 0 && denied.length === 0) {
+    return prompt;
+  }
+  const policy = ["## Loom role policy"];
+  if (readOnly) {
+    policy.push(
+      "This is a READ-ONLY run. Do not create, edit, delete, commit, or push files. Inspect the repository and report findings only.",
+    );
+  }
+  if (allowed.length > 0) {
+    policy.push("Use only these tool categories: " + allowed.join(", ") + ".");
+  }
+  if (denied.length > 0) {
+    policy.push("Do not use these tool categories: " + denied.join(", ") + ".");
+  }
+  return policy.join("\n") + "\n\n" + prompt;
+}
+
+function commaSeparatedValues(value) {
+  return stringValue(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item, index, values) => item !== "" && values.indexOf(item) === index);
 }
 
 function inputValue(request, key) {
@@ -2165,7 +2251,7 @@ async function requestPayload(ctx) {
 
 function failed(errorClass, message, info) {
   const logs = info.logs || [];
-  return {
+  const result = {
     status: "failed",
     exitCode: 1,
     errorClass,
@@ -2182,6 +2268,11 @@ function failed(errorClass, message, info) {
       phase: errorClass,
     }),
   };
+  if (Array.isArray(info.transcriptEntries)) {
+    Object.assign(result, info.taskUsage || {});
+    result.transcript_entries = info.transcriptEntries;
+  }
+  return result;
 }
 
 function stringMetadata(values = {}) {

@@ -219,6 +219,16 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 	if result, refused := refuseUntrustedTaskRunnerExecution(req); refused {
 		return result, nil
 	}
+	if isLocalTaskRunner(req) {
+		if _, _, policyErr := localTaskRunnerAgentPolicyFromInput(req.Input); policyErr != nil {
+			return TaskExecResult{
+				Status:       domain.TaskRunFailed,
+				ExitCode:     2,
+				ErrorClass:   "managed_agent_policy_invalid",
+				ErrorMessage: policyErr.Error(),
+			}, nil
+		}
+	}
 	resolvedWorktree, worktreeFailure, failed := e.resolveLocalTaskWorktree(ctx, req)
 	if failed {
 		return worktreeFailure, nil
@@ -312,6 +322,22 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return result, nil
 	}
 	return e.finalizeAndApplyPatch(ctx, req, runnerResult, patch, result)
+}
+
+// localTaskRunnerPublishedDelivery reports whether the trusted bundled runner
+// has already delivered a completed change through a durable published ref.
+// Only that runner may suppress patch-back from result metadata: other runners
+// cannot self-assert "pull_request" to bypass their configured delivery path.
+func localTaskRunnerPublishedDelivery(req TaskExecRequest, result TaskExecResult) bool {
+	if !isLocalTaskRunner(req) || result.Status != domain.TaskRunCompleted {
+		return false
+	}
+	switch strings.TrimSpace(result.RuntimeMetadata["delivery"]) {
+	case "local_branch", "stack_branch", "pull_request":
+		return true
+	default:
+		return false
+	}
 }
 
 func (e HostBridgeTaskExecutor) bridgeRunner(ctx context.Context, req TaskExecRequest) (func() (bridgeTaskRunnerResult, error), error) {
@@ -712,7 +738,10 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 	}
 	env = append(env, e.taskRunnerBundleEnv(req)...)
 	if isLocalTaskRunner(req) {
-		env = append(env, TaskRunnerBackendEnv+"="+e.resolveTaskRunnerBackend(req))
+		agentPolicy, _, _ := localTaskRunnerAgentPolicyFromInput(req.Input)
+		backend := e.resolveTaskRunnerBackend(req, agentPolicy)
+		env = append(env, TaskRunnerBackendEnv+"="+backend)
+		env = append(env, localTaskRunnerRoleEnv(agentPolicy, backend)...)
 		existing := env
 		if len(inherited) > 0 && len(inherited[0]) > 0 {
 			existing = append(append([]string{}, inherited[0]...), env...)
@@ -732,7 +761,8 @@ func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []
 		return nil
 	}
 	out := make([]string, 0, 2)
-	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" {
+	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" &&
+		!envHasAny(existing, "LOOM_OPENCODE_MODEL") {
 		out = append(out, "LOOM_OPENCODE_MODEL="+model)
 	}
 	if !envHasAny(existing, "GITHUB_TOKEN", "GH_TOKEN") {
@@ -757,31 +787,6 @@ func envHasAny(env []string, names ...string) bool {
 		}
 	}
 	return false
-}
-
-// resolveTaskRunnerBackend resolves the backend CLI for the local task runner,
-// mirroring service.GetWorkspaceBackend precedence (§4.3): a per-agent override
-// (the worker's agent row Backend) wins, else DaemonProfile.AgentBackend, else
-// the default codex. The store is consulted best-effort; any lookup failure
-// falls through to the next source so the runner always receives a backend.
-func (e HostBridgeTaskExecutor) resolveTaskRunnerBackend(req TaskExecRequest) string {
-	if e.Store == nil {
-		return defaultTaskRunnerBackend
-	}
-	ctx := context.Background()
-	if worker := strings.TrimSpace(req.WorkerProfileID); worker != "" {
-		if agent, err := e.Store.Agents().Get(ctx, req.WorkspaceKey, worker); err == nil && agent != nil {
-			if backend := strings.TrimSpace(agent.Backend); backend != "" {
-				return backend
-			}
-		}
-	}
-	if profile, err := e.Store.Daemon().Get(ctx, req.WorkspaceKey); err == nil && profile != nil {
-		if backend := strings.TrimSpace(profile.AgentBackend); backend != "" {
-			return backend
-		}
-	}
-	return defaultTaskRunnerBackend
 }
 
 func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {
@@ -852,6 +857,9 @@ func (e HostBridgeTaskExecutor) finalizeAndApplyPatch(ctx context.Context, req T
 	}
 	result.RuntimeMetadata["patch_artifact_id"] = finalized.ArtifactID
 	result.RuntimeMetadata["patch_content_hash"] = finalized.ContentHash
+	if localTaskRunnerPublishedDelivery(req, result) {
+		return result, nil
+	}
 	if strings.TrimSpace(e.WorktreePath) == "" || strings.TrimSpace(baseRef) == "" {
 		result.Status = domain.TaskRunFailed
 		if result.ExitCode == 0 {

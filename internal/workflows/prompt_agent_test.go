@@ -42,6 +42,11 @@ func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 		// the event payload names none (the internal task.ready / run-now lane).
 		"loom.binding.config()",
 		"bindingConfigRoleName(loom)",
+		// Every named role is assigned one lifecycle owner before it can claim:
+		// old UI empty/any records become coder roles; unknown filters fail closed.
+		"resolveRolePhase(resolved)",
+		`errorClass: "prompt_agent_unsupported_task_filter"`,
+		`return { supported: true, taskFilter: "has_design", rawTaskFilter };`,
 		// GAP B: targeted claim-by-id, plus filterless pickup retained.
 		"loom.tasks.claim({ taskId: targetId, actor })",
 		"loom.tasks.claimReady({ actor, limit: 1 })",

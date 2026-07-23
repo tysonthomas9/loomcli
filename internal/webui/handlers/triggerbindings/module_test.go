@@ -152,6 +152,7 @@ func (a *testAutomationAPI) UpdateBinding(ctx context.Context, _ authority.Opera
 	}
 	patch := store.TriggerBindingUpdate{
 		Name: command.Patch.Name, Schedule: command.Patch.Schedule, ScheduleTimezone: command.Patch.ScheduleTimezone,
+		SourceConfigRef:     command.Patch.SourceConfigRef,
 		EventTypePatterns:   command.Patch.EventTypePatterns,
 		ConcurrencyPolicy:   command.Patch.ConcurrencyPolicy,
 		SubjectKeyTemplate:  command.Patch.SubjectKeyTemplate,
@@ -462,21 +463,118 @@ func TestCreateBinding_IsIdempotent(t *testing.T) {
 	}
 }
 
+func TestCreateBinding_EnsureRejectsImmutableIdentityMismatch(t *testing.T) {
+	const original = `{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"epics.runs.create","source_kind":"http","binding_id":"b-fixed","entrypoint":"run","enabled":true}`
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "driver",
+			body: `{"driver_id":"driver-2","driver_version_id":"version-1","route_key":"epics.runs.create","source_kind":"http","binding_id":"b-fixed","entrypoint":"run","enabled":true}`,
+		},
+		{
+			name: "driver version",
+			body: `{"driver_id":"driver-1","driver_version_id":"version-2","route_key":"epics.runs.create","source_kind":"http","binding_id":"b-fixed","entrypoint":"run","enabled":true}`,
+		},
+		{
+			name: "unspecified driver version",
+			body: `{"driver_id":"driver-1","route_key":"epics.runs.create","source_kind":"http","binding_id":"b-fixed","entrypoint":"run","enabled":true}`,
+		},
+		{
+			name: "source kind",
+			body: `{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"epics.runs.create","source_kind":"internal","binding_id":"b-fixed","entrypoint":"run","enabled":true}`,
+		},
+		{
+			name: "source route",
+			body: `{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"epics.runs.other","source_kind":"http","binding_id":"b-fixed","entrypoint":"run","enabled":true}`,
+		},
+		{
+			name: "source event patterns",
+			body: `{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"epics.runs.create","source_kind":"http","binding_id":"b-fixed","entrypoint":"run","event_type_patterns":["internal.task.ready"],"enabled":true}`,
+		},
+		{
+			name: "entrypoint",
+			body: `{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"epics.runs.create","source_kind":"http","binding_id":"b-fixed","entrypoint":"other","enabled":true}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mux, st := seededMux(t)
+			if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", original); rec.Code != http.StatusCreated {
+				t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+			}
+
+			rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", test.body)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("ensure status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+			}
+			binding, err := st.TriggerBindings().Get(t.Context(), "WS", "b-fixed")
+			if err != nil {
+				t.Fatalf("get binding: %v", err)
+			}
+			if binding.DriverID != "driver-1" || binding.DriverVersionID != "version-1" ||
+				binding.SourceKind != "http" || binding.RouteKey != "epics.runs.create" ||
+				binding.TargetEntrypoint != "run" {
+				t.Fatalf("binding changed after rejected ensure: %+v", binding)
+			}
+		})
+	}
+}
+
+func TestCreateBinding_EnsureResolvesWorkflowBeforeReusingBinding(t *testing.T) {
+	initialMux, st := seededMux(t)
+	const initial = `{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"stable-review","enabled":true}`
+	if rec := do(t, initialMux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", initial); rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+
+	preparer := &testWorkflowTargetPreparer{
+		target: workflowbinding.WorkflowTarget{DriverID: "different-review", DriverVersionID: "different-review-v1"},
+	}
+	automationAPI := &testAutomationAPI{store: st}
+	createWorkflow, err := workflowbinding.New(preparer, automationAPI)
+	if err != nil {
+		t.Fatalf("new workflow binding: %v", err)
+	}
+	mux := http.NewServeMux()
+	New(Config{
+		CreateWorkflow: createWorkflow,
+		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
+		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
+		Runs: st.DriverRuns(), Connectors: &testConnectorCompatibility{store: st},
+	}).Register(mux)
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"workflow":"different-review-agent","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"stable-review","enabled":true}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("workflow ensure status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if preparer.calls != 1 || preparer.workflow != "different-review-agent" {
+		t.Fatalf("preparer = %+v", preparer)
+	}
+}
+
 // A gallery/scheduled-workflow activation starts from a workspace with no
 // builtin Driver rows. The application workflow prepares that target before
-// Automation creates the binding; a repeated browser ensure returns the same
-// response shape with 200 and does not prepare or write again.
+// Automation creates the binding; a repeated browser ensure resolves the
+// workflow again to prove immutable identity, then returns the same response
+// shape with 200 without writing another binding or driver.
 func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS", Name: "WS"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	automationAPI := &testAutomationAPI{store: st}
+	materializations := 0
 	preparer := &testWorkflowTargetPreparer{
 		target: workflowbinding.WorkflowTarget{DriverID: "builtin-review", DriverVersionID: "builtin-review-v1"},
 		prepare: func(ctx context.Context, workspace, workflow string) error {
 			if workspace != "WS" || workflow != "github-review-agent" {
 				return fmt.Errorf("unexpected target %s/%s", workspace, workflow)
+			}
+			if materializations > 0 {
+				return nil
 			}
 			if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 				WorkspaceKey: workspace, DriverID: "builtin-review", Name: workflow,
@@ -490,6 +588,9 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 				Version: 1, SourceDigest: "sha256:builtin", BundleDigest: "sha256:bundle",
 				ValidationStatus: domain.DriverVersionValidationPassed,
 			})
+			if err == nil {
+				materializations++
+			}
 			return err
 		},
 	}
@@ -514,8 +615,8 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 	if second.Code != http.StatusOK {
 		t.Fatalf("workflow ensure status = %d, want 200; body=%s", second.Code, second.Body.String())
 	}
-	if preparer.calls != 1 {
-		t.Fatalf("preparer calls = %d, want exactly one", preparer.calls)
+	if preparer.calls != 2 || materializations != 1 {
+		t.Fatalf("preparer calls = %d, materializations = %d, want 2/1", preparer.calls, materializations)
 	}
 
 	var created, ensured automation.Binding
@@ -867,6 +968,45 @@ func TestPatchBinding_RenameAndReschedule(t *testing.T) {
 	}
 	if out.NextFireAt == nil || !out.NextFireAt.After(time.Now()) {
 		t.Fatalf("next_fire_at not recomputed to a future instant: %v", out.NextFireAt)
+	}
+}
+
+func TestPatchBinding_ReconcilesRunInput(t *testing.T) {
+	mux, st := seededMux(t)
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+
+	rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/s1",
+		`{"run_input":{"targetRepo":"alpha","githubRepo":"acme/alpha"}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	binding, err := st.TriggerBindings().Get(t.Context(), "WS", "s1")
+	if err != nil {
+		t.Fatalf("get binding: %v", err)
+	}
+	var runInput map[string]string
+	if err := json.Unmarshal([]byte(binding.SourceConfigRef), &runInput); err != nil {
+		t.Fatalf("decode source_config_ref %q: %v", binding.SourceConfigRef, err)
+	}
+	if runInput["targetRepo"] != "alpha" || runInput["githubRepo"] != "acme/alpha" {
+		t.Fatalf("run input = %#v, want reconciled repo fields", runInput)
+	}
+}
+
+func TestPatchBinding_RejectsNonObjectRunInput(t *testing.T) {
+	mux, _ := seededMux(t)
+	createCronBinding(t, mux, "s1", "*/10 * * * *")
+
+	for _, body := range []string{
+		`{"run_input":"alpha"}`,
+		`{"run_input":["alpha"]}`,
+		`{"run_input":null}`,
+	} {
+		rec := do(t, mux, http.MethodPatch, "/api/workspaces/WS/trigger-bindings/s1", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("patch %s status = %d, want 400; body=%s", body, rec.Code, rec.Body.String())
+		}
 	}
 }
 

@@ -277,6 +277,98 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 		}
 	})
 
+	t.Run("prompt agent role config follows immutable request policy", func(t *testing.T) {
+		st := memstore.New()
+		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
+			t.Fatalf("create workspace: %v", err)
+		}
+		budget := 3.25
+		if _, err := st.Roles().Create(ctx, store.RoleCreate{
+			WorkspaceKey: "WS", Name: "reviewer", Backend: "opencode", Model: "openai/gpt-5.6-terra",
+			Effort: "high", ReadOnly: true, AllowedTools: []string{"read", "grep"},
+			DeniedTools: []string{"write"}, MaxBudgetUSD: &budget,
+		}); err != nil {
+			t.Fatalf("create role: %v", err)
+		}
+		if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+			WorkspaceKey: "WS", ServiceID: "agt-reviewer", Name: "reviewer",
+			Kind: domain.AgentServiceKindEvent, DesiredState: domain.AgentServiceDesiredRunning, RoleName: "reviewer",
+		}); err != nil {
+			t.Fatalf("create agent service: %v", err)
+		}
+		if _, err := st.Drivers().Create(ctx, store.DriverCreate{
+			WorkspaceKey: "WS", DriverID: "prompt-agent", Name: "prompt-agent",
+			OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive,
+		}); err != nil {
+			t.Fatalf("create driver: %v", err)
+		}
+		if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
+			WorkspaceKey: "WS", VersionID: "prompt-agent-v1", DriverID: "prompt-agent", Version: 1,
+			SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
+			ValidationStatus: domain.DriverVersionValidationPassed,
+		}); err != nil {
+			t.Fatalf("create driver version: %v", err)
+		}
+		if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+			WorkspaceKey: "WS", BindingID: "agt-reviewer-1", Name: "reviewer",
+			SourceKind: "internal", DriverID: "prompt-agent", DriverVersionID: "prompt-agent-v1",
+			TargetAgentServiceID: "agt-reviewer", Enabled: true,
+		}); err != nil {
+			t.Fatalf("create trigger binding: %v", err)
+		}
+		if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+			WorkspaceKey: "WS", RunID: "driver-run-1", DriverID: "prompt-agent",
+			DriverVersionID: "prompt-agent-v1", TriggerBindingID: "agt-reviewer-1",
+		}); err != nil {
+			t.Fatalf("create driver run: %v", err)
+		}
+
+		req := hostBridgeTaskExecRequest()
+		req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+		req.Input = []byte(`{
+			"prompt": "review this card",
+			"loomAgentPolicy": {
+				"version": 1,
+				"agentServiceId": "agt-reviewer",
+				"roleName": "reviewer",
+				"roleUpdatedAt": "2026-07-22T12:00:00Z",
+				"backend": "opencode",
+				"model": "openai/gpt-5.6-terra",
+				"effort": "high",
+				"readOnly": true,
+				"allowedTools": ["read", "grep"],
+				"deniedTools": ["write"],
+				"maxBudgetUsd": 3.25
+			}
+		}`)
+		env := envMap(HostBridgeTaskExecutor{Store: st}.taskRunnerEnv(req, "{}"))
+		for key, want := range map[string]string{
+			TaskRunnerBackendEnv:  "opencode",
+			"LOOM_OPENCODE_MODEL": "openai/gpt-5.6-terra",
+			"LOOM_AGENT_EFFORT":   "high",
+			"LOOM_CLAUDE_EFFORT":  "high",
+			"LOOM_READ_ONLY":      "1",
+			"LOOM_ALLOWED_TOOLS":  "read,grep",
+			"LOOM_DENIED_TOOLS":   "write",
+			"LOOM_MAX_BUDGET_USD": "3.25",
+		} {
+			if env[key] != want {
+				t.Fatalf("%s = %q, want %q; env=%+v", key, env[key], want, env)
+			}
+		}
+		metadata := map[string]string{"backend": "cursor"}
+		if _, err := st.AgentServices().Update(ctx, "WS", "agt-reviewer", store.AgentServiceUpdate{Metadata: &metadata}); err != nil {
+			t.Fatalf("update per-agent backend: %v", err)
+		}
+		env = envMap(HostBridgeTaskExecutor{Store: st}.taskRunnerEnv(req, "{}"))
+		if env[TaskRunnerBackendEnv] != "opencode" {
+			t.Fatalf("%s = %q, want immutable opencode snapshot after live agent edit", TaskRunnerBackendEnv, env[TaskRunnerBackendEnv])
+		}
+		if env["LOOM_OPENCODE_MODEL"] != "openai/gpt-5.6-terra" {
+			t.Fatalf("immutable role model drifted after live agent edit: %+v", env)
+		}
+	})
+
 	t.Run("non-local runner gets no backend env", func(t *testing.T) {
 		st := memstore.New()
 		req := hostBridgeTaskExecRequest()

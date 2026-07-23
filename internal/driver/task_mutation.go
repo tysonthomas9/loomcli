@@ -99,14 +99,24 @@ const claimByIDReadyScanDepth = 10000
 
 const blockedIssueStatus = "blocked"
 
+func oneNonEmptyString(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return []string{value}
+}
+
 type TaskClaimOptions struct {
 	EpicID string
 	Actor  string
 	// Type optionally narrows the ready view to a single issue type (e.g.
 	// "bug"), filtered server-side via ReadyOpts.Type. Empty means no filter.
-	Type    string
-	Limit   int
-	LockTTL time.Duration
+	Type string
+	// SourceRepo optionally narrows ready work to one workspace repository.
+	SourceRepo string
+	Limit      int
+	LockTTL    time.Duration
 }
 
 type ClaimedTask struct {
@@ -159,9 +169,10 @@ func ReadyTaskCandidates(ctx context.Context, issueBackend backend.IssueBackend,
 		limit = defaultClaimReadyLimit
 	}
 	ready, err := issueBackend.Ready(ctx, backend.ReadyOpts{
-		ParentID: strings.TrimSpace(opts.EpicID),
-		Type:     strings.TrimSpace(opts.Type),
-		Limit:    limit,
+		ParentID:    strings.TrimSpace(opts.EpicID),
+		Type:        strings.TrimSpace(opts.Type),
+		SourceRepos: oneNonEmptyString(opts.SourceRepo),
+		Limit:       limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list ready tasks: %w", err)

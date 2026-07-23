@@ -26,8 +26,36 @@ const (
 
 type supervisedAgentDTO struct {
 	*domain.Agent
-	ID   string `json:"id"`
-	Kind string `json:"kind"`
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"`
+	Repos      []string `json:"repos"`
+	RepoGroups []string `json:"repo_groups"`
+	CrossRepo  bool     `json:"cross_repo"`
+}
+
+// newSupervisedAgentDTO keeps the unified agent response compatible with the
+// workspace contract. Repos and repo_groups are required collection fields in
+// the frontend model; domain.Agent omits nil slices, which made a freshly
+// created cross-repo or no-group agent crash consumers that iterate them before
+// the next workspace refresh.
+func newSupervisedAgentDTO(agent *domain.Agent) supervisedAgentDTO {
+	if agent == nil {
+		return supervisedAgentDTO{
+			Kind:       agentRecordKindSupervised,
+			Repos:      []string{},
+			RepoGroups: []string{},
+			CrossRepo:  false,
+		}
+	}
+	clone := *agent
+	return supervisedAgentDTO{
+		Agent:      &clone,
+		ID:         clone.Name,
+		Kind:       agentRecordKindSupervised,
+		Repos:      append([]string{}, clone.Repos...),
+		RepoGroups: append([]string{}, clone.RepoGroups...),
+		CrossRepo:  clone.CrossRepo,
+	}
 }
 
 type agentRecordDTO struct {
@@ -132,7 +160,18 @@ type patchAgentBehaviorRecord struct {
 }
 
 func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.AgentService, now time.Time) (agentRecordDTO, error) {
-	out := agentRecordDTO{
+	if m.bindings == nil {
+		return newAgentRecordDTO(record), automation.ErrUnavailable
+	}
+	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: record.ServiceID})
+	if err != nil {
+		return newAgentRecordDTO(record), err
+	}
+	return m.agentRecordDTOWithBindings(ctx, ws, record, bindings, now), nil
+}
+
+func newAgentRecordDTO(record *domain.AgentService) agentRecordDTO {
+	return agentRecordDTO{
 		ID:      record.ServiceID,
 		Name:    record.Name,
 		Kind:    deriveAgentRecordKind(record),
@@ -148,13 +187,16 @@ func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.A
 		CreatedAt:    record.CreatedAt,
 		UpdatedAt:    record.UpdatedAt,
 	}
-	if m.bindings == nil {
-		return out, automation.ErrUnavailable
-	}
-	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: record.ServiceID})
-	if err != nil {
-		return out, err
-	}
+}
+
+func (m *Module) agentRecordDTOWithBindings(
+	ctx context.Context,
+	ws string,
+	record *domain.AgentService,
+	bindings []*automation.Binding,
+	now time.Time,
+) agentRecordDTO {
+	out := newAgentRecordDTO(record)
 	decorators := make([]triggerbindings.BindingDecorators, 0, len(bindings))
 	out.Bindings = make([]recordBindingDTO, 0, len(bindings))
 	for _, b := range bindings {
@@ -171,7 +213,7 @@ func (m *Module) agentRecordDTO(ctx context.Context, ws string, record *domain.A
 		})
 	}
 	out.LastRunStatus, out.ConsecutiveFailures, out.NextFireAt = aggregateBindingDecorators(decorators)
-	return out, nil
+	return out
 }
 
 func legacyBindingDTO(ctx context.Context, st store.Store, ws string, b *domain.TriggerBinding, now time.Time) legacyBindingAgentDTO {

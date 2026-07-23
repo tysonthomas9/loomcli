@@ -19,6 +19,10 @@ const (
 	defaultDriverAwaitMaxTimeout      = 14 * 24 * time.Hour
 	defaultDriverAwaitMaxPerRun       = 100
 	defaultDriverAwaitTotalSuspendCap = 30 * 24 * time.Hour
+
+	// Fleet versions review-claim fingerprints so the retained review restore
+	// status is cryptographically bound into the immutable claim receipt.
+	driverRunWorkItemReviewClaimFingerprintPrefix = "driver-run-work-item-claim-v2:"
 )
 
 func (service *Service) SubmitDriverRun(ctx context.Context, auth authority.OperatorAuthority, command SubmitDriverRunCommand) (*DriverRun, error) {
@@ -357,8 +361,10 @@ func (service *Service) ClaimDriverRunWorkItem(
 	if err := service.requireOwner(ActionClaimDriverRunWorkItem, command.WorkspaceKey, command.Owner, auth); err != nil {
 		return DriverRunWorkItemMutationResult{}, err
 	}
+	command.RequiredStatus = strings.TrimSpace(command.RequiredStatus)
 	if command.Owner.ResourceKind != ResourceDriverRun || strings.TrimSpace(command.WorkItemID) == "" ||
 		command.RequestID != ClaimDriverRunWorkItemRequestID(command.Owner.ResourceID, command.WorkItemID) ||
+		(command.RequiredStatus != "" && command.RequiredStatus != DriverRunWorkItemRestoreReview) ||
 		command.ClaimTTL < 0 || (command.ClaimTTL > 0 && command.ClaimTTL < time.Second) || command.ClaimedAt.IsZero() {
 		return DriverRunWorkItemMutationResult{}, ErrInvalid
 	}
@@ -371,7 +377,8 @@ func (service *Service) ClaimDriverRunWorkItem(
 		return DriverRunWorkItemMutationResult{}, err
 	}
 	if err := validateDriverRunWorkItemMutationResult(result, command.WorkspaceKey, command.Owner.ResourceID,
-		command.WorkItemID, command.RequestID, "claim_work_item", "claimed", command.ClaimedAt, true); err != nil {
+		command.WorkItemID, command.RequestID, "claim_work_item", "claimed", command.ClaimedAt,
+		command.RequiredStatus, true); err != nil {
 		return DriverRunWorkItemMutationResult{}, fmt.Errorf("%w: claimed Work Item escaped DriverRun owner envelope", ErrConflict)
 	}
 	return cloneDriverRunWorkItemMutationResult(result), nil
@@ -385,10 +392,16 @@ func (service *Service) ReleaseDriverRunWorkItem(
 	if err := service.requireOwner(ActionReleaseDriverRunWorkItem, command.WorkspaceKey, command.Owner, auth); err != nil {
 		return DriverRunWorkItemMutationResult{}, err
 	}
+	command.RestoreStatus = strings.TrimSpace(command.RestoreStatus)
+	if command.RestoreStatus == "" {
+		command.RestoreStatus = DriverRunWorkItemRestoreOpen
+	}
 	claimRequestID := ClaimDriverRunWorkItemRequestID(command.Owner.ResourceID, command.WorkItemID)
 	if command.Owner.ResourceKind != ResourceDriverRun || strings.TrimSpace(command.WorkItemID) == "" ||
 		command.RequestID != ReleaseDriverRunWorkItemRequestID(command.Owner.ResourceID, command.WorkItemID) ||
-		command.ClaimActionID != DriverRunWorkItemClaimActionID(claimRequestID) || command.ReleasedAt.IsZero() {
+		command.ClaimActionID != DriverRunWorkItemClaimActionID(claimRequestID) ||
+		(command.RestoreStatus != DriverRunWorkItemRestoreOpen && command.RestoreStatus != DriverRunWorkItemRestoreReview) ||
+		command.ReleasedAt.IsZero() {
 		return DriverRunWorkItemMutationResult{}, ErrInvalid
 	}
 	port := service.dependencies.DriverRuns.WorkItems
@@ -400,8 +413,52 @@ func (service *Service) ReleaseDriverRunWorkItem(
 		return DriverRunWorkItemMutationResult{}, err
 	}
 	if err := validateDriverRunWorkItemMutationResult(result, command.WorkspaceKey, command.Owner.ResourceID,
-		command.WorkItemID, command.RequestID, "release_work_item", "released", command.ReleasedAt, false); err != nil {
+		command.WorkItemID, command.RequestID, "release_work_item", "released", command.ReleasedAt,
+		"", false); err != nil {
 		return DriverRunWorkItemMutationResult{}, fmt.Errorf("%w: released Work Item escaped DriverRun owner envelope", ErrConflict)
+	}
+	return cloneDriverRunWorkItemMutationResult(result), nil
+}
+
+func (service *Service) HandoffDriverRunReviewWorkItem(
+	ctx context.Context,
+	auth authority.ExecutionAuthority,
+	command HandoffDriverRunReviewWorkItemCommand,
+) (DriverRunWorkItemMutationResult, error) {
+	if err := service.requireOwner(ActionHandoffDriverRunReviewWorkItem, command.WorkspaceKey, command.Owner, auth); err != nil {
+		return DriverRunWorkItemMutationResult{}, err
+	}
+	command.WorkItemID = strings.TrimSpace(command.WorkItemID)
+	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
+	command.TargetStatus = strings.TrimSpace(command.TargetStatus)
+	command.Reason = strings.TrimSpace(command.Reason)
+	claimRequestID := ClaimDriverRunWorkItemRequestID(command.Owner.ResourceID, command.WorkItemID)
+	if command.Owner.ResourceKind != ResourceDriverRun || command.WorkItemID == "" || command.TaskRunID == "" ||
+		command.RequestID != HandoffDriverRunReviewWorkItemRequestID(command.Owner.ResourceID, command.WorkItemID, command.TaskRunID) ||
+		command.ClaimActionID != DriverRunWorkItemClaimActionID(claimRequestID) ||
+		(command.TargetStatus != DriverRunWorkItemRestoreOpen && command.TargetStatus != "closed") ||
+		command.HandedOffAt.IsZero() {
+		return DriverRunWorkItemMutationResult{}, ErrInvalid
+	}
+	port := service.dependencies.DriverRuns.WorkItems
+	if port == nil {
+		return DriverRunWorkItemMutationResult{}, ErrUnavailable
+	}
+	result, err := port.HandoffDriverRunReviewWorkItem(ctx, command)
+	if err != nil {
+		return DriverRunWorkItemMutationResult{}, err
+	}
+	workItem, action := result.WorkItem, result.Action
+	actor := "driver-run:" + command.Owner.ResourceID
+	if workItem == nil || workItem.WorkspaceKey != command.WorkspaceKey || workItem.WorkItemID != command.WorkItemID ||
+		workItem.Status != command.TargetStatus || workItem.Assignee != "" ||
+		workItem.UpdatedAt.IsZero() ||
+		!validDriverRunWorkItemActionReceipt(
+			action, command.WorkspaceKey, command.WorkItemID, actor, "handoff_review_work_item",
+			DriverRunReviewWorkItemHandoffActionID(command.RequestID),
+			"issue://"+command.WorkItemID+"#handed-off", command.HandedOffAt, "", result.Replay,
+		) {
+		return DriverRunWorkItemMutationResult{}, fmt.Errorf("%w: review handoff escaped DriverRun owner envelope", ErrConflict)
 	}
 	return cloneDriverRunWorkItemMutationResult(result), nil
 }
@@ -410,6 +467,7 @@ func validateDriverRunWorkItemMutationResult(
 	result DriverRunWorkItemMutationResult,
 	workspace, driverRunID, workItemID, requestID, actionType, responseState string,
 	requestedAt time.Time,
+	requiredStatus string,
 	claim bool,
 ) error {
 	workItem, action := result.WorkItem, result.Action
@@ -420,7 +478,14 @@ func validateDriverRunWorkItemMutationResult(
 	actionPrefix := "driver-run-work-item-" + strings.TrimSuffix(actionType, "_work_item") + ":"
 	wantActionID := actionPrefix + requestID
 	wantResponseRef := "issue://" + workItemID + "#" + responseState
-	if !validDriverRunWorkItemActionReceipt(action, workspace, workItemID, actor, actionType, wantActionID, wantResponseRef, requestedAt, result.Replay) {
+	fingerprintPrefix := ""
+	if claim && requiredStatus == DriverRunWorkItemRestoreReview {
+		fingerprintPrefix = driverRunWorkItemReviewClaimFingerprintPrefix
+	}
+	if !validDriverRunWorkItemActionReceipt(
+		action, workspace, workItemID, actor, actionType, wantActionID, wantResponseRef,
+		requestedAt, fingerprintPrefix, result.Replay,
+	) {
 		return ErrConflict
 	}
 	return nil
@@ -446,11 +511,13 @@ func validDriverRunWorkItemActionReceipt(
 	action *DriverRunWorkItemAction,
 	workspace, workItemID, actor, actionType, wantActionID, wantResponseRef string,
 	requestedAt time.Time,
+	fingerprintPrefix string,
 	replay bool,
 ) bool {
 	return action != nil && action.WorkspaceKey == workspace && action.ActionID == wantActionID &&
 		action.IdempotencyKey == wantActionID && action.ActionType == actionType && action.TargetRef == workItemID &&
-		action.RequestedBy == actor && action.Status == "applied" && validDriverRunCommandFingerprint(action.RequestRef) &&
+		action.RequestedBy == actor && action.Status == "applied" &&
+		validDriverRunCommandFingerprintWithPrefix(action.RequestRef, fingerprintPrefix) &&
 		action.ResponseRef == wantResponseRef && !action.CreatedAt.IsZero() && action.AppliedAt != nil &&
 		!action.AppliedAt.IsZero() && action.AppliedAt.Equal(action.CreatedAt) &&
 		(replay || persistedCommandTimeMatches(action.CreatedAt, requestedAt))
@@ -458,7 +525,7 @@ func validDriverRunWorkItemActionReceipt(
 
 func validReleasedDriverRunWorkItem(status, assignee, actor string) bool {
 	switch status {
-	case "open":
+	case "open", "review":
 		return assignee == ""
 	case "closed", "tombstone":
 		return assignee == actor
@@ -473,6 +540,14 @@ func validDriverRunCommandFingerprint(value string) bool {
 	}
 	_, err := hex.DecodeString(strings.TrimPrefix(value, "sha256:"))
 	return err == nil
+}
+
+func validDriverRunCommandFingerprintWithPrefix(value, prefix string) bool {
+	if prefix == "" {
+		return validDriverRunCommandFingerprint(value)
+	}
+	return strings.HasPrefix(value, prefix) &&
+		validDriverRunCommandFingerprint(strings.TrimPrefix(value, prefix))
 }
 
 func cloneDriverRunWorkItemMutationResult(result DriverRunWorkItemMutationResult) DriverRunWorkItemMutationResult {

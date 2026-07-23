@@ -1,10 +1,87 @@
 package localsettings
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
+
+func TestRuntimeCredentialKeyConcurrentFirstPublicationConverges(t *testing.T) {
+	dir := t.TempDir()
+	const callers = 32
+	start := make(chan struct{})
+	results := make(chan []byte, callers)
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			key, err := runtimeCredentialKey(dir)
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- key
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		t.Fatalf("runtimeCredentialKey: %v", err)
+	}
+
+	var winner []byte
+	for key := range results {
+		if winner == nil {
+			winner = key
+			continue
+		}
+		if !bytes.Equal(key, winner) {
+			t.Fatal("concurrent callers returned different runtime credential keys")
+		}
+	}
+	persisted, err := readRuntimeCredentialKey(filepath.Join(dir, runtimeCredentialKeyFileName))
+	if err != nil {
+		t.Fatalf("read persisted runtime credential key: %v", err)
+	}
+	if !bytes.Equal(persisted, winner) {
+		t.Fatal("persisted runtime credential key differs from returned winner")
+	}
+}
+
+func TestSaveConcurrentPublishersUseIndependentTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	settings := Default()
+	const callers = 32
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- Save(dir, settings)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Save: %v", err)
+		}
+	}
+	if _, err := Load(dir); err != nil {
+		t.Fatalf("load concurrently published settings: %v", err)
+	}
+}
 
 func TestRedisFromURL_ParsesRedisCLIUpstashCommand(t *testing.T) {
 	cfg, err := RedisFromURL("redis-cli --tls -u redis://default:secret@example.upstash.io:6379")

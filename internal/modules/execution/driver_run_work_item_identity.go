@@ -21,6 +21,17 @@ func ReleaseDriverRunWorkItemRequestID(driverRunID, workItemID string) string {
 	return driverRunWorkItemRequestID("release-work-item", "loom-driver-run-work-item-release", driverRunID, workItemID)
 }
 
+// HandoffDriverRunReviewWorkItemRequestID returns the stable command identity
+// for the parent-owned terminal handoff of one retained review child.
+func HandoffDriverRunReviewWorkItemRequestID(driverRunID, workItemID, taskRunID string) string {
+	return driverRunWorkItemRequestID(
+		"handoff-review-work-item",
+		"loom-driver-run-review-work-item-handoff",
+		driverRunID,
+		workItemID+"\x00"+taskRunID,
+	)
+}
+
 func driverRunWorkItemRequestID(prefix, digestDomain, driverRunID, workItemID string) string {
 	digest := sha256.Sum256([]byte(digestDomain + "\x00" + driverRunID + "\x00" + workItemID))
 	return prefix + ":sha256:" + hex.EncodeToString(digest[:])
@@ -36,4 +47,10 @@ func DriverRunWorkItemClaimActionID(claimRequestID string) string {
 // associated with a release request.
 func DriverRunWorkItemReleaseActionID(releaseRequestID string) string {
 	return "driver-run-work-item-release:" + releaseRequestID
+}
+
+// DriverRunReviewWorkItemHandoffActionID is Fleet's exact action-ledger
+// identity for a successful retained-review handoff.
+func DriverRunReviewWorkItemHandoffActionID(requestID string) string {
+	return "driver-run-review-work-item-handoff:" + requestID
 }

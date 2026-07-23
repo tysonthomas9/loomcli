@@ -57,13 +57,14 @@ type DriverRunHeartbeatPort interface {
 	HeartbeatDriverRun(context.Context, DriverRunHeartbeatCommand) (*DriverRun, error)
 }
 
-// DriverRunWorkItemPort owns the atomic owner-fenced claim and release of a
-// Work Item on behalf of one live DriverRun. Implementations must validate the
-// parent owner in the same transaction that mutates the issue projection and
-// commits the action receipt.
+// DriverRunWorkItemPort owns the atomic owner-fenced claim, release, and
+// successful-review handoff of a Work Item on behalf of one live DriverRun.
+// Implementations must validate the parent owner in the same transaction that
+// mutates the issue projection and commits the action receipt.
 type DriverRunWorkItemPort interface {
 	ClaimDriverRunWorkItem(context.Context, ClaimDriverRunWorkItemCommand) (DriverRunWorkItemMutationResult, error)
 	ReleaseDriverRunWorkItem(context.Context, ReleaseDriverRunWorkItemCommand) (DriverRunWorkItemMutationResult, error)
+	HandoffDriverRunReviewWorkItem(context.Context, HandoffDriverRunReviewWorkItemCommand) (DriverRunWorkItemMutationResult, error)
 }
 
 type DriverRunFinalizePort interface {

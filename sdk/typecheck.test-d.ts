@@ -73,14 +73,21 @@ export async function exerciseLoomDriverClientSurface(): Promise<void> {
   await client.agents.message({ agent: "lead", message: "hello" });
 
   // tasks + taskRuns
-  expectType<Record<string, unknown> | null>(await client.tasks.claimReady({ epicId: "EPIC-1" }));
+  expectType<Record<string, unknown> | null>(await client.tasks.claimReady({ epicId: "EPIC-1", sourceRepo: "alpha" }));
   expectType<Record<string, unknown> | null>(await client.tasks.claim({ taskId: "TASK-1", epicId: "EPIC-1", limit: 5 }));
+  expectType<Record<string, unknown> | null>(await client.tasks.claimReview({ taskId: "TASK-1" }));
+  expectType<Record<string, unknown> | null>(await client.tasks.handoffReview({
+    taskId: "TASK-1", taskRunId: "task-run-1", status: "open", reason: "changes requested",
+  }));
   await client.tasks.complete({ taskId: "TASK-1", taskRunId: "task-run-1", artifactIds: ["a1"] });
   await client.tasks.release({ taskId: "TASK-1" });
+  await client.tasks.releaseReview({ taskId: "TASK-1" });
   expectType<Record<string, unknown>>(await client.taskRuns.request({
     taskId: "TASK-1",
     runner: "local-task-runner",
     capabilities: ["git"],
+    closeTask: false,
+    retainWorkItemClaim: true,
     // Optional task-run payload (diff+rubric) delivered verbatim to the runner.
     input: { kind: "github-review", diff: "patch", rubric: { mustPass: ["builds"] } },
   }));

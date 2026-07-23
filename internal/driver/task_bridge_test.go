@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -95,6 +96,53 @@ func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) 
 	if !envContains(env, "GITHUB_TOKEN=settings-token") {
 		t.Fatalf("settings GitHub token was not exported when inherited env had no GitHub token: %v", env)
 	}
+
+	req.Input = json.RawMessage(`{
+		"loomAgentPolicy": {
+			"version": 1,
+			"agentServiceId": "agent-1",
+			"roleName": "reviewer",
+			"backend": "opencode",
+			"model": "role/model"
+		}
+	}`)
+	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin"})
+	if !envContains(env, "LOOM_OPENCODE_MODEL=role/model") {
+		t.Fatalf("immutable role model was not exported: %v", env)
+	}
+	if envContains(env, "LOOM_OPENCODE_MODEL=opencode/model") {
+		t.Fatalf("local settings overrode immutable role model: %v", env)
+	}
+}
+
+func TestLocalTaskRunnerManagedPolicyParsingFailsClosed(t *testing.T) {
+	valid := json.RawMessage(`{
+		"loomAgentPolicy": {
+			"version": 1,
+			"agentServiceId": "agent-1",
+			"roleName": "reviewer",
+			"backend": "codex"
+		}
+	}`)
+	policy, present, err := localTaskRunnerAgentPolicyFromInput(valid)
+	if err != nil || !present {
+		t.Fatalf("valid managed policy parse = (%+v, %v, %v), want present without error", policy, present, err)
+	}
+	if policy.AgentServiceID != "agent-1" || policy.RoleName != "reviewer" || policy.Backend != "codex" {
+		t.Fatalf("valid managed policy = %+v, want stamped values", policy)
+	}
+
+	_, present, err = localTaskRunnerAgentPolicyFromInput(json.RawMessage(`{
+		"loomAgentPolicy": {"version": 1, "backend": "codex"}
+	}`))
+	if !present || err == nil || !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("incomplete managed policy parse = (present=%v, err=%v), want invalid error", present, err)
+	}
+
+	_, present, err = localTaskRunnerAgentPolicyFromInput(json.RawMessage(`{"prompt":"legacy"}`))
+	if err != nil || present {
+		t.Fatalf("legacy input parse = (present=%v, err=%v), want absent without error", present, err)
+	}
 }
 
 func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testing.T) {
@@ -143,6 +191,92 @@ func TestHostBridgeTaskExecutorAppliesPatchUploadsAndFinalizesArtifact(t *testin
 	}
 	if artifact.DurableStatus != "finalized" || artifact.URI == "" || artifact.ContentHash == "" || artifact.Checksum == "" || artifact.FinalizedAt == nil {
 		t.Fatalf("artifact = %+v, want finalized durable artifact", artifact)
+	}
+}
+
+func TestLocalTaskRunnerPublishedDelivery(t *testing.T) {
+	localReq := hostBridgeTaskExecRequest()
+	localReq.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	for _, tc := range []struct {
+		name     string
+		req      TaskExecRequest
+		status   domain.TaskRunStatus
+		delivery string
+		want     bool
+	}{
+		{name: "local branch", req: localReq, status: domain.TaskRunCompleted, delivery: "local_branch", want: true},
+		{name: "stack branch", req: localReq, status: domain.TaskRunCompleted, delivery: "stack_branch", want: true},
+		{name: "pull request", req: localReq, status: domain.TaskRunCompleted, delivery: "pull_request", want: true},
+		{name: "patch back", req: localReq, status: domain.TaskRunCompleted, delivery: "patch_back"},
+		{name: "empty published unit", req: localReq, status: domain.TaskRunCompleted, delivery: "pull_request_skipped_no_changes"},
+		{name: "failed result", req: localReq, status: domain.TaskRunFailed, delivery: "local_branch"},
+		{name: "foreign runner cannot self assert", req: hostBridgeTaskExecRequest(), status: domain.TaskRunCompleted, delivery: "local_branch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := TaskExecResult{
+				Status:          tc.status,
+				RuntimeMetadata: map[string]string{"delivery": tc.delivery},
+			}
+			if got := localTaskRunnerPublishedDelivery(tc.req, result); got != tc.want {
+				t.Fatalf("localTaskRunnerPublishedDelivery() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHostBridgeTaskExecutorPersistsPublishedPatchWithoutPatchBack(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	repo := newPatchBackRepo(t)
+	base := repo.commitFile("file.txt", "old\n", "base")
+	patch := "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+published\n"
+	req := hostBridgeTaskExecRequest()
+	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
+
+	executor := HostBridgeTaskExecutor{
+		Store:               st,
+		Artifacts:           testArtifactsAPI(st),
+		ArtifactAuthorities: taskWorkerTestAuthorities{},
+		WorktreePath:        repo.dir,
+		APIBaseURL:          testTaskRunAPIURL,
+		Command:             hostBridgeHelperCommand(t, "published", base, patch),
+	}
+	result, err := executor.ExecuteTask(ctx, req)
+	if err != nil {
+		t.Fatalf("ExecuteTask: %v", err)
+	}
+	if result.Status != domain.TaskRunCompleted || result.ExitCode != 0 {
+		t.Fatalf("result = %+v, want completed and zero exit", result)
+	}
+	if got := repo.read("file.txt"); got != "old\n" {
+		t.Fatalf("host file content = %q, want published delivery to leave it unchanged", got)
+	}
+	if got := result.RuntimeMetadata["patch_artifact_id"]; got != "patch-task-run-1" {
+		t.Fatalf("patch artifact metadata = %q, want patch-task-run-1", got)
+	}
+	if _, ok := result.RuntimeMetadata["patch_back_status"]; ok {
+		t.Fatalf("published delivery unexpectedly attempted patch-back: %+v", result.RuntimeMetadata)
+	}
+	artifact, err := st.Artifacts().Get(ctx, "WS", "patch-task-run-1")
+	if err != nil {
+		t.Fatalf("get patch artifact: %v", err)
+	}
+	if artifact.Type != "patch" || artifact.DurableStatus != "finalized" || artifact.ContentHash == "" {
+		t.Fatalf("patch artifact = %+v, want finalized exact diff evidence", artifact)
+	}
+	contentReader, ok := st.Artifacts().(interface {
+		ReadContent(context.Context, string, string) ([]byte, error)
+	})
+	if !ok {
+		t.Fatal("artifact store does not expose ReadContent")
+	}
+	content, err := contentReader.ReadContent(ctx, "WS", "patch-task-run-1")
+	if err != nil {
+		t.Fatalf("read patch artifact content: %v", err)
+	}
+	if string(content) != patch {
+		t.Fatalf("patch artifact content = %q, want exact runner patch %q", content, patch)
 	}
 }
 
@@ -853,6 +987,21 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			t.Fatalf("encode result: %v", err)
 		}
+	case "published":
+		result := map[string]any{
+			"status":         "completed",
+			"exitCode":       0,
+			"patch":          patch,
+			"patch_base_ref": base,
+			"logsRef":        "logs://" + req.TaskRunID,
+			"runtimeMetadata": map[string]string{
+				"helper":   "host_bridge",
+				"delivery": "local_branch",
+			},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			t.Fatalf("encode result: %v", err)
+		}
 	case "artifact":
 		result := map[string]any{
 			"status":    "completed",
@@ -916,6 +1065,41 @@ func TestHostBridgeTaskExecutorHelperProcess(t *testing.T) {
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
 			t.Fatalf("encode result: %v", err)
+		}
+	case "flue-retry-transcript":
+		attempt := req.TaskRunAttempt
+		if attempt < 1 {
+			attempt = 1
+		}
+		status := "failed"
+		exitCode := 1
+		errorClass := "retry_fixture"
+		errorMessage := "attempt 1 failed"
+		if attempt > 1 {
+			status = "completed"
+			exitCode = 0
+			errorClass = ""
+			errorMessage = ""
+		}
+		result := map[string]any{
+			"status":        status,
+			"exit_code":     exitCode,
+			"error_class":   errorClass,
+			"error_message": errorMessage,
+			"logs":          "logs for attempt " + strconv.Itoa(attempt) + "\n",
+			"transcript_entries": []map[string]any{{
+				"seq":       1,
+				"timestamp": "2026-07-23T01:00:00Z",
+				"role":      "assistant",
+				"type":      "text",
+				"text":      "transcript for attempt " + strconv.Itoa(attempt),
+			}},
+			"runtime_metadata": map[string]string{
+				"fixture_attempt": strconv.Itoa(attempt),
+			},
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+			t.Fatalf("encode retry transcript result: %v", err)
 		}
 	case "invalid-empty":
 		os.Stdout.WriteString("{}\n")

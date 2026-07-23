@@ -218,16 +218,17 @@ type ExecutionDriverRunHeartbeatCommand struct {
 }
 
 type ExecutionDriverRunWorkItemClaimCommand struct {
-	WorkspaceKey string
-	CommandID    string
-	RunID        string
-	TaskID       string
-	NodeID       string
-	LeaseID      string
-	LeaseToken   string `json:"-"`
-	FencingToken int64
-	ClaimTTL     time.Duration
-	ClaimedAt    time.Time
+	WorkspaceKey   string
+	CommandID      string
+	RunID          string
+	TaskID         string
+	NodeID         string
+	LeaseID        string
+	LeaseToken     string `json:"-"`
+	FencingToken   int64
+	ClaimTTL       time.Duration
+	RequiredStatus string
+	ClaimedAt      time.Time
 }
 
 type ExecutionDriverRunWorkItemReleaseCommand struct {
@@ -240,7 +241,24 @@ type ExecutionDriverRunWorkItemReleaseCommand struct {
 	LeaseToken    string `json:"-"`
 	FencingToken  int64
 	ClaimActionID string
+	RestoreStatus string
 	ReleasedAt    time.Time
+}
+
+type ExecutionDriverRunReviewWorkItemHandoffCommand struct {
+	WorkspaceKey  string
+	CommandID     string
+	RunID         string
+	TaskID        string
+	NodeID        string
+	LeaseID       string
+	LeaseToken    string `json:"-"`
+	FencingToken  int64
+	ClaimActionID string
+	TaskRunID     string
+	TargetStatus  string
+	Reason        string
+	HandedOffAt   time.Time
 }
 
 type ExecutionDriverRunWorkItemResult struct {
@@ -449,6 +467,7 @@ type ExecutionTransport interface {
 	HeartbeatDriverRun(context.Context, ExecutionDriverRunHeartbeatCommand) (*domain.DriverRun, error)
 	ClaimDriverRunWorkItem(context.Context, ExecutionDriverRunWorkItemClaimCommand) (*ExecutionDriverRunWorkItemResult, error)
 	ReleaseDriverRunWorkItem(context.Context, ExecutionDriverRunWorkItemReleaseCommand) (*ExecutionDriverRunWorkItemResult, error)
+	HandoffDriverRunReviewWorkItem(context.Context, ExecutionDriverRunReviewWorkItemHandoffCommand) (*ExecutionDriverRunWorkItemResult, error)
 	SuspendDriverRun(context.Context, ExecutionDriverRunSuspendCommand) (*domain.DriverRun, error)
 	FinalizeDriverRun(context.Context, ExecutionDriverRunFinalizeCommand) (*domain.DriverRun, error)
 	RecoverStaleChildTaskRuns(context.Context, ExecutionDriverRunStaleTaskRecoveryCommand) (*ExecutionDriverRunStaleTaskRecoveryResult, error)

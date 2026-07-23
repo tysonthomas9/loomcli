@@ -1,14 +1,20 @@
 package roles
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func newRolesMux() *http.ServeMux {
@@ -43,16 +49,285 @@ func TestCreateRole_CreatesThenIsIdempotent(t *testing.T) {
 	}
 
 	// Second create of the same role is an idempotent 200, not a 409.
-	rec2 := postRole(t, mux, `{"name":"bug-triage"}`)
+	rec2 := postRole(t, mux, `{"name":"bug-triage","task_filter":"any","read_only":true,"description":"triage"}`)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("idempotent create status = %d, want 200; body=%s", rec2.Code, rec2.Body.String())
 	}
+}
+
+func TestCreateRole_ExistingPromptAndPolicyMustMatch(t *testing.T) {
+	st := memstore.New()
+	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{
+		WorkspaceKey: "WS",
+		Name:         "bug-triage",
+		Description:  "triage",
+		Prompt:       "existing prompt",
+		TaskFilter:   "any",
+		ReadOnly:     false,
+	}); err != nil {
+		t.Fatalf("seed role: %v", err)
+	}
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	rec := postRole(t, mux, `{
+		"name":"bug-triage",
+		"description":"triage",
+		"prompt":"different prompt",
+		"task_filter":"any",
+		"read_only":true
+	}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("collision status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "prompt") || !strings.Contains(rec.Body.String(), "read_only") {
+		t.Fatalf("collision body does not identify safe fields: %s", rec.Body.String())
+	}
+	role, err := st.Roles().Get(context.Background(), "WS", "bug-triage")
+	if err != nil {
+		t.Fatalf("get role: %v", err)
+	}
+	if role.Prompt != "existing prompt" || role.ReadOnly {
+		t.Fatalf("colliding ensure mutated role: %+v", role)
+	}
+}
+
+func TestCreateRole_ExactInlinePromptIsIdempotent(t *testing.T) {
+	st := memstore.New()
+	if _, err := st.Roles().Create(context.Background(), store.RoleCreate{
+		WorkspaceKey: "WS",
+		Name:         "bug-triage",
+		Description:  "triage",
+		Prompt:       "same prompt",
+		TaskFilter:   "any",
+		ReadOnly:     true,
+	}); err != nil {
+		t.Fatalf("seed role: %v", err)
+	}
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	rec := postRole(t, mux, `{
+		"name":"bug-triage",
+		"description":"triage",
+		"prompt":"same prompt",
+		"prompt_filename":"bug-triage.md",
+		"task_filter":"any",
+		"read_only":true
+	}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("exact ensure status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnsureRole_RecreateAfterDeleteUsesNewImmutablePrompt(t *testing.T) {
+	st := newPromptRoleStore(t)
+	ctx := context.Background()
+	first, created, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+		Name: "docs", Prompt: "first prompt", PromptFilename: "docs.md", TaskFilter: "has_design",
+	})
+	if err != nil || !created {
+		t.Fatalf("first EnsureRole = %+v created=%v err=%v", first, created, err)
+	}
+	if err := st.Roles().Delete(ctx, "WS", "docs"); err != nil {
+		t.Fatalf("delete first role: %v", err)
+	}
+	second, recreated, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+		Name: "docs", Prompt: "second prompt", PromptFilename: "docs.md", TaskFilter: "has_design",
+	})
+	if err != nil || !recreated {
+		t.Fatalf("recreated EnsureRole = %+v created=%v err=%v", second, recreated, err)
+	}
+	if second.PromptFile == first.PromptFile {
+		t.Fatalf("recreated role reused prior immutable prompt path %q", second.PromptFile)
+	}
+	if got := ReadPromptBody(second); got != "second prompt" {
+		t.Fatalf("recreated role prompt = %q, want second prompt", got)
+	}
+}
+
+func TestEnsureRole_ExplicitPromptFilenameIsRoleNamespaced(t *testing.T) {
+	st := newPromptRoleStore(t)
+	ctx := context.Background()
+	first, firstCreated, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+		Name: "reviewer", Prompt: "shared prompt", PromptFilename: "shared.md", TaskFilter: "has_design",
+	})
+	if err != nil || !firstCreated {
+		t.Fatalf("first EnsureRole = %+v created=%v err=%v", first, firstCreated, err)
+	}
+	second, secondCreated, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+		Name: "auditor", Prompt: "shared prompt", PromptFilename: "shared.md", TaskFilter: "has_design",
+	})
+	if err != nil || !secondCreated {
+		t.Fatalf("second EnsureRole = %+v created=%v err=%v", second, secondCreated, err)
+	}
+	if first.PromptFile == second.PromptFile {
+		t.Fatalf("explicit prompt filename shared across roles: %q", first.PromptFile)
+	}
+	if got := ReadPromptBody(first); got != "shared prompt" {
+		t.Fatalf("first prompt = %q, want shared prompt", got)
+	}
+	if got := ReadPromptBody(second); got != "shared prompt" {
+		t.Fatalf("second prompt = %q, want shared prompt", got)
+	}
+}
+
+func TestEnsureRoleCompensationRetainsRetryableRoleAndPrompt(t *testing.T) {
+	st := newPromptRoleStore(t)
+	ctx := context.Background()
+	created, err := EnsureRoleWithReceipt(ctx, st, "WS", EnsureRoleRequest{
+		Name: "reviewer", Prompt: "owned prompt", PromptFilename: "reviewer.md", TaskFilter: "has_design",
+	})
+	if err != nil || created == nil || !created.Created {
+		t.Fatalf("EnsureRoleWithReceipt = %+v err=%v, want created receipt", created, err)
+	}
+	promptPath := created.Role.PromptFile
+	if err := created.Compensate(ctx, st, "WS"); err != nil {
+		t.Fatalf("Compensate created role: %v", err)
+	}
+	if _, err := st.Roles().Get(ctx, "WS", "reviewer"); err != nil {
+		t.Fatalf("retryable role was removed: %v", err)
+	}
+	if _, err := os.Stat(promptPath); err != nil {
+		t.Fatalf("retryable prompt was removed: %v", err)
+	}
+
+	reused, err := EnsureRoleWithReceipt(ctx, st, "WS", EnsureRoleRequest{
+		Name: "reviewer", Prompt: "pre-existing prompt", PromptFilename: "reviewer.md", TaskFilter: "has_design",
+	})
+	if err == nil || reused != nil {
+		t.Fatalf("conflicting retry = %+v err=%v, want conflict", reused, err)
+	}
+	role, err := st.Roles().Get(ctx, "WS", "reviewer")
+	if err != nil {
+		t.Fatalf("retained role disappeared after conflict: %v", err)
+	}
+	if got := ReadPromptBody(role); got != "owned prompt" {
+		t.Fatalf("retained prompt changed = %q", got)
+	}
+}
+
+func TestEnsureRoleCompensationNeverDeletesEditedGeneration(t *testing.T) {
+	st := newPromptRoleStore(t)
+	ctx := context.Background()
+	receipt, err := EnsureRoleWithReceipt(ctx, st, "WS", EnsureRoleRequest{
+		Name: "reviewer", Prompt: "owned prompt", TaskFilter: "has_design",
+	})
+	if err != nil {
+		t.Fatalf("EnsureRoleWithReceipt: %v", err)
+	}
+	description := "operator edit"
+	if _, err := st.Roles().Update(ctx, "WS", "reviewer", store.RoleUpdate{Description: &description}); err != nil {
+		t.Fatalf("edit role: %v", err)
+	}
+	if err := receipt.Compensate(ctx, st, "WS"); err != nil {
+		t.Fatalf("Compensate edited role: %v", err)
+	}
+	if _, err := st.Roles().Get(ctx, "WS", "reviewer"); err != nil {
+		t.Fatalf("edited role was deleted: %v", err)
+	}
+	if _, err := os.Stat(receipt.Role.PromptFile); err != nil {
+		t.Fatalf("edited role prompt was deleted: %v", err)
+	}
+}
+
+func TestEnsureRole_ConcurrentDifferentPromptsCannotOverwriteWinner(t *testing.T) {
+	st := newPromptRoleStore(t)
+	ctx := context.Background()
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, prompt := range []string{"read-only prompt", "mutating prompt"} {
+		prompt := prompt
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+				Name: "reviewer", Prompt: prompt, PromptFilename: "reviewer.md",
+				TaskFilter: "has_design", ReadOnly: prompt == "read-only prompt",
+			})
+			results <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	successes, conflicts := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, domain.ErrConflict):
+			conflicts++
+		default:
+			t.Fatalf("concurrent EnsureRole error = %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent results: successes=%d conflicts=%d, want 1/1", successes, conflicts)
+	}
+	winner, err := st.Roles().Get(ctx, "WS", "reviewer")
+	if err != nil {
+		t.Fatalf("get winning role: %v", err)
+	}
+	prompt := ReadPromptBody(winner)
+	if prompt != "read-only prompt" && prompt != "mutating prompt" {
+		t.Fatalf("winning prompt was overwritten or corrupted: %q", prompt)
+	}
+	if winner.ReadOnly != (prompt == "read-only prompt") {
+		t.Fatalf("winning role policy and prompt diverged: %+v prompt=%q", winner, prompt)
+	}
+}
+
+func newPromptRoleStore(t *testing.T) *memstore.Store {
+	t.Helper()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	workspacePath := t.TempDir()
+	if err := bootstrap.MutateWorkspaceLocalState("WS", func(local *bootstrap.WorkspaceLocalState) error {
+		local.Path = workspacePath
+		return nil
+	}); err != nil {
+		t.Fatalf("seed workspace local path: %v", err)
+	}
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{
+		Key: "WS", Name: "Test Workspace",
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	return st
 }
 
 func TestCreateRole_RequiresName(t *testing.T) {
 	rec := postRole(t, newRolesMux(), `{"name":"   "}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestValidatePromptAgentRole(t *testing.T) {
+	tests := []struct {
+		name    string
+		role    *domain.Role
+		wantErr string
+	}{
+		{name: "missing prompt", role: &domain.Role{Name: "empty", TaskFilter: "has_design"}, wantErr: "non-empty prompt"},
+		{name: "unsupported filter", role: &domain.Role{Name: "docs", Prompt: "work", TaskFilter: "docs"}, wantErr: "unsupported"},
+		{name: "inline legacy any", role: &domain.Role{Name: "legacy", Prompt: "work", TaskFilter: "any"}},
+		{name: "inline planner", role: &domain.Role{Name: "planner", Prompt: "work", TaskFilter: "needs_plan"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePromptAgentRole(tt.role)
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("ValidatePromptAgentRole: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("ValidatePromptAgentRole error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -114,6 +389,53 @@ func TestUpdateRole_PatchesFields(t *testing.T) {
 	}
 	if got.Role.Description != "new" || got.Role.ReadOnly {
 		t.Fatalf("patch did not apply: %+v", got.Role)
+	}
+}
+
+func TestUpdateRole_PublishesImmutablePromptAndLeavesSharedFileUntouched(t *testing.T) {
+	st := newPromptRoleStore(t)
+	ctx := context.Background()
+	first, created, err := EnsureRole(ctx, st, "WS", EnsureRoleRequest{
+		Name: "reviewer", Prompt: "shared prompt", PromptFilename: "shared.md", TaskFilter: "has_design",
+	})
+	if err != nil || !created {
+		t.Fatalf("seed first role = %+v created=%v err=%v", first, created, err)
+	}
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "WS",
+		Name:         "auditor",
+		PromptFile:   first.PromptFile,
+		TaskFilter:   "has_design",
+	}); err != nil {
+		t.Fatalf("seed second role sharing legacy prompt path: %v", err)
+	}
+	mux := http.NewServeMux()
+	NewModule(st).Register(mux)
+
+	rec := doRole(t, mux, http.MethodPatch, "/api/workspaces/WS/roles/reviewer", `{"prompt":"updated prompt"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	reviewer, err := st.Roles().Get(ctx, "WS", "reviewer")
+	if err != nil {
+		t.Fatalf("get updated reviewer: %v", err)
+	}
+	auditor, err := st.Roles().Get(ctx, "WS", "auditor")
+	if err != nil {
+		t.Fatalf("get untouched auditor: %v", err)
+	}
+	if reviewer.PromptFile == first.PromptFile {
+		t.Fatalf("prompt edit reused mutable path %q", reviewer.PromptFile)
+	}
+	if auditor.PromptFile != first.PromptFile {
+		t.Fatalf("unrelated role was repointed from %q to %q", first.PromptFile, auditor.PromptFile)
+	}
+	if got := ReadPromptBody(reviewer); got != "updated prompt" {
+		t.Fatalf("updated reviewer prompt = %q, want updated prompt", got)
+	}
+	if got := ReadPromptBody(auditor); got != "shared prompt" {
+		t.Fatalf("shared legacy prompt was overwritten: %q", got)
 	}
 }
 

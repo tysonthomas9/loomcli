@@ -429,6 +429,35 @@ describe("SettingsView", () => {
       });
     });
 
+    it("warns when the saved GitHub credential cannot be opened", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          settings: {
+            version: 1,
+            fleetdb_redis: {
+              enabled: false,
+              db: 0,
+              tls: false,
+              password_set: false,
+            },
+            agent_runtime: { default: "local" },
+            local_task_runner: {},
+            runtime_credentials: {
+              daytona: { configured: false },
+              github: { configured: true, usable: false },
+            },
+          },
+        }),
+      );
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("github-settings-panel")).toHaveTextContent(
+        "Saved credential cannot be opened. Re-save it.",
+      );
+    });
+
     it("keeps Daytona saves scoped to the remote runtime credential", async () => {
       const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
       mockUseBackendConfig.mockReturnValue(createMockHookReturn());

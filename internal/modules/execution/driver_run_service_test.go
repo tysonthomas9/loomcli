@@ -34,12 +34,16 @@ type driverRunCascadePortStub struct {
 type driverRunWorkItemPortStub struct {
 	claimCommand   ClaimDriverRunWorkItemCommand
 	releaseCommand ReleaseDriverRunWorkItemCommand
+	handoffCommand HandoffDriverRunReviewWorkItemCommand
 	claimResult    DriverRunWorkItemMutationResult
 	releaseResult  DriverRunWorkItemMutationResult
+	handoffResult  DriverRunWorkItemMutationResult
 	claimErr       error
 	releaseErr     error
+	handoffErr     error
 	claimCalls     int
 	releaseCalls   int
+	handoffCalls   int
 }
 
 func (stub *driverRunWorkItemPortStub) ClaimDriverRunWorkItem(_ context.Context, command ClaimDriverRunWorkItemCommand) (DriverRunWorkItemMutationResult, error) {
@@ -52,6 +56,12 @@ func (stub *driverRunWorkItemPortStub) ReleaseDriverRunWorkItem(_ context.Contex
 	stub.releaseCalls++
 	stub.releaseCommand = command
 	return stub.releaseResult, stub.releaseErr
+}
+
+func (stub *driverRunWorkItemPortStub) HandoffDriverRunReviewWorkItem(_ context.Context, command HandoffDriverRunReviewWorkItemCommand) (DriverRunWorkItemMutationResult, error) {
+	stub.handoffCalls++
+	stub.handoffCommand = command
+	return stub.handoffResult, stub.handoffErr
 }
 
 func (stub *driverRunCascadePortStub) CascadeChildDriverRuns(_ context.Context, command CascadeChildDriverRunsCommand) (CascadeChildDriverRunsResult, error) {
@@ -424,6 +434,66 @@ func TestDriverRunWorkItemClaimAndReleaseRequireExactOwnerAndReceipts(t *testing
 	}
 }
 
+func TestDriverRunReviewWorkItemClaimAcceptsOnlyVersionedReceiptFingerprint(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 44, 45, 841059362, time.UTC)
+	appliedAt := now.Truncate(time.Microsecond)
+	owner := Owner{
+		ResourceKind: ResourceDriverRun, ResourceID: "run-review-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7,
+	}
+	taskID := "TASK-REVIEW-1"
+	requestID := ClaimDriverRunWorkItemRequestID(owner.ResourceID, taskID)
+	actionID := DriverRunWorkItemClaimActionID(requestID)
+	plainRef := "sha256:" + strings.Repeat("c", 64)
+	versionedRef := driverRunWorkItemReviewClaimFingerprintPrefix + plainRef
+
+	for _, tc := range []struct {
+		name           string
+		requiredStatus string
+		requestRef     string
+		wantConflict   bool
+	}{
+		{name: "review_versioned", requiredStatus: DriverRunWorkItemRestoreReview, requestRef: versionedRef},
+		{name: "review_plain_rejected", requiredStatus: DriverRunWorkItemRestoreReview, requestRef: plainRef, wantConflict: true},
+		{name: "open_plain", requestRef: plainRef},
+		{name: "open_versioned_rejected", requestRef: versionedRef, wantConflict: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			port := &driverRunWorkItemPortStub{claimResult: DriverRunWorkItemMutationResult{
+				WorkItem: &DriverRunWorkItem{
+					WorkspaceKey: "TEST", WorkItemID: taskID, Status: "in_progress",
+					Assignee: "driver-run:" + owner.ResourceID, UpdatedAt: appliedAt,
+				},
+				Action: &DriverRunWorkItemAction{
+					WorkspaceKey: "TEST", ActionID: actionID, IdempotencyKey: actionID,
+					ActionType: "claim_work_item", TargetRef: taskID, RequestedBy: "driver-run:" + owner.ResourceID,
+					Status: "applied", RequestRef: tc.requestRef, ResponseRef: "issue://" + taskID + "#claimed",
+					CreatedAt: appliedAt, AppliedAt: &appliedAt,
+				},
+			}}
+			service, issuer := newDriverRunTestService(t, DriverRunDependencies{WorkItems: port})
+			result, err := service.ClaimDriverRunWorkItem(
+				context.Background(),
+				issueExecution(t, issuer, ActionClaimDriverRunWorkItem, owner),
+				ClaimDriverRunWorkItemCommand{
+					WorkspaceKey: "TEST", RequestID: requestID, Owner: owner, WorkItemID: taskID,
+					RequiredStatus: tc.requiredStatus, ClaimedAt: now,
+				},
+			)
+			if tc.wantConflict {
+				if !errors.Is(err, ErrConflict) {
+					t.Fatalf("error = %v, want conflict", err)
+				}
+				return
+			}
+			if err != nil || result.WorkItem == nil || result.WorkItem.Assignee != "driver-run:"+owner.ResourceID ||
+				port.claimCommand.RequiredStatus != tc.requiredStatus {
+				t.Fatalf("claim=%+v command=%+v err=%v", result, port.claimCommand, err)
+			}
+		})
+	}
+}
+
 func TestDriverRunWorkItemCommandsRejectDivergentActionAndMissingPort(t *testing.T) {
 	now := time.Now().UTC()
 	owner := Owner{ResourceKind: ResourceDriverRun, ResourceID: "run-1", NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7}
@@ -449,6 +519,68 @@ func TestDriverRunWorkItemCommandsRejectDivergentActionAndMissingPort(t *testing
 	}
 }
 
+func TestDriverRunReviewWorkItemHandoffRequiresExactOwnerChildAndReceipt(t *testing.T) {
+	now := time.Date(2026, 7, 23, 5, 0, 0, 123456789, time.UTC)
+	appliedAt := now.Truncate(time.Microsecond)
+	owner := Owner{
+		ResourceKind: ResourceDriverRun, ResourceID: "run-review-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7,
+	}
+	taskID := "TASK-REVIEW-1"
+	taskRunID := "review-child-1"
+	requestID := HandoffDriverRunReviewWorkItemRequestID(owner.ResourceID, taskID, taskRunID)
+	actionID := DriverRunReviewWorkItemHandoffActionID(requestID)
+	claimActionID := DriverRunWorkItemClaimActionID(ClaimDriverRunWorkItemRequestID(owner.ResourceID, taskID))
+	port := &driverRunWorkItemPortStub{handoffResult: DriverRunWorkItemMutationResult{
+		WorkItem: &DriverRunWorkItem{
+			WorkspaceKey: "TEST", WorkItemID: taskID, Status: "open", Assignee: "", UpdatedAt: appliedAt,
+		},
+		Action: &DriverRunWorkItemAction{
+			WorkspaceKey: "TEST", ActionID: actionID, IdempotencyKey: actionID,
+			ActionType: "handoff_review_work_item", TargetRef: taskID, RequestedBy: "driver-run:" + owner.ResourceID,
+			Status: "applied", RequestRef: "sha256:" + strings.Repeat("2", 64),
+			ResponseRef: "issue://" + taskID + "#handed-off", CreatedAt: appliedAt, AppliedAt: &appliedAt,
+		},
+	}}
+	service, issuer := newDriverRunTestService(t, DriverRunDependencies{WorkItems: port})
+	command := HandoffDriverRunReviewWorkItemCommand{
+		WorkspaceKey: "TEST", RequestID: requestID, Owner: owner, WorkItemID: taskID,
+		ClaimActionID: claimActionID, TaskRunID: taskRunID, TargetStatus: "open",
+		Reason: "changes requested", HandedOffAt: now,
+	}
+	result, err := service.HandoffDriverRunReviewWorkItem(
+		context.Background(),
+		issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+		command,
+	)
+	if err != nil || result.WorkItem == nil || result.WorkItem.Status != "open" ||
+		port.handoffCalls != 1 || port.handoffCommand.TaskRunID != taskRunID ||
+		port.handoffCommand.ClaimActionID != claimActionID {
+		t.Fatalf("handoff=%+v command=%+v calls=%d err=%v", result, port.handoffCommand, port.handoffCalls, err)
+	}
+
+	for name, edit := range map[string]func(*HandoffDriverRunReviewWorkItemCommand){
+		"wrong child":   func(c *HandoffDriverRunReviewWorkItemCommand) { c.TaskRunID = "other" },
+		"wrong claim":   func(c *HandoffDriverRunReviewWorkItemCommand) { c.ClaimActionID = "other" },
+		"review target": func(c *HandoffDriverRunReviewWorkItemCommand) { c.TargetStatus = "review" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := command
+			edit(&bad)
+			if _, err := service.HandoffDriverRunReviewWorkItem(
+				context.Background(),
+				issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+				bad,
+			); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("error=%v, want invalid", err)
+			}
+		})
+	}
+	if port.handoffCalls != 1 {
+		t.Fatalf("invalid commands reached port: %d calls", port.handoffCalls)
+	}
+}
+
 func TestDriverRunWorkItemRequestIDsAreDeterministicAndBounded(t *testing.T) {
 	for _, derive := range []func(string, string) string{ClaimDriverRunWorkItemRequestID, ReleaseDriverRunWorkItemRequestID} {
 		short := derive("run-1", "TASK-1")
@@ -462,6 +594,12 @@ func TestDriverRunWorkItemRequestIDsAreDeterministicAndBounded(t *testing.T) {
 		if left, right := derive("a:b", "c"), derive("a", "b:c"); left == right {
 			t.Fatalf("delimiter collision: %q", left)
 		}
+	}
+	handoff := HandoffDriverRunReviewWorkItemRequestID("run-1", "TASK-1", "task-run-1")
+	if handoff != HandoffDriverRunReviewWorkItemRequestID("run-1", "TASK-1", "task-run-1") ||
+		len(handoff) > driverRunWorkItemRequestIDMaxLength ||
+		handoff == HandoffDriverRunReviewWorkItemRequestID("run-1", "TASK-1", "task-run-2") {
+		t.Fatalf("handoff identity = %q", handoff)
 	}
 }
 

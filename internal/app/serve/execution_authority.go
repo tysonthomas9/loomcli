@@ -131,6 +131,7 @@ func driverRunExecutionAction(action authority.Action) bool {
 	case execution.ActionHeartbeatDriverRun, execution.ActionFinalizeDriverRun, execution.ActionAwaitDriverRun,
 		execution.ActionStartChildDriverRun, execution.ActionCascadeChildDriverRuns,
 		execution.ActionClaimDriverRunWorkItem, execution.ActionReleaseDriverRunWorkItem,
+		execution.ActionHandoffDriverRunReviewWorkItem,
 		execution.ActionRequestTaskRun, execution.ActionRecoverStaleChildTaskRuns:
 		return true
 	default:

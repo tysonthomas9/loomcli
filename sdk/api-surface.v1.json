@@ -127,6 +127,7 @@
         "epicId",
         "actor",
         "type",
+        "sourceRepo",
         "limit"
       ]
     },
@@ -137,6 +138,21 @@
         "actor",
         "epicId",
         "limit"
+      ]
+    },
+    "claim-review": {
+      "method": "POST",
+      "fields": [
+        "taskId"
+      ]
+    },
+    "handoff-review": {
+      "method": "POST",
+      "fields": [
+        "taskId",
+        "taskRunId",
+        "status",
+        "reason"
       ]
     },
     "epic-get": {
@@ -198,6 +214,7 @@
         "deferCompletion",
         "enqueueOnly",
         "closeTask",
+        "retainWorkItemClaim",
         "input"
       ]
     },
@@ -247,6 +264,12 @@
       "fields": [
         "taskId",
         "actor"
+      ]
+    },
+    "release-review": {
+      "method": "POST",
+      "fields": [
+        "taskId"
       ]
     },
     "connector-dispatch": {
@@ -377,9 +400,12 @@
       "tasks": [
         "claimReady",
         "claim",
+        "claimReview",
+        "handoffReview",
         "diff",
         "complete",
-        "release"
+        "release",
+        "releaseReview"
       ],
       "taskRuns": [
         "request",

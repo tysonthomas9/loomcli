@@ -57,6 +57,23 @@ function activeWorkerAgent(): LoomAgentStatus {
   };
 }
 
+function activeServiceWorkerAgent(): LoomAgentStatus {
+  return {
+    name: "advanced-task-runner",
+    branch: "worker/advanced-task-runner",
+    status: "working: E2E-2",
+    ahead: 0,
+    behind: 0,
+    workspace: "E2E",
+    role: "task",
+    role_kind: "worker",
+    daemon_managed: true,
+    mode: "service",
+    desired_state: "running",
+    state: "active",
+  };
+}
+
 function renderWithAgents(agents: LoomAgentStatus[], agentName: string) {
   const store = createAgentStore();
   store.setState({ agents });
@@ -266,5 +283,32 @@ describe("AgentDetailMain", () => {
       screen.getByRole("button", { name: "Open logs" }),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
+  });
+
+  it("does not seed a terminal for an ordinary daemon-supervised worker", () => {
+    const agent = activeServiceWorkerAgent();
+
+    renderWithAgents([agent], agent.name);
+
+    expect(screen.getByText("Worker terminal unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/daemon-supervised/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("terminal-view")).not.toBeInTheDocument();
+  });
+
+  it("still seeds a terminal for a custom interactive agent", () => {
+    const agent: LoomAgentStatus = {
+      ...activeServiceWorkerAgent(),
+      name: "pr-reviewer",
+      role: "pr-review",
+      role_kind: "interactive",
+      daemon_managed: false,
+    };
+
+    renderWithAgents([agent], agent.name);
+
+    expect(screen.getByTestId("terminal-view")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Worker terminal unavailable"),
+    ).not.toBeInTheDocument();
   });
 });

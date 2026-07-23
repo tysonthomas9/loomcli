@@ -65,7 +65,7 @@ func (adapter *fleetDriverRunCommandPort) ClaimDriverRunWorkItem(
 		WorkspaceKey: command.WorkspaceKey, CommandID: command.RequestID, RunID: command.Owner.ResourceID,
 		TaskID: command.WorkItemID, NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID,
 		LeaseToken: command.Owner.LeaseToken, FencingToken: command.Owner.FencingToken,
-		ClaimTTL: command.ClaimTTL, ClaimedAt: command.ClaimedAt,
+		ClaimTTL: command.ClaimTTL, RequiredStatus: command.RequiredStatus, ClaimedAt: command.ClaimedAt,
 	})
 	if err != nil {
 		return execution.DriverRunWorkItemMutationResult{}, mapFleetExecutionPortError(err)
@@ -81,7 +81,24 @@ func (adapter *fleetDriverRunCommandPort) ReleaseDriverRunWorkItem(
 		WorkspaceKey: command.WorkspaceKey, CommandID: command.RequestID, RunID: command.Owner.ResourceID,
 		TaskID: command.WorkItemID, NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID,
 		LeaseToken: command.Owner.LeaseToken, FencingToken: command.Owner.FencingToken,
-		ClaimActionID: command.ClaimActionID, ReleasedAt: command.ReleasedAt,
+		ClaimActionID: command.ClaimActionID, RestoreStatus: command.RestoreStatus, ReleasedAt: command.ReleasedAt,
+	})
+	if err != nil {
+		return execution.DriverRunWorkItemMutationResult{}, mapFleetExecutionPortError(err)
+	}
+	return executionDriverRunWorkItemMutationResult(result)
+}
+
+func (adapter *fleetDriverRunCommandPort) HandoffDriverRunReviewWorkItem(
+	ctx context.Context,
+	command execution.HandoffDriverRunReviewWorkItemCommand,
+) (execution.DriverRunWorkItemMutationResult, error) {
+	result, err := adapter.transport.HandoffDriverRunReviewWorkItem(ctx, fleetdb.ExecutionDriverRunReviewWorkItemHandoffCommand{
+		WorkspaceKey: command.WorkspaceKey, CommandID: command.RequestID, RunID: command.Owner.ResourceID,
+		TaskID: command.WorkItemID, NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID,
+		LeaseToken: command.Owner.LeaseToken, FencingToken: command.Owner.FencingToken,
+		ClaimActionID: command.ClaimActionID, TaskRunID: command.TaskRunID,
+		TargetStatus: command.TargetStatus, Reason: command.Reason, HandedOffAt: command.HandedOffAt,
 	})
 	if err != nil {
 		return execution.DriverRunWorkItemMutationResult{}, mapFleetExecutionPortError(err)

@@ -7,7 +7,7 @@
  * deny-by-default grants scoping which actions/resources its binding may reach.
  */
 
-import { post, wsUrl } from "@/api/common";
+import { post, put, wsUrl } from "@/api/common";
 
 /** The canonical connector id used for the GitHub egress credential. */
 export const GITHUB_CONNECTOR_ID = "github";
@@ -76,6 +76,50 @@ export async function createConnectorGrant(
 ): Promise<ConnectorGrant> {
   return post<ConnectorGrant>(
     wsUrl(workspaceId, `/connectors/${encodeURIComponent(connectorId)}/grants`),
+    req,
+  );
+}
+
+export interface ReplaceConnectorGrant {
+  /** Connector action (e.g. "github.pull_request.read"). */
+  action: string;
+  /** Resource pattern (e.g. "repo:octocat/hello"). */
+  resource_pattern: string;
+}
+
+export interface ReplaceConnectorBindingGrantsRequest {
+  /** Exact binding generation observed after disabling and updating it. */
+  expected_binding_created_at: string;
+  /** Exact disabled binding revision whose run input these grants authorize. */
+  expected_binding_updated_at: string;
+  /** Complete desired authority set for this connector and binding. */
+  grants: ReplaceConnectorGrant[];
+}
+
+export interface ReplaceConnectorBindingGrantsResponse {
+  binding_id: string;
+  binding_created_at: string;
+  binding_updated_at: string;
+  grants: ConnectorGrant[];
+  grants_revoked: number;
+}
+
+/**
+ * Replace a connector's complete grant set for one exact disabled binding
+ * revision. The server owns stale-grant revocation and generation fencing, so
+ * singleton workflow retargeting never retains the prior repository scope.
+ */
+export async function replaceConnectorBindingGrants(
+  workspaceId: string,
+  connectorId: string,
+  bindingId: string,
+  req: ReplaceConnectorBindingGrantsRequest,
+): Promise<ReplaceConnectorBindingGrantsResponse> {
+  return put<ReplaceConnectorBindingGrantsResponse>(
+    wsUrl(
+      workspaceId,
+      `/connectors/${encodeURIComponent(connectorId)}/bindings/${encodeURIComponent(bindingId)}/grants`,
+    ),
     req,
   );
 }

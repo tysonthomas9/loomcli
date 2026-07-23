@@ -32,11 +32,7 @@ func HandleList(agentSvc service.AgentService) http.HandlerFunc {
 			if agent == nil {
 				continue
 			}
-			items = append(items, supervisedAgentDTO{
-				Agent: agent,
-				ID:    agent.Name,
-				Kind:  agentRecordKindSupervised,
-			})
+			items = append(items, newSupervisedAgentDTO(agent))
 		}
 		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
 	}
@@ -94,11 +90,7 @@ func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			return
 		}
 		broadcastAgentRefresh(hub, ws, created.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusCreated, supervisedAgentDTO{
-			Agent: created,
-			ID:    created.Name,
-			Kind:  agentRecordKindSupervised,
-		})
+		handler.WriteJSON(w, http.StatusCreated, newSupervisedAgentDTO(created))
 	}
 }
 
@@ -124,11 +116,7 @@ func HandleUpdate(agentSvc service.AgentService, hub *realtime.Hub) http.Handler
 			return
 		}
 		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusOK, supervisedAgentDTO{
-			Agent: updated,
-			ID:    updated.Name,
-			Kind:  agentRecordKindSupervised,
-		})
+		handler.WriteJSON(w, http.StatusOK, newSupervisedAgentDTO(updated))
 	}
 }
 
@@ -222,6 +210,13 @@ func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lif
 			handler.HandleServiceError(w, err)
 			return
 		}
+		// A non-force Stop remains a graceful daemon yield for supervised
+		// workers, but interactive agents are stopped synchronously by their
+		// process-local terminal owner. Reflect the settled placement-specific
+		// result instead of claiming that an interactive runtime merely yielded.
+		if patch.commandType == "stop" && !req.Force && updated.DesiredState == domain.AgentDesiredStopped {
+			effective = patch
+		}
 		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
 		handler.WriteJSON(w, effective.status, dto.NewMessageResponse(fmt.Sprintf("agent %q %s", updated.Name, effective.message)))
 	}
@@ -261,10 +256,18 @@ func resolveLifecycleRequest(patch lifecyclePatch, req lifecycleRequest) (lifecy
 		payload["force"] = "true"
 	}
 
+	// Preserve the requested Stop for the service layer. It owns the role-kind
+	// placement decision: workers convert a graceful Stop to a daemon yield,
+	// while interactive agents terminate their local PTY directly.
+	inputPatch := effective
+	if patch.commandType == "stop" {
+		inputPatch = patch
+	}
+
 	return effective, service.AgentLifecycleInput{
-		State:        effective.state,
-		DesiredState: effective.desired,
-		CommandType:  effective.commandType,
+		State:        inputPatch.state,
+		DesiredState: inputPatch.desired,
+		CommandType:  inputPatch.commandType,
 		Payload:      payload,
 	}
 }
