@@ -61,7 +61,8 @@ by daemon agents that would claim an open, unassigned planning ticket and try to
 - **Frontier query**: `loom data ready --workspace LOOMCLI --parent <MAP-ID>`. The `--parent` scope is **required** — a bare `loom data ready` excludes children of an open epic, so the map's tickets do not appear without it. `ready` already drops blocked and claimed (assignee-set) tickets; take the first in id order.
   - **Gotcha: `ready` does not return the `assignee` field.** Its rows carry `owner` (the creator — typically set on *every* ticket, so it is NOT the claim) but no `assignee`. You therefore cannot tell claimed-ness from `ready` output; use `loom data list --parent <MAP-ID>` or `show <ID>` to see `assignee`. Auditing a map's claims with `ready` alone will silently mislead.
   - **Watch for stale claims.** A ticket assigned during charting and never worked stays off the frontier indefinitely. Audit periodically with `list` and clear with `loom data update <ID> --workspace LOOMCLI --assignee ""`.
-  - The embedded local backend loads `~/.loom/fleet-db/redis-snapshot.json` per invocation and writes it back. Whether overlapping invocations can lose writes has **not** been verified — treat it as unknown, and re-read after a batch of mutations to confirm what actually landed.
+  - The embedded local backend loads `~/.loom/fleet-db/redis-snapshot.json` per invocation and writes it back. **Overlapping invocations DO lose writes — verified 2026-07-22.** Two concurrent wayfinder sessions blanked the `LOOMCLI-169` map body twice; the losing writer's issue record came back with no `description` at all. Always re-read after a batch of mutations, and never assume a write landed because the command printed `updated`.
+  - Overlapping invocations also collide on the lock outright: `embedded fleet-db already running: lock … is held`. The command exits non-zero having done nothing, so a `2>/dev/null` pipeline yields **empty output**, not an error you'd notice. Retry rather than treating an empty result as "no rows".
 - **Blocked**: `loom data blocked --workspace LOOMCLI`.
 - **Claim**: `loom data update <ID> --workspace LOOMCLI --assignee <you>` — the session's first write, before any work.
 - **Resolve**: `loom data comment <ID> --workspace LOOMCLI "<answer>"`, then `loom data close <ID> --workspace LOOMCLI --reason "..."`, then append a one-line context pointer (gist + id) to the map's Decisions-so-far. Store any large artifact (research findings, a spec) in the ticket's `--design` field, not only in a scratchpad file — the scratchpad is per-session and does not persist.
@@ -73,6 +74,16 @@ on this machine. It survives across sessions here but is **not** committed and
 **not** backed up. A map that needs to outlive this machine should be migrated to
 a synced tracker (the server fleet-db, or beads via git) — a migration, not a
 rewrite.
+
+**Recovering a clobbered issue body.** Every mutation is journalled to a Redis
+stream in the same snapshot, so a lost `description` is recoverable without a
+backup. Find the entry keyed
+`fleet-db:<WS>:events:issue:<ID>` in `~/.loom/fleet-db/redis-snapshot.json`; its
+`stream` is the ordered event list, and each event's `values.after` is a JSON
+issue delta. Walk it backwards for the last non-empty `description` and write it
+back with `loom data update <ID> --workspace <WS> --description-from-file <path>`.
+The `.bak` sibling snapshot is only one write behind, so it is usually **already
+post-clobber** — use the event stream, not the backup.
 
 ### Map registry
 
