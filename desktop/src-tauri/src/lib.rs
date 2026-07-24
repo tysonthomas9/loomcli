@@ -76,7 +76,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building Loom desktop app")
+        .expect("error while building Superfactory desktop app")
         .run(|app, event| match event {
             RunEvent::Ready | RunEvent::Resumed => show_primary_window(app),
             RunEvent::Reopen { .. } => show_primary_window(app),
@@ -222,7 +222,7 @@ fn show_launcher_window<R: Runtime>(app: &AppHandle<R>) {
     }
 
     match WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-        .title("Loom")
+        .title("Superfactory")
         .initialization_script(&relocation_init_script())
         .inner_size(520.0, 300.0)
         .min_inner_size(420.0, 260.0)
@@ -423,7 +423,7 @@ fn open_workspace_window_native<R: Runtime>(
     };
 
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
-        .title("Loom")
+        .title("Superfactory")
         .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
         .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
         .content_protected(false)
@@ -445,7 +445,7 @@ fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Re
         app.webview_windows().len()
     );
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
-        .title("Loom")
+        .title("Superfactory")
         .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
         .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
         .content_protected(false)
@@ -511,21 +511,21 @@ mod tests {
     #[test]
     fn detects_app_running_from_mounted_disk_image() {
         assert!(path_needs_relocation(Path::new(
-            "/Volumes/Loom Agents/Loom Agents.app/Contents/MacOS/loom-desktop"
+            "/Volumes/Superfactory/Superfactory.app/Contents/MacOS/loom-desktop"
         )));
     }
 
     #[test]
     fn detects_app_translocation_path() {
         assert!(path_needs_relocation(Path::new(
-            "/private/var/folders/xx/AppTranslocation/123/d/Loom Agents.app/Contents/MacOS/loom-desktop"
+            "/private/var/folders/xx/AppTranslocation/123/d/Superfactory.app/Contents/MacOS/loom-desktop"
         )));
     }
 
     #[test]
     fn allows_applications_path() {
         assert!(!path_needs_relocation(Path::new(
-            "/Applications/Loom Agents.app/Contents/MacOS/loom-desktop"
+            "/Applications/Superfactory.app/Contents/MacOS/loom-desktop"
         )));
     }
 

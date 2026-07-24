@@ -561,7 +561,7 @@ describe("StartWorkButton", () => {
       // Check if the warning is in the popover
       expect(screen.getByTestId("connection-warning")).toBeInTheDocument();
       expect(screen.getByTestId("connection-warning")).toHaveTextContent(
-        "Loom server not connected",
+        "Superfactory runtime not connected",
       );
     });
   });

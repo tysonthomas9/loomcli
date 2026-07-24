@@ -57,14 +57,16 @@ describe("AppLayout", () => {
   });
 
   describe("title", () => {
-    it('displays default title "Loom" when no title prop', () => {
+    it('displays default title "Superfactory" when no title prop', () => {
       render(
         <AppLayout>
           <p>Content</p>
         </AppLayout>,
       );
 
-      expect(screen.getByRole("heading", { name: "Loom" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Superfactory" }),
+      ).toBeInTheDocument();
     });
 
     it("displays custom title when title prop provided", () => {

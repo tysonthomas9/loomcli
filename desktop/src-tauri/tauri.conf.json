@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Loom Agents",
+  "productName": "Superfactory",
   "version": "0.1.0",
-  "identifier": "com.loom.agents.local",
+  "identifier": "com.superfactory.desktop",
   "build": {
     "beforeDevCommand": "npm run prepare-sidecar && npm run dev:frontend",
     "beforeBuildCommand": "npm run prepare-sidecar && npm run build:frontend",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Loom",
+        "title": "Superfactory",
         "width": 520,
         "height": 300,
         "minWidth": 420,
@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
+    "icon": ["icons/icon.icns", "icons/icon.ico", "icons/icon.png"],
     "externalBin": ["binaries/loom", "binaries/fleet-db"],
     "resources": {
       "resources/webui/": "webui/"

@@ -1,13 +1,13 @@
-# Loom Desktop
+# Superfactory Desktop
 
-Tauri shell for the Loom macOS desktop app.
+Tauri shell for the Superfactory macOS desktop app.
 
 This package is intentionally a thin controller. The bundled `loom` sidecar owns
 the local runtime:
 
 - `loom local service`
 - embedded FleetDB/miniredis
-- Loom web/API server
+- Superfactory web/API UI served by the Loom runtime
 - workspace daemon manager
 - background agents
 
@@ -80,7 +80,7 @@ The initial desktop shell can:
 - install and uninstall the app-owned macOS login service
 - call `loom local status --json`
 - call `loom local drain`, `resume`, and `stop`
-- open local Loom workspace UI windows once healthy
+- open local Superfactory workspace UI windows once healthy
 
 Updater wiring, real drain enforcement, workspace daemon restoration, and
 multi-window restoration are still tracked by

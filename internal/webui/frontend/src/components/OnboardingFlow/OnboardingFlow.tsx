@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { PRODUCT_NAME } from "@/utils/brand";
+
 import styles from "./OnboardingFlow.module.css";
 
 export type OnboardingStepStatus =
@@ -43,7 +45,7 @@ function stepClassName(status: OnboardingStepStatus): string {
 }
 
 export function OnboardingFlow({
-  title = "Set up Loom",
+  title = `Set up ${PRODUCT_NAME}`,
   subtitle = "Follow the fixed first-run flow to create a workspace, attach a repo, configure the CLI, and start useful agent work.",
   steps,
   className,

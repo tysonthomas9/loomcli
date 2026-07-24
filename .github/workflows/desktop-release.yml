@@ -1,6 +1,6 @@
 name: Desktop Release
 
-# Builds, signs (Developer ID), notarizes, staples, and uploads the "Loom Agents"
+# Builds, signs (Developer ID), notarizes, staples, and uploads the "Superfactory"
 # macOS desktop app DMG to a GitHub release.
 #
 # Trigger by pushing a desktop-specific tag (kept separate from the CLI's `v*`
@@ -100,7 +100,7 @@ jobs:
         with:
           projectPath: desktop
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: 'Loom Agents ${{ github.event.inputs.tag || github.ref_name }} (Apple Silicon)'
+          releaseName: 'Superfactory ${{ github.event.inputs.tag || github.ref_name }} (Apple Silicon)'
           releaseBody: 'Signed + notarized macOS desktop app. Apple Silicon (arm64).'
           releaseDraft: true
           prerelease: false

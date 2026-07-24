@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "${DESKTOP_DIR}/.." && pwd)"
 WEBUI_FRONTEND_DIR="${REPO_ROOT}/internal/webui/frontend"
 WEBUI_DIST_DIR="${WEBUI_FRONTEND_DIR}/dist"
 RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/webui"
-APP_BUNDLE="${APP_BUNDLE:-${DESKTOP_DIR}/src-tauri/target/release/bundle/macos/Loom Agents.app}"
+APP_BUNDLE="${APP_BUNDLE:-${DESKTOP_DIR}/src-tauri/target/release/bundle/macos/Superfactory.app}"
 APP_WEBUI_DIR="${APP_BUNDLE}/Contents/Resources/webui"
 
 RESTART=1
@@ -41,8 +41,8 @@ else
 fi
 
 if [[ "${RESTART}" == "1" ]]; then
-  echo "[desktop] restarting Loom Agents.app"
-  osascript -e 'tell application "Loom Agents" to quit' >/dev/null 2>&1 || true
+  echo "[desktop] restarting Superfactory.app"
+  osascript -e 'tell application "Superfactory" to quit' >/dev/null 2>&1 || true
   sleep 2
   open "${APP_BUNDLE}"
 fi

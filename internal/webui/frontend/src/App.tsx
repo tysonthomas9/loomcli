@@ -19,6 +19,7 @@ import { useStore } from "zustand";
 
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
+import { PRODUCT_HOME_LABEL, PRODUCT_MARK, PRODUCT_NAME } from "@/utils/brand";
 import { updateIssue, addComment, closeIssue } from "@/api";
 import {
   fetchWorkspaceApi,
@@ -966,7 +967,7 @@ function App() {
         id: "verify-repo",
         title: "Verify repository",
         description: hasWorkspaceRepo
-          ? "The repo is visible to Loom and ready for the next setup step."
+          ? `The repo is visible to ${PRODUCT_NAME} and ready for the next setup step.`
           : "Repository checks run after a repo has been attached.",
         status: hasWorkspaceRepo ? "complete" : "blocked",
       },
@@ -1311,12 +1312,12 @@ function App() {
       type="button"
       className={styles.brandButton}
       onClick={() => navigateToView("kanban")}
-      aria-label="Loom home — return to Kanban board"
+      aria-label={PRODUCT_HOME_LABEL}
     >
       <span className={styles.brandMark} aria-hidden="true">
-        ◇
+        {PRODUCT_MARK}
       </span>
-      <span className={styles.brandName}>Loom</span>
+      <span className={styles.brandName}>{PRODUCT_NAME}</span>
     </button>
   ) : (
     <WorkspaceBreadcrumb
@@ -1369,7 +1370,9 @@ function App() {
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
-          onTitleClick={() => navigateToView("kanban")}
+          {...(!showBoardToolbar && {
+            onTitleClick: () => navigateToView("kanban"),
+          })}
           actions={headerActions}
           navRail={
             <NavRail
@@ -1444,7 +1447,7 @@ function App() {
                   className={styles.workspaceOnboarding ?? ""}
                   variant="panel"
                   title="Finish onboarding"
-                  subtitle="Keep this checklist open while you move through Loom. Setup actions switch the main view without losing progress."
+                  subtitle={`Keep this checklist open while you move through ${PRODUCT_NAME}. Setup actions switch the main view without losing progress.`}
                   steps={workspaceOnboardingSteps}
                   onDismiss={handleOnboardingDismiss}
                 />

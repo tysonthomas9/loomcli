@@ -187,7 +187,9 @@ describe("AgentActivityPanel", () => {
         />,
       );
 
-      expect(screen.getByText("Loom server not running")).toBeInTheDocument();
+      expect(
+        screen.getByText("Superfactory runtime not running"),
+      ).toBeInTheDocument();
       expect(screen.getByText(/loom serve/)).toBeInTheDocument();
       expect(screen.getByTestId("agent-activity-panel")).toBeInTheDocument();
     });
@@ -202,7 +204,9 @@ describe("AgentActivityPanel", () => {
         />,
       );
 
-      expect(screen.getByText("Loom server not available")).toBeInTheDocument();
+      expect(
+        screen.getByText("Superfactory runtime not available"),
+      ).toBeInTheDocument();
       expect(screen.getByTestId("agent-activity-panel")).toBeInTheDocument();
     });
 
@@ -235,7 +239,7 @@ describe("AgentActivityPanel", () => {
       );
 
       expect(
-        screen.getByText("Reconnecting to loom server..."),
+        screen.getByText("Reconnecting to Superfactory runtime..."),
       ).toBeInTheDocument();
       expect(screen.getByText("Retry in 10s")).toBeInTheDocument();
     });

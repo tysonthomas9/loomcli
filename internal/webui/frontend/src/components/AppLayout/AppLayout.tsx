@@ -5,6 +5,7 @@
 
 import type { ReactNode } from "react";
 
+import { PRODUCT_NAME } from "@/utils/brand";
 import { LiveRegion } from "@/components/LiveRegion/LiveRegion";
 
 import styles from "./AppLayout.module.css";
@@ -23,7 +24,7 @@ export interface AppLayoutProps {
   actions?: ReactNode;
   /** Optional element to render in the left sidebar */
   sidebar?: ReactNode;
-  /** Application title displayed in header (defaults to "Loom") */
+  /** Application title displayed in header (defaults to Superfactory) */
   title?: ReactNode;
   /** When set, the brand/title becomes a home button (design: logo → kanban) */
   onTitleClick?: () => void;
@@ -42,7 +43,7 @@ export function AppLayout({
   navigation,
   actions,
   sidebar,
-  title = "Loom",
+  title = PRODUCT_NAME,
   onTitleClick,
   className,
 }: AppLayoutProps): JSX.Element {

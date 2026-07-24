@@ -5,6 +5,7 @@
 
 import { useMemo } from "react";
 
+import { PRODUCT_RUNTIME_NAME } from "@/utils/brand";
 import type {
   LoomAgentStatus,
   LoomSyncInfo,
@@ -107,7 +108,9 @@ export function AgentActivityPanel({
       <div className={rootClassName} data-testid="agent-activity-panel">
         <div className={styles.empty} role="status" aria-live="polite">
           <span className={styles.emptyIcon}>🔌</span>
-          <span className={styles.emptyText}>Loom server not running</span>
+          <span className={styles.emptyText}>
+            {PRODUCT_RUNTIME_NAME} not running
+          </span>
           <span className={styles.emptyHint}>
             Start with: <code className={styles.code}>loom serve</code>
           </span>
@@ -139,7 +142,7 @@ export function AgentActivityPanel({
         <div className={styles.reconnecting} role="status" aria-live="polite">
           <span className={styles.spinner} aria-hidden="true" />
           <span className={styles.emptyText}>
-            Reconnecting to loom server...
+            Reconnecting to {PRODUCT_RUNTIME_NAME}...
           </span>
           {retryCountdown > 0 && (
             <span className={styles.countdown}>Retry in {retryCountdown}s</span>
@@ -160,7 +163,9 @@ export function AgentActivityPanel({
       <div className={rootClassName} data-testid="agent-activity-panel">
         <div className={styles.empty} role="status" aria-live="polite">
           <span className={styles.emptyIcon}>⚠️</span>
-          <span className={styles.emptyText}>Loom server not available</span>
+          <span className={styles.emptyText}>
+            {PRODUCT_RUNTIME_NAME} not available
+          </span>
           {onRetry && (
             <button className={styles.retryButton} onClick={onRetry}>
               Retry Connection

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+import { PRODUCT_NAME } from "@/utils/brand";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFocusTrap } from "@/hooks";
 
@@ -94,7 +95,7 @@ export function LoginPage({
     >
       <div className={styles.content}>
         <h2 id="login-title" className={styles.title}>
-          Sign in to Loom
+          Sign in to {PRODUCT_NAME}
         </h2>
 
         {authServiceDown && (

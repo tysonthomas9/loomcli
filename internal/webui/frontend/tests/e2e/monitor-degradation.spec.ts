@@ -288,7 +288,7 @@ async function navigateAndWait(page: Page, path: string) {
 }
 
 test.describe("MonitorDashboard degradation", () => {
-  test("shows 'Loom server not running' when never connected", async ({
+  test("shows Superfactory runtime not running when never connected", async ({
     page,
   }) => {
     await setupBackendMocks(page);
@@ -299,7 +299,9 @@ test.describe("MonitorDashboard degradation", () => {
     await expect(agentPanel).toBeVisible();
 
     // Verify exact text for never_connected state
-    await expect(agentPanel.getByText("Loom server not running")).toBeVisible({
+    await expect(
+      agentPanel.getByText("Superfactory runtime not running"),
+    ).toBeVisible({
       timeout: 10000,
     });
 
@@ -323,7 +325,9 @@ test.describe("MonitorDashboard degradation", () => {
     await expect(agentPanel).toBeVisible();
 
     // Wait for never_connected state to render
-    await expect(agentPanel.getByText("Loom server not running")).toBeVisible({
+    await expect(
+      agentPanel.getByText("Superfactory runtime not running"),
+    ).toBeVisible({
       timeout: 10000,
     });
 
@@ -339,7 +343,9 @@ test.describe("MonitorDashboard degradation", () => {
 
     // Panel should still be visible after click (mock still returns invalid JSON)
     await expect(agentPanel).toBeVisible();
-    await expect(agentPanel.getByText("Loom server not running")).toBeVisible({
+    await expect(
+      agentPanel.getByText("Superfactory runtime not running"),
+    ).toBeVisible({
       timeout: 10000,
     });
   });
@@ -434,8 +440,12 @@ test.describe("Monitor Dashboard Reconnection & Stale Data", () => {
     await expect(agentPanel).toBeVisible();
 
     // Should show one of the unavailable states (not the agent summary)
-    const notRunningText = agentPanel.getByText("Loom server not running");
-    const notAvailableText = agentPanel.getByText("Loom server not available");
+    const notRunningText = agentPanel.getByText(
+      "Superfactory runtime not running",
+    );
+    const notAvailableText = agentPanel.getByText(
+      "Superfactory runtime not available",
+    );
     const noAgentsText = agentPanel.getByText("No agents found");
 
     // Wait for the initial state to render after failed loom fetch
@@ -703,7 +713,9 @@ test.describe("Monitor Dashboard Empty States", () => {
     // Verify agent panel shows empty state
     const agentPanel = page.getByTestId("agent-activity-panel");
     await expect(agentPanel).toBeVisible();
-    await expect(agentPanel.getByText("Loom server not running")).toBeVisible();
+    await expect(
+      agentPanel.getByText("Superfactory runtime not running"),
+    ).toBeVisible();
   });
 
   test("all panels show empty state messages when no data", async ({
@@ -725,7 +737,9 @@ test.describe("Monitor Dashboard Empty States", () => {
 
     // AgentActivityPanel: shows "No agents found"
     const agentPanel = page.getByTestId("agent-activity-panel");
-    await expect(agentPanel.getByText("Loom server not running")).toBeVisible();
+    await expect(
+      agentPanel.getByText("Superfactory runtime not running"),
+    ).toBeVisible();
 
     // ProjectHealthPanel: shows "No bottlenecks detected" in bottleneck section
     const healthPanel = page.getByTestId("project-health-panel");

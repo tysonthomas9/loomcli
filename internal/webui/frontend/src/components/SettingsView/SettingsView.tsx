@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 
+import { PRODUCT_NAME } from "@/utils/brand";
 import { ErrorDisplay } from "@/components/ErrorDisplay";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import type { ViewMode } from "@/types";
@@ -286,9 +287,12 @@ export function SettingsView({
     const ok = await updateRedis(payload);
     if (ok) {
       setRedisForm((current) => ({ ...current, password: "", url: "" }));
-      showToast("Redis settings saved. Restart Loom to apply them.", {
-        type: "success",
-      });
+      showToast(
+        `Redis settings saved. Restart ${PRODUCT_NAME} to apply them.`,
+        {
+          type: "success",
+        },
+      );
     } else {
       showToast("Failed to save Redis settings", { type: "error" });
     }

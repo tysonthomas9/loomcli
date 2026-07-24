@@ -4,6 +4,7 @@
 import type { ReactNode } from "react";
 import { useState, useCallback, useEffect } from "react";
 
+import { PRODUCT_RUNTIME_NAME } from "@/utils/brand";
 import { ApiError } from "@/types";
 import { gitPush, gitPushAll } from "@/hooks/api";
 import { ConfirmDialog, ErrorDisplay, LoadingSkeleton } from "@/components";
@@ -345,7 +346,7 @@ export function AgentsSidebar({
           {!isConnected && !isLoading && (
             <ErrorDisplay
               variant="connection-error"
-              title="Loom server not available"
+              title={`${PRODUCT_RUNTIME_NAME} not available`}
               description="Unable to connect to the agent server."
               className={styles.sidebarError ?? ""}
             />

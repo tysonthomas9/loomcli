@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DESKTOP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-APP_BUNDLE="${APP_BUNDLE:-${DESKTOP_DIR}/src-tauri/target/release/bundle/macos/Loom Agents.app}"
+APP_BUNDLE="${APP_BUNDLE:-${DESKTOP_DIR}/src-tauri/target/release/bundle/macos/Superfactory.app}"
 
 RESTART=1
 if [[ "${1:-}" == "--no-restart" ]]; then
@@ -22,8 +22,8 @@ stop_sidecar() {
 }
 
 if [[ "${RESTART}" == "1" && -d "${APP_BUNDLE}" ]]; then
-  echo "[desktop] stopping Loom Agents.app"
-  osascript -e 'tell application "Loom Agents" to quit' >/dev/null 2>&1 || true
+  echo "[desktop] stopping Superfactory.app"
+  osascript -e 'tell application "Superfactory" to quit' >/dev/null 2>&1 || true
   sleep 2
   stop_sidecar "loom"
   stop_sidecar "fleet-db"
@@ -41,7 +41,7 @@ if [[ ! -d "${APP_BUNDLE}" ]]; then
 fi
 
 if [[ "${RESTART}" == "1" ]]; then
-  echo "[desktop] starting Loom Agents.app"
+  echo "[desktop] starting Superfactory.app"
   open "${APP_BUNDLE}"
 fi
 

@@ -72,7 +72,7 @@ describe("LoginPage", () => {
       render(<LoginPage error={null} onErrorClear={vi.fn()} />);
       const dialog = screen.getByRole("dialog");
       expect(dialog).toHaveAttribute("aria-labelledby", "login-title");
-      expect(screen.getByText("Sign in to Loom")).toHaveAttribute(
+      expect(screen.getByText("Sign in to Superfactory")).toHaveAttribute(
         "id",
         "login-title",
       );

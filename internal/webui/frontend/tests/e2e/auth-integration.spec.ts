@@ -24,7 +24,7 @@ test.describe("Auth Integration", () => {
         timeout: 10_000,
       });
       // Login page should NOT be visible
-      await expect(page.getByText("Sign in to Loom")).not.toBeVisible();
+      await expect(page.getByText("Sign in to Superfactory")).not.toBeVisible();
     });
 
     test("no auth-related requests made", async ({
@@ -98,7 +98,7 @@ test.describe("Auth Integration", () => {
       await page.waitForLoadState("domcontentloaded");
 
       // Login page should be visible
-      await expect(page.getByText("Sign in to Loom")).toBeVisible({
+      await expect(page.getByText("Sign in to Superfactory")).toBeVisible({
         timeout: 10_000,
       });
       await expect(
@@ -143,7 +143,7 @@ test.describe("Auth Integration", () => {
         timeout: 15_000,
       });
       // Login page should NOT be visible
-      await expect(page.getByText("Sign in to Loom")).not.toBeVisible();
+      await expect(page.getByText("Sign in to Superfactory")).not.toBeVisible();
     });
 
     test("deep link restored after authentication", async ({
@@ -302,10 +302,7 @@ test.describe("Auth Integration", () => {
   });
 
   test.describe("SSE token exchange", () => {
-    test("SSE uses opaque token in oidc mode", async ({
-      page,
-      mockApi,
-    }) => {
+    test("SSE uses opaque token in oidc mode", async ({ page, mockApi }) => {
       const sseRequests: string[] = [];
 
       await mockApi.mockConfig({ mode: "oidc", auth_url: "https://auth.test" });
@@ -350,10 +347,14 @@ test.describe("Auth Integration", () => {
 
       // Wait for SSE connection with token (may arrive after h1 renders)
       await expect
-        .poll(() => sseRequests.some((url) => url.includes("token=test-opaque-token")), {
-          timeout: 10_000,
-          message: "SSE request with opaque token should have been made",
-        })
+        .poll(
+          () =>
+            sseRequests.some((url) => url.includes("token=test-opaque-token")),
+          {
+            timeout: 10_000,
+            message: "SSE request with opaque token should have been made",
+          },
+        )
         .toBe(true);
     });
 
@@ -476,7 +477,7 @@ test.describe("Auth Integration", () => {
       await page2.waitForLoadState("domcontentloaded");
 
       // page2 should show the login page since the session is now null
-      await expect(page2.getByText("Sign in to Loom")).toBeVisible({
+      await expect(page2.getByText("Sign in to Superfactory")).toBeVisible({
         timeout: 15_000,
       });
 

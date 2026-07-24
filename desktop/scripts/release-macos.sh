@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build, sign (Developer ID), notarize, and staple the Loom Agents macOS desktop
+# Build, sign (Developer ID), notarize, and staple the Superfactory macOS desktop
 # app, then wrap it in a notarized + stapled DMG ready to upload to a GitHub
 # release.
 #
@@ -24,7 +24,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DESKTOP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application: Tyson Kuthur Thomas (BN879H59CY)}"
-APP_NAME="Loom Agents"
+APP_NAME="Superfactory"
 APP_BUNDLE="${DESKTOP_DIR}/src-tauri/target/release/bundle/macos/${APP_NAME}.app"
 RELEASE_DIR="${DESKTOP_DIR}/dist-release"
 
@@ -41,7 +41,7 @@ if ! security find-identity -v -p codesigning | grep -qF "${SIGNING_IDENTITY}"; 
 fi
 
 APP_VERSION="${APP_VERSION:-$(node -p "require('${DESKTOP_DIR}/src-tauri/tauri.conf.json').version" 2>/dev/null || echo "0.0.0")}"
-OUT_DMG="${RELEASE_DIR}/Loom-Agents-${APP_VERSION}-aarch64.dmg"
+OUT_DMG="${RELEASE_DIR}/Superfactory-${APP_VERSION}-aarch64.dmg"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -131,7 +131,7 @@ codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
 # 3. Notarize + staple the .app (so the app is offline-valid inside the DMG)
 # ---------------------------------------------------------------------------
 
-APP_ZIP="$(mktemp -d)/loom-agents.zip"
+APP_ZIP="$(mktemp -d)/superfactory.zip"
 log "zipping app for notarization"
 ditto -c -k --keepParent "${APP_BUNDLE}" "${APP_ZIP}"
 notarize "${APP_ZIP}"                # notarize via the zip...
@@ -203,6 +203,6 @@ Upload to a GitHub release with:
   gh release create desktop-v${APP_VERSION} \\
     "${OUT_DMG}" \\
     --repo tysonthomas9/loomcli \\
-    --title "Loom Agents ${APP_VERSION} (Apple Silicon)" \\
+    --title "Superfactory ${APP_VERSION} (Apple Silicon)" \\
     --notes "Signed + notarized macOS desktop app. Apple Silicon (arm64)."
 EOF

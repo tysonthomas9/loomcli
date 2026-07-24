@@ -26,6 +26,7 @@ import {
 } from "react";
 import { useStore } from "zustand";
 
+import { PRODUCT_NAME } from "@/utils/brand";
 import { LoadingSkeleton } from "@/components";
 import type {
   TerminalInputRequest,
@@ -308,7 +309,7 @@ function EphemeralWorkerSummary({
           }}
         >
           {running
-            ? "This daemon-owned ephemeral worker is already running under Loom. Live terminal attach is disabled so the UI does not launch a duplicate worker; use logs while it runs."
+            ? `This daemon-owned ephemeral worker is already running under ${PRODUCT_NAME}. Live terminal attach is disabled so the UI does not launch a duplicate worker; use logs while it runs.`
             : "This daemon-owned ephemeral worker has stopped. Live terminal attach is disabled after the ephemeral run stops; use logs and task session artifacts for review."}
         </div>
         <div

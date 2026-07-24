@@ -6,6 +6,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 
+import { PRODUCT_RUNTIME_NAME } from "@/utils/brand";
 import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus } from "@/types/agent";
 import type { Status } from "@/types/issue";
@@ -205,7 +206,7 @@ export function StartWorkButton({
                   strokeLinecap="round"
                 />
               </svg>
-              Loom server not connected
+              {PRODUCT_RUNTIME_NAME} not connected
             </div>
           )}
 

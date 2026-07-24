@@ -1419,15 +1419,16 @@ describe("App", () => {
   });
 
   describe("AppLayout integration", () => {
-    it("renders with Loom title in header", () => {
+    it("renders with Superfactory title and SF mark in header", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
       render(<App />);
 
       expect(
-        screen.getByRole("heading", { name: "Loom", level: 1 }),
+        screen.getByRole("heading", { name: "Superfactory", level: 1 }),
       ).toBeInTheDocument();
+      expect(screen.getByText("SF")).toHaveAttribute("aria-hidden", "true");
     });
 
     it("renders header with banner role", () => {
@@ -3815,7 +3816,7 @@ describe("App", () => {
   });
 
   describe("WorkspaceBreadcrumb isMultiRepo guard", () => {
-    it("renders Loom fallback in breadcrumb when isMultiRepo is false", () => {
+    it("renders Superfactory fallback in breadcrumb when isMultiRepo is false", () => {
       vi.mocked(useWorkspaceContext).mockReturnValue({
         workspace: { name: "my-workspace" },
         repos: [],
@@ -3846,11 +3847,11 @@ describe("App", () => {
       render(<App />);
 
       // Even though workspace has a name, isMultiRepo=false passes null to WorkspaceBreadcrumb
-      // which renders "Loom" fallback
+      // which renders the Superfactory fallback
       expect(
-        screen.getByRole("heading", { name: "Loom", level: 1 }),
+        screen.getByRole("heading", { name: "Superfactory", level: 1 }),
       ).toBeInTheDocument();
-      // Breadcrumb should NOT show workspace name (Loom fallback instead).
+      // Breadcrumb should NOT show workspace name (Superfactory fallback instead).
       // Note: workspace name may still appear in the sidebar WorkspaceSelectorBar.
       expect(
         screen.queryByRole("heading", { name: "my-workspace", level: 1 }),
@@ -3887,7 +3888,7 @@ describe("App", () => {
 
       render(<App />);
 
-      // Board views show the Loom brand (home button) instead of a
+      // Board views show the Superfactory brand (home button) instead of a
       // breadcrumb heading — the Aether V3 minimal header. The workspace
       // name itself lives in the sidebar WorkspaceSelectorBar.
       expect(
@@ -3895,7 +3896,7 @@ describe("App", () => {
       ).not.toBeInTheDocument();
       expect(
         screen.getByRole("button", {
-          name: "Loom home — return to Kanban board",
+          name: "Superfactory home — return to Kanban board",
         }),
       ).toBeInTheDocument();
     });

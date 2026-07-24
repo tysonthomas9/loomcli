@@ -40,7 +40,7 @@ app.innerHTML = `
     <section class="status">
       <div id="spinner" class="spinner" aria-hidden="true"></div>
       <div class="statusText">
-        <h1 id="stageTitle">Starting Loom</h1>
+        <h1 id="stageTitle">Starting Superfactory</h1>
         <p id="stageDetail">Preparing the local workspace runtime.</p>
       </div>
     </section>
@@ -145,7 +145,7 @@ async function readRuntimeStatus() {
 }
 
 async function ensureRuntime() {
-  setStage("starting", "Starting Loom", "Checking the local runtime.");
+  setStage("starting", "Starting Superfactory", "Checking the local runtime.");
   details.open = false;
 
   const initial = await readRuntimeStatus().catch((err: unknown) => {
@@ -155,7 +155,7 @@ async function ensureRuntime() {
   });
   renderRuntime(initial);
 
-  setStage("starting", "Starting Loom", "Ensuring the local runtime matches this app.");
+  setStage("starting", "Starting Superfactory", "Ensuring the local runtime matches this app.");
   const start = await runLoom(["local", "start"]);
   renderRuntime(initial, `${start.stdout}\n${start.stderr}`);
   if (start.code !== 0) {
@@ -170,7 +170,7 @@ async function waitForHealthyRuntime() {
   let lastError = "";
 
   while (Date.now() - startedAt < RUNTIME_TIMEOUT_MS) {
-    setStage("starting", "Starting Loom", "Waiting for the workspace runtime.");
+    setStage("starting", "Starting Superfactory", "Waiting for the workspace runtime.");
     try {
       const status = await readRuntimeStatus();
       renderRuntime(status);
@@ -259,8 +259,8 @@ function showRelocationNotice() {
   openWorkspaceBtn.disabled = true;
   setStage(
     "error",
-    "Move Loom to Applications",
-    "Loom can't run from a disk image or your Downloads folder. Drag \"Loom Agents\" into your Applications folder, then open it from there.",
+    "Move Superfactory to Applications",
+    "Superfactory can't run from a disk image or your Downloads folder. Drag \"Superfactory\" into your Applications folder, then open it from there.",
   );
   actions.hidden = true;
   details.open = false;
@@ -285,7 +285,7 @@ async function boot(options: { forceNew?: boolean } = {}) {
     if (!runtimeUrl) {
       throw new Error("local runtime URL is missing");
     }
-    setStage("ready", "Opening Workspace", "Loom is ready.");
+    setStage("ready", "Opening Workspace", "Superfactory is ready.");
     await openWorkspaceWindow(runtimeUrl, {
       ...options,
       route: recoveryRoute || "/",
