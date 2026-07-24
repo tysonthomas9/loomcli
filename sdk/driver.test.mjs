@@ -196,10 +196,71 @@ test("LoomDriverClient rejects incomplete review handoffs before HTTP", async ()
 
     await assert.rejects(client.tasks.handoffReview({ taskId: "TASK-1", status: "open" }), /requires taskRunId/);
     await assert.rejects(
+      client.tasks.handoffReview({ taskId: "TASK-1", taskRunId: "review-child-1", status: "needs_review" }),
+      /status must be "open", "review", or "closed"/,
+    );
+    await assert.rejects(
       client.tasks.handoffReview({ taskId: "TASK-1", taskRunId: "review-child-1", status: "review" }),
-      /status must be "open" or "closed"/,
+      /requires priority/,
+    );
+    await assert.rejects(
+      client.tasks.handoffReview({
+        taskId: "TASK-1", taskRunId: "review-child-1", status: "review", priority: 2,
+      }),
+      /requires nonblank commentBody/,
+    );
+    await assert.rejects(
+      client.tasks.handoffReview({
+        taskId: "TASK-1", taskRunId: "review-child-1", status: "review",
+        priority: 2.5, commentBody: "triaged",
+      }),
+      /priority as an integer/,
+    );
+    await assert.rejects(
+      client.tasks.handoffReview({
+        taskId: "TASK-1", taskRunId: "review-child-1", status: "review",
+        priority: 2, labels: "bug", commentBody: "triaged",
+      }),
+      /labels must be an array of strings/,
+    );
+    await assert.rejects(
+      client.tasks.handoffReview({
+        taskId: "TASK-1", taskRunId: "review-child-1", status: "open", labels: [],
+      }),
+      /only valid for review status/,
     );
     assert.equal(calls.length, 0);
+  });
+});
+
+test("LoomDriverClient serializes atomic Review annotations in camelCase", async () => {
+  await withDriverServer(async (call) => {
+    if (call.url === "/api/workspaces/WS/driver/handoff-review") {
+      return { id: "TASK-1", status: "review", released: true };
+    }
+    return notFound();
+  }, async ({ apiUrl, calls }) => {
+    const client = createLoomDriverClient({
+      env: { LOOM_DRIVER_WORKSPACE: "WS", LOOM_DRIVER_RUN_ID: "review-parent-1", LOOM_DRIVER_API_URL: apiUrl },
+    });
+
+    await client.tasks.handoffReview({
+      taskId: "TASK-1",
+      taskRunId: "review-child-1",
+      status: "review",
+      priority: 0,
+      labels: ["bug", "triaged"],
+      commentBody: "Automated triage completed.",
+    });
+
+    assert.deepEqual(calls[0].body, {
+      taskId: "TASK-1",
+      taskRunId: "review-child-1",
+      status: "review",
+      priority: 0,
+      labels: ["bug", "triaged"],
+      commentBody: "Automated triage completed.",
+    });
   });
 });
 

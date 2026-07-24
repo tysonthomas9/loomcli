@@ -120,10 +120,13 @@ type TaskClaimOptions struct {
 }
 
 type ClaimedTask struct {
-	ID            string    `json:"id"`
-	Title         string    `json:"title,omitempty"`
-	Status        string    `json:"status,omitempty"`
-	Priority      int       `json:"priority,omitempty"`
+	ID     string `json:"id"`
+	Title  string `json:"title,omitempty"`
+	Status string `json:"status,omitempty"`
+	// Priority is never omitted: zero is the authoritative P0 value, not
+	// absence. Workflows use this claim-committed value for fenced handoffs and
+	// must not fall back to a stale pre-claim projection when it is P0.
+	Priority      int       `json:"priority"`
 	IssueType     string    `json:"issueType,omitempty"`
 	Assignee      string    `json:"assignee,omitempty"`
 	Labels        []string  `json:"labels,omitempty"`

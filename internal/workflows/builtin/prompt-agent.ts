@@ -25,6 +25,12 @@ function toJsonResult(value) {
   return value === undefined ? null : JSON.parse(JSON.stringify(value));
 }
 
+const BUG_TRIAGE_TASK_OUTCOME_MODE = "bug-triage";
+const BUG_TRIAGE_MAX_SUMMARY_CHARS = 2000;
+const BUG_TRIAGE_MAX_LABELS = 8;
+const BUG_TRIAGE_MAX_LABEL_CHARS = 64;
+const BUG_TRIAGE_LABEL_SLUG_MAX_CHARS = 48;
+
 // prompt-agent: the PROMPT-AGENT realization (Phase 4, unified-agent-ux-proposal).
 //
 // This is the workflow-plane realization of a "role agent": a generic task-runner
@@ -40,7 +46,9 @@ function toJsonResult(value) {
 //      > input.roleName > binding.config().roleName;
 //   2. claim a REAL ready loom task with the existing task lease. A specific
 //      target claims by id (loom.tasks.claim — no claim-and-release race);
-//      otherwise pickup is filterless (loom.tasks.claimReady, queue order);
+//      otherwise pickup is filterless (loom.tasks.claimReady, queue order).
+//      The read-only "bug" filter is target-only and verifies the current card
+//      before claim, so it never falls through to a mixed-workspace queue;
 //   3. dispatch the bundled local-task-runner for it, delivering the role prompt
 //      verbatim as the task-run Input field `taskPrompt` (the runner's
 //      LOOM_TASK_RUN_PROMPT > input.taskPrompt > generic precedence — see
@@ -118,19 +126,20 @@ export async function run(ctx) {
   const actor = stringValue(input.actor) || "prompt-agent";
   const backend = stringValue(input.backend); // optional; informational only (backend is host-resolved)
 
-  // Role phase (TaskFilter) drives BOTH claim gating and the completion
+  // Role policy (TaskFilter) drives BOTH claim gating and the completion
   // outcome: needs_plan => planner (design + review, no close); has_design =>
   // coder (implement + close on success, today's behavior). UI-created roles
   // historically persisted either an empty filter or "any"; treat both as the
   // safe coder phase so they cannot claim work that still needs planning.
-  // Unknown named-role filters fail closed before any claim. A non-role prompt
-  // (input.prompt / taskPrompt) remains intentionally filterless.
+  // A read-only "bug" role is an issue-type owner instead of a design-phase
+  // owner. Unknown named-role filters fail closed before any claim. A non-role
+  // prompt (input.prompt / taskPrompt) remains intentionally filterless.
   const rolePhase = resolveRolePhase(resolved);
   if (!rolePhase.supported) {
     return loom.failed({
       summary: "prompt-agent: role " + (stringValue(resolved.roleName) || "?")
         + " has unsupported task_filter " + JSON.stringify(rolePhase.rawTaskFilter)
-        + "; expected needs_plan or has_design",
+        + "; expected needs_plan, has_design, or read-only bug",
       errorClass: "prompt_agent_unsupported_task_filter",
       roleName: stringValue(resolved.roleName),
       taskFilter: rolePhase.rawTaskFilter,
@@ -140,6 +149,19 @@ export async function run(ctx) {
   const taskFilter = rolePhase.taskFilter;
   const isPlanner = taskFilter === "needs_plan";
   const isReadOnly = resolved.readOnly === true;
+  const isBugFilter = taskFilter === "bug";
+  const targetId = resolveTargetTaskId(input);
+
+  if (isBugFilter && !isReadOnly) {
+    return loom.failed({
+      summary: "prompt-agent: role " + (stringValue(resolved.roleName) || "?")
+        + " uses task_filter \"bug\" without read_only=true",
+      errorClass: "prompt_agent_bug_filter_requires_read_only",
+      roleName: stringValue(resolved.roleName),
+      taskFilter,
+      claimed: false,
+    });
+  }
 
   // 2a. WS2b event-path gate. A task.ready event carries a definite hasDesign;
   //     decide the phase BEFORE claiming so a mismatch costs zero dispatch (no
@@ -149,19 +171,63 @@ export async function run(ctx) {
   const gatedByEvent = isGatingFilter(taskFilter) && eventHasDesign !== undefined;
   if (gatedByEvent && !phaseAllows(taskFilter, eventHasDesign, eventLabels(event))) {
     return loom.completed({
-      summary: notMyPhaseSummary(resolved.roleName, taskFilter, resolveTargetTaskId(input), eventHasDesign),
+      summary: notMyPhaseSummary(resolved.roleName, taskFilter, targetId, eventHasDesign),
       claimed: false,
       skipped: true,
     });
   }
 
-  // 2b. Claim a real ready task with the existing task lease. Targets a task id
+  // 2b. The issue-type "bug" filter is deliberately target-only. There is no
+  // atomic type predicate on claimReady, so an untargeted bug role must not use
+  // the mixed-workspace queue. A typed task-ready event can cheaply reject a
+  // known non-bug. Missing (or matching) event type still requires a current
+  // card read BEFORE claim; the card is the authoritative fail-closed gate.
+  if (isBugFilter) {
+    const eventIssueType = issueTypeValue(event);
+    if (eventIssueType && !issueTypeAllowsBug(eventIssueType)) {
+      return loom.completed({
+        summary: notMyIssueTypeSummary(resolved.roleName, targetId, eventIssueType, "event"),
+        claimed: false,
+        skipped: true,
+      });
+    }
+    if (!targetId) {
+      return loom.completed({
+        summary: "prompt-agent: bug-filtered role " + (stringValue(resolved.roleName) || "?")
+          + " requires a target task; skipped filterless pickup",
+        claimed: false,
+        skipped: true,
+      });
+    }
+    let currentCard;
+    try {
+      currentCard = (await loom.issues.get({ issueId: targetId })) || {};
+    } catch (err) {
+      return loom.failed({
+        summary: "prompt-agent: could not verify bug-filtered task " + targetId
+          + " before claim: " + errorMessage(err),
+        errorClass: "prompt_agent_bug_filter_card_read_failed",
+        issueId: targetId,
+        claimed: false,
+      });
+    }
+    const currentIssueType = issueTypeValue(currentCard);
+    if (!issueTypeAllowsBug(currentIssueType)) {
+      return loom.completed({
+        summary: notMyIssueTypeSummary(resolved.roleName, targetId, currentIssueType, "card"),
+        issueId: targetId,
+        claimed: false,
+        skipped: true,
+      });
+    }
+  }
+
+  // 2c. Claim a real ready task with the existing task lease. Targets a task id
   //    when supplied (claim-by-id), else claims any ready task (queue order).
   //    The id may arrive flat (input.taskId — cron/manual dispatch) or nested in
   //    the InternalSource provenance envelope for a task-ready event
   //    (input.event.taskId — the loopback wraps the emitter payload under
   //    "event"; see internal/trigger issue_journal_bridge_task_ready.go).
-  const targetId = resolveTargetTaskId(input);
   const claimed = await claimTargetTask(loom, actor, targetId);
   const issueId = claimed && stringValue(claimed.id || claimed.ID);
   if (!issueId) {
@@ -172,7 +238,45 @@ export async function run(ctx) {
       claimed: false,
     });
   }
-  // 2c. WS2b post-claim gate for the cron / run-now / explicit path (or a stale
+  // The pre-claim issue read avoids unnecessary ownership/spend, but it is not
+  // the authority boundary: issue type may change before the atomic claim
+  // commits. ClaimedTask's generated SDK/wire contract carries that committed
+  // value as `issueType` (camelCase). Require it again before any model
+  // dispatch. Missing is a non-match. A mismatch is returned through the typed
+  // release op so the exact claim generation cannot remain parked.
+  if (isBugFilter) {
+    const claimedIssueType = stringValue(claimed.issueType);
+    if (claimedIssueType !== "bug") {
+      try {
+        await unclaimTask(loom, issueId);
+      } catch (err) {
+        return loom.failed({
+          summary: "prompt-agent: claimed bug-filtered task " + issueId
+            + " with committed issueType=" + JSON.stringify(claimedIssueType)
+            + ", then typed release failed: " + errorMessage(err),
+          errorClass: "prompt_agent_bug_filter_claim_release_failed",
+          issueId,
+          issueType: claimedIssueType,
+          claimed: true,
+          released: false,
+        });
+      }
+      return loom.completed({
+        summary: notMyClaimReceiptIssueTypeSummary(
+          resolved.roleName,
+          issueId,
+          claimedIssueType,
+        ),
+        issueId,
+        issueType: claimedIssueType,
+        claimed: false,
+        released: true,
+        skipped: true,
+      });
+    }
+  }
+
+  // 2d. WS2b post-claim gate for the cron / run-now / explicit path (or a stale
   //     event with no hasDesign): check the phase against the REAL card and, on
   //     mismatch, hand the claim back so the true owner (planner vs coder) can
   //     take it — parking it under our lease would starve them until TTL.
@@ -219,6 +323,13 @@ export async function run(ctx) {
   const taskRunId = "promptagent-" + (stringValue(loom.driverRunId) || "run") + "-" + issueId;
   const requestInput = { taskPrompt: prompt, openPullRequest: false };
   requestInput.deliveryMode = isPlanner || isReadOnly ? "patch-back" : "local-branch";
+  if (isBugFilter && isReadOnly) {
+    // The trusted local-task-runner appends the authoritative, placement-aware
+    // handoff contract and accepts the typed triaged outcome only in this mode.
+    // The shared Role prompt may also run under the legacy daemon, so it cannot
+    // safely hard-code TaskRun-only instructions itself.
+    requestInput.taskOutcomeMode = BUG_TRIAGE_TASK_OUTCOME_MODE;
+  }
   if (backend) {
     // Informational: the backend is resolved host-side (resolveTaskRunnerBackend);
     // carry it so it shows in the task-run input for observability.
@@ -235,6 +346,13 @@ export async function run(ctx) {
     requestParams.repoRef = sourceRepo;
   }
   requestParams.closeTask = false;
+  if (isBugFilter) {
+    // Successful bug-triage TaskRuns do not retire the parent generation.
+    // The host consumes that exact generation with one atomic Review handoff
+    // after validating the typed outcome. Failed/cancelled children still use
+    // Fleet's terminal policy and never grant this workflow an unfenced write.
+    requestParams.retainWorkItemClaim = true;
+  }
   try {
     await loom.taskRuns.request(requestParams);
   } catch (e) {
@@ -319,6 +437,16 @@ export async function run(ctx) {
         promptSource,
         backend: runBackend,
         outcome: "design-review",
+      });
+    }
+    if (isBugFilter) {
+      return completeBugTriageHandoff(loom, {
+        issueId,
+        taskRunId,
+        promptSource,
+        backend: runBackend,
+        meta,
+        fallbackPriority: bugTriageFallbackPriority(claimed && claimed.priority),
       });
     }
     if (isReadOnly) {
@@ -407,6 +535,36 @@ export async function run(ctx) {
       filesChanged,
     });
   }
+  const resultErrorClass = stringValue(result && (result.error_class || result.errorClass));
+  if (isBugFilter && status === "cancelled") {
+    // Bug-triage mode is read-only and has exactly one successful disposition:
+    // triaged. An older/custom runner must not convert a cancellation (including
+    // needs_revision) into the planner/coder requeue path. This legacy/foreign
+    // runner result is not a successful retained-claim handoff, so Fleet's
+    // terminal policy owns the card state. Do not overwrite a concurrent human
+    // action with a generic issue.update after the generation has retired.
+    return loom.needsReview({
+      summary: "prompt-agent: bug-triage TaskRun " + taskRunId
+        + " reported an unsupported cancelled outcome; " + issueId
+        + " was left in its policy-owned terminal state without requeue",
+      errorClass: "prompt_agent_bug_triage_outcome_invalid",
+      issueId,
+      taskRunId,
+    });
+  }
+  if (isBugFilter && status === "failed" && resultErrorClass === "local_task_outcome_invalid") {
+    // The runner rejected a present-but-malformed triage outcome. That is a
+    // real failed TaskRun, not a successful retained claim. Retry exhaustion
+    // atomically blocks the Work Item; preserve that policy-owned state rather
+    // than rewriting it to Review with an unfenced issue mutation.
+    return loom.needsReview({
+      summary: "prompt-agent: bug-triage TaskRun " + taskRunId
+        + " produced an invalid typed outcome; " + issueId + " was left blocked for review",
+      errorClass: "prompt_agent_bug_triage_outcome_invalid",
+      issueId,
+      taskRunId,
+    });
+  }
   // Cancellation retires the typed generation and atomically releases the Work
   // Item to open+unassigned. Reconcile that state and the typed needs-revision
   // label after the terminal receipt. A failed TaskRun is different: retry
@@ -428,7 +586,7 @@ export async function run(ctx) {
     summary: "prompt-agent: task-run " + taskRunId + " for " + issueId + " ended " + status
       + (result && result.error_message ? " - " + stringValue(result.error_message) : "")
       + (status === "cancelled" ? " (returned to open+unassigned)" : " (left blocked for review)"),
-    errorClass: stringValue(result && (result.error_class || result.errorClass)) || "prompt_agent_task_failed",
+    errorClass: resultErrorClass || "prompt_agent_task_failed",
     taskRunId,
   });
 }
@@ -483,7 +641,7 @@ async function bindingConfigRoleName(loom) {
   }
 }
 
-// resolveRolePhase makes every named role choose one of the two supported
+// resolveRolePhase makes every named role choose one of the supported
 // lifecycle owners before it can claim work. Empty and legacy "any" filters
 // came from the UI's custom-role path; preserving them as ungated would let a
 // coder-shaped lifecycle steal needs-plan work, so both migrate in place to
@@ -494,6 +652,9 @@ function resolveRolePhase(resolved) {
   }
   const rawTaskFilter = stringValue(resolved.taskFilter).trim();
   if (rawTaskFilter === "needs_plan" || rawTaskFilter === "has_design") {
+    return { supported: true, taskFilter: rawTaskFilter, rawTaskFilter };
+  }
+  if (rawTaskFilter === "bug") {
     return { supported: true, taskFilter: rawTaskFilter, rawTaskFilter };
   }
   if (rawTaskFilter === "" || rawTaskFilter === "any") {
@@ -605,6 +766,21 @@ function cardLabels(card) {
   return card ? labelList(card.labels) : [];
 }
 
+// issueTypeValue normalizes both TriggerEvent and issue-card wire shapes.
+// Missing and malformed values become a non-match; only the canonical bug type
+// passes, case-insensitively.
+function issueTypeValue(record) {
+  if (!record || typeof record !== "object") return "";
+  const value = record.issueType !== undefined
+    ? record.issueType
+    : (record.issue_type !== undefined ? record.issue_type : record.type);
+  return stringValue(value).trim();
+}
+
+function issueTypeAllowsBug(issueType) {
+  return stringValue(issueType).trim().toLowerCase() === "bug";
+}
+
 // unclaimTask returns the typed DriverRun Work Item claim to the ready pool.
 // The release command atomically restores open+unassigned, clears the exact
 // claim generation, releases the actor lock, and records the durable action.
@@ -652,6 +828,158 @@ function notMyPhaseSummary(roleName, taskFilter, taskId, hasDesign) {
   return "prompt-agent: not my phase (role " + (stringValue(roleName) || "?")
     + ", filter " + taskFilter + "): task " + (stringValue(taskId) || "?")
     + " hasDesign=" + String(hasDesign) + " — skipped, no dispatch";
+}
+
+function notMyIssueTypeSummary(roleName, taskId, issueType, source) {
+  return "prompt-agent: not my issue type (role " + (stringValue(roleName) || "?")
+    + ", filter bug): task " + (stringValue(taskId) || "?") + " "
+    + source + " issueType=" + JSON.stringify(stringValue(issueType))
+    + " — skipped before claim, no dispatch";
+}
+
+function notMyClaimReceiptIssueTypeSummary(roleName, taskId, issueType) {
+  return "prompt-agent: not my issue type (role " + (stringValue(roleName) || "?")
+    + ", filter bug): task " + (stringValue(taskId) || "?")
+    + " committed claim issueType=" + JSON.stringify(stringValue(issueType))
+    + " — typed claim released, no dispatch";
+}
+
+async function completeBugTriageHandoff(loom, context) {
+  const parsed = parseBugTriageOutcome(context.meta);
+  const validOutcome = parsed.ok;
+  const priority = validOutcome ? parsed.priority : context.fallbackPriority;
+  const labels = validOutcome ? parsed.labels : ["triage:needs-review"];
+  const commentBody = validOutcome
+    ? parsed.summary + "\n\nLoom bug-triage TaskRun: " + context.taskRunId
+    : "Bug triage " + parsed.reason
+      + ". No model-authored triage metadata was applied; inspect the TaskRun transcript."
+      + "\n\nLoom bug-triage TaskRun: " + context.taskRunId;
+  try {
+    // This is the sole successful bug-triage lifecycle mutation. Fleet verifies
+    // the retained parent generation and commits Review+unassigned, priority,
+    // additive labels, immutable host comment, action, and receipt in one
+    // transaction. Exact replay returns the same receipt/comment; a concurrent
+    // human transition or generation change rejects with zero partial writes.
+    await loom.tasks.handoffReview({
+      taskId: context.issueId,
+      taskRunId: context.taskRunId,
+      status: "review",
+      priority,
+      labels,
+      commentBody,
+    });
+  } catch (err) {
+    return loom.needsReview({
+      summary: "prompt-agent: bug-triage TaskRun " + context.taskRunId
+        + " completed, but the host could not commit its fenced Review handoff for "
+        + context.issueId + ": " + errorMessage(err),
+      errorClass: "prompt_agent_bug_triage_handoff_failed",
+      issueId: context.issueId,
+      taskRunId: context.taskRunId,
+    });
+  }
+
+  if (!validOutcome) {
+    return loom.needsReview({
+      summary: "prompt-agent: bug-triage TaskRun " + context.taskRunId + " "
+        + parsed.reason + "; " + context.issueId
+        + " was atomically handed to review without model-authored triage metadata",
+      errorClass: parsed.errorClass,
+      issueId: context.issueId,
+      taskRunId: context.taskRunId,
+      priority,
+      labels,
+      outcome: "bug-triage-needs-review",
+    });
+  }
+
+  return loom.completed({
+    summary: "prompt-agent: " + context.issueId + " triaged via "
+      + (context.backend || "backend") + " and handed to review at P"
+      + String(priority),
+    issueId: context.issueId,
+    taskRunId: context.taskRunId,
+    promptSource: context.promptSource,
+    backend: context.backend,
+    priority,
+    labels,
+    outcome: "bug-triage-review",
+  });
+}
+
+function bugTriageFallbackPriority(claimedPriority) {
+  if (claimedPriority !== undefined && claimedPriority !== null
+      && !(typeof claimedPriority === "string" && claimedPriority.trim() === "")) {
+    const priority = Number(claimedPriority);
+    if (Number.isInteger(priority) && priority >= 0 && priority <= 4) return priority;
+  }
+  return 2;
+}
+
+function parseBugTriageOutcome(meta) {
+  const disposition = stringValue(meta && meta.task_outcome).trim();
+  if (disposition === "") {
+    return {
+      ok: false,
+      errorClass: "prompt_agent_bug_triage_outcome_missing",
+      reason: "completed without the required typed triage outcome",
+    };
+  }
+  if (disposition !== "triaged") {
+    return invalidBugTriageOutcome("reported unsupported task_outcome=" + JSON.stringify(disposition));
+  }
+  const summary = stringValue(meta && meta.triage_summary).trim();
+  if (!summary || summary.length > BUG_TRIAGE_MAX_SUMMARY_CHARS) {
+    return invalidBugTriageOutcome("reported an invalid triage summary");
+  }
+  const rawPriority = stringValue(meta && meta.triage_priority).trim();
+  const priority = Number(rawPriority);
+  if (!/^[0-4]$/.test(rawPriority) || !Number.isInteger(priority)) {
+    return invalidBugTriageOutcome("reported an invalid triage priority");
+  }
+  let labels;
+  try {
+    labels = JSON.parse(stringValue(meta && meta.triage_labels_json));
+  } catch {
+    return invalidBugTriageOutcome("reported malformed triage labels");
+  }
+  if (!Array.isArray(labels) || labels.length < 1 || labels.length > BUG_TRIAGE_MAX_LABELS
+      || labels[0] !== "triaged") {
+    return invalidBugTriageOutcome("reported invalid triage labels");
+  }
+  const unique = new Set();
+  for (let index = 0; index < labels.length; index += 1) {
+    const label = labels[index];
+    if (typeof label !== "string" || label !== label.trim() || label.length < 1
+        || label.length > BUG_TRIAGE_MAX_LABEL_CHARS || /[\x00-\x1f\x7f]/.test(label)
+        || unique.has(label)
+        || (index > 0 && !isSafeTriageLabel(label))) {
+      return invalidBugTriageOutcome("reported invalid triage labels");
+    }
+    unique.add(label);
+  }
+  return { ok: true, summary, priority, labels };
+}
+
+// Runtime metadata from the trusted runner carries only the fixed host marker
+// plus host-normalized descriptive labels. This strict allowlist is the
+// defense-in-depth boundary if a custom/older runner attempts to pass raw
+// routing labels through to the workflow host.
+function isSafeTriageLabel(label) {
+  const prefix = "triage:";
+  if (!label.startsWith(prefix)) return false;
+  const slug = label.slice(prefix.length);
+  return slug.length >= 1
+    && slug.length <= BUG_TRIAGE_LABEL_SLUG_MAX_CHARS
+    && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
+}
+
+function invalidBugTriageOutcome(reason) {
+  return {
+    ok: false,
+    errorClass: "prompt_agent_bug_triage_outcome_invalid",
+    reason,
+  };
 }
 
 // ensureCardInReview reconciles a completed planner run's card to review after

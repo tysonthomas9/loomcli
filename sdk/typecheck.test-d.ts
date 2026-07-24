@@ -79,6 +79,10 @@ export async function exerciseLoomDriverClientSurface(): Promise<void> {
   expectType<Record<string, unknown> | null>(await client.tasks.handoffReview({
     taskId: "TASK-1", taskRunId: "task-run-1", status: "open", reason: "changes requested",
   }));
+  expectType<Record<string, unknown> | null>(await client.tasks.handoffReview({
+    taskId: "TASK-2", taskRunId: "task-run-2", status: "review",
+    priority: 2, labels: ["bug", "reviewed"], commentBody: "Automated bug triage completed.",
+  }));
   await client.tasks.complete({ taskId: "TASK-1", taskRunId: "task-run-1", artifactIds: ["a1"] });
   await client.tasks.release({ taskId: "TASK-1" });
   await client.tasks.releaseReview({ taskId: "TASK-1" });

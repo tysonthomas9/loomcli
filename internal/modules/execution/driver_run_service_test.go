@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -560,9 +561,10 @@ func TestDriverRunReviewWorkItemHandoffRequiresExactOwnerChildAndReceipt(t *test
 	}
 
 	for name, edit := range map[string]func(*HandoffDriverRunReviewWorkItemCommand){
-		"wrong child":   func(c *HandoffDriverRunReviewWorkItemCommand) { c.TaskRunID = "other" },
-		"wrong claim":   func(c *HandoffDriverRunReviewWorkItemCommand) { c.ClaimActionID = "other" },
-		"review target": func(c *HandoffDriverRunReviewWorkItemCommand) { c.TargetStatus = "review" },
+		"wrong child":                func(c *HandoffDriverRunReviewWorkItemCommand) { c.TaskRunID = "other" },
+		"wrong claim":                func(c *HandoffDriverRunReviewWorkItemCommand) { c.ClaimActionID = "other" },
+		"review missing annotations": func(c *HandoffDriverRunReviewWorkItemCommand) { c.TargetStatus = "review" },
+		"unsupported target":         func(c *HandoffDriverRunReviewWorkItemCommand) { c.TargetStatus = "blocked" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			bad := command
@@ -578,6 +580,168 @@ func TestDriverRunReviewWorkItemHandoffRequiresExactOwnerChildAndReceipt(t *test
 	}
 	if port.handoffCalls != 1 {
 		t.Fatalf("invalid commands reached port: %d calls", port.handoffCalls)
+	}
+}
+
+func TestDriverRunReviewWorkItemHandoffValidatesAtomicReviewAnnotationsAndResult(t *testing.T) {
+	now := time.Date(2026, 7, 23, 5, 30, 0, 123456789, time.UTC)
+	appliedAt := now.Truncate(time.Microsecond)
+	owner := Owner{
+		ResourceKind: ResourceDriverRun, ResourceID: "run-triage-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7,
+	}
+	taskID := "TASK-TRIAGE-1"
+	taskRunID := "triage-child-1"
+	requestID := HandoffDriverRunReviewWorkItemRequestID(owner.ResourceID, taskID, taskRunID)
+	actionID := DriverRunReviewWorkItemHandoffActionID(requestID)
+	claimActionID := DriverRunWorkItemClaimActionID(ClaimDriverRunWorkItemRequestID(owner.ResourceID, taskID))
+	priority := 4
+	port := &driverRunWorkItemPortStub{handoffResult: DriverRunWorkItemMutationResult{
+		WorkItem: &DriverRunWorkItem{
+			WorkspaceKey: "TEST", WorkItemID: taskID, Status: "review", Priority: priority,
+			Labels: []string{"existing", "bug", "triaged"}, Assignee: "", UpdatedAt: appliedAt,
+		},
+		Action: &DriverRunWorkItemAction{
+			WorkspaceKey: "TEST", ActionID: actionID, IdempotencyKey: actionID,
+			ActionType: "handoff_review_work_item", TargetRef: taskID, RequestedBy: "driver-run:" + owner.ResourceID,
+			Status: "applied", RequestRef: "sha256:" + strings.Repeat("2", 64),
+			ResponseRef: "issue://" + taskID + "#handed-off", CreatedAt: appliedAt, AppliedAt: &appliedAt,
+		},
+		Comment: &DriverRunWorkItemComment{
+			CommentID: "17", WorkItemID: taskID, Author: "driver-run:" + owner.ResourceID,
+			Body: "Automated bug triage completed.", CreatedAt: appliedAt,
+		},
+	}}
+	service, issuer := newDriverRunTestService(t, DriverRunDependencies{WorkItems: port})
+	command := HandoffDriverRunReviewWorkItemCommand{
+		WorkspaceKey: "TEST", RequestID: requestID, Owner: owner, WorkItemID: taskID,
+		ClaimActionID: claimActionID, TaskRunID: taskRunID, TargetStatus: "review",
+		Priority: &priority, Labels: []string{" bug ", "triaged", "bug"},
+		CommentBody: "Automated bug triage completed.", HandedOffAt: now,
+	}
+	result, err := service.HandoffDriverRunReviewWorkItem(
+		context.Background(),
+		issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+		command,
+	)
+	if err != nil || result.WorkItem == nil || result.WorkItem.Status != "review" ||
+		port.handoffCalls != 1 || port.handoffCommand.Priority == nil ||
+		*port.handoffCommand.Priority != priority ||
+		!slices.Equal(port.handoffCommand.Labels, []string{"bug", "triaged"}) ||
+		port.handoffCommand.CommentBody != command.CommentBody {
+		t.Fatalf("handoff=%+v command=%+v calls=%d err=%v", result, port.handoffCommand, port.handoffCalls, err)
+	}
+
+	port.handoffResult.Replay = true
+	retry := command
+	retry.HandedOffAt = now.Add(time.Minute)
+	if _, err := service.HandoffDriverRunReviewWorkItem(
+		context.Background(),
+		issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+		retry,
+	); err != nil {
+		t.Fatalf("exact replay with regenerated request timestamp failed: %v", err)
+	}
+	port.handoffResult.Comment.CreatedAt = appliedAt.Add(time.Second)
+	if _, err := service.HandoffDriverRunReviewWorkItem(
+		context.Background(),
+		issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+		retry,
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("replay with divergent comment timestamp error=%v, want conflict", err)
+	}
+	port.handoffResult.Comment.CreatedAt = appliedAt
+	port.handoffResult.WorkItem.UpdatedAt = appliedAt.Add(time.Second)
+	if _, err := service.HandoffDriverRunReviewWorkItem(
+		context.Background(),
+		issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+		retry,
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("replay with divergent Work Item timestamp error=%v, want conflict", err)
+	}
+	port.handoffResult.WorkItem.UpdatedAt = appliedAt
+	port.handoffResult.Replay = false
+
+	port.handoffResult.WorkItem.Priority = 3
+	if _, err := service.HandoffDriverRunReviewWorkItem(
+		context.Background(),
+		issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+		command,
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("divergent priority error=%v, want conflict", err)
+	}
+	port.handoffResult.WorkItem.Priority = priority
+	port.handoffResult.WorkItem.Labels = []string{"bug"}
+	if _, err := service.HandoffDriverRunReviewWorkItem(
+		context.Background(),
+		issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+		command,
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("missing returned label error=%v, want conflict", err)
+	}
+	port.handoffResult.WorkItem.Labels = []string{"existing", "bug", "triaged"}
+	port.handoffResult.Comment.Body = "different"
+	if _, err := service.HandoffDriverRunReviewWorkItem(
+		context.Background(),
+		issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+		command,
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("divergent comment error=%v, want conflict", err)
+	}
+}
+
+func TestDriverRunReviewWorkItemHandoffRejectsInvalidReviewAnnotationsBeforePort(t *testing.T) {
+	now := time.Date(2026, 7, 23, 5, 30, 0, 0, time.UTC)
+	owner := Owner{
+		ResourceKind: ResourceDriverRun, ResourceID: "run-triage-1", NodeID: "node-1",
+		LeaseID: "lease-1", LeaseToken: "secret", FencingToken: 7,
+	}
+	taskID := "TASK-TRIAGE-1"
+	taskRunID := "triage-child-1"
+	requestID := HandoffDriverRunReviewWorkItemRequestID(owner.ResourceID, taskID, taskRunID)
+	claimActionID := DriverRunWorkItemClaimActionID(ClaimDriverRunWorkItemRequestID(owner.ResourceID, taskID))
+	priority := 2
+	command := HandoffDriverRunReviewWorkItemCommand{
+		WorkspaceKey: "TEST", RequestID: requestID, Owner: owner, WorkItemID: taskID,
+		ClaimActionID: claimActionID, TaskRunID: taskRunID, TargetStatus: "review",
+		Priority: &priority, CommentBody: "triaged", HandedOffAt: now,
+	}
+	tests := []struct {
+		name string
+		edit func(*HandoffDriverRunReviewWorkItemCommand)
+	}{
+		{"missing priority", func(c *HandoffDriverRunReviewWorkItemCommand) { c.Priority = nil }},
+		{"out of range priority", func(c *HandoffDriverRunReviewWorkItemCommand) {
+			value := 5
+			c.Priority = &value
+		}},
+		{"blank comment", func(c *HandoffDriverRunReviewWorkItemCommand) { c.CommentBody = "   " }},
+		{"oversized comment", func(c *HandoffDriverRunReviewWorkItemCommand) {
+			c.CommentBody = strings.Repeat("x", DriverRunReviewWorkItemMaxCommentBytes+1)
+		}},
+		{"too many labels", func(c *HandoffDriverRunReviewWorkItemCommand) {
+			c.Labels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"}
+		}},
+		{"invalid label", func(c *HandoffDriverRunReviewWorkItemCommand) { c.Labels = []string{"bad,label"} }},
+		{"open annotations", func(c *HandoffDriverRunReviewWorkItemCommand) { c.TargetStatus = "open" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			port := &driverRunWorkItemPortStub{}
+			service, issuer := newDriverRunTestService(t, DriverRunDependencies{WorkItems: port})
+			bad := command
+			tc.edit(&bad)
+			if _, err := service.HandoffDriverRunReviewWorkItem(
+				context.Background(),
+				issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+				bad,
+			); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("error=%v, want invalid", err)
+			}
+			if port.handoffCalls != 0 {
+				t.Fatalf("invalid command reached port: %+v", port.handoffCommand)
+			}
+		})
 	}
 }
 

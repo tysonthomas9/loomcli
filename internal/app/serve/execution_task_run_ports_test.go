@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -391,6 +392,42 @@ func TestFleetDriverRunWorkItemPortForwardsOpaqueOwnerAndClaimAction(t *testing.
 		transport.workItemHandoff.CommandID != handoffRequestID ||
 		transport.workItemHandoff.TargetStatus != "closed" {
 		t.Fatalf("handoff transport command=%+v", transport.workItemHandoff)
+	}
+
+	reviewTaskRunID := "triage-child-1"
+	reviewRequestID := execution.HandoffDriverRunReviewWorkItemRequestID("run-1", "TASK-1", reviewTaskRunID)
+	priority := 4
+	transport.workItemHandoffResult = &fleetdb.ExecutionDriverRunWorkItemResult{
+		Issue: &fleetdb.ExecutionIssue{
+			Workspace: "WS", ID: "TASK-1", Status: "review", Priority: priority,
+			Labels: []string{"existing", "bug", "triaged"}, Assignee: "", UpdatedAt: handoffAt,
+		},
+		Action: &fleetdb.ExecutionActionLedger{
+			WorkspaceKey: "WS", ActionID: execution.DriverRunReviewWorkItemHandoffActionID(reviewRequestID),
+		},
+		Comment: &fleetdb.ExecutionWorkItemComment{
+			ID: "17", IssueID: "TASK-1", Author: "driver-run:run-1",
+			Body: "Automated bug triage completed.", CreatedAt: handoffAt,
+		},
+	}
+	result, err = port.HandoffDriverRunReviewWorkItem(context.Background(), execution.HandoffDriverRunReviewWorkItemCommand{
+		WorkspaceKey: "WS", RequestID: reviewRequestID, Owner: owner, WorkItemID: "TASK-1",
+		ClaimActionID: claimActionID, TaskRunID: reviewTaskRunID, TargetStatus: "review",
+		Priority: &priority, Labels: []string{"bug", "triaged"},
+		CommentBody: "Automated bug triage completed.", HandedOffAt: handoffAt,
+	})
+	if err != nil || result.WorkItem == nil || result.WorkItem.Priority != priority ||
+		result.Comment == nil || result.Comment.CommentID != "17" ||
+		result.Comment.WorkItemID != "TASK-1" || result.Comment.Author != "driver-run:run-1" ||
+		result.Comment.Body != "Automated bug triage completed." ||
+		!result.Comment.CreatedAt.Equal(handoffAt) ||
+		!slices.Equal(result.WorkItem.Labels, []string{"existing", "bug", "triaged"}) {
+		t.Fatalf("review handoff result=%+v err=%v", result, err)
+	}
+	if transport.workItemHandoff.Priority == nil || *transport.workItemHandoff.Priority != priority ||
+		!slices.Equal(transport.workItemHandoff.Labels, []string{"bug", "triaged"}) ||
+		transport.workItemHandoff.CommentBody != "Automated bug triage completed." {
+		t.Fatalf("review handoff transport command=%+v", transport.workItemHandoff)
 	}
 }
 

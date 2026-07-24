@@ -260,6 +260,13 @@ func resolveRepoPath(wsKey, repoName string) string {
 	return ""
 }
 
+// ResolveRepoPath exposes the machine-local checkout path recorded for a
+// workspace repository. Callers must still validate that the path is a Git
+// checkout for the expected canonical remote before using repository data.
+func ResolveRepoPath(wsKey, repoName string) string {
+	return resolveRepoPath(wsKey, repoName)
+}
+
 // DefaultWorkspaceKey is retained for compatibility with older callers.
 // Default workspace selection has been removed, so it always returns empty.
 func DefaultWorkspaceKey() string {

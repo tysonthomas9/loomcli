@@ -23,6 +23,7 @@ var (
 	updateTitle        string
 	updateDescription  string
 	updateDescFile     string
+	updateExternalRef  string
 	updateAddDeps      []string
 	updateRemoveDeps   []string
 )
@@ -117,6 +118,28 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		return backend.UpdateParams{}, false, fmt.Errorf("--description and --description-from-file are mutually exclusive")
 	}
 	params := backend.UpdateParams{}
+	changed := applyDirectUpdateFlags(cmd, &params)
+	if applied, err := applyDesignFormatFlag(cmd, &params); err != nil {
+		return backend.UpdateParams{}, false, err
+	} else if applied {
+		changed = true
+	}
+	if descFromFlag {
+		params.Description = &updateDescription
+		changed = true
+	}
+	if descFromFile {
+		body, err := readDescriptionFile(updateDescFile, cmd.InOrStdin())
+		if err != nil {
+			return backend.UpdateParams{}, false, err
+		}
+		params.Description = &body
+		changed = true
+	}
+	return params, changed, nil
+}
+
+func applyDirectUpdateFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
 	changed := false
 	if cmd.Flags().Changed("status") {
 		params.Status = &updateStatus
@@ -134,11 +157,6 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		params.Design = &updateDesign
 		changed = true
 	}
-	if applied, err := applyDesignFormatFlag(cmd, &params); err != nil {
-		return backend.UpdateParams{}, false, err
-	} else if applied {
-		changed = true
-	}
 	if cmd.Flags().Changed("priority") {
 		params.Priority = &updatePriority
 		changed = true
@@ -147,19 +165,11 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		params.Title = &updateTitle
 		changed = true
 	}
-	if descFromFlag {
-		params.Description = &updateDescription
+	if cmd.Flags().Changed("external-ref") {
+		params.ExternalRef = &updateExternalRef
 		changed = true
 	}
-	if descFromFile {
-		body, err := readDescriptionFile(updateDescFile, cmd.InOrStdin())
-		if err != nil {
-			return backend.UpdateParams{}, false, err
-		}
-		params.Description = &body
-		changed = true
-	}
-	return params, changed, nil
+	return changed
 }
 
 func applyDesignFormatFlag(cmd *cobra.Command, params *backend.UpdateParams) (bool, error) {
@@ -239,6 +249,7 @@ func init() {
 	updateCmd.Flags().StringVar(&updateTitle, "title", "", "Set title")
 	updateCmd.Flags().StringVar(&updateDescription, "description", "", "Set description")
 	updateCmd.Flags().StringVar(&updateDescFile, "description-from-file", "", "Read description from file (use - for stdin)")
+	updateCmd.Flags().StringVar(&updateExternalRef, "external-ref", "", "Set external reference")
 	updateCmd.Flags().StringArrayVar(&updateAddDeps, "depends-on", nil, "Add dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateRemoveDeps, "remove-depends-on", nil, "Remove dependency on issue ID (repeatable)")
 }

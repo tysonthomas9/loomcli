@@ -317,6 +317,8 @@ func TestValidatePromptAgentRole(t *testing.T) {
 		{name: "unsupported filter", role: &domain.Role{Name: "docs", Prompt: "work", TaskFilter: "docs"}, wantErr: "unsupported"},
 		{name: "inline legacy any", role: &domain.Role{Name: "legacy", Prompt: "work", TaskFilter: "any"}},
 		{name: "inline planner", role: &domain.Role{Name: "planner", Prompt: "work", TaskFilter: "needs_plan"}},
+		{name: "read-only bug triage", role: &domain.Role{Name: "triage", Prompt: "work", TaskFilter: "bug", ReadOnly: true}},
+		{name: "mutating bug filter", role: &domain.Role{Name: "unsafe-triage", Prompt: "work", TaskFilter: "bug"}, wantErr: "read_only=true"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

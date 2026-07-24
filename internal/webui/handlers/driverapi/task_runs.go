@@ -99,8 +99,12 @@ func (m *Module) taskRequestExecutor() driverpkg.HostBridgeTaskExecutor {
 		WorktreePath:     m.worktreePath,
 		APIBaseURL:       m.apiBaseURL,
 		LocalSettingsDir: m.localSettingsDir,
-		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{Store: m.store, Lineage: driverpkg.DefaultStackLineageLookup()},
-		StackStore:       driverpkg.DefaultStackStore(),
+		WorktreeResolver: driverpkg.LocalTaskWorktreeResolver{
+			Store:            m.store,
+			Lineage:          driverpkg.DefaultStackLineageLookup(),
+			LocalSettingsDir: m.localSettingsDir,
+		},
+		StackStore: driverpkg.DefaultStackStore(),
 	}
 }
 
@@ -538,14 +542,98 @@ func (m *Module) releaseReview(ctx context.Context, ws string, id driverIdentity
 }
 
 type handoffReviewParams struct {
-	TaskID    string `json:"taskId"`
-	TaskRunID string `json:"taskRunId"`
-	Status    string `json:"status"`
-	Reason    string `json:"reason"`
+	TaskID      string    `json:"taskId"`
+	TaskRunID   string    `json:"taskRunId"`
+	Status      string    `json:"status"`
+	Reason      string    `json:"reason"`
+	Priority    *int      `json:"priority"`
+	Labels      *[]string `json:"labels"`
+	CommentBody *string   `json:"commentBody"`
+}
+
+type handoffReviewFieldPresence struct {
+	priority    bool
+	labels      bool
+	commentBody bool
+}
+
+type handoffReviewRequest struct {
+	taskID       string
+	taskRunID    string
+	targetStatus string
+	reason       string
+	priority     *int
+	labels       []string
+	commentBody  string
+}
+
+func decodeHandoffReviewParams(body []byte) (handoffReviewParams, handoffReviewFieldPresence, error) {
+	params, err := decodeParams[handoffReviewParams](body)
+	if err != nil {
+		return handoffReviewParams{}, handoffReviewFieldPresence{}, err
+	}
+	var rawFields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &rawFields); err != nil {
+		return handoffReviewParams{}, handoffReviewFieldPresence{},
+			fmt.Errorf("decode handoff review field presence: %w", domain.ErrInvalid)
+	}
+	_, priorityProvided := rawFields["priority"]
+	_, labelsProvided := rawFields["labels"]
+	_, commentBodyProvided := rawFields["commentBody"]
+	return params, handoffReviewFieldPresence{
+		priority: priorityProvided, labels: labelsProvided, commentBody: commentBodyProvided,
+	}, nil
+}
+
+func normalizeHandoffReviewRequest(params handoffReviewParams) handoffReviewRequest {
+	request := handoffReviewRequest{
+		taskID: strings.TrimSpace(params.TaskID), taskRunID: strings.TrimSpace(params.TaskRunID),
+		targetStatus: strings.TrimSpace(params.Status), reason: strings.TrimSpace(params.Reason),
+		priority: params.Priority,
+	}
+	if params.Labels != nil {
+		request.labels = append([]string{}, (*params.Labels)...)
+	}
+	if params.CommentBody != nil {
+		request.commentBody = *params.CommentBody
+	}
+	return request
+}
+
+func validateHandoffReviewRequest(request handoffReviewRequest, fields handoffReviewFieldPresence) error {
+	if request.taskID == "" || request.taskRunID == "" || !validHandoffReviewTargetStatus(request.targetStatus) {
+		return fmt.Errorf("taskId, taskRunId, and status open, review, or closed are required: %w", domain.ErrInvalid)
+	}
+	if request.targetStatus == execution.DriverRunWorkItemRestoreReview {
+		if !validHandoffReviewAnnotations(request, fields) {
+			return fmt.Errorf("review status requires priority 0 through 4 and nonblank commentBody: %w", domain.ErrInvalid)
+		}
+		return nil
+	}
+	if fields.priority || fields.labels || fields.commentBody {
+		return fmt.Errorf("priority, labels, and commentBody are only valid for review status: %w", domain.ErrInvalid)
+	}
+	return nil
+}
+
+func validHandoffReviewTargetStatus(status string) bool {
+	return status == execution.DriverRunWorkItemRestoreOpen ||
+		status == execution.DriverRunWorkItemRestoreReview ||
+		status == "closed"
+}
+
+func validHandoffReviewAnnotations(request handoffReviewRequest, fields handoffReviewFieldPresence) bool {
+	return fields.priority &&
+		request.priority != nil &&
+		*request.priority >= execution.DriverRunReviewWorkItemPriorityMin &&
+		*request.priority <= execution.DriverRunReviewWorkItemPriorityMax &&
+		fields.commentBody &&
+		strings.TrimSpace(request.commentBody) != "" &&
+		(!fields.labels || request.labels != nil)
 }
 
 func (m *Module) handoffReview(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
-	params, err := decodeParams[handoffReviewParams](body)
+	params, fields, err := decodeHandoffReviewParams(body)
 	if err != nil {
 		return nil, err
 	}
@@ -553,12 +641,9 @@ func (m *Module) handoffReview(ctx context.Context, ws string, id driverIdentity
 	if err != nil {
 		return nil, err
 	}
-	taskID := strings.TrimSpace(params.TaskID)
-	taskRunID := strings.TrimSpace(params.TaskRunID)
-	targetStatus := strings.TrimSpace(params.Status)
-	if taskID == "" || taskRunID == "" ||
-		(targetStatus != execution.DriverRunWorkItemRestoreOpen && targetStatus != "closed") {
-		return nil, fmt.Errorf("taskId, taskRunId, and status open or closed are required: %w", domain.ErrInvalid)
+	request := normalizeHandoffReviewRequest(params)
+	if err := validateHandoffReviewRequest(request, fields); err != nil {
+		return nil, err
 	}
 	if m.execution == nil || m.executionAuthorities == nil {
 		return nil, fmt.Errorf("execution DriverRun review handoff capability is unavailable: %w", execution.ErrUnavailable)
@@ -573,16 +658,19 @@ func (m *Module) handoffReview(ctx context.Context, ws string, id driverIdentity
 	if err != nil {
 		return nil, fmt.Errorf("resolve DriverRun review handoff authority: %w", err)
 	}
-	claimRequestID := execution.ClaimDriverRunWorkItemRequestID(parent.RunID, taskID)
+	claimRequestID := execution.ClaimDriverRunWorkItemRequestID(parent.RunID, request.taskID)
 	result, err := m.execution.HandoffDriverRunReviewWorkItem(ctx, auth, execution.HandoffDriverRunReviewWorkItemCommand{
 		WorkspaceKey:  ws,
-		RequestID:     execution.HandoffDriverRunReviewWorkItemRequestID(parent.RunID, taskID, taskRunID),
+		RequestID:     execution.HandoffDriverRunReviewWorkItemRequestID(parent.RunID, request.taskID, request.taskRunID),
 		Owner:         owner,
-		WorkItemID:    taskID,
+		WorkItemID:    request.taskID,
 		ClaimActionID: execution.DriverRunWorkItemClaimActionID(claimRequestID),
-		TaskRunID:     taskRunID,
-		TargetStatus:  targetStatus,
-		Reason:        strings.TrimSpace(params.Reason),
+		TaskRunID:     request.taskRunID,
+		TargetStatus:  request.targetStatus,
+		Reason:        request.reason,
+		Priority:      request.priority,
+		Labels:        request.labels,
+		CommentBody:   request.commentBody,
 		HandedOffAt:   time.Now().UTC(),
 	})
 	if err != nil {
@@ -592,7 +680,7 @@ func (m *Module) handoffReview(ctx context.Context, ws string, id driverIdentity
 		return nil, fmt.Errorf("handoff review task returned no Work Item: %w", execution.ErrConflict)
 	}
 	return &driverpkg.TaskMutationResult{
-		ID: taskID, Status: result.WorkItem.Status, Released: true, Reason: strings.TrimSpace(params.Reason),
+		ID: request.taskID, Status: result.WorkItem.Status, Released: true, Reason: request.reason,
 	}, nil
 }
 

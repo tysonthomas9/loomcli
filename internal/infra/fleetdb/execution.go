@@ -258,13 +258,25 @@ type ExecutionDriverRunReviewWorkItemHandoffCommand struct {
 	TaskRunID     string
 	TargetStatus  string
 	Reason        string
+	Priority      *int
+	Labels        []string
+	CommentBody   string
 	HandedOffAt   time.Time
 }
 
+type ExecutionWorkItemComment struct {
+	ID        string    `json:"id"`
+	IssueID   string    `json:"issue_id"`
+	Author    string    `json:"author"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type ExecutionDriverRunWorkItemResult struct {
-	Issue    *ExecutionIssue        `json:"issue"`
-	Action   *ExecutionActionLedger `json:"action"`
-	Replayed bool                   `json:"replayed"`
+	Issue    *ExecutionIssue           `json:"issue"`
+	Action   *ExecutionActionLedger    `json:"action"`
+	Comment  *ExecutionWorkItemComment `json:"comment,omitempty"`
+	Replayed bool                      `json:"replayed"`
 }
 
 type ExecutionDriverRunSuspendCommand struct {

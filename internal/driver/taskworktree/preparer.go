@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 )
 
@@ -21,10 +22,25 @@ import (
 type Preparer struct {
 	workspaceKey string
 	local        bootstrap.WorkspaceLocalState
+	credentials  gitauth.Source
 }
 
 // Open loads and validates the machine-local state for workspaceKey.
 func Open(workspaceKey string) (*Preparer, error) {
+	return OpenWithCredentials(workspaceKey, nil)
+}
+
+// OpenWithLocalSettings loads machine-local state and resolves private HTTPS
+// credentials from localSettingsDir just in time for each git operation. An
+// empty directory preserves anonymous/SSH/local git behavior.
+func OpenWithLocalSettings(workspaceKey, localSettingsDir string) (*Preparer, error) {
+	return OpenWithCredentials(workspaceKey, gitauth.NewLocalSettingsSource(localSettingsDir))
+}
+
+// OpenWithCredentials loads machine-local state and retains a credential
+// source for private clone/fetch operations. The source resolves plaintext
+// just in time; Preparer never caches credentials.
+func OpenWithCredentials(workspaceKey string, credentials gitauth.Source) (*Preparer, error) {
 	sc, err := bootstrap.LoadStateCache()
 	if err != nil {
 		return nil, fmt.Errorf("load local workspace state: %w", err)
@@ -39,7 +55,7 @@ func Open(workspaceKey string) (*Preparer, error) {
 	if strings.TrimSpace(local.Path) == "" {
 		return nil, fmt.Errorf("workspace %q has no local path in loom state", workspaceKey)
 	}
-	return &Preparer{workspaceKey: workspaceKey, local: local}, nil
+	return &Preparer{workspaceKey: workspaceKey, local: local, credentials: credentials}, nil
 }
 
 // Prepare ensures repo has a local checkout and creates taskRunID's detached
@@ -58,7 +74,9 @@ func (p *Preparer) Prepare(ctx context.Context, repo *domain.Repo, taskRunID str
 	if resolveBase != nil {
 		baseBranch = resolveBase()
 	}
-	if err := localworkspace.EnsureDetachedGitWorktreeFromBranch(repoPath, target, repoRemote(repo), baseBranch); err != nil {
+	if err := localworkspace.EnsureDetachedGitWorktreeFromBranchWithCredentials(
+		ctx, repoPath, target, repoRemote(repo), baseBranch, p.credentials,
+	); err != nil {
 		return "", fmt.Errorf("ensure task run worktree for repo %q: %w", repo.Name, err)
 	}
 	return target, nil
@@ -87,7 +105,7 @@ func (p *Preparer) ensureRepoCheckout(ctx context.Context, repo *domain.Repo) (s
 	if strings.TrimSpace(repo.RemoteURL) == "" {
 		return "", fmt.Errorf("repo %q has no local checkout at %s and no remote URL to clone", repo.Name, repoPath)
 	}
-	if err := localworkspace.CloneRepoTo(ctx, repo.RemoteURL, repoPath); err != nil {
+	if err := localworkspace.CloneRepoToWithCredentials(ctx, repo.RemoteURL, repoPath, p.credentials); err != nil {
 		return "", err
 	}
 	if err := localworkspace.RememberRepoPath(p.workspaceKey, repo.Name, repoPath); err != nil {

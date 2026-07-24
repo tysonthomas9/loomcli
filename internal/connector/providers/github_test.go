@@ -39,9 +39,10 @@ type fakeGitHub struct {
 }
 
 type fakeResponse struct {
-	status int
-	header map[string]string
-	body   string
+	status  int
+	header  map[string]string
+	body    string
+	respond func(recordedRequest) fakeResponse
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
@@ -61,19 +62,23 @@ func (f *fakeGitHub) route(method, path string, resp fakeResponse) {
 func (f *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	f.mu.Lock()
-	f.requests = append(f.requests, recordedRequest{
+	recorded := recordedRequest{
 		Method: r.Method,
 		Path:   r.URL.Path,
 		Query:  r.URL.RawQuery,
 		Header: r.Header.Clone(),
 		Body:   body,
-	})
+	}
+	f.mu.Lock()
+	f.requests = append(f.requests, recorded)
 	resp, ok := f.routes[r.Method+" "+r.URL.Path]
 	f.mu.Unlock()
 	if !ok {
 		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 		return
+	}
+	if resp.respond != nil {
+		resp = resp.respond(recorded)
 	}
 	for k, v := range resp.header {
 		w.Header().Set(k, v)
@@ -363,6 +368,7 @@ func TestGitHubWritesRequireIdempotencyKey(t *testing.T) {
 func TestGitHubReviewPost(t *testing.T) {
 	prPath := "/repos/octocat/hello/pulls/7"
 	openPR := `{"number":7,"state":"open","head":{"sha":"deadbeef","ref":"feat"},"base":{"sha":"aaa","ref":"main"}}`
+	reviewURL := "https://github.com/octocat/hello/pull/7#pullrequestreview-42"
 
 	tests := []struct {
 		name        string
@@ -399,10 +405,21 @@ func TestGitHubReviewPost(t *testing.T) {
 			fake.route(http.MethodGet, prPath, tt.prResponse)
 			fake.route(http.MethodPost, prPath+"/reviews", fakeResponse{
 				status: http.StatusOK,
-				body:   `{"id":42,"state":"APPROVED"}`,
+				body:   `{"id":42,"state":"APPROVED","html_url":"` + reviewURL + `","url":"https://api.github.com/repos/octocat/hello/pulls/7/reviews/42"}`,
 			})
 
-			result, err := fake.provider().Call(context.Background(), reviewSpec())
+			spec := reviewSpec()
+			// commit_id is provider-owned: a workflow cannot override the
+			// ExpectedHeadSha precondition through ordinary args.
+			spec.Args["commit_id"] = "workflow-controlled-sha"
+			spec.Args["comments"] = []any{
+				map[string]any{
+					"path": "internal/worker.go",
+					"line": float64(73),
+					"body": "Release the lease on this error path.",
+				},
+			}
+			result, err := fake.provider().Call(context.Background(), spec)
 			reqs := fake.recorded()
 			for _, req := range reqs {
 				if got := req.Header.Get("Idempotency-Key"); got != "run-1#github.review.post#0" {
@@ -436,14 +453,352 @@ func TestGitHubReviewPost(t *testing.T) {
 			if result.Decision != domain.ConnectorCallGranted {
 				t.Errorf("decision = %q, want granted", result.Decision)
 			}
-			if result.Body["id"] != float64(42) || result.Body["state"] != "APPROVED" {
+			if result.Body["id"] != float64(42) || result.Body["state"] != "APPROVED" ||
+				result.Body["htmlUrl"] != reviewURL {
 				t.Errorf("body = %+v", result.Body)
+			}
+			if _, ok := result.Body["html_url"]; ok {
+				t.Errorf("body contains upstream snake_case html_url: %+v", result.Body)
+			}
+			if _, ok := result.Body["url"]; ok {
+				t.Errorf("body exposes the raw API URL: %+v", result.Body)
 			}
 			if len(reqs) != 2 || reqs[0].Method != http.MethodGet || reqs[1].Method != http.MethodPost {
 				t.Fatalf("requests = %+v, want GET then POST", reqs)
 			}
-			if reqs[1].Body["event"] != "APPROVE" || reqs[1].Body["body"] != "lgtm" {
+			wantBody := `lgtm
+
+Unanchored review findings:
+- file "internal/worker.go", unverified line 73: Release the lease on this error path.`
+			if reqs[1].Body["event"] != "APPROVE" || reqs[1].Body["body"] != wantBody {
 				t.Errorf("review payload = %+v", reqs[1].Body)
+			}
+			if reqs[1].Body["commit_id"] != "deadbeef" {
+				t.Errorf("review commit_id = %#v, want expected head sha", reqs[1].Body["commit_id"])
+			}
+			if _, ok := reqs[1].Body["comments"]; ok {
+				t.Errorf("review payload contains uncertified inline comments: %+v", reqs[1].Body)
+			}
+		})
+	}
+}
+
+func TestGitHubReviewPostRejectsUnsafeInlineCommentsBeforeEgress(t *testing.T) {
+	validComment := func() map[string]any {
+		return map[string]any{
+			"path": "internal/worker.go",
+			"line": float64(73),
+			"body": "Release the lease on this error path.",
+		}
+	}
+	tooMany := make([]any, maxGitHubReviewComments+1)
+	for i := range tooMany {
+		tooMany[i] = validComment()
+	}
+
+	tests := []struct {
+		name     string
+		comments any
+	}{
+		{name: "comments must be an array", comments: map[string]any{"0": validComment()}},
+		{name: "comment count is bounded", comments: tooMany},
+		{name: "entry must be an object", comments: []any{"not-an-object"}},
+		{name: "unknown fields are rejected", comments: []any{map[string]any{
+			"path": "internal/worker.go", "line": 73, "body": "finding", testToken: "payload",
+		}}},
+		{name: "side is not in the public finding schema", comments: []any{map[string]any{
+			"path": "internal/worker.go", "line": 73, "side": "LEFT", "body": "finding",
+		}}},
+		{name: "path is required", comments: []any{map[string]any{"line": 73, "body": "finding"}}},
+		{name: "path must be relative", comments: []any{map[string]any{
+			"path": "/etc/passwd", "line": 73, "body": "finding",
+		}}},
+		{name: "path cannot traverse", comments: []any{map[string]any{
+			"path": "internal/../secrets.txt", "line": 73, "body": "finding",
+		}}},
+		{name: "path cannot start above repository", comments: []any{map[string]any{
+			"path": "../secrets.txt", "line": 73, "body": "finding",
+		}}},
+		{name: "path cannot contain control characters", comments: []any{map[string]any{
+			"path": "internal/\nworker.go", "line": 73, "body": "finding",
+		}}},
+		{name: "path is bounded", comments: []any{map[string]any{
+			"path": strings.Repeat("a", maxGitHubReviewPathBytes+1), "line": 73, "body": "finding",
+		}}},
+		{name: "path must be valid UTF-8", comments: []any{map[string]any{
+			"path": string([]byte{'a', 0xff}), "line": 73, "body": "finding",
+		}}},
+		{name: "body is required", comments: []any{map[string]any{
+			"path": "internal/worker.go", "line": 73,
+		}}},
+		{name: "body rejects unsafe controls", comments: []any{map[string]any{
+			"path": "internal/worker.go", "line": 73, "body": "finding\x00" + testToken,
+		}}},
+		{name: "body is bounded", comments: []any{map[string]any{
+			"path": "internal/worker.go", "line": 73,
+			"body": strings.Repeat("x", maxGitHubReviewCommentBodyBytes+1),
+		}}},
+		{name: "body must be valid UTF-8", comments: []any{map[string]any{
+			"path": "internal/worker.go", "line": 73, "body": string([]byte{'a', 0xff}),
+		}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFakeGitHub(t)
+			spec := reviewSpec()
+			spec.Args["comments"] = tt.comments
+
+			result, err := fake.provider().Call(context.Background(), spec)
+			if !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("error = %v, want domain.ErrInvalid", err)
+			}
+			if result.Decision != domain.ConnectorCallUpstreamError {
+				t.Fatalf("decision = %q, want upstream_error", result.Decision)
+			}
+			assertNoCredential(t, err)
+			if n := len(fake.recorded()); n != 0 {
+				t.Fatalf("fake saw %d request(s), want zero (invalid comments refused before egress)", n)
+			}
+		})
+	}
+}
+
+func TestGitHubReviewPostFallsBackAllUncertifiedCommentsAndStillPosts(t *testing.T) {
+	const (
+		prPath = "/repos/octocat/hello/pulls/7"
+		openPR = `{"number":7,"state":"open","head":{"sha":"deadbeef"}}`
+	)
+	fake := newFakeGitHub(t)
+	fake.route(http.MethodGet, prPath, fakeResponse{status: http.StatusOK, body: openPR})
+	fake.route(http.MethodPost, prPath+"/reviews", fakeResponse{
+		respond: func(req recordedRequest) fakeResponse {
+			if _, carriesUncertifiedAnchors := req.Body["comments"]; carriesUncertifiedAnchors {
+				return fakeResponse{
+					status: http.StatusUnprocessableEntity,
+					body:   `{"message":"Validation Failed","errors":[{"resource":"PullRequestReviewComment","field":"line","code":"invalid"}]}`,
+				}
+			}
+			return fakeResponse{
+				status: http.StatusCreated,
+				body:   `{"id":42,"state":"COMMENTED","html_url":"https://github.com/octocat/hello/pull/7#pullrequestreview-42"}`,
+			}
+		},
+	})
+
+	spec := reviewSpec()
+	spec.Args["event"] = "COMMENT"
+	spec.Args["body"] = "Review summary."
+	spec.Args["comments"] = []any{
+		map[string]any{
+			"path": "internal/anchored.go",
+			"line": float64(73),
+			"body": "This arbitrary positive line is not proof of a RIGHT-side diff anchor.",
+		},
+		map[string]any{
+			"path": "internal/missing.go",
+			"body": "The model omitted a line.",
+		},
+		map[string]any{
+			"path": "internal/fractional.go",
+			"line": 73.5,
+			"body": "The model returned a fractional line.",
+		},
+		map[string]any{
+			"path": "internal/deletion.go",
+			"line": 0,
+			"body": "A deletion-side finding cannot use the RIGHT-only schema.",
+		},
+		map[string]any{
+			"path": "internal/unbounded.go",
+			"line": float64(maxGitHubReviewLine + 1),
+			"body": "The model returned an out-of-range line.",
+		},
+		map[string]any{
+			"path": "internal/wrong-type.go",
+			"line": map[string]any{"value": 73},
+			"body": "The model returned a non-scalar line.",
+		},
+	}
+
+	result, err := fake.provider().Call(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("review post: %v", err)
+	}
+	if result.Decision != domain.ConnectorCallGranted {
+		t.Fatalf("decision = %q, want granted", result.Decision)
+	}
+	if result.Status != http.StatusCreated {
+		t.Fatalf("status = %d, want created", result.Status)
+	}
+	reqs := fake.recorded()
+	if len(reqs) != 2 {
+		t.Fatalf("requests = %d, want GET then POST", len(reqs))
+	}
+	post := reqs[1].Body
+	if post["commit_id"] != "deadbeef" {
+		t.Errorf("commit_id = %#v, want deadbeef", post["commit_id"])
+	}
+	wantBody := `Review summary.
+
+Unanchored review findings:
+- file "internal/anchored.go", unverified line 73: This arbitrary positive line is not proof of a RIGHT-side diff anchor.
+- file "internal/missing.go": The model omitted a line.
+- file "internal/fractional.go": The model returned a fractional line.
+- file "internal/deletion.go": A deletion-side finding cannot use the RIGHT-only schema.
+- file "internal/unbounded.go": The model returned an out-of-range line.
+- file "internal/wrong-type.go": The model returned a non-scalar line.`
+	if post["body"] != wantBody {
+		t.Errorf("body = %q, want %q", post["body"], wantBody)
+	}
+	if _, ok := post["comments"]; ok {
+		t.Fatalf("POST carried uncertified inline comments that can make GitHub reject the review: %#v", post)
+	}
+}
+
+func TestGitHubReviewPostValidatesEventAndBodyBeforeEgress(t *testing.T) {
+	tests := []struct {
+		name   string
+		event  string
+		body   any
+		mutate func(map[string]any)
+	}{
+		{
+			name:  "event is a documented value",
+			event: "PENDING",
+			body:  "review",
+		},
+		{
+			name:  "COMMENT requires body",
+			event: "COMMENT",
+			mutate: func(args map[string]any) {
+				delete(args, "body")
+			},
+		},
+		{
+			name:  "body must be a string",
+			event: "COMMENT",
+			body:  map[string]any{"text": "review"},
+		},
+		{
+			name:  "body is bounded",
+			event: "COMMENT",
+			body:  strings.Repeat("x", maxGitHubReviewBodyBytes+1),
+		},
+		{
+			name:  "body rejects unsafe controls",
+			event: "COMMENT",
+			body:  "review\x00" + testToken,
+		},
+		{
+			name:  "body must be valid UTF-8",
+			event: "COMMENT",
+			body:  string([]byte{'a', 0xff}),
+		},
+		{
+			name:  "degraded comments keep the aggregate body bounded",
+			event: "COMMENT",
+			body:  strings.Repeat("x", maxGitHubReviewBodyBytes),
+			mutate: func(args map[string]any) {
+				args["comments"] = []any{map[string]any{
+					"path": "internal/worker.go",
+					"body": "unanchored finding",
+				}}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFakeGitHub(t)
+			spec := reviewSpec()
+			spec.Args["event"] = tt.event
+			if tt.body != nil {
+				spec.Args["body"] = tt.body
+			}
+			if tt.mutate != nil {
+				tt.mutate(spec.Args)
+			}
+
+			result, err := fake.provider().Call(context.Background(), spec)
+			if !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("error = %v, want domain.ErrInvalid", err)
+			}
+			if result.Decision != domain.ConnectorCallUpstreamError {
+				t.Fatalf("decision = %q, want upstream_error", result.Decision)
+			}
+			assertNoCredential(t, err)
+			if n := len(fake.recorded()); n != 0 {
+				t.Fatalf("fake saw %d request(s), want zero (invalid review refused before egress)", n)
+			}
+		})
+	}
+}
+
+func TestGitHubReviewPostRejectsMalformedSuccessResponse(t *testing.T) {
+	const (
+		prPath = "/repos/octocat/hello/pulls/7"
+		openPR = `{"number":7,"state":"open","head":{"sha":"deadbeef"}}`
+	)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "missing id",
+			body: `{"state":"COMMENTED","html_url":"https://github.com/octocat/hello/pull/7#pullrequestreview-42"}`,
+		},
+		{
+			name: "invalid id",
+			body: `{"id":{"nested":"payload"},"state":"COMMENTED","html_url":"https://github.com/octocat/hello/pull/7#pullrequestreview-42"}`,
+		},
+		{
+			name: "missing state",
+			body: `{"id":42,"html_url":"https://github.com/octocat/hello/pull/7#pullrequestreview-42"}`,
+		},
+		{
+			name: "state control character",
+			body: `{"id":42,"state":"COMMENTED\u0000` + testToken + `","html_url":"https://github.com/octocat/hello/pull/7#pullrequestreview-42"}`,
+		},
+		{
+			name: "missing html URL",
+			body: `{"id":42,"state":"COMMENTED"}`,
+		},
+		{
+			name: "non HTTP URL",
+			body: `{"id":42,"state":"COMMENTED","html_url":"javascript:alert(1)` + testToken + `"}`,
+		},
+		{
+			name: "URL userinfo",
+			body: `{"id":42,"state":"COMMENTED","html_url":"https://user:` + testToken + `@github.com/octocat/hello/pull/7"}`,
+		},
+		{
+			name: "URL control character",
+			body: `{"id":42,"state":"COMMENTED","html_url":"https://github.com/octocat/hello/\u0000` + testToken + `"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFakeGitHub(t)
+			fake.route(http.MethodGet, prPath, fakeResponse{status: http.StatusOK, body: openPR})
+			fake.route(http.MethodPost, prPath+"/reviews", fakeResponse{status: http.StatusOK, body: tt.body})
+
+			result, err := fake.provider().Call(context.Background(), reviewSpec())
+			var upstream *UpstreamError
+			if !errors.As(err, &upstream) {
+				t.Fatalf("error %T is not *UpstreamError (err=%v)", err, err)
+			}
+			if upstream.Class != ClassServerError || !Retryable(err) {
+				t.Fatalf("upstream = %+v, want retryable server_error", upstream)
+			}
+			if result.Status != http.StatusOK || result.Decision != domain.ConnectorCallUpstreamError {
+				t.Fatalf("result = %+v, want status 200 upstream_error", result)
+			}
+			assertNoCredential(t, err)
+			if reqs := fake.recorded(); len(reqs) != 2 ||
+				reqs[0].Method != http.MethodGet || reqs[1].Method != http.MethodPost {
+				t.Fatalf("requests = %+v, want GET then POST", reqs)
 			}
 		})
 	}

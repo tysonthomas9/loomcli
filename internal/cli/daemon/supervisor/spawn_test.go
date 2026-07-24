@@ -111,6 +111,34 @@ func TestAppendRoleEnv_Effort(t *testing.T) {
 	}
 }
 
+func TestAppendRoleEnv_ReadOnlyRoleConfigIsAuthoritative(t *testing.T) {
+	t.Parallel()
+
+	t.Run("writable role removes inherited policy", func(t *testing.T) {
+		t.Parallel()
+		ap := &AgentProcess{RoleConfig: cfgpkg.RoleConfig{ReadOnly: false}}
+
+		env := appendRoleEnv([]string{"PATH=/bin", "LOOM_READ_ONLY=1"}, ap)
+
+		for _, entry := range env {
+			if strings.HasPrefix(entry, "LOOM_READ_ONLY=") {
+				t.Fatalf("writable role inherited stale policy %q", entry)
+			}
+		}
+	})
+
+	t.Run("read-only role replaces inherited value", func(t *testing.T) {
+		t.Parallel()
+		ap := &AgentProcess{RoleConfig: cfgpkg.RoleConfig{ReadOnly: true}}
+
+		env := appendRoleEnv([]string{"LOOM_READ_ONLY=0"}, ap)
+
+		if len(env) != 1 || env[0] != "LOOM_READ_ONLY=1" {
+			t.Fatalf("read-only role env = %v, want [LOOM_READ_ONLY=1]", env)
+		}
+	})
+}
+
 func TestAppendSessionEnvConcurrentLeaseAccess(t *testing.T) {
 	ap := &AgentProcess{}
 

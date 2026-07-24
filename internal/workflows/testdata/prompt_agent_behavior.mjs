@@ -13,6 +13,19 @@ function error(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
+function triageMetadata(overrides = {}) {
+  return {
+    delivery: "patch_back",
+    backend: "codex",
+    files_changed: "0",
+    task_outcome: "triaged",
+    triage_summary: "P2 bug reproduced with a bounded failing case.",
+    triage_priority: "2",
+    triage_labels_json: JSON.stringify(["triaged", "triage:reproduced"]),
+    ...overrides,
+  };
+}
+
 function makeLoom(options = {}) {
   const calls = [];
   let issueReadIndex = 0;
@@ -57,6 +70,12 @@ function makeLoom(options = {}) {
         options.claimReadyError,
       ),
       release: async (params) => call("tasks.release", params, undefined, options.releaseError),
+      handoffReview: async (params) => call(
+        "tasks.handoffReview",
+        params,
+        options.handoffReviewResult || {},
+        options.handoffReviewError,
+      ),
     },
     issues: {
       get: async (params) => {
@@ -71,6 +90,13 @@ function makeLoom(options = {}) {
         return call("issues.get", params, result, failure);
       },
       addLabel: async (params) => call("issues.addLabel", params, options.addLabelResult || {}, options.addLabelError),
+      listComments: async (params) => call(
+        "issues.listComments",
+        params,
+        options.commentsResult || [],
+        options.commentsError,
+      ),
+      comment: async (params) => call("issues.comment", params, options.commentResult || {}, options.commentError),
       update: async (params) => call("issues.update", params, options.updateResult || {}, options.updateError),
       blockRepositoryRequired: async (params) => call(
         "issues.blockRepositoryRequired",
@@ -300,6 +326,417 @@ test("a named role with an unknown filter fails closed before claiming", async (
   assert.equal(result.taskFilter, "review");
   assert.match(result.summary, /unsupported task_filter "review"/);
   none(calls, "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("a mutating bug-filtered role fails closed before reading or claiming", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: false,
+  }, {
+    roleName: "unsafe-triage",
+    event: { taskId: TASK_ID, issueType: "bug" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "failed");
+  assert.equal(result.errorClass, "prompt_agent_bug_filter_requires_read_only");
+  assert.equal(result.claimed, false);
+  none(calls, "issues.get", "tasks.claim", "tasks.claimReady", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("a bug-filtered role rejects a known non-bug event before reading or claiming", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID, issueType: "task" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  assert.match(result.summary, /not my issue type/);
+  none(calls, "issues.get", "tasks.claim", "tasks.claimReady", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("a bug-filtered event missing type reads a non-bug card before claim and skips", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "task" },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  none(calls, "tasks.claim", "tasks.claimReady", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("a bug-filtered role treats a card with missing type as a non-match", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { title: "malformed projection" },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  none(calls, "tasks.claim", "tasks.claimReady", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("a bug-filtered card read failure is typed and never claims", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issueError: error("unavailable", "issue projection unavailable"),
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "failed");
+  assert.equal(result.errorClass, "prompt_agent_bug_filter_card_read_failed");
+  assert.equal(result.claimed, false);
+  assert.match(result.summary, /issue projection unavailable/);
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  none(calls, "tasks.claim", "tasks.claimReady", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("an untargeted bug-filtered run skips instead of using claimReady", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+  }, {
+    roleName: "bug-triage",
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  assert.match(result.summary, /skipped filterless pickup/);
+  none(calls, "issues.get", "tasks.claim", "tasks.claimReady", "tasks.release", "taskRuns.request", "taskRuns.await");
+});
+
+test("a verified bug card is read before claim and runs the read-only lifecycle", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug", priority: 3 },
+    claimResult: { id: TASK_ID, issueType: "bug", priority: 3 },
+    awaitResult: {
+      status: "completed",
+      runtime_metadata: {
+        delivery: "patch_back",
+        backend: "codex",
+        files_changed: "0",
+        task_outcome: "triaged",
+        triage_summary: "P1 regression reproduced in the parser.",
+        triage_priority: "1",
+        triage_labels_json: JSON.stringify(["triaged", "triage:parser"]),
+      },
+    },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.outcome, "bug-triage-review");
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  assert.deepEqual(one(calls, "tasks.claim"), { taskId: TASK_ID, actor: "prompt-agent" });
+  const request = taskRunRequest(calls);
+  assert.equal(request.input.deliveryMode, "patch-back");
+  assert.equal(request.input.taskOutcomeMode, "bug-triage");
+  assert.equal(request.retainWorkItemClaim, true);
+  assert.ok(callIndex(calls, "issues.get") < callIndex(calls, "tasks.claim"));
+  assert.ok(callIndex(calls, "tasks.claim") < callIndex(calls, "taskRuns.request"));
+  assert.deepEqual(one(calls, "tasks.handoffReview"), {
+    taskId: TASK_ID,
+    taskRunId: "promptagent-driver-run-7-TASK-42",
+    status: "review",
+    priority: 1,
+    labels: ["triaged", "triage:parser"],
+    commentBody: "P1 regression reproduced in the parser."
+      + "\n\nLoom bug-triage TaskRun: promptagent-driver-run-7-TASK-42",
+  });
+  assert.ok(callIndex(calls, "taskRuns.await") < callIndex(calls, "tasks.handoffReview"));
+  none(
+    calls,
+    "tasks.claimReady",
+    "tasks.release",
+    "issues.update",
+    "issues.addLabel",
+    "issues.listComments",
+    "issues.comment",
+    "needsReview",
+  );
+});
+
+test("a completed bug triage without typed output is handed to Review as needs-review", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug", priority: 4 },
+    // The claim-committed P0 must win over the stale pre-claim P4.
+    claimResult: { id: TASK_ID, issueType: "bug", priority: 0 },
+    awaitResult: {
+      status: "completed",
+      runtime_metadata: { delivery: "patch_back", backend: "codex", files_changed: "0" },
+    },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID, issueType: "bug" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "prompt_agent_bug_triage_outcome_missing");
+  assert.equal(result.outcome, "bug-triage-needs-review");
+  assert.deepEqual(one(calls, "tasks.handoffReview"), {
+    taskId: TASK_ID,
+    taskRunId: "promptagent-driver-run-7-TASK-42",
+    status: "review",
+    priority: 0,
+    labels: ["triage:needs-review"],
+    commentBody: "Bug triage completed without the required typed triage outcome."
+      + " No model-authored triage metadata was applied; inspect the TaskRun transcript."
+      + "\n\nLoom bug-triage TaskRun: promptagent-driver-run-7-TASK-42",
+  });
+  none(calls, "issues.update", "issues.addLabel", "issues.listComments", "issues.comment", "completed");
+});
+
+test("bug triage rejects raw workflow-control labels instead of minting them", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug" },
+    claimResult: { id: TASK_ID, issueType: "bug" },
+    awaitResult: {
+      status: "completed",
+      runtime_metadata: triageMetadata({
+        triage_labels_json: JSON.stringify(["triaged", "needs-revision"]),
+      }),
+    },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID, issueType: "bug" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "prompt_agent_bug_triage_outcome_invalid");
+  assert.deepEqual(one(calls, "tasks.handoffReview"), {
+    taskId: TASK_ID,
+    taskRunId: "promptagent-driver-run-7-TASK-42",
+    status: "review",
+    priority: 2,
+    labels: ["triage:needs-review"],
+    commentBody: "Bug triage reported invalid triage labels."
+      + " No model-authored triage metadata was applied; inspect the TaskRun transcript."
+      + "\n\nLoom bug-triage TaskRun: promptagent-driver-run-7-TASK-42",
+  });
+  none(calls, "issues.update", "issues.addLabel", "issues.listComments", "issues.comment", "completed");
+});
+
+test("bug triage surfaces a fenced handoff conflict without partial issue writes", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug" },
+    claimResult: { id: TASK_ID, issueType: "bug" },
+    handoffReviewError: error("conflict", "claim generation changed"),
+    awaitResult: {
+      status: "completed",
+      runtime_metadata: triageMetadata(),
+    },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID, issueType: "bug" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "prompt_agent_bug_triage_handoff_failed");
+  assert.match(result.summary, /claim generation changed/);
+  one(calls, "tasks.handoffReview");
+  none(calls, "issues.update", "issues.addLabel", "issues.listComments", "issues.comment", "completed");
+});
+
+test("bug triage cancellation cannot mint needs-revision or requeue the card", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug" },
+    claimResult: { id: TASK_ID, issueType: "bug" },
+    awaitResult: {
+      status: "cancelled",
+      error_class: "task_needs_revision",
+      runtime_metadata: { task_outcome: "needs_revision" },
+    },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID, issueType: "bug" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "prompt_agent_bug_triage_outcome_invalid");
+  assert.match(result.summary, /policy-owned terminal state/);
+  none(calls, "tasks.handoffReview", "issues.update", "issues.addLabel", "tasks.release", "completed");
+});
+
+test("a runner-rejected bug triage outcome leaves terminal Blocked policy intact", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug" },
+    claimResult: { id: TASK_ID, issueType: "bug" },
+    awaitResult: {
+      status: "failed",
+      error_class: "local_task_outcome_invalid",
+      error_message: "triaged task outcome priority must be an integer from 0 through 4",
+    },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID, issueType: "bug" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "prompt_agent_bug_triage_outcome_invalid");
+  assert.match(result.summary, /left blocked for review/);
+  none(
+    calls,
+    "tasks.handoffReview",
+    "issues.update",
+    "issues.addLabel",
+    "issues.listComments",
+    "issues.comment",
+    "completed",
+  );
+});
+
+test("bug triage delegates exact replay idempotency to the atomic handoff receipt", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug" },
+    claimResult: { id: TASK_ID, issueType: "bug" },
+    handoffReviewResult: { replayed: true, comment: { id: "comment-1" } },
+    awaitResult: {
+      status: "completed",
+      runtime_metadata: triageMetadata(),
+    },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID, issueType: "bug" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.outcome, "bug-triage-review");
+  assert.deepEqual(one(calls, "tasks.handoffReview"), {
+    taskId: TASK_ID,
+    taskRunId: "promptagent-driver-run-7-TASK-42",
+    status: "review",
+    priority: 2,
+    labels: ["triaged", "triage:reproduced"],
+    commentBody: "P2 bug reproduced with a bounded failing case."
+      + "\n\nLoom bug-triage TaskRun: promptagent-driver-run-7-TASK-42",
+  });
+  none(calls, "issues.update", "issues.addLabel", "issues.listComments", "issues.comment", "needsReview");
+});
+
+test("a bug card that drifts to non-bug at atomic claim is released before a completed skip", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug" },
+    claimResult: { id: TASK_ID, issueType: "task" },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID, issueType: "bug" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  assert.equal(result.released, true);
+  assert.equal(result.issueType, "task");
+  assert.match(result.summary, /committed claim issueType="task"/);
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  assert.deepEqual(one(calls, "tasks.claim"), { taskId: TASK_ID, actor: "prompt-agent" });
+  assert.deepEqual(one(calls, "tasks.release"), { taskId: TASK_ID });
+  assert.ok(callIndex(calls, "issues.get") < callIndex(calls, "tasks.claim"));
+  assert.ok(callIndex(calls, "tasks.claim") < callIndex(calls, "tasks.release"));
+  assert.ok(callIndex(calls, "tasks.release") < callIndex(calls, "completed"));
+  none(calls, "taskRuns.request", "taskRuns.await", "issues.update", "failed", "needsReview");
+});
+
+test("a bug claim receipt missing generated issueType is released and never dispatches", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug" },
+    claimResult: { id: TASK_ID },
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.skipped, true);
+  assert.equal(result.claimed, false);
+  assert.equal(result.released, true);
+  assert.equal(result.issueType, "");
+  assert.match(result.summary, /committed claim issueType=""/);
+  assert.deepEqual(one(calls, "tasks.release"), { taskId: TASK_ID });
+  assert.ok(callIndex(calls, "tasks.claim") < callIndex(calls, "tasks.release"));
+  assert.ok(callIndex(calls, "tasks.release") < callIndex(calls, "completed"));
+  none(calls, "taskRuns.request", "taskRuns.await", "issues.update", "failed", "needsReview");
+});
+
+test("a bug claim type mismatch plus typed-release failure returns a typed failure without dispatch", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "bug",
+    readOnly: true,
+    issue: { issue_type: "bug" },
+    claimResult: { id: TASK_ID, issueType: "feature" },
+    releaseError: error("internal", "typed release unavailable"),
+  }, {
+    roleName: "bug-triage",
+    event: { taskId: TASK_ID, issueType: "bug" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "failed");
+  assert.equal(result.errorClass, "prompt_agent_bug_filter_claim_release_failed");
+  assert.equal(result.claimed, true);
+  assert.equal(result.released, false);
+  assert.equal(result.issueType, "feature");
+  assert.match(result.summary, /typed release failed: typed release unavailable/);
+  assert.deepEqual(one(calls, "tasks.release"), { taskId: TASK_ID });
+  assert.ok(callIndex(calls, "tasks.claim") < callIndex(calls, "tasks.release"));
+  assert.ok(callIndex(calls, "tasks.release") < callIndex(calls, "failed"));
+  none(calls, "taskRuns.request", "taskRuns.await", "issues.update", "completed", "needsReview");
 });
 
 test("a read-only custom role hands designed work to review without closing it", async () => {

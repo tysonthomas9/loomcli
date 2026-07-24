@@ -25,7 +25,7 @@ func promptAgentSource(t *testing.T) string {
 // REFERENCE — input.roleName else the binding's configured roleName read from the
 // calling run's provenance (loom.binding.config) — then through the driver SDK
 // roles surface (GAP C), claims the exact target task by id (GAP B) while keeping
-// filterless claim-ready for untargeted pickup, and dispatches the bundled
+// filterless claim-ready for unconstrained pickup, and dispatches the bundled
 // local-task-runner (which a custom registration reaches via workspace-global
 // runner resolution, GAP A). These anchors lock that authoring contract; the
 // live full-circle exercises the runtime path.
@@ -47,6 +47,10 @@ func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 		"resolveRolePhase(resolved)",
 		`errorClass: "prompt_agent_unsupported_task_filter"`,
 		`return { supported: true, taskFilter: "has_design", rawTaskFilter };`,
+		`if (rawTaskFilter === "bug") {`,
+		`errorClass: "prompt_agent_bug_filter_requires_read_only"`,
+		`errorClass: "prompt_agent_bug_filter_card_read_failed"`,
+		"issueTypeAllowsBug",
 		// GAP B: targeted claim-by-id, plus filterless pickup retained.
 		"loom.tasks.claim({ taskId: targetId, actor })",
 		"loom.tasks.claimReady({ actor, limit: 1 })",
@@ -80,6 +84,11 @@ func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 		if !strings.Contains(source, want) {
 			t.Fatalf("prompt-agent source missing %q", want)
 		}
+	}
+	bugRead := strings.Index(source, "currentCard = (await loom.issues.get({ issueId: targetId }))")
+	targetClaim := strings.Index(source, "const claimed = await claimTargetTask(loom, actor, targetId)")
+	if bugRead < 0 || targetClaim < 0 || bugRead >= targetClaim {
+		t.Fatal("bug-filtered prompt-agent must read and verify the current card before claiming")
 	}
 	unclaimStart := strings.Index(source, "async function unclaimTask")
 	if unclaimStart < 0 {

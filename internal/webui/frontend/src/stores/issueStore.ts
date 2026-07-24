@@ -426,7 +426,19 @@ export function createIssueStore(
     ): Promise<void> {
       const existingIssue = get().issuesMap.get(issueId);
       if (!existingIssue) {
-        throw new Error(`Issue ${issueId} not found`);
+        // Detail surfaces can resolve an issue directly even when the active
+        // list projection excludes it. The mutation must still reach the API;
+        // it simply cannot use the optimistic snapshot/rollback path.
+        try {
+          await apiUpdateIssue(workspaceId, issueId, { status: newStatus });
+          scheduleProjectionRefresh(get);
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Failed to update status";
+          onToast?.(message, { type: "error" });
+          throw err;
+        }
+        return;
       }
 
       if (optimisticEntries.has(issueId)) {

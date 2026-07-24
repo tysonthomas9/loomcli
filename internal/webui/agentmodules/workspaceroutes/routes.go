@@ -17,22 +17,14 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
 	"github.com/tysonthomas9/loomcli/internal/webui/readprojection"
+	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 // New preserves the established route registration order while grouping the
 // concrete HTTP adapters behind one workspace composition seam.
 func New(deps routecontracts.Deps, automationModules automationroutes.Modules) []interface{ Register(*http.ServeMux) } {
 	onboardingModule := supportroutes.New(deps.IssueSvc, deps.AgentSvc)
-	var taskWorkflowRuns readprojection.TaskWorkflowRunReader
-	if deps.Store != nil {
-		taskWorkflowRuns = readprojection.NewTaskWorkflowRunReader(
-			deps.Store.AgentSessions(),
-			deps.Store.TaskRuns(),
-			deps.Store.TriggerEvents(),
-			deps.Store.TriggerDeliveries(),
-			deps.Store.DriverRuns(),
-		)
-	}
+	taskWorkflowRuns := newTaskWorkflowRunReader(deps)
 
 	return []interface{ Register(*http.ServeMux) }{
 		agents.New(agents.Config{
@@ -64,7 +56,8 @@ func New(deps routecontracts.Deps, automationModules automationroutes.Modules) [
 			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL, APIBaseURL: deps.DriverAPIBaseURL,
 			IssueBackends: deps.ExecutionIssueBackends,
 			APIToken:      deps.DriverAPIToken, RunTokenKey: deps.DriverRunTokenKey,
-			LocalSettingsDir: deps.LocalSettingsDir, Dispatcher: deps.Dispatcher,
+			LocalSettingsDir: deps.LocalSettingsDir, LocalRepoPath: storeadapter.ResolveRepoPath,
+			Dispatcher:       deps.Dispatcher,
 			WorkflowEventing: deps.AutomationEventing, EventAwaits: automationModules.EventAwaits,
 			Execution: deps.ExecutionDriverRuns, ExecutionAuthorities: deps.ExecutionDriverRunAuthorities,
 			TaskRunRequests: deps.ExecutionTaskRunRequests, TaskRunRecovery: deps.ExecutionTaskRunRecovery,
@@ -72,4 +65,17 @@ func New(deps routecontracts.Deps, automationModules automationroutes.Modules) [
 			WorkflowCatalog: deps.WorkflowCatalog, Artifacts: deps.Artifacts,
 		}),
 	}
+}
+
+func newTaskWorkflowRunReader(deps routecontracts.Deps) readprojection.TaskWorkflowRunReader {
+	if deps.Store == nil {
+		return nil
+	}
+	return readprojection.NewTaskWorkflowRunReader(
+		deps.Store.AgentSessions(),
+		deps.Store.TaskRuns(),
+		deps.Store.TriggerEvents(),
+		deps.Store.TriggerDeliveries(),
+		deps.Store.DriverRuns(),
+	)
 }

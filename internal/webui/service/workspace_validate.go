@@ -163,6 +163,12 @@ func extractCloneHost(cloneURL string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if u.User != nil {
+			return "", fmt.Errorf("URL userinfo is forbidden")
+		}
+		if u.RawQuery != "" || u.Fragment != "" {
+			return "", fmt.Errorf("URL query strings and fragments are forbidden")
+		}
 		host := u.Hostname()
 		if host == "" {
 			return "", fmt.Errorf("empty host in URL")

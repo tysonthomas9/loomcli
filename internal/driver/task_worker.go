@@ -87,8 +87,9 @@ type TaskWorker struct {
 	// APIBaseURL is the serve task-run API base URL exported to bridge task
 	// runners as LOOM_TASK_RUN_API_URL (see HostBridgeTaskExecutor).
 	APIBaseURL string
-	// LocalSettingsDir is passed through to HostBridgeTaskExecutor so bundled
-	// local-task-runner can read desktop-local credentials/settings.
+	// LocalSettingsDir is passed through to HostBridgeTaskExecutor and the
+	// default worktree resolver so bundled runners and git operations can read
+	// desktop-local settings just in time.
 	LocalSettingsDir string
 	// WorktreeResolver resolves per-task-run local worktrees for bundled local
 	// task runners. Nil uses the machine-local workspace cache.
@@ -190,8 +191,12 @@ func (w *TaskWorker) runOnceInWorkspace(ctx context.Context, ws, workDir string)
 			WorktreePath:        workDir,
 			APIBaseURL:          w.APIBaseURL,
 			LocalSettingsDir:    w.LocalSettingsDir,
-			WorktreeResolver:    firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{Store: w.Store, Lineage: DefaultStackLineageLookup()}),
-			StackStore:          DefaultStackStore(),
+			WorktreeResolver: firstNonNilTaskWorktreeResolver(w.WorktreeResolver, LocalTaskWorktreeResolver{
+				Store:            w.Store,
+				Lineage:          DefaultStackLineageLookup(),
+				LocalSettingsDir: w.LocalSettingsDir,
+			}),
+			StackStore: DefaultStackStore(),
 		}
 	} else {
 		executor = withTaskWorkerArtifacts(executor, w.Artifacts, w.TaskRunAuthorities)

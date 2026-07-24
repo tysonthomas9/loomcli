@@ -88,6 +88,10 @@ type Config struct {
 	// LocalSettingsDir is the desktop-local settings directory exposed only to
 	// bundled local-task-runner executions.
 	LocalSettingsDir string
+	// LocalRepoPath resolves the trusted machine-local checkout recorded for
+	// one workspace repo. It enables local-review diff acquisition without
+	// changing the shared Repo record's canonical remote URL.
+	LocalRepoPath func(workspaceKey, repoName string) string
 	// IssueBackends overrides the default fleet-db issue backend factory.
 	IssueBackends IssueBackendFactory
 	// Dispatcher is the connector egress choke point for connector-dispatch.
@@ -121,6 +125,7 @@ type Module struct {
 	apiBaseURL           string
 	worktreePath         string
 	localSettingsDir     string
+	localRepoPath        func(workspaceKey, repoName string) string
 	issueBackends        IssueBackendFactory
 	dispatcher           *connector.Dispatcher
 	workflowEventing     *workfloweventing.Workflow
@@ -156,6 +161,7 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		apiBaseURL:           strings.TrimSpace(cfg.APIBaseURL),
 		worktreePath:         cfg.WorktreePath,
 		localSettingsDir:     strings.TrimSpace(cfg.LocalSettingsDir),
+		localRepoPath:        cfg.LocalRepoPath,
 		issueBackends:        cfg.IssueBackends,
 		dispatcher:           cfg.Dispatcher,
 		workflowEventing:     cfg.WorkflowEventing,

@@ -225,6 +225,9 @@ func TestGitHubReviewAgentWorkflowSourceContract(t *testing.T) {
 		{name: "invalid findings error class", want: `errorClass: "invalid_review_findings"`},
 		{name: "posts review", want: "loom.connectors.github.postReview({"},
 		{name: "comment-only event", want: `event: "COMMENT",`},
+		{name: "line is locator only", want: "Include line only when it is useful as a locator hint"},
+		{name: "uncertified anchors cannot lose review", want: "does not risk the whole review on an uncertified inline anchor"},
+		{name: "provider owns finding placement", want: `return summary + "\n\n" + count + " review finding(s) follow.";`},
 		{name: "completed with review url", want: "reviewUrl:"},
 	}
 	for _, tt := range tests {

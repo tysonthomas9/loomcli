@@ -48,6 +48,7 @@ function toJsonResult(value) {
 // task can never fake-complete here.
 
 const DEFAULT_BACKEND = "codex";
+const BUG_TRIAGE_TASK_OUTCOME_MODE = "bug-triage";
 
 // SUPPORTED maps each backend to its default binary name. The binary is
 // overridable via LOOM_<BACKEND>_BIN so tests can inject a fake CLI and so
@@ -145,12 +146,16 @@ export async function run(ctx = {}) {
   // Precedence: the daemon-leaf env override (its exact composed prompt) wins,
   // then input.taskPrompt (custom workflows), else this runner's generic prompt.
   const inputPrompt = stringValue(inputValue(request, "taskPrompt"));
+  const taskOutcomeMode = stringValue(inputValue(request, "taskOutcomeMode"));
   const basePrompt = typeof promptOverride === "string" && promptOverride.trim() !== ""
     ? promptOverride
     : inputPrompt.trim() !== ""
       ? inputPrompt
       : buildPrompt(request, task, execWorktree);
-  const prompt = applyRolePolicy(basePrompt);
+  const prompt = applyTaskOutcomePromptContract(
+    applyRolePolicy(basePrompt),
+    taskOutcomeMode,
+  );
   const args = backendArgs(backend, execWorktree, prompt);
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
@@ -213,7 +218,7 @@ export async function run(ctx = {}) {
     // model evidence and therefore intentionally omit transcript_entries.
     transcriptEntries = buildTranscriptEntries(backend, taskId || taskRunId, prompt, stdout);
     taskUsage = taskUsageFromEntries(transcriptEntries);
-    taskOutcome = readTaskOutcome(taskOutcomeChannel.file);
+    taskOutcome = readTaskOutcome(taskOutcomeChannel.file, taskOutcomeMode);
     if (taskOutcome) {
       logs.push(taskOutcome.invalid
         ? "task outcome rejected: " + taskOutcome.invalid
@@ -408,6 +413,13 @@ export async function run(ctx = {}) {
   if (acceptedTaskOutcome) {
     metadata.task_outcome = acceptedTaskOutcome.disposition;
     metadata.task_outcome_summary = redactRunnerText(acceptedTaskOutcome.summary);
+    if (acceptedTaskOutcome.disposition === "triaged") {
+      metadata.triage_summary = redactRunnerText(acceptedTaskOutcome.summary);
+      metadata.triage_priority = String(acceptedTaskOutcome.priority);
+      metadata.triage_labels_json = JSON.stringify(
+        acceptedTaskOutcome.labels.map((label) => redactRunnerText(label)),
+      );
+    }
   }
 
   if (stackInfo) {
@@ -432,6 +444,34 @@ export async function run(ctx = {}) {
     metadata.delivery = "pull_request_skipped_no_changes";
   } else {
     metadata.delivery = "patch_back";
+  }
+
+  // A real backend failure is the primary terminal fact. A model can write the
+  // outcome channel before crashing (or leave partial JSON while a stream
+  // fails); never reclassify that execution failure as a protocol-validation
+  // failure, because prompt-agent intentionally leaves exhausted execution
+  // failures Blocked for operator review.
+  if (exitCode !== 0 || streamFailure) {
+    const failureExitCode = exitCode !== 0 ? exitCode : 1;
+    const failureMessage = streamFailure
+      ? `${backend} CLI reported stream error: ${streamFailure}`
+      : `${backend} CLI exited with code ${exitCode}`;
+    return {
+      status: "failed",
+      exitCode: failureExitCode,
+      errorClass: "local_agent_failed",
+      errorMessage: redactRunnerText(failureMessage),
+      logs: renderLogs(logs),
+      logsRef: "logs://" + taskRunId,
+      ...taskUsage,
+      transcript_entries: transcriptEntries,
+      patch: patchInfo.patch,
+      // base_ref lets the driver host-bridge patch-back apply this patch to the
+      // (clean) host worktree. Empty when running in place (no patch-back).
+      base_ref: baseRef,
+      patch_base_ref: baseRef,
+      runtimeMetadata: { ...metadata, phase: "local_agent_failed" },
+    };
   }
 
   if (taskOutcome && taskOutcome.invalid) {
@@ -472,29 +512,6 @@ export async function run(ctx = {}) {
       needsRevision.patch_base_ref = baseRef;
     }
     return needsRevision;
-  }
-
-  if (exitCode !== 0 || streamFailure) {
-    const failureExitCode = exitCode !== 0 ? exitCode : 1;
-    const failureMessage = streamFailure
-      ? `${backend} CLI reported stream error: ${streamFailure}`
-      : `${backend} CLI exited with code ${exitCode}`;
-    return {
-      status: "failed",
-      exitCode: failureExitCode,
-      errorClass: "local_agent_failed",
-      errorMessage: redactRunnerText(failureMessage),
-      logs: renderLogs(logs),
-      logsRef: "logs://" + taskRunId,
-      ...taskUsage,
-      transcript_entries: transcriptEntries,
-      patch: patchInfo.patch,
-      // base_ref lets the driver host-bridge patch-back apply this patch to the
-      // (clean) host worktree. Empty when running in place (no patch-back).
-      base_ref: baseRef,
-      patch_base_ref: baseRef,
-      runtimeMetadata: { ...metadata, phase: "local_agent_failed" },
-    };
   }
 
   const completed = {
@@ -614,6 +631,20 @@ function dirExists(filePath) {
 
 const TASK_OUTCOME_MAX_BYTES = 16 * 1024;
 const TASK_OUTCOME_SUMMARY_MAX_CHARS = 2000;
+// The runner adds the fixed host-owned `triaged` marker, keeping the persisted
+// label set bounded to eight entries total.
+const TASK_OUTCOME_TRIAGE_MAX_LABELS = 7;
+const TASK_OUTCOME_TRIAGE_MAX_LABEL_CHARS = 64;
+const TASK_OUTCOME_TRIAGE_LABEL_SLUG_MAX_CHARS = 48;
+const TASK_OUTCOME_PROTECTED_LABELS = new Set([
+  "needs-revision",
+  "review-cycle-cap-noted",
+  "triaged",
+]);
+const TASK_OUTCOME_PROTECTED_LABEL_PREFIXES = [
+  "loom:",
+  "review-cycle:",
+];
 
 // createTaskOutcomeChannel allocates outside the repository so the protocol
 // file can never leak into a patch/commit. The child receives only the exact
@@ -632,9 +663,13 @@ function cleanupTaskOutcomeChannel(channel) {
   }
 }
 
-// readTaskOutcome is deliberately a closed enum. Unknown/malformed content is
-// an explicit fail-closed result, while absence means ordinary task completion.
-function readTaskOutcome(filePath) {
+// readTaskOutcome is deliberately a closed, mode-bound protocol.
+// needs_revision remains available to implementation runners, but bug-triage
+// mode accepts only triaged: a model cannot turn a read-only triage run into a
+// planner requeue. A custom prompt likewise cannot widen its own capability by
+// writing a different JSON shape. Unknown/malformed content is an explicit
+// fail-closed result, while absence means ordinary task completion.
+function readTaskOutcome(filePath, mode = "") {
   let stat;
   try {
     stat = fs.lstatSync(filePath);
@@ -654,9 +689,17 @@ function readTaskOutcome(filePath) {
   } catch (err) {
     return { invalid: "LOOM_TASK_OUTCOME_FILE is not valid JSON: " + errorMessage(err) };
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)
-      || value.version !== 1 || value.disposition !== "needs_revision") {
-    return { invalid: "task outcome must be {version:1, disposition:\"needs_revision\", summary:string}" };
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.version !== 1) {
+    return { invalid: "task outcome must be a version 1 object" };
+  }
+  if (mode === BUG_TRIAGE_TASK_OUTCOME_MODE && value.disposition !== "triaged") {
+    return { invalid: "bug-triage task outcome disposition must be \"triaged\"" };
+  }
+  if (value.disposition === "triaged") {
+    return readBugTriageOutcome(value, mode);
+  }
+  if (value.disposition !== "needs_revision") {
+    return { invalid: "task outcome disposition is unsupported" };
   }
   const keys = Object.keys(value).sort();
   if (keys.join(",") !== "disposition,summary,version") {
@@ -667,6 +710,80 @@ function readTaskOutcome(filePath) {
     return { invalid: "task outcome summary must contain 1-" + TASK_OUTCOME_SUMMARY_MAX_CHARS + " characters" };
   }
   return { disposition: "needs_revision", summary };
+}
+
+function readBugTriageOutcome(value, mode) {
+  if (mode !== BUG_TRIAGE_TASK_OUTCOME_MODE) {
+    return { invalid: "triaged task outcome requires taskOutcomeMode=\"bug-triage\"" };
+  }
+  const keys = Object.keys(value).sort();
+  if (keys.join(",") !== "disposition,labels,priority,summary,version") {
+    return { invalid: "triaged task outcome contains unsupported fields" };
+  }
+  const summary = typeof value.summary === "string" ? value.summary.trim() : "";
+  if (!summary || summary.length > TASK_OUTCOME_SUMMARY_MAX_CHARS) {
+    return { invalid: "triaged task outcome summary must contain 1-" + TASK_OUTCOME_SUMMARY_MAX_CHARS + " characters" };
+  }
+  if (!Number.isInteger(value.priority) || value.priority < 0 || value.priority > 4) {
+    return { invalid: "triaged task outcome priority must be an integer from 0 through 4" };
+  }
+  if (!Array.isArray(value.labels) || value.labels.length > TASK_OUTCOME_TRIAGE_MAX_LABELS) {
+    return { invalid: "triaged task outcome labels must be an array with at most " + TASK_OUTCOME_TRIAGE_MAX_LABELS + " entries" };
+  }
+  const labels = ["triaged"];
+  const seenRaw = new Set();
+  const seenSafe = new Set(labels);
+  for (const raw of value.labels) {
+    if (typeof raw !== "string" || raw !== raw.trim() || raw.length < 1
+        || raw.length > TASK_OUTCOME_TRIAGE_MAX_LABEL_CHARS || /[\x00-\x1f\x7f]/.test(raw)) {
+      return { invalid: "triaged task outcome labels must be nonblank trimmed strings of at most "
+        + TASK_OUTCOME_TRIAGE_MAX_LABEL_CHARS + " characters without control characters" };
+    }
+    if (seenRaw.has(raw)) {
+      return { invalid: "triaged task outcome labels must be unique" };
+    }
+    if (isTaskOutcomeProtectedLabel(raw)) {
+      return { invalid: "triaged task outcome labels may not use host-owned workflow labels" };
+    }
+    const slug = triageLabelSlug(raw);
+    if (!slug) {
+      return { invalid: "triaged task outcome labels must contain a safe alphanumeric slug" };
+    }
+    const safe = "triage:" + slug;
+    if (seenSafe.has(safe)) {
+      return { invalid: "triaged task outcome labels must remain unique after safe normalization" };
+    }
+    seenRaw.add(raw);
+    seenSafe.add(safe);
+    labels.push(safe);
+  }
+  return {
+    disposition: "triaged",
+    summary,
+    priority: value.priority,
+    labels,
+  };
+}
+
+// Triage labels are model-proposed descriptive metadata. Labels that control
+// planner/coder routing, review-loop accounting, or Loom-owned quarantine
+// state must only be minted by their owning host workflow. Match
+// case-insensitively so spelling variants cannot claim a reserved namespace.
+function isTaskOutcomeProtectedLabel(label) {
+  const normalized = label.toLowerCase();
+  return TASK_OUTCOME_PROTECTED_LABELS.has(normalized)
+    || TASK_OUTCOME_PROTECTED_LABEL_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+function triageLabelSlug(label) {
+  return label
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, TASK_OUTCOME_TRIAGE_LABEL_SLUG_MAX_CHARS)
+    .replace(/-+$/g, "");
 }
 
 // DefaultMaxBudgetUSD mirrors internal/cli/backends/backend_claude.go.
@@ -900,6 +1017,42 @@ export function applyRolePolicy(prompt) {
     policy.push("Do not use these tool categories: " + denied.join(", ") + ".");
   }
   return policy.join("\n") + "\n\n" + prompt;
+}
+
+// applyTaskOutcomePromptContract appends the host-owned protocol after the
+// operator Role prompt so it is the final, authoritative instruction. Some
+// shared bug-triage Roles are also used by the legacy daemon and therefore
+// contain direct `loom data` mutation instructions that are valid there but
+// forbidden inside a TaskRun. This contract explicitly supersedes those
+// placement-specific instructions without rewriting the shared Role.
+function applyTaskOutcomePromptContract(prompt, mode) {
+  if (mode !== BUG_TRIAGE_TASK_OUTCOME_MODE) {
+    return prompt;
+  }
+  return prompt + `
+
+## Authoritative Loom TaskRun bug-triage handoff
+
+This section overrides any earlier instruction to comment on, label, reprioritize,
+assign, close, or move the Loom ticket yourself. Do not call raw Loom/Fleet HTTP
+APIs and do not use Loom CLI metadata mutation commands. The workflow host owns
+all ticket mutations and the terminal Review transition.
+
+Investigate only the supervisor-assigned bug. When the investigation is complete,
+write exactly one JSON object to the file named by \`LOOM_TASK_OUTCOME_FILE\`:
+
+\`\`\`json
+{"version":1,"disposition":"triaged","summary":"concise evidence-based triage report","priority":2,"labels":["parser","regression"]}
+\`\`\`
+
+\`summary\` must contain 1-${TASK_OUTCOME_SUMMARY_MAX_CHARS} characters,
+\`priority\` must be an integer from 0 through 4, and \`labels\` must contain at
+most ${TASK_OUTCOME_TRIAGE_MAX_LABELS} unique descriptive strings (each at most
+${TASK_OUTCOME_TRIAGE_MAX_LABEL_CHARS} characters). Do not include routing or
+workflow-control labels. The host safely namespaces accepted labels under
+\`triage:\` and adds the fixed \`triaged\` marker. This host-owned outcome file is
+the sole write allowed by this read-only run; do not modify repository files.
+`;
 }
 
 function commaSeparatedValues(value) {

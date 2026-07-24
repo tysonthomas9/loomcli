@@ -5017,8 +5017,16 @@ paths:
       description: >-
         Validates the live parent owner, exact claim generation, completed
         TaskRun lineage, and immutable retained-claim policy before moving the
-        work item to open or closed and retiring its claim in one transaction.
-        Requires an authenticated service actor.
+        work item to open, review, or closed and retiring its claim in one
+        transaction. A review handoff also atomically sets priority, adds
+        normalized labels, and creates one server-authored comment. Exact
+        command replay returns the immutable original response without creating
+        another comment. For review handoffs, handed_off_at is commit metadata
+        rather than part of idempotency identity, so timestamp-only retries
+        replay the first committed issue, action, and comment. A claim
+        originating in open may hand off only to review; a claim originating in
+        review may hand off to open, review, or closed. Requires an authenticated
+        service actor.
       operationId: handoffDriverRunReviewWorkItem
       parameters:
         - $ref: "#/components/parameters/XLeaseToken"
@@ -12317,6 +12325,18 @@ components:
       type: object
       additionalProperties: false
       required: [command_id, node_id, lease_id, fencing_token, claim_action_id, task_run_id, target_status, handed_off_at]
+      allOf:
+        - if:
+            properties:
+              target_status: { const: review }
+          then:
+            required: [priority, comment_body]
+          else:
+            not:
+              anyOf:
+                - required: [priority]
+                - required: [labels]
+                - required: [comment_body]
       properties:
         command_id: { type: string, maxLength: 128 }
         node_id: { type: string }
@@ -12328,10 +12348,34 @@ components:
         task_run_id: { type: string }
         target_status:
           type: string
-          enum: [open, closed]
+          enum: [open, review, closed]
         reason:
           type: string
           description: Close reason when target_status is closed.
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 4
+          description: Required only when target_status is review.
+        labels:
+          type: array
+          maxItems: 8
+          description: >-
+            Optional additive labels for a review handoff. FleetDB trims and
+            stable-deduplicates entries. Normalized labels are non-empty,
+            control-free, contain no comma or semicolon, and are at most 64
+            UTF-8 bytes. Rejected for open and closed handoffs.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+        comment_body:
+          type: string
+          minLength: 1
+          maxLength: 10000
+          description: >-
+            Required only when target_status is review. Persisted as one
+            server-authored immutable comment tied to this handoff command.
         handed_off_at: { type: string, format: date-time }
 
     DriverRunWorkItemCommandResult:
@@ -12340,6 +12384,10 @@ components:
       properties:
         issue: { $ref: "#/components/schemas/Issue" }
         action: { $ref: "#/components/schemas/ActionLedger" }
+        comment:
+          allOf:
+            - $ref: "#/components/schemas/Comment"
+          description: Present only for a review handoff.
         replayed: { type: boolean }
 
     TaskRunRequestAtomicRequest:

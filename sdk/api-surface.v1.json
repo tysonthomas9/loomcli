@@ -152,7 +152,10 @@
         "taskId",
         "taskRunId",
         "status",
-        "reason"
+        "reason",
+        "priority",
+        "labels",
+        "commentBody"
       ]
     },
     "epic-get": {

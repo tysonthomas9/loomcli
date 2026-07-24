@@ -151,11 +151,26 @@ describe("review-loop Work Item ownership", () => {
       request(input) {
         return { taskRunId: input.taskRunId, status: "queued", replay: true };
       },
+      await() {
+        return {
+          status: "completed",
+          runtime_metadata: {
+            review_findings: JSON.stringify({
+              summary: "Looks good",
+              comments: [
+                { path: "internal/worker.go", line: 73, body: "Release the lease on this error path." },
+                { path: "internal/deletion.go", body: "Preserve this unanchored finding in the review body." },
+              ],
+            }),
+          },
+        };
+      },
     });
 
     const result = await mod.reviewPullRequest(loom, "github", SUBJECT, 1, "LOCALMODE-42");
 
     assert.equal(result.ok, true);
+    assert.equal(result.reviewUrl, "https://github.test/review/1");
     const names = callNames(calls);
     assert.ok(names.indexOf("readPullRequest") < names.indexOf("compare"));
     assert.ok(names.indexOf("compare") < names.indexOf("claimReview"));
@@ -171,7 +186,12 @@ describe("review-loop Work Item ownership", () => {
     assert.equal(requested.input.repo, "acme/widgets");
     assert.equal(requested.input.prNumber, 123);
     assert.equal(requested.taskRunId, "review-loop-automation-run-1-localmode-42-c1");
-    assert.equal(calls.find(([name]) => name === "postReview")[1].body, "Looks good");
+    const postedReview = calls.find(([name]) => name === "postReview")[1];
+    assert.equal(postedReview.body, "Looks good");
+    assert.deepEqual(postedReview.comments, [
+      { path: "internal/worker.go", line: 73, body: "Release the lease on this error path." },
+      { path: "internal/deletion.go", body: "Preserve this unanchored finding in the review body." },
+    ]);
     assert.deepEqual(calls.find(([name]) => name === "handoffReview")[1], {
       taskId: "LOCALMODE-42",
       taskRunId: "review-loop-automation-run-1-localmode-42-c1",

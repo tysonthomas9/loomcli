@@ -14,8 +14,10 @@ import {
 } from "@/api/agents"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import type {
+  CreateRoleRequest,
   InteractivePromptInfo,
   RepoInfo,
+  RoleWithPrompt,
   WorkspaceAgentInfo,
   WorkspaceRole,
 } from "@/api/workspace";
@@ -42,6 +44,8 @@ import {
 import { AgentTemplateCard } from "./AgentTemplateCard";
 import {
   BUILTIN_ROLE_TEMPLATES,
+  LEGACY_BUG_TRIAGE_PROMPT,
+  LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME,
   LEGACY_DAEMON_TEMPLATES,
   NEW_ROLE_TEMPLATE,
   SCRIPTED_WORKFLOW_TEMPLATES,
@@ -69,6 +73,11 @@ const DEFAULT_CADENCE = CADENCE_OPTIONS[0].value;
 const BUILTIN_ROLE_NAMES = new Set(["lead", "plan", "task"]);
 
 const CUSTOM_PROMPT_ID = "custom";
+
+const BUG_TRIAGE_ROLE_NAME = "bug-triage";
+const BUG_TRIAGE_FALLBACK_ROLE_NAME = "loom-bug-triage-v2";
+const LEGACY_BUG_TRIAGE_DESCRIPTION =
+  "Reproduces and triages ready tickets; does not write fixes.";
 
 const INTERACTIVE_ACCENTS = {
   lead: "#db2777",
@@ -134,6 +143,7 @@ function isPromptAgentTaskFilterSupported(
     case "any":
     case "needs_plan":
     case "has_design":
+    case "bug":
       return true;
     default:
       return false;
@@ -146,8 +156,86 @@ function isCustomPromptAgentRoleCandidate(role: WorkspaceRole): boolean {
     roleName !== "" &&
     !BUILTIN_ROLE_NAMES.has(roleName.toLowerCase()) &&
     !isInteractiveWorkspaceRole(role) &&
-    isPromptAgentTaskFilterSupported(role.task_filter)
+    isPromptAgentTaskFilterSupported(role.task_filter) &&
+    (role.task_filter?.trim() !== "bug" || role.read_only === true)
   );
+}
+
+function isEmptyRoleList(value: string[] | undefined): boolean {
+  return value === undefined || value.length === 0;
+}
+
+function isLegacyBugTriagePromptFile(promptFile: string | undefined): boolean {
+  const normalized = promptFile?.replace(/\\/g, "/") ?? "";
+  return ["bug-triage.md", LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME].some(
+    (basename) =>
+      normalized === `.loom/prompts/${basename}` ||
+      normalized.endsWith(`/.loom/prompts/${basename}`),
+  );
+}
+
+/**
+ * Recognize only the exact role definition shipped by the previous built-in
+ * bug-triage card. This accepts both its original mutable prompt path and the
+ * later immutable path. A 409 for anything else is shared user authority and
+ * must remain a conflict rather than being bypassed by template provisioning.
+ */
+function isExactLegacyBugTriageRole(current: RoleWithPrompt): boolean {
+  const role = current.role;
+  const kind = role.kind?.trim() ?? "";
+  return (
+    role.name === BUG_TRIAGE_ROLE_NAME &&
+    (kind === "" || kind === "worker") &&
+    role.description === LEGACY_BUG_TRIAGE_DESCRIPTION &&
+    (role.prompt?.trim() ?? "") === "" &&
+    isLegacyBugTriagePromptFile(role.prompt_file) &&
+    role.task_filter === "any" &&
+    role.read_only === true &&
+    (role.model?.trim() ?? "") === "" &&
+    (role.backend?.trim() ?? "") === "" &&
+    (role.effort?.trim() ?? "") === "" &&
+    isEmptyRoleList(role.path_patterns) &&
+    isEmptyRoleList(role.skills) &&
+    isEmptyRoleList(role.allowed_tools) &&
+    isEmptyRoleList(role.denied_tools) &&
+    role.max_priority === undefined &&
+    role.max_concurrency === undefined &&
+    role.max_budget_usd === undefined &&
+    current.prompt === LEGACY_BUG_TRIAGE_PROMPT
+  );
+}
+
+async function ensureTemplateRole(
+  workspaceId: string,
+  request: CreateRoleRequest,
+  ensureRole: (req: CreateRoleRequest) => Promise<WorkspaceRole>,
+): Promise<WorkspaceRole> {
+  try {
+    return await ensureRole(request);
+  } catch (error) {
+    if (
+      !(error instanceof ApiError) ||
+      error.status !== 409 ||
+      request.name !== BUG_TRIAGE_ROLE_NAME
+    ) {
+      throw error;
+    }
+
+    const current = await getWorkspaceRole(workspaceId, request.name);
+    if (!isExactLegacyBugTriageRole(current)) {
+      throw error;
+    }
+
+    // Never rewrite the shared legacy name from the browser: role PATCH has no
+    // compare-and-swap precondition, so an operator edit racing this request
+    // could otherwise be lost. Exact-ensure a reserved successor instead. The
+    // server rejects an incompatible fallback collision, while an identical
+    // existing successor remains idempotent.
+    return ensureRole({
+      ...request,
+      name: BUG_TRIAGE_FALLBACK_ROLE_NAME,
+    });
+  }
 }
 
 /** Details of a workflow activation, surfaced to the caller on success. */
@@ -504,7 +592,8 @@ export function CreateAgentModal({
               const role = detail.role ?? listedRole;
               if (
                 !isCustomPromptAgentRoleCandidate(role) ||
-                detail.prompt.trim() === ""
+                detail.prompt.trim() === "" ||
+                isExactLegacyBugTriageRole(detail)
               ) {
                 return null;
               }
@@ -814,13 +903,14 @@ export function CreateAgentModal({
       // Custom-role templates provision their Role (and seed its prompt file)
       // on first use, before the agent that references the role is created.
       // The endpoint is idempotent, so re-creating the same template is safe.
+      let roleName = selectedTemplate.roleName;
       if (
         !isInteractive &&
         selectedTemplate.kind === "custom-role" &&
         selectedTemplate.customRole
       ) {
         const cr = selectedTemplate.customRole;
-        await ensureRole({
+        const roleRequest: CreateRoleRequest = {
           name: cr.roleName,
           prompt: cr.promptContent,
           prompt_filename: cr.promptFilename,
@@ -829,9 +919,14 @@ export function CreateAgentModal({
           ...(cr.readOnly !== undefined ? { read_only: cr.readOnly } : {}),
           ...(cr.allowedTools ? { allowed_tools: cr.allowedTools } : {}),
           ...(cr.deniedTools ? { denied_tools: cr.deniedTools } : {}),
-        });
+        };
+        const ensuredRole = await ensureTemplateRole(
+          workspaceId,
+          roleRequest,
+          ensureRole,
+        );
+        roleName = ensuredRole.name;
       }
-      let roleName = selectedTemplate.roleName;
       let interactiveFields: {
         kind?: "interactive";
         prompt?: string;
@@ -861,7 +956,11 @@ export function CreateAgentModal({
         // Non-interactive templates keep their canonical role name. Interactive
         // prompts use the built-in prompt id (or the agent name for inline text).
         role_name: roleName,
-        auto: false,
+        // Advanced workers have no browser-owned terminal or manual Start
+        // control: the local-mode daemon manager discovers their workspace
+        // only when at least one assignment is marked auto. Interactive agents
+        // remain browser-launched and must never be daemon-supervised.
+        auto: !isInteractive,
         cross_repo: crossRepo,
         repos: crossRepo ? [] : selectedRepos,
         ...interactiveFields,

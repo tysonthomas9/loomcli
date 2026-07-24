@@ -17,8 +17,17 @@ import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom";
 
 import { CreateAgentModal } from "../CreateAgentModal";
+import {
+  BUG_TRIAGE_PROMPT,
+  LEGACY_BUG_TRIAGE_PROMPT,
+  LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME,
+} from "../agentTemplates";
 import { ApiError } from "@/types/common";
-import type { RepoInfo, WorkspaceAgentInfo } from "@/api/workspace";
+import type {
+  RepoInfo,
+  RoleWithPrompt,
+  WorkspaceAgentInfo,
+} from "@/api/workspace";
 
 // ---------- Mocks ----------
 
@@ -29,6 +38,7 @@ const mockEnsureRole = vi.fn();
 const mockCreatePromptAgentRecord = vi.fn();
 const mockListWorkspaceRoles = vi.fn();
 const mockGetWorkspaceRole = vi.fn();
+const mockUpdateWorkspaceRole = vi.fn();
 const mockCreateBinding = vi.fn();
 const mockUpdateBinding = vi.fn();
 const mockSetEnabled = vi.fn();
@@ -52,6 +62,7 @@ vi.mock("@/api/agents", () => ({
 vi.mock("@/api/workspace", () => ({
   getWorkspaceRole: (...args: unknown[]) => mockGetWorkspaceRole(...args),
   listWorkspaceRoles: (...args: unknown[]) => mockListWorkspaceRoles(...args),
+  updateWorkspaceRole: (...args: unknown[]) => mockUpdateWorkspaceRole(...args),
 }));
 vi.mock("@/hooks/workspace", () => ({
   GITHUB_CONNECTOR_ID: "github",
@@ -112,6 +123,22 @@ const sampleAgentRecord = {
   bindings: [{ binding_id: "agt-coder-1" }],
 };
 
+function exactLegacyBugTriageRole(promptFile: string): RoleWithPrompt {
+  return {
+    role: {
+      workspace_key: "ws-1",
+      name: "bug-triage",
+      kind: "worker",
+      description:
+        "Reproduces and triages ready tickets; does not write fixes.",
+      prompt_file: promptFile,
+      task_filter: "any",
+      read_only: true,
+    },
+    prompt: LEGACY_BUG_TRIAGE_PROMPT,
+  };
+}
+
 function renderModal(
   overrides: Partial<React.ComponentProps<typeof CreateAgentModal>> = {},
 ) {
@@ -154,6 +181,7 @@ beforeEach(() => {
   mockReplaceGrants.mockReset();
   mockListWorkspaceRoles.mockReset();
   mockGetWorkspaceRole.mockReset();
+  mockUpdateWorkspaceRole.mockReset();
   mockEnsureRole.mockReset();
   mockCreatePromptAgentRecord.mockResolvedValue(sampleAgentRecord);
   mockListWorkspaceRoles.mockResolvedValue([]);
@@ -169,6 +197,16 @@ beforeEach(() => {
         prompt: `${name} prompt`,
       }),
   );
+  mockUpdateWorkspaceRole.mockResolvedValue({
+    role: {
+      workspace_key: "ws-1",
+      name: "bug-triage",
+      kind: "worker",
+      task_filter: "bug",
+      read_only: true,
+    },
+    prompt: BUG_TRIAGE_PROMPT,
+  });
   mockEnsureRole.mockResolvedValue({
     name: "bug-triage",
     workspace_key: "ws-1",
@@ -375,6 +413,20 @@ describe("CreateAgentModal: default prop seeding", () => {
       },
       {
         workspace_key: "ws-1",
+        name: "bug-triage",
+        kind: "worker",
+        task_filter: "bug",
+        read_only: true,
+      },
+      {
+        workspace_key: "ws-1",
+        name: "unsafe-bug-triage",
+        kind: "worker",
+        task_filter: "bug",
+        read_only: false,
+      },
+      {
+        workspace_key: "ws-1",
         name: "missing-prompt",
         kind: "worker",
         task_filter: "any",
@@ -393,9 +445,20 @@ describe("CreateAgentModal: default prop seeding", () => {
             workspace_key: "ws-1",
             name,
             kind: "worker",
-            task_filter: name === "docs-worker" ? "has_design" : "any",
+            task_filter:
+              name === "docs-worker"
+                ? "has_design"
+                : name === "bug-triage"
+                  ? "bug"
+                  : "any",
+            read_only: name === "bug-triage",
           },
-          prompt: name === "docs-worker" ? "Write documentation." : "",
+          prompt:
+            name === "docs-worker"
+              ? "Write documentation."
+              : name === "bug-triage"
+                ? "Triage the assigned bug."
+                : "",
         }),
     );
 
@@ -403,6 +466,9 @@ describe("CreateAgentModal: default prop seeding", () => {
 
     expect(
       await screen.findByTestId("create-agent-template-role-docs-worker"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("create-agent-template-role-bug-triage"),
     ).toBeInTheDocument();
     expect(
       screen.queryByTestId("create-agent-template-role-pr-review"),
@@ -417,9 +483,72 @@ describe("CreateAgentModal: default prop seeding", () => {
       screen.queryByTestId("create-agent-template-role-legacy-filter"),
     ).not.toBeInTheDocument();
     expect(
+      screen.queryByTestId("create-agent-template-role-unsafe-bug-triage"),
+    ).not.toBeInTheDocument();
+    expect(
       screen.getByTestId("create-agent-template-interactive-pr-review"),
     ).toBeInTheDocument();
-    expect(mockGetWorkspaceRole).toHaveBeenCalledTimes(2);
+    expect(mockGetWorkspaceRole).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ["plain", "/workspace/.loom/prompts/bug-triage.md"],
+    [
+      "immutable",
+      `/workspace/.loom/prompts/${LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME}`,
+    ],
+  ])(
+    "hides the exact factory-owned legacy bug-triage role with its %s prompt path",
+    async (_pathKind, promptFile) => {
+      mockListWorkspaceRoles.mockResolvedValueOnce([
+        {
+          workspace_key: "ws-1",
+          name: "bug-triage",
+          kind: "worker",
+          task_filter: "any",
+          read_only: true,
+        },
+      ]);
+      mockGetWorkspaceRole.mockResolvedValueOnce(
+        exactLegacyBugTriageRole(promptFile),
+      );
+
+      renderModal();
+
+      await waitFor(() =>
+        expect(mockGetWorkspaceRole).toHaveBeenCalledWith("ws-1", "bug-triage"),
+      );
+      expect(
+        screen.queryByTestId("create-agent-template-role-bug-triage"),
+      ).not.toBeInTheDocument();
+      // The repaired Advanced card remains the explicit upgrade entry point.
+      expect(
+        screen.getByTestId("create-agent-template-bug-triage"),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("keeps a user-edited legacy bug-triage role visible in the Behavior gallery", async () => {
+    mockListWorkspaceRoles.mockResolvedValueOnce([
+      {
+        workspace_key: "ws-1",
+        name: "bug-triage",
+        kind: "worker",
+        task_filter: "any",
+        read_only: true,
+      },
+    ]);
+    const edited = exactLegacyBugTriageRole(
+      `/workspace/.loom/prompts/${LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME}`,
+    );
+    edited.prompt = `${LEGACY_BUG_TRIAGE_PROMPT}\nOperator customization.`;
+    mockGetWorkspaceRole.mockResolvedValueOnce(edited);
+
+    renderModal();
+
+    expect(
+      await screen.findByTestId("create-agent-template-role-bug-triage"),
+    ).toBeInTheDocument();
   });
 
   it("submits a hydrated compatible custom role through prompt-agent", async () => {
@@ -642,10 +771,35 @@ describe("CreateAgentModal: submission", () => {
     expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
       name: "review-worker",
       role_name: "task",
+      auto: true,
     });
     expect(mockCreatePromptAgentRecord).not.toHaveBeenCalled();
     expect(onSuccess).toHaveBeenCalledWith(sampleAgent);
   });
+
+  it.each([
+    ["Planner", "create-agent-template-legacy-planner", "plan"],
+    ["Task Runner", "create-agent-template-legacy-task", "task"],
+    ["Bug triage", "create-agent-template-bug-triage", "bug-triage"],
+  ])(
+    "registers the Advanced %s worker for daemon auto-supervision",
+    async (_label, templateTestID, roleName) => {
+      mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+      renderModal({ defaultName: "daemon-worker" });
+
+      fireEvent.click(screen.getByTestId(templateTestID));
+      fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+      await waitFor(() => expect(mockCreateAgent).toHaveBeenCalledTimes(1));
+      expect(mockCreateAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "daemon-worker",
+          role_name: roleName,
+          auto: true,
+        }),
+      );
+    },
+  );
 
   it("submits mixed-case names as lowercase", async () => {
     renderModal();
@@ -727,6 +881,7 @@ describe("CreateAgentModal: submission", () => {
     expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
       name: "lead-nova",
       role_name: "lead",
+      auto: false,
     });
     expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("kind");
     expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
@@ -747,6 +902,7 @@ describe("CreateAgentModal: submission", () => {
       role_name: "pr-review",
       kind: "interactive",
       prompt_file: "builtin:pr-review",
+      auto: false,
       cross_repo: false,
       repos: ["alpha"],
     });
@@ -770,6 +926,7 @@ describe("CreateAgentModal: submission", () => {
       role_name: "custom-review",
       kind: "interactive",
       prompt: "Review literally: {{ marker }}",
+      auto: false,
       cross_repo: false,
       repos: ["alpha"],
     });
@@ -786,8 +943,11 @@ describe("CreateAgentModal: submission", () => {
     await waitFor(() => expect(mockEnsureRole).toHaveBeenCalledTimes(1));
     expect(mockEnsureRole.mock.calls[0][0]).toMatchObject({
       name: "bug-triage",
-      task_filter: "any",
+      task_filter: "bug",
       read_only: true,
+      prompt: expect.stringContaining(
+        "loom data update <assigned-task-id> --status review",
+      ),
     });
     // ...then the agent is created referencing that role.
     await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
@@ -795,6 +955,199 @@ describe("CreateAgentModal: submission", () => {
       name: "triage-1",
       role_name: "bug-triage",
     });
+  });
+
+  it.each([
+    ["plain", "/workspace/.loom/prompts/bug-triage.md"],
+    [
+      "immutable",
+      `/workspace/.loom/prompts/${LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME}`,
+    ],
+  ])(
+    "leaves the exact %s-path legacy role untouched and creates against the reserved fallback",
+    async (_pathKind, promptFile) => {
+      mockEnsureRole
+        .mockRejectedValueOnce(
+          new ApiError(409, "Conflict", {
+            error: "role bug-triage has incompatible configuration",
+          }),
+        )
+        .mockResolvedValueOnce({
+          name: "loom-bug-triage-v2",
+          workspace_key: "ws-1",
+        });
+      mockGetWorkspaceRole.mockResolvedValueOnce(
+        exactLegacyBugTriageRole(promptFile),
+      );
+      mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+
+      renderModal({ defaultName: "triage-upgraded" });
+      fireEvent.click(screen.getByTestId("create-agent-template-bug-triage"));
+      fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+      await waitFor(() => expect(mockEnsureRole).toHaveBeenCalledTimes(2));
+      expect(mockEnsureRole).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          name: "bug-triage",
+          task_filter: "bug",
+          read_only: true,
+        }),
+      );
+      expect(mockEnsureRole).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          name: "loom-bug-triage-v2",
+          task_filter: "bug",
+          read_only: true,
+          prompt: BUG_TRIAGE_PROMPT,
+        }),
+      );
+      expect(mockUpdateWorkspaceRole).not.toHaveBeenCalled();
+      await waitFor(() => expect(mockCreateAgent).toHaveBeenCalledTimes(1));
+      expect(mockCreateAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "triage-upgraded",
+          role_name: "loom-bug-triage-v2",
+        }),
+      );
+    },
+  );
+
+  it("does not overwrite an operator edit racing fallback provisioning", async () => {
+    const legacySnapshot = exactLegacyBugTriageRole(
+      `/workspace/.loom/prompts/${LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME}`,
+    );
+    mockEnsureRole
+      .mockRejectedValueOnce(
+        new ApiError(409, "Conflict", {
+          error: "role bug-triage has incompatible configuration",
+        }),
+      )
+      .mockImplementationOnce(async (request: { name: string }) => {
+        // Simulate an operator changing the canonical role after the UI read
+        // it. The only subsequent write is the reserved fallback ensure.
+        legacySnapshot.prompt = `${LEGACY_BUG_TRIAGE_PROMPT}\nConcurrent operator edit.`;
+        return {
+          name: request.name,
+          workspace_key: "ws-1",
+        };
+      });
+    mockGetWorkspaceRole.mockResolvedValueOnce(legacySnapshot);
+    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+
+    renderModal({ defaultName: "triage-race-safe" });
+    fireEvent.click(screen.getByTestId("create-agent-template-bug-triage"));
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalledTimes(1));
+    expect(mockEnsureRole).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ name: "loom-bug-triage-v2" }),
+    );
+    expect(mockUpdateWorkspaceRole).not.toHaveBeenCalled();
+    expect(legacySnapshot.prompt).toContain("Concurrent operator edit.");
+    expect(mockCreateAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ role_name: "loom-bug-triage-v2" }),
+    );
+  });
+
+  it("fails closed when the reserved fallback role has an incompatible collision", async () => {
+    mockEnsureRole
+      .mockRejectedValueOnce(
+        new ApiError(409, "Conflict", {
+          error: "role bug-triage has incompatible configuration",
+        }),
+      )
+      .mockRejectedValueOnce(
+        new ApiError(409, "Conflict", {
+          error:
+            'role "loom-bug-triage-v2" already exists with incompatible configuration',
+        }),
+      );
+    mockGetWorkspaceRole.mockResolvedValueOnce(
+      exactLegacyBugTriageRole(
+        `/workspace/.loom/prompts/${LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME}`,
+      ),
+    );
+
+    renderModal({ defaultName: "triage-collision" });
+    fireEvent.click(screen.getByTestId("create-agent-template-bug-triage"));
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /loom-bug-triage-v2.*incompatible configuration/i,
+    );
+    expect(mockEnsureRole).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ name: "loom-bug-triage-v2" }),
+    );
+    expect(mockUpdateWorkspaceRole).not.toHaveBeenCalled();
+    expect(mockCreateAgent).not.toHaveBeenCalled();
+  });
+
+  it("preserves a user-edited bug-triage role when exact ensure conflicts", async () => {
+    mockEnsureRole.mockRejectedValueOnce(
+      new ApiError(409, "Conflict", {
+        error: "role bug-triage has incompatible configuration",
+      }),
+    );
+    mockGetWorkspaceRole.mockResolvedValueOnce({
+      role: {
+        workspace_key: "ws-1",
+        name: "bug-triage",
+        kind: "worker",
+        description:
+          "Reproduces and triages ready tickets; does not write fixes.",
+        prompt_file: `/workspace/.loom/prompts/${LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME}`,
+        task_filter: "any",
+        read_only: true,
+      },
+      prompt: `${LEGACY_BUG_TRIAGE_PROMPT}\nUser customization.`,
+    });
+
+    renderModal({ defaultName: "triage-preserve" });
+    fireEvent.click(screen.getByTestId("create-agent-template-bug-triage"));
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /incompatible configuration/i,
+    );
+    expect(mockUpdateWorkspaceRole).not.toHaveBeenCalled();
+    expect(mockEnsureRole).toHaveBeenCalledTimes(1);
+    expect(mockCreateAgent).not.toHaveBeenCalled();
+  });
+
+  it("preserves a legacy-body role repointed to a user prompt file", async () => {
+    mockEnsureRole.mockRejectedValueOnce(
+      new ApiError(409, "Conflict", {
+        error: "role bug-triage has incompatible configuration",
+      }),
+    );
+    mockGetWorkspaceRole.mockResolvedValueOnce({
+      role: {
+        workspace_key: "ws-1",
+        name: "bug-triage",
+        kind: "worker",
+        description:
+          "Reproduces and triages ready tickets; does not write fixes.",
+        prompt_file: "/workspace/.loom/prompts/user-owned-triage.md",
+        task_filter: "any",
+        read_only: true,
+      },
+      prompt: LEGACY_BUG_TRIAGE_PROMPT,
+    });
+
+    renderModal({ defaultName: "triage-preserve-path" });
+    fireEvent.click(screen.getByTestId("create-agent-template-bug-triage"));
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /incompatible configuration/i,
+    );
+    expect(mockUpdateWorkspaceRole).not.toHaveBeenCalled();
+    expect(mockEnsureRole).toHaveBeenCalledTimes(1);
+    expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
   it("switches background template selection when Planner is clicked", () => {

@@ -302,6 +302,7 @@ func (adapter testDriverRunExecution) HandoffDriverRunReviewWorkItem(
 		WorkItem: &execution.DriverRunWorkItem{
 			WorkspaceKey: command.WorkspaceKey, WorkItemID: command.WorkItemID,
 			Status: command.TargetStatus, Assignee: "", UpdatedAt: command.HandedOffAt,
+			Priority: reviewHandoffPriority(command.Priority), Labels: append([]string(nil), command.Labels...),
 		},
 		Action: &execution.DriverRunWorkItemAction{
 			WorkspaceKey: command.WorkspaceKey, ActionID: actionID, IdempotencyKey: actionID,
@@ -310,6 +311,13 @@ func (adapter testDriverRunExecution) HandoffDriverRunReviewWorkItem(
 			CreatedAt: command.HandedOffAt, AppliedAt: &appliedAt,
 		},
 	}, nil
+}
+
+func reviewHandoffPriority(priority *int) int {
+	if priority == nil {
+		return 0
+	}
+	return *priority
 }
 
 func (testDriverRunExecution) CascadeChildDriverRuns(
@@ -1067,6 +1075,107 @@ func TestDriverAPIHandoffReviewBindsExactParentClaimAndChild(t *testing.T) {
 		command.ClaimActionID != wantClaimActionID || command.RequestID != wantRequestID ||
 		command.TaskRunID != taskRunID || command.TargetStatus != "closed" || command.Reason != "approved" {
 		t.Fatalf("handoff command = %+v, want exact parent/claim/child envelope", command)
+	}
+}
+
+func TestDriverAPIHandoffReviewCarriesAtomicReviewAnnotations(t *testing.T) {
+	h := newTestHarness(t, "")
+	taskID := "TASK-TRIAGE-7"
+	taskRunID := "triage-child-7"
+
+	resp, decoded := h.do(t, opRequest{
+		op: "handoff-review",
+		body: map[string]any{
+			"taskId": taskID, "taskRunId": taskRunID, "status": "review",
+			"priority": 4, "labels": []string{"bug", "triaged"},
+			"commentBody": "Automated bug triage completed.",
+		},
+		headers: h.ownerHeaders(),
+	})
+	if resp.StatusCode != http.StatusOK || decoded["id"] != taskID || decoded["status"] != "review" {
+		t.Fatalf("status/body = %d/%v, want review handoff", resp.StatusCode, decoded)
+	}
+	if len(h.backend.typedHandoffs) != 1 {
+		t.Fatalf("typed handoffs = %+v, want one", h.backend.typedHandoffs)
+	}
+	command := h.backend.typedHandoffs[0]
+	if command.Priority == nil || *command.Priority != 4 ||
+		!slices.Equal(command.Labels, []string{"bug", "triaged"}) ||
+		command.CommentBody != "Automated bug triage completed." {
+		t.Fatalf("handoff annotations = %+v, want exact priority, labels, and comment", command)
+	}
+}
+
+func TestDriverAPIHandoffReviewRejectsInvalidAnnotationEnvelope(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]any
+	}{
+		{
+			name: "review missing priority",
+			body: map[string]any{
+				"taskId": "TASK-1", "taskRunId": "run-1", "status": "review", "commentBody": "triaged",
+			},
+		},
+		{
+			name: "review invalid priority",
+			body: map[string]any{
+				"taskId": "TASK-1", "taskRunId": "run-1", "status": "review",
+				"priority": 5, "commentBody": "triaged",
+			},
+		},
+		{
+			name: "review blank comment",
+			body: map[string]any{
+				"taskId": "TASK-1", "taskRunId": "run-1", "status": "review",
+				"priority": 2, "commentBody": "   ",
+			},
+		},
+		{
+			name: "review null labels",
+			body: map[string]any{
+				"taskId": "TASK-1", "taskRunId": "run-1", "status": "review",
+				"priority": 2, "labels": nil, "commentBody": "triaged",
+			},
+		},
+		{
+			name: "open with priority",
+			body: map[string]any{
+				"taskId": "TASK-1", "taskRunId": "run-1", "status": "open", "priority": 0,
+			},
+		},
+		{
+			name: "closed with empty labels field",
+			body: map[string]any{
+				"taskId": "TASK-1", "taskRunId": "run-1", "status": "closed", "labels": []string{},
+			},
+		},
+		{
+			name: "open with empty comment field",
+			body: map[string]any{
+				"taskId": "TASK-1", "taskRunId": "run-1", "status": "open", "commentBody": "",
+			},
+		},
+		{
+			name: "open with null priority field",
+			body: map[string]any{
+				"taskId": "TASK-1", "taskRunId": "run-1", "status": "open", "priority": nil,
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness(t, "")
+			resp, decoded := h.do(t, opRequest{
+				op: "handoff-review", body: tc.body, headers: h.ownerHeaders(),
+			})
+			if resp.StatusCode != http.StatusBadRequest || errorCode(t, decoded) != "invalid" {
+				t.Fatalf("status/body = %d/%v, want invalid", resp.StatusCode, decoded)
+			}
+			if len(h.backend.typedHandoffs) != 0 {
+				t.Fatalf("invalid handoff reached execution: %+v", h.backend.typedHandoffs)
+			}
+		})
 	}
 }
 

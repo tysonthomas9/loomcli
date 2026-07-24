@@ -79,8 +79,10 @@ test("contract: every op sends only frozen camelCase wire fields to its frozen p
     await client.tasks.handoffReview({
       taskId: "TASK-1",
       taskRunId: "task-run-1",
-      status: "open",
-      reason: "review findings require changes",
+      status: "review",
+      priority: 2,
+      labels: ["bug", "reviewed"],
+      commentBody: "Automated bug triage completed.",
     });
     await client.epics.get({});
     await client.epics.snapshot({});

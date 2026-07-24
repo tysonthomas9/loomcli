@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -651,6 +652,187 @@ func TestExecutionDriverRunReviewHandoffUsesFencedRouteAndStrictReceipt(t *testi
 	}
 }
 
+func TestExecutionDriverRunReviewHandoffSendsAndValidatesAtomicReviewAnnotations(t *testing.T) {
+	handedOffAt := time.Date(2026, 7, 23, 5, 45, 0, 123456789, time.UTC)
+	commandID := "handoff-review-work-item:sha256:" + strings.Repeat("e", 64)
+	claimActionID := "driver-run-work-item-claim:claim-work-item:sha256:" + strings.Repeat("a", 64)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost ||
+			r.URL.Path != "/api/v1/WS/driver-runs/run-1/work-items/TASK-1/review-handoff" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Lease-Token"); got != "raw-driver-secret" {
+			t.Fatalf("X-Lease-Token = %q", got)
+		}
+		var raw map[string]json.RawMessage
+		decodeJSONBody(t, r, &raw)
+		encoded, _ := json.Marshal(raw)
+		if strings.Contains(string(encoded), "raw-driver-secret") || raw["lease_token"] != nil {
+			t.Fatalf("body leaked raw token: %s", encoded)
+		}
+		if string(raw["target_status"]) != `"review"` ||
+			string(raw["priority"]) != `4` ||
+			string(raw["labels"]) != `["bug","triaged"]` ||
+			string(raw["comment_body"]) != `"Automated bug triage completed."` {
+			t.Fatalf("review handoff body = %s", encoded)
+		}
+		receipt := executionDriverRunWorkItemFixture("review", commandID, handedOffAt.Truncate(time.Microsecond))
+		receipt.Comment.Body = "Automated bug triage completed."
+		writeJSON(t, w, receipt)
+	}))
+	t.Cleanup(server.Close)
+	client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	priority := 4
+	result, err := client.Execution().HandoffDriverRunReviewWorkItem(t.Context(), ExecutionDriverRunReviewWorkItemHandoffCommand{
+		WorkspaceKey: "WS", CommandID: commandID, RunID: "run-1", TaskID: "TASK-1",
+		NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "raw-driver-secret", FencingToken: 7,
+		ClaimActionID: claimActionID, TaskRunID: "review-child-1", TargetStatus: "review",
+		Priority: &priority, Labels: []string{" bug ", "triaged", "bug"},
+		CommentBody: "Automated bug triage completed.", HandedOffAt: handedOffAt,
+	})
+	if err != nil || result.Issue == nil || result.Issue.Status != "review" ||
+		result.Issue.Priority != priority ||
+		!slices.Equal(result.Issue.Labels, []string{"existing", "bug", "triaged"}) {
+		t.Fatalf("HandoffDriverRunReviewWorkItem() = %+v, %v", result, err)
+	}
+}
+
+func TestExecutionDriverRunReviewHandoffRejectsInvalidAnnotationsBeforeHTTP(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	t.Cleanup(server.Close)
+	client, err := New(Config{BaseURL: server.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	priority := 2
+	base := ExecutionDriverRunReviewWorkItemHandoffCommand{
+		WorkspaceKey: "WS", CommandID: "handoff-review-work-item:sha256:" + strings.Repeat("e", 64),
+		RunID: "run-1", TaskID: "TASK-1", NodeID: "node-1", LeaseID: "lease-1",
+		LeaseToken: "raw-driver-secret", FencingToken: 7,
+		ClaimActionID: "driver-run-work-item-claim:claim-work-item:sha256:" + strings.Repeat("a", 64),
+		TaskRunID:     "review-child-1", TargetStatus: "review", Priority: &priority,
+		CommentBody: "triaged", HandedOffAt: time.Date(2026, 7, 23, 5, 45, 0, 0, time.UTC),
+	}
+	tests := []struct {
+		name string
+		edit func(*ExecutionDriverRunReviewWorkItemHandoffCommand)
+	}{
+		{"missing priority", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) { c.Priority = nil }},
+		{"out of range priority", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) {
+			value := -1
+			c.Priority = &value
+		}},
+		{"blank comment", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) { c.CommentBody = " " }},
+		{"too many labels", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) {
+			c.Labels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"}
+		}},
+		{"invalid label", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) { c.Labels = []string{"bad;label"} }},
+		{"open annotations", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) { c.TargetStatus = "open" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			command := base
+			tc.edit(&command)
+			if _, err := client.Execution().HandoffDriverRunReviewWorkItem(t.Context(), command); !errors.Is(err, ErrExecutionInvalid) {
+				t.Fatalf("error=%v, want ErrExecutionInvalid", err)
+			}
+		})
+	}
+	if requests != 0 {
+		t.Fatalf("invalid commands reached FleetDB: %d requests", requests)
+	}
+}
+
+func TestValidExecutionDriverRunReviewHandoffResultChecksReviewPriorityAndLabels(t *testing.T) {
+	at := time.Date(2026, 7, 23, 5, 45, 0, 0, time.UTC)
+	commandID := "handoff-review-work-item:sha256:" + strings.Repeat("e", 64)
+	priority := 4
+	command := ExecutionDriverRunReviewWorkItemHandoffCommand{
+		WorkspaceKey: "WS", CommandID: commandID, RunID: "run-1", TaskID: "TASK-1",
+		TaskRunID: "review-child-1", TargetStatus: "review", Priority: &priority,
+		Labels: []string{"bug", "triaged"}, CommentBody: "triaged", HandedOffAt: at,
+	}
+	result := executionDriverRunWorkItemFixture("review", commandID, at)
+	if !validExecutionDriverRunReviewWorkItemHandoffResult(&result, command) {
+		t.Fatal("valid review result was rejected")
+	}
+	replayed := executionDriverRunWorkItemFixture("review", commandID, at)
+	replayed.Replayed = true
+	retryCommand := command
+	retryCommand.HandedOffAt = at.Add(time.Minute)
+	if !validExecutionDriverRunReviewWorkItemHandoffResult(&replayed, retryCommand) {
+		t.Fatal("exact replay with a regenerated request timestamp was rejected")
+	}
+	replayed.Comment.CreatedAt = at.Add(time.Second)
+	if validExecutionDriverRunReviewWorkItemHandoffResult(&replayed, retryCommand) {
+		t.Fatal("replay with comment timestamp divergent from its action was accepted")
+	}
+	replayed.Comment.CreatedAt = at
+	replayed.Issue.UpdatedAt = at.Add(time.Second)
+	if validExecutionDriverRunReviewWorkItemHandoffResult(&replayed, retryCommand) {
+		t.Fatal("replay with issue timestamp divergent from its action was accepted")
+	}
+	result.Issue.Priority = 3
+	if validExecutionDriverRunReviewWorkItemHandoffResult(&result, command) {
+		t.Fatal("divergent review priority was accepted")
+	}
+	result.Issue.Priority = priority
+	result.Issue.Labels = []string{"bug"}
+	if validExecutionDriverRunReviewWorkItemHandoffResult(&result, command) {
+		t.Fatal("missing requested review label was accepted")
+	}
+
+	for _, tc := range []struct {
+		name string
+		edit func(*ExecutionDriverRunWorkItemResult)
+	}{
+		{name: "missing_comment", edit: func(result *ExecutionDriverRunWorkItemResult) {
+			result.Comment = nil
+		}},
+		{name: "blank_comment_id", edit: func(result *ExecutionDriverRunWorkItemResult) {
+			result.Comment.ID = ""
+		}},
+		{name: "wrong_comment_issue", edit: func(result *ExecutionDriverRunWorkItemResult) {
+			result.Comment.IssueID = "OTHER"
+		}},
+		{name: "wrong_comment_author", edit: func(result *ExecutionDriverRunWorkItemResult) {
+			result.Comment.Author = "driver-run:other"
+		}},
+		{name: "wrong_comment_body", edit: func(result *ExecutionDriverRunWorkItemResult) {
+			result.Comment.Body = "different"
+		}},
+		{name: "wrong_comment_time", edit: func(result *ExecutionDriverRunWorkItemResult) {
+			result.Comment.CreatedAt = result.Comment.CreatedAt.Add(time.Second)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			divergent := executionDriverRunWorkItemFixture("review", commandID, at)
+			tc.edit(&divergent)
+			if validExecutionDriverRunReviewWorkItemHandoffResult(&divergent, command) {
+				t.Fatal("divergent atomic comment receipt was accepted")
+			}
+		})
+	}
+
+	closed := ExecutionDriverRunReviewWorkItemHandoffCommand{
+		WorkspaceKey: "WS", CommandID: commandID, RunID: "run-1", TaskID: "TASK-1",
+		TaskRunID: "review-child-1", TargetStatus: "closed", HandedOffAt: at,
+	}
+	closedResult := executionDriverRunWorkItemFixture("handoff", commandID, at)
+	closedResult.Comment = &ExecutionWorkItemComment{
+		ID: "1", IssueID: "TASK-1", Author: "driver-run:run-1", Body: "unexpected", CreatedAt: at,
+	}
+	if validExecutionDriverRunReviewWorkItemHandoffResult(&closedResult, closed) {
+		t.Fatal("non-review handoff accepted an unexpected comment receipt")
+	}
+}
+
 func executionDriverRunWorkItemFixture(operation, commandID string, at time.Time) ExecutionDriverRunWorkItemResult {
 	appliedAt := at
 	status, assignee, actionType, responseState := "in_progress", "driver-run:run-1", "claim_work_item", "claimed"
@@ -661,10 +843,18 @@ func executionDriverRunWorkItemFixture(operation, commandID string, at time.Time
 	} else if operation == "handoff" {
 		status, assignee, actionType, responseState = "closed", "", "handoff_review_work_item", "handed-off"
 		actionPrefix = "driver-run-review-work-item-handoff:"
+	} else if operation == "review" {
+		status, assignee, actionType, responseState = "review", "", "handoff_review_work_item", "handed-off"
+		actionPrefix = "driver-run-review-work-item-handoff:"
 	}
 	actionID := actionPrefix + commandID
-	return ExecutionDriverRunWorkItemResult{
-		Issue: &ExecutionIssue{ID: "TASK-1", Workspace: "WS", Title: "task", Status: status, Assignee: assignee, UpdatedAt: at},
+	issue := &ExecutionIssue{ID: "TASK-1", Workspace: "WS", Title: "task", Status: status, Assignee: assignee, UpdatedAt: at}
+	if operation == "review" {
+		issue.Priority = 4
+		issue.Labels = []string{"existing", "bug", "triaged"}
+	}
+	result := ExecutionDriverRunWorkItemResult{
+		Issue: issue,
 		Action: &ExecutionActionLedger{
 			WorkspaceKey: "WS", ActionID: actionID, IdempotencyKey: actionID, ActionType: actionType,
 			TargetRef: "TASK-1", RequestedBy: "driver-run:run-1", Status: "applied",
@@ -672,6 +862,13 @@ func executionDriverRunWorkItemFixture(operation, commandID string, at time.Time
 			CreatedAt: at, AppliedAt: &appliedAt,
 		},
 	}
+	if operation == "review" {
+		result.Comment = &ExecutionWorkItemComment{
+			ID: "1", IssueID: "TASK-1", Author: "driver-run:run-1",
+			Body: "triaged", CreatedAt: at,
+		}
+	}
+	return result
 }
 
 func TestExecutionDriverRunSuspendUsesWriteOnlyLeaseTokenHeader(t *testing.T) {

@@ -64,6 +64,15 @@ func shortSocketDir(canonicalPath string) string {
 // - We need short paths due to Unix socket length limits
 const tmpDir = "/tmp"
 
+// isManagedTempSocketDir reports whether dir is an immediate /tmp child whose
+// name begins with loom-. Nested workspace paths under /tmp/loom-* are not
+// short-socket directories owned by this package.
+func isManagedTempSocketDir(dir string) bool {
+	dir = filepath.Clean(dir)
+	return filepath.Dir(dir) == tmpDir &&
+		strings.HasPrefix(filepath.Base(dir), "loom-")
+}
+
 // EnsureSocketDir creates the socket directory if it doesn't exist.
 // Returns the socket path (unchanged) and any error.
 // This should be called by the daemon before listening.
@@ -76,7 +85,7 @@ func EnsureSocketDir(socketPath string) (string, error) {
 
 	// Only manage /tmp/loom-* directories.
 	// Workspace runtime directories live inside the workspace and should already exist.
-	if !strings.HasPrefix(dir, filepath.Join(tmpDir, "loom-")) {
+	if !isManagedTempSocketDir(dir) {
 		return socketPath, nil
 	}
 
@@ -135,7 +144,7 @@ func CleanupSocketDir(socketPath string) error {
 	dir := filepath.Dir(socketPath)
 
 	// Only remove if it's a /tmp/loom-* directory we created.
-	if strings.HasPrefix(dir, filepath.Join(tmpDir, "loom-")) {
+	if isManagedTempSocketDir(dir) {
 		// Remove socket file first
 		_ = os.Remove(socketPath)
 		// Remove directory (will fail if not empty, which is fine)

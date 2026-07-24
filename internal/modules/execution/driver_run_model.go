@@ -223,6 +223,12 @@ type ClaimDriverRunWorkItemCommand struct {
 const (
 	DriverRunWorkItemRestoreOpen   = "open"
 	DriverRunWorkItemRestoreReview = "review"
+
+	DriverRunReviewWorkItemPriorityMin     = 0
+	DriverRunReviewWorkItemPriorityMax     = 4
+	DriverRunReviewWorkItemMaxLabels       = 8
+	DriverRunReviewWorkItemMaxLabelBytes   = 64
+	DriverRunReviewWorkItemMaxCommentBytes = 10000
 )
 
 // ReleaseDriverRunWorkItemCommand releases exactly the claim action created
@@ -251,6 +257,9 @@ type HandoffDriverRunReviewWorkItemCommand struct {
 	TaskRunID     string
 	TargetStatus  string
 	Reason        string
+	Priority      *int
+	Labels        []string
+	CommentBody   string
 	HandedOffAt   time.Time
 }
 
@@ -286,9 +295,18 @@ type DriverRunWorkItemAction struct {
 	AppliedAt      *time.Time
 }
 
+type DriverRunWorkItemComment struct {
+	CommentID  string
+	WorkItemID string
+	Author     string
+	Body       string
+	CreatedAt  time.Time
+}
+
 type DriverRunWorkItemMutationResult struct {
 	WorkItem *DriverRunWorkItem
 	Action   *DriverRunWorkItemAction
+	Comment  *DriverRunWorkItemComment
 	Replay   bool
 }
 

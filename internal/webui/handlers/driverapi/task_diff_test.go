@@ -79,6 +79,88 @@ func TestTaskDiffRejectsNonFilesystemOrigin(t *testing.T) {
 	}
 }
 
+func TestTaskDiffReturnsLocalBranchDiffFromVerifiedWorkspaceCheckout(t *testing.T) {
+	checkout, head := createLocalBranchCheckout(t, "https://github.com/example/source-repo.git", "changed locally\n")
+	h := newTestHarness(t, "")
+	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
+		WorkspaceKey:  "WS",
+		Name:          "source-repo",
+		RemoteURL:     "https://github.com/example/source-repo.git",
+		DefaultBranch: "main",
+		SourceRepoID:  "source-repo",
+	}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	h.module.localRepoPath = func(workspaceKey, repoName string) string {
+		if workspaceKey == "WS" && repoName == "source-repo" {
+			return checkout
+		}
+		return ""
+	}
+	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+		ID:          "TASK-1",
+		Status:      "review",
+		SourceRepo:  "source-repo",
+		ExternalRef: "local-branch:loom/TASK-1@" + head,
+	}}
+
+	resp, decoded := h.do(t, opRequest{
+		op:      "task-diff",
+		headers: h.ownerHeaders(),
+		body:    map[string]any{"taskId": "TASK-1"},
+	})
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %v", resp.StatusCode, decoded)
+	}
+	if decoded["resolvedHead"] != head || decoded["egressMechanism"] != "workspace-checkout" {
+		t.Fatalf("decoded checkout evidence = %v", decoded)
+	}
+	diff, _ := decoded["diff"].(string)
+	if !strings.Contains(diff, "+changed locally") {
+		t.Fatalf("diff = %q, want local checkout change", diff)
+	}
+}
+
+func TestTaskDiffRejectsWorkspaceCheckoutRemoteMismatch(t *testing.T) {
+	checkout, _ := createLocalBranchCheckout(t, "https://github.com/other/repo.git", "changed\n")
+	h := newTestHarness(t, "")
+	if _, err := h.store.Repos().Create(t.Context(), store.RepoCreate{
+		WorkspaceKey:  "WS",
+		Name:          "source-repo",
+		RemoteURL:     "https://github.com/example/source-repo.git",
+		DefaultBranch: "main",
+		SourceRepoID:  "source-repo",
+	}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	h.module.localRepoPath = func(workspaceKey, repoName string) string {
+		if workspaceKey == "WS" && repoName == "source-repo" {
+			return checkout
+		}
+		return ""
+	}
+	h.backend.epic = &backend.IssueDetailData{IssueData: backend.IssueData{
+		ID:          "TASK-1",
+		Status:      "review",
+		SourceRepo:  "source-repo",
+		ExternalRef: "local-branch:loom/TASK-1@abcdef1",
+	}}
+
+	resp, decoded := h.do(t, opRequest{
+		op:      "task-diff",
+		headers: h.ownerHeaders(),
+		body:    map[string]any{"taskId": "TASK-1"},
+	})
+
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, body = %v", resp.StatusCode, decoded)
+	}
+	if code := errorCode(t, decoded); code != "task_diff_checkout_remote_mismatch" {
+		t.Fatalf("error code = %q, want task_diff_checkout_remote_mismatch", code)
+	}
+}
+
 func TestTaskDiffEnforcesDiffSizeCap(t *testing.T) {
 	origin, head := createLocalBranchOrigin(t, strings.Repeat("x", taskDiffMaxBytes+2048)+"\n")
 	h := newTestHarness(t, "")
@@ -102,6 +184,28 @@ func TestTaskDiffEnforcesDiffSizeCap(t *testing.T) {
 	if code := errorCode(t, decoded); code != "task_diff_too_large" {
 		t.Fatalf("error code = %q, want task_diff_too_large", code)
 	}
+}
+
+func createLocalBranchCheckout(t *testing.T, remoteURL, branchContent string) (string, string) {
+	t.Helper()
+	worktree := filepath.Join(t.TempDir(), "work")
+	runGit(t, "", "init", worktree)
+	runGit(t, worktree, "checkout", "-B", "main")
+	runGit(t, worktree, "config", "user.email", "loom@example.test")
+	runGit(t, worktree, "config", "user.name", "Loom Test")
+	if err := os.WriteFile(filepath.Join(worktree, "file.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatalf("write base file: %v", err)
+	}
+	runGit(t, worktree, "add", "file.txt")
+	runGit(t, worktree, "commit", "-m", "base")
+	runGit(t, worktree, "remote", "add", "origin", remoteURL)
+	runGit(t, worktree, "checkout", "-B", "loom/TASK-1")
+	if err := os.WriteFile(filepath.Join(worktree, "file.txt"), []byte(branchContent), 0o644); err != nil {
+		t.Fatalf("write branch file: %v", err)
+	}
+	runGit(t, worktree, "add", "file.txt")
+	runGit(t, worktree, "commit", "-m", "task change")
+	return worktree, strings.TrimSpace(runGit(t, worktree, "rev-parse", "HEAD"))
 }
 
 func seedTaskDiffRepo(t *testing.T, h *testHarness, origin string) {

@@ -8,14 +8,25 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
-const executionDriverRunReviewClaimFingerprintPrefix = "driver-run-work-item-claim-v2:"
+const (
+	executionDriverRunReviewClaimFingerprintPrefix = "driver-run-work-item-claim-v2:"
+
+	executionDriverRunReviewPriorityMin     = 0
+	executionDriverRunReviewPriorityMax     = 4
+	executionDriverRunReviewMaxLabels       = 8
+	executionDriverRunReviewMaxLabelBytes   = 64
+	executionDriverRunReviewMaxCommentBytes = 10000
+)
 
 type executionTaskRunRequestBody struct {
 	CommandID            string                  `json:"command_id"`
@@ -283,10 +294,12 @@ func (s *executionStore) HandoffDriverRunReviewWorkItem(
 	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
 	command.TargetStatus = strings.TrimSpace(command.TargetStatus)
 	command.Reason = strings.TrimSpace(command.Reason)
+	command.Labels = normalizeExecutionDriverRunReviewLabels(command.Labels)
 	if !validExecutionDriverRunWorkItemOwner(command.WorkspaceKey, command.CommandID, command.RunID, command.TaskID,
 		command.NodeID, command.LeaseID, command.LeaseToken, command.FencingToken) ||
 		strings.TrimSpace(command.ClaimActionID) == "" || command.TaskRunID == "" ||
-		(command.TargetStatus != "open" && command.TargetStatus != "closed") ||
+		(command.TargetStatus != "open" && command.TargetStatus != "review" && command.TargetStatus != "closed") ||
+		!validExecutionDriverRunReviewAnnotations(command) ||
 		command.HandedOffAt.IsZero() {
 		return nil, fmt.Errorf("execution DriverRun review handoff identity, owner, token, claim action, TaskRun, target, and time are required: %w", ErrExecutionInvalid)
 	}
@@ -299,10 +312,14 @@ func (s *executionStore) HandoffDriverRunReviewWorkItem(
 		TaskRunID     string    `json:"task_run_id"`
 		TargetStatus  string    `json:"target_status"`
 		Reason        string    `json:"reason"`
+		Priority      *int      `json:"priority,omitempty"`
+		Labels        []string  `json:"labels,omitempty"`
+		CommentBody   string    `json:"comment_body,omitempty"`
 		HandedOffAt   time.Time `json:"handed_off_at"`
 	}{
 		command.CommandID, command.NodeID, command.LeaseID, command.FencingToken,
-		command.ClaimActionID, command.TaskRunID, command.TargetStatus, command.Reason, command.HandedOffAt,
+		command.ClaimActionID, command.TaskRunID, command.TargetStatus, command.Reason,
+		command.Priority, command.Labels, command.CommentBody, command.HandedOffAt,
 	}
 	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.RunID) +
 		"/work-items/" + pathEscape(command.TaskID) + "/review-handoff"
@@ -327,12 +344,16 @@ func validExecutionDriverRunReviewWorkItemHandoffResult(
 	if result == nil || result.Issue == nil || result.Action == nil ||
 		result.Issue.Workspace != command.WorkspaceKey || result.Issue.ID != command.TaskID ||
 		result.Issue.Status != command.TargetStatus || result.Issue.Assignee != "" ||
+		!validExecutionDriverRunReviewResultAnnotations(result.Issue, command) ||
 		result.Issue.UpdatedAt.IsZero() {
 		return false
 	}
 	actor := "driver-run:" + command.RunID
 	wantActionID := "driver-run-review-work-item-handoff:" + command.CommandID
 	action := result.Action
+	if !validExecutionDriverRunReviewResultComment(result.Comment, command, action.CreatedAt) {
+		return false
+	}
 	return executionChecksPass(
 		action.WorkspaceKey == command.WorkspaceKey, action.ActionID == wantActionID,
 		action.IdempotencyKey == wantActionID, action.ActionType == "handoff_review_work_item",
@@ -340,8 +361,80 @@ func validExecutionDriverRunReviewWorkItemHandoffResult(
 		validExecutionCommandFingerprint(action.RequestRef),
 		action.ResponseRef == "issue://"+command.TaskID+"#handed-off", !action.CreatedAt.IsZero(),
 		action.AppliedAt != nil && !action.AppliedAt.IsZero() && action.AppliedAt.Equal(action.CreatedAt),
+		result.Issue.UpdatedAt.Equal(action.CreatedAt),
 		result.Replayed || executionPersistedCommandTimeMatches(action.CreatedAt, command.HandedOffAt),
 	)
+}
+
+func validExecutionDriverRunReviewResultComment(
+	comment *ExecutionWorkItemComment,
+	command ExecutionDriverRunReviewWorkItemHandoffCommand,
+	receiptTime time.Time,
+) bool {
+	if command.TargetStatus != "review" {
+		return comment == nil
+	}
+	actor := "driver-run:" + command.RunID
+	return comment != nil &&
+		strings.TrimSpace(comment.ID) != "" &&
+		comment.IssueID == command.TaskID &&
+		comment.Author == actor &&
+		comment.Body == command.CommentBody &&
+		!comment.CreatedAt.IsZero() &&
+		comment.CreatedAt.Equal(receiptTime)
+}
+
+func validExecutionDriverRunReviewAnnotations(command ExecutionDriverRunReviewWorkItemHandoffCommand) bool {
+	if command.TargetStatus != "review" {
+		return command.Priority == nil && len(command.Labels) == 0 && strings.TrimSpace(command.CommentBody) == ""
+	}
+	if command.Priority == nil ||
+		*command.Priority < executionDriverRunReviewPriorityMin ||
+		*command.Priority > executionDriverRunReviewPriorityMax ||
+		strings.TrimSpace(command.CommentBody) == "" ||
+		len(command.CommentBody) > executionDriverRunReviewMaxCommentBytes ||
+		len(command.Labels) > executionDriverRunReviewMaxLabels {
+		return false
+	}
+	for _, label := range command.Labels {
+		if label == "" || !utf8.ValidString(label) || len(label) > executionDriverRunReviewMaxLabelBytes ||
+			strings.ContainsAny(label, ",;") || strings.IndexFunc(label, unicode.IsControl) >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeExecutionDriverRunReviewLabels(labels []string) []string {
+	if labels == nil {
+		return nil
+	}
+	normalized := make([]string, 0, len(labels))
+	for _, label := range labels {
+		label = strings.TrimSpace(label)
+		if !slices.Contains(normalized, label) {
+			normalized = append(normalized, label)
+		}
+	}
+	return normalized
+}
+
+func validExecutionDriverRunReviewResultAnnotations(
+	issue *ExecutionIssue,
+	command ExecutionDriverRunReviewWorkItemHandoffCommand,
+) bool {
+	if command.TargetStatus != "review" {
+		return true
+	}
+	if command.Priority == nil || issue.Priority != *command.Priority {
+		return false
+	}
+	for _, label := range command.Labels {
+		if !slices.Contains(issue.Labels, label) {
+			return false
+		}
+	}
+	return true
 }
 
 func validExecutionDriverRunWorkItemOwner(workspace, commandID, runID, taskID, nodeID, leaseID, leaseToken string, fencingToken int64) bool {

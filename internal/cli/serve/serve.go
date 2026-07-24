@@ -774,8 +774,9 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
 	cfg.SetDefaultWorkspaceFn = nil
 	cfg.ClearDefaultWorkspaceFn = nil
-	cfg.WorkspaceCreateFn = workspacemgr.BuildStoreBackedCreateWorkspace(cfg.Store)
-	cfg.WorkspaceAddReposFn = workspacemgr.BuildStoreBackedAddRepos(cfg.Store)
+	gitCredentials := workspacemgr.NewLocalSettingsGitCredentials(cfg.LocalSettingsDir)
+	cfg.WorkspaceCreateFn = workspacemgr.BuildStoreBackedCreateWorkspaceWithCredentials(cfg.Store, gitCredentials)
+	cfg.WorkspaceAddReposFn = workspacemgr.BuildStoreBackedAddReposWithCredentials(cfg.Store, gitCredentials)
 	cfg.DaemonConfigFn = daemonwire.BuildStoreBackedDaemonConfigFn(cfg.Store)
 }
 

@@ -15,6 +15,13 @@ describe("agent template role defaults", () => {
     ).toBe("has_design");
   });
 
+  it("restricts the advanced bug-triage worker to bug cards", () => {
+    expect(
+      AGENT_TEMPLATES.find((template) => template.id === "legacy-bug-triage")
+        ?.customRole?.taskFilter,
+    ).toBe("bug");
+  });
+
   it("pins review workflows to Codex while bug-fix stays workspace-resolved", () => {
     const workflows = new Map(
       SCRIPTED_WORKFLOW_TEMPLATES.map((template) => [

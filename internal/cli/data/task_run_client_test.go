@@ -201,6 +201,17 @@ func TestTaskRunDataCommandsUseLeaseFacadeAndStayExactTaskDesignOnly(t *testing.
 			t.Fatalf("rejected status reached facade: calls=%d", updateCalls.Load())
 		}
 
+		setTestFlagChanged(t, updateCmd.Flags(), "status", false)
+		setTestFlagChanged(t, updateCmd.Flags(), "external-ref", true)
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"TASK-1"})
+		}); err == nil || !strings.Contains(err.Error(), "rejected --external-ref") {
+			t.Fatalf("external-ref update error = %v, want design-only rejection", err)
+		}
+		if updateCalls.Load() != 1 {
+			t.Fatalf("rejected external-ref reached facade: calls=%d", updateCalls.Load())
+		}
+
 		if _, err := captureDataStdout(t, func() error {
 			return showCmd.RunE(showCmd, []string{"TASK-2"})
 		}); err == nil || !strings.Contains(err.Error(), "restricted to TASK-1") {

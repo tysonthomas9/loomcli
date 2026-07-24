@@ -369,7 +369,9 @@ function validateFindings(raw) {
 function reviewRubric() {
   return [
     "Review this pull request diff. Return ONLY a JSON object:",
-    '{ "summary": "<overall assessment>", "comments": [ { "path": "<file>", "line": <n>, "body": "<comment>" } ] }',
+    '{ "summary": "<overall assessment>", "comments": [ { "path": "<file>", "line": <optional locator hint>, "body": "<comment>" } ] }',
+    "Include line only when it is useful as a locator hint; omit it for file-wide findings.",
+    "Loom preserves every finding in the review body and does not risk the whole review on an uncertified inline anchor.",
     "Be concise; flag correctness, security, and obvious bugs. Do not approve or request changes — comment only.",
   ].join("\n");
 }

@@ -1696,7 +1696,11 @@ export function IssueDetailPanel({
   }
 
   // Build root class name
-  const rootClassName = [styles.overlay, isOpen && styles.open, className]
+  const rootClassName = [
+    styles.overlay,
+    isOpen ? styles.open : styles.closed,
+    className,
+  ]
     .filter(Boolean)
     .join(" ");
 

@@ -182,6 +182,29 @@ func TestDataUpdate_EmptyDescriptionClearsField(t *testing.T) {
 	})
 }
 
+func TestDataUpdate_ExternalRefFlag(t *testing.T) {
+	stub := &localBackendStub{}
+	withLocalBackend(t, stub, func() {
+		outputFormat = "text"
+		updateExternalRef = "local-branch:loom/TASK-1@abcdef1234567890"
+		t.Cleanup(func() { updateExternalRef = "" })
+		setTestFlagChanged(t, updateCmd.Flags(), "external-ref", true)
+
+		if _, err := captureDataStdout(t, func() error {
+			return updateCmd.RunE(updateCmd, []string{"TASK-1"})
+		}); err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		if len(stub.calls) != 1 || stub.calls[0].method != "Update" {
+			t.Fatalf("calls = %#v, want one Update call", stub.calls)
+		}
+		params := stub.calls[0].args.(backend.UpdateParams)
+		if params.ExternalRef == nil || *params.ExternalRef != updateExternalRef {
+			t.Fatalf("Update external ref = %#v, want %q", params.ExternalRef, updateExternalRef)
+		}
+	})
+}
+
 // resetUpdateFieldFlags clears any Changed state leaked onto updateCmd's
 // field flags by earlier tests in the package, so dependency-flag tests see
 // a deterministic "no field flags set" baseline.
@@ -189,7 +212,7 @@ func resetUpdateFieldFlags(t *testing.T) {
 	t.Helper()
 	for _, name := range []string{
 		"status", "assignee", "notes", "design", "priority",
-		"title", "description", "description-from-file",
+		"title", "description", "description-from-file", "external-ref",
 	} {
 		setTestFlagChanged(t, updateCmd.Flags(), name, false)
 	}

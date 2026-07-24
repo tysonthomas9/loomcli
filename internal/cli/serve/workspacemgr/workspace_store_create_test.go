@@ -11,12 +11,22 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
+
+type recordingGitCredentialSource struct {
+	remotes []string
+}
+
+func (s *recordingGitCredentialSource) Resolve(_ context.Context, remoteURL string) (*gitauth.Credential, error) {
+	s.remotes = append(s.remotes, remoteURL)
+	return nil, nil
+}
 
 func TestStoreBackedCreateEmptyWorkspaceCreatesStoreAndLocalState(t *testing.T) {
 	loomDir := t.TempDir()
@@ -459,13 +469,17 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 
 	src := initTestGitRepo(t, t.TempDir(), "Hello-World")
 	sourceBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
-	addFn := BuildStoreBackedAddRepos(st)
+	credentials := &recordingGitCredentialSource{}
+	addFn := BuildStoreBackedAddReposWithCredentials(st, credentials)
 	result, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
 		WorkspaceID: "MY-WS",
 		CloneURLs:   []string{src},
 	})
 	if err != nil {
 		t.Fatalf("add clone repo: %v", err)
+	}
+	if len(credentials.remotes) != 0 {
+		t.Fatalf("credential source remotes = %v, want none for anonymous clone success", credentials.remotes)
 	}
 	if result.WorkspaceID != "MY-WS" || result.WorkspacePath != wsPath {
 		t.Fatalf("result = %#v, want MY-WS at %s", result, wsPath)
@@ -490,6 +504,19 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	local := sc.Workspaces["MY-WS"]
 	if local.Repos["hello-world"] != filepath.Join(wsPath, "hello-world") {
 		t.Fatalf("local repo path = %q", local.Repos["hello-world"])
+	}
+
+	// The source is still wired through the store-backed path: once the
+	// anonymous clone fails, credential resolution receives the exact remote.
+	missingRemote := filepath.Join(t.TempDir(), "missing-private.git")
+	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		CloneURLs:   []string{missingRemote},
+	}); err == nil {
+		t.Fatal("add missing clone repo succeeded")
+	}
+	if len(credentials.remotes) != 1 || credentials.remotes[0] != missingRemote {
+		t.Fatalf("credential source remotes = %v, want fallback [%s]", credentials.remotes, missingRemote)
 	}
 }
 
@@ -703,7 +730,8 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	src := initTestGitRepo(t, t.TempDir(), "app")
 	sourceBranch := strings.TrimSpace(gitOutput(t, src, "branch", "--show-current"))
 	st := memstore.New()
-	createFn := BuildStoreBackedCreateWorkspace(st)
+	credentials := &recordingGitCredentialSource{}
+	createFn := BuildStoreBackedCreateWorkspaceWithCredentials(st, credentials)
 	wsPath := filepath.Join(loomDir, "workspaces", "clone-ws")
 
 	result, err := createFn(context.Background(), service.WorkspaceCreateRequest{
@@ -714,6 +742,9 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	})
 	if err != nil {
 		t.Fatalf("clone workspace: %v", err)
+	}
+	if len(credentials.remotes) != 0 {
+		t.Fatalf("credential source remotes = %v, want none for anonymous clone success", credentials.remotes)
 	}
 	if result.WorkspaceID != "CLONE-WS" {
 		t.Fatalf("WorkspaceID = %q, want CLONE-WS", result.WorkspaceID)
@@ -755,6 +786,21 @@ func TestStoreBackedCreateCloneWorkspacePersistsLifecycleAndRepos(t *testing.T) 
 	}
 	if sc.Workspaces["CLONE-WS"].Repos["app"] != filepath.Join(wsPath, "app") {
 		t.Fatalf("state repo path = %q", sc.Workspaces["CLONE-WS"].Repos["app"])
+	}
+
+	// A failed anonymous clone still proves the credential source is wired
+	// through the create path and receives the exact remote for fallback.
+	missingRemote := filepath.Join(t.TempDir(), "missing-private.git")
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name:      "clone-ws-auth-fallback",
+		Type:      "clone",
+		CloneURLs: []string{missingRemote},
+		Path:      filepath.Join(loomDir, "workspaces", "clone-ws-auth-fallback"),
+	}); err == nil {
+		t.Fatal("create workspace from missing clone repo succeeded")
+	}
+	if len(credentials.remotes) != 1 || credentials.remotes[0] != missingRemote {
+		t.Fatalf("credential source remotes = %v, want fallback [%s]", credentials.remotes, missingRemote)
 	}
 }
 

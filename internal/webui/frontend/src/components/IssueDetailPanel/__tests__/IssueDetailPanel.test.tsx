@@ -493,6 +493,16 @@ describe("IssueDetailPanel", () => {
       );
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
     });
+
+    it("does not intercept pointer input while the close animation is pending", () => {
+      render(
+        <IssueDetailPanel isOpen={false} issue={null} onClose={() => {}} />,
+      );
+
+      expect(screen.getByTestId("issue-detail-overlay").className).toMatch(
+        /closed/i,
+      );
+    });
   });
 
   describe("close interactions", () => {

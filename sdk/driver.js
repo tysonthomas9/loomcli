@@ -504,15 +504,40 @@ export class LoomDriverClient {
     if (!taskRunId) {
       throw new Error("tasks.handoffReview requires taskRunId");
     }
-    if (status !== "open" && status !== "closed") {
-      throw new Error('tasks.handoffReview status must be "open" or "closed"');
+    if (status !== "open" && status !== "review" && status !== "closed") {
+      throw new Error('tasks.handoffReview status must be "open", "review", or "closed"');
     }
-    return this.#httpCall("handoff-review", {
+    const hasPriority = Object.prototype.hasOwnProperty.call(input, "priority");
+    const hasLabels = Object.prototype.hasOwnProperty.call(input, "labels");
+    const hasCommentBody = Object.prototype.hasOwnProperty.call(input, "commentBody");
+    if (status !== "review" && (hasPriority || hasLabels || hasCommentBody)) {
+      throw new Error("tasks.handoffReview priority, labels, and commentBody are only valid for review status");
+    }
+    if (status === "review") {
+      if (!Number.isInteger(input.priority) || input.priority < 0 || input.priority > 4) {
+        throw new Error("tasks.handoffReview review status requires priority as an integer from 0 through 4");
+      }
+      if (typeof input.commentBody !== "string" || input.commentBody.trim() === "") {
+        throw new Error("tasks.handoffReview review status requires nonblank commentBody");
+      }
+      if (hasLabels && (!Array.isArray(input.labels) || input.labels.some((label) => typeof label !== "string"))) {
+        throw new Error("tasks.handoffReview labels must be an array of strings");
+      }
+    }
+    const params = {
       taskId: String(taskId),
       taskRunId,
       status,
       reason: String(input.reason || ""),
-    });
+    };
+    if (status === "review") {
+      params.priority = input.priority;
+      params.commentBody = input.commentBody;
+      if (hasLabels) {
+        params.labels = input.labels;
+      }
+    }
+    return this.#httpCall("handoff-review", params, { rawKeys: ["labels"] });
   }
 
   // dispatchConnector posts one connector egress call to the run-scoped

@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/gitauth"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -380,10 +381,29 @@ func normalizeRepoName(name string) string {
 
 // cloneRepos clones each URL into the workspace directory, deduplicating names.
 func cloneRepos(ctx context.Context, cloneURLs []string, wsDir string) ([]config.RepoConfig, error) {
-	return cloneReposWithSeen(ctx, cloneURLs, wsDir, make(map[string]bool))
+	return cloneReposWithCredentials(ctx, cloneURLs, wsDir, nil)
 }
 
 func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, seenNames map[string]bool) ([]config.RepoConfig, error) {
+	return cloneReposWithSeenCredentials(ctx, cloneURLs, wsDir, seenNames, nil)
+}
+
+func cloneReposWithCredentials(
+	ctx context.Context,
+	cloneURLs []string,
+	wsDir string,
+	credentials gitauth.Source,
+) ([]config.RepoConfig, error) {
+	return cloneReposWithSeenCredentials(ctx, cloneURLs, wsDir, make(map[string]bool), credentials)
+}
+
+func cloneReposWithSeenCredentials(
+	ctx context.Context,
+	cloneURLs []string,
+	wsDir string,
+	seenNames map[string]bool,
+	credentials gitauth.Source,
+) ([]config.RepoConfig, error) {
 	var repos []config.RepoConfig
 	if seenNames == nil {
 		seenNames = make(map[string]bool)
@@ -399,7 +419,7 @@ func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, s
 		seenNames[repoName] = true
 
 		clonePath := filepath.Join(wsDir, repoName)
-		if err := localworkspace.CloneRepoTo(ctx, cloneURL, clonePath); err != nil {
+		if err := localworkspace.CloneRepoToWithCredentials(ctx, cloneURL, clonePath, credentials); err != nil {
 			cleanupClonedRepos(repos)
 			return nil, workspaceerrors.New(workspaceerrors.GitFailed, err.Error(), err)
 		}

@@ -858,12 +858,8 @@ func TestGenerateFleetTaskPrompt(t *testing.T) {
 	}
 }
 
-func TestTaskPromptsRequireStackedPRDelivery(t *testing.T) {
-	prompts := map[string]string{
-		"task":       GenerateTaskPrompt("test", nil, "", "claude"),
-		"fleet_task": GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude"),
-	}
-
+func TestTaskPromptRequiresStackedPRDelivery(t *testing.T) {
+	prompt := GenerateTaskPrompt("test", nil, "", "claude")
 	wantParts := []string{
 		"Publish through Loom stacked PR delivery (MANDATORY)",
 		"loom stack init <stack-id>",
@@ -879,16 +875,44 @@ func TestTaskPromptsRequireStackedPRDelivery(t *testing.T) {
 		"git add -A && git commit",
 	}
 
-	for name, prompt := range prompts {
-		for _, part := range wantParts {
-			if !strings.Contains(prompt, part) {
-				t.Errorf("%s prompt missing expected stacked PR instruction: %q", name, part)
-			}
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("task prompt missing expected stacked PR instruction: %q", part)
 		}
-		for _, part := range notWantParts {
-			if strings.Contains(prompt, part) {
-				t.Errorf("%s prompt should not contain direct publish instruction: %q", name, part)
-			}
+	}
+	for _, part := range notWantParts {
+		if strings.Contains(prompt, part) {
+			t.Errorf("task prompt should not contain direct publish instruction: %q", part)
+		}
+	}
+}
+
+func TestFleetTaskPromptFallsBackToLocalReviewWhenPRDeliveryIsUnavailable(t *testing.T) {
+	prompt := GenerateFleetTaskPrompt("test", "loom-test.1", nil, "claude")
+	wantParts := []string{
+		"Prefer Loom stacked PR delivery",
+		"loom stack init <stack-id>",
+		"loom stack add <task-id>",
+		"loom stack publish <stack-id>",
+		"git branch -f <output-branch> HEAD",
+		"supported local review handoff, NOT an external blocker",
+		`--external-ref "local-branch:<output-branch>@${head_sha}"`,
+		"Do NOT mark the task blocked",
+		"Do NOT close it",
+		"Do not attempt a direct push",
+	}
+	for _, part := range wantParts {
+		if !strings.Contains(prompt, part) {
+			t.Errorf("fleet task prompt missing delivery instruction: %q", part)
+		}
+	}
+	for _, part := range []string{
+		"git push origin HEAD",
+		"Stage and commit: git add -A",
+		"git add -A && git commit",
+	} {
+		if strings.Contains(prompt, part) {
+			t.Errorf("fleet task prompt should not contain unsafe publish instruction: %q", part)
 		}
 	}
 }

@@ -420,49 +420,6 @@ func (service *Service) ReleaseDriverRunWorkItem(
 	return cloneDriverRunWorkItemMutationResult(result), nil
 }
 
-func (service *Service) HandoffDriverRunReviewWorkItem(
-	ctx context.Context,
-	auth authority.ExecutionAuthority,
-	command HandoffDriverRunReviewWorkItemCommand,
-) (DriverRunWorkItemMutationResult, error) {
-	if err := service.requireOwner(ActionHandoffDriverRunReviewWorkItem, command.WorkspaceKey, command.Owner, auth); err != nil {
-		return DriverRunWorkItemMutationResult{}, err
-	}
-	command.WorkItemID = strings.TrimSpace(command.WorkItemID)
-	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
-	command.TargetStatus = strings.TrimSpace(command.TargetStatus)
-	command.Reason = strings.TrimSpace(command.Reason)
-	claimRequestID := ClaimDriverRunWorkItemRequestID(command.Owner.ResourceID, command.WorkItemID)
-	if command.Owner.ResourceKind != ResourceDriverRun || command.WorkItemID == "" || command.TaskRunID == "" ||
-		command.RequestID != HandoffDriverRunReviewWorkItemRequestID(command.Owner.ResourceID, command.WorkItemID, command.TaskRunID) ||
-		command.ClaimActionID != DriverRunWorkItemClaimActionID(claimRequestID) ||
-		(command.TargetStatus != DriverRunWorkItemRestoreOpen && command.TargetStatus != "closed") ||
-		command.HandedOffAt.IsZero() {
-		return DriverRunWorkItemMutationResult{}, ErrInvalid
-	}
-	port := service.dependencies.DriverRuns.WorkItems
-	if port == nil {
-		return DriverRunWorkItemMutationResult{}, ErrUnavailable
-	}
-	result, err := port.HandoffDriverRunReviewWorkItem(ctx, command)
-	if err != nil {
-		return DriverRunWorkItemMutationResult{}, err
-	}
-	workItem, action := result.WorkItem, result.Action
-	actor := "driver-run:" + command.Owner.ResourceID
-	if workItem == nil || workItem.WorkspaceKey != command.WorkspaceKey || workItem.WorkItemID != command.WorkItemID ||
-		workItem.Status != command.TargetStatus || workItem.Assignee != "" ||
-		workItem.UpdatedAt.IsZero() ||
-		!validDriverRunWorkItemActionReceipt(
-			action, command.WorkspaceKey, command.WorkItemID, actor, "handoff_review_work_item",
-			DriverRunReviewWorkItemHandoffActionID(command.RequestID),
-			"issue://"+command.WorkItemID+"#handed-off", command.HandedOffAt, "", result.Replay,
-		) {
-		return DriverRunWorkItemMutationResult{}, fmt.Errorf("%w: review handoff escaped DriverRun owner envelope", ErrConflict)
-	}
-	return cloneDriverRunWorkItemMutationResult(result), nil
-}
-
 func validateDriverRunWorkItemMutationResult(
 	result DriverRunWorkItemMutationResult,
 	workspace, driverRunID, workItemID, requestID, actionType, responseState string,
@@ -563,6 +520,10 @@ func cloneDriverRunWorkItemMutationResult(result DriverRunWorkItemMutationResult
 			action.AppliedAt = &appliedAt
 		}
 		result.Action = &action
+	}
+	if result.Comment != nil {
+		comment := *result.Comment
+		result.Comment = &comment
 	}
 	return result
 }

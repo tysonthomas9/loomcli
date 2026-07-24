@@ -96,7 +96,7 @@ func (m *Module) resolvePromptAgentRoleForCreate(
 	// creates a role. Driver preflight intentionally stays first so
 	// build-toolchain failures retain their atomic 503 behavior.
 	if err := rolehandlers.ValidatePromptAgentRole(&domain.Role{
-		Name: plan.roleName, Prompt: roleCreate.Prompt, TaskFilter: roleCreate.TaskFilter,
+		Name: plan.roleName, Prompt: roleCreate.Prompt, TaskFilter: roleCreate.TaskFilter, ReadOnly: roleCreate.ReadOnly,
 	}); err != nil {
 		handler.WriteDomainError(w, err, "invalid prompt-agent role")
 		return promptAgentRoleResolution{}, false

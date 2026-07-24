@@ -98,7 +98,9 @@ func (adapter *fleetDriverRunCommandPort) HandoffDriverRunReviewWorkItem(
 		TaskID: command.WorkItemID, NodeID: command.Owner.NodeID, LeaseID: command.Owner.LeaseID,
 		LeaseToken: command.Owner.LeaseToken, FencingToken: command.Owner.FencingToken,
 		ClaimActionID: command.ClaimActionID, TaskRunID: command.TaskRunID,
-		TargetStatus: command.TargetStatus, Reason: command.Reason, HandedOffAt: command.HandedOffAt,
+		TargetStatus: command.TargetStatus, Reason: command.Reason,
+		Priority: command.Priority, Labels: append([]string(nil), command.Labels...),
+		CommentBody: command.CommentBody, HandedOffAt: command.HandedOffAt,
 	})
 	if err != nil {
 		return execution.DriverRunWorkItemMutationResult{}, mapFleetExecutionPortError(err)
@@ -147,7 +149,7 @@ func executionDriverRunWorkItemMutationResult(
 		return execution.DriverRunWorkItemMutationResult{}, execution.ErrConflict
 	}
 	issue, action := result.Issue, result.Action
-	return execution.DriverRunWorkItemMutationResult{
+	converted := execution.DriverRunWorkItemMutationResult{
 		WorkItem: &execution.DriverRunWorkItem{
 			WorkspaceKey: issue.Workspace, WorkItemID: issue.ID, Title: issue.Title, Status: issue.Status,
 			Priority: issue.Priority, IssueType: issue.Type, Assignee: issue.Assignee,
@@ -161,7 +163,14 @@ func executionDriverRunWorkItemMutationResult(
 			CreatedAt: action.CreatedAt, AppliedAt: action.AppliedAt,
 		},
 		Replay: result.Replayed,
-	}, nil
+	}
+	if result.Comment != nil {
+		converted.Comment = &execution.DriverRunWorkItemComment{
+			CommentID: result.Comment.ID, WorkItemID: result.Comment.IssueID,
+			Author: result.Comment.Author, Body: result.Comment.Body, CreatedAt: result.Comment.CreatedAt,
+		}
+	}
+	return converted, nil
 }
 
 func (adapter *fleetDriverRunCommandPort) SuspendDriverRun(ctx context.Context, workspace string, owner execution.Owner, instanceKey string) (*execution.DriverRun, error) {

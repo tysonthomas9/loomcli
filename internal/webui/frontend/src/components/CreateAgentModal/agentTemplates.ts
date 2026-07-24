@@ -28,8 +28,8 @@ export interface CustomRoleSpec {
   /** Optional role description. */
   description?: string;
   /**
-   * Task-phase filter: "needs_plan" | "has_design" | "any" (defaults to
-   * "has_design"). Filters by task phase, not issue type.
+   * Task filter: phase filters "needs_plan" | "has_design" | "any", or the
+   * read-only issue-type filter "bug" (defaults to "has_design").
    */
   taskFilter?: string;
   /** Constrain the role to read-only tools. */
@@ -160,7 +160,7 @@ const ACCENTS = {
  * Prompt seeded for the legacy bug-triage daemon role on first use. The main
  * behavior grid only shows bug triage when a workspace role exists for it.
  */
-export const BUG_TRIAGE_PROMPT = `# Bug triage agent
+export const LEGACY_BUG_TRIAGE_PROMPT = `# Bug triage agent
 
 You are a focused bug-triage agent. You claim incoming bug tickets, reproduce
 them, and write a crisp triage summary. You do NOT implement fixes.
@@ -173,6 +173,37 @@ For each bug ticket you claim:
 4. Assess severity and blast radius.
 5. Post a triage summary comment and set the ticket's labels/priority. Leave the
    ticket ready for an implementer — do not change product code yourself.
+
+Be concise and evidence-based. Prefer reading code and logs over speculation.
+`;
+
+/**
+ * Immutable prompt filename produced for the legacy role by the backend's
+ * roleprompts.ImmutablePromptFilename contract. This is intentionally pinned:
+ * the one-time migration must not overwrite a user role that merely retained
+ * the old prompt body while being repointed to an operator-owned prompt file.
+ */
+export const LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME =
+  "bug-triage.c72a7d7efcff.3c7b7bb16b2d.md";
+
+export const BUG_TRIAGE_PROMPT = `# Bug triage agent
+
+You are a focused bug-triage agent. You investigate the ticket assigned by the
+supervisor and write a crisp triage summary. You do NOT implement fixes.
+
+For the supervisor-assigned bug ticket:
+1. Restate the report in one line and identify the affected area of the code.
+2. Attempt to reproduce. Record exact steps, expected vs actual, and the
+   smallest failing case you can find.
+3. Locate the most likely root cause in the code (file:line) and explain why.
+4. Assess severity and blast radius.
+5. Post a triage summary comment and set the ticket's labels/priority.
+6. Move the ticket to the Review column as the terminal triage handoff:
+   loom data update <assigned-task-id> --status review
+   Do not leave it Open: the daemon would otherwise select it for triage again.
+
+The ticket must be ready for a human to approve into the Planner → Coder path.
+Do not change product code yourself.
 
 Be concise and evidence-based. Prefer reading code and logs over speculation.
 `;
@@ -325,7 +356,7 @@ const LEGACY_BUG_TRIAGE_TEMPLATE: AgentTemplate = {
     promptFilename: "bug-triage.md",
     promptContent: BUG_TRIAGE_PROMPT,
     description: "Reproduces and triages ready tickets; does not write fixes.",
-    taskFilter: "any",
+    taskFilter: "bug",
     readOnly: true,
   },
 };

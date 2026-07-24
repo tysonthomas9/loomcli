@@ -208,11 +208,24 @@ export interface LoomTaskRunRequest {
   retainWorkItemClaim?: boolean;
 }
 
-export interface LoomReviewHandoffInput extends LoomTaskSelector {
+export type LoomReviewHandoffInput = LoomTaskSelector & {
   taskRunId: string;
-  status: "open" | "closed";
   reason?: string;
-}
+} & ({
+  status: "review";
+  /** Priority zero through four, committed atomically with the Review transition. */
+  priority: number;
+  /** Optional labels added atomically when the Work Item enters Review. */
+  labels?: string[];
+  /** Required nonblank immutable comment authored by the host in the same fenced command. */
+  commentBody: string;
+} | {
+  status: "open" | "closed";
+  /** Review annotations are forbidden for open/closed handoffs. */
+  priority?: never;
+  labels?: never;
+  commentBody?: never;
+});
 
 export interface LoomEpicInput {
   epicId?: string;

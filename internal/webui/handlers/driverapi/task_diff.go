@@ -90,12 +90,15 @@ type taskDiffResponse struct {
 // branch delivery paths return no top-level patch because the published ref is
 // the delivery, and HostBridgeTaskExecutor only creates patch_artifact_id when a
 // patch is returned. The robust local input is therefore the review card's
-// external_ref stamp plus the workspace repo's filesystem origin.
+// external_ref stamp plus either the workspace repo's filesystem origin or its
+// verified machine-local checkout. The checkout fallback lets a legacy
+// daemon-supervised Task Runner hand work to Local Review when GitHub PR
+// delivery is unavailable without pretending the commit was published.
 //
 // Auth is the same run-scoped verifyParent model as role-get: a trusted
 // workflow run may read only cards/repos inside its workspace. The operation is
-// read-only and fail-closed: malformed stamps, missing refs, non-filesystem
-// origins, and over-large diffs all return precise structured error codes.
+// read-only and fail-closed: malformed stamps, missing refs, unverified local
+// checkouts, and over-large diffs all return precise structured error codes.
 func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) { //nolint:funlen // Validation and bounded diff assembly are one security boundary.
 	params, err := decodeParams[taskDiffParams](body)
 	if err != nil {
@@ -127,14 +130,14 @@ func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, bod
 	if err != nil {
 		return nil, err
 	}
-	originPath, err := filesystemOriginPath(ctx, repo.RemoteURL)
+	repositoryPath, egressMechanism, err := m.taskDiffRepositoryPath(ctx, ws, repo)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateLocalBranchRef(ctx, originPath, branch); err != nil {
+	if err := validateLocalBranchRef(ctx, repositoryPath, branch); err != nil {
 		return nil, err
 	}
-	headCommit, err := gitRevParseCommit(ctx, originPath, "refs/heads/"+branch, "task_diff_branch_missing", "local branch "+branch+" not found in filesystem origin")
+	headCommit, err := gitRevParseCommit(ctx, repositoryPath, "refs/heads/"+branch, "task_diff_branch_missing", "local branch "+branch+" not found in local repository")
 	if err != nil {
 		return nil, err
 	}
@@ -143,15 +146,15 @@ func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, bod
 			"local branch "+branch+" points at "+shortSHA(headCommit)+" but external_ref stamped "+stampedSHA,
 			false, map[string]any{"branch": branch, "head": headCommit, "stamped": stampedSHA}, domain.ErrConflict)
 	}
-	defaultBranch, err := taskDiffDefaultBranch(ctx, originPath, repo.DefaultBranch)
+	defaultBranch, err := taskDiffDefaultBranch(ctx, repositoryPath, repo.DefaultBranch)
 	if err != nil {
 		return nil, err
 	}
-	baseCommit, err := gitRevParseCommit(ctx, originPath, "refs/heads/"+defaultBranch, "task_diff_base_missing", "default branch "+defaultBranch+" not found in filesystem origin")
+	baseCommit, err := gitRevParseCommit(ctx, repositoryPath, "refs/heads/"+defaultBranch, "task_diff_base_missing", "default branch "+defaultBranch+" not found in local repository")
 	if err != nil {
 		return nil, err
 	}
-	diff, err := gitDiff(ctx, originPath, baseCommit, headCommit)
+	diff, err := gitDiff(ctx, repositoryPath, baseCommit, headCommit)
 	if err != nil {
 		return nil, err
 	}
@@ -168,8 +171,90 @@ func (m *Module) taskDiff(ctx context.Context, ws string, id driverIdentity, bod
 		Diff:            diff,
 		SizeBytes:       len([]byte(diff)),
 		LimitBytes:      taskDiffMaxBytes,
-		EgressMechanism: "filesystem-origin",
+		EgressMechanism: egressMechanism,
 	}, nil
+}
+
+func (m *Module) taskDiffRepositoryPath(ctx context.Context, ws string, repo *domain.Repo) (string, string, error) {
+	if repo == nil {
+		return "", "", taskDiffError(http.StatusNotFound, "task_diff_repo_missing", "workspace repo is missing", false, nil, domain.ErrNotFound)
+	}
+	originPath, originErr := filesystemOriginPath(ctx, repo.RemoteURL)
+	if originErr == nil {
+		return originPath, "filesystem-origin", nil
+	}
+	var coded *codedOpError
+	if !errors.As(originErr, &coded) || coded.code != "task_diff_origin_not_filesystem" {
+		return "", "", originErr
+	}
+
+	if m.localRepoPath == nil {
+		return "", "", originErr
+	}
+	checkoutPath := strings.TrimSpace(m.localRepoPath(ws, repo.Name))
+	if checkoutPath == "" {
+		return "", "", taskDiffError(http.StatusNotFound, "task_diff_checkout_missing",
+			"selected repo has no machine-local checkout for local review", false,
+			map[string]any{"repo": repo.Name}, domain.ErrNotFound)
+	}
+	if err := validateTaskDiffCheckout(ctx, checkoutPath, repo); err != nil {
+		return "", "", err
+	}
+	return checkoutPath, "workspace-checkout", nil
+}
+
+func validateTaskDiffCheckout(ctx context.Context, checkoutPath string, repo *domain.Repo) error {
+	info, err := os.Stat(checkoutPath)
+	if err != nil || !info.IsDir() {
+		return taskDiffError(http.StatusNotFound, "task_diff_checkout_missing",
+			"selected repo machine-local checkout is missing", false,
+			map[string]any{"repo": repo.Name}, firstNonNil(err, domain.ErrNotFound))
+	}
+	if _, _, err := runTaskDiffGit(ctx, checkoutPath, taskDiffSmallOutLimit, "rev-parse", "--git-dir"); err != nil {
+		return taskDiffError(http.StatusBadRequest, "task_diff_checkout_not_git",
+			"selected repo machine-local checkout is not a git repository", false,
+			map[string]any{"repo": repo.Name}, err)
+	}
+	if strings.TrimSpace(repo.RemoteURL) == "" {
+		return nil
+	}
+	remoteName := strings.TrimSpace(repo.Remote)
+	if remoteName == "" {
+		remoteName = "origin"
+	}
+	got, stderr, err := runTaskDiffGit(ctx, checkoutPath, taskDiffSmallOutLimit, "remote", "get-url", remoteName)
+	if err != nil {
+		message := strings.TrimSpace(stderr)
+		if message == "" {
+			message = "selected repo machine-local checkout has no configured " + remoteName + " remote"
+		}
+		return taskDiffError(http.StatusBadRequest, "task_diff_checkout_remote_missing", message, false,
+			map[string]any{"repo": repo.Name, "remote": remoteName}, err)
+	}
+	if !sameTaskDiffRemote(got, repo.RemoteURL) {
+		return taskDiffError(http.StatusConflict, "task_diff_checkout_remote_mismatch",
+			"selected repo machine-local checkout remote does not match the workspace repo", false,
+			map[string]any{"repo": repo.Name}, domain.ErrConflict)
+	}
+	return nil
+}
+
+func sameTaskDiffRemote(a, b string) bool {
+	normalize := func(value string) string {
+		value = strings.TrimSpace(value)
+		value = strings.TrimSuffix(value, "/")
+		return strings.TrimSuffix(value, ".git")
+	}
+	return normalize(a) == normalize(b)
+}
+
+func firstNonNil(values ...error) error {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return domain.ErrInvalid
 }
 
 func parseLocalBranchExternalRef(externalRef string) (string, string, error) {

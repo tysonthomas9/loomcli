@@ -290,6 +290,10 @@ func recordStackOutput(ctx context.Context, store stackstore.Store, workspaceKey
 
 type LocalTaskWorktreeResolver struct {
 	Store store.Store
+	// LocalSettingsDir is passed to the taskworktree boundary, which resolves
+	// private HTTPS credentials just in time for clone and fetch. Empty
+	// preserves anonymous/SSH/local git behavior.
+	LocalSettingsDir string
 	// Lineage is optional. When nil (the two pre-stacking construction sites and
 	// all tests), the worktree base stays the repo default branch. When set, the
 	// per-task worktree is cut from the task's lineage base so each stacked task
@@ -310,7 +314,7 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 	if taskRunID == "" {
 		return TaskWorktree{}, fmt.Errorf("task run id required: %w", domain.ErrInvalid)
 	}
-	local, err := taskworktree.Open(workspaceKey)
+	local, err := taskworktree.OpenWithLocalSettings(workspaceKey, r.LocalSettingsDir)
 	if err != nil {
 		return TaskWorktree{}, err
 	}

@@ -14,9 +14,14 @@
     visibility 0s var(--transition-slow);
 }
 
+.overlay.closed {
+  pointer-events: none;
+}
+
 .overlay.open {
   background-color: rgb(0 0 0 / 32%);
   visibility: visible;
+  pointer-events: auto;
   transition:
     background-color var(--transition-slow),
     visibility 0s;

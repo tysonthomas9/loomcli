@@ -392,6 +392,34 @@ func TestPromptAgentCreateTransactionCreatesRecordBindingAndRole(t *testing.T) {
 	}
 }
 
+func TestPromptAgentCreateAcceptsReadOnlyBugFilter(t *testing.T) {
+	st := newAgentRecordStore(t)
+	body := `{
+		"kind":"prompt",
+		"name":"Bug triage",
+		"behavior":{"role_name":"bug-triage","role_create":{
+			"description":"Triage bugs without writing code.",
+			"prompt":"Investigate the assigned bug and post evidence.",
+			"prompt_filename":"bug-triage.md",
+			"task_filter":"bug",
+			"read_only":true
+		}},
+		"trigger":{"source_kind":"internal","event_type_patterns":["internal.task.ready"]},
+		"enabled":true
+	}`
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodPost, "/api/workspaces/WS/agents", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /agents status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	role, err := st.Roles().Get(context.Background(), agentRecordTestWS, "bug-triage")
+	if err != nil {
+		t.Fatalf("get ensured role: %v", err)
+	}
+	if role.TaskFilter != "bug" || !role.ReadOnly {
+		t.Fatalf("ensured bug role = %+v, want task_filter=bug read_only=true", role)
+	}
+}
+
 func TestPromptAgentCreateRejectsUnreadyRoleBeforeAgentArtifacts(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -420,6 +448,12 @@ func TestPromptAgentCreateRejectsUnreadyRoleBeforeAgentArtifacts(t *testing.T) {
 			name:       "new role definition without prompt",
 			body:       `{"kind":"prompt","name":"Docs","behavior":{"role_name":"docs-assistant","role_create":{"task_filter":"has_design"}},"trigger":{"source_kind":"internal"},"enabled":true}`,
 			wantError:  "non-empty prompt",
+			wantNoRole: true,
+		},
+		{
+			name:       "new mutating bug-filter role",
+			body:       `{"kind":"prompt","name":"Unsafe triage","behavior":{"role_name":"docs-assistant","role_create":{"prompt":"Triage bugs.","task_filter":"bug","read_only":false}},"trigger":{"source_kind":"internal"},"enabled":true}`,
+			wantError:  "read_only=true",
 			wantNoRole: true,
 		},
 	}

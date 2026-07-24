@@ -92,6 +92,9 @@ process.stdin.on("end", () => {
       : path.join(process.cwd(), process.env.FAKE_WRITE_FILE);
     fs.writeFileSync(target, "hello from fake stdin backend\\n");
   }
+  if (process.env.FAKE_TASK_OUTCOME && process.env.LOOM_TASK_OUTCOME_FILE) {
+    fs.writeFileSync(process.env.LOOM_TASK_OUTCOME_FILE, process.env.FAKE_TASK_OUTCOME);
+  }
   process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "read the stdin" } }) + "\\n");
   process.exit(Number(process.env.FAKE_EXIT_CODE || "0"));
 });
@@ -778,6 +781,99 @@ describe("local-task-runner fail-closed classes", () => {
     assert.match(out.errorMessage, /API that no longer exists/);
   });
 
+  it("rejects a triaged outcome unless the trusted request selected bug-triage mode", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_TASK_OUTCOME = JSON.stringify({
+      version: 1,
+      disposition: "triaged",
+      summary: "P2 parser regression reproduced.",
+      priority: 2,
+      labels: ["triaged", "parser"],
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.exitCode, 1);
+    assert.equal(out.errorClass, "local_task_outcome_invalid");
+    assert.match(out.errorMessage, /requires taskOutcomeMode="bug-triage"/);
+    assert.equal(out.runtimeMetadata.task_outcome, undefined);
+  });
+
+  it("accepts only triaged disposition when the trusted request selected bug-triage mode", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_TASK_OUTCOME = JSON.stringify({
+      version: 1,
+      disposition: "needs_revision",
+      summary: "Attempt to requeue a read-only bug investigation.",
+    });
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-triage-no-requeue",
+      task_id: "BUG-1",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: { taskPrompt: "Triage the bug.", taskOutcomeMode: "bug-triage" },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.exitCode, 1);
+    assert.equal(out.errorClass, "local_task_outcome_invalid");
+    assert.match(out.errorMessage, /disposition must be "triaged"/);
+    assert.equal(out.runtimeMetadata.task_outcome, undefined);
+  });
+
+  for (const [name, edit, message] of [
+    ["extra field", (outcome) => { outcome.status = "review"; }, /unsupported fields/],
+    ["fractional priority", (outcome) => { outcome.priority = 1.5; }, /priority must be an integer/],
+    ["out-of-range priority", (outcome) => { outcome.priority = 5; }, /priority must be an integer/],
+    ["non-array labels", (outcome) => { outcome.labels = "triaged"; }, /labels must be an array/],
+    ["too many labels", (outcome) => { outcome.labels = Array.from({ length: 8 }, (_, i) => "label-" + i); }, /at most 7/],
+    ["duplicate labels", (outcome) => { outcome.labels = ["parser", "parser"]; }, /must be unique/],
+    ["untrimmed label", (outcome) => { outcome.labels = [" triaged"]; }, /trimmed strings/],
+    ["needs-revision routing label", (outcome) => { outcome.labels = ["needs-revision"]; }, /host-owned workflow labels/],
+    ["review-cycle routing label", (outcome) => { outcome.labels = ["review-cycle:9"]; }, /host-owned workflow labels/],
+    ["Loom-owned namespace", (outcome) => { outcome.labels = ["loom:quarantined"]; }, /host-owned workflow labels/],
+    ["fixed host marker", (outcome) => { outcome.labels = ["triaged"]; }, /host-owned workflow labels/],
+    ["normalization collision", (outcome) => { outcome.labels = ["Parser Bug", "parser-bug"]; }, /unique after safe normalization/],
+    ["oversized summary", (outcome) => { outcome.summary = "x".repeat(2001); }, /summary must contain 1-2000/],
+  ]) {
+    it(`fails closed for triaged outcome with ${name}`, async () => {
+      const outcome = {
+        version: 1,
+        disposition: "triaged",
+        summary: "P2 parser regression reproduced.",
+        priority: 2,
+        labels: ["triaged", "parser"],
+      };
+      edit(outcome);
+      process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+      process.env.LOOM_WORKTREE_PATH = worktree;
+      process.env.LOOM_CODEX_BIN = fakeBin;
+      process.env.FAKE_TASK_OUTCOME = JSON.stringify(outcome);
+      process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+        task_run_id: "tr-triage-invalid",
+        task_id: "BUG-1",
+        runner: "local-task-runner",
+        workspace_key: "ws",
+        input: { taskPrompt: "Triage the bug.", taskOutcomeMode: "bug-triage" },
+      });
+
+      const out = await run();
+
+      assert.equal(out.status, "failed");
+      assert.equal(out.exitCode, 1);
+      assert.equal(out.errorClass, "local_task_outcome_invalid");
+      assert.match(out.errorMessage, message);
+      assert.equal(out.runtimeMetadata.task_outcome, undefined);
+    });
+  }
+
   it("does not accept a needs_revision outcome from a backend that exits nonzero", async () => {
     process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
     process.env.LOOM_WORKTREE_PATH = worktree;
@@ -812,6 +908,46 @@ describe("local-task-runner fail-closed classes", () => {
     assert.match(out.errorMessage, /provider rejected the turn/);
   });
 
+  it("preserves a nonzero backend failure when the outcome file contains partial JSON", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "9";
+    process.env.FAKE_TASK_OUTCOME = "{";
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.exitCode, 9);
+    assert.equal(out.errorClass, "local_agent_failed");
+    assert.equal(out.runtimeMetadata.phase, "local_agent_failed");
+    assert.equal(out.runtimeMetadata.task_outcome, undefined);
+    assert.match(out.errorMessage, /exited with code 9/);
+  });
+
+  it("preserves a fatal stream failure when the outcome file is malformed", async () => {
+    process.env.LOOM_TASK_RUNNER_BACKEND = "opencode";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_OPENCODE_BIN = fakeBin;
+    process.env.FAKE_STREAM_ERROR = "provider stream terminated";
+    process.env.FAKE_TASK_OUTCOME = JSON.stringify({
+      version: 1,
+      disposition: "triaged",
+      summary: "partial result",
+      priority: 99,
+      labels: [],
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.exitCode, 1);
+    assert.equal(out.errorClass, "local_agent_failed");
+    assert.equal(out.runtimeMetadata.phase, "local_agent_failed");
+    assert.equal(out.runtimeMetadata.task_outcome, undefined);
+    assert.match(out.errorMessage, /provider stream terminated/);
+  });
+
   for (const [name, value] of [
     ["malformed JSON", "{"],
     ["unknown disposition", JSON.stringify({ version: 1, disposition: "complete", summary: "no" })],
@@ -833,6 +969,51 @@ describe("local-task-runner fail-closed classes", () => {
 });
 
 describe("local-task-runner success", () => {
+  it("appends the authoritative bug-triage contract and emits bounded string metadata", async () => {
+    const promptFile = path.join(tmpRoot, "bug-triage-prompt.txt");
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeStdinBin;
+    process.env.LOOM_READ_ONLY = "1";
+    process.env.FAKE_STDIN_FILE = promptFile;
+    process.env.FAKE_TASK_OUTCOME = JSON.stringify({
+      version: 1,
+      disposition: "triaged",
+      summary: "P4: no actionable defect was reproduced.",
+      priority: 4,
+      labels: ["Parser Regression", "café"],
+    });
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-bug-triage",
+      task_id: "BUG-1",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        taskPrompt: "Inspect the assigned bug and mutate it directly.",
+        taskOutcomeMode: "bug-triage",
+      },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "completed");
+    assert.equal(out.exitCode, 0);
+    assert.equal(out.runtimeMetadata.task_outcome, "triaged");
+    assert.equal(out.runtimeMetadata.triage_summary, "P4: no actionable defect was reproduced.");
+    assert.equal(out.runtimeMetadata.triage_priority, "4");
+    assert.equal(
+      out.runtimeMetadata.triage_labels_json,
+      JSON.stringify(["triaged", "triage:parser-regression", "triage:cafe"]),
+    );
+    const deliveredPrompt = fs.readFileSync(promptFile, "utf8");
+    assert.ok(deliveredPrompt.indexOf("Inspect the assigned bug") < deliveredPrompt.indexOf("Authoritative Loom TaskRun bug-triage handoff"));
+    assert.match(deliveredPrompt, /Do not call raw Loom\/Fleet HTTP\s+APIs/);
+    assert.match(deliveredPrompt, /sole write allowed by this read-only run/);
+    assert.match(deliveredPrompt, /LOOM_TASK_OUTCOME_FILE/);
+    assert.match(deliveredPrompt, /safely namespaces accepted labels under\s+`triage:`/);
+    assert.equal(out.runtimeMetadata.files_changed, "0");
+  });
+
   it("runs the deterministic localdogfood executable with the role prompt on stdin", async () => {
     const promptFile = path.join(tmpRoot, "localdogfood-prompt.txt");
     process.env.LOOM_TASK_RUNNER_BACKEND = "localdogfood";

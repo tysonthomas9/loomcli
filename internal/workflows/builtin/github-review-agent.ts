@@ -312,7 +312,7 @@ async function postReview(loom, subject, findings) {
     });
     const body = (result && result.body) || {};
     return loom.completed({
-      summary: "Posted COMMENT review on " + subject.subjectRef + " (" + findings.comments.length + " inline finding(s))",
+      summary: "Posted COMMENT review on " + subject.subjectRef + " (" + findings.comments.length + " review finding(s))",
       skipped: "",
       reviewUrl: stringValue(body.htmlUrl || body.html_url || body.url),
       reviewId: stringValue(body.id),
@@ -327,21 +327,16 @@ async function postReview(loom, subject, findings) {
 }
 
 // renderReviewBody composes the human-facing review summary. The github
-// connector's review post carries the body + event but not the per-line
-// comments array, so each inline finding is also rendered into the body as a
-// `path:line — body` bullet; that way every finding is visible on the posted
-// COMMENT review even when the provider does not attach line comments.
+// provider preserves every model finding in the top-level review body because
+// a model-supplied line is not proof of a valid GitHub diff anchor. Duplicating
+// findings here would render each one twice.
 function renderReviewBody(findings, subject) {
   const summary = stringValue(findings.summary) || "Automated review of " + subject.subjectRef + " at " + subject.headSha + ".";
   const count = findings.comments.length;
   if (count === 0) {
     return summary + "\n\nNo blocking issues found.";
   }
-  const lines = findings.comments.map((c) => {
-    const loc = c.line ? c.path + ":" + c.line : c.path;
-    return "- **" + loc + "** — " + stringValue(c.body);
-  });
-  return summary + "\n\n" + count + " inline finding(s):\n" + lines.join("\n");
+  return summary + "\n\n" + count + " review finding(s) follow.";
 }
 
 // stitchDiff re-builds a unified-diff string from a compare files[] array when
@@ -371,6 +366,8 @@ function reviewRubric() {
   return [
     "Review the pull request diff for correctness bugs, security issues, and clear regressions.",
     "Return JSON {summary, comments:[{path, line, body}]} only.",
+    "Include line only when it is useful as a locator hint; omit it for file-wide findings.",
+    "Loom preserves every finding in the review body and does not risk the whole review on an uncertified inline anchor.",
     "Do not approve or request changes; this is a COMMENT-only advisory review.",
   ].join(" ");
 }
@@ -463,6 +460,9 @@ function errorMessage(err) {
   return err && err.message ? err.message : String(err);
 }
 
-const MAX_REVIEW_COMMENTS = 50;
-const MAX_COMMENT_BODY = 4000;
-const MAX_REVIEW_BODY = 16000;
+// Findings are rendered into GitHub's top-level review body until the provider
+// can certify exact inline anchors. These caps keep built-in output below the
+// provider's aggregate 64 KiB boundary, including paths and formatting.
+const MAX_REVIEW_COMMENTS = 20;
+const MAX_COMMENT_BODY = 2000;
+const MAX_REVIEW_BODY = 4000;
