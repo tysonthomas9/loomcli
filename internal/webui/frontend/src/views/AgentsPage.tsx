@@ -32,7 +32,10 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useStore } from "zustand";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
-import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
+import {
+  AgentDetailMain,
+  AgentLifecycleControls,
+} from "@/components/AgentDetailMain/AgentDetailMain";
 import { AgentConfigModal } from "@/components/AgentConfigModal";
 import {
   WorkflowAgentActionBar,
@@ -533,6 +536,14 @@ function AgentsPageInner(): JSX.Element {
                       {formatStatusLabel(roleName)} agent
                     </p>
                   </div>
+                  {!isInteractiveAgent(selected) ? (
+                    <AgentLifecycleControls
+                      agent={selected}
+                      onChanged={() => {
+                        void agentStore.getState().fetchData();
+                      }}
+                    />
+                  ) : null}
                 </div>
                 <dl className={styles.statGrid}>
                   {infoStats.map((s) => (
@@ -675,6 +686,7 @@ function AgentsPageInner(): JSX.Element {
       infoStats,
       statusType,
       canEditConfig,
+      agentStore,
     ],
   );
 

@@ -125,6 +125,9 @@ vi.mock("@/components", () => ({
 
 vi.mock("@/components/AgentDetailMain/AgentDetailMain", () => ({
   AgentDetailMain: () => <div data-testid="agent-detail" />,
+  AgentLifecycleControls: ({ agent }: { agent: { name: string } }) => (
+    <div data-testid="agent-lifecycle-controls">{agent.name}</div>
+  ),
 }));
 
 vi.mock("@/components/AgentDetailPanel", () => ({
@@ -298,6 +301,9 @@ describe("AgentsPage", () => {
     expect(screen.getByRole("button", { name: "Files" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Terminal" })).toBeNull();
     expect(screen.queryByTestId("agent-detail")).toBeNull();
+    expect(screen.getByTestId("agent-lifecycle-controls").textContent).toBe(
+      "triage-1",
+    );
   });
 
   it.each([

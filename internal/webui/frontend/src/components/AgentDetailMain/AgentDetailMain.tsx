@@ -619,7 +619,7 @@ function Header({
  * by the agentcontrol HTTP surface. Hidden for daemon-owned ephemeral workers
  * (rendered read-only elsewhere) and when the workspace key is unknown.
  */
-function AgentLifecycleControls({
+export function AgentLifecycleControls({
   agent,
   onChanged,
 }: {
