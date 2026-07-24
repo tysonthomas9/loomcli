@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -173,16 +172,13 @@ func (m *Module) readCodexReviewerSnapshot(ctx context.Context, sess *domain.Age
 	if err != nil {
 		return reviewerSnapshot{state: "reconnecting"}
 	}
-	messages := flattenReviewerMessages(thread)
-	// Prefer the on-disk rollout when available: thread/read only returns
-	// summary chat items, while tool calls (custom_tool_call*) live in the
-	// rollout JSONL.
-	if path, findErr := findCodexRolloutPath(rt); findErr == nil {
-		if data, readErr := os.ReadFile(path); readErr == nil {
-			if msgs, parseErr := reviewerMessagesFromCodexRollout(rt.ThreadID, data); parseErr == nil && len(msgs) > 0 {
-				messages = msgs
-			}
-		}
+	// Prefer the on-disk rollout: thread/read only returns summary chat items,
+	// while tool calls (custom_tool_call*) live in the rollout JSONL. Flattening
+	// the thread payload is the fallback, so it is only paid when there is no
+	// readable rollout.
+	messages, ok := m.rollouts.messagesFor(rt.ThreadID)
+	if !ok {
+		messages = flattenReviewerMessages(thread)
 	}
 	return reviewerSnapshot{
 		state:    reviewerThreadState(thread),
@@ -346,7 +342,6 @@ func codexItemAsTool(item leadcontrol.CodexTurnItem) *reviewerStreamMessage {
 		msg.ToolName = "exec"
 		msg.ToolInput = strings.TrimSpace(item.Command)
 		msg.ToolResult = item.AggregatedOutput
-		msg.Text = msg.ToolName
 	case "mcpToolCall":
 		name := strings.TrimSpace(item.Tool)
 		if item.Server != "" && name != "" {
@@ -359,8 +354,9 @@ func codexItemAsTool(item leadcontrol.CodexTurnItem) *reviewerStreamMessage {
 		}
 		msg.ToolName = name
 		msg.ToolInput = rawJSONOrEmpty(item.Arguments)
-		msg.ToolResult = firstNonEmpty(rawJSONOrEmpty(item.Result), rawJSONOrEmpty(item.Error))
-		msg.Text = msg.ToolName
+		if msg.ToolResult = rawJSONOrEmpty(item.Result); msg.ToolResult == "" {
+			msg.ToolResult = rawJSONOrEmpty(item.Error)
+		}
 	case "dynamicToolCall":
 		name := strings.TrimSpace(item.Tool)
 		if name == "" {
@@ -369,22 +365,21 @@ func codexItemAsTool(item leadcontrol.CodexTurnItem) *reviewerStreamMessage {
 		msg.ToolName = name
 		msg.ToolInput = rawJSONOrEmpty(item.Arguments)
 		msg.ToolResult = rawJSONOrEmpty(item.Result)
-		msg.Text = msg.ToolName
 	case "fileChange":
 		msg.ToolName = "fileChange"
 		msg.ToolInput = codexFileChangeSummary(item.Changes)
 		msg.ToolResult = item.Status
-		msg.Text = msg.ToolName
 	case "webSearch":
 		msg.ToolName = "webSearch"
 		msg.ToolInput = strings.TrimSpace(item.Query)
-		msg.Text = msg.ToolName
 	default:
 		return nil
 	}
 	if strings.TrimSpace(msg.ToolName) == "" {
 		return nil
 	}
+	// The pill's label is its tool name for every kind above.
+	msg.Text = msg.ToolName
 	return msg
 }
 
@@ -393,15 +388,6 @@ func rawJSONOrEmpty(raw json.RawMessage) string {
 		return ""
 	}
 	return string(raw)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func codexFileChangeSummary(changes []leadcontrol.CodexFileChange) string {

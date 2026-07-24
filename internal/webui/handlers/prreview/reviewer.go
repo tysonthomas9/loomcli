@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -358,10 +359,7 @@ func (m *Module) ensureReviewerAgent(ctx context.Context, ws, agentName, repo st
 		return fmt.Errorf("load existing reviewer agent: %w", getErr)
 	}
 	if !reviewerAgentCurrent(agent, backend, reviewerRoleName) {
-		if err := m.migrateReviewer(ctx, ws, agentName, backend, reviewerRoleName, repos); err != nil {
-			return err
-		}
-		return nil
+		return m.migrateReviewer(ctx, ws, agentName, backend, reviewerRoleName, repos)
 	}
 	return m.ensureReviewerRepos(ctx, ws, agentName, agent, repos)
 }
@@ -375,15 +373,12 @@ func reviewerRepos(repo string) []string {
 }
 
 func reviewerHasRepo(agent *domain.Agent, repo string) bool {
-	if agent == nil || repo == "" {
-		return repo == "" && (agent == nil || len(agent.Repos) == 0)
+	if agent == nil {
+		return false
 	}
-	for _, existing := range agent.Repos {
-		if strings.TrimSpace(existing) == repo {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(agent.Repos, func(existing string) bool {
+		return strings.TrimSpace(existing) == repo
+	})
 }
 
 func (m *Module) ensureReviewerRepos(ctx context.Context, ws, agentName string, agent *domain.Agent, repos []string) error {

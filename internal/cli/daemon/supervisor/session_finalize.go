@@ -1,9 +1,7 @@
 package supervisor
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -24,16 +22,11 @@ import (
 // TS leaf's terminal `result.output`; fall back to Codex rollout token_count /
 // turn.completed events for the Go leaf.
 type leafUsage struct {
-	InputTokens      int64   `json:"input_tokens"`
-	OutputTokens     int64   `json:"output_tokens"`
-	CacheReadTokens  int64   `json:"cache_read_tokens"`
-	CacheWriteTokens int64   `json:"cache_write_tokens"`
-	CostUSD          float64 `json:"cost_usd"`
-}
-
-func (u leafUsage) cost() float64 {
-	// Only persist provider-reported cost_usd. Loom does not estimate from tokens.
-	return u.CostUSD
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	CostUSD          float64
 }
 
 // readLeafTranscript reads the session's on-disk native transcript ONCE so the
@@ -60,39 +53,14 @@ func (s *Supervisor) readLeafTranscript(sessionID string) (data []byte, usage le
 // rollout token_count / turn.completed events so the Go leaf no longer lands
 // tokens=0.
 func extractLeafUsage(data []byte) leafUsage {
-	if u, ok := extractResultEntryLeafUsage(data); ok {
-		return u
-	}
-	u := sessions.ExtractTranscriptUsage(data)
+	u, cost := sessions.ExtractTranscriptUsageWithCost(data)
 	return leafUsage{
 		InputTokens:      u.InputTokens,
 		OutputTokens:     u.OutputTokens,
 		CacheReadTokens:  u.CacheReadTokens,
 		CacheWriteTokens: u.CacheWriteTokens,
+		CostUSD:          cost,
 	}
-}
-
-func extractResultEntryLeafUsage(data []byte) (leafUsage, bool) {
-	lines := bytes.Split(data, []byte("\n"))
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if len(line) == 0 {
-			continue
-		}
-		var ev struct {
-			Type   string `json:"type"`
-			Output string `json:"output"`
-		}
-		if json.Unmarshal(line, &ev) != nil || ev.Type != "result" || ev.Output == "" {
-			continue
-		}
-		var u leafUsage
-		if json.Unmarshal([]byte(ev.Output), &u) != nil {
-			return leafUsage{}, false
-		}
-		return u, true
-	}
-	return leafUsage{}, false
 }
 
 func (s *Supervisor) completeBackendUnavailableCleanup(ap *AgentProcess) {
@@ -222,7 +190,8 @@ func finalizeLocalSession(
 		OutputTokens:     leafTokens.OutputTokens,
 		CacheReadTokens:  leafTokens.CacheReadTokens,
 		CacheWriteTokens: leafTokens.CacheWriteTokens,
-		EstimatedCostUSD: leafTokens.cost(),
+		// Only provider-reported cost_usd is persisted; loom never estimates from tokens.
+		EstimatedCostUSD: leafTokens.CostUSD,
 	})
 	if err != nil {
 		slog.Warn("session finalization failed", "worktree", ap.Entry.Worktree, "err", err)

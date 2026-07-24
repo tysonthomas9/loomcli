@@ -667,11 +667,16 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 // = read/write+sensitive). Unset/empty returns nil, preserving the fail-closed
 // default (remote file access denied). This is a coarse deployment-level policy
 // with NO per-user/per-workspace membership — pair a restrictive role (viewer)
-// with a trusted-auth deployment. An unrecognized role still fails closed
-// (forbidden) at the capability check.
+// with a trusted-auth deployment. An unrecognized role fails closed (remote
+// file access denied) and says so at startup, rather than looking enabled in
+// the logs while every file request 403s.
 func buildFileBrowserRoleResolver() middleware.WorkspaceRoleResolver {
 	role := strings.ToLower(strings.TrimSpace(os.Getenv("LOOM_FILE_BROWSER_DEFAULT_ROLE")))
 	if role == "" {
+		return nil
+	}
+	if !middleware.KnownFileRole(role) {
+		slog.Default().Error("LOOM_FILE_BROWSER_DEFAULT_ROLE is not a recognized role; remote file access stays disabled", "role", role)
 		return nil
 	}
 	slog.Default().Warn("file-browser default role enabled: EVERY authenticated user gets this role for remote file access (no per-workspace membership)", "role", role)

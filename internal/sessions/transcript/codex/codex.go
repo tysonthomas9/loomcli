@@ -29,20 +29,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 )
 
-// knownCodexPayloadTypes are the response_item payload types we expect from a
-// codex rollout. Anything outside this set is treated as schema drift and
-// surfaced via a warning (fail-loud) rather than silently dropped. Kept in sync
-// with the switch in rewriteLine.
-var knownCodexPayloadTypes = map[string]bool{
-	"message":                 true,
-	"reasoning":               true,
-	"function_call":           true,
-	"function_call_output":    true,
-	"custom_tool_call":        true,
-	"custom_tool_call_output": true,
-	"web_search_call":         true,
-}
-
 // Events parses a Codex rollout JSONL into the canonical event stream
 // (response_item message → text, function_call → tool_use, function_call_output
 // → tool_result), delegating the parse to harness-wrapper's codex reader. A
@@ -72,6 +58,8 @@ func Events(data []byte) ([]transcript.Event, error) {
 // drift alerting); known-but-skipped types such as "reasoning" are not reported.
 func normalizeCustomToolCalls(data []byte) ([]byte, []string) {
 	var buf bytes.Buffer
+	// Most lines pass through verbatim, so the output is ~the size of the input.
+	buf.Grow(len(data))
 	unknown := map[string]struct{}{}
 	// bufio.ReadBytes (not Scanner) — codex tool I/O lines have no length cap,
 	// matching the wrapper's own ParseRollout.
@@ -99,6 +87,12 @@ func normalizeCustomToolCalls(data []byte) ([]byte, []string) {
 func rewriteLine(line []byte, unknown map[string]struct{}) []byte {
 	trimmed := bytes.TrimSpace(line)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return line
+	}
+	// Only response_item lines can be rewritten or count as payload drift. A
+	// substring probe skips the two map unmarshals below for every other line
+	// (event_msg, turn_context, session_meta) — most of a rollout.
+	if !bytes.Contains(trimmed, []byte(`"response_item"`)) {
 		return line
 	}
 	var env map[string]json.RawMessage
@@ -136,7 +130,9 @@ func rewriteLine(line []byte, unknown map[string]struct{}) []byte {
 	case "message", "reasoning", "function_call", "function_call_output", "web_search_call":
 		return line // known type; nothing to rewrite
 	default:
-		if pt != "" && !knownCodexPayloadTypes[pt] {
+		// Outside the cases above = schema drift: report it (fail-loud) rather
+		// than letting the wrapper silently drop the item.
+		if pt != "" {
 			unknown[pt] = struct{}{}
 		}
 		return line

@@ -14,6 +14,7 @@ import {
 import { CompactRailHost } from "@/components/CompactRail";
 import { useAgentStoreInstance, useWorkspaceContext } from "@/hooks";
 import type { LoomAgentStatus } from "@/types";
+import { isPRReviewerAgent } from "@/utils/agentDisplay";
 
 import styles from "./CollapsedAgentRail.module.css";
 
@@ -24,8 +25,6 @@ export interface CollapsedAgentRailProps {
   /** When "prs", only PR review agents are shown and Add agent is hidden. */
   activeView?: string | undefined;
 }
-
-const PR_REVIEWER_ROLE = "pr-reviewer";
 
 export function CollapsedAgentRail({
   onAgentClick,
@@ -63,9 +62,7 @@ export function CollapsedAgentRail({
       (agent) => agent.status === "configured" || isLiveAgentRailVisible(agent),
     );
     if (!prsView) return ordered;
-    return ordered.filter(
-      (agent) => (agent.role ?? "").trim().toLowerCase() === PR_REVIEWER_ROLE,
-    );
+    return ordered.filter(isPRReviewerAgent);
   }, [fleetAgents, workspaceConfigAgents, workspace?.name, prsView]);
 
   return (

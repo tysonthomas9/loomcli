@@ -3,6 +3,8 @@ package sessions
 import (
 	"bytes"
 	"encoding/json"
+	"iter"
+	"os"
 )
 
 // ExtractTranscriptUsage recovers token totals from a native transcript blob.
@@ -13,16 +15,40 @@ import (
 //
 // Returns the zero value when the transcript has no recoverable usage.
 func ExtractTranscriptUsage(data []byte) TokenUsage {
+	u, _ := ExtractTranscriptUsageWithCost(data)
+	return u
+}
+
+// ExtractTranscriptUsageWithCost is ExtractTranscriptUsage plus the
+// provider-reported cost_usd. Only the TS leaf's terminal `result` entry reports
+// cost; the Codex sources carry tokens alone, so cost is 0 there. Loom never
+// estimates cost from tokens, so `estimated_cost_usd` in the transcript is
+// deliberately not read.
+func ExtractTranscriptUsageWithCost(data []byte) (TokenUsage, float64) {
 	if len(data) == 0 {
-		return TokenUsage{}
+		return TokenUsage{}, 0
 	}
-	if u := extractResultEntryUsage(data); !u.IsZero() {
-		return u
+	// The result entry is authoritative whenever it reports anything at all;
+	// an all-zero one falls through so a mixed transcript can still recover.
+	if u, cost, ok := extractResultEntryUsage(data); ok && (!u.IsZero() || cost != 0) {
+		return u, cost
 	}
 	if u := extractCodexTokenCountUsage(data); !u.IsZero() {
-		return u
+		return u, 0
 	}
-	return extractTurnCompletedUsage(data)
+	return extractTurnCompletedUsage(data), 0
+}
+
+// TranscriptUsage recovers token usage from a session's on-disk native
+// transcript. Zero when the transcript is missing, empty, or carries nothing
+// recoverable — callers use it to backfill sessions whose collector finalize
+// never persisted usage.
+func (s *Store) TranscriptUsage(sessionID string) TokenUsage {
+	data, err := os.ReadFile(s.NativeTranscriptPath(sessionID)) //nolint:gosec // session-owned path
+	if err != nil || len(data) == 0 {
+		return TokenUsage{}
+	}
+	return ExtractTranscriptUsage(data)
 }
 
 // IsZero reports whether all token fields are zero.
@@ -33,13 +59,11 @@ func (u TokenUsage) IsZero() bool {
 		u.CacheWriteTokens == 0
 }
 
-func extractResultEntryUsage(data []byte) TokenUsage {
-	lines := bytes.Split(data, []byte("\n"))
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := bytes.TrimSpace(lines[i])
-		if len(line) == 0 {
-			continue
-		}
+// extractResultEntryUsage returns the usage and provider-reported cost carried by
+// the transcript's LAST `result` entry. ok is false when there is no such entry
+// (or its `output` does not decode), which is the signal to try another source.
+func extractResultEntryUsage(data []byte) (TokenUsage, float64, bool) {
+	for line := range jsonLinesReverse(data) {
 		var ev struct {
 			Type   string `json:"type"`
 			Output string `json:"output"`
@@ -48,33 +72,30 @@ func extractResultEntryUsage(data []byte) TokenUsage {
 			continue
 		}
 		var u struct {
-			InputTokens      int64 `json:"input_tokens"`
-			OutputTokens     int64 `json:"output_tokens"`
-			CacheReadTokens  int64 `json:"cache_read_tokens"`
-			CacheWriteTokens int64 `json:"cache_write_tokens"`
+			InputTokens      int64   `json:"input_tokens"`
+			OutputTokens     int64   `json:"output_tokens"`
+			CacheReadTokens  int64   `json:"cache_read_tokens"`
+			CacheWriteTokens int64   `json:"cache_write_tokens"`
+			CostUSD          float64 `json:"cost_usd"`
 		}
 		if json.Unmarshal([]byte(ev.Output), &u) != nil {
-			return TokenUsage{}
+			return TokenUsage{}, 0, false
 		}
 		return TokenUsage{
 			InputTokens:      u.InputTokens,
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
-		}
+		}, u.CostUSD, true
 	}
-	return TokenUsage{}
+	return TokenUsage{}, 0, false
 }
 
 func extractCodexTokenCountUsage(data []byte) TokenUsage {
 	// Last token_count's total_token_usage is cumulative for the session.
 	var last TokenUsage
 	found := false
-	for _, line := range bytes.Split(data, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
+	for line := range jsonLines(data) {
 		var ev struct {
 			Type    string `json:"type"`
 			Payload *struct {
@@ -116,11 +137,7 @@ func extractCodexTokenCountUsage(data []byte) TokenUsage {
 func extractTurnCompletedUsage(data []byte) TokenUsage {
 	// Stream JSON turn.completed events carry per-turn usage; sum them.
 	var total TokenUsage
-	for _, line := range bytes.Split(data, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
+	for line := range jsonLines(data) {
 		var ev struct {
 			Type  string `json:"type"`
 			Usage *struct {
@@ -140,4 +157,47 @@ func extractTurnCompletedUsage(data []byte) TokenUsage {
 		total.CacheReadTokens += ev.Usage.CachedInputTokens
 	}
 	return total
+}
+
+// jsonLines yields each non-blank, whitespace-trimmed line of a JSONL blob, oldest
+// first. It slices data in place rather than building a bytes.Split index over
+// the whole transcript, which matters on multi-MB rollouts.
+func jsonLines(data []byte) iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		for len(data) > 0 {
+			line := data
+			if i := bytes.IndexByte(data, '\n'); i >= 0 {
+				line, data = data[:i], data[i+1:]
+			} else {
+				data = nil
+			}
+			if line = bytes.TrimSpace(line); len(line) == 0 {
+				continue
+			}
+			if !yield(line) {
+				return
+			}
+		}
+	}
+}
+
+// jsonLinesReverse is jsonLines in newest-first order, so a scan for the terminal entry
+// stops at the tail instead of reading the whole transcript.
+func jsonLinesReverse(data []byte) iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		for len(data) > 0 {
+			line := data
+			if i := bytes.LastIndexByte(data, '\n'); i >= 0 {
+				line, data = data[i+1:], data[:i]
+			} else {
+				data = nil
+			}
+			if line = bytes.TrimSpace(line); len(line) == 0 {
+				continue
+			}
+			if !yield(line) {
+				return
+			}
+		}
+	}
 }

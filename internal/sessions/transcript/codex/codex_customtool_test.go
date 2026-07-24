@@ -2,7 +2,6 @@ package codex
 
 import (
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 
@@ -99,61 +98,4 @@ func TestEvents_CodexLegacyFunctionCallUnaffected(t *testing.T) {
 	if events[0].ToolName != "exec_command" || events[1].Output != "done" {
 		t.Errorf("legacy mapping altered: %+v", events)
 	}
-}
-
-// TestEvents_CodexCustomToolCall_Conformance parses a redacted real codex-cli
-// 0.144.3 rollout (the LOCALMODE-3 coder run) and asserts every exec tool call
-// survives normalization and pairs correctly.
-func TestEvents_CodexCustomToolCall_Conformance(t *testing.T) {
-	data, err := os.ReadFile("testdata/codex_custom_tool_call_rollout.jsonl")
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
-	events, err := Events(data)
-	if err != nil {
-		t.Fatalf("Events: %v", err)
-	}
-
-	var text, toolUse, toolResult int
-	useIDs := map[string]bool{}
-	resIDs := map[string]bool{}
-	var firstUse *transcript.Event
-	for i := range events {
-		e := events[i]
-		switch e.Type {
-		case transcript.EventText:
-			text++
-		case transcript.EventToolUse:
-			toolUse++
-			useIDs[e.ToolUseID] = true
-			if firstUse == nil {
-				firstUse = &events[i]
-			}
-			if !json.Valid(e.ToolInput) {
-				t.Errorf("tool_use %q has invalid tool_input JSON: %s", e.ToolUseID, e.ToolInput)
-			}
-		case transcript.EventToolResult:
-			toolResult++
-			resIDs[e.ToolUseID] = true
-		}
-	}
-
-	if toolUse != 15 {
-		t.Errorf("tool_use count = %d, want 15", toolUse)
-	}
-	if toolResult != 15 {
-		t.Errorf("tool_result count = %d, want 15", toolResult)
-	}
-	if text == 0 {
-		t.Errorf("expected text events, got 0")
-	}
-	for id := range useIDs {
-		if !resIDs[id] {
-			t.Errorf("tool_use %q has no paired tool_result", id)
-		}
-	}
-	if firstUse != nil && firstUse.ToolName != "exec" {
-		t.Errorf("first tool_use name = %q, want exec", firstUse.ToolName)
-	}
-	t.Logf("conformance counts: text=%d tool_use=%d tool_result=%d", text, toolUse, toolResult)
 }

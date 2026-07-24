@@ -20,8 +20,8 @@ func TestExtractLeafUsage_ParsesResultEntryUsage(t *testing.T) {
 	if u.InputTokens != 8000 || u.OutputTokens != 300 || u.CacheReadTokens != 12 || u.CacheWriteTokens != 7 {
 		t.Fatalf("token mismatch: %+v", u)
 	}
-	if u.cost() != 0.42 {
-		t.Errorf("cost = %v, want 0.42", u.cost())
+	if u.CostUSD != 0.42 {
+		t.Errorf("cost = %v, want 0.42", u.CostUSD)
 	}
 }
 
@@ -42,12 +42,11 @@ func TestExtractLeafUsage_CodexTokenCount(t *testing.T) {
 	}
 }
 
-// TestLeafUsageCost_UsesProviderCostOnly ignores estimated_cost_usd.
-func TestLeafUsageCost_UsesProviderCostOnly(t *testing.T) {
-	if got := (leafUsage{CostUSD: 1.5}).cost(); got != 1.5 {
-		t.Errorf("cost() = %v, want 1.5 (cost_usd)", got)
-	}
-	if got := (leafUsage{}).cost(); got != 0 {
-		t.Errorf("cost() = %v, want 0 (no estimate fallback)", got)
+// TestExtractLeafUsage_IgnoresEstimatedCost pins that only the provider-reported
+// cost_usd is carried through; a leaf's estimated_cost_usd is never persisted.
+func TestExtractLeafUsage_IgnoresEstimatedCost(t *testing.T) {
+	data := []byte(`{"role":"system","type":"result","output":"{\"input_tokens\":10,\"estimated_cost_usd\":2.5}"}` + "\n")
+	if u := extractLeafUsage(data); u.CostUSD != 0 {
+		t.Errorf("CostUSD = %v, want 0 (no estimate fallback)", u.CostUSD)
 	}
 }

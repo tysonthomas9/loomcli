@@ -37,16 +37,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The `code` an ApiError carries for a given status, if it is that status. */
+function apiErrorCode(error: unknown, status: number): unknown {
+  if (!(error instanceof ApiError) || error.status !== status) return undefined;
+  if (!error.body || typeof error.body !== "object") return undefined;
+  return (error.body as { code?: unknown }).code;
+}
+
 function isStaleSubjectError(error: unknown): boolean {
-  if (!(error instanceof ApiError) || error.status !== 409) return false;
-  if (!error.body || typeof error.body !== "object") return false;
-  return (error.body as { code?: unknown }).code === "stale_subject";
+  return apiErrorCode(error, 409) === "stale_subject";
 }
 
 function isReviewerNotStartedError(error: unknown): boolean {
-  if (!(error instanceof ApiError) || error.status !== 404) return false;
-  if (!error.body || typeof error.body !== "object") return false;
-  return (error.body as { code?: unknown }).code === "reviewer_not_started";
+  return apiErrorCode(error, 404) === "reviewer_not_started";
 }
 
 export function usePRReviewConversation({
@@ -77,7 +80,14 @@ export function usePRReviewConversation({
   const pollInFlightRef = useRef(false);
   const mountedRef = useRef(false);
   const onStaleSubjectRef = useRef(onStaleSubject);
+  // Mirrors agentName for the poll's error path, which must read it WITHOUT
+  // taking a dependency on it (that would re-arm the poll interval on every
+  // agent change). Always written through setAgentNameAndRef.
   const agentNameRef = useRef<string | null>(null);
+  const setAgentNameAndRef = useCallback((name: string | null) => {
+    agentNameRef.current = name;
+    setAgentName(name);
+  }, []);
   const key = `${workspaceId}|${owner}|${repo}|${number}`;
 
   const invalidateRequests = useCallback(() => {
@@ -156,12 +166,7 @@ export function usePRReviewConversation({
   }, [onStaleSubject]);
 
   useEffect(() => {
-    agentNameRef.current = agentName;
-  }, [agentName]);
-
-  useEffect(() => {
-    setAgentName(null);
-    agentNameRef.current = null;
+    setAgentNameAndRef(null);
     setMessages([]);
     setState("starting");
     setDetail(null);
@@ -171,7 +176,7 @@ export function usePRReviewConversation({
     ensureKeyRef.current = null;
     requestSeqRef.current++;
     pollInFlightRef.current = false;
-  }, [key]);
+  }, [key, setAgentNameAndRef]);
 
   // Load conversation immediately — do not wait for ensure. Existing reviewers
   // (e.g. kanban sidebar click) can show chat while checkout refreshes.
@@ -193,8 +198,7 @@ export function usePRReviewConversation({
       try {
         const result = await ensureReviewer(workspaceId, owner, repo, number);
         if (!ignore && mountedRef.current) {
-          setAgentName(result.agent_name);
-          agentNameRef.current = result.agent_name;
+          setAgentNameAndRef(result.agent_name);
           setError(null);
           setConversationReady(true);
           // Refresh after ensure so checkout/agent identity stays in sync.
@@ -230,6 +234,7 @@ export function usePRReviewConversation({
     refetchConversation,
     repo,
     retryNonce,
+    setAgentNameAndRef,
     workspaceId,
   ]);
 

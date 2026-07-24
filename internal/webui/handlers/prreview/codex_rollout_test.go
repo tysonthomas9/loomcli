@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 )
 
 func TestReviewerMessagesFromCodexRolloutIncludesTools(t *testing.T) {
@@ -52,7 +50,7 @@ func TestFindCodexRolloutPathByGlob(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := findCodexRolloutPath(leadcontrol.CodexRuntimeMetadata{ThreadID: threadID})
+	got, err := findCodexRolloutPath(threadID)
 	if err != nil {
 		t.Fatalf("findCodexRolloutPath: %v", err)
 	}
@@ -73,7 +71,7 @@ func TestFindCodexRolloutPathRequiresExactThreadIDSuffix(t *testing.T) {
 	if err := os.WriteFile(nearMatch, []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := findCodexRolloutPath(leadcontrol.CodexRuntimeMetadata{ThreadID: threadID}); err == nil {
+	if _, err := findCodexRolloutPath(threadID); err == nil {
 		t.Fatal("near-match rollout should not be selected")
 	}
 }

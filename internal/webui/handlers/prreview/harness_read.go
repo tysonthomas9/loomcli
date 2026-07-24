@@ -217,47 +217,59 @@ func reviewerMessagesFromEvents(provider, harnessSessionID string, events []hwtr
 	for _, ev := range events {
 		switch ev.Type {
 		case hwtranscript.EventText:
-			if ev.Role != hwtranscript.RoleUser && ev.Role != hwtranscript.RoleAssistant {
-				continue
+			if msg, ok := reviewerTextMessage(idPrefix, ordinals, ev); ok {
+				out = append(out, msg)
 			}
-			if strings.TrimSpace(ev.Text) == "" {
-				continue
-			}
-			turnID, itemID := reviewerEventIDs(idPrefix, ordinals, ev)
-			out = append(out, reviewerStreamMessage{
-				TurnID: turnID,
-				ItemID: itemID,
-				Role:   ev.Role,
-				Text:   ev.Text,
-			})
 		case hwtranscript.EventToolUse:
-			name := strings.TrimSpace(ev.ToolName)
-			if name == "" {
-				name = "tool"
-			}
-			turnID, itemID := reviewerEventIDs(idPrefix, ordinals, ev)
-			msg := reviewerStreamMessage{
-				TurnID:    turnID,
-				ItemID:    itemID,
-				Role:      "assistant",
-				Kind:      "tool_use",
-				ToolName:  name,
-				ToolUseID: ev.ToolUseID,
-				ToolInput: strings.TrimSpace(string(ev.ToolInput)),
-				Text:      name,
-			}
-			if ev.ToolUseID != "" {
-				msg.ToolResult = results[ev.ToolUseID]
-			}
-			if msg.ToolResult == "" {
-				msg.ToolResult = strings.TrimSpace(ev.Output)
-			}
-			out = append(out, msg)
-		default:
-			continue
+			out = append(out, reviewerToolUseMessage(idPrefix, ordinals, results, ev))
 		}
 	}
 	return trimReviewerPreamble(out)
+}
+
+// reviewerTextMessage renders a user/assistant text event; ok is false for
+// other roles and for whitespace-only text, which stay out of the transcript.
+func reviewerTextMessage(idPrefix string, ordinals map[string]int, ev hwtranscript.Event) (reviewerStreamMessage, bool) {
+	if ev.Role != hwtranscript.RoleUser && ev.Role != hwtranscript.RoleAssistant {
+		return reviewerStreamMessage{}, false
+	}
+	if strings.TrimSpace(ev.Text) == "" {
+		return reviewerStreamMessage{}, false
+	}
+	turnID, itemID := reviewerEventIDs(idPrefix, ordinals, ev)
+	return reviewerStreamMessage{
+		TurnID: turnID,
+		ItemID: itemID,
+		Role:   ev.Role,
+		Text:   ev.Text,
+	}, true
+}
+
+// reviewerToolUseMessage renders a tool call, preferring the paired tool-result
+// event's output and falling back to any output carried on the call itself.
+func reviewerToolUseMessage(idPrefix string, ordinals map[string]int, results map[string]string, ev hwtranscript.Event) reviewerStreamMessage {
+	name := strings.TrimSpace(ev.ToolName)
+	if name == "" {
+		name = "tool"
+	}
+	turnID, itemID := reviewerEventIDs(idPrefix, ordinals, ev)
+	msg := reviewerStreamMessage{
+		TurnID:    turnID,
+		ItemID:    itemID,
+		Role:      "assistant",
+		Kind:      "tool_use",
+		ToolName:  name,
+		ToolUseID: ev.ToolUseID,
+		ToolInput: strings.TrimSpace(string(ev.ToolInput)),
+		Text:      name,
+	}
+	if ev.ToolUseID != "" {
+		msg.ToolResult = results[ev.ToolUseID]
+	}
+	if msg.ToolResult == "" {
+		msg.ToolResult = strings.TrimSpace(ev.Output)
+	}
+	return msg
 }
 
 func reviewerEventIDs(idPrefix string, ordinals map[string]int, ev hwtranscript.Event) (turnID, itemID string) {

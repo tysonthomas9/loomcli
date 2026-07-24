@@ -24,6 +24,7 @@ import {
   orderAgentsForEpicRunner,
   splitAgentsByRuntime,
 } from "@/utils/agentRole";
+import { isPRReviewerAgent } from "@/utils/agentDisplay";
 import { wsGet, wsSet } from "@/utils/scopedStorage";
 
 import styles from "./AgentSection.module.css";
@@ -44,8 +45,6 @@ interface AgentMenuState {
   x: number;
   y: number;
 }
-
-const PR_REVIEWER_ROLE = "pr-reviewer";
 
 export function AgentSection({
   onAgentClick,
@@ -97,9 +96,7 @@ export function AgentSection({
       merged = [...orderedFleetAgents, ...configPlaceholders];
     }
     if (!prsView) return merged;
-    return merged.filter(
-      (agent) => (agent.role ?? "").trim().toLowerCase() === PR_REVIEWER_ROLE,
-    );
+    return merged.filter(isPRReviewerAgent);
   }, [fleetAgents, workspaceConfigAgents, workspace?.name, prsView]);
 
   const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents]);

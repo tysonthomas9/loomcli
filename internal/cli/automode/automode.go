@@ -419,7 +419,7 @@ func runAutoTask(ctx *autoLoopCtx, shutdown chan struct{}) bool {
 	captureSessionID(ctx)
 	endedAt := time.Now()
 
-	recordAndFinalize(ctx, collector, sess, beforeRef, backendName, startedAt, endedAt, err)
+	recordAndFinalize(ctx, collector, sess, beforeRef, startedAt, endedAt, err)
 
 	if updateErr := ctx.updateState(cli.StateIdle); updateErr != nil {
 		fmt.Printf("[auto] Warning: failed to update state: %v\n", updateErr)
@@ -478,11 +478,13 @@ func captureSessionID(ctx *autoLoopCtx) {
 	}
 }
 
-func recordAndFinalize(ctx *autoLoopCtx, collector *usage.Collector, sess *sessions.Session, beforeRef, backendName string, startedAt, endedAt time.Time, err error) {
+func recordAndFinalize(ctx *autoLoopCtx, collector *usage.Collector, sess *sessions.Session, beforeRef string, startedAt, endedAt time.Time, err error) {
 	recordSessionUsage(ctx.usageStore, collector, ctx.opts.WorktreePath, ctx.opts.AgentName, ctx.opts.ParentID, startedAt, endedAt, err, ctx.opts.LockBridge)
 
+	// No cost argument: only provider-reported usage is recorded, never a
+	// pricing-tier estimate derived from the backend name.
 	inTok, outTok, cacheRead, cacheWrite := collector.Totals()
-	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite, 0)
+	finalizeAutoSession(ctx, sess, beforeRef, err, inTok, outTok, cacheRead, cacheWrite)
 }
 
 func classifyInvokeError(err error, backendName string) *agenterr.AgentError {

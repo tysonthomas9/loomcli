@@ -191,11 +191,7 @@ func enrichSessionUsageFromTranscript(store *sessions.Store, rec *sessions.Sessi
 	if localHasUsage(*rec) {
 		return
 	}
-	data, err := os.ReadFile(store.NativeTranscriptPath(rec.SessionID)) //nolint:gosec // session-owned path
-	if err != nil || len(data) == 0 {
-		return
-	}
-	u := sessions.ExtractTranscriptUsage(data)
+	u := store.TranscriptUsage(rec.SessionID)
 	if u.IsZero() {
 		return
 	}

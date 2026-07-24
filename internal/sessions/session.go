@@ -10,12 +10,13 @@ type Session struct {
 	Meta  SessionMetadata
 }
 
-// Store returns the session's backing Store.
-func (s *Session) Store() *Store {
-	if s == nil {
-		return nil
+// TranscriptUsage recovers token usage from this session's on-disk native
+// transcript. Zero when the session has no store or nothing is recoverable.
+func (s *Session) TranscriptUsage() TokenUsage {
+	if s == nil || s.store == nil {
+		return TokenUsage{}
 	}
-	return s.store
+	return s.store.TranscriptUsage(s.Meta.SessionID)
 }
 
 // SessionID returns the session's unique identifier.

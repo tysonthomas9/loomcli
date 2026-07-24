@@ -10,10 +10,12 @@
 import { useMemo, useState } from "react";
 
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
+import { ToolPill } from "@/components/ToolPill";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 import { formatStatusLabel } from "@/utils/issue";
-import { sessionTotalTokens } from "@/utils/sessionUsage";
+import { formatTokens, sessionTotalTokens } from "@/utils/sessionUsage";
+import { argPreview } from "@/utils/toolPreview";
 
 import { MarkdownRenderer } from "../sections/MarkdownRenderer";
 import styles from "./SessionsTab.module.css";
@@ -51,16 +53,12 @@ function formatTimestamp(ts: string | undefined): string {
   return `${hh}:${mm}:${ss}.${ms}`;
 }
 
+// Cost and duration keep detail-panel precision here (sub-cent cost to 4dp,
+// fractional seconds) rather than the run rail's rounded summary formatting.
 function formatCost(usd: number): string {
   if (usd === 0) return "$0";
   if (usd < 0.01) return `$${usd.toFixed(4)}`;
   return `$${usd.toFixed(2)}`;
-}
-
-function formatTokens(n: number): string {
-  if (n < 1000) return String(n);
-  if (n < 1000000) return `${(n / 1000).toFixed(1)}k`;
-  return `${(n / 1000000).toFixed(1)}M`;
 }
 
 function formatDuration(s: number | undefined): string {
@@ -225,84 +223,6 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────
-
-function ToolBlock({
-  item,
-  expanded,
-  onToggle,
-}: {
-  item: ToolItem;
-  expanded: boolean;
-  onToggle: () => void;
-}): JSX.Element {
-  const payload = item.inputPreview;
-  const resultText = item.result ?? "";
-
-  return (
-    <div
-      className={styles.toolBlock}
-      data-testid="transcript-event"
-      data-type="tool_use"
-    >
-      <button
-        type="button"
-        className={`${styles.toolPill} ${expanded ? styles.toolPillOpen : ""}`}
-        onClick={onToggle}
-        aria-expanded={expanded}
-        data-testid="tool-pill"
-      >
-        <span className={styles.toolPillIcon}>{item.name}</span>
-        <span className={styles.toolPillArg}>{argPreview(item.input)}</span>
-        <span className={styles.toolPillCaret}>{expanded ? "▾" : "▸"}</span>
-      </button>
-      {expanded && (
-        <div className={styles.toolBody}>
-          {payload && <pre className={styles.toolInput}>{payload}</pre>}
-          {resultText && (
-            <>
-              <div className={styles.toolResultLabel}>
-                Result
-                {item.resultTimestamp && (
-                  <span className={styles.ts}>
-                    · {formatTimestamp(item.resultTimestamp)}
-                  </span>
-                )}
-              </div>
-              <pre className={styles.toolOutput}>{resultText}</pre>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Return a short preview of the most salient tool-input arg (path, command, etc.). */
-function argPreview(input: unknown): string {
-  if (input == null) return "";
-  if (typeof input === "string") return truncate(input, 60);
-  if (typeof input !== "object") return "";
-  const rec = input as Record<string, unknown>;
-  for (const key of [
-    "file_path",
-    "filePath",
-    "path",
-    "notebook_path",
-    "url",
-    "pattern",
-    "command",
-    "query",
-    "skill",
-  ]) {
-    const v = rec[key];
-    if (typeof v === "string" && v) return truncate(v, 60);
-  }
-  return "";
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n - 1) + "…" : s;
-}
 
 // ─── Main component ───────────────────────────────────────────────────
 
@@ -559,11 +479,22 @@ export function SessionDetailView({
                       className={styles.msg}
                     />
                   ) : (
-                    <ToolBlock
+                    <ToolPill
                       key={item.seq}
-                      item={item}
+                      name={item.name}
+                      arg={argPreview(item.input)}
+                      input={item.inputPreview}
+                      result={item.result}
+                      resultTimestamp={
+                        item.resultTimestamp
+                          ? formatTimestamp(item.resultTimestamp)
+                          : undefined
+                      }
                       expanded={expandedTools.has(item.seq)}
                       onToggle={() => toggleTool(item.seq)}
+                      className={styles.toolBlock}
+                      testId="transcript-event"
+                      dataType="tool_use"
                     />
                   ),
                 )}

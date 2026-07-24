@@ -52,7 +52,7 @@ func latestHarnessTranscriptPath(backend, workDir, hintUUID string, since time.T
 		}
 		return resolveClaudeTranscript(projectDir, hintUUID, since)
 	case backendnames.Codex:
-		root := codexSessionsRoot()
+		root := CodexSessionsRoot()
 		if root == "" {
 			return ""
 		}

@@ -4,7 +4,11 @@
  */
 
 import type { SessionRecord } from "@/types/agent";
-import { sessionTotalTokens } from "@/utils/sessionUsage";
+import {
+  formatCost,
+  formatTokens,
+  sessionTotalTokens,
+} from "@/utils/sessionUsage";
 
 import styles from "./SessionsTab.module.css";
 
@@ -21,20 +25,6 @@ function formatDuration(seconds: number | undefined): string {
   const s = Math.round(seconds % 60);
   if (m === 0) return `${s}s`;
   return `${m}m ${s}s`;
-}
-
-/** Format token count with K suffix for large numbers */
-function formatTokens(count: number): string {
-  if (count >= 10_000) return `${(count / 1000).toFixed(1)}K`;
-  if (count >= 1_000) return `${(count / 1000).toFixed(1)}K`;
-  return String(count);
-}
-
-/** Format USD cost */
-function formatCost(usd: number): string {
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
 }
 
 function formatRunStatus(status: string): string {

@@ -4,6 +4,7 @@
  */
 
 import type { SessionRecord } from "@/types/agent";
+import { formatCost, formatTokens } from "@/utils/sessionUsage";
 
 import { SessionTimelineRow } from "./SessionTimelineRow";
 import styles from "./SessionsTab.module.css";
@@ -22,18 +23,6 @@ export interface SessionTimelineProps {
   onSelect: (id: string) => void;
   isLoading: boolean;
   summary: RunRailSummary;
-}
-
-function formatTokensShort(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
-  return String(count);
-}
-
-function formatCostUSD(usd: number): string {
-  if (usd === 0) return "$0.00";
-  if (usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
 }
 
 export function SessionTimeline({
@@ -66,10 +55,10 @@ export function SessionTimeline({
 
   const summaryParts = [
     String(summary.count),
-    `${formatTokensShort(summary.totalTokens)} tok`,
+    `${formatTokens(summary.totalTokens)} tok`,
   ];
   if (summary.totalCost > 0) {
-    summaryParts.push(formatCostUSD(summary.totalCost));
+    summaryParts.push(formatCost(summary.totalCost));
   }
   if (summary.activeSessions > 0) {
     summaryParts.push(`${summary.activeSessions} active`);

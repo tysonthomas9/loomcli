@@ -3,7 +3,9 @@ import { useState } from "react";
 import type { ReviewerMessage } from "@/api/workspace/prReview";
 import { MarkdownRenderer } from "@/components/IssueDetailPanel";
 import { TerminalView } from "@/components/TerminalView";
+import { ToolPill } from "@/components/ToolPill";
 import { usePRReviewConversation } from "@/hooks/workspace";
+import { argPreviewFromJSON } from "@/utils/toolPreview";
 
 import styles from "./PRDiscussionPanel.module.css";
 
@@ -22,76 +24,23 @@ function isToolMessage(message: ReviewerMessage): boolean {
   return message.kind === "tool_use" || Boolean(message.tool_name);
 }
 
-function truncate(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return `${value.slice(0, max - 1)}…`;
-}
-
-/** Short preview of the most salient tool-input arg (path, command, etc.). */
-function toolArgPreview(input: string | undefined): string {
-  const raw = (input ?? "").trim();
-  if (!raw) return "";
-  if (!raw.startsWith("{") && !raw.startsWith("[")) {
-    return truncate(raw.replace(/\s+/g, " "), 60);
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed === "string") return truncate(parsed, 60);
-    if (parsed && typeof parsed === "object") {
-      const rec = parsed as Record<string, unknown>;
-      for (const key of [
-        "file_path",
-        "filePath",
-        "path",
-        "notebook_path",
-        "url",
-        "pattern",
-        "command",
-        "query",
-        "skill",
-      ]) {
-        const v = rec[key];
-        if (typeof v === "string" && v) return truncate(v, 60);
-      }
-    }
-  } catch {
-    // fall through to truncated raw
-  }
-  return truncate(raw.replace(/\s+/g, " "), 60);
-}
-
-function ToolPill({ message }: { message: ReviewerMessage }): JSX.Element {
+function ReviewerToolPill({
+  message,
+}: {
+  message: ReviewerMessage;
+}): JSX.Element {
   const [expanded, setExpanded] = useState(false);
-  const name = message.tool_name || "tool";
-  const arg = toolArgPreview(message.tool_input);
-  const input = (message.tool_input ?? "").trim();
-  const result = (message.tool_result ?? "").trim();
-
   return (
-    <div className={styles.toolBlock} data-testid="pr-chat-tool">
-      <button
-        type="button"
-        className={`${styles.toolPill} ${expanded ? styles.toolPillOpen : ""}`}
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        data-testid="tool-pill"
-      >
-        <span className={styles.toolPillIcon}>{name}</span>
-        {arg && <span className={styles.toolPillArg}>{arg}</span>}
-        <span className={styles.toolPillCaret}>{expanded ? "▾" : "▸"}</span>
-      </button>
-      {expanded && (input || result) && (
-        <div className={styles.toolBody}>
-          {input && <pre className={styles.toolInput}>{input}</pre>}
-          {result && (
-            <>
-              <div className={styles.toolResultLabel}>Result</div>
-              <pre className={styles.toolOutput}>{result}</pre>
-            </>
-          )}
-        </div>
-      )}
-    </div>
+    <ToolPill
+      name={message.tool_name || "tool"}
+      arg={argPreviewFromJSON(message.tool_input)}
+      input={(message.tool_input ?? "").trim()}
+      result={(message.tool_result ?? "").trim()}
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+      className={styles.toolBlock}
+      testId="pr-chat-tool"
+    />
   );
 }
 
@@ -218,7 +167,7 @@ export function PRDiscussionPanel({
           ) : (
             messages.map((message) =>
               isToolMessage(message) ? (
-                <ToolPill key={message.item_id} message={message} />
+                <ReviewerToolPill key={message.item_id} message={message} />
               ) : (
                 <div
                   key={message.item_id}

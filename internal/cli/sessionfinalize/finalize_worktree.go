@@ -1,8 +1,6 @@
 package sessionfinalize
 
 import (
-	"os"
-
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -84,11 +82,7 @@ func recoverUsageFromNativeTranscript(sess *sessions.Session, opts WithWorktreeO
 		opts.CacheReadTokens != 0 || opts.CacheWriteTokens != 0 {
 		return opts
 	}
-	data, err := os.ReadFile(sess.Store().NativeTranscriptPath(sess.SessionID())) //nolint:gosec // session-owned path
-	if err != nil || len(data) == 0 {
-		return opts
-	}
-	u := sessions.ExtractTranscriptUsage(data)
+	u := sess.TranscriptUsage()
 	if u.IsZero() {
 		return opts
 	}

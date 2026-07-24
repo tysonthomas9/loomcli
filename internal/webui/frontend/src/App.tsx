@@ -1351,9 +1351,7 @@ function App() {
       onAgentClick={handleAgentClick}
       selectedAgentName={sidebarSelectedAgentName}
       agentTasks={agentTasks}
-      {...(activeView === "prs"
-        ? {}
-        : { onAddClick: () => setShowCreateAgent(true) })}
+      onAddClick={() => setShowCreateAgent(true)}
       onAddWorkspaceClick={() => setShowCreateWorkspace(true)}
       connectionState={connectionState}
       connectionLost={isConnectionLost}
