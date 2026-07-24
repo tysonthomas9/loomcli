@@ -211,6 +211,59 @@ func TestAddWorkspaceReposNormalizesCloneURLInput(t *testing.T) {
 	}
 }
 
+func TestStartAsyncAddReposNormalizesAndSchedulesWithoutRunningInline(t *testing.T) {
+	jobStore := &recordingWorkspaceJobStore{}
+	addCalled := false
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		AddReposFn: func(_ context.Context, req WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
+			addCalled = true
+			return WorkspaceCreateResult{WorkspaceID: req.WorkspaceID}, nil
+		},
+		JobStore: jobStore,
+	})
+
+	jobID, err := svc.StartAsyncAddRepos(context.Background(), WorkspaceAddReposRequest{
+		WorkspaceID: "ALPHA",
+		Repos:       []string{" https://github.com/acme/slow.git "},
+	})
+	if err != nil {
+		t.Fatalf("StartAsyncAddRepos returned error: %v", err)
+	}
+	if jobID != "add-repos-job" {
+		t.Fatalf("job ID = %q, want add-repos-job", jobID)
+	}
+	if addCalled {
+		t.Fatal("add function ran before the async job store started it")
+	}
+	if len(jobStore.addReq.Repos) != 0 {
+		t.Fatalf("repos = %#v, want normalized empty local list", jobStore.addReq.Repos)
+	}
+	if len(jobStore.addReq.CloneURLs) != 1 || jobStore.addReq.CloneURLs[0] != "https://github.com/acme/slow.git" {
+		t.Fatalf("clone URLs = %#v", jobStore.addReq.CloneURLs)
+	}
+	if jobStore.addFn == nil {
+		t.Fatal("expected async add function to be scheduled")
+	}
+}
+
+func TestStartAsyncAddReposRejectsLocalOnlyRequest(t *testing.T) {
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		AddReposFn: func(context.Context, WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
+			return WorkspaceCreateResult{}, nil
+		},
+		JobStore: &recordingWorkspaceJobStore{},
+	})
+
+	_, err := svc.StartAsyncAddRepos(context.Background(), WorkspaceAddReposRequest{
+		WorkspaceID: "ALPHA",
+		Repos:       []string{"/workspace/local"},
+	})
+	var serviceErr *ServiceError
+	if !errors.As(err, &serviceErr) || serviceErr.Kind != KindValidation {
+		t.Fatalf("error = %v, want validation error", err)
+	}
+}
+
 func TestGetWorkspace_StoreBackedMissReturnsNotFound(t *testing.T) {
 	st := memstore.New()
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
@@ -475,6 +528,25 @@ func TestGetWorkspaceJob_StoreFallbackReturnsFailedForErrorWorkspace(t *testing.
 	if job.Error != msg {
 		t.Fatalf("error = %q, want %q", job.Error, msg)
 	}
+}
+
+type recordingWorkspaceJobStore struct {
+	addReq WorkspaceAddReposRequest
+	addFn  WorkspaceAddReposFn
+}
+
+func (*recordingWorkspaceJobStore) Start(WorkspaceCreateRequest, WorkspaceCreateFn) string {
+	return "create-job"
+}
+
+func (s *recordingWorkspaceJobStore) StartAddRepos(req WorkspaceAddReposRequest, fn WorkspaceAddReposFn) string {
+	s.addReq = req
+	s.addFn = fn
+	return "add-repos-job"
+}
+
+func (*recordingWorkspaceJobStore) Get(string) *WorkspaceJob {
+	return nil
 }
 
 type workspaceCountingStore struct {

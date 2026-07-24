@@ -21,6 +21,43 @@ func TestValidateCloneURLAcceptsTokenFreeGitHubHTTPS(t *testing.T) {
 	}
 }
 
+func TestWorkspaceAddReposRequiresCloneRecognizesExplicitAndLegacyURLs(t *testing.T) {
+	tests := []struct {
+		name string
+		req  WorkspaceAddReposRequest
+		want bool
+	}{
+		{
+			name: "explicit clone URL",
+			req:  WorkspaceAddReposRequest{CloneURLs: []string{"https://github.com/acme/repo.git"}},
+			want: true,
+		},
+		{
+			name: "legacy URL in repos",
+			req:  WorkspaceAddReposRequest{Repos: []string{" git@github.com:acme/repo.git "}},
+			want: true,
+		},
+		{
+			name: "local path",
+			req:  WorkspaceAddReposRequest{Repos: []string{"/workspace/repo"}},
+			want: false,
+		},
+		{
+			name: "blank clone URL",
+			req:  WorkspaceAddReposRequest{CloneURLs: []string{"  "}, Repos: []string{"/workspace/repo"}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := WorkspaceAddReposRequiresClone(tt.req); got != tt.want {
+				t.Fatalf("WorkspaceAddReposRequiresClone() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWorkspaceCloneAdmissionRejectsHTTPSQueryAndFragment(t *testing.T) {
 	for _, cloneURL := range []string{
 		"https://github.com/example/repo.git?access_token=query-secret",

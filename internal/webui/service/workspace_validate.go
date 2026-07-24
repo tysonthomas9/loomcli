@@ -105,6 +105,24 @@ func normalizeWorkspaceAddReposRequest(req WorkspaceAddReposRequest) WorkspaceAd
 	return normalized
 }
 
+// WorkspaceAddReposRequiresClone reports whether an add-repositories request
+// contains a supported remote clone URL. It recognizes the legacy form where
+// clone URLs were supplied through repos as well as the explicit clone_urls
+// field, matching normalizeWorkspaceAddReposRequest.
+func WorkspaceAddReposRequiresClone(req WorkspaceAddReposRequest) bool {
+	for _, cloneURL := range req.CloneURLs {
+		if strings.TrimSpace(cloneURL) != "" {
+			return true
+		}
+	}
+	for _, repo := range req.Repos {
+		if IsCloneURL(strings.TrimSpace(repo)) {
+			return true
+		}
+	}
+	return false
+}
+
 func validateWorkspaceAddReposRequest(req *WorkspaceAddReposRequest) *ServiceError {
 	if req.WorkspaceID == "" {
 		return ErrValidation("workspace ID is required")

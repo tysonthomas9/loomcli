@@ -203,7 +203,7 @@ func addReposToStoreBackedWorkspace(
 
 	branch := pickAddReposBranch(req.Branch, ws, key)
 
-	created, repos, err := materializeAddReposWorktrees(ctx, resolved, wsDir, branch)
+	created, repos, err := materializeAddReposWorktrees(ctx, resolved, wsDir, branch, req.Branch)
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
@@ -301,12 +301,16 @@ func pickAddReposBranch(reqBranch string, ws *domain.Workspace, key string) stri
 
 // materializeAddReposWorktrees attaches a worktree for each resolved repo,
 // rolling back partially-attached worktrees on failure.
-func materializeAddReposWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch string) ([]createdWorktree, []config.RepoConfig, error) {
+func materializeAddReposWorktrees(
+	ctx context.Context,
+	resolved []resolvedRepo,
+	wsDir, branch, defaultBranchOverride string,
+) ([]createdWorktree, []config.RepoConfig, error) {
 	if len(resolved) == 0 {
 		return nil, nil, nil
 	}
 	warningCtx := service.WithCreateWarnings(ctx)
-	created, repos, err := addWorktrees(warningCtx, resolved, wsDir, branch)
+	created, repos, err := addWorktreesWithRepoDefault(warningCtx, resolved, wsDir, branch, defaultBranchOverride)
 	if err != nil {
 		cleanupAttachedWorktrees(created)
 		return nil, nil, err
@@ -396,6 +400,13 @@ func createStoreRepo(ctx context.Context, s storepkg.Store, key, branch string, 
 		DefaultBranch: defaultBranch,
 		SourceRepoID:  r.SourceRepoID,
 	}); err != nil {
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			return workspaceerrors.New(
+				workspaceerrors.AlreadyExists,
+				fmt.Sprintf("repository name %q is already registered; repository names must be unique across workspaces", r.Name),
+				err,
+			)
+		}
 		return fmt.Errorf("create repo %q in store: %w", r.Name, err)
 	}
 	return nil

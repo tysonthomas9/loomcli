@@ -183,8 +183,15 @@ func (m *Module) taskDiffRepositoryPath(ctx context.Context, ws string, repo *do
 	if originErr == nil {
 		return originPath, "filesystem-origin", nil
 	}
+	// UI admission permits local repos without an origin. In that case, and
+	// for non-filesystem origins, the machine-local workspace checkout is the
+	// only bounded source; it still passes the git/remote checks below. A
+	// configured filesystem origin that has disappeared remains fail-closed.
 	var coded *codedOpError
-	if !errors.As(originErr, &coded) || coded.code != "task_diff_origin_not_filesystem" {
+	noConfiguredOrigin := strings.TrimSpace(repo.RemoteURL) == ""
+	if !errors.As(originErr, &coded) ||
+		(coded.code != "task_diff_origin_not_filesystem" &&
+			(coded.code != "task_diff_origin_missing" || !noConfiguredOrigin)) {
 		return "", "", originErr
 	}
 

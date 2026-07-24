@@ -250,6 +250,22 @@ export interface AddWorkspaceReposRequest {
   branch?: string;
 }
 
+/** 201 sync result: local repositories were attached immediately. */
+export interface WorkspaceAddReposSync {
+  kind: "sync";
+  data: WorkspaceData;
+}
+
+/** 202 async result: remote repositories are cloning; poll the job. */
+export interface WorkspaceAddReposAsync {
+  kind: "async";
+  jobId: string;
+}
+
+export type WorkspaceAddReposResult =
+  | WorkspaceAddReposSync
+  | WorkspaceAddReposAsync;
+
 /** 201 sync result: workspace was created immediately. */
 export interface WorkspaceCreateSync {
   kind: "sync";
@@ -312,12 +328,17 @@ export async function createWorkspace(
 export async function addWorkspaceRepos(
   workspaceId: string,
   req: AddWorkspaceReposRequest,
-): Promise<WorkspaceData> {
-  const response = await post<ApiResult<WorkspaceData>>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/repos`,
-    req,
-  );
-  return unwrap(response);
+): Promise<WorkspaceAddReposResult> {
+  const response = await post<
+    ApiResult<WorkspaceData> | WorkspaceJobAcceptedResponse
+  >(`/api/workspaces/${encodeURIComponent(workspaceId)}/repos`, req);
+  if ("job_id" in response && typeof response.job_id === "string") {
+    return { kind: "async", jobId: response.job_id };
+  }
+  return {
+    kind: "sync",
+    data: unwrap(response as ApiResult<WorkspaceData>),
+  };
 }
 
 export async function createWorkspaceAgent(

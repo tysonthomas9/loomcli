@@ -110,6 +110,17 @@ func HandleAddWorkspaceRepos(svc service.WorkspaceService) http.HandlerFunc {
 		// we only emit the count here.
 		span.SetAttributes(attribute.Int("repo.count", len(req.Repos)+len(req.CloneURLs)))
 
+		if service.WorkspaceAddReposRequiresClone(req) {
+			jobID, err := svc.StartAsyncAddRepos(ctx, req)
+			if err != nil {
+				recordErr(span, err)
+				handler.HandleServiceError(w, err)
+				return
+			}
+			handler.WriteJSON(w, http.StatusAccepted, map[string]any{"success": true, "job_id": jobID})
+			return
+		}
+
 		data, err := svc.AddWorkspaceRepos(ctx, req)
 		if err != nil {
 			recordErr(span, err)

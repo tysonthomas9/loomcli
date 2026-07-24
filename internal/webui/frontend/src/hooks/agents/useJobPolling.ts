@@ -1,5 +1,5 @@
 /**
- * Hook that polls an async workspace creation job until it completes or fails.
+ * Hook that polls an async workspace mutation job until it completes or fails.
  *
  * Encapsulates the ref-sync pattern so that callback identity changes from
  * parent re-renders do not restart the polling timer.
@@ -18,6 +18,13 @@ export interface UseJobPollingCallbacks {
   onFinish: () => void;
 }
 
+export interface UseJobPollingMessages {
+  initialProgress: string;
+  loadError: string;
+  connectionError: string;
+  terminalError: string;
+}
+
 export interface UseJobPollingReturn {
   /** Whether a job is currently being polled. */
   isPolling: boolean;
@@ -34,17 +41,27 @@ export interface UseJobPollingReturn {
 }
 
 /**
- * Poll an async workspace creation job.
+ * Poll an async workspace mutation job.
  *
  * @param name - Current workspace name (read at completion time via ref).
  * @param callbacks - onSuccess and onClose, kept in refs to avoid timer restarts.
+ * @param messages - Optional operation-specific progress and error copy.
  */
 export function useJobPolling(
   name: string,
   callbacks: UseJobPollingCallbacks,
+  messages: Partial<UseJobPollingMessages> = {},
 ): UseJobPollingReturn {
+  const initialProgress = messages.initialProgress ?? "Cloning repositories...";
+  const loadError =
+    messages.loadError ??
+    "Workspace was created but failed to load. Please refresh the page.";
+  const connectionError =
+    messages.connectionError ??
+    "Lost connection while creating workspace. The clone may still be running.";
+  const terminalError = messages.terminalError ?? "Workspace creation failed";
   const [jobId, setJobId] = useState<string | null>(null);
-  const [progress, setProgress] = useState("Cloning repositories...");
+  const [progress, setProgress] = useState(initialProgress);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [error, setError] = useState("");
   const elapsed = useElapsedTime(startTime);
@@ -55,6 +72,12 @@ export function useJobPolling(
   const onCloseRef = useRef(callbacks.onClose);
   const onFinishRef = useRef(callbacks.onFinish);
   const nameRef = useRef(name);
+  const messagesRef = useRef<UseJobPollingMessages>({
+    initialProgress,
+    loadError,
+    connectionError,
+    terminalError,
+  });
   useEffect(() => {
     onSuccessRef.current = callbacks.onSuccess;
   }, [callbacks.onSuccess]);
@@ -67,18 +90,26 @@ export function useJobPolling(
   useEffect(() => {
     nameRef.current = name;
   }, [name]);
+  useEffect(() => {
+    messagesRef.current = {
+      initialProgress,
+      loadError,
+      connectionError,
+      terminalError,
+    };
+  }, [initialProgress, loadError, connectionError, terminalError]);
 
   const startJob = useCallback((id: string) => {
     setJobId(id);
     setStartTime(Date.now());
-    setProgress("Cloning repositories...");
+    setProgress(messagesRef.current.initialProgress);
     setError("");
   }, []);
 
   const reset = useCallback(() => {
     setJobId(null);
     setStartTime(null);
-    setProgress("Cloning repositories...");
+    setProgress(messagesRef.current.initialProgress);
     setError("");
   }, []);
 
@@ -113,9 +144,7 @@ export function useJobPolling(
             setJobId(null);
             setStartTime(null);
             onFinishRef.current();
-            setError(
-              "Workspace was created but failed to load. Please refresh the page.",
-            );
+            setError(messagesRef.current.loadError);
           }
           return;
         }
@@ -124,7 +153,7 @@ export function useJobPolling(
           setJobId(null);
           setStartTime(null);
           onFinishRef.current();
-          setError(state.error || "Workspace creation failed");
+          setError(state.error || messagesRef.current.terminalError);
           return;
         }
 
@@ -135,9 +164,7 @@ export function useJobPolling(
         setJobId(null);
         setStartTime(null);
         onFinishRef.current();
-        setError(
-          "Lost connection while creating workspace. The clone may still be running.",
-        );
+        setError(messagesRef.current.connectionError);
       }
     };
 

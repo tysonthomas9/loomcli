@@ -102,6 +102,31 @@ func (s *workspaceServiceImpl) AddWorkspaceRepos(ctx context.Context, req Worksp
 	return s.GetWorkspace(ctx, req.WorkspaceID)
 }
 
+func (s *workspaceServiceImpl) StartAsyncAddRepos(_ context.Context, req WorkspaceAddReposRequest) (string, error) {
+	if s.addReposFn == nil {
+		return "", ErrUnavailable("workspace repo attachment is not available")
+	}
+	req = normalizeWorkspaceAddReposRequest(req)
+	if err := validateWorkspaceAddReposRequest(&req); err != nil {
+		return "", err
+	}
+	if len(req.CloneURLs) == 0 {
+		return "", ErrValidation("async repo attachment requires at least one clone URL")
+	}
+	if s.jobStore == nil {
+		return "", ErrUnavailable("async workspace repo attachment not available")
+	}
+
+	jobID := s.jobStore.StartAddRepos(req, func(ctx context.Context, normalized WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
+		result, err := s.addReposFn(ctx, normalized)
+		if err == nil {
+			s.invalidateWorkspaceCache()
+		}
+		return result, err
+	})
+	return jobID, nil
+}
+
 // loadActiveWorkspace returns the active workspace topology from FleetDB.
 func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
 	if s.store != nil {

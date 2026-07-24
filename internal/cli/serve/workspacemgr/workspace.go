@@ -171,6 +171,18 @@ type createdWorktree struct {
 
 // addWorktrees creates git worktrees for each resolved repo in the workspace directory.
 func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch string) ([]createdWorktree, []config.RepoConfig, error) {
+	return addWorktreesWithRepoDefault(ctx, resolved, wsDir, branch, branch)
+}
+
+// addWorktreesWithRepoDefault keeps the workspace checkout branch separate
+// from the repository's integration branch. A blank override auto-detects the
+// source repository branch; this is the UI Add Repo path, where the workspace
+// branch remains an isolation branch but task diffing must use the source base.
+func addWorktreesWithRepoDefault(
+	ctx context.Context,
+	resolved []resolvedRepo,
+	wsDir, worktreeBranch, defaultBranchOverride string,
+) ([]createdWorktree, []config.RepoConfig, error) {
 	var created []createdWorktree
 	var repos []config.RepoConfig
 
@@ -179,8 +191,15 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 			return created, nil, ctx.Err()
 		}
 		worktreePath := filepath.Join(wsDir, repo.name)
-		repoConfig := worktreeRepoConfig(repo, worktreePath, branch)
-		worktree, err := createWorkspaceWorktree(repo, worktreePath, branch)
+		repoConfig, err := worktreeRepoConfig(repo, worktreePath, defaultBranchOverride)
+		if err != nil {
+			return created, nil, workspaceerrors.New(
+				workspaceerrors.GitFailed,
+				fmt.Sprintf("detect default branch for local repo %q", repo.name),
+				err,
+			)
+		}
+		worktree, err := createWorkspaceWorktree(repo, worktreePath, worktreeBranch)
 		if err != nil {
 			if errors.Is(err, gitbranch.ErrRepositoryNotUsable) {
 				return created, nil, workspaceerrors.New(workspaceerrors.GitFailed, fmt.Sprintf("source repo is not usable for %s", repo.name), err)
@@ -194,14 +213,22 @@ func addWorktrees(ctx context.Context, resolved []resolvedRepo, wsDir, branch st
 	return created, repos, nil
 }
 
-func worktreeRepoConfig(repo resolvedRepo, worktreePath, branch string) config.RepoConfig {
+func worktreeRepoConfig(repo resolvedRepo, worktreePath, defaultBranchOverride string) (config.RepoConfig, error) {
+	defaultBranch := strings.TrimSpace(defaultBranchOverride)
+	if defaultBranch == "" {
+		var err error
+		defaultBranch, err = detectRepoDefaultBranch(repo.path)
+		if err != nil {
+			return config.RepoConfig{}, err
+		}
+	}
 	return config.RepoConfig{
 		Name:          repo.name,
 		Path:          worktreePath,
 		Remote:        "origin",
-		DefaultBranch: branch,
+		DefaultBranch: defaultBranch,
 		SourceRepoID:  repo.name,
-	}
+	}, nil
 }
 
 func createWorkspaceWorktree(repo resolvedRepo, worktreePath, branch string) (createdWorktree, error) {
@@ -423,7 +450,7 @@ func cloneReposWithSeenCredentials(
 			cleanupClonedRepos(repos)
 			return nil, workspaceerrors.New(workspaceerrors.GitFailed, err.Error(), err)
 		}
-		defaultBranch, err := detectClonedRepoDefaultBranch(clonePath, "origin")
+		defaultBranch, err := detectRepoDefaultBranch(clonePath)
 		if err != nil {
 			_ = os.RemoveAll(clonePath)
 			cleanupClonedRepos(repos)
@@ -445,30 +472,46 @@ func cloneReposWithSeenCredentials(
 	return repos, nil
 }
 
-// detectClonedRepoDefaultBranch resolves the branch selected by git clone.
-// Prefer the remote's symbolic HEAD because it is the repository contract;
-// fall back to the clone's symbolic HEAD for local/file remotes that do not
-// advertise refs/remotes/<remote>/HEAD. A clone with no resolvable branch is
-// not runnable and must not be registered with guessed metadata.
-func detectClonedRepoDefaultBranch(repoPath, remote string) (string, error) {
-	remote = strings.TrimSpace(remote)
-	if remote == "" {
-		remote = "origin"
-	}
-	remoteHead := "refs/remotes/" + remote + "/HEAD"
-	if out, err := cli.RunGitCommand(repoPath, "symbolic-ref", "--quiet", "--short", remoteHead); err == nil {
-		shortRef := strings.TrimSpace(out)
-		branch := strings.TrimPrefix(shortRef, remote+"/")
-		if branch != "" && gitRefResolvesToCommit(repoPath, shortRef) {
+// detectRepoDefaultBranch resolves the repository's integration branch.
+// Prefer the remote's symbolic HEAD because it is the repository contract.
+// Older local-mode fixtures may omit that symbolic ref while still carrying a
+// conventional fetched main/master branch, so accept those deterministically.
+// A configured remote with no advertised or conventional base fails closed;
+// only a repo with no remote may use its checkout's symbolic HEAD.
+func detectRepoDefaultBranch(repoPath string) (string, error) {
+	const remote = "origin"
+	remotePrefix := "refs/remotes/" + remote + "/"
+	remoteHead := remotePrefix + "HEAD"
+	if out, err := cli.RunGitCommand(repoPath, "symbolic-ref", "--quiet", remoteHead); err == nil {
+		target := strings.TrimSpace(out)
+		branch := strings.TrimPrefix(target, remotePrefix)
+		if target != branch && branch != "" && branch != "HEAD" && gitRefResolvesToCommit(repoPath, target) {
 			return branch, nil
 		}
 	}
-	if out, err := cli.RunGitCommand(repoPath, "symbolic-ref", "--quiet", "--short", "HEAD"); err == nil {
-		if branch := strings.TrimSpace(out); branch != "" && gitRefResolvesToCommit(repoPath, "HEAD") {
+	for _, branch := range []string{"main", "master"} {
+		ref := remotePrefix + branch
+		if gitRefIsDirect(repoPath, ref) && gitRefResolvesToCommit(repoPath, ref) {
 			return branch, nil
 		}
 	}
-	return "", fmt.Errorf("remote %q and clone HEAD do not resolve to a committed branch", remote)
+	if out, err := cli.RunGitCommand(repoPath, "remote", "get-url", remote); err == nil && strings.TrimSpace(out) != "" {
+		return "", fmt.Errorf("remote %q does not advertise a resolvable committed default branch; specify one explicitly", remote)
+	}
+	const localPrefix = "refs/heads/"
+	if out, err := cli.RunGitCommand(repoPath, "symbolic-ref", "--quiet", "HEAD"); err == nil {
+		target := strings.TrimSpace(out)
+		branch := strings.TrimPrefix(target, localPrefix)
+		if target != branch && branch != "" && gitRefResolvesToCommit(repoPath, target) {
+			return branch, nil
+		}
+	}
+	return "", fmt.Errorf("remote %q and repository HEAD do not resolve to a committed branch", remote)
+}
+
+func gitRefIsDirect(repoPath, ref string) bool {
+	out, err := cli.RunGitCommand(repoPath, "for-each-ref", "--format=%(symref)", "--count=1", ref)
+	return err == nil && strings.TrimSpace(out) == ""
 }
 
 func gitRefResolvesToCommit(repoPath, ref string) bool {
