@@ -98,11 +98,12 @@ type Manager struct {
 
 	// Sweep budgets. Default to the package constants; overridable at
 	// construction (test seams — production callers pass no Options).
-	scanTimeout   time.Duration
-	batchSize     int
-	batchTimeout  time.Duration
-	sweepCap      time.Duration
-	closeSweepCap time.Duration
+	scanTimeout    time.Duration
+	batchSize      int
+	batchTimeout   time.Duration
+	sweepCap       time.Duration
+	closeSweepCap  time.Duration
+	directReadHook func(context.Context)
 
 	// baseCtx parents every periodic/manual sweep; baseCancel fires at
 	// the START of Close so an in-flight sweep aborts promptly instead
@@ -135,6 +136,9 @@ func withBatchSize(n int) Option               { return func(m *Manager) { m.bat
 func withBatchTimeout(d time.Duration) Option  { return func(m *Manager) { m.batchTimeout = d } }
 func withSweepCap(d time.Duration) Option      { return func(m *Manager) { m.sweepCap = d } }
 func withCloseSweepCap(d time.Duration) Option { return func(m *Manager) { m.closeSweepCap = d } }
+func withDirectReadHook(hook func(context.Context)) Option {
+	return func(m *Manager) { m.directReadHook = hook }
+}
 
 // NewManager starts an in-process miniredis and returns a Manager.
 // If snapshotPath is non-empty, the Manager loads an existing snapshot
@@ -456,7 +460,9 @@ func (s sweepStats) abortError() error {
 // snapshot. Only the string-type GET errors this way (redis.Nil): the
 // aggregate reads return empty results and TYPE returns "none" for a
 // vanished key, both of which readEntry already skips.
-func isVanishedKeyErr(err error) bool { return errors.Is(err, redis.Nil) }
+func isVanishedKeyErr(err error) bool {
+	return errors.Is(err, redis.Nil) || errors.Is(err, miniredis.ErrKeyNotFound)
+}
 
 // listKeys SCANs the entire keyspace under its own deadline (a handful
 // of SCAN pages — independent of the per-batch read budgets) and
@@ -485,38 +491,185 @@ func (m *Manager) listKeys(ctx context.Context) ([]string, error) {
 	return keys, nil
 }
 
-// readBatch reads one slice of keys under a fresh per-batch deadline,
-// appending successful entries and folding failures/skips into st. It
-// never returns an error: the abort signal lives in st.unread so the
-// caller can account for the keys it then abandons.
+type snapshotBatchResult struct {
+	entry   *snapshotEntry
+	err     error
+	hashCmd *redis.MapStringStringCmd
+	ttlMs   int64
+}
+
+func (m *Manager) failSnapshotReads(keys []string, err error, st *sweepStats) {
+	st.unread += len(keys)
+	if st.firstErr == nil {
+		st.firstErr = err
+	}
+	if len(keys) > 0 {
+		m.logger.Debug("failed to read key for snapshot", "key", keys[0], "err", err)
+	}
+}
+
+// readBatch reads metadata and simple values through miniredis' direct
+// in-process API. Hashes still use one HGETALL pipeline per batch so each
+// hash is captured atomically while avoiding TYPE/PTTL protocol round trips.
 func (m *Manager) readBatch(parent context.Context, keys []string, out *[]snapshotEntry, st *sweepStats) {
 	ctx, cancel := context.WithTimeout(parent, m.batchTimeout)
 	defer cancel()
+
+	if err := ctx.Err(); err != nil {
+		m.failSnapshotReads(keys, err, st)
+		return
+	}
+
+	results := make([]snapshotBatchResult, len(keys))
+	hashPipe := m.client.Pipeline()
+	hashCount := 0
 	for i, key := range keys {
-		entry, err := m.readEntry(ctx, key)
+		if err := ctx.Err(); err != nil {
+			m.failSnapshotReads(keys, err, st)
+			return
+		}
+		typ := m.mr.Type(key)
+		if typ == "" {
+			continue
+		}
+		ttlMs := int64(-1)
+		if ttl := m.mr.TTL(key); ttl > 0 {
+			ttlMs = ttl.Milliseconds()
+		}
+		if typ == "hash" {
+			results[i].hashCmd = hashPipe.HGetAll(ctx, key)
+			results[i].ttlMs = ttlMs
+			hashCount++
+			continue
+		}
+		results[i].entry, results[i].err = m.readDirectEntry(ctx, key, typ, ttlMs)
+	}
+	if err := ctx.Err(); err != nil {
+		m.failSnapshotReads(keys, err, st)
+		return
+	}
+	if hashCount > 0 {
+		_, _ = hashPipe.Exec(ctx)
+		if err := ctx.Err(); err != nil {
+			m.failSnapshotReads(keys, err, st)
+			return
+		}
+		for i, result := range results {
+			if result.hashCmd == nil {
+				continue
+			}
+			if err := result.hashCmd.Err(); err != nil {
+				results[i].err = err
+				continue
+			}
+			fields := result.hashCmd.Val()
+			if len(fields) > 0 {
+				results[i].entry = &snapshotEntry{
+					Key: keys[i], Type: "hash", TTLMs: result.ttlMs, Hash: fields,
+				}
+			}
+		}
+	}
+
+	for i, result := range results {
 		switch {
-		case err != nil && isVanishedKeyErr(err):
+		case result.err != nil && isVanishedKeyErr(result.err):
 			st.skipped++
-		case err != nil:
+		case result.err != nil:
 			st.unread++
 			if st.firstErr == nil {
-				st.firstErr = err
+				st.firstErr = result.err
 			}
-			m.logger.Debug("failed to read key for snapshot", "key", key, "err", err)
-			if ctx.Err() != nil {
-				// The batch deadline (or the sweep cap / shutdown cancel
-				// above it) expired: every later read would fail the same
-				// way. Account for the keys after this one without issuing
-				// doomed round trips or logging once per key.
-				st.unread += len(keys) - i - 1
-				return
-			}
-		case entry == nil:
+			m.logger.Debug("failed to read key for snapshot", "key", keys[i], "err", result.err)
+		case result.entry == nil:
 			st.skipped++
 		default:
 			st.read++
-			*out = append(*out, *entry)
+			*out = append(*out, *result.entry)
 		}
+	}
+}
+
+//nolint:gocognit,cyclop,funlen // Type-specific direct reads stay together for replay symmetry.
+func (m *Manager) readDirectEntry(ctx context.Context, key, typ string, ttlMs int64) (*snapshotEntry, error) {
+	if m.directReadHook != nil {
+		m.directReadHook(ctx)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	switch typ {
+	case "string":
+		value, err := m.mr.Get(key)
+		if err != nil {
+			return nil, err
+		}
+		return &snapshotEntry{Key: key, Type: typ, TTLMs: ttlMs, String: value}, nil
+	case "set":
+		members, err := m.mr.SMembers(key)
+		if err != nil {
+			return nil, err
+		}
+		if len(members) == 0 {
+			return nil, nil
+		}
+		return &snapshotEntry{Key: key, Type: typ, TTLMs: ttlMs, Set: members}, nil
+	case "list":
+		values, err := m.mr.List(key)
+		if err != nil {
+			return nil, err
+		}
+		if len(values) == 0 {
+			return nil, nil
+		}
+		return &snapshotEntry{Key: key, Type: typ, TTLMs: ttlMs, List: append([]string(nil), values...)}, nil
+	case "zset":
+		members, err := m.mr.ZMembers(key)
+		if err != nil {
+			return nil, err
+		}
+		if len(members) == 0 {
+			return nil, nil
+		}
+		entries := make([]zEntry, 0, len(members))
+		for _, member := range members {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			score, err := m.mr.ZScore(key, member)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, zEntry{Member: member, Score: score})
+		}
+		return &snapshotEntry{Key: key, Type: typ, TTLMs: ttlMs, ZSet: entries}, nil
+	case "stream":
+		messages, err := m.mr.Stream(key)
+		if err != nil {
+			return nil, err
+		}
+		start := len(messages) - maxStreamEntriesPerKey
+		if start < 0 {
+			start = 0
+		}
+		msgs := messages[start:]
+		if len(msgs) == 0 {
+			return nil, nil
+		}
+		entries := make([]streamEntry, 0, len(msgs))
+		for _, msg := range msgs {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			values := make(map[string]string, len(msg.Values)/2)
+			for i := 0; i+1 < len(msg.Values); i += 2 {
+				values[msg.Values[i]] = msg.Values[i+1]
+			}
+			entries = append(entries, streamEntry{ID: msg.ID, Values: values})
+		}
+		return &snapshotEntry{Key: key, Type: typ, TTLMs: ttlMs, Stream: entries}, nil
+	default:
+		return nil, nil
 	}
 }
 
@@ -560,106 +713,6 @@ func (m *Manager) collectEntries(ctx context.Context) ([]snapshotEntry, sweepSta
 	}
 	st.elapsed = time.Since(start)
 	return entries, st, nil
-}
-
-//nolint:gocognit,cyclop,funlen // Redis type-specific snapshot reads stay together for symmetry with replay.
-func (m *Manager) readEntry(ctx context.Context, key string) (*snapshotEntry, error) {
-	typ, err := m.client.Type(ctx, key).Result()
-	if err != nil {
-		return nil, err
-	}
-	ttl, err := m.client.PTTL(ctx, key).Result()
-	if err != nil {
-		return nil, err
-	}
-	ttlMs := int64(-1)
-	switch {
-	case ttl == -2*time.Millisecond:
-		// Key expired between Keys() and here — skip.
-		return nil, nil
-	case ttl > 0:
-		ttlMs = ttl.Milliseconds()
-	}
-	switch typ {
-	case "hash":
-		fields, err := m.client.HGetAll(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(fields) == 0 {
-			return nil, nil
-		}
-		return &snapshotEntry{Key: key, Type: "hash", TTLMs: ttlMs, Hash: fields}, nil
-	case "string":
-		value, err := m.client.Get(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		return &snapshotEntry{Key: key, Type: "string", TTLMs: ttlMs, String: value}, nil
-	case "set":
-		members, err := m.client.SMembers(ctx, key).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(members) == 0 {
-			return nil, nil
-		}
-		sort.Strings(members) // determinism for tests + diffs
-		return &snapshotEntry{Key: key, Type: "set", TTLMs: ttlMs, Set: members}, nil
-	case "list":
-		values, err := m.client.LRange(ctx, key, 0, -1).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(values) == 0 {
-			return nil, nil
-		}
-		return &snapshotEntry{Key: key, Type: "list", TTLMs: ttlMs, List: values}, nil
-	case "zset":
-		zs, err := m.client.ZRangeWithScores(ctx, key, 0, -1).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(zs) == 0 {
-			return nil, nil
-		}
-		entries := make([]zEntry, 0, len(zs))
-		for _, z := range zs {
-			member, _ := z.Member.(string)
-			entries = append(entries, zEntry{Member: member, Score: z.Score})
-		}
-		return &snapshotEntry{Key: key, Type: "zset", TTLMs: ttlMs, ZSet: entries}, nil
-	case "stream":
-		// Read the newest maxStreamEntriesPerKey via XREVRANGE; reverse
-		// to oldest-first so replay preserves ordering. Older entries
-		// beyond the cap are NOT in the snapshot — they remain in the
-		// running miniredis but won't survive a restart.
-		msgs, err := m.client.XRevRangeN(ctx, key, "+", "-", maxStreamEntriesPerKey).Result()
-		if err != nil {
-			return nil, err
-		}
-		if len(msgs) == 0 {
-			return nil, nil
-		}
-		entries := make([]streamEntry, 0, len(msgs))
-		for i := len(msgs) - 1; i >= 0; i-- {
-			msg := msgs[i]
-			vals := make(map[string]string, len(msg.Values))
-			for k, v := range msg.Values {
-				if s, ok := v.(string); ok {
-					vals[k] = s
-				} else {
-					vals[k] = fmt.Sprint(v)
-				}
-			}
-			entries = append(entries, streamEntry{ID: msg.ID, Values: vals})
-		}
-		return &snapshotEntry{Key: key, Type: "stream", TTLMs: ttlMs, Stream: entries}, nil
-	default:
-		// Truly unsupported (geo, hyperloglog, etc.) — fleet-db does not
-		// use these today. Skip silently rather than fail the whole dump.
-		return nil, nil
-	}
 }
 
 // load reads the snapshot file (or its .bak fallback) and replays it

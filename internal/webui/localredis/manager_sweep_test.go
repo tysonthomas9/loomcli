@@ -6,16 +6,43 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 )
+
+type pipelineCountingHook struct {
+	individual atomic.Int64
+	pipelines  atomic.Int64
+}
+
+func (h *pipelineCountingHook) DialHook(next redis.DialHook) redis.DialHook {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return next(ctx, network, addr)
+	}
+}
+
+func (h *pipelineCountingHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		h.individual.Add(1)
+		return next(ctx, cmd)
+	}
+}
+
+func (h *pipelineCountingHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		h.pipelines.Add(1)
+		return next(ctx, cmds)
+	}
+}
 
 // captureHandler is a minimal slog.Handler recording every emitted
 // record so tests can assert on log volume and levels (the WARN-storm
@@ -71,6 +98,18 @@ func seedBulkKeys(t *testing.T, m *Manager, n int) {
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		t.Fatalf("seed bulk keys: %v", err)
+	}
+}
+
+func seedBulkHashes(t *testing.T, m *Manager, n int) {
+	t.Helper()
+	ctx := context.Background()
+	pipe := m.Client().Pipeline()
+	for i := 0; i < n; i++ {
+		pipe.HSet(ctx, fmt.Sprintf("fleet-db:bulk:%05d", i), "field", "value")
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		t.Fatalf("seed bulk hashes: %v", err)
 	}
 }
 
@@ -191,6 +230,28 @@ func TestDump_MultiBatchSuccess(t *testing.T) {
 		if want := fmt.Sprintf("v%03d", i); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}
+	}
+}
+
+func TestDump_UsesDirectMetadataAndPipelinesHashValues(t *testing.T) {
+	m, err := NewManager(filepath.Join(t.TempDir(), "snapshot.json"), true, nil, withBatchSize(50))
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+	seedBulkHashes(t, m, 100)
+
+	hook := &pipelineCountingHook{}
+	m.Client().AddHook(hook)
+	if err := m.Dump(); err != nil {
+		t.Fatalf("Dump: %v", err)
+	}
+
+	if got := hook.pipelines.Load(); got != 2 {
+		t.Fatalf("pipeline calls = %d, want 2 hash-value pipelines", got)
+	}
+	if got := hook.individual.Load(); got > 10 {
+		t.Fatalf("individual Redis calls = %d, want only bounded SCAN/administrative calls", got)
 	}
 }
 
@@ -409,7 +470,17 @@ func TestClose_FinalDumpUsesTighterCap(t *testing.T) {
 // instead of waiting out its generous cap, then write the final dump.
 func TestClose_InterruptsInFlightSweep(t *testing.T) {
 	snapPath := filepath.Join(t.TempDir(), "snapshot.json")
-	m, err := NewManager(snapPath, false, nil, withSweepCap(time.Hour), withBatchSize(1))
+	started := make(chan struct{})
+	var blockFirstRead atomic.Bool
+	blockFirstRead.Store(true)
+	readHook := func(ctx context.Context) {
+		if blockFirstRead.CompareAndSwap(true, false) {
+			close(started)
+			<-ctx.Done()
+		}
+	}
+	m, err := NewManager(snapPath, false, nil,
+		withSweepCap(time.Hour), withBatchSize(1), withDirectReadHook(readHook))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +488,7 @@ func TestClose_InterruptsInFlightSweep(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- m.Dump() }()
-	time.Sleep(250 * time.Millisecond) // let the sweep get going
+	<-started
 
 	closeStart := time.Now()
 	closeErr := m.Close()

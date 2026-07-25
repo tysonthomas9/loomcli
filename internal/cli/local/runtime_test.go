@@ -18,17 +18,43 @@ import (
 
 func TestCheckRuntimeHealthUsesAPIHealth(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/health" {
+		switch r.URL.Path {
+		case "/api/health":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/api/workspaces":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"workspaces":[]}`))
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}))
 	t.Cleanup(server.Close)
 
 	if err := checkRuntimeHealth(context.Background(), server.URL); err != nil {
 		t.Fatalf("checkRuntimeHealth() error = %v", err)
+	}
+}
+
+func TestCheckRuntimeHealthRequiresWorkspaceAPIReadiness(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/api/workspaces":
+			http.Error(w, "redis: connection pool timeout", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	err := checkRuntimeHealth(context.Background(), server.URL)
+	if err == nil {
+		t.Fatal("checkRuntimeHealth() error = nil, want workspace readiness error")
+	}
+	if !strings.Contains(err.Error(), "/api/workspaces returned 503") {
+		t.Fatalf("checkRuntimeHealth() error = %q, want /api/workspaces 503", err)
 	}
 }
 
@@ -205,6 +231,52 @@ func TestRuntimeMatchesFleetDBRedisSettings(t *testing.T) {
 	}
 	if !runtimeMatchesFleetDBRedisSettings(&runtimeInfo{}, "") {
 		t.Fatal("runtimeMatchesFleetDBRedisSettings() should allow missing hash when settings are disabled")
+	}
+}
+
+func TestReuseRunningRuntimeStopsMatchingButUnhealthyRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX sleep process")
+	}
+
+	service := startSleepProcess(t)
+	dataDir := t.TempDir()
+	redisHash, err := currentFleetDBRedisHash(dataDir)
+	if err != nil {
+		t.Fatalf("currentFleetDBRedisHash() error = %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/api/workspaces":
+			http.Error(w, "redis: connection pool timeout", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	info := &runtimeInfo{
+		Status:           "running",
+		PID:              service.Process.Pid,
+		URL:              server.URL,
+		FleetDBRedisHash: redisHash,
+	}
+	applyExecutableIdentity(info, currentExecutableIdentity())
+	if err := writeRuntime(dataDir, info); err != nil {
+		t.Fatalf("writeRuntime() error = %v", err)
+	}
+
+	result, err := reuseRunningRuntime(dataDir, false)
+	if err != nil {
+		t.Fatalf("reuseRunningRuntime() error = %v", err)
+	}
+	if result != nil {
+		t.Fatalf("reuseRunningRuntime() = %#v, want nil so caller restarts", result)
+	}
+	if processRunning(service.Process.Pid) {
+		t.Fatalf("unhealthy service pid %d still running", service.Process.Pid)
 	}
 }
 

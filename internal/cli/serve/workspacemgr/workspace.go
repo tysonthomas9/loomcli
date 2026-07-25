@@ -352,34 +352,78 @@ func cloneRepos(ctx context.Context, cloneURLs []string, wsDir string) ([]config
 }
 
 func cloneReposWithSeen(ctx context.Context, cloneURLs []string, wsDir string, seenNames map[string]bool) ([]config.RepoConfig, error) {
-	var repos []config.RepoConfig
+	result, err := cloneReposWithKnownCheckouts(ctx, cloneURLs, wsDir, seenNames, nil)
+	return result.repos, err
+}
+
+type cloneRepoResult struct {
+	repos   []config.RepoConfig
+	created []config.RepoConfig
+}
+
+// cloneReposWithKnownCheckouts materializes clone requests while preserving
+// checkouts already recorded in this machine's local workspace state. Those
+// paths can outlive their FleetDB repo record (for example after recovering an
+// older embedded snapshot), so an explicit Add Repo request reattaches the
+// known checkout instead of trying to clone over or delete it.
+func cloneReposWithKnownCheckouts(
+	ctx context.Context,
+	cloneURLs []string,
+	wsDir string,
+	seenNames map[string]bool,
+	knownCheckouts map[string]string,
+) (cloneRepoResult, error) {
+	var result cloneRepoResult
 	if seenNames == nil {
 		seenNames = make(map[string]bool)
 	}
 
 	for _, cloneURL := range cloneURLs {
 		if ctx.Err() != nil {
-			cleanupClonedRepos(repos)
-			return nil, ctx.Err()
+			cleanupClonedRepos(result.created)
+			return cloneRepoResult{}, ctx.Err()
 		}
 
 		repoName := deduplicateRepoName(repoNameFromURL(cloneURL), seenNames)
 		seenNames[repoName] = true
 
 		clonePath := filepath.Join(wsDir, repoName)
-		if err := localworkspace.CloneRepoTo(ctx, cloneURL, clonePath); err != nil {
-			cleanupClonedRepos(repos)
-			return nil, workspaceerrors.New(workspaceerrors.GitFailed, err.Error(), err)
-		}
-
-		repos = append(repos, config.RepoConfig{
+		repo := config.RepoConfig{
 			Name:         repoName,
 			Path:         clonePath,
 			Remote:       "origin",
 			SourceRepoID: repoName,
-		})
+		}
+		if isKnownGitCheckout(knownCheckouts[repoName], clonePath) {
+			slog.Info("reattaching known local checkout instead of cloning over it",
+				"repo", repoName, "path", clonePath, "requested_url", cloneURL)
+			result.repos = append(result.repos, repo)
+			continue
+		}
+		if err := localworkspace.CloneRepoTo(ctx, cloneURL, clonePath); err != nil {
+			cleanupClonedRepos(result.created)
+			return cloneRepoResult{}, workspaceerrors.New(workspaceerrors.GitFailed, err.Error(), err)
+		}
+		result.repos = append(result.repos, repo)
+		result.created = append(result.created, repo)
 	}
-	return repos, nil
+	return result, nil
+}
+
+func isKnownGitCheckout(knownPath, targetPath string) bool {
+	if strings.TrimSpace(knownPath) == "" {
+		return false
+	}
+	knownAbs, err := filepath.Abs(filepath.Clean(knownPath))
+	if err != nil {
+		return false
+	}
+	targetAbs, err := filepath.Abs(filepath.Clean(targetPath))
+	if err != nil || knownAbs != targetAbs {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(targetAbs, ".git"))
+	return err == nil
 }
 
 func cleanupClonedRepos(repos []config.RepoConfig) {

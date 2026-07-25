@@ -18,6 +18,7 @@ import {
 import { fetchWorkspaceApi } from "@/hooks/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { CreateWorkspaceModal } from "@/components/CreateWorkspaceModal";
+import { ErrorDisplay } from "@/components/ErrorDisplay";
 import {
   OnboardingFlow,
   type OnboardingStep,
@@ -34,10 +35,13 @@ export function RedirectToWorkspace() {
   const location = useLocation();
   const { mode, isAuthenticated, isLoading } = useAuth();
   const [resolving, setResolving] = useState(true);
+  const [workspaceError, setWorkspaceError] = useState<Error | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
   const resolveWorkspace = useCallback(() => {
     let cancelled = false;
+    setResolving(true);
+    setWorkspaceError(null);
     const lastId = getLastWorkspaceId();
     const failedId = (location.state as { failedWorkspaceId?: string } | null)
       ?.failedWorkspaceId;
@@ -65,8 +69,13 @@ export function RedirectToWorkspace() {
           setResolving(false);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return;
+        setWorkspaceError(
+          error instanceof Error
+            ? error
+            : new Error("The workspace request failed"),
+        );
         setResolving(false);
       });
 
@@ -82,6 +91,30 @@ export function RedirectToWorkspace() {
     if (isLoading || !isAuthenticated) return;
     return resolveWorkspace();
   }, [mode, isAuthenticated, isLoading, resolveWorkspace]);
+
+  if (!resolving && workspaceError) {
+    return (
+      <div
+        style={{
+          display: "grid",
+          placeItems: "center",
+          minHeight: "100vh",
+          padding: "32px",
+          background: "var(--color-bg-secondary)",
+        }}
+      >
+        <ErrorDisplay
+          variant="connection-error"
+          title="Could not load workspaces"
+          description="Superfactory could not reach the local workspace service. Your workspace data has not been removed. Try again after the service recovers."
+          error={workspaceError}
+          onRetry={() => {
+            resolveWorkspace();
+          }}
+        />
+      </div>
+    );
+  }
 
   if (!resolving) {
     const onboardingSteps: OnboardingStep[] = [

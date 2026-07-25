@@ -10,6 +10,25 @@ WEBUI_FRONTEND_DIR="${REPO_ROOT}/internal/webui/frontend"
 WEBUI_DIST_DIR="${WEBUI_FRONTEND_DIR}/dist"
 WEBUI_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/webui"
 
+if [ -d "${FLEET_DB_REPO}" ]; then
+  FLEET_DB_IS_BARE="$(git -C "${FLEET_DB_REPO}" rev-parse --is-bare-repository 2>/dev/null || true)"
+  if [ "${FLEET_DB_IS_BARE}" = "true" ]; then
+    echo "fleet-db source must be a working checkout, not a bare worktree anchor: ${FLEET_DB_REPO}" >&2
+    echo "set FLEET_DB_REPO to the checkout that matches this loom branch" >&2
+    exit 1
+  fi
+  if [ ! -f "${FLEET_DB_REPO}/internal/api/connector.go" ]; then
+    echo "fleet-db source is incompatible: connector API routes are missing at ${FLEET_DB_REPO}" >&2
+    echo "set FLEET_DB_REPO to the checkout that matches this loom branch" >&2
+    exit 1
+  fi
+  if ! grep -q 'json:"kind' "${FLEET_DB_REPO}/internal/api/roles.go"; then
+    echo "fleet-db source is incompatible: role kind support is missing at ${FLEET_DB_REPO}" >&2
+    echo "set FLEET_DB_REPO to the checkout that matches this loom branch" >&2
+    exit 1
+  fi
+fi
+
 if ! command -v rustc >/dev/null 2>&1; then
   echo "rustc is required to prepare the Tauri sidecar" >&2
   exit 127

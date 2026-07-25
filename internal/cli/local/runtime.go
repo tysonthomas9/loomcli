@@ -320,7 +320,16 @@ func checkRuntimeHealth(ctx context.Context, url string) error {
 	if url == "" {
 		return errors.New("runtime URL is empty")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/health", nil)
+	for _, path := range []string{"/api/health", "/api/workspaces"} {
+		if err := checkRuntimeEndpoint(ctx, url, path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkRuntimeEndpoint(ctx context.Context, url, path string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(url, "/")+path, nil)
 	if err != nil {
 		return err
 	}
@@ -331,7 +340,7 @@ func checkRuntimeHealth(ctx context.Context, url string) error {
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("/api/health returned %d", resp.StatusCode)
+		return fmt.Errorf("%s returned %d", path, resp.StatusCode)
 	}
 	return nil
 }

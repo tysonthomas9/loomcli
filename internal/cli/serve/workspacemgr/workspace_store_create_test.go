@@ -318,6 +318,96 @@ func TestStoreBackedAddReposClonesRemoteRepoToEmptyWorkspace(t *testing.T) {
 	}
 }
 
+func TestStoreBackedAddReposReattachesKnownCheckoutInsteadOfCloningOverIt(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	st := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(st)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	repoPath := initTestGitRepo(t, wsPath, "fleet-db")
+	runGit(t, repoPath, "remote", "add", "origin", "git@github.com:tysonthomas9/fleet-db.git")
+	if err := bootstrap.MutateWorkspaceLocalState("MY-WS", func(local *bootstrap.WorkspaceLocalState) error {
+		if local.Repos == nil {
+			local.Repos = make(map[string]string)
+		}
+		local.Repos["fleet-db"] = repoPath
+		return nil
+	}); err != nil {
+		t.Fatalf("record known checkout: %v", err)
+	}
+
+	addFn := BuildStoreBackedAddRepos(st)
+	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		CloneURLs:   []string{"https://github.com/BrowserOperator/fleet-db"},
+		Branch:      "dynamic-workflows",
+	}); err != nil {
+		t.Fatalf("reattach known checkout: %v", err)
+	}
+
+	if got := strings.TrimSpace(gitOutput(t, repoPath, "remote", "get-url", "origin")); got != "git@github.com:tysonthomas9/fleet-db.git" {
+		t.Fatalf("existing checkout origin = %q, want unchanged", got)
+	}
+	repos, err := st.Repos().List(context.Background(), "MY-WS")
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	if len(repos) != 1 || repos[0].Name != "fleet-db" || repos[0].RemoteURL != "git@github.com:tysonthomas9/fleet-db.git" {
+		t.Fatalf("repos = %#v, want recovered fleet-db checkout", repos)
+	}
+	if _, err := os.Stat(filepath.Join(repoPath, "README.md")); err != nil {
+		t.Fatalf("known checkout was not preserved: %v", err)
+	}
+}
+
+func TestStoreBackedAddReposRollbackNeverDeletesKnownCheckout(t *testing.T) {
+	loomDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", loomDir)
+
+	base := memstore.New()
+	createFn := BuildStoreBackedCreateWorkspace(base)
+	wsPath := filepath.Join(loomDir, "workspaces", "my-ws")
+	if _, err := createFn(context.Background(), service.WorkspaceCreateRequest{
+		Name: "my-ws",
+		Type: "empty",
+		Path: wsPath,
+	}); err != nil {
+		t.Fatalf("create empty workspace: %v", err)
+	}
+
+	repoPath := initTestGitRepo(t, wsPath, "fleet-db")
+	if err := bootstrap.MutateWorkspaceLocalState("MY-WS", func(local *bootstrap.WorkspaceLocalState) error {
+		if local.Repos == nil {
+			local.Repos = make(map[string]string)
+		}
+		local.Repos["fleet-db"] = repoPath
+		return nil
+	}); err != nil {
+		t.Fatalf("record known checkout: %v", err)
+	}
+
+	st := &repoFailStore{Store: base, err: errors.New("repo create failed")}
+	addFn := BuildStoreBackedAddRepos(st)
+	if _, err := addFn(context.Background(), service.WorkspaceAddReposRequest{
+		WorkspaceID: "MY-WS",
+		CloneURLs:   []string{"https://github.com/BrowserOperator/fleet-db"},
+	}); err == nil {
+		t.Fatal("reattach known checkout succeeded, want repo store error")
+	}
+	if _, err := os.Stat(filepath.Join(repoPath, "README.md")); err != nil {
+		t.Fatalf("known checkout was deleted during rollback: %v", err)
+	}
+}
+
 func TestStoreBackedCreateEmptyWorkspaceRollsBackOnRepoStoreError(t *testing.T) {
 	loomDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", loomDir)

@@ -489,7 +489,12 @@ func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error
 			return nil, fmt.Errorf("load FleetDB Redis settings: %w", err)
 		}
 		if runtimeMatchesExecutable(info, identity) && runtimeMatchesFleetDBRedisSettings(info, redisHash) {
-			return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
+			healthCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			healthErr := checkRuntimeHealth(healthCtx, info.URL)
+			cancel()
+			if healthErr == nil {
+				return &RuntimeStartResult{PID: info.PID, URL: info.URL, AlreadyRunning: true}, nil
+			}
 		}
 	}
 	if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {

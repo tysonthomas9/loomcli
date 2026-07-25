@@ -67,6 +67,9 @@ The Tauri config runs `scripts/prepare-sidecar.sh` before dev/build. That script
 builds the web UI into `src-tauri/resources/webui`, builds `../cmd/loom` into
 `src-tauri/binaries/loom-<target-triple>`, and, when the sibling FleetDB repo is
 available, builds `src-tauri/binaries/fleet-db-<target-triple>`. The
+FleetDB path must be a working checkout with the connector and role-kind APIs
+used by this Loom branch; the build fails early when `FLEET_DB_REPO` points at
+a bare worktree anchor or an incompatible checkout. The
 `loom local service` entrypoint discovers the bundled FleetDB sibling and web UI
 resources, then sets `FLEET_DB_BIN` and `LOOM_FRONTEND_DIR` for the local
 `loom serve` process.

@@ -168,6 +168,10 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
+	knownCheckouts, err := localRepoPaths(key)
+	if err != nil {
+		return service.WorkspaceCreateResult{}, err
+	}
 
 	branch := pickAddReposBranch(req.Branch, ws, key)
 
@@ -175,11 +179,11 @@ func addReposToStoreBackedWorkspace(ctx context.Context, s storepkg.Store, req s
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
-	clonedRepos, err := materializeAddReposClones(ctx, req.CloneURLs, wsDir, seen, created)
+	materializedRepos, clonedRepos, err := materializeAddReposClones(ctx, req.CloneURLs, wsDir, seen, knownCheckouts, created)
 	if err != nil {
 		return service.WorkspaceCreateResult{}, err
 	}
-	repos = append(repos, clonedRepos...)
+	repos = append(repos, materializedRepos...)
 
 	if err := persistAddReposRecords(ctx, s, key, wsDir, branch, repos, created, clonedRepos); err != nil {
 		return service.WorkspaceCreateResult{}, err
@@ -283,16 +287,23 @@ func materializeAddReposWorktrees(ctx context.Context, resolved []resolvedRepo, 
 
 // materializeAddReposClones clones any --clone-url repos under the workspace
 // directory, rolling back previously-attached worktrees on failure.
-func materializeAddReposClones(ctx context.Context, cloneURLs []string, wsDir string, seen map[string]bool, created []createdWorktree) ([]config.RepoConfig, error) {
+func materializeAddReposClones(
+	ctx context.Context,
+	cloneURLs []string,
+	wsDir string,
+	seen map[string]bool,
+	knownCheckouts map[string]string,
+	created []createdWorktree,
+) ([]config.RepoConfig, []config.RepoConfig, error) {
 	if len(cloneURLs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	cloned, err := cloneReposWithSeen(ctx, cloneURLs, wsDir, seen)
+	result, err := cloneReposWithKnownCheckouts(ctx, cloneURLs, wsDir, seen, knownCheckouts)
 	if err != nil {
 		cleanupAttachedWorktrees(created)
-		return nil, err
+		return nil, nil, err
 	}
-	return cloned, nil
+	return result.repos, result.created, nil
 }
 
 // persistAddReposRecords writes the fleet-db repo records for each new
@@ -354,6 +365,21 @@ func localWorkspacePath(key string) (string, error) {
 		}
 	}
 	return "", workspaceerrors.New(workspaceerrors.PathNotFound, fmt.Sprintf("workspace %q has no local path; open it on this machine before adding repos", key), nil)
+}
+
+func localRepoPaths(key string) (map[string]string, error) {
+	sc, err := bootstrap.LoadStateCache()
+	if err != nil {
+		return nil, fmt.Errorf("load local workspace state: %w", err)
+	}
+	if sc == nil {
+		return nil, nil
+	}
+	local, ok := sc.Workspaces[key]
+	if !ok {
+		return nil, nil
+	}
+	return local.Repos, nil
 }
 
 func gitRemoteURL(repoPath, remote string) string {

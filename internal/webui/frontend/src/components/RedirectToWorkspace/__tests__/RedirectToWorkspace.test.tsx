@@ -293,14 +293,24 @@ describe("RedirectToWorkspace", () => {
   });
 
   describe("API error (catch path)", () => {
-    it("shows empty state when fetchWorkspace rejects", async () => {
+    it("shows a retryable load error instead of the empty state", async () => {
       mockFetchWorkspace.mockRejectedValueOnce(new Error("Network error"));
 
       renderComponent();
 
       await waitFor(() => {
-        expect(screen.getByText(/No workspaces found/i)).toBeInTheDocument();
+        expect(
+          screen.getByRole("heading", { name: "Could not load workspaces" }),
+        ).toBeInTheDocument();
       });
+
+      expect(screen.queryByText(/No workspaces found/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Create Workspace" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Try again" }),
+      ).toBeEnabled();
     });
 
     it("does NOT navigate when fetchWorkspace rejects", async () => {
@@ -309,7 +319,9 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(screen.getByText(/No workspaces found/i)).toBeInTheDocument();
+        expect(
+          screen.getByRole("heading", { name: "Could not load workspaces" }),
+        ).toBeInTheDocument();
       });
 
       expect(mockNavigate).not.toHaveBeenCalled();
@@ -322,10 +334,34 @@ describe("RedirectToWorkspace", () => {
       renderComponent();
 
       await waitFor(() => {
-        expect(screen.getByText(/No workspaces found/i)).toBeInTheDocument();
+        expect(
+          screen.getByRole("heading", { name: "Could not load workspaces" }),
+        ).toBeInTheDocument();
       });
 
       expect(mockClearLastWorkspaceId).not.toHaveBeenCalled();
+    });
+
+    it("retries the request and navigates after the service recovers", async () => {
+      mockFetchWorkspace
+        .mockRejectedValueOnce(new Error("Network error"))
+        .mockResolvedValueOnce(
+          makeWorkspaceData([{ id: "ws-recovered", is_default: true }]),
+        );
+
+      renderComponent();
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Try again" }),
+      );
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith(
+          "/ws/ws-recovered/kanban",
+          { replace: true },
+        );
+      });
+      expect(mockFetchWorkspace).toHaveBeenCalledTimes(2);
     });
   });
 
