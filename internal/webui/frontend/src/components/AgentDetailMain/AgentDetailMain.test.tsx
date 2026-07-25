@@ -2,21 +2,57 @@
  * @vitest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import "@testing-library/jest-dom";
-import { describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createAgentStore } from "@/stores/agentStore";
-import type { LoomAgentStatus } from "@/types";
+import { ApiError, type LoomAgentStatus } from "@/types";
 
-import { AgentDetailMain } from "./AgentDetailMain";
+import { AgentDetailMain, AgentLifecycleControls } from "./AgentDetailMain";
+import {
+  loadPendingAgentLifecycleCommand,
+  pendingAgentLifecycleCommandStorageKey,
+  pendingAgentLifecycleStorageKey,
+  savePendingAgentLifecycleCommand,
+} from "./agentLifecyclePending";
 
 const mocks = vi.hoisted(() => ({
   useAgentStoreInstance: vi.fn(),
+  getAgentLifecycleCommand: vi.fn(),
+  restartAgent: vi.fn(),
+  showToast: vi.fn(),
+  startAgent: vi.fn(),
+  stopAgent: vi.fn(),
 }));
 
 vi.mock("@/hooks", () => ({
   useAgentStoreInstance: mocks.useAgentStoreInstance,
+}));
+
+vi.mock("@/hooks/api", () => ({
+  getAgentLifecycleCommand: mocks.getAgentLifecycleCommand,
+  restartAgent: mocks.restartAgent,
+  startAgent: mocks.startAgent,
+  stopAgent: mocks.stopAgent,
+  wsUrl: (workspace: string, path: string) =>
+    `/api/workspaces/${encodeURIComponent(workspace)}${path}`,
+}));
+
+vi.mock("@/hooks/ui/useToast", () => ({
+  useToast: () => ({
+    dismissAll: vi.fn(),
+    dismissToast: vi.fn(),
+    showToast: mocks.showToast,
+    toasts: [],
+  }),
 }));
 
 vi.mock("@/components/TerminalView", () => ({
@@ -82,6 +118,26 @@ function renderWithAgents(agents: LoomAgentStatus[], agentName: string) {
 }
 
 describe("AgentDetailMain", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    mocks.restartAgent.mockResolvedValue({
+      message: "agent restarted",
+      pending: false,
+      status: "succeeded",
+    });
+    mocks.startAgent.mockResolvedValue({
+      message: "agent started",
+      pending: false,
+      status: "succeeded",
+    });
+    mocks.stopAgent.mockResolvedValue({
+      message: "agent stopped",
+      pending: false,
+      status: "succeeded",
+    });
+  });
+
   it("shows two-letter initials in the agent header avatar", () => {
     renderWithAgents(
       [
@@ -310,5 +366,488 @@ describe("AgentDetailMain", () => {
     expect(
       screen.queryByText("Worker terminal unavailable"),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps a fast restart locked when every Agent snapshot is unchanged", async () => {
+    vi.useFakeTimers();
+    try {
+      const initial = activeServiceWorkerAgent();
+      const onChanged = vi.fn();
+      mocks.restartAgent.mockResolvedValueOnce({
+        message: "restart requested",
+        pending: true,
+        command_id: "restart-fast",
+        status: "queued",
+      });
+      mocks.getAgentLifecycleCommand
+        .mockResolvedValueOnce({
+          command_id: "restart-fast",
+          action: "restart",
+          status: "queued",
+        })
+        .mockResolvedValueOnce({
+          command_id: "restart-fast",
+          action: "restart",
+          status: "succeeded",
+        });
+
+      const { rerender } = render(
+        <AgentLifecycleControls agent={initial} onChanged={onChanged} />,
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("agent-restart-button"));
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId("agent-restart-button")).toBeDisabled();
+      expect(mocks.getAgentLifecycleCommand).toHaveBeenCalledTimes(1);
+
+      rerender(
+        <AgentLifecycleControls agent={{ ...initial }} onChanged={onChanged} />,
+      );
+      expect(screen.getByTestId("agent-restart-button")).toBeDisabled();
+      fireEvent.click(screen.getByTestId("agent-restart-button"));
+      expect(mocks.restartAgent).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(screen.getByTestId("agent-restart-button")).not.toBeDisabled();
+      expect(mocks.showToast).toHaveBeenCalledWith(
+        "Restart completed for advanced-task-runner",
+        { type: "success" },
+      );
+      expect(onChanged).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("coordinates two mounted lifecycle controls before either request settles", async () => {
+    const initial = activeServiceWorkerAgent();
+    let resolveRestart:
+      | ((value: {
+          message: string;
+          pending: boolean;
+          command_id: string;
+          status: "queued";
+        }) => void)
+      | undefined;
+    mocks.restartAgent.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRestart = resolve;
+      }),
+    );
+    mocks.getAgentLifecycleCommand.mockResolvedValue({
+      command_id: "restart-two-views",
+      action: "restart",
+      status: "running",
+    });
+
+    render(
+      <>
+        <AgentLifecycleControls agent={initial} onChanged={vi.fn()} />
+        <AgentLifecycleControls agent={initial} onChanged={vi.fn()} />
+      </>,
+    );
+    const restartButtons = screen.getAllByTestId("agent-restart-button");
+    fireEvent.click(restartButtons[0]!);
+    fireEvent.click(restartButtons[1]!);
+
+    expect(mocks.restartAgent).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(restartButtons[0]).toBeDisabled();
+      expect(restartButtons[1]).toBeDisabled();
+    });
+
+    await act(async () => {
+      resolveRestart?.({
+        message: "restart requested",
+        pending: true,
+        command_id: "restart-two-views",
+        status: "queued",
+      });
+      await Promise.resolve();
+    });
+    expect(mocks.restartAgent).toHaveBeenCalledTimes(1);
+    expect(loadPendingAgentLifecycleCommand("E2E", initial.name)).toMatchObject(
+      { commandId: "restart-two-views" },
+    );
+  });
+
+  it("makes two mounted controls adopt the newest exact-key storage event", async () => {
+    const initial = activeServiceWorkerAgent();
+    savePendingAgentLifecycleCommand({
+      workspace: "E2E",
+      agent: initial.name,
+      action: "restart",
+      commandId: "restart-older-tab",
+      acceptedAt: Date.now() - 1_000,
+      warningShown: false,
+    });
+    mocks.getAgentLifecycleCommand.mockImplementation(
+      async (_workspace: string, _agent: string, commandId: string) => ({
+        command_id: commandId,
+        action: "restart" as const,
+        status: "running" as const,
+      }),
+    );
+    render(
+      <>
+        <AgentLifecycleControls agent={initial} onChanged={vi.fn()} />
+        <AgentLifecycleControls agent={initial} onChanged={vi.fn()} />
+      </>,
+    );
+
+    const pendingFromOtherTab = {
+      workspace: "E2E",
+      agent: initial.name,
+      action: "restart" as const,
+      commandId: "restart-other-tab",
+      acceptedAt: Date.now(),
+      warningShown: false,
+    };
+    const storageKey = pendingAgentLifecycleCommandStorageKey(
+      "E2E",
+      initial.name,
+      pendingFromOtherTab.commandId,
+    );
+    act(() => {
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify(pendingFromOtherTab),
+      );
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: storageKey,
+          newValue: JSON.stringify(pendingFromOtherTab),
+          storageArea: window.localStorage,
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      for (const button of screen.getAllByTestId("agent-restart-button")) {
+        expect(button).toBeDisabled();
+      }
+      const newCommandCalls = mocks.getAgentLifecycleCommand.mock.calls.filter(
+        (call) => call[2] === "restart-other-tab",
+      );
+      expect(newCommandCalls).toHaveLength(2);
+    });
+  });
+
+  it("does not let a late older 202 response overwrite a newer cross-tab command", async () => {
+    const initial = activeServiceWorkerAgent();
+    let resolveOlder:
+      | ((value: {
+          message: string;
+          pending: boolean;
+          command_id: string;
+          status: "queued";
+        }) => void)
+      | undefined;
+    mocks.restartAgent.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOlder = resolve;
+      }),
+    );
+    mocks.getAgentLifecycleCommand.mockImplementation(
+      async (_workspace: string, _agent: string, commandId: string) => ({
+        command_id: commandId,
+        action: "restart" as const,
+        status: "running" as const,
+      }),
+    );
+    render(<AgentLifecycleControls agent={initial} onChanged={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("agent-restart-button"));
+    expect(mocks.restartAgent).toHaveBeenCalledTimes(1);
+
+    const newer = {
+      workspace: "E2E",
+      agent: initial.name,
+      action: "restart" as const,
+      commandId: "restart-newer",
+      acceptedAt: Date.now() + 1_000,
+      warningShown: false,
+    };
+    const storageKey = pendingAgentLifecycleStorageKey(
+      newer.workspace,
+      newer.agent,
+    );
+    act(() => {
+      window.localStorage.setItem(storageKey, JSON.stringify(newer));
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: storageKey,
+          newValue: JSON.stringify(newer),
+          storageArea: window.localStorage,
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(mocks.getAgentLifecycleCommand).toHaveBeenCalledWith(
+        "E2E",
+        initial.name,
+        "restart-newer",
+        expect.anything(),
+      ),
+    );
+
+    await act(async () => {
+      resolveOlder?.({
+        message: "restart requested",
+        pending: true,
+        command_id: "restart-older",
+        status: "queued",
+      });
+      await Promise.resolve();
+    });
+
+    expect(loadPendingAgentLifecycleCommand("E2E", initial.name)).toEqual(
+      newer,
+    );
+    expect(screen.getByTestId("agent-restart-button")).toBeDisabled();
+  });
+
+  it("restores a persisted pending command after unmount and remount", async () => {
+    const initial = activeServiceWorkerAgent();
+    const acceptedAt = Date.now();
+    expect(
+      savePendingAgentLifecycleCommand({
+        workspace: "E2E",
+        agent: initial.name,
+        action: "restart",
+        commandId: "restart-restored",
+        acceptedAt,
+        warningShown: false,
+      }),
+    ).toBe(true);
+    mocks.getAgentLifecycleCommand
+      .mockResolvedValueOnce({
+        command_id: "restart-restored",
+        action: "restart",
+        status: "running",
+      })
+      .mockResolvedValueOnce({
+        command_id: "restart-restored",
+        action: "restart",
+        status: "succeeded",
+      });
+
+    const first = render(
+      <AgentLifecycleControls agent={initial} onChanged={vi.fn()} />,
+    );
+    expect(screen.getByTestId("agent-restart-button")).toBeDisabled();
+    await waitFor(() =>
+      expect(mocks.getAgentLifecycleCommand).toHaveBeenCalledTimes(1),
+    );
+    first.unmount();
+
+    render(<AgentLifecycleControls agent={initial} onChanged={vi.fn()} />);
+    expect(screen.getByTestId("agent-restart-button")).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-restart-button")).not.toBeDisabled(),
+    );
+    expect(loadPendingAgentLifecycleCommand("E2E", initial.name)).toBeNull();
+  });
+
+  it("retains the durable lock through transient polling errors and a delayed warning", async () => {
+    vi.useFakeTimers();
+    try {
+      const initial = activeServiceWorkerAgent();
+      const acceptedAt = Date.now() - 14_900;
+      savePendingAgentLifecycleCommand({
+        workspace: "E2E",
+        agent: initial.name,
+        action: "restart",
+        commandId: "restart-delayed",
+        acceptedAt,
+        warningShown: false,
+      });
+      mocks.getAgentLifecycleCommand
+        .mockRejectedValueOnce(new ApiError(503, "Unavailable"))
+        .mockResolvedValueOnce({
+          command_id: "restart-delayed",
+          action: "restart",
+          status: "running",
+        })
+        .mockResolvedValueOnce({
+          command_id: "restart-delayed",
+          action: "restart",
+          status: "succeeded",
+        });
+
+      render(<AgentLifecycleControls agent={initial} onChanged={vi.fn()} />);
+      await act(async () => {
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(screen.getByTestId("agent-restart-button")).toBeDisabled();
+      expect(mocks.showToast).toHaveBeenCalledWith(
+        "Restart is still pending for advanced-task-runner; controls remain locked while Loom confirms the command",
+        { type: "warning" },
+      );
+      expect(
+        loadPendingAgentLifecycleCommand("E2E", initial.name),
+      ).toMatchObject({ warningShown: true });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(900);
+      });
+      expect(screen.getByTestId("agent-restart-button")).toBeDisabled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(screen.getByTestId("agent-restart-button")).not.toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("surfaces terminal command failure and clears the persisted lock", async () => {
+    const initial = activeServiceWorkerAgent();
+    mocks.restartAgent.mockResolvedValueOnce({
+      message: "restart requested",
+      pending: true,
+      command_id: "restart-failed",
+      status: "queued",
+    });
+    mocks.getAgentLifecycleCommand.mockResolvedValueOnce({
+      command_id: "restart-failed",
+      action: "restart",
+      status: "failed",
+      error_class: "AgentUnreachable",
+    });
+
+    render(<AgentLifecycleControls agent={initial} onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("agent-restart-button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-restart-button")).not.toBeDisabled(),
+    );
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      "Restart failed for advanced-task-runner: AgentUnreachable",
+      { type: "error" },
+    );
+    expect(loadPendingAgentLifecycleCommand("E2E", initial.name)).toBeNull();
+  });
+
+  it("settles a graceful stop reported as a yield command", async () => {
+    const initial = activeServiceWorkerAgent();
+    mocks.stopAgent.mockResolvedValueOnce({
+      message: "stop requested",
+      pending: true,
+      command_id: "stop-yield",
+      status: "queued",
+    });
+    mocks.getAgentLifecycleCommand.mockResolvedValueOnce({
+      command_id: "stop-yield",
+      action: "yield",
+      status: "succeeded",
+    });
+
+    render(<AgentLifecycleControls agent={initial} onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("agent-stop-button"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-stop-button")).not.toBeDisabled(),
+    );
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      "Stop completed for advanced-task-runner",
+      { type: "success" },
+    );
+  });
+
+  it("clears an authoritative 404 with an honest toast and refresh", async () => {
+    const initial = activeServiceWorkerAgent();
+    const onChanged = vi.fn();
+    savePendingAgentLifecycleCommand({
+      workspace: "E2E",
+      agent: initial.name,
+      action: "stop",
+      commandId: "stop-missing",
+      acceptedAt: Date.now(),
+      warningShown: false,
+    });
+    mocks.getAgentLifecycleCommand.mockRejectedValueOnce(
+      new ApiError(404, "Not Found"),
+    );
+
+    render(<AgentLifecycleControls agent={initial} onChanged={onChanged} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-stop-button")).not.toBeDisabled(),
+    );
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      "Stop command stop-missing is no longer available; refreshed the current agent state",
+      { type: "warning" },
+    );
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(loadPendingAgentLifecycleCommand("E2E", initial.name)).toBeNull();
+  });
+
+  it("aborts command polling and cancels delayed work on unmount", async () => {
+    vi.useFakeTimers();
+    try {
+      const initial = activeServiceWorkerAgent();
+      let pollSignal: AbortSignal | undefined;
+      mocks.restartAgent.mockResolvedValueOnce({
+        message: "restart requested",
+        pending: true,
+        command_id: "restart-unmount",
+        status: "queued",
+      });
+      mocks.getAgentLifecycleCommand.mockImplementationOnce(
+        (
+          _workspace: string,
+          _agent: string,
+          _command: string,
+          options?: { signal?: AbortSignal },
+        ) => {
+          pollSignal = options?.signal;
+          return new Promise(() => undefined);
+        },
+      );
+      const { unmount } = render(
+        <AgentLifecycleControls agent={initial} onChanged={vi.fn()} />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("agent-restart-button"));
+        await Promise.resolve();
+      });
+      expect(pollSignal?.aborted).toBe(false);
+      mocks.showToast.mockClear();
+      unmount();
+      expect(pollSignal?.aborted).toBe(true);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(mocks.getAgentLifecycleCommand).toHaveBeenCalledTimes(1);
+      expect(mocks.showToast).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("remains interactive after StrictMode effect replay", async () => {
+    const initial = activeServiceWorkerAgent();
+    const onChanged = vi.fn();
+    render(
+      <StrictMode>
+        <AgentLifecycleControls agent={initial} onChanged={onChanged} />
+      </StrictMode>,
+    );
+
+    fireEvent.click(screen.getByTestId("agent-restart-button"));
+    await waitFor(() =>
+      expect(mocks.showToast).toHaveBeenCalledWith(
+        "Restart completed for advanced-task-runner",
+        { type: "success" },
+      ),
+    );
+    expect(onChanged).toHaveBeenCalledTimes(1);
   });
 });
