@@ -21,7 +21,9 @@ const WORKSPACE_WINDOW_HEIGHT: f64 = 800.0;
 const WORKSPACE_MIN_WIDTH: f64 = 720.0;
 const WORKSPACE_MIN_HEIGHT: f64 = 520.0;
 const TRAFFIC_LIGHT_X: f64 = 14.0;
-const TRAFFIC_LIGHT_Y: f64 = 15.0;
+// Wry treats this as the traffic-light centerline within its titlebar
+// container, so half of the 44px web header keeps both layers aligned.
+const TRAFFIC_LIGHT_Y: f64 = 22.0;
 const STALE_RUNTIME_HEALTH_TIMEOUT: Duration = Duration::from_millis(300);
 
 #[derive(Default)]
