@@ -57,8 +57,9 @@ type Daemon struct {
 
 	// store is the fleet-db backed source of agent assignments and daemon
 	// profile data.
-	store       store.Store
-	storeHandle *bootstrap.StoreHandle
+	store                  store.Store
+	storeHandle            *bootstrap.StoreHandle
+	agentCommandDispatcher agentCommandDispatcher
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.

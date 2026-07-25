@@ -22,7 +22,7 @@ func TestCheckedInRuntimeInventoryMatchesRepository(t *testing.T) {
 	if got, want := len(inventory.Components), 86; got != want {
 		t.Fatalf("runtime components = %d, want baseline %d", got, want)
 	}
-	if got, want := len(inventory.GoroutineLaunches), 103; got != want {
+	if got, want := len(inventory.GoroutineLaunches), 105; got != want {
 		t.Fatalf("runtime goroutine launches = %d, want baseline %d", got, want)
 	}
 	codexLaunches := map[string]struct{}{

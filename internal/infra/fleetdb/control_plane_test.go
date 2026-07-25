@@ -252,6 +252,64 @@ func TestControlPlaneClientAgentCommandCreateOmitsStatus(t *testing.T) {
 	}
 }
 
+func TestControlPlaneClientAgentCommandAckSendsClaimantBinding(t *testing.T) {
+	now := time.Now().UTC()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-commands/cmd-1/ack" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode Ack: %v", err)
+		}
+		if body["node_id"] != "node-new" || body["owner_id"] != "stable-runtime-owner" {
+			t.Fatalf("Ack body = %#v, want atomic claimant node and stable owner", body)
+		}
+		if body["ownership_lease_id"] != "lease-7" ||
+			body["ownership_token"] != "SECRET_TOKEN" ||
+			body["ownership_fencing_token"] != float64(9) {
+			t.Fatalf("Ack body ownership proof = %#v", body)
+		}
+		writeJSON(t, w, domain.AgentCommand{
+			WorkspaceKey:  "WS",
+			CommandID:     "cmd-1",
+			TargetAgentID: "agent-1",
+			TargetNodeID:  "node-new",
+			Type:          "start",
+			Status:        domain.AgentCommandAcked,
+			AckedBy:       "stable-runtime-owner",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, err := client.AgentCommands().Ack(
+		t.Context(),
+		"WS",
+		"cmd-1",
+		store.AgentCommandAck{
+			NodeID:  "node-new",
+			OwnerID: "stable-runtime-owner",
+			AgentCommandOwnershipProof: store.AgentCommandOwnershipProof{
+				OwnershipLeaseID:      "lease-7",
+				OwnershipToken:        "SECRET_TOKEN",
+				OwnershipFencingToken: 9,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Ack command: %v", err)
+	}
+	if cmd.TargetNodeID != "node-new" || cmd.AckedBy != "stable-runtime-owner" {
+		t.Fatalf("Ack response = %+v, want claimant binding", cmd)
+	}
+}
+
 func TestControlPlaneClientArtifactUploadContent(t *testing.T) {
 	body := []byte("artifact bytes")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

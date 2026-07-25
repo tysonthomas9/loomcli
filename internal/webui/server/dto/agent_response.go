@@ -30,3 +30,13 @@ type AgentStatusResponse struct {
 	// Mapping function must initialize to []string{} to avoid null.
 	Labels []string `json:"labels"`
 }
+
+// AgentLifecycleResponse is the common wire contract returned by every agent
+// lifecycle route, whether the transition completed synchronously or was
+// durably queued for a supervised runtime owner.
+type AgentLifecycleResponse struct {
+	Message   string `json:"message"`
+	Pending   bool   `json:"pending"`
+	CommandID string `json:"command_id"`
+	Status    string `json:"status"`
+}

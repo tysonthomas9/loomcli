@@ -504,6 +504,7 @@ func classifyForbiddenHTTPError(prefix, path, code string) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrAwaitActorForbidden)
 	}
 	if strings.Contains(path, "/driver-runs/") || strings.Contains(path, "/task-runs/") ||
+		strings.Contains(path, "/agent-commands/") ||
 		strings.Contains(path, "/artifact-commands/") || strings.Contains(path, "/artifacts/") {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrNotOwner)
 	}

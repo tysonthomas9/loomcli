@@ -333,9 +333,14 @@ func (t *tracedAgentCommandStore) List(ctx context.Context, ws string, filter st
 	)
 }
 
-func (t *tracedAgentCommandStore) Ack(ctx context.Context, ws, commandID string) (*domain.AgentCommand, error) {
+func (t *tracedAgentCommandStore) Ack(
+	ctx context.Context,
+	ws,
+	commandID string,
+	ack store.AgentCommandAck,
+) (*domain.AgentCommand, error) {
 	return traced(ctx, "AgentCommands", "Ack", func(ctx context.Context) (*domain.AgentCommand, error) {
-		return t.inner.Ack(ctx, ws, commandID)
+		return t.inner.Ack(ctx, ws, commandID, ack)
 	},
 		attribute.String("loom.workspace", ws),
 	)

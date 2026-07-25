@@ -1389,11 +1389,14 @@ export interface paths {
     put?: never;
     /**
      * Stop an agent using its runtime owner
-     * @description Supervised workers yield through their daemon by default and return
-     *     202 Accepted; `{"force": true}` sends `agent_stop(force=true)` and
-     *     returns 200. Interactive agents are owned by the web terminal runtime,
-     *     so Stop terminates their PTY synchronously and returns 200 without
-     *     enqueueing a daemon command.
+     * @description In store-backed mode, supervised workers durably queue a stop command
+     *     for their daemon and return 202 while desired_state is draining. A
+     *     direct local-daemon deployment waits for the daemon's semantic result
+     *     and returns 200 only after the stop completes. By default the daemon
+     *     requests a cooperative yield before keeping the worker stopped;
+     *     `{"force": true}` skips that yield and terminates directly. Interactive
+     *     agents are owned by the web terminal runtime, so Stop terminates their
+     *     PTY synchronously and returns 200 without enqueueing a daemon command.
      */
     post: operations["stopAgent"];
     delete?: never;
@@ -1411,7 +1414,12 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Start an agent */
+    /**
+     * Start an agent
+     * @description Store-backed supervised workers return 202 after durably queueing the
+     *     start command. Interactive agents and direct local-daemon deployments
+     *     return 200 only after their runtime owner accepts the start.
+     */
     post: operations["startAgent"];
     delete?: never;
     options?: never;
@@ -1428,7 +1436,15 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Restart an agent */
+    /**
+     * Restart an agent
+     * @description Store-backed supervised workers return 202 after durably queueing the
+     *     restart command. A direct local-daemon deployment waits through the
+     *     configured cooperative-yield and SIGTERM escalation and returns 200
+     *     only after the daemon reports completion. Interactive agents return
+     *     200 after synchronously terminating the current PTY so a fresh
+     *     terminal can attach.
+     */
     post: operations["restartAgent"];
     delete?: never;
     options?: never;
@@ -1445,8 +1461,35 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Yield an agent (graceful stop at next safe point) */
+    /**
+     * Yield an agent (graceful stop at next safe point)
+     * @description Store-backed supervised workers return 202 after durably queueing the
+     *     yield command. A direct local-daemon deployment returns 200 after the
+     *     yield marker is written. Interactive agents reject Yield; use Stop.
+     */
     post: operations["yieldAgent"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{name}/lifecycle-commands/{command_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get durable lifecycle command status
+     * @description Returns the durable status of a lifecycle request. The command must
+     *     belong to the agent named in the route; cross-agent command IDs are
+     *     reported as not found.
+     */
+    get: operations["getAgentLifecycleCommand"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -3137,6 +3180,42 @@ export interface components {
         [key: string]: string;
       };
       task_id?: string;
+    };
+    AgentLifecycleResponse: {
+      message: string;
+      /** @description True when a supervised runtime owner accepted the command for asynchronous execution. */
+      pending: boolean;
+      /** @description Durable lifecycle command ID when pending; empty for a synchronous transition. */
+      command_id: string;
+      /** @enum {string} */
+      status:
+        | "queued"
+        | "acked"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "cancelled";
+    };
+    AgentLifecycleCommandResponse: {
+      command_id: string;
+      /** @enum {string} */
+      action: "start" | "stop" | "restart" | "yield";
+      /** @enum {string} */
+      status:
+        | "queued"
+        | "acked"
+        | "running"
+        | "succeeded"
+        | "failed"
+        | "cancelled";
+      result: string;
+      error_class: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /** Format: date-time */
+      acked_at: string | null;
     };
     StopAgentRequest: components["schemas"]["AgentLifecycleRequest"] & {
       /** @default false */
@@ -7165,22 +7244,22 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Interactive agent stopped or supervised worker force-stopped */
+      /** @description Interactive or direct local-daemon agent stopped synchronously */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
-      /** @description Yield signal sent (graceful stop in progress) */
+      /** @description Supervised worker stop queued for its runtime owner */
       202: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
       /** @description Invalid lifecycle request */
@@ -7248,13 +7327,22 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Agent started */
+      /** @description Interactive or direct local-daemon agent started synchronously */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
+        };
+      };
+      /** @description Supervised worker start durably queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
       /** @description Invalid lifecycle request */
@@ -7322,13 +7410,22 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Agent restarted */
+      /** @description Interactive or direct local-daemon restart completed synchronously */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
+        };
+      };
+      /** @description Supervised worker restart durably queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
       /** @description Invalid lifecycle request */
@@ -7396,13 +7493,22 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Yield signal sent */
+      /** @description Direct local-daemon yield request completed synchronously */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
+        };
+      };
+      /** @description Supervised worker yield durably queued */
       202: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["MessageResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
       /** @description Invalid lifecycle request */
@@ -7442,6 +7548,68 @@ export interface operations {
         };
       };
       /** @description Agent service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+    };
+  };
+  getAgentLifecycleCommand: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Unified agent identifier or supervised assignment name */
+        name: components["parameters"]["AgentName"];
+        command_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Durable lifecycle command status */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentLifecycleCommandResponse"];
+        };
+      };
+      /** @description Invalid agent name or command ID */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Lifecycle command not found for this agent */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Agent command store operation failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Agent command store unavailable */
       503: {
         headers: {
           [name: string]: unknown;

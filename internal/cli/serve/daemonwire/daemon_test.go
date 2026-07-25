@@ -1,15 +1,155 @@
 package daemonwire
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 )
+
+func TestSendControlRequestWaitsForDaemonLifecycleResult(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	t.Cleanup(func() { _ = serverConn.Close() })
+
+	requestReceived := make(chan struct{})
+	allowCompletion := make(chan struct{})
+	serverDone := make(chan error, 1)
+	go func() {
+		defer func() { _ = serverConn.Close() }()
+
+		scanner := bufio.NewScanner(serverConn)
+		if !scanner.Scan() {
+			serverDone <- scanner.Err()
+			return
+		}
+		var req struct {
+			Operation string `json:"operation"`
+			AgentName string `json:"agent_name"`
+			Force     bool   `json:"force"`
+		}
+		if unmarshalErr := json.Unmarshal(scanner.Bytes(), &req); unmarshalErr != nil {
+			serverDone <- unmarshalErr
+			return
+		}
+		if req.Operation != "agent_stop" || req.AgentName != "nova" || req.Force {
+			serverDone <- fmt.Errorf("request = %+v, want graceful agent_stop for nova", req)
+			return
+		}
+		close(requestReceived)
+
+		<-allowCompletion
+		_, writeErr := serverConn.Write([]byte(`{"success":true}` + "\n"))
+		serverDone <- writeErr
+	}()
+
+	type controlCallResult struct {
+		result *agentcontrol.AgentControlResult
+		err    error
+	}
+	callDone := make(chan controlCallResult, 1)
+	go func() {
+		result, callErr := sendControlRequestOnConn(
+			clientConn,
+			"agent_stop",
+			"nova",
+			false,
+			5*time.Second,
+		)
+		callDone <- controlCallResult{result: result, err: callErr}
+	}()
+
+	select {
+	case <-requestReceived:
+	case serverErr := <-serverDone:
+		t.Fatalf("server before request: %v", serverErr)
+	case <-time.After(time.Second):
+		t.Fatal("daemon did not receive lifecycle request")
+	}
+
+	select {
+	case got := <-callDone:
+		t.Fatalf("request returned before daemon lifecycle completed: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(allowCompletion)
+	select {
+	case serverErr := <-serverDone:
+		if serverErr != nil {
+			t.Fatalf("server response: %v", serverErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("daemon did not finish lifecycle response")
+	}
+	select {
+	case got := <-callDone:
+		if got.err != nil {
+			t.Fatalf("send control request: %v", got.err)
+		}
+		if got.result == nil || !got.result.Success {
+			t.Fatalf("control result = %+v, want daemon-confirmed success", got.result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request did not return after daemon lifecycle response")
+	}
+}
+
+func TestSendControlRequestReturnsDaemonRejection(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	t.Cleanup(func() { _ = clientConn.Close() })
+	t.Cleanup(func() { _ = serverConn.Close() })
+
+	go func() {
+		defer func() { _ = serverConn.Close() }()
+		scanner := bufio.NewScanner(serverConn)
+		if scanner.Scan() {
+			_, _ = serverConn.Write([]byte(`{"error":"agent \"missing\" not found"}` + "\n"))
+		}
+	}()
+
+	result, err := sendControlRequestOnConn(
+		clientConn,
+		"agent_restart",
+		"missing",
+		false,
+		time.Second,
+	)
+	if err != nil {
+		t.Fatalf("send control request: %v", err)
+	}
+	if result == nil || result.Success || !strings.Contains(result.Error, "not found") {
+		t.Fatalf("control result = %+v, want observable daemon rejection", result)
+	}
+}
+
+func TestAgentControlReadDeadlineCoversGracefulEscalation(t *testing.T) {
+	dc := &config.DaemonConfig{}
+	if got, want := agentControlReadDeadline(dc, "agent_stop", false), 380*time.Second; got != want {
+		t.Fatalf("default graceful stop deadline = %v, want %v", got, want)
+	}
+	if got, want := agentControlReadDeadline(dc, "agent_stop", true), 320*time.Second; got != want {
+		t.Fatalf("default force stop deadline = %v, want %v", got, want)
+	}
+
+	yieldTimeout := 12
+	sigtermTimeout := 34
+	dc.Daemon.RestartPolicy.YieldTimeout = &yieldTimeout
+	dc.Daemon.RestartPolicy.SigtermTimeout = &sigtermTimeout
+	if got, want := agentControlReadDeadline(dc, "agent_restart", false), 66*time.Second; got != want {
+		t.Fatalf("configured restart deadline = %v, want %v", got, want)
+	}
+}
 
 func TestBuildStoreBackedDaemonConfigFnUsesFleetDBStore(t *testing.T) {
 	ctx := context.Background()

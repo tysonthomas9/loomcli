@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"regexp"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
@@ -63,9 +64,14 @@ type AgentService interface {
 	// UpdateAgent applies a partial-update to an existing agent.
 	UpdateAgent(ctx context.Context, wsKey, name string, patch AgentUpdateInput) (*domain.Agent, error)
 
-	// RequestAgentLifecycle updates desired agent state and enqueues a daemon
-	// command for the corresponding lifecycle action.
-	RequestAgentLifecycle(ctx context.Context, wsKey, name string, in AgentLifecycleInput) (*domain.Agent, error)
+	// RequestAgentLifecycle requests a placement-owned lifecycle transition.
+	// Pending is authoritative: handlers must not infer asynchronous completion
+	// from the best-effort Agent projection.
+	RequestAgentLifecycle(ctx context.Context, wsKey, name string, in AgentLifecycleInput) (*AgentLifecycleResult, error)
+
+	// GetAgentLifecycleCommand returns the durable status of a lifecycle
+	// command scoped to the named agent.
+	GetAgentLifecycleCommand(ctx context.Context, wsKey, name, commandID string) (*AgentLifecycleCommandResult, error)
 
 	// DeleteAgent removes an agent assignment from the store.
 	DeleteAgent(ctx context.Context, wsKey, name string) error
@@ -112,6 +118,28 @@ type AgentLifecycleInput struct {
 	DesiredState domain.AgentDesiredState
 	CommandType  string
 	Payload      map[string]string
+}
+
+// AgentLifecycleResult describes whether a lifecycle transition completed in
+// the request owner or was durably accepted for asynchronous execution.
+type AgentLifecycleResult struct {
+	Agent     *domain.Agent
+	Pending   bool
+	CommandID string
+	Status    domain.AgentCommandStatus
+}
+
+// AgentLifecycleCommandResult is the UI-safe projection of a durable lifecycle
+// command. It intentionally omits claimant and placement metadata.
+type AgentLifecycleCommandResult struct {
+	CommandID  string                    `json:"command_id"`
+	Action     string                    `json:"action"`
+	Status     domain.AgentCommandStatus `json:"status"`
+	Result     string                    `json:"result"`
+	ErrorClass string                    `json:"error_class"`
+	CreatedAt  time.Time                 `json:"created_at"`
+	UpdatedAt  time.Time                 `json:"updated_at"`
+	AckedAt    *time.Time                `json:"acked_at"`
 }
 
 // AgentTerminalInfoResult contains the terminal mode for an agent.

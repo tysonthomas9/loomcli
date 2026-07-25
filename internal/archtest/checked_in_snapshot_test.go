@@ -31,7 +31,7 @@ func checkedInSnapshotReport() Report {
 		AnalysisProfilesEnforced:   11,
 		MutationCommands:           61,
 		RuntimeComponents:          86,
-		RuntimeGoroutineLaunches:   103,
+		RuntimeGoroutineLaunches:   105,
 		PerformanceMetrics:         6,
 		PerformanceMetricsMeasured: 6,
 	}

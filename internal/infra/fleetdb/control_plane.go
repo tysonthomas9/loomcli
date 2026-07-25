@@ -793,9 +793,19 @@ func (s *agentCommandStore) List(ctx context.Context, ws string, filter store.Ag
 	return resp.AgentCommands, nil
 }
 
-func (s *agentCommandStore) Ack(ctx context.Context, ws, commandID string) (*domain.AgentCommand, error) {
+func (s *agentCommandStore) Ack(
+	ctx context.Context,
+	ws,
+	commandID string,
+	ack store.AgentCommandAck,
+) (*domain.AgentCommand, error) {
 	var out domain.AgentCommand
-	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-commands/"+pathEscape(commandID)+"/ack", nil, &out); err != nil {
+	if err := s.client.do(ctx,
+		"POST",
+		"/api/v1/"+pathEscape(ws)+"/agent-commands/"+pathEscape(commandID)+"/ack",
+		ack,
+		&out,
+	); err != nil {
 		return nil, err
 	}
 	return &out, nil

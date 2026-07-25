@@ -611,56 +611,6 @@ func (s *agentServiceImpl) UpdateAgent(ctx context.Context, wsKey, name string, 
 	return updated, nil
 }
 
-// RequestAgentLifecycle updates FleetDB state and creates a queued command for
-// the daemon poller that owns this workspace.
-func (s *agentServiceImpl) RequestAgentLifecycle(ctx context.Context, wsKey, name string, in service.AgentLifecycleInput) (*domain.Agent, error) {
-	if s.store == nil {
-		return nil, service.ErrUnavailable("fleet-db store not configured")
-	}
-	name = normalizeStoredAgentName(name)
-	if err := validateStoredAgentName(name); err != nil {
-		return nil, err
-	}
-	if err := validateAgentCommandType(in.CommandType); err != nil {
-		return nil, err
-	}
-	agent, err := s.store.Agents().Get(ctx, wsKey, name)
-	if err != nil {
-		return nil, classifyStoreError("load agent lifecycle target", err)
-	}
-	role, err := s.loadAgentRoleForKind(ctx, wsKey, agent.RoleName)
-	if err != nil {
-		return nil, err
-	}
-	if domain.ResolveRoleKind(role, agent.RoleName) == domain.RoleKindInteractive {
-		return s.requestInteractiveAgentLifecycle(ctx, wsKey, agent, in)
-	}
-	if in.CommandType == "stop" && in.Payload["force"] != "true" {
-		in.State = domain.AgentStateIdle
-		in.DesiredState = domain.AgentDesiredDraining
-		in.CommandType = "yield"
-	}
-	updated, err := s.UpdateAgent(ctx, wsKey, name, service.AgentUpdateInput{
-		State:        &in.State,
-		DesiredState: &in.DesiredState,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if s.store.AgentCommands() == nil {
-		return updated, nil
-	}
-	if _, err := s.store.AgentCommands().Create(ctx, store.AgentCommandCreate{
-		WorkspaceKey:  wsKey,
-		TargetAgentID: name,
-		Type:          in.CommandType,
-		Payload:       in.Payload,
-	}); err != nil {
-		return nil, classifyStoreError("create agent command", err)
-	}
-	return updated, nil
-}
-
 func (s *agentServiceImpl) requestInteractiveAgentLifecycle(
 	ctx context.Context,
 	wsKey string,

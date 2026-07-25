@@ -29,7 +29,7 @@ func checkedInSnapshotViolations(report Report) []string {
 	checkCount("enforced analysis profiles", report.AnalysisProfilesEnforced, 11)
 	checkCount("mutation commands", report.MutationCommands, 61)
 	checkCount("runtime components", report.RuntimeComponents, 86)
-	checkCount("runtime goroutine launches", report.RuntimeGoroutineLaunches, 103)
+	checkCount("runtime goroutine launches", report.RuntimeGoroutineLaunches, 105)
 	checkCount("performance metrics", report.PerformanceMetrics, 6)
 	checkCount("measured performance metrics", report.PerformanceMetricsMeasured, 6)
 	checkCount("deferred performance metrics", report.PerformanceMetricsDeferred, 0)

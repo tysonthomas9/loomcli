@@ -168,8 +168,8 @@ func HandleYield(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerF
 		state:       domain.AgentStateIdle,
 		desired:     domain.AgentDesiredDraining,
 		commandType: "yield",
-		status:      http.StatusAccepted,
-		message:     "yield requested",
+		status:      http.StatusOK,
+		message:     "yielded",
 	})
 }
 
@@ -205,38 +205,56 @@ func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lif
 		}
 
 		effective, input := resolveLifecycleRequest(patch, req)
-		updated, err := agentSvc.RequestAgentLifecycle(r.Context(), ws, name, input)
+		result, err := agentSvc.RequestAgentLifecycle(r.Context(), ws, name, input)
 		if err != nil {
 			handler.HandleServiceError(w, err)
 			return
 		}
-		// A non-force Stop remains a graceful daemon yield for supervised
-		// workers, but interactive agents are stopped synchronously by their
-		// process-local terminal owner. Reflect the settled placement-specific
-		// result instead of claiming that an interactive runtime merely yielded.
-		if patch.commandType == "stop" && !req.Force && updated.DesiredState == domain.AgentDesiredStopped {
-			effective = patch
+		if result == nil || result.Agent == nil {
+			handler.HandleServiceError(w, service.ErrInternal("agent lifecycle returned no agent", nil))
+			return
 		}
-		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, effective.status, dto.NewMessageResponse(fmt.Sprintf("agent %q %s", updated.Name, effective.message)))
+		if result.Pending {
+			effective.status = http.StatusAccepted
+			if patch.commandType == "stop" && req.Force {
+				effective.message = "force-stop requested"
+			} else {
+				effective.message = effective.commandType + " requested"
+			}
+		}
+		broadcastAgentRefresh(hub, ws, result.Agent.Name, r.Header.Get("X-Actor"))
+		handler.WriteJSON(w, effective.status, dto.AgentLifecycleResponse{
+			Message:   fmt.Sprintf("agent %q %s", result.Agent.Name, effective.message),
+			Pending:   result.Pending,
+			CommandID: result.CommandID,
+			Status:    string(result.Status),
+		})
+	}
+}
+
+// HandleGetLifecycleCommand exposes the durable command projection used by the
+// UI to distinguish accepted work from terminal lifecycle convergence.
+func HandleGetLifecycleCommand(agentSvc service.AgentService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		result, err := agentSvc.GetAgentLifecycleCommand(
+			r.Context(),
+			requestWorkspaceID(r),
+			r.PathValue("name"),
+			r.PathValue("command_id"),
+		)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusOK, result)
 	}
 }
 
 func resolveLifecycleRequest(patch lifecyclePatch, req lifecycleRequest) (lifecyclePatch, service.AgentLifecycleInput) {
 	effective := patch
-	if patch.commandType == "stop" {
-		if req.Force {
-			effective.payload = map[string]string{"force": "true"}
-			effective.message = "force-stopped"
-		} else {
-			effective = lifecyclePatch{
-				state:       domain.AgentStateIdle,
-				desired:     domain.AgentDesiredDraining,
-				commandType: "yield",
-				status:      http.StatusAccepted,
-				message:     "yield requested",
-			}
-		}
+	if patch.commandType == "stop" && req.Force {
+		effective.payload = map[string]string{"force": "true"}
+		effective.message = "force-stopped"
 	}
 
 	payload := cloneLifecyclePayload(effective.payload)
@@ -256,18 +274,10 @@ func resolveLifecycleRequest(patch lifecyclePatch, req lifecycleRequest) (lifecy
 		payload["force"] = "true"
 	}
 
-	// Preserve the requested Stop for the service layer. It owns the role-kind
-	// placement decision: workers convert a graceful Stop to a daemon yield,
-	// while interactive agents terminate their local PTY directly.
-	inputPatch := effective
-	if patch.commandType == "stop" {
-		inputPatch = patch
-	}
-
 	return effective, service.AgentLifecycleInput{
-		State:        inputPatch.state,
-		DesiredState: inputPatch.desired,
-		CommandType:  inputPatch.commandType,
+		State:        effective.state,
+		DesiredState: effective.desired,
+		CommandType:  effective.commandType,
 		Payload:      payload,
 	}
 }

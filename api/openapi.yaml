@@ -2764,11 +2764,14 @@ paths:
       tags: [agent-control]
       summary: Stop an agent using its runtime owner
       description: |
-        Supervised workers yield through their daemon by default and return
-        202 Accepted; `{"force": true}` sends `agent_stop(force=true)` and
-        returns 200. Interactive agents are owned by the web terminal runtime,
-        so Stop terminates their PTY synchronously and returns 200 without
-        enqueueing a daemon command.
+        In store-backed mode, supervised workers durably queue a stop command
+        for their daemon and return 202 while desired_state is draining. A
+        direct local-daemon deployment waits for the daemon's semantic result
+        and returns 200 only after the stop completes. By default the daemon
+        requests a cooperative yield before keeping the worker stopped;
+        `{"force": true}` skips that yield and terminates directly. Interactive
+        agents are owned by the web terminal runtime, so Stop terminates their
+        PTY synchronously and returns 200 without enqueueing a daemon command.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2779,17 +2782,17 @@ paths:
               $ref: "#/components/schemas/StopAgentRequest"
       responses:
         "200":
-          description: Interactive agent stopped or supervised worker force-stopped
+          description: Interactive or direct local-daemon agent stopped synchronously
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "202":
-          description: Yield signal sent (graceful stop in progress)
+          description: Supervised worker stop queued for its runtime owner
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "400":
           description: Invalid lifecycle request
           content:
@@ -2826,6 +2829,10 @@ paths:
       operationId: startAgent
       tags: [agent-control]
       summary: Start an agent
+      description: |
+        Store-backed supervised workers return 202 after durably queueing the
+        start command. Interactive agents and direct local-daemon deployments
+        return 200 only after their runtime owner accepts the start.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2836,11 +2843,17 @@ paths:
               $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
         "200":
-          description: Agent started
+          description: Interactive or direct local-daemon agent started synchronously
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
+        "202":
+          description: Supervised worker start durably queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "400":
           description: Invalid lifecycle request
           content:
@@ -2877,6 +2890,13 @@ paths:
       operationId: restartAgent
       tags: [agent-control]
       summary: Restart an agent
+      description: |
+        Store-backed supervised workers return 202 after durably queueing the
+        restart command. A direct local-daemon deployment waits through the
+        configured cooperative-yield and SIGTERM escalation and returns 200
+        only after the daemon reports completion. Interactive agents return
+        200 after synchronously terminating the current PTY so a fresh
+        terminal can attach.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2887,11 +2907,17 @@ paths:
               $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
         "200":
-          description: Agent restarted
+          description: Interactive or direct local-daemon restart completed synchronously
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
+        "202":
+          description: Supervised worker restart durably queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "400":
           description: Invalid lifecycle request
           content:
@@ -2928,6 +2954,10 @@ paths:
       operationId: yieldAgent
       tags: [agent-control]
       summary: Yield an agent (graceful stop at next safe point)
+      description: |
+        Store-backed supervised workers return 202 after durably queueing the
+        yield command. A direct local-daemon deployment returns 200 after the
+        yield marker is written. Interactive agents reject Yield; use Stop.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2937,12 +2967,18 @@ paths:
             schema:
               $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
-        "202":
-          description: Yield signal sent
+        "200":
+          description: Direct local-daemon yield request completed synchronously
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MessageResponse"
+                $ref: "#/components/schemas/AgentLifecycleResponse"
+        "202":
+          description: Supervised worker yield durably queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentLifecycleResponse"
         "400":
           description: Invalid lifecycle request
           content:
@@ -2969,6 +3005,56 @@ paths:
                 $ref: "#/components/schemas/AgentErrorResponse"
         "503":
           description: Agent service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+
+  /api/workspaces/{ws}/agents/{name}/lifecycle-commands/{command_id}:
+    get:
+      operationId: getAgentLifecycleCommand
+      tags: [agent-control]
+      summary: Get durable lifecycle command status
+      description: |
+        Returns the durable status of a lifecycle request. The command must
+        belong to the agent named in the route; cross-agent command IDs are
+        reported as not found.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentName"
+        - name: command_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Durable lifecycle command status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentLifecycleCommandResponse"
+        "400":
+          description: Invalid agent name or command ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "404":
+          description: Lifecycle command not found for this agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "500":
+          description: Agent command store operation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentErrorResponse"
+        "503":
+          description: Agent command store unavailable
           content:
             application/json:
               schema:
@@ -6222,6 +6308,49 @@ components:
             type: string
         task_id:
           type: string
+
+    AgentLifecycleResponse:
+      type: object
+      required: [message, pending, command_id, status]
+      properties:
+        message:
+          type: string
+        pending:
+          type: boolean
+          description: True when a supervised runtime owner accepted the command for asynchronous execution.
+        command_id:
+          type: string
+          description: Durable lifecycle command ID when pending; empty for a synchronous transition.
+        status:
+          type: string
+          enum: [queued, acked, running, succeeded, failed, cancelled]
+
+    AgentLifecycleCommandResponse:
+      type: object
+      required: [command_id, action, status, result, error_class, created_at, updated_at, acked_at]
+      properties:
+        command_id:
+          type: string
+        action:
+          type: string
+          enum: [start, stop, restart, yield]
+        status:
+          type: string
+          enum: [queued, acked, running, succeeded, failed, cancelled]
+        result:
+          type: string
+        error_class:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        acked_at:
+          type: string
+          format: date-time
+          nullable: true
 
     StopAgentRequest:
       allOf:

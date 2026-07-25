@@ -489,15 +489,188 @@ func TestModifiedAgentsToDrain_DrainsCompletedEphemeralTask(t *testing.T) {
 	}
 }
 
-func TestReconcilerLiveAgentCommandStatusTreatsEmptyAsLive(t *testing.T) {
-	if !liveAgentCommandStatus("") {
-		t.Fatal("empty agent command status should be live for legacy fleet-db rows")
+func TestReconcilerLiveAgentCommandStatusUsesExplicitActiveStates(t *testing.T) {
+	if liveAgentCommandStatus("") {
+		t.Fatal("empty agent command status should not exist after queued became the durable default")
 	}
 	if !liveAgentCommandStatus(domain.AgentCommandAcked) {
 		t.Fatal("acked agent command status should be live")
 	}
 	if liveAgentCommandStatus(domain.AgentCommandSucceeded) {
 		t.Fatal("succeeded agent command status should not be live")
+	}
+}
+
+func TestHasLiveForceStopCommand(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	cmd, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: "worker",
+		Type:          "stop",
+		Payload:       map[string]string{"force": "true"},
+	})
+	if err != nil {
+		t.Fatalf("create force-stop command: %v", err)
+	}
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: "other",
+		Type:          "stop",
+		Payload:       map[string]string{"force": "true"},
+	}); err != nil {
+		t.Fatalf("create other force-stop command: %v", err)
+	}
+
+	cfg := makeDaemonConfig([]AgentEntry{{Worktree: "worker"}}, nil)
+	d := &Daemon{
+		config: cfg,
+		sup:    &supervisor.Supervisor{WorkspaceID: "ws", NodeID: "node-1"},
+		store:  st,
+	}
+	got, err := d.hasLiveForceStopCommand("worker")
+	if err != nil {
+		t.Fatalf("hasLiveForceStopCommand: %v", err)
+	}
+	if !got {
+		t.Fatal("hasLiveForceStopCommand = false, want true for queued force stop")
+	}
+
+	if _, err := st.AgentCommands().Ack(ctx, "ws", cmd.CommandID, store.AgentCommandAck{
+		NodeID:  "node-1",
+		OwnerID: "owner-1",
+	}); err != nil {
+		t.Fatalf("ack force-stop command: %v", err)
+	}
+	if _, err := st.AgentCommands().Complete(ctx, "ws", cmd.CommandID, store.AgentCommandComplete{
+		NodeID: "node-1", OwnerID: "owner-1", Status: domain.AgentCommandSucceeded,
+	}); err != nil {
+		t.Fatalf("complete force-stop command: %v", err)
+	}
+	got, err = d.hasLiveForceStopCommand("worker")
+	if err != nil {
+		t.Fatalf("hasLiveForceStopCommand after completion: %v", err)
+	}
+	if got {
+		t.Fatal("hasLiveForceStopCommand = true, want false after completion")
+	}
+}
+
+func TestHasLiveForceStopCommand_PaginatesPastActiveHistory(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	for i := range 101 {
+		if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+			WorkspaceKey:  "ws",
+			TargetAgentID: "worker",
+			Type:          "stop",
+		}); err != nil {
+			t.Fatalf("create non-force command %d: %v", i, err)
+		}
+	}
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: "worker",
+		Type:          "stop",
+		Payload:       map[string]string{"force": "true"},
+	}); err != nil {
+		t.Fatalf("create force-stop command: %v", err)
+	}
+
+	cfg := makeDaemonConfig([]AgentEntry{{Worktree: "worker"}}, nil)
+	d := &Daemon{
+		config: cfg,
+		sup:    &supervisor.Supervisor{WorkspaceID: "ws", NodeID: "node-1"},
+		store:  st,
+	}
+	got, err := d.hasLiveForceStopCommand("worker")
+	if err != nil {
+		t.Fatalf("hasLiveForceStopCommand: %v", err)
+	}
+	if !got {
+		t.Fatal("hasLiveForceStopCommand = false, want force stop after multiple pages")
+	}
+}
+
+func TestHasLiveForceStopCommand_IgnoresOtherNode(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: "worker",
+		TargetNodeID:  "node-other",
+		Type:          "stop",
+		Payload:       map[string]string{"force": "true"},
+	}); err != nil {
+		t.Fatalf("create other-node force-stop command: %v", err)
+	}
+
+	cfg := makeDaemonConfig([]AgentEntry{{Worktree: "worker"}}, nil)
+	d := &Daemon{
+		config: cfg,
+		sup:    &supervisor.Supervisor{WorkspaceID: "ws", NodeID: "node-1"},
+		store:  st,
+	}
+	got, err := d.hasLiveForceStopCommand("worker")
+	if err != nil {
+		t.Fatalf("hasLiveForceStopCommand: %v", err)
+	}
+	if got {
+		t.Fatal("hasLiveForceStopCommand = true, want other-node force intent ignored")
+	}
+}
+
+func TestDrainAgentsHonorsQueuedForceStop(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.AgentCommands().Create(ctx, store.AgentCommandCreate{
+		WorkspaceKey:  "ws",
+		TargetAgentID: "worker",
+		Type:          "stop",
+		Payload:       map[string]string{"force": "true"},
+	}); err != nil {
+		t.Fatalf("create force-stop command: %v", err)
+	}
+
+	entry := AgentEntry{
+		Worktree:     "worker",
+		Role:         "task",
+		DesiredState: domain.AgentDesiredDraining,
+	}
+	ap := &supervisor.AgentProcess{
+		Entry:  entry,
+		StopCh: make(chan struct{}),
+		Done:   make(chan struct{}),
+	}
+	go func() {
+		<-ap.StopCh
+		close(ap.Done)
+	}()
+
+	cfg := makeDaemonConfig([]AgentEntry{entry}, nil)
+	d := &Daemon{
+		config: cfg,
+		store:  st,
+		sup: &supervisor.Supervisor{
+			ConfigSnapshot: func() *DaemonConfig { return cfg },
+			WorkspaceID:    "ws",
+			NodeID:         "node-1",
+			Shutdown:       make(chan struct{}),
+			StoppedAgents:  make(map[string]struct{}),
+			Agents:         []*supervisor.AgentProcess{ap},
+		},
+	}
+
+	d.drainAgents([]AgentEntry{entry}, "modified")
+
+	ap.Mu.Lock()
+	reason := ap.StopReason
+	ap.Mu.Unlock()
+	if reason != supervisor.StopReasonManualStop {
+		t.Fatalf("stop reason = %q, want force-stop reason %q", reason, supervisor.StopReasonManualStop)
+	}
+	if got := d.AgentCount(); got != 0 {
+		t.Fatalf("AgentCount = %d after force drain, want 0", got)
 	}
 }
 

@@ -22,6 +22,8 @@ type AgentControlEntry struct {
 // op: "agent_stop", "agent_start", "agent_restart", "agent_yield", "agent_list"
 // agentName: target agent worktree name (empty for "agent_list")
 // force: only applies to "agent_stop"
+// Every result is the daemon's semantic response. The socket client uses an
+// operation-specific deadline long enough for stop/restart escalation.
 // Returns nil result + error when the daemon is unreachable.
 // Returns non-nil result with Success=false when the daemon rejects the command.
 type AgentControlFn func(op, agentName string, force bool) (*AgentControlResult, error)

@@ -18,6 +18,90 @@ const (
 	WorkerTokenScopes = "WorkerToken.Scopes"
 )
 
+// Defines values for AgentLifecycleCommandResponseAction.
+const (
+	Restart AgentLifecycleCommandResponseAction = "restart"
+	Start   AgentLifecycleCommandResponseAction = "start"
+	Stop    AgentLifecycleCommandResponseAction = "stop"
+	Yield   AgentLifecycleCommandResponseAction = "yield"
+)
+
+// Valid indicates whether the value is a known member of the AgentLifecycleCommandResponseAction enum.
+func (e AgentLifecycleCommandResponseAction) Valid() bool {
+	switch e {
+	case Restart:
+		return true
+	case Start:
+		return true
+	case Stop:
+		return true
+	case Yield:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentLifecycleCommandResponseStatus.
+const (
+	AgentLifecycleCommandResponseStatusAcked     AgentLifecycleCommandResponseStatus = "acked"
+	AgentLifecycleCommandResponseStatusCancelled AgentLifecycleCommandResponseStatus = "cancelled"
+	AgentLifecycleCommandResponseStatusFailed    AgentLifecycleCommandResponseStatus = "failed"
+	AgentLifecycleCommandResponseStatusQueued    AgentLifecycleCommandResponseStatus = "queued"
+	AgentLifecycleCommandResponseStatusRunning   AgentLifecycleCommandResponseStatus = "running"
+	AgentLifecycleCommandResponseStatusSucceeded AgentLifecycleCommandResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the AgentLifecycleCommandResponseStatus enum.
+func (e AgentLifecycleCommandResponseStatus) Valid() bool {
+	switch e {
+	case AgentLifecycleCommandResponseStatusAcked:
+		return true
+	case AgentLifecycleCommandResponseStatusCancelled:
+		return true
+	case AgentLifecycleCommandResponseStatusFailed:
+		return true
+	case AgentLifecycleCommandResponseStatusQueued:
+		return true
+	case AgentLifecycleCommandResponseStatusRunning:
+		return true
+	case AgentLifecycleCommandResponseStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentLifecycleResponseStatus.
+const (
+	AgentLifecycleResponseStatusAcked     AgentLifecycleResponseStatus = "acked"
+	AgentLifecycleResponseStatusCancelled AgentLifecycleResponseStatus = "cancelled"
+	AgentLifecycleResponseStatusFailed    AgentLifecycleResponseStatus = "failed"
+	AgentLifecycleResponseStatusQueued    AgentLifecycleResponseStatus = "queued"
+	AgentLifecycleResponseStatusRunning   AgentLifecycleResponseStatus = "running"
+	AgentLifecycleResponseStatusSucceeded AgentLifecycleResponseStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the AgentLifecycleResponseStatus enum.
+func (e AgentLifecycleResponseStatus) Valid() bool {
+	switch e {
+	case AgentLifecycleResponseStatusAcked:
+		return true
+	case AgentLifecycleResponseStatusCancelled:
+		return true
+	case AgentLifecycleResponseStatusFailed:
+		return true
+	case AgentLifecycleResponseStatusQueued:
+		return true
+	case AgentLifecycleResponseStatusRunning:
+		return true
+	case AgentLifecycleResponseStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentStatusResponseAgentState.
 const (
 	AgentStatusResponseAgentStateDead     AgentStatusResponseAgentState = "dead"
@@ -1701,11 +1785,43 @@ type AgentErrorResponse struct {
 	Kind  *string `json:"kind,omitempty"`
 }
 
+// AgentLifecycleCommandResponse defines model for AgentLifecycleCommandResponse.
+type AgentLifecycleCommandResponse struct {
+	AckedAt    *time.Time                          `json:"acked_at"`
+	Action     AgentLifecycleCommandResponseAction `json:"action"`
+	CommandId  string                              `json:"command_id"`
+	CreatedAt  time.Time                           `json:"created_at"`
+	ErrorClass string                              `json:"error_class"`
+	Result     string                              `json:"result"`
+	Status     AgentLifecycleCommandResponseStatus `json:"status"`
+	UpdatedAt  time.Time                           `json:"updated_at"`
+}
+
+// AgentLifecycleCommandResponseAction defines model for AgentLifecycleCommandResponse.Action.
+type AgentLifecycleCommandResponseAction string
+
+// AgentLifecycleCommandResponseStatus defines model for AgentLifecycleCommandResponse.Status.
+type AgentLifecycleCommandResponseStatus string
+
 // AgentLifecycleRequest defines model for AgentLifecycleRequest.
 type AgentLifecycleRequest struct {
 	Payload *map[string]string `json:"payload,omitempty"`
 	TaskId  *string            `json:"task_id,omitempty"`
 }
+
+// AgentLifecycleResponse defines model for AgentLifecycleResponse.
+type AgentLifecycleResponse struct {
+	// CommandId Durable lifecycle command ID when pending; empty for a synchronous transition.
+	CommandId string `json:"command_id"`
+	Message   string `json:"message"`
+
+	// Pending True when a supervised runtime owner accepted the command for asynchronous execution.
+	Pending bool                         `json:"pending"`
+	Status  AgentLifecycleResponseStatus `json:"status"`
+}
+
+// AgentLifecycleResponseStatus defines model for AgentLifecycleResponse.Status.
+type AgentLifecycleResponseStatus string
 
 // AgentRecordBase defines model for AgentRecordBase.
 type AgentRecordBase struct {

@@ -7952,6 +7952,10 @@ paths:
       tags: [ControlPlane]
       summary: Release an agent ownership lease
       operationId: releaseAgentOwnershipLease
+      description: |
+        Releases only the generation identified by the raw token. Every
+        successful Acquire, including a same-owner replacement, rotates that
+        token so delayed Renew or Release calls from an older generation fail.
       responses:
         "200":
           description: Lease released
@@ -8038,11 +8042,29 @@ paths:
       - $ref: "#/components/parameters/AgentCommandID"
     post:
       tags: [ControlPlane]
-      summary: Acknowledge an agent command
+      summary: Atomically claim and acknowledge an agent command
       operationId: ackAgentCommand
+      requestBody:
+        required: false
+        description: |
+          Modern clients must send node_id and the durable owner_id.
+          Known lifecycle commands start/stop/restart/yield may omit ownership
+          proof only when no live ownership lease exists; unknown targeted
+          command types always require proof. When a live lease exists, clients
+          must send its exact lease ID, request-only token, and fencing token.
+          During the Fleet-first rolling upgrade only, an omitted body is
+          accepted as a deprecated authenticated legacy request. FleetDB
+          infers and atomically revalidates an exact live lease generation. If
+          no lease is live, FleetDB persists an unmintable temporary claimant
+          marker that the first real ownership Acquire atomically upgrades to
+          its stable owner, node, lease ID, and fence.
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AckAgentCommandRequest"
       responses:
         "200":
-          description: Command acknowledged
+          description: Command bound to the claimant node and acknowledged
           content:
             application/json:
               schema:
@@ -8058,10 +8080,27 @@ paths:
       operationId: completeAgentCommand
       requestBody:
         required: true
+        description: |
+          Modern clients must send the current node_id, durable owner_id, and
+          the ownership generation proof persisted by Ack (or a newer current
+          same-owner generation). The raw ownership token is request-only.
+          A proofless command acknowledged while no lease was live may converge
+          to failed or canceled for any known lifecycle type, or to succeeded
+          only for Stop; successful Start/Restart/Yield and Running always
+          require proof, and unknown targeted types always require proof.
+          Legacy requests without claimant fields are deprecated and accepted
+          only through the authenticated rolling-upgrade bridge. FleetDB
+          infers and atomically revalidates the exact durable ownership
+          generation, or requires X-Actor to match its server-reserved
+          proofless marker. A legacy Failed/Canceled result may terminally
+          converge after that exact generation was released; this exception
+          never permits Running or Succeeded Start/Restart/Yield.
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CompleteAgentCommandRequest"
+              oneOf:
+                - $ref: "#/components/schemas/CompleteAgentCommandRequest"
+                - $ref: "#/components/schemas/LegacyCompleteAgentCommandRequest"
       responses:
         "200":
           description: Command completed
@@ -9975,7 +10014,7 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, work_items.repository_requirement.v1, workflow_catalog.version_lifecycle.v1]
+          example: [agents.lifecycle_command_fencing.v1, agents.lifecycle_command_ownership_fencing.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, work_items.repository_requirement.v1, workflow_catalog.version_lifecycle.v1]
 
     AutomationErrorResponse:
       type: object
@@ -14172,11 +14211,26 @@ components:
         status:
           type: string
           enum: [queued, acked, running, succeeded, failed, cancelled]
-        acked_by:         { type: string }
+        acked_by:
+          type: string
+          description: |
+            Stable claimant supervisor owner identity used for daemon-restart
+            recovery; not the authenticated request actor. During a deprecated
+            Fleet-first rolling upgrade, a proofless legacy Ack briefly stores
+            a server-reserved marker here until the first real Acquire
+            atomically replaces it with the stable owner.
         acked_at:
           type: string
           format: date-time
           nullable: true
+        ownership_lease_id:
+          type: string
+          description: Non-secret ownership generation identifier that authorized the command.
+        ownership_fencing_token:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Monotonic non-secret ownership generation fence. The raw ownership token is never persisted on a command.
         result:           { type: string }
         error_class:      { type: string }
         created_at:       { type: string, format: date-time }
@@ -14199,8 +14253,90 @@ components:
           enum: [queued]
           description: 'Optional; only "queued" is accepted on create. Server-assigned regardless.'
 
+    AckAgentCommandRequest:
+      type: object
+      additionalProperties: false
+      description: |
+        Known lifecycle commands start/stop/restart/yield may omit all ownership
+        proof fields only when no live ownership lease exists. Unknown targeted
+        command types always require complete proof.
+      required: [node_id, owner_id]
+      properties:
+        node_id:
+          type: string
+          minLength: 1
+          description: Claimant daemon node. Ack atomically binds an untargeted command to this node.
+        owner_id:
+          type: string
+          minLength: 1
+          description: Stable supervisor owner identity used to recover an acknowledged command after process-node replacement.
+        ownership_lease_id:
+          type: string
+          minLength: 1
+          description: Required with ownership_token and ownership_fencing_token when proving a live owner.
+        ownership_token:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Request-only raw token for the current agent ownership lease. Never persisted on AgentCommand.
+        ownership_fencing_token:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Current ownership generation fence.
+
     CompleteAgentCommandRequest:
       type: object
+      additionalProperties: false
+      description: |
+        Complete ownership proof is normally required. A proofless command
+        acknowledged while no lease was live may report failed or canceled for
+        any known lifecycle type, or succeeded only for Stop. Successful
+        Start/Restart/Yield and Running require proof; unknown targeted types
+        always require proof.
+      required: [node_id, owner_id]
+      properties:
+        node_id:
+          type: string
+          minLength: 1
+          description: Current claimant daemon node. Claim metadata remains bound to the original atomic Ack.
+        owner_id:
+          type: string
+          minLength: 1
+          description: Stable supervisor owner identity that must match acked_by.
+        ownership_lease_id:
+          type: string
+          minLength: 1
+          description: Ownership generation identifier persisted by Ack, or a newer same-owner generation.
+        ownership_token:
+          type: string
+          minLength: 1
+          writeOnly: true
+          description: Request-only raw token proving the ownership generation. Never persisted on AgentCommand.
+        ownership_fencing_token:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Ownership generation fence, never lower than the command's persisted fence.
+        status:
+          type: string
+          enum: [running, succeeded, failed, cancelled]
+        result:      { type: string }
+        error_class: { type: string }
+
+    LegacyCompleteAgentCommandRequest:
+      type: object
+      additionalProperties: false
+      deprecated: true
+      description: |
+        Fleet-first rolling-upgrade bridge for the previous Loom client.
+        For a proof-backed command FleetDB infers and atomically revalidates
+        the exact current ownership generation; X-Actor is the authenticated
+        service caller, not the daemon node or stable owner. For a still-
+        proofless command, X-Actor must match FleetDB's server-reserved marker.
+        Failed/Canceled may converge after the exact inferred generation was
+        released, but Running and Succeeded Start/Restart/Yield remain
+        forbidden. New clients must use CompleteAgentCommandRequest.
       properties:
         status:
           type: string

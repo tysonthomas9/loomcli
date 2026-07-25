@@ -67,16 +67,27 @@ const (
 	// retires it while publishing the Work Item's open-or-closed lifecycle.
 	ExecutionDriverRunReviewWorkItemHandoffCapability = "execution.driver_run_review_work_item_handoff.v1"
 	ExecutionTaskRunLogIdempotencyCapability          = "execution.task_run_log_idempotency.v1"
+	// AgentsLifecycleCommandFencingCapability certifies client-ID Create
+	// recovery, atomic node/stable-owner Ack binding, and owner-fenced,
+	// idempotent command completion. Loom has no unfenced fallback.
+	AgentsLifecycleCommandFencingCapability = "agents.lifecycle_command_fencing.v1"
+	// AgentsLifecycleCommandOwnershipFencingCapability certifies that every
+	// lifecycle Ack/Complete is bound to the current logical-agent ownership
+	// generation, with only the documented no-live convergence exceptions.
+	AgentsLifecycleCommandOwnershipFencingCapability = "agents.lifecycle_command_ownership_fencing.v1"
 	// ArtifactsOwnerFencedLifecycleCapability certifies owner-fenced,
 	// idempotent Artifact create/upload/finalize/reference commands.
 	ArtifactsOwnerFencedLifecycleCapability = "artifacts.owner_fenced_lifecycle.v1"
 )
 
-// Phase4FoundationCapabilities is the complete indivisible Execution and
-// Artifacts deployment profile. Await atomic resume is an older always-on
-// invariant and is intentionally required separately by serve.
+// Phase4FoundationCapabilities is the complete indivisible
+// Agents/Execution/Artifacts/Work Items deployment profile. Await atomic resume
+// is an older always-on invariant and is intentionally required separately by
+// serve.
 func Phase4FoundationCapabilities() []string {
 	return []string{
+		AgentsLifecycleCommandFencingCapability,
+		AgentsLifecycleCommandOwnershipFencingCapability,
 		ArtifactsOwnerFencedLifecycleCapability,
 		WorkItemsRepositoryRequirementCapability,
 		ExecutionIssueClaimTaskRunStartCapability,

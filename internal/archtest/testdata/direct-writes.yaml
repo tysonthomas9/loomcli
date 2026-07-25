@@ -1556,15 +1556,15 @@ writes:
     count: 1
     aggregate_owner: connectors
     expires_after_phase: 7
-  - file: internal/cli/daemon/daemon_command_poller.go
+  - file: internal/cli/daemon/daemon_command_ownership.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AgentCommandStore
-    method: Ack
+    method: Complete
     count: 1
     aggregate_owner: interaction
     expires_after_phase: 7
   - file: internal/cli/daemon/daemon_command_poller.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AgentCommandStore
-    method: Complete
+    method: Ack
     count: 1
     aggregate_owner: interaction
     expires_after_phase: 7

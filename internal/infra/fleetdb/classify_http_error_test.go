@@ -40,6 +40,19 @@ func TestClassifyHTTPError_RateLimitRemainsRetryable(t *testing.T) {
 	}
 }
 
+func TestClassifyHTTPError_AgentCommandForbiddenMapsToNotOwner(t *testing.T) {
+	t.Parallel()
+	err := classifyHTTPError(
+		http.MethodPost,
+		"/api/v1/WS/agent-commands/cmd-1/complete",
+		http.StatusForbidden,
+		[]byte(`{"error":{"code":"forbidden","message":"ownership proof rejected"}}`),
+	)
+	if !errors.Is(err, domain.ErrNotOwner) {
+		t.Fatalf("err = %v, want errors.Is ErrNotOwner", err)
+	}
+}
+
 // The pre-410 mappings must be unchanged (back-compat matrix).
 func TestClassifyHTTPError_ExistingMappingsUnchanged(t *testing.T) {
 	t.Parallel()

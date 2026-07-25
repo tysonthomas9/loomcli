@@ -78,6 +78,9 @@ func New() *Store { //nolint:funlen // Constructor wiring is deliberately explic
 	routes := &triggerRouteStore{bindings: bindings, events: events, deliveries: deliveries, runs: runs}
 	awaits := newAwaitStore(events)
 	awaits.runs = runs
+	ownership := newAgentOwnershipLeaseStore()
+	commands := newAgentCommandStore(ownership)
+	ownership.commands = commands
 	// ResumeAwaiting's security gate: only a resolved (satisfied/timed_out)
 	// await releases its suspended run.
 	runs.setAwaitResumeEligible(awaits.resumeEligible)
@@ -90,8 +93,8 @@ func New() *Store { //nolint:funlen // Constructor wiring is deliberately explic
 		terminals:  newTerminalSessionStore(),
 		artifacts:  artifacts,
 		leases:     newAgentLeaseStore(),
-		ownership:  newAgentOwnershipLeaseStore(),
-		commands:   newAgentCommandStore(),
+		ownership:  ownership,
+		commands:   commands,
 		inbox:      newAgentInboxMessageStore(),
 		drivers:    drivers,
 		versions:   versions,
