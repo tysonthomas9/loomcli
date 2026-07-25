@@ -20,7 +20,7 @@ import { useStore } from "zustand";
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
 import { PRODUCT_HOME_LABEL, PRODUCT_MARK, PRODUCT_NAME } from "@/utils/brand";
-import { updateIssue, addComment, closeIssue } from "@/api";
+import { updateIssue, addComment, closeIssue, isDesktopRuntime } from "@/api";
 import {
   fetchWorkspaceApi,
   runOnboardingFirstTask,
@@ -157,6 +157,7 @@ function App() {
     agentName?: string;
   }>();
   const navigate = useNavigate();
+  const titleBarMode = isDesktopRuntime() ? "macos-overlay" : "standard";
 
   // Theme state
   const { theme, toggleTheme } = useTheme();
@@ -1369,6 +1370,7 @@ function App() {
     >
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
+          titleBarMode={titleBarMode}
           title={headerTitle}
           {...(!showBoardToolbar && {
             onTitleClick: () => navigateToView("kanban"),

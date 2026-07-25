@@ -20,6 +20,8 @@ const WORKSPACE_WINDOW_WIDTH: f64 = 1280.0;
 const WORKSPACE_WINDOW_HEIGHT: f64 = 800.0;
 const WORKSPACE_MIN_WIDTH: f64 = 720.0;
 const WORKSPACE_MIN_HEIGHT: f64 = 520.0;
+const TRAFFIC_LIGHT_X: f64 = 14.0;
+const TRAFFIC_LIGHT_Y: f64 = 15.0;
 const STALE_RUNTIME_HEALTH_TIMEOUT: Duration = Duration::from_millis(300);
 
 #[derive(Default)]
@@ -221,15 +223,15 @@ fn show_launcher_window<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
 
-    match WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
         .title("Superfactory")
         .initialization_script(&relocation_init_script())
         .inner_size(520.0, 300.0)
         .min_inner_size(420.0, 260.0)
         .content_protected(false)
-        .focused(true)
-        .build()
-    {
+        .focused(true);
+
+    match with_macos_titlebar(builder).build() {
         Ok(window) => {
             reveal_window(app, &window);
         }
@@ -422,13 +424,13 @@ fn open_workspace_window_native<R: Runtime>(
         PRIMARY_WORKSPACE_WINDOW_LABEL.to_string()
     };
 
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
         .title("Superfactory")
         .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
         .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
         .content_protected(false)
-        .focused(true)
-        .build()?;
+        .focused(true);
+    let window = with_macos_titlebar(builder).build()?;
     reveal_window(app, &window);
     Ok(())
 }
@@ -444,18 +446,21 @@ fn open_additional_workspace_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Re
         current_time_millis(),
         app.webview_windows().len()
     );
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
         .title("Superfactory")
         .inner_size(WORKSPACE_WINDOW_WIDTH, WORKSPACE_WINDOW_HEIGHT)
         .min_inner_size(WORKSPACE_MIN_WIDTH, WORKSPACE_MIN_HEIGHT)
         .content_protected(false)
-        .focused(true)
-        .build()?;
+        .focused(true);
+    let window = with_macos_titlebar(builder).build()?;
     reveal_window(app, &window);
     Ok(())
 }
 
 fn configure_workspace_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    window.set_title_bar_style(tauri::TitleBarStyle::Overlay)?;
+
     window.set_min_size(Some(LogicalSize::new(
         WORKSPACE_MIN_WIDTH,
         WORKSPACE_MIN_HEIGHT,
@@ -464,6 +469,24 @@ fn configure_workspace_window<R: Runtime>(window: &WebviewWindow<R>) -> tauri::R
         WORKSPACE_WINDOW_WIDTH,
         WORKSPACE_WINDOW_HEIGHT,
     ))
+}
+
+fn with_macos_titlebar<'a, R: Runtime, M: Manager<R>>(
+    builder: WebviewWindowBuilder<'a, R, M>,
+) -> WebviewWindowBuilder<'a, R, M> {
+    #[cfg(target_os = "macos")]
+    {
+        builder
+            .decorations(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .traffic_light_position(LogicalPosition::new(TRAFFIC_LIGHT_X, TRAFFIC_LIGHT_Y))
+            .hidden_title(true)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder
+    }
 }
 
 fn workspace_entry_url(runtime_url: &str) -> tauri::Result<Url> {

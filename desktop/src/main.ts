@@ -36,6 +36,11 @@ if (!app) {
 }
 
 app.innerHTML = `
+  <div
+    class="nativeTitlebar"
+    data-tauri-drag-region="deep"
+    aria-hidden="true"
+  ></div>
   <main class="launcher" aria-live="polite">
     <section class="status">
       <div id="spinner" class="spinner" aria-hidden="true"></div>

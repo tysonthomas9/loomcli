@@ -32,6 +32,10 @@
   padding: 0 var(--space-6);
 }
 
+.appLayout[data-titlebar-mode="macos-overlay"] .headerContent {
+  padding-left: 80px;
+}
+
 .brand {
   flex-shrink: 0;
   width: auto;
@@ -95,6 +99,10 @@
     padding: 0 var(--space-4);
   }
 
+  .appLayout[data-titlebar-mode="macos-overlay"] .headerContent {
+    padding-left: 80px;
+  }
+
   .title {
     font-size: 1rem;
   }
@@ -116,6 +124,10 @@
   .headerContent {
     gap: 12px;
     padding: 0 12px;
+  }
+
+  .appLayout[data-titlebar-mode="macos-overlay"] .headerContent {
+    padding-left: 80px;
   }
 
   .title {

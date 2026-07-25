@@ -10,6 +10,8 @@ import { LiveRegion } from "@/components/LiveRegion/LiveRegion";
 
 import styles from "./AppLayout.module.css";
 
+export type AppTitleBarMode = "standard" | "macos-overlay";
+
 /**
  * Props for the AppLayout component.
  */
@@ -30,6 +32,8 @@ export interface AppLayoutProps {
   onTitleClick?: () => void;
   /** Additional CSS class name */
   className?: string;
+  /** Enables native macOS titlebar spacing and drag behavior in Tauri. */
+  titleBarMode?: AppTitleBarMode;
 }
 
 /**
@@ -46,18 +50,23 @@ export function AppLayout({
   title = PRODUCT_NAME,
   onTitleClick,
   className,
+  titleBarMode = "standard",
 }: AppLayoutProps): JSX.Element {
   const rootClassName = className
     ? `${styles.appLayout} ${className}`
     : styles.appLayout;
+  const dragRegionProps =
+    titleBarMode === "macos-overlay"
+      ? { "data-tauri-drag-region": "deep" }
+      : {};
 
   return (
-    <div className={rootClassName}>
+    <div className={rootClassName} data-titlebar-mode={titleBarMode}>
       <LiveRegion />
       <a href="#main-content" className={styles.skipLink}>
         Skip to main content
       </a>
-      <header className={styles.header} role="banner">
+      <header className={styles.header} role="banner" {...dragRegionProps}>
         <div className={styles.headerContent}>
           <div className={styles.brand}>
             {onTitleClick ? (

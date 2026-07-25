@@ -6,8 +6,8 @@
  * Unit tests for AppLayout component.
  */
 
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
 import { AppLayout } from "../AppLayout";
@@ -231,6 +231,56 @@ describe("AppLayout", () => {
       // Skip link should be first
       expect(focusableElements[0]).toHaveAttribute("href", "#main-content");
       expect(focusableElements[0]).toHaveTextContent(/skip to main content/i);
+    });
+  });
+
+  describe("macOS overlay titlebar", () => {
+    it("marks header whitespace as a deep Tauri drag region", () => {
+      const { container } = render(
+        <AppLayout titleBarMode="macos-overlay">
+          <p>Content</p>
+        </AppLayout>,
+      );
+
+      const root = container.firstChild as HTMLElement;
+      const header = screen.getByRole("banner");
+
+      expect(root).toHaveAttribute("data-titlebar-mode", "macos-overlay");
+      expect(header).toHaveAttribute("data-tauri-drag-region", "deep");
+    });
+
+    it("keeps standard browser mode free of native drag behavior", () => {
+      const { container } = render(
+        <AppLayout>
+          <p>Content</p>
+        </AppLayout>,
+      );
+
+      const root = container.firstChild as HTMLElement;
+      const header = screen.getByRole("banner");
+
+      expect(root).toHaveAttribute("data-titlebar-mode", "standard");
+      expect(header).not.toHaveAttribute("data-tauri-drag-region");
+    });
+
+    it("keeps titlebar controls interactive and renders one product heading", () => {
+      const onAction = vi.fn();
+
+      render(
+        <AppLayout
+          titleBarMode="macos-overlay"
+          actions={<button onClick={onAction}>Account</button>}
+        >
+          <p>Content</p>
+        </AppLayout>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Account" }));
+
+      expect(onAction).toHaveBeenCalledOnce();
+      expect(
+        screen.getAllByRole("heading", { name: "Superfactory" }),
+      ).toHaveLength(1);
     });
   });
 

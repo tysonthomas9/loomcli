@@ -22,6 +22,13 @@ body {
   font-size: 14px;
 }
 
+.nativeTitlebar {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 10;
+  height: 44px;
+}
+
 button {
   min-height: 34px;
   border: 1px solid #c8ced8;
@@ -46,7 +53,7 @@ button:not(:disabled):hover {
   display: grid;
   gap: 18px;
   width: min(100vw, 720px);
-  padding: 24px;
+  padding: 56px 24px 24px;
 }
 
 .status {
@@ -169,7 +176,7 @@ dd {
 
 @media (width <= 560px) {
   .launcher {
-    padding: 18px;
+    padding: 50px 18px 18px;
   }
 
   dl {
