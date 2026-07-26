@@ -187,7 +187,7 @@ func HasAnyAvailableTasks(parentID string, repoLabel string) (bool, error) {
 func BuildRouterTaskCheck(rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
 	constraints := cli.MergeRoleConstraints(rc, ae)
 	repoLabel := ae.Repo
-	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
+	if !constraints.HasRoutingConstraints(repoLabel) {
 		return nil
 	}
 	return func() (bool, error) {

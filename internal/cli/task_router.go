@@ -16,15 +16,26 @@ import (
 // RoleConstraints holds the resolved routing constraints from a config.RoleConfig
 // merged with any per-agent config.AgentEntry overrides.
 type RoleConstraints struct {
-	TaskFilter   string   // "needs_plan", "has_design", "any", or "" (defaults to "has_design")
-	Backend      string   // resolved backend name
-	PathPatterns []string // not used in routing decisions; carried through for subprocess env var propagation
-	Skills       []string // skill labels this role handles
-	MaxPriority  *int     // reject tasks with priority > this value (nil = no cap)
-	SourceRepos  []string // resolved source repo IDs for affinity scoring
-	ReadOnly     bool     // informational, carried through for downstream use
-	AllowedTools []string // informational, carried through for downstream use
-	DeniedTools  []string // informational, carried through for downstream use
+	TaskFilter    string   // "needs_plan", "has_design", "any", or "" (defaults to "has_design")
+	Backend       string   // resolved backend name
+	PathPatterns  []string // not used in routing decisions; carried through for subprocess env var propagation
+	Skills        []string // skill labels this role handles
+	Labels        []string // issue must carry ALL of these labels; empty = no requirement
+	ExcludeLabels []string // reject issue if it carries ANY of these labels (evaluated before Labels)
+	MaxPriority   *int     // reject tasks with priority > this value (nil = no cap)
+	SourceRepos   []string // resolved source repo IDs for affinity scoring
+	ReadOnly      bool     // informational, carried through for downstream use
+	AllowedTools  []string // informational, carried through for downstream use
+	DeniedTools   []string // informational, carried through for downstream use
+}
+
+// HasRoutingConstraints reports whether any constraint would affect task
+// selection. When false, callers fall back to the generic availability check.
+// Keep in sync when adding fields to RoleConstraints.
+func (c RoleConstraints) HasRoutingConstraints(repoLabel string) bool {
+	return len(c.Skills) > 0 || c.MaxPriority != nil || c.TaskFilter != "" ||
+		repoLabel != "" || len(c.SourceRepos) > 0 ||
+		len(c.Labels) > 0 || len(c.ExcludeLabels) > 0
 }
 
 // TaskMatch represents the result of matching a single issue against role constraints.
@@ -40,14 +51,16 @@ type TaskMatch struct {
 // when non-empty.
 func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstraints {
 	c := RoleConstraints{
-		TaskFilter:   rc.TaskFilter,
-		Backend:      rc.Backend,
-		PathPatterns: rc.PathPatterns,
-		Skills:       rc.Skills,
-		MaxPriority:  rc.MaxPriority,
-		ReadOnly:     rc.ReadOnly,
-		AllowedTools: rc.AllowedTools,
-		DeniedTools:  rc.DeniedTools,
+		TaskFilter:    rc.TaskFilter,
+		Backend:       rc.Backend,
+		PathPatterns:  rc.PathPatterns,
+		Skills:        rc.Skills,
+		Labels:        rc.Labels,
+		ExcludeLabels: rc.ExcludeLabels,
+		MaxPriority:   rc.MaxPriority,
+		ReadOnly:      rc.ReadOnly,
+		AllowedTools:  rc.AllowedTools,
+		DeniedTools:   rc.DeniedTools,
 	}
 
 	// config.AgentEntry overrides
@@ -85,6 +98,16 @@ func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 	// Apply TaskFilter
 	if reason := applyTaskFilter(issue, constraints.TaskFilter); reason != "" {
 		return TaskMatch{Issue: issue, Score: 0, Reason: reason}
+	}
+
+	// Reject issues carrying an excluded label (evaluated before required labels).
+	if label, found := firstMatchingLabel(issue.Labels, constraints.ExcludeLabels); found {
+		return TaskMatch{Issue: issue, Score: 0, Reason: fmt.Sprintf("excluded by label %q", label)}
+	}
+
+	// Reject issues missing a required label.
+	if label, missing := firstMissingLabel(issue.Labels, constraints.Labels); missing {
+		return TaskMatch{Issue: issue, Score: 0, Reason: fmt.Sprintf("missing required label %q", label)}
 	}
 
 	// Reject if priority exceeds MaxPriority
@@ -188,6 +211,12 @@ func RoleConfigFromEnv() config.RoleConfig {
 	if v := os.Getenv("LOOM_ROLE_SKILLS"); v != "" {
 		rc.Skills = strings.Split(v, ",")
 	}
+	if v := os.Getenv("LOOM_ROLE_LABELS"); v != "" {
+		rc.Labels = splitLabelCSV(v)
+	}
+	if v := os.Getenv("LOOM_ROLE_EXCLUDE_LABELS"); v != "" {
+		rc.ExcludeLabels = splitLabelCSV(v)
+	}
 	if v := os.Getenv("LOOM_ROLE_PATH_PATTERNS"); v != "" {
 		rc.PathPatterns = strings.Split(v, ",")
 	}
@@ -279,6 +308,52 @@ func countSkillMatches(labels []string, skills []string) int {
 	return count
 }
 
+// firstMatchingLabel returns the first entry of want that appears in labels.
+func firstMatchingLabel(labels, want []string) (string, bool) {
+	if len(want) == 0 || len(labels) == 0 {
+		return "", false
+	}
+	labelSet := make(map[string]bool, len(labels))
+	for _, l := range labels {
+		labelSet[l] = true
+	}
+	for _, w := range want {
+		if labelSet[w] {
+			return w, true
+		}
+	}
+	return "", false
+}
+
+// firstMissingLabel returns the first entry of required that is absent from labels.
+func firstMissingLabel(labels, required []string) (string, bool) {
+	if len(required) == 0 {
+		return "", false
+	}
+	labelSet := make(map[string]bool, len(labels))
+	for _, l := range labels {
+		labelSet[l] = true
+	}
+	for _, r := range required {
+		if !labelSet[r] {
+			return r, true
+		}
+	}
+	return "", false
+}
+
+// splitLabelCSV splits a comma-separated env value, trimming whitespace and
+// dropping empty elements. Returns nil for an all-empty input.
+func splitLabelCSV(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // FetchReadyIssues fetches issues ready for work.
 func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, error) {
 	ib := DefaultIssueBackend()
@@ -304,7 +379,7 @@ func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, e
 func BuildRouterTaskCheck(rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
 	constraints := MergeRoleConstraints(rc, ae)
 	repoLabel := ae.Repo
-	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
+	if !constraints.HasRoutingConstraints(repoLabel) {
 		return nil
 	}
 	return func() (bool, error) {
