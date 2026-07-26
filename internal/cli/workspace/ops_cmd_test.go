@@ -17,6 +17,19 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+// isolateDaemonPathProbe keeps the path-based daemon detection inside
+// buildWorkspaceOpsStatus offline. collectDaemonStatusForDir resolves the
+// daemon state path through the active workspace config, which opens a real
+// store when LOOM_WORKSPACE / LOOM_FLEET_DB_URL point at a live deployment —
+// that is both live I/O from a unit test and a way for a real daemon on the
+// host to leak into the result. Clearing LOOM_WORKSPACE short-circuits
+// workspace resolution so no store is opened at all.
+func isolateDaemonPathProbe(t *testing.T) {
+	t.Helper()
+	t.Setenv("LOOM_WORKSPACE", "")
+	t.Setenv("LOOM_FLEET_DB_URL", "")
+}
+
 func clearRuntimeRoutingEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("LOOM_ISSUE_BACKEND", "")
@@ -604,6 +617,11 @@ func TestWaitForWorkspaceOpsDaemonAcceptsRegisteredDaemon(t *testing.T) {
 // empty (the LOOM-3 cwd-mismatch scenario).
 func TestBuildWorkspaceOpsStatusUsesNodeRegistry(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet") // skip local-runtime probe
+	// buildWorkspaceOpsStatus probes local.DefaultDataDir for a
+	// path-based daemon; point it at an empty dir so a real desktop
+	// daemon on the dev/CI host cannot influence the result.
+	t.Setenv("LOOM_DESKTOP_DATA_DIR", t.TempDir())
+	isolateDaemonPathProbe(t)
 	st := memstore.New()
 	ctx := context.Background()
 
@@ -660,5 +678,74 @@ func TestBuildWorkspaceOpsStatusUsesNodeRegistry(t *testing.T) {
 		if problem.Code == "daemon_not_running" {
 			t.Fatalf("expected no daemon_not_running, got problems %#v", status.Problems)
 		}
+	}
+}
+
+// TestBuildWorkspaceOpsStatusIgnoresTaskWorkerNode is the DOGFOOD-3
+// downstream regression. `loom serve` registers itself as a fresh local
+// Node carrying only loom-driver-executor / loom-task-worker labels. With
+// a runnable agent and no supervisor anywhere, diagnose must report the
+// registered daemon as down, emit daemon_not_running, and fail overall —
+// previously that Node alone flipped the whole verdict to healthy.
+func TestBuildWorkspaceOpsStatusIgnoresTaskWorkerNode(t *testing.T) {
+	t.Setenv("LOOM_ISSUE_BACKEND", "fleet") // skip local-runtime probe
+	// Isolate the path-based AppData probe from any real desktop daemon
+	// running on the dev/CI host.
+	t.Setenv("LOOM_DESKTOP_DATA_DIR", t.TempDir())
+	isolateDaemonPathProbe(t)
+	st := memstore.New()
+	ctx := context.Background()
+
+	ws := &domain.Workspace{Key: "WS-NODE-WORKER"}
+	repo := &domain.Repo{Name: "app", Groups: []string{}}
+	agent := &domain.Agent{
+		Name:         "planner",
+		RoleName:     "plan",
+		State:        domain.AgentStateActive,
+		DesiredState: domain.AgentDesiredRunning,
+	}
+	roles := []*domain.Role{{Name: "plan"}}
+
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown-host"
+	}
+	_, err := st.Nodes().Create(ctx, store.NodeCreate{
+		WorkspaceKey:    ws.Key,
+		NodeID:          fmt.Sprintf("loom-task-worker-%s-%d", hostname, os.Getpid()),
+		OwnerActor:      "local",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		Labels:          []string{"loom-driver-executor", "loom-task-worker"},
+		Capabilities:    []string{"loom-driver-executor"},
+		DrainState:      domain.NodeDrainActive,
+		TTL:             5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	status, err := buildWorkspaceOpsStatus(ctx, st, ws, []*domain.Repo{repo}, []*domain.Agent{agent}, roles)
+	if err != nil {
+		t.Fatalf("buildWorkspaceOpsStatus: %v", err)
+	}
+	if status.Daemon.Registered.Running {
+		t.Fatalf("status.Daemon.Registered = %+v, want Running=false (task-worker Node is not a supervisor)", status.Daemon.Registered)
+	}
+	if status.Daemon.AppData.Running || status.Daemon.WorkspaceLocal.Running {
+		t.Fatalf("path-based daemon detection leaked into the test: AppData=%+v WorkspaceLocal=%+v",
+			status.Daemon.AppData, status.Daemon.WorkspaceLocal)
+	}
+	var found bool
+	for _, problem := range status.Problems {
+		if problem.Code == "daemon_not_running" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected daemon_not_running problem, got %#v", status.Problems)
+	}
+	if status.OK {
+		t.Fatal("status.OK = true, want false (daemon_not_running is an error-severity problem)")
 	}
 }
