@@ -150,6 +150,12 @@ func decideDomain(d agenterr.DomainOutcome) Disposition {
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	case agenterr.SpawnFailureOutcome:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
+	case agenterr.CompletionHookFailureOutcome:
+		// The turn itself succeeded; only the supervisor's issue write failed.
+		// Transient write errors clear on retry, and a permanent one (bad label
+		// permission) must still stop rather than spin — so bounded counted
+		// retry with the default backoff, then Block.
+		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	default:
 		return Disposition{Decision: Retry, Backoff: BPDefault, OnExhaustion: Block, BlockBudget: defaultBlockBudget}
 	}
