@@ -182,8 +182,8 @@ func HasAnyAvailableTasks(parentID string, repoLabel string) (bool, error) {
 
 // BuildRouterTaskCheck creates a CustomTaskCheck function that uses the task router's
 // SelectBestTask instead of the generic Has*Tasks functions. Returns nil if the role
-// has no routing constraints (Skills, MaxPriority, and TaskFilter all unset), signaling
-// the caller to use default task checking.
+// has no routing constraints (see cli.RoleConstraints.HasRoutingConstraints for the
+// authoritative list), signaling the caller to use default task checking.
 func BuildRouterTaskCheck(rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
 	constraints := cli.MergeRoleConstraints(rc, ae)
 	repoLabel := ae.Repo

@@ -146,8 +146,8 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 			Backend:       roleAddBackend,
 			Effort:        roleAddEffort,
 			Skills:        roleAddSkills,
-			Labels:        roleAddLabels,
-			ExcludeLabels: roleAddExcludeLabels,
+			Labels:        trimFilterLabels(roleAddLabels),
+			ExcludeLabels: trimFilterLabels(roleAddExcludeLabels),
 			ReadOnly:      roleAddReadOnly,
 		}
 		if roleAddMaxConc > 0 {
@@ -391,6 +391,26 @@ func validateRoleKindValue(value string) error {
 // sliceCSVPtr returns a non-nil *[]string for the patch. Empty input
 // becomes an empty slice (which fleet-db treats as "set to empty list",
 // equivalent to clearing the field).
+// trimFilterLabels trims whitespace and drops empty elements from a
+// --labels/--exclude-labels flag value. Labels are hard-reject constraints
+// (unlike Skills' soft demote), so a stray whitespace-only element must not
+// survive: it would never match a real issue label, silently starving a
+// required-labels role or leaving an exclude-labels-only role with an
+// effectively empty constraint list (falling through the routing-check
+// activation guard, the exact bug this constraint exists to prevent).
+func trimFilterLabels(in []string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func sliceCSVPtr(csv string) *[]string {
 	if csv == "" {
 		empty := []string{}

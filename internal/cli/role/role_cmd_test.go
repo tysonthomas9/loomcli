@@ -97,3 +97,47 @@ func TestBuildRolePatchExcludeLabelsUnset(t *testing.T) {
 		t.Fatalf("buildRolePatch() ExcludeLabels = %v, want empty slice", *patch.ExcludeLabels)
 	}
 }
+
+func TestTrimFilterLabels(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{name: "nil", in: nil, want: nil},
+		{name: "no whitespace", in: []string{"a", "b"}, want: []string{"a", "b"}},
+		{name: "trims surrounding whitespace", in: []string{" a ", "b"}, want: []string{"a", "b"}},
+		{name: "drops whitespace-only elements", in: []string{" ", "a", ""}, want: []string{"a"}},
+		{name: "all whitespace collapses to empty slice", in: []string{" ", "\t"}, want: []string{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trimFilterLabels(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("trimFilterLabels(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("trimFilterLabels(%v) = %v, want %v", tt.in, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestRunRoleAdd_WhitespaceOnlyLabelDoesNotReintroduceGuardBug pins the fix
+// for a whitespace-only --labels/--exclude-labels value: without filtering,
+// a role with only a whitespace label would store a non-empty Labels slice
+// (so HasRoutingConstraints sees it as configured), but the env round-trip's
+// splitLabelCSV would decode it back to nil — silently falling through the
+// routing-check activation guard, the exact bug this constraint exists to
+// prevent. Filtering at loom role add time keeps what's stored consistent
+// with what splitLabelCSV will later decode.
+func TestRunRoleAdd_WhitespaceOnlyLabelDoesNotReintroduceGuardBug(t *testing.T) {
+	got := trimFilterLabels([]string{" "})
+	if len(got) != 0 {
+		t.Fatalf("trimFilterLabels([\" \"]) = %v, want empty slice so a whitespace-only "+
+			"--labels value is never stored as a non-empty constraint", got)
+	}
+}
