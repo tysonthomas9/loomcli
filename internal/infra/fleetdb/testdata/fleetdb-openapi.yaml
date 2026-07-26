@@ -7495,7 +7495,7 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
         "503":
-          description: Artifact content store is not configured
+          description: Artifact content store is unavailable or not configured
     put:
       tags: [ControlPlane]
       summary: Upload artifact bytes

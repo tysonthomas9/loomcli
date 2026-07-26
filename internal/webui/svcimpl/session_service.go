@@ -28,6 +28,11 @@ var _ service.SessionService = (*sessionServiceImpl)(nil)
 
 var userHomeDir = os.UserHomeDir
 
+// errNoUsableSessionStores distinguishes an absent or unreadable local session
+// store from unrelated control-plane failures. Transcript and diff reads may
+// recover from this condition through their durable control-plane artifacts.
+var errNoUsableSessionStores = errors.New("no usable local session stores")
+
 // sessionServiceImpl is the concrete implementation of SessionService.
 type sessionServiceImpl struct {
 	store      store.Store
@@ -64,16 +69,26 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 			return
 		}
 		seen[key] = struct{}{}
-		if st, err := sessions.NewStore(runtimeDir); err == nil {
-			stores = append(stores, st)
+		st, err := sessions.NewStore(runtimeDir)
+		if err != nil {
+			logger.Warn("failed to open local session store", "runtime_dir", runtimeDir, "err", err)
+			return
 		}
+		stores = append(stores, st)
 	}
 
 	addStore(s.runtimeDir)
 
 	if s.store != nil {
 		wsData, err := storeadapter.BuildWorkspaceDataForKey(ctx, s.store, wsID)
-		if err != nil || wsData == nil {
+		if err != nil {
+			if len(stores) == 0 {
+				if errors.Is(err, domain.ErrNotFound) {
+					return nil, service.ErrNotFound("workspace not found")
+				}
+				return nil, service.ErrInternal("failed to resolve session stores", err)
+			}
+		} else if wsData == nil {
 			if len(stores) == 0 {
 				return nil, service.ErrNotFound("workspace not found")
 			}
@@ -90,7 +105,7 @@ func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string
 	}
 
 	if len(stores) == 0 {
-		return nil, service.ErrInternal("no session stores available", nil)
+		return nil, service.ErrInternal("no session stores available", errNoUsableSessionStores)
 	}
 	return stores, nil
 }
@@ -447,7 +462,7 @@ func (s *sessionServiceImpl) controlPlaneSession(ctx context.Context, wsID, task
 func (s *sessionServiceImpl) GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
 	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
-		if !serviceErrorNotFound(err) {
+		if !sessionStoreAllowsControlPlaneFallback(err) {
 			return nil, err
 		}
 		return s.controlPlaneSessionTranscript(ctx, wsID, taskID, sessionID)
@@ -621,6 +636,10 @@ func serviceErrorNotFound(err error) bool {
 	return errors.As(err, &svcErr) && svcErr.Kind == service.KindNotFound
 }
 
+func sessionStoreAllowsControlPlaneFallback(err error) bool {
+	return serviceErrorNotFound(err) || errors.Is(err, errNoUsableSessionStores)
+}
+
 func (s *sessionServiceImpl) ListSessionSubagents(ctx context.Context, wsID, taskID, sessionID string) ([]string, error) {
 	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
@@ -717,7 +736,7 @@ func (s *sessionServiceImpl) authorizedSessionStore(ctx context.Context, wsID, t
 func (s *sessionServiceImpl) GetSessionDiff(ctx context.Context, wsID, taskID, sessionID string) (string, error) {
 	store, _, err := s.authorizedSessionStore(ctx, wsID, taskID, sessionID)
 	if err != nil {
-		if !serviceErrorNotFound(err) {
+		if !sessionStoreAllowsControlPlaneFallback(err) {
 			return "", err
 		}
 		return s.controlPlaneSessionDiff(ctx, wsID, taskID, sessionID)

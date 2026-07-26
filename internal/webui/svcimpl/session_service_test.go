@@ -132,6 +132,39 @@ func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing
 	}
 }
 
+func TestSessionServicePathlessWorkspaceTranscriptFallsBackToControlPlaneArtifact(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := t.Context()
+	st := memstore.New()
+	createPathlessWorkspace(t, st)
+
+	transcriptBody := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"durable transcript"}` + "\n")
+	createFinalizedArtifact(t, st, "transcript-pathless", "flue-pathless", "TASK-PATHLESS", "task-run-pathless", "transcript", "application/x-ndjson", transcriptBody)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-pathless",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-PATHLESS",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"transcript_ref": "artifact://transcript-pathless",
+		},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	unavailableRuntimeDir := unavailableSessionRuntimeDir(t)
+	events, err := NewSessionServiceWithRuntimeDir(st, nil, unavailableRuntimeDir).
+		GetSessionTranscript(ctx, "WS", "TASK-PATHLESS", "flue-pathless")
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "durable transcript" {
+		t.Fatalf("events = %+v, want durable control-plane transcript", events)
+	}
+}
+
 func TestSessionServiceControlPlaneDiffArtifactReadContent(t *testing.T) {
 	ctx := t.Context()
 	st := memstore.New()
@@ -169,6 +202,87 @@ func TestSessionServiceControlPlaneDiffArtifactReadContent(t *testing.T) {
 	}
 	if diff != string(patchBody) {
 		t.Fatalf("diff = %q, want %q", diff, patchBody)
+	}
+}
+
+func TestSessionServicePathlessWorkspaceDiffFallsBackToControlPlaneArtifact(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := t.Context()
+	st := memstore.New()
+	createPathlessWorkspace(t, st)
+
+	patchBody := []byte("diff --git a/docs.md b/docs.md\n+durable patch\n")
+	createFinalizedArtifact(t, st, "patch-pathless", "flue-pathless", "TASK-PATHLESS", "task-run-pathless", "patch", "text/x-diff", patchBody)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-pathless",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-PATHLESS",
+		Status:       domain.AgentSessionCompleted,
+		Metadata: map[string]string{
+			"patch_artifact_id": "patch-pathless",
+		},
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	unavailableRuntimeDir := unavailableSessionRuntimeDir(t)
+	diff, err := NewSessionServiceWithRuntimeDir(st, nil, unavailableRuntimeDir).
+		GetSessionDiff(ctx, "WS", "TASK-PATHLESS", "flue-pathless")
+	if err != nil {
+		t.Fatalf("GetSessionDiff: %v", err)
+	}
+	if diff != string(patchBody) {
+		t.Fatalf("diff = %q, want %q", diff, patchBody)
+	}
+}
+
+func TestSessionServicePathlessWorkspaceFallbackPreservesValidationAndOwnership(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	ctx := t.Context()
+	st := memstore.New()
+	createPathlessWorkspace(t, st)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "flue-pathless",
+		AgentID:      "flue-task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-PATHLESS",
+		Status:       domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create control-plane session: %v", err)
+	}
+
+	svc := NewSessionService(st, nil)
+	_, err := svc.GetSessionTranscript(ctx, "WS", "bad/task", "flue-pathless")
+	assertServiceErrorKind(t, err, service.KindValidation)
+	_, err = svc.GetSessionDiff(ctx, "WS", "bad/task", "flue-pathless")
+	assertServiceErrorKind(t, err, service.KindValidation)
+	_, err = svc.GetSessionTranscript(ctx, "WS", "TASK-OTHER", "flue-pathless")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+	_, err = svc.GetSessionDiff(ctx, "WS", "TASK-OTHER", "flue-pathless")
+	assertServiceErrorKind(t, err, service.KindNotFound)
+}
+
+func TestSessionStoreAllowsControlPlaneFallbackOnlyForLocalAbsence(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "session not found", err: service.ErrNotFound("session not found"), want: true},
+		{name: "local stores unavailable", err: service.ErrInternal("no session stores available", errNoUsableSessionStores), want: true},
+		{name: "validation", err: service.ErrValidation("invalid session ID"), want: false},
+		{name: "forbidden", err: service.ErrForbidden("forbidden"), want: false},
+		{name: "unrelated internal", err: service.ErrInternal("failed to resolve session stores", errors.New("fleet unavailable")), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sessionStoreAllowsControlPlaneFallback(tt.err); got != tt.want {
+				t.Fatalf("sessionStoreAllowsControlPlaneFallback() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -340,6 +454,25 @@ func createFinalizedArtifact(t *testing.T, st *memstore.Store, artifactID, sessi
 	if _, err := st.Artifacts().Finalize(t.Context(), "WS", artifactID, store.ArtifactFinalize{ContentHash: &uploaded.ContentHash}); err != nil {
 		t.Fatalf("finalize %s artifact: %v", artifactType, err)
 	}
+}
+
+func createPathlessWorkspace(t *testing.T, st *memstore.Store) {
+	t.Helper()
+	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := st.Repos().Create(t.Context(), store.RepoCreate{WorkspaceKey: "WS", Name: "source-repo"}); err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+}
+
+func unavailableSessionRuntimeDir(t *testing.T) string {
+	t.Helper()
+	notDirectory := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(notDirectory, []byte("occupied"), 0o600); err != nil {
+		t.Fatalf("write non-directory runtime parent: %v", err)
+	}
+	return filepath.Join(notDirectory, "runtime")
 }
 
 func assertServiceErrorKind(t *testing.T, err error, want service.ErrorKind) {
