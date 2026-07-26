@@ -409,18 +409,265 @@ func TestSupervisor_ShouldRestart_NoWorkCount_ResetOnError(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// DOGFOOD-36: NoWork no longer resets RestartCount; post-spawn NoWork backs
+// off exponentially via NoWorkSpawnCount.
+// ---------------------------------------------------------------------------
+
+func TestShouldRestart_NoWork_PreservesRestartCount(t *testing.T) {
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+
+	ap := &AgentProcess{
+		RestartCount: 2,
+		LastExitCode: 0,
+		LastStart:    time.Now(),
+		LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
+	}
+
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart() = false, want true for NoWork")
+	}
+	if ap.RestartCount != 2 {
+		t.Errorf("RestartCount = %d, want 2 (preserved, not reset, across a NoWork exit)", ap.RestartCount)
+	}
+}
+
+func TestShouldRestart_NoWork_PostSpawn_IncrementsSpawnCount(t *testing.T) {
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+
+	ap := &AgentProcess{
+		LastExitCode:        0,
+		LastStart:           time.Now(),
+		LastError:           &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
+		LastNoWorkPostSpawn: true,
+	}
+
+	for i := 1; i <= 3; i++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("shouldRestart should return true for NoWork (iteration %d)", i)
+		}
+		if ap.NoWorkSpawnCount != i {
+			t.Errorf("NoWorkSpawnCount = %d after %d post-spawn NoWork exits, want %d", ap.NoWorkSpawnCount, i, i)
+		}
+		if ap.NoWorkCount != i {
+			t.Errorf("NoWorkCount = %d after %d NoWork exits, want %d", ap.NoWorkCount, i, i)
+		}
+	}
+}
+
+func TestShouldRestart_NoWork_PreSpawn_DoesNotGrow(t *testing.T) {
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+
+	ap := &AgentProcess{
+		LastExitCode:        0,
+		LastStart:           time.Now(),
+		LastError:           &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
+		LastNoWorkPostSpawn: false,
+	}
+
+	for i := 1; i <= 3; i++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("shouldRestart should return true for NoWork (iteration %d)", i)
+		}
+		if ap.NoWorkSpawnCount != 0 {
+			t.Errorf("NoWorkSpawnCount = %d after pre-spawn NoWork exit %d, want 0 (only post-spawn grows it)", ap.NoWorkSpawnCount, i)
+		}
+	}
+}
+
+func TestShouldRestart_CleanSuccess_ResetsNoWorkSpawnCount(t *testing.T) {
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+
+	ap := &AgentProcess{
+		NoWorkSpawnCount: 4,
+		LastExitCode:     0,
+		LastStart:        time.Now().Add(-2 * time.Minute),
+		LastError:        nil,
+	}
+
+	s.shouldRestart(ap)
+	if ap.NoWorkSpawnCount != 0 {
+		t.Errorf("NoWorkSpawnCount = %d, want 0 after a clean success", ap.NoWorkSpawnCount)
+	}
+}
+
+func TestShouldRestart_CountedError_ResetsNoWorkSpawnCount(t *testing.T) {
+	maxRetries := 10
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+
+	ap := &AgentProcess{
+		NoWorkSpawnCount: 3,
+		LastExitCode:     1,
+		LastStart:        time.Now(),
+		LastError:        &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout)},
+	}
+
+	s.shouldRestart(ap)
+	if ap.NoWorkSpawnCount != 0 {
+		t.Errorf("NoWorkSpawnCount = %d, want 0 after a counted (Timeout) error", ap.NoWorkSpawnCount)
+	}
+}
+
+func TestShouldRestart_FatalStop_ResetsNoWorkSpawnCount(t *testing.T) {
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+
+	ap := &AgentProcess{
+		NoWorkSpawnCount: 3,
+		LastExitCode:     1,
+		LastStart:        time.Now(),
+		LastError:        &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrAuth)},
+	}
+
+	if s.shouldRestart(ap) {
+		t.Fatal("shouldRestart() = true, want false for a fatal error")
+	}
+	if ap.NoWorkSpawnCount != 0 {
+		t.Errorf("NoWorkSpawnCount = %d, want 0 after a fatal stop", ap.NoWorkSpawnCount)
+	}
+}
+
+func TestShouldRestart_MaxRetriesBlock_ResetsNoWorkSpawnCount(t *testing.T) {
+	maxRetries := 1
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{MaxRetries: &maxRetries}},
+	})
+
+	ap := &AgentProcess{
+		RestartCount:     1, // already at maxRetries; next counted failure exhausts the budget
+		NoWorkSpawnCount: 5,
+		LastExitCode:     1,
+		LastStart:        time.Now(),
+		LastError:        &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrTimeout)},
+	}
+
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart() = false, want true (blocked agents keep retrying)")
+	}
+	if ap.StopReason != StopReasonMaxRetriesBlocked {
+		t.Fatalf("StopReason = %q, want %q", ap.StopReason, StopReasonMaxRetriesBlocked)
+	}
+	if ap.NoWorkSpawnCount != 0 {
+		t.Errorf("NoWorkSpawnCount = %d, want 0 once the agent blocks", ap.NoWorkSpawnCount)
+	}
+}
+
+func TestGetNoWorkBackoffMax_Default(t *testing.T) {
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{})
+	if got := s.getNoWorkBackoffMax(); got != 900 {
+		t.Errorf("getNoWorkBackoffMax() = %d, want 900 (default)", got)
+	}
+}
+
+func TestGetNoWorkBackoffMax_Custom(t *testing.T) {
+	val := 600
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{NoWorkBackoffMax: &val}},
+	})
+	if got := s.getNoWorkBackoffMax(); got != 600 {
+		t.Errorf("getNoWorkBackoffMax() = %d, want 600", got)
+	}
+}
+
+func TestGetNoWorkBackoffMax_ZeroOrNegative_FallsBackToDefault(t *testing.T) {
+	// A NoWorkBackoffMax pointer that is explicitly set to <= 0 is a distinct
+	// misconfiguration from "unset" (nil): the "> 0" guard rejects it and
+	// falls back to the 900s default, same as if the field were never set.
+	for _, val := range []int{0, -5, -900} {
+		val := val
+		s := newTestSupervisorWithConfig(&config.DaemonConfig{
+			Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{NoWorkBackoffMax: &val}},
+		})
+		if got := s.getNoWorkBackoffMax(); got != 900 {
+			t.Errorf("getNoWorkBackoffMax() with NoWorkBackoffMax=%d = %d, want 900 (default)", val, got)
+		}
+	}
+}
+
+func TestComputeBackoff_NoWork_MaxBelowBase_ClampsUp(t *testing.T) {
+	base := 30
+	tooLow := 10
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{
+			NoWorkBackoff:    &base,
+			NoWorkBackoffMax: &tooLow,
+		}},
+	})
+	if got := s.getNoWorkBackoffMax(); got != base {
+		t.Errorf("getNoWorkBackoffMax() = %d, want %d (clamped up to no_work_backoff, never below it)", got, base)
+	}
+}
+
+func TestComputeBackoff_NoWork_PreSpawn_Fixed(t *testing.T) {
+	base := 30
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{NoWorkBackoff: &base}},
+	})
+
+	for _, n := range []int{0, 1, 5, 20} {
+		ap := &AgentProcess{
+			LastError:           &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
+			LastNoWorkPostSpawn: false,
+			NoWorkSpawnCount:    n,
+		}
+		got := s.computeBackoff(ap)
+		want := time.Duration(base) * time.Second
+		if got != want {
+			t.Errorf("computeBackoff() with pre-spawn NoWork (n=%d) = %v, want fixed %v", n, got, want)
+		}
+	}
+}
+
+func TestComputeBackoff_NoWork_PostSpawn_Exponential(t *testing.T) {
+	base := 30
+	max := 900
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{
+			NoWorkBackoff:    &base,
+			NoWorkBackoffMax: &max,
+		}},
+	})
+
+	tests := []struct {
+		n    int
+		want time.Duration
+	}{
+		{1, 30 * time.Second},
+		{2, 30 * time.Second},
+		{3, 60 * time.Second},
+		{4, 120 * time.Second},
+		{5, 240 * time.Second},
+		{6, 480 * time.Second},
+		{7, 900 * time.Second}, // capped: 30*2^5=960 > 900
+		{8, 900 * time.Second}, // stays pinned at the cap
+	}
+	for _, tt := range tests {
+		ap := &AgentProcess{
+			LastError:           &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
+			LastNoWorkPostSpawn: true,
+			NoWorkSpawnCount:    tt.n,
+		}
+		got := s.computeBackoff(ap)
+		if got != tt.want {
+			t.Errorf("computeBackoff() with post-spawn NoWork (NoWorkSpawnCount=%d) = %v, want %v", tt.n, got, tt.want)
+		}
+	}
+}
+
 func TestSupervisor_GetAgents_Snapshot_NewFields(t *testing.T) {
 	backoffTime := time.Now().Add(30 * time.Second)
 	cfg := &config.DaemonConfig{}
 	s := newTestSupervisorWithConfig(cfg)
 	s.Agents = []*AgentProcess{
 		{
-			Entry:        config.AgentEntry{Worktree: "alpha", Role: "plan"},
-			WorktreePath: "/path/alpha",
-			Pid:          12345,
-			NoWorkCount:  5,
-			BackoffUntil: backoffTime,
-			LastError:    &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited)},
+			Entry:            config.AgentEntry{Worktree: "alpha", Role: "plan"},
+			WorktreePath:     "/path/alpha",
+			Pid:              12345,
+			NoWorkCount:      5,
+			NoWorkSpawnCount: 2,
+			BackoffUntil:     backoffTime,
+			LastError:        &agenterr.AgentError{Class: agenterr.OutcomeFromHarness(wrapper.ErrRateLimited)},
 		},
 	}
 
@@ -433,6 +680,9 @@ func TestSupervisor_GetAgents_Snapshot_NewFields(t *testing.T) {
 	st := statuses[0]
 	if st.NoWorkCount != 5 {
 		t.Errorf("NoWorkCount = %d, want 5", st.NoWorkCount)
+	}
+	if st.NoWorkSpawnCount != 2 {
+		t.Errorf("NoWorkSpawnCount = %d, want 2", st.NoWorkSpawnCount)
 	}
 	if !st.BackoffUntil.Equal(backoffTime) {
 		t.Errorf("BackoffUntil = %v, want %v", st.BackoffUntil, backoffTime)
