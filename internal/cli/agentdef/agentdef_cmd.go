@@ -118,7 +118,11 @@ func init() {
 	agentShowCmd.Flags().BoolVar(&agentShowJSON, "json", false, "JSON output")
 	agentStopCmd.Flags().BoolVar(&agentStopForce, "force", false, "Stop without graceful yield when handled by a local daemon")
 
-	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd)
+	registerHookFlags(agentAddCmd, &agentAddCommentReply, &agentAddLabels)
+	registerHookFlags(agentUpdateCmd, &agentUpdateCommentReply, &agentUpdateLabels)
+	agentUpdateCmd.Flags().BoolVar(&agentUpdateClear, "clear-on-complete", false, "Remove all on_complete hooks from this agent")
+
+	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd, agentUpdateCmd)
 	cli.RegisterCommand(agentdefCmd)
 }
 
@@ -131,7 +135,11 @@ func runAgentAdd(cmd *cobra.Command, args []string) error {
 		if orchestratorID == "" {
 			orchestratorID = os.Getenv(envOrchestratorSessionID)
 		}
-		a, err := h.Store.Agents().Create(ctx, agentCreateFromFlags(ws, args[0], mode))
+		create, err := agentCreateFromFlags(ws, args[0], mode)
+		if err != nil {
+			return err
+		}
+		a, err := h.Store.Agents().Create(ctx, create)
 		if err != nil {
 			return fmt.Errorf("create agent: %w", err)
 		}
@@ -149,10 +157,14 @@ func runAgentAdd(cmd *cobra.Command, args []string) error {
 	})
 }
 
-func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) store.AgentCreate {
+func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) (store.AgentCreate, error) {
 	desiredState := domain.AgentDesiredState("")
 	if agentAddTask != "" {
 		desiredState = domain.AgentDesiredStopped
+	}
+	hooks, err := hooksFromFlags(agentAddCommentReply, agentAddLabels)
+	if err != nil {
+		return store.AgentCreate{}, err
 	}
 	return store.AgentCreate{
 		WorkspaceKey:   workspace,
@@ -169,7 +181,8 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) store.A
 		MaxConcurrency: agentAddMaxConc,
 		BudgetPolicy:   agentAddBudget,
 		DesiredState:   desiredState,
-	}
+		Hooks:          hooks,
+	}, nil
 }
 
 func enqueueAgentAddTaskStart(ctx context.Context, st store.Store, workspace, agentName, orchestratorID string) error {
@@ -330,6 +343,7 @@ func runAgentShow(_ *cobra.Command, args []string) error {
 		if a.BudgetPolicy != "" {
 			fmt.Printf("Budget:       %s\n", a.BudgetPolicy)
 		}
+		printHookPipeline(a.Hooks)
 		return nil
 	})
 }
