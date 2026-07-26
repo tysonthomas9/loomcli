@@ -20,11 +20,20 @@ type RoleConstraints struct {
 	Backend      string   // resolved backend name
 	PathPatterns []string // not used in routing decisions; carried through for subprocess env var propagation
 	Skills       []string // skill labels this role handles
-	MaxPriority  *int     // reject tasks with priority > this value (nil = no cap)
-	SourceRepos  []string // resolved source repo IDs for affinity scoring
-	ReadOnly     bool     // informational, carried through for downstream use
-	AllowedTools []string // informational, carried through for downstream use
-	DeniedTools  []string // informational, carried through for downstream use
+	// Labels requires the issue to carry ALL of these (AND). Empty = no requirement.
+	// Unlike Skills — which only RANKS candidates and falls back to score 10 — a
+	// missing label is a hard reject, because that is what gives a pipeline stage
+	// a termination condition.
+	Labels []string
+	// ExcludeLabels rejects the issue if it carries ANY of these (OR). Empty = no
+	// exclusion. Evaluated BEFORE Labels: if a label appears in both lists,
+	// exclusion wins.
+	ExcludeLabels []string
+	MaxPriority   *int     // reject tasks with priority > this value (nil = no cap)
+	SourceRepos   []string // resolved source repo IDs for affinity scoring
+	ReadOnly      bool     // informational, carried through for downstream use
+	AllowedTools  []string // informational, carried through for downstream use
+	DeniedTools   []string // informational, carried through for downstream use
 }
 
 // TaskMatch represents the result of matching a single issue against role constraints.
@@ -40,14 +49,16 @@ type TaskMatch struct {
 // when non-empty.
 func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstraints {
 	c := RoleConstraints{
-		TaskFilter:   rc.TaskFilter,
-		Backend:      rc.Backend,
-		PathPatterns: rc.PathPatterns,
-		Skills:       rc.Skills,
-		MaxPriority:  rc.MaxPriority,
-		ReadOnly:     rc.ReadOnly,
-		AllowedTools: rc.AllowedTools,
-		DeniedTools:  rc.DeniedTools,
+		TaskFilter:    rc.TaskFilter,
+		Backend:       rc.Backend,
+		PathPatterns:  rc.PathPatterns,
+		Skills:        rc.Skills,
+		MaxPriority:   rc.MaxPriority,
+		ReadOnly:      rc.ReadOnly,
+		AllowedTools:  rc.AllowedTools,
+		DeniedTools:   rc.DeniedTools,
+		Labels:        rc.Labels,
+		ExcludeLabels: rc.ExcludeLabels,
 	}
 
 	// config.AgentEntry overrides
@@ -90,6 +101,19 @@ func MatchTask(issue backend.IssueData, constraints RoleConstraints) TaskMatch {
 	// Reject if priority exceeds MaxPriority
 	if constraints.MaxPriority != nil && issue.Priority > *constraints.MaxPriority {
 		return TaskMatch{Issue: issue, Score: 0, Reason: fmt.Sprintf("priority %d exceeds max %d", issue.Priority, *constraints.MaxPriority)}
+	}
+
+	// Label gating. Exclusion first, so a label present in both lists rejects.
+	//
+	// These are HARD rejects (score 0), deliberately unlike Skills: a pipeline
+	// stage that stamps its output label needs to stop seeing the issues it has
+	// already processed. A soft demote would leave the re-claim loop intact
+	// whenever the stage's queue is otherwise empty — which is the steady state.
+	if label, found := firstLabelIn(issue.Labels, constraints.ExcludeLabels); found {
+		return TaskMatch{Issue: issue, Score: 0, Reason: "excluded by label " + label}
+	}
+	if label, missing := firstLabelMissing(issue.Labels, constraints.Labels); missing {
+		return TaskMatch{Issue: issue, Score: 0, Reason: "missing required label " + label}
 	}
 
 	// Base score
@@ -201,6 +225,12 @@ func RoleConfigFromEnv() config.RoleConfig {
 	if v := os.Getenv("LOOM_ROLE_TASK_FILTER"); v != "" {
 		rc.TaskFilter = v
 	}
+	if v := os.Getenv("LOOM_ROLE_LABELS"); v != "" {
+		rc.Labels = strings.Split(v, ",")
+	}
+	if v := os.Getenv("LOOM_ROLE_EXCLUDE_LABELS"); v != "" {
+		rc.ExcludeLabels = strings.Split(v, ",")
+	}
 	return rc
 }
 
@@ -249,6 +279,53 @@ func applyTaskFilter(issue backend.IssueData, filter string) string {
 		}
 	}
 	return ""
+}
+
+// firstLabelIn returns the first of want that appears in labels. Exact,
+// case-sensitive matching, consistent with countSkillMatches and matchesRepo.
+func firstLabelIn(labels, want []string) (string, bool) {
+	if len(want) == 0 || len(labels) == 0 {
+		return "", false
+	}
+	have := make(map[string]bool, len(labels))
+	for _, l := range labels {
+		have[l] = true
+	}
+	for _, w := range want {
+		if have[w] {
+			return w, true
+		}
+	}
+	return "", false
+}
+
+// firstLabelMissing returns the first of required that is absent from labels.
+func firstLabelMissing(labels, required []string) (string, bool) {
+	if len(required) == 0 {
+		return "", false
+	}
+	have := make(map[string]bool, len(labels))
+	for _, l := range labels {
+		have[l] = true
+	}
+	for _, r := range required {
+		if !have[r] {
+			return r, true
+		}
+	}
+	return "", false
+}
+
+// HasRoutingConstraints reports whether any constraint would affect task
+// selection. When false, callers fall back to the generic availability check.
+//
+// Keep in sync when adding fields to RoleConstraints: a role configured with
+// ONLY a new constraint would otherwise return nil here and have that
+// constraint silently ignored.
+func (c RoleConstraints) HasRoutingConstraints(repoLabel string) bool {
+	return len(c.Skills) > 0 || c.MaxPriority != nil || c.TaskFilter != "" ||
+		repoLabel != "" || len(c.SourceRepos) > 0 ||
+		len(c.Labels) > 0 || len(c.ExcludeLabels) > 0
 }
 
 // matchesRepo returns true if repo appears in the repos list.
@@ -304,7 +381,7 @@ func FetchReadyIssues(parentID string, repoLabel string) ([]backend.IssueData, e
 func BuildRouterTaskCheck(rc config.RoleConfig, ae config.AgentEntry, parentID string) func() (bool, error) {
 	constraints := MergeRoleConstraints(rc, ae)
 	repoLabel := ae.Repo
-	if len(constraints.Skills) == 0 && constraints.MaxPriority == nil && constraints.TaskFilter == "" && repoLabel == "" && len(constraints.SourceRepos) == 0 {
+	if !constraints.HasRoutingConstraints(repoLabel) {
 		return nil
 	}
 	return func() (bool, error) {

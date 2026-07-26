@@ -66,16 +66,22 @@ type RestartPolicy struct {
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
 type RoleConfig struct {
-	Kind           string   `yaml:"kind,omitempty"`
-	Description    string   `yaml:"description,omitempty"`
-	Prompt         string   `yaml:"prompt,omitempty"`
-	PromptFile     string   `yaml:"prompt_file,omitempty"`
-	Model          string   `yaml:"model,omitempty"`
-	TaskFilter     string   `yaml:"task_filter,omitempty"`
-	Backend        string   `yaml:"backend,omitempty"`
-	Effort         string   `yaml:"effort,omitempty"`
-	PathPatterns   []string `yaml:"path_patterns,omitempty"`
-	Skills         []string `yaml:"skills,omitempty"`
+	Kind         string   `yaml:"kind,omitempty"`
+	Description  string   `yaml:"description,omitempty"`
+	Prompt       string   `yaml:"prompt,omitempty"`
+	PromptFile   string   `yaml:"prompt_file,omitempty"`
+	Model        string   `yaml:"model,omitempty"`
+	TaskFilter   string   `yaml:"task_filter,omitempty"`
+	Backend      string   `yaml:"backend,omitempty"`
+	Effort       string   `yaml:"effort,omitempty"`
+	PathPatterns []string `yaml:"path_patterns,omitempty"`
+	Skills       []string `yaml:"skills,omitempty"`
+	// Labels requires ALL of these on an issue (AND); ExcludeLabels rejects the
+	// issue if ANY is present (OR), and is evaluated first. Together these give a
+	// pipeline stage its trigger and its termination condition — the equivalent
+	// of orche's poll({ labels, excludeLabels }).
+	Labels         []string `yaml:"labels,omitempty"`
+	ExcludeLabels  []string `yaml:"exclude_labels,omitempty"`
 	MaxPriority    *int     `yaml:"max_priority,omitempty"`
 	MaxConcurrency *int     `yaml:"max_concurrency,omitempty"`
 	ReadOnly       bool     `yaml:"read_only,omitempty"`
