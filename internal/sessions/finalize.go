@@ -44,6 +44,7 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	// otherwise preserve the existing disk value (hook-captured data).
 	var diskInputTokens, diskOutputTokens, diskCacheRead, diskCacheWrite int64
 	var diskCost float64
+	var diskModel string
 	diskMeta, err := s.store.LoadMetadata(s.Meta.SessionID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sessions: failed to load metadata for token preservation: %v\n", err)
@@ -54,6 +55,7 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 		diskCacheRead = diskMeta.CacheReadTokens
 		diskCacheWrite = diskMeta.CacheWriteTokens
 		diskCost = diskMeta.EstimatedCostUSD
+		diskModel = diskMeta.Model
 		// Preserve the transcript-format marker stamped by SyncNativeTranscript. The
 		// daemon's in-memory Meta predates it — the TS leaf stamps "canonical" from a
 		// separate (worker) process, so writing the stale in-memory value here would
@@ -68,6 +70,11 @@ func (s *Session) Finalize(opts FinalizeOptions) error {
 	s.Meta.CacheReadTokens = mergeTokenVal(opts.CacheReadTokens, diskCacheRead)
 	s.Meta.CacheWriteTokens = mergeTokenVal(opts.CacheWriteTokens, diskCacheWrite)
 	s.Meta.EstimatedCostUSD = mergeTokenCost(opts.EstimatedCostUSD, diskCost)
+	if opts.Model != "" {
+		s.Meta.Model = opts.Model
+	} else if s.Meta.Model == "" {
+		s.Meta.Model = diskModel
+	}
 
 	// Set error context.
 	s.Meta.ErrorClass = opts.ErrorClass

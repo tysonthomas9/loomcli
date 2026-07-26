@@ -40,6 +40,7 @@ var codexNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown 
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	args := []string{"--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"}
+	args = append(args, codexModelArgs()...)
 	args = appendCodexEffortArgs(args, resolveAgentEffort())
 	args = append(args, prompt)
 	cmd := exec.Command("codex", args...)
@@ -106,10 +107,19 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 // positional prompt argument instead.
 func buildCodexNonInteractiveArgs(prompt string) []string {
 	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+	args = append(args, codexModelArgs()...)
 	if prompt != "" {
 		args = append(args, prompt)
 	}
 	return args
+}
+
+func codexModelArgs() []string {
+	model := strings.TrimSpace(os.Getenv("LOOM_CODEX_MODEL"))
+	if model == "" {
+		return nil
+	}
+	return []string{"--model", model}
 }
 
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.
@@ -239,8 +249,9 @@ func init() {
 type codexUsageEvent struct {
 	Type  string `json:"type"`
 	Usage *struct {
-		InputTokens  int64 `json:"input_tokens"`
-		OutputTokens int64 `json:"output_tokens"`
+		InputTokens       int64 `json:"input_tokens"`
+		CachedInputTokens int64 `json:"cached_input_tokens"`
+		OutputTokens      int64 `json:"output_tokens"`
 	} `json:"usage,omitempty"`
 }
 
@@ -256,5 +267,5 @@ func collectCodexStreamUsage(line string, collector *usage.Collector) {
 		return
 	}
 	// No message-level dedup needed for Codex (one usage per turn)
-	collector.Accumulate("", event.Usage.InputTokens, event.Usage.OutputTokens, 0, 0)
+	collector.Accumulate("", event.Usage.InputTokens, event.Usage.OutputTokens, event.Usage.CachedInputTokens, 0)
 }

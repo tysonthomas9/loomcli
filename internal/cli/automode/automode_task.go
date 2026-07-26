@@ -16,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
@@ -33,7 +34,7 @@ func createAutoSession(ctx *autoLoopCtx, prompt string) *sessions.Session {
 	return sess
 }
 
-func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef string, err error, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64, estimatedCostUSD float64) {
+func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef string, err error, record usage.SessionUsage) {
 	if sess == nil {
 		return
 	}
@@ -50,15 +51,18 @@ func finalizeAutoSession(ctx *autoLoopCtx, sess *sessions.Session, beforeRef str
 		taskID = info.TaskID
 	}
 	_, _ = sessionfinalize.WithWorktree(sess, sessionfinalize.WithWorktreeOptions{
-		WorktreePath:     ctx.opts.WorktreePath,
-		BeforeRef:        beforeRef,
-		TaskID:           taskID,
-		ExitCode:         exitCode,
-		InputTokens:      inputTokens,
-		OutputTokens:     outputTokens,
-		CacheReadTokens:  cacheReadTokens,
-		CacheWriteTokens: cacheWriteTokens,
-		EstimatedCostUSD: estimatedCostUSD,
+		WorktreePath:      ctx.opts.WorktreePath,
+		BeforeRef:         beforeRef,
+		TaskID:            taskID,
+		ExitCode:          exitCode,
+		InputTokens:       record.InputTokens,
+		OutputTokens:      record.OutputTokens,
+		CacheReadTokens:   record.CacheReadTokens,
+		CacheWriteTokens:  record.CacheWriteTokens,
+		EstimatedCostUSD:  record.EstimatedCostUSD,
+		Model:             record.Model,
+		ClaudeSessionID:   backends.GetLastCapturedSessionID(),
+		OpenCodeSessionID: backends.GetLastCapturedOpenCodeSessionID(),
 	})
 	backends.ClearActiveSessionEnv()
 	go sessions.NotifyWebUI(cmdstore.RootContext(), backends.ResolveWebUIURL(), taskID, sess.SessionID(), sess.Meta.Status, backends.ResolveNotifyToken())

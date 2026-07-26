@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,13 +21,16 @@ func TestSumTranscriptUsage_EmptyFile(t *testing.T) {
 	if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CacheReadTokens != 0 || usage.CacheWriteTokens != 0 {
 		t.Errorf("expected zero usage, got %+v", usage)
 	}
+	if usage.CostUSD != 0 || usage.Model != "" {
+		t.Errorf("expected empty cost/model, got %+v", usage)
+	}
 }
 
 func TestSumTranscriptUsage_SingleAssistant(t *testing.T) {
 	dir := t.TempDir()
 	txPath := filepath.Join(dir, "transcript.jsonl")
 
-	line := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":200,"cache_creation_input_tokens":300}}}` + "\n"
+	line := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":200,"cache_creation_input_tokens":300}}}` + "\n"
 
 	if err := os.WriteFile(txPath, []byte(line), 0o600); err != nil {
 		t.Fatalf("write file: %v", err)
@@ -47,6 +51,115 @@ func TestSumTranscriptUsage_SingleAssistant(t *testing.T) {
 	}
 	if usage.CacheWriteTokens != 300 {
 		t.Errorf("CacheWriteTokens = %d, want 300", usage.CacheWriteTokens)
+	}
+	if usage.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want claude-opus-4-8", usage.Model)
+	}
+}
+
+func TestSumTranscriptUsage_ResultCost(t *testing.T) {
+	dir := t.TempDir()
+	txPath := filepath.Join(dir, "transcript.jsonl")
+
+	lines := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[],"usage":{"input_tokens":100,"output_tokens":50}}}
+{"type":"result","cost_usd":0.0123}
+`
+	if err := os.WriteFile(txPath, []byte(lines), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	usage, err := SumTranscriptUsage(txPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage.CostUSD != 0.0123 {
+		t.Errorf("CostUSD = %f, want 0.0123", usage.CostUSD)
+	}
+}
+
+func TestSumTranscriptUsage_CodexTokenCount(t *testing.T) {
+	dir := t.TempDir()
+	txPath := filepath.Join(dir, "rollout.jsonl")
+
+	lines := `{"type":"turn_context","payload":{"model":"gpt-5.5"}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":13797,"cached_input_tokens":4480,"output_tokens":28,"reasoning_output_tokens":17,"total_tokens":13825}}}}
+`
+	if err := os.WriteFile(txPath, []byte(lines), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	usage, err := SumTranscriptUsage(txPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage.InputTokens != 13797 {
+		t.Errorf("InputTokens = %d, want 13797", usage.InputTokens)
+	}
+	if usage.OutputTokens != 28 {
+		t.Errorf("OutputTokens = %d, want 28", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 4480 {
+		t.Errorf("CacheReadTokens = %d, want 4480", usage.CacheReadTokens)
+	}
+	if usage.Model != "gpt-5.5" {
+		t.Errorf("Model = %q, want gpt-5.5", usage.Model)
+	}
+}
+
+func TestSumTranscriptUsage_OpenCodeExport(t *testing.T) {
+	data := []byte(`{
+  "info": {"id":"ses_123"},
+  "messages": [
+    {
+      "info": {"id":"msg_user","role":"user","time":{"created":1700000000000}},
+      "parts": [{"type":"text","text":"hello"}]
+    },
+    {
+      "info": {
+        "id":"msg_assistant_1",
+        "role":"assistant",
+        "modelID":"anthropic/claude-sonnet-4",
+        "time":{"created":1700000001000},
+        "tokens":{"input":11,"output":7,"cache":{"read":3,"write":2}},
+        "cost":0.0012
+      },
+      "parts": [{"type":"text","text":"first"}]
+    },
+    {
+      "info": {
+        "id":"msg_assistant_2",
+        "role":"assistant",
+        "modelID":"anthropic/claude-sonnet-4",
+        "time":{"created":1700000002000},
+        "tokens":{"input":13,"output":5,"cache":{"read":4,"write":1}},
+        "cost":0.0023
+      },
+      "parts": [{"type":"text","text":"second"}]
+    }
+  ]
+}`)
+
+	usage, err := SumTranscriptUsageBytes(data)
+	if err != nil {
+		t.Fatalf("SumTranscriptUsageBytes: %v", err)
+	}
+	if usage.InputTokens != 24 {
+		t.Errorf("InputTokens = %d, want 24", usage.InputTokens)
+	}
+	if usage.OutputTokens != 12 {
+		t.Errorf("OutputTokens = %d, want 12", usage.OutputTokens)
+	}
+	if usage.CacheReadTokens != 7 {
+		t.Errorf("CacheReadTokens = %d, want 7", usage.CacheReadTokens)
+	}
+	if usage.CacheWriteTokens != 3 {
+		t.Errorf("CacheWriteTokens = %d, want 3", usage.CacheWriteTokens)
+	}
+	if math.Abs(usage.CostUSD-0.0035) > 0.0000001 {
+		t.Errorf("CostUSD = %f, want 0.0035", usage.CostUSD)
+	}
+	if usage.Model != "anthropic/claude-sonnet-4" {
+		t.Errorf("Model = %q, want anthropic/claude-sonnet-4", usage.Model)
 	}
 }
 

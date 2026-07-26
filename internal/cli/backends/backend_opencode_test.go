@@ -235,6 +235,25 @@ func TestCollectOpenCodeStreamUsage_WithUsage(t *testing.T) {
 	}
 }
 
+func TestCollectOpenCodeStreamUsage_WithStepFinishTokensAndCost(t *testing.T) {
+	t.Parallel()
+	c := usage.NewCollector("opencode", "test")
+
+	line := `{"type":"step_finish","part":{"type":"step-finish","tokens":{"total":11432,"input":11376,"output":6,"reasoning":50,"cache":{"write":0,"read":0}},"cost":0.02575}}`
+	collectOpenCodeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.InputTokens != 11376 {
+		t.Errorf("InputTokens = %d, want 11376", su.InputTokens)
+	}
+	if su.OutputTokens != 6 {
+		t.Errorf("OutputTokens = %d, want 6", su.OutputTokens)
+	}
+	if su.EstimatedCostUSD != 0.02575 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.02575", su.EstimatedCostUSD)
+	}
+}
+
 func TestCollectOpenCodeStreamUsage_NoUsage(t *testing.T) {
 	t.Parallel()
 	c := usage.NewCollector("opencode", "test")
@@ -256,6 +275,28 @@ func TestCollectOpenCodeStreamUsage_InvalidJSON(t *testing.T) {
 	su := c.Finalize("", "", time.Now(), time.Now(), 0)
 	if su.InputTokens != 0 {
 		t.Errorf("InputTokens = %d, want 0", su.InputTokens)
+	}
+}
+
+func TestExtractOpenCodeSessionID(t *testing.T) {
+	t.Parallel()
+
+	line := `{"type":"step_start","sessionID":"ses_1836797d8ffe0cYlvvI2xlmSke","part":{"type":"step-start"}}`
+	got, ok := extractOpenCodeSessionID(line)
+	if !ok {
+		t.Fatal("extractOpenCodeSessionID() = not found, want found")
+	}
+	if got != "ses_1836797d8ffe0cYlvvI2xlmSke" {
+		t.Fatalf("extractOpenCodeSessionID() = %q", got)
+	}
+}
+
+func TestExtractOpenCodeSessionID_Missing(t *testing.T) {
+	t.Parallel()
+
+	line := `{"type":"message","content":"hello"}`
+	if got, ok := extractOpenCodeSessionID(line); ok {
+		t.Fatalf("extractOpenCodeSessionID() = (%q, true), want not found", got)
 	}
 }
 

@@ -31,6 +31,8 @@ func envHasKey(env []string, key string) bool {
 type buildFunc func(workDir, prompt, agentName string) *exec.Cmd
 
 func TestBuildInteractiveCmd_PromptInArgs(t *testing.T) {
+	t.Setenv("LOOM_CLAUDE_MODEL", "")
+	t.Setenv("LOOM_CODEX_MODEL", "")
 	t.Setenv("LOOM_OPENCODE_MODEL", "")
 
 	tests := []struct {
@@ -319,4 +321,54 @@ func TestBuildOpenCodeInteractiveCmd_PassesModelFlagFromEnv(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected --model flag in args %v", cmd.Args)
+}
+
+func TestBuildClaudeInteractiveCmd_PassesModelFlagFromEnv(t *testing.T) {
+	workDir := "/projects/myapp"
+	model := "claude-opus-4-8"
+	t.Setenv("LOOM_CLAUDE_MODEL", model)
+
+	cmd := buildClaudeInteractiveCmd(workDir, "test prompt", "agent")
+	assertModelFlag(t, cmd.Args, model)
+}
+
+func TestBuildClaudeRunTurnArgs_PassesModelFlagFromEnv(t *testing.T) {
+	model := "claude-opus-4-8"
+	t.Setenv("LOOM_CLAUDE_MODEL", model)
+
+	args := buildClaudeRunTurnArgs("")
+	assertModelFlag(t, args, model)
+}
+
+func TestBuildCodexInteractiveCmd_PassesModelFlagFromEnv(t *testing.T) {
+	workDir := "/projects/myapp"
+	model := "gpt-5.5"
+	t.Setenv("LOOM_CODEX_MODEL", model)
+
+	cmd := buildCodexInteractiveCmd(workDir, "test prompt", "agent")
+	assertModelFlag(t, cmd.Args, model)
+}
+
+func TestBuildCodexNonInteractiveArgs_PassesModelFlagFromEnv(t *testing.T) {
+	model := "gpt-5.5"
+	t.Setenv("LOOM_CODEX_MODEL", model)
+
+	args := buildCodexNonInteractiveArgs("test prompt")
+	assertModelFlag(t, args, model)
+}
+
+func assertModelFlag(t *testing.T, args []string, model string) {
+	t.Helper()
+	for i, arg := range args {
+		if arg == "--model" {
+			if i+1 >= len(args) {
+				t.Fatal("--model flag present but no value follows")
+			}
+			if args[i+1] != model {
+				t.Fatalf("--model value = %q, want %q", args[i+1], model)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected --model flag in args %v", args)
 }

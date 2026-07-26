@@ -580,17 +580,19 @@ func TestCollectClaudeStreamUsage_Dedup(t *testing.T) {
 	t.Parallel()
 	c := usage.NewCollector("claude", "test")
 
-	// Same message ID in both message_start and message_delta
-	// Only the first should be counted (dedup by message ID)
+	// Same message ID in both message_start and message_delta.
+	// The later cumulative delta should replace the initial snapshot.
 	line1 := `{"type":"message_start","message":{"id":"msg-789","usage":{"input_tokens":500,"output_tokens":0}}}`
 	line2 := `{"type":"message_delta","message":{"id":"msg-789"},"usage":{"input_tokens":500,"output_tokens":200}}`
 	collectClaudeStreamUsage(line1, c)
 	collectClaudeStreamUsage(line2, c)
 
 	su := c.Finalize("", "", time.Now(), time.Now(), 0)
-	// Only first occurrence counted
 	if su.InputTokens != 500 {
-		t.Errorf("InputTokens = %d, want 500 (dedup)", su.InputTokens)
+		t.Errorf("InputTokens = %d, want 500", su.InputTokens)
+	}
+	if su.OutputTokens != 200 {
+		t.Errorf("OutputTokens = %d, want 200", su.OutputTokens)
 	}
 }
 
@@ -618,6 +620,32 @@ func TestCollectClaudeStreamUsage_NoUsage(t *testing.T) {
 	su := c.Finalize("", "", time.Now(), time.Now(), 0)
 	if su.InputTokens != 0 {
 		t.Errorf("InputTokens = %d, want 0 (no usage in event)", su.InputTokens)
+	}
+}
+
+func TestCollectClaudeStreamUsage_ResultCost(t *testing.T) {
+	t.Parallel()
+	c := usage.NewCollector("claude", "test")
+
+	line := `{"type":"result","cost_usd":0.0123}`
+	collectClaudeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.EstimatedCostUSD != 0.0123 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.0123", su.EstimatedCostUSD)
+	}
+}
+
+func TestCollectClaudeStreamUsage_Model(t *testing.T) {
+	t.Parallel()
+	c := usage.NewCollector("claude", "test")
+
+	line := `{"type":"assistant","message":{"id":"msg-model","model":"claude-opus-4-8","content":[]}}`
+	collectClaudeStreamUsage(line, c)
+
+	su := c.Finalize("", "", time.Now(), time.Now(), 0)
+	if su.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want claude-opus-4-8", su.Model)
 	}
 }
 

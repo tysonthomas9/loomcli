@@ -71,7 +71,7 @@ func partitionUsageRecords(records []SessionUsage, cutoff time.Time) ([]SessionU
 func writeUsageAtomic(path string, records []SessionUsage) error {
 	tmpPath := path + ".tmp"
 	// #nosec G304 — controlled path
-	// #nosec G302 — usage.jsonl contains only token counts and cost estimates
+	// #nosec G302 — usage.jsonl contains only session usage metadata
 	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return fmt.Errorf("create usage purge tmp: %w", err)

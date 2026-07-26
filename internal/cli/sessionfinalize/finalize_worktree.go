@@ -1,10 +1,16 @@
 package sessionfinalize
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
+
+var openCodeExportSession = defaultOpenCodeExportSession
 
 type WithWorktreeOptions struct {
 	WorktreePath string
@@ -18,11 +24,16 @@ type WithWorktreeOptions struct {
 	// falls back to newest-by-mtime in the worktree's project dir.
 	ClaudeSessionID string
 
+	// OpenCodeSessionID is the OpenCode session ID captured from the run's
+	// stream output. Used to export the exact native transcript.
+	OpenCodeSessionID string
+
 	InputTokens      int64
 	OutputTokens     int64
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	EstimatedCostUSD float64
+	Model            string
 }
 
 type WithWorktreeResult struct {
@@ -51,11 +62,13 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	if sess == nil {
 		return result, nil
 	}
-	if sess.Meta.Backend == backendnames.Codex {
-		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
-	}
-	if sess.Meta.Backend == backendnames.Claude {
-		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+	switch sess.Meta.Backend {
+	case backendnames.Codex:
+		enrichCodexUsageFromTranscript(sess, &opts)
+	case backendnames.Claude:
+		enrichClaudeUsageFromTranscript(sess, &opts)
+	case backendnames.OpenCode:
+		enrichOpenCodeUsageFromExport(sess, &opts)
 	}
 	return result, sess.Finalize(sessions.FinalizeOptions{
 		TaskID:       opts.TaskID,
@@ -70,5 +83,83 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		CacheReadTokens:  opts.CacheReadTokens,
 		CacheWriteTokens: opts.CacheWriteTokens,
 		EstimatedCostUSD: opts.EstimatedCostUSD,
+		Model:            opts.Model,
 	})
+}
+
+func enrichCodexUsageFromTranscript(sess *sessions.Session, opts *WithWorktreeOptions) {
+	srcPath, _ := sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
+	enrichUsageFromTranscript(srcPath, opts)
+}
+
+func enrichClaudeUsageFromTranscript(sess *sessions.Session, opts *WithWorktreeOptions) {
+	srcPath, _ := sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
+	enrichUsageFromTranscript(srcPath, opts)
+}
+
+func enrichOpenCodeUsageFromExport(sess *sessions.Session, opts *WithWorktreeOptions) {
+	data, err := openCodeExportSession(opts.WorktreePath, opts.OpenCodeSessionID)
+	if err != nil || len(data) == 0 {
+		return
+	}
+	if err := sess.SyncNativeTranscriptBytes(data); err != nil {
+		return
+	}
+	tok, err := sessions.SumTranscriptUsageBytes(data)
+	if err != nil {
+		return
+	}
+	applyTranscriptUsage(opts, tok)
+}
+
+func defaultOpenCodeExportSession(workDir, sessionID string) ([]byte, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
+	}
+	result := cli.DefaultDeps().Exec.Run(workDir, "opencode", "export", sessionID)
+	if result.Err != nil {
+		return nil, fmt.Errorf("opencode export %s: %w: %s", sessionID, result.Err, strings.TrimSpace(result.Stderr))
+	}
+	return normalizeOpenCodeExportOutput(result.Stdout), nil
+}
+
+func normalizeOpenCodeExportOutput(stdout string) []byte {
+	idx := strings.Index(stdout, "{")
+	if idx < 0 {
+		return nil
+	}
+	return []byte(strings.TrimSpace(stdout[idx:]))
+}
+
+func enrichUsageFromTranscript(srcPath string, opts *WithWorktreeOptions) {
+	if srcPath == "" {
+		return
+	}
+	tok, err := sessions.SumTranscriptUsage(srcPath)
+	if err != nil {
+		return
+	}
+	applyTranscriptUsage(opts, tok)
+}
+
+func applyTranscriptUsage(opts *WithWorktreeOptions, tok sessions.TokenUsage) {
+	if opts.InputTokens == 0 {
+		opts.InputTokens = tok.InputTokens
+	}
+	if opts.OutputTokens == 0 {
+		opts.OutputTokens = tok.OutputTokens
+	}
+	if opts.CacheReadTokens == 0 {
+		opts.CacheReadTokens = tok.CacheReadTokens
+	}
+	if opts.CacheWriteTokens == 0 {
+		opts.CacheWriteTokens = tok.CacheWriteTokens
+	}
+	if tok.CostUSD > 0 {
+		opts.EstimatedCostUSD = tok.CostUSD
+	}
+	if tok.Model != "" {
+		opts.Model = tok.Model
+	}
 }

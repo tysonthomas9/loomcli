@@ -137,6 +137,16 @@ create_agent_worktree() {
   fi
   git -C "$path" config user.email "local-mode@fixture.local"
   git -C "$path" config user.name "local-mode"
+  install_claude_hooks "$path"
+}
+
+install_claude_hooks() {
+  path="$1"
+  if [ "$AGENT_BACKEND" != "claude" ]; then
+    return 0
+  fi
+  loom hooks install --force "$path"
+  echo "[local-mode] installed Claude hooks for ${path}"
 }
 
 toml_escape() {

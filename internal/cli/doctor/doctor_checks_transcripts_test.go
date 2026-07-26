@@ -57,8 +57,9 @@ func stageClaudeCodeTranscript(t *testing.T, runtimeDir, home, agent string) {
 	if mkErr := os.MkdirAll(projectDir, 0o755); mkErr != nil {
 		t.Fatalf("mkdir project: %v", mkErr)
 	}
-	line := `{"type":"assistant","message":{"id":"m1","usage":` +
-		`{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}` + "\n"
+	line := `{"type":"assistant","message":{"id":"m1","model":"claude-opus-4-8","usage":` +
+		`{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}` + "\n" +
+		`{"type":"result","cost_usd":0.0042}` + "\n"
 	if wErr := os.WriteFile(filepath.Join(projectDir, "cc-uuid.jsonl"), []byte(line), 0o600); wErr != nil {
 		t.Fatalf("write cc transcript: %v", wErr)
 	}
@@ -95,8 +96,11 @@ func TestCheckOrphanedTranscripts_Backfills(t *testing.T) {
 		t.Errorf("tokens = in%d/out%d/cr%d/cw%d, want 100/50/10/5",
 			meta.InputTokens, meta.OutputTokens, meta.CacheReadTokens, meta.CacheWriteTokens)
 	}
-	if meta.EstimatedCostUSD <= 0 {
-		t.Errorf("estimated cost = %v, want > 0", meta.EstimatedCostUSD)
+	if meta.EstimatedCostUSD != 0.0042 {
+		t.Errorf("estimated cost = %v, want 0.0042", meta.EstimatedCostUSD)
+	}
+	if meta.Model != "claude-opus-4-8" {
+		t.Errorf("model = %q, want claude-opus-4-8", meta.Model)
 	}
 }
 

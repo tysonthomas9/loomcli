@@ -21,9 +21,10 @@ var (
 // Set by auto-mode before invoking InvokeNonInteractive, consumed (read+cleared)
 // inside the invoker. Follows the same pattern as activeSessionEnv above.
 var (
-	resumeMu              sync.RWMutex
-	resumeSessionID       string
-	lastCapturedSessionID string
+	resumeMu                      sync.RWMutex
+	resumeSessionID               string
+	lastCapturedSessionID         string
+	lastCapturedOpenCodeSessionID string
 )
 
 // SetResumeSessionID sets the Claude session ID to resume on the next
@@ -78,6 +79,30 @@ func ClearLastCapturedSessionID() {
 	resumeMu.Lock()
 	defer resumeMu.Unlock()
 	lastCapturedSessionID = ""
+}
+
+// SetLastCapturedOpenCodeSessionID stores the OpenCode session ID captured
+// from the most recent non-interactive invocation's JSON stream. Thread-safe.
+func SetLastCapturedOpenCodeSessionID(id string) {
+	resumeMu.Lock()
+	defer resumeMu.Unlock()
+	lastCapturedOpenCodeSessionID = id
+}
+
+// GetLastCapturedOpenCodeSessionID returns the OpenCode session ID captured
+// from the most recent non-interactive invocation. Thread-safe.
+func GetLastCapturedOpenCodeSessionID() string {
+	resumeMu.RLock()
+	defer resumeMu.RUnlock()
+	return lastCapturedOpenCodeSessionID
+}
+
+// ClearLastCapturedOpenCodeSessionID clears the last captured OpenCode session
+// ID. Thread-safe.
+func ClearLastCapturedOpenCodeSessionID() {
+	resumeMu.Lock()
+	defer resumeMu.Unlock()
+	lastCapturedOpenCodeSessionID = ""
 }
 
 // SetActiveSessionRuntimeEnv sets the workspace runtime directory and session ID that will be

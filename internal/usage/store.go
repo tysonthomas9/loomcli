@@ -12,6 +12,29 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
+// SessionUsage records token consumption and backend-reported cost for one
+// agent session.
+//
+// EstimatedCostUSD keeps the existing JSON field name for API compatibility,
+// but callers should only populate it from backend/session data. Unknown cost
+// is represented as zero; this package does not estimate pricing locally.
+type SessionUsage struct {
+	AgentName        string    `json:"agent_name"`
+	Backend          string    `json:"backend"`
+	TaskID           string    `json:"task_id,omitempty"`
+	EpicID           string    `json:"epic_id,omitempty"`
+	InputTokens      int64     `json:"input_tokens"`
+	OutputTokens     int64     `json:"output_tokens"`
+	CacheReadTokens  int64     `json:"cache_read_tokens"`
+	CacheWriteTokens int64     `json:"cache_write_tokens"`
+	EstimatedCostUSD float64   `json:"estimated_cost_usd"`
+	StartedAt        time.Time `json:"started_at"`
+	EndedAt          time.Time `json:"ended_at"`
+	ExitCode         int       `json:"exit_code"`
+	Model            string    `json:"model,omitempty"`
+	SessionID        string    `json:"session_id,omitempty"`
+}
+
 // Store provides append-only JSONL storage for session usage records.
 // Concurrent appends are serialized via flock.
 type Store struct {
@@ -37,7 +60,7 @@ func (s *Store) Append(record SessionUsage) error {
 	data = append(data, '\n')
 
 	// #nosec G304 - controlled path from NewStore
-	// #nosec G302 - usage.jsonl contains only token counts and cost estimates, not secrets
+	// #nosec G302 - usage.jsonl contains only session usage metadata, not secrets
 	f, err := os.OpenFile(s.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open usage file: %w", err)

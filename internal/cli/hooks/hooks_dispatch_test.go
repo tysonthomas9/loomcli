@@ -71,7 +71,8 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 	txDir := t.TempDir()
 	txPath := filepath.Join(txDir, "claude-transcript.jsonl")
 	txLines := `{"type":"assistant","message":{"id":"msg_001","role":"assistant","content":[],"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200,"cache_creation_input_tokens":100}}}
-{"type":"assistant","message":{"id":"msg_002","role":"assistant","content":[],"usage":{"input_tokens":2000,"output_tokens":800,"cache_read_input_tokens":300,"cache_creation_input_tokens":50}}}
+{"type":"assistant","message":{"id":"msg_002","role":"assistant","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":2000,"output_tokens":800,"cache_read_input_tokens":300,"cache_creation_input_tokens":50}}}
+{"type":"result","cost_usd":0.0123}
 `
 	if err := os.WriteFile(txPath, []byte(txLines), 0o600); err != nil {
 		t.Fatalf("write transcript: %v", err)
@@ -111,8 +112,11 @@ func TestDispatchHookEvent_SessionEndCapturesTokenUsage(t *testing.T) {
 	if loaded.CacheWriteTokens != 150 {
 		t.Errorf("CacheWriteTokens = %d, want 150 (100+50)", loaded.CacheWriteTokens)
 	}
-	if loaded.EstimatedCostUSD <= 0 {
-		t.Errorf("EstimatedCostUSD = %f, want > 0", loaded.EstimatedCostUSD)
+	if loaded.EstimatedCostUSD != 0.0123 {
+		t.Errorf("EstimatedCostUSD = %f, want 0.0123", loaded.EstimatedCostUSD)
+	}
+	if loaded.Model != "claude-opus-4-8" {
+		t.Errorf("Model = %q, want claude-opus-4-8", loaded.Model)
 	}
 }
 

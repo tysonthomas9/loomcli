@@ -210,6 +210,7 @@ var claudeInvoker = defaultClaudeInvoker
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	args := []string{"--dangerously-skip-permissions"}
+	args = append(args, claudeModelArgs()...)
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
@@ -269,6 +270,7 @@ func buildClaudeRunTurnArgs(resumeSessionID string) []string {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
+	args = append(args, claudeModelArgs()...)
 	return args
 }
 
@@ -277,6 +279,14 @@ func claudeResumeArgs(sessionID string) []string {
 		return caps.Resume.ResumeArgs(sessionID)
 	}
 	return []string{"--resume", sessionID}
+}
+
+func claudeModelArgs() []string {
+	model := strings.TrimSpace(os.Getenv("LOOM_CLAUDE_MODEL"))
+	if model == "" {
+		return nil
+	}
+	return []string{"--model", model}
 }
 
 // defaultClaudeNonInteractiveInvoker is the real non-interactive Claude
@@ -589,15 +599,20 @@ func scanStreamOutput(stdout io.Reader, handler func(string)) string {
 // StreamEvent represents a Claude stream-json event.
 // Claude emits usage in message_start (initial) and message_delta (cumulative final).
 type StreamEvent struct {
-	Type    string        `json:"type"`
-	Subtype string        `json:"subtype,omitempty"` // e.g. "message_start", "message_delta"
-	Message *EventMessage `json:"message,omitempty"`
-	Usage   *StreamUsage  `json:"usage,omitempty"` // top-level usage on message_delta events
+	Type         string        `json:"type"`
+	Subtype      string        `json:"subtype,omitempty"` // e.g. "message_start", "message_delta"
+	Message      *EventMessage `json:"message,omitempty"`
+	Usage        *StreamUsage  `json:"usage,omitempty"` // top-level usage on message_delta events
+	Model        string        `json:"model,omitempty"`
+	CostUSD      float64       `json:"cost_usd,omitempty"`
+	TotalCostUSD float64       `json:"total_cost_usd,omitempty"`
+	CostUSDCamel float64       `json:"costUSD,omitempty"`
 }
 
 // EventMessage holds the message body from a Claude stream event.
 type EventMessage struct {
 	ID      string         `json:"id,omitempty"`
+	Model   string         `json:"model,omitempty"`
 	Content []ContentBlock `json:"content,omitempty"`
 	Usage   *StreamUsage   `json:"usage,omitempty"` // usage nested in message on message_start events
 }
@@ -704,6 +719,15 @@ func collectClaudeStreamUsage(line string, collector *usage.Collector) {
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
 		return
 	}
+	if event.Model != "" {
+		collector.SetModel(event.Model)
+	}
+	if event.Message != nil && event.Message.Model != "" {
+		collector.SetModel(event.Message.Model)
+	}
+	if costUSD := firstPositiveFloat(event.TotalCostUSD, event.CostUSD, event.CostUSDCamel); costUSD > 0 {
+		collector.SetCostUSD(costUSD)
+	}
 
 	// Extract message ID for dedup
 	var messageID string
@@ -727,4 +751,13 @@ func collectClaudeStreamUsage(line string, collector *usage.Collector) {
 		u := event.Message.Usage
 		collector.Accumulate(messageID, u.InputTokens, u.OutputTokens, u.CacheReadInputTokens, u.CacheCreationInputTokens)
 	}
+}
+
+func firstPositiveFloat(vals ...float64) float64 {
+	for _, v := range vals {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
 }

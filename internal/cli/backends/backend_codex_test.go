@@ -275,7 +275,7 @@ func TestCollectCodexStreamUsage_TurnCompleted(t *testing.T) {
 	t.Parallel()
 	c := usage.NewCollector("codex", "test")
 
-	line := `{"type":"turn.completed","usage":{"input_tokens":1000,"output_tokens":500}}`
+	line := `{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":250,"output_tokens":500}}`
 	collectCodexStreamUsage(line, c)
 
 	su := c.Finalize("", "", time.Now(), time.Now(), 0)
@@ -284,6 +284,9 @@ func TestCollectCodexStreamUsage_TurnCompleted(t *testing.T) {
 	}
 	if su.OutputTokens != 500 {
 		t.Errorf("OutputTokens = %d, want 500", su.OutputTokens)
+	}
+	if su.CacheReadTokens != 250 {
+		t.Errorf("CacheReadTokens = %d, want 250", su.CacheReadTokens)
 	}
 }
 

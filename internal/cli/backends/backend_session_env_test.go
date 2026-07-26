@@ -265,10 +265,29 @@ func TestLastCapturedSessionID_SetGetClear(t *testing.T) {
 	}
 }
 
+func TestLastCapturedOpenCodeSessionID_SetGetClear(t *testing.T) {
+	t.Cleanup(ClearLastCapturedOpenCodeSessionID)
+
+	if got := GetLastCapturedOpenCodeSessionID(); got != "" {
+		t.Errorf("GetLastCapturedOpenCodeSessionID() = %q before set, want empty", got)
+	}
+
+	SetLastCapturedOpenCodeSessionID("ses_abc123")
+	if got := GetLastCapturedOpenCodeSessionID(); got != "ses_abc123" {
+		t.Errorf("GetLastCapturedOpenCodeSessionID() = %q, want ses_abc123", got)
+	}
+
+	ClearLastCapturedOpenCodeSessionID()
+	if got := GetLastCapturedOpenCodeSessionID(); got != "" {
+		t.Errorf("GetLastCapturedOpenCodeSessionID() = %q after clear, want empty", got)
+	}
+}
+
 func TestResumeSessionID_Concurrent(t *testing.T) {
 	t.Cleanup(func() {
 		ClearResumeSessionID()
 		ClearLastCapturedSessionID()
+		ClearLastCapturedOpenCodeSessionID()
 	})
 
 	const goroutines = 10
@@ -296,6 +315,9 @@ func TestResumeSessionID_Concurrent(t *testing.T) {
 				SetLastCapturedSessionID("captured-concurrent")
 				_ = GetLastCapturedSessionID()
 				ClearLastCapturedSessionID()
+				SetLastCapturedOpenCodeSessionID("opencode-concurrent")
+				_ = GetLastCapturedOpenCodeSessionID()
+				ClearLastCapturedOpenCodeSessionID()
 			}
 		}()
 	}

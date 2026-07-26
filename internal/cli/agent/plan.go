@@ -293,27 +293,40 @@ func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string
 		taskID = info.TaskID
 	}
 
-	// GetLastCapturedSessionID returns the Claude session UUID scraped from the
-	// run's stream output (empty for interactive runs or non-Claude backends),
-	// letting WithWorktree resolve the native transcript exactly.
+	// Captured backend session IDs let WithWorktree resolve native transcripts
+	// exactly for CLIs that need a session-specific lookup/export.
 	opts := sessionfinalize.WithWorktreeOptions{
-		WorktreePath:    worktreePath,
-		BeforeRef:       beforeRef,
-		TaskID:          taskID,
-		ExitCode:        exitCode,
-		ClaudeSessionID: backends.GetLastCapturedSessionID(),
+		WorktreePath:      worktreePath,
+		BeforeRef:         beforeRef,
+		TaskID:            taskID,
+		ExitCode:          exitCode,
+		ClaudeSessionID:   backends.GetLastCapturedSessionID(),
+		OpenCodeSessionID: backends.GetLastCapturedOpenCodeSessionID(),
 	}
+	var rec *usage.SessionUsage
+	endedAt := time.Now()
 	if collector != nil {
-		rec := collector.Finalize(taskID, epicID, startedAt, time.Now(), exitCode)
-		opts.InputTokens = rec.InputTokens
-		opts.OutputTokens = rec.OutputTokens
-		opts.CacheReadTokens = rec.CacheReadTokens
-		opts.CacheWriteTokens = rec.CacheWriteTokens
-		opts.EstimatedCostUSD = rec.EstimatedCostUSD
-		appendUsageRecord(rec)
+		r := collector.Finalize(taskID, epicID, startedAt, endedAt, exitCode)
+		opts.InputTokens = r.InputTokens
+		opts.OutputTokens = r.OutputTokens
+		opts.CacheReadTokens = r.CacheReadTokens
+		opts.CacheWriteTokens = r.CacheWriteTokens
+		opts.EstimatedCostUSD = r.EstimatedCostUSD
+		opts.Model = r.Model
+		rec = &r
 	}
 
 	_, _ = sessionfinalize.WithWorktree(sess, opts)
+	if rec != nil {
+		rec.SessionID = sess.Meta.SessionID
+		rec.InputTokens = sess.Meta.InputTokens
+		rec.OutputTokens = sess.Meta.OutputTokens
+		rec.CacheReadTokens = sess.Meta.CacheReadTokens
+		rec.CacheWriteTokens = sess.Meta.CacheWriteTokens
+		rec.EstimatedCostUSD = sess.Meta.EstimatedCostUSD
+		rec.Model = sess.Meta.Model
+		appendUsageRecord(*rec)
+	}
 	backends.ClearActiveSessionEnv()
 }
 

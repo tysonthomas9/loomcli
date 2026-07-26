@@ -11,7 +11,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
-	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // transcriptMatchMargin tolerates clock skew between a session's recorded start
@@ -149,7 +148,8 @@ func backfillSession(store *sessions.Store, o orphanSession, srcPath string) err
 		return err
 	}
 	if tok.InputTokens == 0 && tok.OutputTokens == 0 &&
-		tok.CacheReadTokens == 0 && tok.CacheWriteTokens == 0 {
+		tok.CacheReadTokens == 0 && tok.CacheWriteTokens == 0 &&
+		tok.CostUSD == 0 && tok.Model == "" {
 		return nil // transcript captured; no usage to record
 	}
 	meta, err := store.LoadMetadata(o.sessionID)
@@ -160,12 +160,12 @@ func backfillSession(store *sessions.Store, o orphanSession, srcPath string) err
 	meta.OutputTokens = tok.OutputTokens
 	meta.CacheReadTokens = tok.CacheReadTokens
 	meta.CacheWriteTokens = tok.CacheWriteTokens
-	meta.EstimatedCostUSD = usage.EstimateCost(usage.ResolvePricing(o.backend), usage.SessionUsage{
-		InputTokens:      tok.InputTokens,
-		OutputTokens:     tok.OutputTokens,
-		CacheReadTokens:  tok.CacheReadTokens,
-		CacheWriteTokens: tok.CacheWriteTokens,
-	})
+	if tok.CostUSD > 0 {
+		meta.EstimatedCostUSD = tok.CostUSD
+	}
+	if tok.Model != "" {
+		meta.Model = tok.Model
+	}
 	if err := store.SaveMetadata(o.sessionID, meta); err != nil {
 		return err
 	}

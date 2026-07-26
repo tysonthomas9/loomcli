@@ -99,7 +99,7 @@ func codexSessionWalkRoots(root string, since, now time.Time) []string {
 	if now.Before(cutoff) {
 		now = cutoff
 	}
-	start := dateOnly(cutoff)
+	start := dateOnly(cutoff.In(now.Location()))
 	end := dateOnly(now)
 	if end.Sub(start) > 14*24*time.Hour {
 		return []string{root}
@@ -180,10 +180,36 @@ func sameCleanPath(a, b string) bool {
 	if a == "" || b == "" {
 		return false
 	}
-	aa, errA := filepath.Abs(a)
-	bb, errB := filepath.Abs(b)
-	if errA != nil || errB != nil {
-		return filepath.Clean(a) == filepath.Clean(b)
+
+	aCandidates := pathIdentityCandidates(a)
+	bCandidates := pathIdentityCandidates(b)
+	for candidate := range aCandidates {
+		if bCandidates[candidate] {
+			return true
+		}
 	}
-	return filepath.Clean(aa) == filepath.Clean(bb)
+	return false
+}
+
+func pathIdentityCandidates(path string) map[string]bool {
+	candidates := []string{path}
+	if abs, err := filepath.Abs(path); err == nil {
+		candidates = append(candidates, abs)
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			candidates = append(candidates, resolved)
+		}
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		candidates = append(candidates, resolved)
+	}
+
+	seen := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		seen[filepath.Clean(candidate)] = true
+	}
+	return seen
 }
