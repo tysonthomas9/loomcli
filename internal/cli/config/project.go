@@ -108,6 +108,9 @@ type AgentEntry struct {
 	Parent           string                   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
 	Mode             domain.AgentMode         `yaml:"mode,omitempty"`   // ephemeral: exit cleanly after one successful task; service: loop forever (default)
 	DesiredState     domain.AgentDesiredState `yaml:"desired_state,omitempty"`
+	// Hooks are the supervisor-owned post-run pipelines. Nil preserves the
+	// pre-hook behavior (the agent's own prompt does its bookkeeping).
+	Hooks *domain.AgentHooks `yaml:"hooks,omitempty"`
 }
 
 // Equal compares persisted config fields only (excludes SourceRepos). Update when adding fields.
@@ -116,6 +119,7 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 		a.Auto == b.Auto && a.Backend == b.Backend && a.CrossRepo == b.CrossRepo && a.Parent == b.Parent &&
 		a.Mode == b.Mode &&
 		a.DesiredState == b.DesiredState &&
+		a.Hooks.Equal(b.Hooks) &&
 		slices.Equal(a.FallbackBackends, b.FallbackBackends) && slices.Equal(a.PathPatterns, b.PathPatterns) &&
 		slices.Equal(a.Repos, b.Repos) && slices.Equal(a.RepoGroups, b.RepoGroups)
 }
@@ -333,6 +337,7 @@ func agentEntryFromDomain(a *domain.Agent) AgentEntry {
 		Parent:           a.Parent,
 		Mode:             a.Mode,
 		DesiredState:     a.DesiredState,
+		Hooks:            a.Hooks.Clone(),
 	}
 }
 

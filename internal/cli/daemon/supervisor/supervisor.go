@@ -814,6 +814,10 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	// Ledger hook: LastError is set, the lock is still present, and
 	// AgentSessionID has not been cleared by finalize yet.
 	s.recordTaskExitForQuarantine(ap, exitCode)
+	// Completion hooks run while the session id, claim, and transcript still
+	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
+	// failed hook write demotes exitCode so the owned task is reopened.
+	exitCode = s.runCompletionHooks(ap, exitCode)
 	s.finalizeAgentSession(ap, exitCode)
 	s.handleAgentCheckpoint(ap, exitCode)
 	s.postMortemRecovery(ap, exitCode)
