@@ -53,6 +53,9 @@ func printAgentDiagnostics(agent DaemonAgentStatus) {
 	if agent.NoWorkCount > 0 {
 		fmt.Printf("      NoWork: %d\n", agent.NoWorkCount)
 	}
+	if agent.NoWorkSpawnCount > 0 {
+		fmt.Printf("      NoWork(spawned): %d\n", agent.NoWorkSpawnCount)
+	}
 	if agent.BlockCount > 0 {
 		fmt.Printf("      Block cycles: %d\n", agent.BlockCount)
 	}

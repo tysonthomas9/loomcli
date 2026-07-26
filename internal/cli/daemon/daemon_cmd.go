@@ -41,7 +41,8 @@ type DaemonAgentStatus struct {
 	WorktreePath           string    `json:"worktree_path,omitempty"`
 	LastErrorClass         string    `json:"last_error_class,omitempty"`
 	NoWorkCount            int       `json:"no_work_count,omitempty"`
-	BlockCount             int       `json:"block_count,omitempty"` // display-only: never hydrated back into supervision across daemon restarts
+	NoWorkSpawnCount       int       `json:"no_work_spawn_count,omitempty"` // consecutive POST-SPAWN no-work exits; drives the exponential no-work backoff
+	BlockCount             int       `json:"block_count,omitempty"`         // display-only: never hydrated back into supervision across daemon restarts
 	BackoffUntil           time.Time `json:"backoff_until,omitempty"`
 	RemoteBranch           string    `json:"remote_branch,omitempty"`
 	OwnershipLeaseID       string    `json:"ownership_lease_id,omitempty"`

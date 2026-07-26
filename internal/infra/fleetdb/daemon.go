@@ -17,9 +17,9 @@ var _ store.DaemonProfileStore = (*daemonStore)(nil)
 // NOTE: fleet-db's RestartPolicy schema is narrower than loom's domain
 // type. Fields that exist only in loom (OutputTimeout, RateLimitBackoff,
 // RateLimitMaxWait, RateLimitNoCount, TimeoutBackoff, NoWorkBackoff,
-// IdlePollInterval, YieldTimeout, SigtermTimeout) are silently dropped
-// on Upsert and zeroed on Get. Same for OTel: loom's Protocol /
-// FlushIntervalMs / Traces / Metrics fields are not persisted.
+// NoWorkBackoffMax, IdlePollInterval, YieldTimeout, SigtermTimeout) are
+// silently dropped on Upsert and zeroed on Get. Same for OTel: loom's
+// Protocol / FlushIntervalMs / Traces / Metrics fields are not persisted.
 //
 // Future work: extend fleet-db's models.RestartPolicy + OTelSettings to
 // cover the full set, or split per-host-only fields out of the domain

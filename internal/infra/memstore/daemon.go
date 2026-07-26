@@ -84,6 +84,7 @@ func cloneRestartPolicy(rp domain.RestartPolicy) domain.RestartPolicy {
 		RateLimitNoCount: clonePtr(rp.RateLimitNoCount),
 		TimeoutBackoff:   clonePtr(rp.TimeoutBackoff),
 		NoWorkBackoff:    clonePtr(rp.NoWorkBackoff),
+		NoWorkBackoffMax: clonePtr(rp.NoWorkBackoffMax),
 		IdlePollInterval: clonePtr(rp.IdlePollInterval),
 		YieldTimeout:     clonePtr(rp.YieldTimeout),
 		SigtermTimeout:   clonePtr(rp.SigtermTimeout),

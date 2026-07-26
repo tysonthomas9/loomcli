@@ -140,6 +140,7 @@ func toDaemonAgentStatus(ap supervisor.SupervisedAgentStatus, maxRetries int) Da
 		WorktreePath:           ap.WorktreePath,
 		LastErrorClass:         ap.LastErrorClass,
 		NoWorkCount:            ap.NoWorkCount,
+		NoWorkSpawnCount:       ap.NoWorkSpawnCount,
 		BlockCount:             ap.BlockCount,
 		BackoffUntil:           ap.BackoffUntil,
 		RemoteBranch:           ap.RemoteBranch,
