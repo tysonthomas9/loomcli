@@ -157,6 +157,12 @@ func appendRoutingEnv(env []string, ap *AgentProcess) []string {
 	if ap.RoleConfig.TaskFilter != "" {
 		env = append(env, fmt.Sprintf("LOOM_ROLE_TASK_FILTER=%s", ap.RoleConfig.TaskFilter))
 	}
+	if len(ap.RoleConfig.Labels) > 0 {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_LABELS=%s", strings.Join(ap.RoleConfig.Labels, ",")))
+	}
+	if len(ap.RoleConfig.ExcludeLabels) > 0 {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_EXCLUDE_LABELS=%s", strings.Join(ap.RoleConfig.ExcludeLabels, ",")))
+	}
 	env = append(env, fmt.Sprintf("LOOM_ROLE=%s", ap.Entry.Role))
 	if len(ap.Entry.PathPatterns) > 0 {
 		env = append(env, fmt.Sprintf("LOOM_AGENT_PATH_PATTERNS=%s", strings.Join(ap.Entry.PathPatterns, ",")))

@@ -26,6 +26,8 @@ var (
 	roleAddBackend     string
 	roleAddEffort      string
 	roleAddSkills      []string
+	roleAddLabels      []string
+	roleAddExclLabels  []string
 	roleAddMaxConc     int
 	roleAddReadOnly    bool
 
@@ -84,6 +86,8 @@ var roleSetCmd = &cobra.Command{
   max_concurrency integer
   max_budget_usd  float
   skills          comma-separated list
+  labels          comma-separated list (issue must carry ALL to be claimable)
+  exclude_labels  comma-separated list (reject if the issue carries ANY)
   path_patterns   comma-separated list
   allowed_tools   comma-separated list
   denied_tools    comma-separated list`,
@@ -99,7 +103,7 @@ var roleUnsetCmd = &cobra.Command{
   max_concurrency *int     (clear)
   max_budget_usd  *float64 (clear)
   description / kind / prompt / prompt_file / model / task_filter / backend / effort  (set to "")
-  skills / path_patterns / allowed_tools / denied_tools      (set to empty list)
+  skills / labels / exclude_labels / path_patterns / allowed_tools / denied_tools  (set to empty list)
   read_only                                                 (set to false)`,
 	Args: cobra.ExactArgs(2),
 	RunE: runRoleUnset,
@@ -114,6 +118,8 @@ func init() {
 	roleAddCmd.Flags().StringVar(&roleAddBackend, "backend", "", "AI backend (e.g., claude, codex)")
 	roleAddCmd.Flags().StringVar(&roleAddEffort, "effort", "", "Agent effort (low, medium, high, xhigh, max)")
 	roleAddCmd.Flags().StringSliceVar(&roleAddSkills, "skills", nil, "Skills (comma-separated or repeat flag)")
+	roleAddCmd.Flags().StringSliceVar(&roleAddLabels, "labels", nil, "Only claim issues carrying ALL of these labels (comma-separated or repeat flag)")
+	roleAddCmd.Flags().StringSliceVar(&roleAddExclLabels, "exclude-labels", nil, "Never claim issues carrying ANY of these labels (comma-separated or repeat flag)")
 	roleAddCmd.Flags().IntVar(&roleAddMaxConc, "max-concurrency", 0, "Max concurrent agents (0 = unlimited)")
 	roleAddCmd.Flags().BoolVar(&roleAddReadOnly, "read-only", false, "Read-only role")
 
@@ -130,17 +136,19 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 	}
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		in := store.RoleCreate{
-			WorkspaceKey: ws,
-			Name:         args[0],
-			Kind:         normalizeRoleKindValue(roleAddKind),
-			Description:  roleAddDescription,
-			Prompt:       roleAddPrompt,
-			PromptFile:   roleAddPromptFile,
-			Model:        roleAddModel,
-			Backend:      roleAddBackend,
-			Effort:       roleAddEffort,
-			Skills:       roleAddSkills,
-			ReadOnly:     roleAddReadOnly,
+			WorkspaceKey:  ws,
+			Name:          args[0],
+			Kind:          normalizeRoleKindValue(roleAddKind),
+			Description:   roleAddDescription,
+			Prompt:        roleAddPrompt,
+			PromptFile:    roleAddPromptFile,
+			Model:         roleAddModel,
+			Backend:       roleAddBackend,
+			Effort:        roleAddEffort,
+			Skills:        roleAddSkills,
+			Labels:        roleAddLabels,
+			ExcludeLabels: roleAddExclLabels,
+			ReadOnly:      roleAddReadOnly,
 		}
 		if roleAddMaxConc > 0 {
 			v := roleAddMaxConc
@@ -340,6 +348,10 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 		patch.MaxBudgetUSD = &ptr
 	case "skills":
 		patch.Skills = sliceCSVPtr(value)
+	case "labels":
+		patch.Labels = sliceCSVPtr(value)
+	case "exclude_labels":
+		patch.ExcludeLabels = sliceCSVPtr(value)
 	case "path_patterns":
 		patch.PathPatterns = sliceCSVPtr(value)
 	case "allowed_tools":

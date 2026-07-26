@@ -17,18 +17,23 @@ const (
 // Workspace-scoped: every Workspace gets its own Role definitions
 // (built-in "plan" and "task" are auto-seeded on workspace creation).
 type Role struct {
-	WorkspaceKey   string   `json:"workspace_key"`
-	Name           string   `json:"name"`
-	Kind           RoleKind `json:"kind,omitempty"`
-	Description    string   `json:"description,omitempty"`
-	Prompt         string   `json:"prompt,omitempty"`
-	PromptFile     string   `json:"prompt_file,omitempty"`
-	Model          string   `json:"model,omitempty"`
-	TaskFilter     string   `json:"task_filter,omitempty"`
-	Backend        string   `json:"backend,omitempty"`
-	Effort         string   `json:"effort,omitempty"`
-	PathPatterns   []string `json:"path_patterns,omitempty"`
-	Skills         []string `json:"skills,omitempty"`
+	WorkspaceKey string   `json:"workspace_key"`
+	Name         string   `json:"name"`
+	Kind         RoleKind `json:"kind,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Prompt       string   `json:"prompt,omitempty"`
+	PromptFile   string   `json:"prompt_file,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	TaskFilter   string   `json:"task_filter,omitempty"`
+	Backend      string   `json:"backend,omitempty"`
+	Effort       string   `json:"effort,omitempty"`
+	PathPatterns []string `json:"path_patterns,omitempty"`
+	Skills       []string `json:"skills,omitempty"`
+	// Labels requires an issue to carry ALL of these (AND); ExcludeLabels
+	// rejects it if ANY is present (OR), evaluated first. Together they give a
+	// pipeline stage its trigger and its termination condition.
+	Labels         []string `json:"labels,omitempty"`
+	ExcludeLabels  []string `json:"exclude_labels,omitempty"`
 	MaxPriority    *int     `json:"max_priority,omitempty"`
 	MaxConcurrency *int     `json:"max_concurrency,omitempty"`
 	ReadOnly       bool     `json:"read_only,omitempty"`

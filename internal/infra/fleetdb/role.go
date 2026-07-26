@@ -26,6 +26,8 @@ type roleWire struct {
 	Effort         string    `json:"effort,omitempty"`
 	PathPatterns   []string  `json:"path_patterns,omitempty"`
 	Skills         []string  `json:"skills,omitempty"`
+	Labels         []string  `json:"labels,omitempty"`
+	ExcludeLabels  []string  `json:"exclude_labels,omitempty"`
 	MaxPriority    *int      `json:"max_priority,omitempty"`
 	MaxConcurrency *int      `json:"max_concurrency,omitempty"`
 	ReadOnly       bool      `json:"read_only,omitempty"`
@@ -50,6 +52,8 @@ func (r roleWire) toDomain() *domain.Role {
 		Effort:         r.Effort,
 		PathPatterns:   r.PathPatterns,
 		Skills:         r.Skills,
+		Labels:         r.Labels,
+		ExcludeLabels:  r.ExcludeLabels,
 		MaxPriority:    r.MaxPriority,
 		MaxConcurrency: r.MaxConcurrency,
 		ReadOnly:       r.ReadOnly,
@@ -74,6 +78,8 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Effort         string   `json:"effort,omitempty"`
 		PathPatterns   []string `json:"path_patterns,omitempty"`
 		Skills         []string `json:"skills,omitempty"`
+		Labels         []string `json:"labels,omitempty"`
+		ExcludeLabels  []string `json:"exclude_labels,omitempty"`
 		MaxPriority    *int     `json:"max_priority,omitempty"`
 		MaxConcurrency *int     `json:"max_concurrency,omitempty"`
 		ReadOnly       bool     `json:"read_only,omitempty"`
@@ -92,6 +98,8 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Effort:         in.Effort,
 		PathPatterns:   in.PathPatterns,
 		Skills:         in.Skills,
+		Labels:         in.Labels,
+		ExcludeLabels:  in.ExcludeLabels,
 		MaxPriority:    in.MaxPriority,
 		MaxConcurrency: in.MaxConcurrency,
 		ReadOnly:       in.ReadOnly,
@@ -146,6 +154,8 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		Effort            *string   `json:"effort,omitempty"`
 		PathPatterns      *[]string `json:"path_patterns,omitempty"`
 		Skills            *[]string `json:"skills,omitempty"`
+		Labels            *[]string `json:"labels,omitempty"`
+		ExcludeLabels     *[]string `json:"exclude_labels,omitempty"`
 		MaxPriority       *int      `json:"max_priority,omitempty"`
 		ClearMaxPriority  bool      `json:"clear_max_priority,omitempty"`
 		MaxConcurrency    *int      `json:"max_concurrency,omitempty"`
@@ -156,19 +166,21 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		MaxBudgetUSD      *float64  `json:"max_budget_usd,omitempty"`
 		ClearMaxBudgetUSD bool      `json:"clear_max_budget_usd,omitempty"`
 	}{
-		Description:  patch.Description,
-		Kind:         patch.Kind,
-		Prompt:       patch.Prompt,
-		PromptFile:   patch.PromptFile,
-		Model:        patch.Model,
-		TaskFilter:   patch.TaskFilter,
-		Backend:      patch.Backend,
-		Effort:       patch.Effort,
-		PathPatterns: patch.PathPatterns,
-		Skills:       patch.Skills,
-		ReadOnly:     patch.ReadOnly,
-		AllowedTools: patch.AllowedTools,
-		DeniedTools:  patch.DeniedTools,
+		Description:   patch.Description,
+		Kind:          patch.Kind,
+		Prompt:        patch.Prompt,
+		PromptFile:    patch.PromptFile,
+		Model:         patch.Model,
+		TaskFilter:    patch.TaskFilter,
+		Backend:       patch.Backend,
+		Effort:        patch.Effort,
+		PathPatterns:  patch.PathPatterns,
+		Skills:        patch.Skills,
+		Labels:        patch.Labels,
+		ExcludeLabels: patch.ExcludeLabels,
+		ReadOnly:      patch.ReadOnly,
+		AllowedTools:  patch.AllowedTools,
+		DeniedTools:   patch.DeniedTools,
 	}
 	if patch.MaxPriority != nil {
 		if *patch.MaxPriority == nil {
