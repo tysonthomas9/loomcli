@@ -1093,8 +1093,10 @@ func TestMatchTask_NilIssueLabels(t *testing.T) {
 
 		got := MatchTask(issue, c)
 
-		if got.Score == 0 {
-			t.Error("Score = 0, want non-zero (nil labels can't match an exclude label)")
+		// base:100 + priority bonus (20 - 2*4 = 12) = 112; nil issue labels
+		// can't match ExcludeLabels, so this must score normally, not reject.
+		if got.Score != 112 {
+			t.Errorf("Score = %d, want 112 (nil labels can't match an exclude label)", got.Score)
 		}
 	})
 }
