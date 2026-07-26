@@ -80,6 +80,12 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if len(overlay.Skills) > 0 {
 		base.Skills = overlay.Skills
 	}
+	if len(overlay.Labels) > 0 {
+		base.Labels = overlay.Labels
+	}
+	if len(overlay.ExcludeLabels) > 0 {
+		base.ExcludeLabels = overlay.ExcludeLabels
+	}
 	if len(overlay.PathPatterns) > 0 {
 		base.PathPatterns = overlay.PathPatterns
 	}
