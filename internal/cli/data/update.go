@@ -24,6 +24,8 @@ var (
 	updateDescFile     string
 	updateAddDeps      []string
 	updateRemoveDeps   []string
+	updateAddLabels    []string
+	updateRemoveLabels []string
 )
 
 var updateCmd = &cobra.Command{
@@ -100,6 +102,8 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		params.Title = &updateTitle
 		changed = true
 	}
+	// Evaluated first so the label flags are always applied, never short-circuited.
+	changed = applyLabelFlags(cmd, &params) || changed
 	if descFromFlag {
 		params.Description = &updateDescription
 		changed = true
@@ -113,6 +117,31 @@ func updateParamsFromFlags(cmd *cobra.Command) (backend.UpdateParams, bool, erro
 		changed = true
 	}
 	return params, changed, nil
+}
+
+// applyLabelFlags copies the repeatable label deltas into params, reporting
+// whether either flag was given.
+//
+// The return value is load-bearing. Label deltas are ordinary fields of the
+// issue PATCH, not a separate resource like dependencies, so they must count
+// toward fieldsChanged: without that, `--add-label x --depends-on Y` takes
+// RunE's `depsChanged && !fieldsChanged` branch, skips Update entirely, and
+// silently drops the label while reporting success.
+//
+// Each occurrence is forwarded as one exact label — no splitting, trimming,
+// deduplication, or key=value parsing. Backend validation is authoritative,
+// and add-existing / remove-absent are idempotent successes there.
+func applyLabelFlags(cmd *cobra.Command, params *backend.UpdateParams) bool {
+	changed := false
+	if cmd.Flags().Changed("add-label") {
+		params.AddLabels = updateAddLabels
+		changed = true
+	}
+	if cmd.Flags().Changed("remove-label") {
+		params.RemoveLabels = updateRemoveLabels
+		changed = true
+	}
+	return changed
 }
 
 func applyDesignFormatFlag(cmd *cobra.Command, params *backend.UpdateParams) (bool, error) {
@@ -194,6 +223,8 @@ func init() {
 	updateCmd.Flags().StringVar(&updateDescFile, "description-from-file", "", "Read description from file (use - for stdin)")
 	updateCmd.Flags().StringArrayVar(&updateAddDeps, "depends-on", nil, "Add dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateRemoveDeps, "remove-depends-on", nil, "Remove dependency on issue ID (repeatable)")
+	updateCmd.Flags().StringArrayVar(&updateAddLabels, "add-label", nil, "Add label (repeatable)")
+	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable)")
 }
 
 func readDescriptionFile(path string, stdin io.Reader) (string, error) {

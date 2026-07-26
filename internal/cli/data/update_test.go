@@ -190,9 +190,16 @@ func resetUpdateFieldFlags(t *testing.T) {
 	for _, name := range []string{
 		"status", "assignee", "notes", "design", "priority",
 		"title", "description", "description-from-file",
+		"add-label", "remove-label",
 	} {
 		setTestFlagChanged(t, updateCmd.Flags(), name, false)
 	}
+	// The slices matter too, not just the Changed bits: RunE's depsChanged is
+	// computed from slice length, so leaked global state changes which branch
+	// runs.
+	updateAddLabels = nil
+	updateRemoveLabels = nil
+	t.Cleanup(func() { updateAddLabels = nil; updateRemoveLabels = nil })
 }
 
 func TestDataUpdate_DependsOnOnly_SkipsFieldUpdate(t *testing.T) {
