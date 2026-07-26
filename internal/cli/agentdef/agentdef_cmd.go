@@ -34,6 +34,7 @@ var (
 	agentAddTaskFilter   string
 	agentAddMaxConc      int
 	agentAddBudget       string
+	agentAddExecution    string
 	agentAddTask         string
 	agentAddOrchestrator string
 
@@ -111,6 +112,7 @@ func init() {
 	agentAddCmd.Flags().StringVar(&agentAddTaskFilter, "task-filter", "", "Task filter for task-driven agents")
 	agentAddCmd.Flags().IntVar(&agentAddMaxConc, "max-concurrency", 0, "Maximum concurrent runs for orchestrator/service agents")
 	agentAddCmd.Flags().StringVar(&agentAddBudget, "budget-policy", "", "Budget/retry policy name")
+	agentAddCmd.Flags().StringVar(&agentAddExecution, "execution", "", `Execution strategy: "" (host, default) or "sandbox" (run under OpenShell)`)
 	agentAddCmd.Flags().StringVar(&agentAddTask, "task", "", "Pin this agent's first cycle to a specific task ID (claims that task instead of polling Ready)")
 	agentAddCmd.Flags().StringVar(&agentAddOrchestrator, "orchestrator", "", "Parent lead/orchestrator session ID for the queued --task start command (overrides $LOOM_ORCHESTRATOR_SESSION_ID)")
 
@@ -169,6 +171,7 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) store.A
 		MaxConcurrency: agentAddMaxConc,
 		BudgetPolicy:   agentAddBudget,
 		DesiredState:   desiredState,
+		Execution:      agentAddExecution,
 	}
 }
 

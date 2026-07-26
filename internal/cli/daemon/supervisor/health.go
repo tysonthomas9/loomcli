@@ -168,8 +168,11 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 	// where the file-based tiers below go stale even while the agent is busy.
 	consider(heartbeat, "heartbeat")
 
-	// Tier 1: session transcript mtime (updated by hooks on every turn).
-	if txPath != "" {
+	// Tier 1: session transcript mtime (updated by hooks on every turn). Skipped
+	// for sandbox agents: the transcript is written INSIDE the container, so the
+	// host path is always stale and would falsely trip the watchdog — sandbox
+	// agents rely on log mtime (Tier 2), fed by openshell-forwarded container stdout.
+	if !ap.IsSandbox() && txPath != "" {
 		if info, err := os.Stat(txPath); err == nil {
 			consider(info.ModTime(), "transcript")
 		}

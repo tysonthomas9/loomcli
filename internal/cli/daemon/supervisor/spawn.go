@@ -23,7 +23,11 @@ import (
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
 func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
-	cfg := s.ConfigSnapshot()
+	// execution: sandbox — provision an OpenShell sandbox and return its `exec`
+	// command instead of the default host loom process. Gated; default off.
+	if ap.IsSandbox() {
+		return s.buildSandboxCommand(ap)
+	}
 
 	ap.Mu.Lock()
 	epicID := ap.AssignedEpicID
@@ -38,42 +42,55 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cmd.Dir = ap.WorktreePath
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	cmd.Env = append(cli.FilteredEnv(),
+	env, err := s.buildAgentEnv(ap)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = env
+
+	return cmd, nil
+}
+
+// buildAgentEnv assembles the environment for a host agent subprocess.
+func (s *Supervisor) buildAgentEnv(ap *AgentProcess) ([]string, error) {
+	cfg := s.ConfigSnapshot()
+
+	env := append(cli.FilteredEnv(),
 		fmt.Sprintf("LOOM_AGENT_NAME=%s", ap.Entry.Worktree),
 		fmt.Sprintf("LOOM_WORKTREE_PATH=%s", ap.WorktreePath),
 		fmt.Sprintf("LOOM_EVENTS_DIR=%s", ResolveDaemonPath(s.ProjectDir, cfg.Daemon.EventsDir)),
 	)
 
-	cmd.Env = appendRoleEnv(cmd.Env, ap)
-	cmd.Env = appendRoutingEnv(cmd.Env, ap)
+	env = appendRoleEnv(env, ap)
+	env = appendRoutingEnv(env, ap)
 
 	sourceRepos, err := cfgpkg.ResolveAgentRepos(ap.Entry, s.Repos)
 	if err != nil {
 		return nil, fmt.Errorf("resolve agent repos: %w", err)
 	}
 	if len(sourceRepos) > 0 {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
+		env = append(env, fmt.Sprintf("LOOM_SOURCE_REPOS=%s", strings.Join(sourceRepos, ",")))
 	}
 
 	ap.Mu.Lock()
 	assignedTaskID := ap.AssignedTaskID
 	ap.Mu.Unlock()
 	if assignedTaskID != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
+		env = append(env, fmt.Sprintf("LOOM_ASSIGNED_TASK_ID=%s", assignedTaskID))
 	}
 
-	cmd.Env = s.appendDaemonEnv(cmd.Env)
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
-	cmd.Env = appendSessionEnv(cmd.Env, ap)
+	env = s.appendDaemonEnv(env)
+	env = append(env, fmt.Sprintf("LOOM_YIELD_FILE=%s", filepath.Join(ap.WorktreePath, YieldFileName)))
+	env = appendSessionEnv(env, ap)
 
 	// Propagate the active trace context so the agent subprocess's bootstrap
 	// span and per-request spans inherit the daemon's trace tree.
 	// See docs/observability/tracing-contract.md §5.
 	if tp := tracing.TraceparentFromContext(cmdstore.RootContext()); tp != "" {
-		cmd.Env = append(cmd.Env, "LOOM_TRACE_PARENT="+tp)
+		env = append(env, "LOOM_TRACE_PARENT="+tp)
 	}
 
-	return cmd, nil
+	return env, nil
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.
@@ -447,4 +464,59 @@ func (s *Supervisor) appendDaemonEnv(env []string) []string {
 		env = append(env, fmt.Sprintf("LOOM_DAEMON_SOCKET=%s", s.IpcSocketPath))
 	}
 	return env
+}
+
+// buildSandboxCommand provisions an OpenShell sandbox for ap and returns the
+// unstarted `sandbox exec` command, recording the sandbox name + credential-revoke
+// func on ap so postExitCleanup can fetch the work back, revoke, and delete it.
+//
+// The heavy sandbox / fleet-db / bootstrap logic lives in internal/cli/agent (the
+// package that also owns the one-shot sandbox flow), reached via the existing
+// supervisor→agent dependency. This keeps the supervisor package's import fan-out
+// bounded; the method only marshals AgentProcess → agent.SandboxExecSpec.
+func (s *Supervisor) buildSandboxCommand(ap *AgentProcess) (*exec.Cmd, error) {
+	ap.Mu.Lock()
+	epicID := ap.AssignedEpicID
+	ap.Mu.Unlock()
+
+	spec := agent.SandboxExecSpec{
+		Worktree:      ap.Entry.Worktree,
+		WorktreePath:  ap.WorktreePath,
+		WorkspaceID:   s.WorkspaceID,
+		ProjectDir:    s.ProjectDir,
+		Role:          ap.Entry.Role,
+		IsBuiltinRole: BuiltInRoles[ap.Entry.Role],
+		PromptFile:    ap.RoleConfig.PromptFile,
+		TaskFilter:    ap.RoleConfig.TaskFilter,
+		EpicID:        epicID,
+		Backend:       s.GetEffectiveBackend(ap),
+	}
+	if ap.RepoConfig != nil {
+		spec.RepoRemoteURL = ap.RepoConfig.RemoteURL
+	}
+
+	cmd, name, revoke, err := agent.BuildSandboxExecCommand(spec)
+	if err != nil {
+		return nil, err
+	}
+	ap.Mu.Lock()
+	ap.SandboxName = name
+	ap.sandboxRevoke = revoke
+	ap.Mu.Unlock()
+	return cmd, nil
+}
+
+// cleanupSandbox fetches the branch the sandbox pushed, fast-forwards the host
+// worktree, revokes the scoped credential, and deletes the sandbox. Called from
+// postExitCleanup for execution:sandbox agents after the exec process exits.
+func (s *Supervisor) cleanupSandbox(ap *AgentProcess) {
+	ap.Mu.Lock()
+	name := ap.SandboxName
+	revoke := ap.sandboxRevoke
+	ap.SandboxName = ""
+	ap.sandboxRevoke = nil
+	ap.Mu.Unlock()
+
+	branch, _ := cli.GetCurrentBranch(ap.WorktreePath)
+	agent.CleanupSandboxExec(s.ProjectDir, ap.WorktreePath, branch, name, revoke)
 }

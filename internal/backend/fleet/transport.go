@@ -19,6 +19,13 @@ import (
 // See docs/design/fleet-http-connection-reuse.md for the symptom analysis
 // and the rationale behind each tuning value.
 var sharedTransport = &http.Transport{
+	// Honor HTTP(S)_PROXY/NO_PROXY. A hand-built *http.Transport defaults Proxy
+	// to nil (direct dial) — unlike http.DefaultTransport. Inside an OpenShell
+	// sandbox all egress is forced through the policy-enforcing proxy (http_proxy=
+	// http://10.200.0.1:3128); without this a sandboxed loom dials fleet-db
+	// directly and the connection is refused. Outside a sandbox no proxy env is
+	// set, so ProxyFromEnvironment returns nil and behavior is unchanged.
+	Proxy:                 http.ProxyFromEnvironment,
 	MaxIdleConnsPerHost:   128,
 	MaxIdleConns:          256,
 	IdleConnTimeout:       90 * time.Second,

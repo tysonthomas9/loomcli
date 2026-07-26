@@ -13,6 +13,25 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
+type listTrackingStore struct {
+	store.Store
+	workspaces *listTrackingWorkspaceStore
+}
+
+func (s *listTrackingStore) Workspaces() store.WorkspaceStore {
+	return s.workspaces
+}
+
+type listTrackingWorkspaceStore struct {
+	store.WorkspaceStore
+	listCalls int
+}
+
+func (s *listTrackingWorkspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
+	s.listCalls++
+	return s.WorkspaceStore.List(ctx)
+}
+
 func TestGetConfigDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("LOOM_CONFIG_DIR", tmpDir)
@@ -136,6 +155,8 @@ func TestLoadConfigFromStoreProjectsFleetDBWithLocalState(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	t.Cleanup(func() { _ = st.Close() })
+	trackedWorkspaces := &listTrackingWorkspaceStore{WorkspaceStore: st.Workspaces()}
+	trackedStore := &listTrackingStore{Store: st, workspaces: trackedWorkspaces}
 
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace One"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -161,9 +182,12 @@ func TestLoadConfigFromStoreProjectsFleetDBWithLocalState(t *testing.T) {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	cfg, err := loadConfigFromStore(ctx, st)
+	cfg, err := loadConfigFromStore(ctx, trackedStore)
 	if err != nil {
 		t.Fatalf("loadConfigFromStore() error = %v", err)
+	}
+	if trackedWorkspaces.listCalls != 1 {
+		t.Errorf("global workspace list calls = %d, want 1", trackedWorkspaces.listCalls)
 	}
 	if cfg.DefaultWorkspace != "WS1" || cfg.DefaultWorkspaceID != "WS1" {
 		t.Fatalf("default workspace = %q/%q, want WS1/WS1", cfg.DefaultWorkspace, cfg.DefaultWorkspaceID)

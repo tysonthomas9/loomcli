@@ -28,6 +28,7 @@ type AgentCreate struct {
 	MaxConcurrency int
 	BudgetPolicy   string
 	DesiredState   domain.AgentDesiredState
+	Execution      string
 }
 
 // AgentUpdate is the partial-update payload for agents.
@@ -47,6 +48,7 @@ type AgentUpdate struct {
 	MaxConcurrency *int
 	BudgetPolicy   *string
 	DesiredState   *domain.AgentDesiredState
+	Execution      *string
 }
 
 // AgentStore is the persistence interface for Agent assignments.

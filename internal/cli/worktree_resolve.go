@@ -24,6 +24,27 @@ type Resolver struct {
 
 // NewResolver creates a workspace resolver from configured workspaces.
 func NewResolver() (*Resolver, error) {
+	if bootstrap.DetectMode() == bootstrap.ModeCloud {
+		key, err := bootstrap.ResolveActiveWorkspaceKey(cmdstore.RootContext(), nil)
+		if err != nil {
+			return nil, err
+		}
+		ws, err := config.ResolveActiveWorkspace()
+		if err != nil {
+			return nil, fmt.Errorf("resolve active workspace: %w", err)
+		}
+		if ws == nil {
+			return nil, fmt.Errorf("no active workspace configured")
+		}
+		return &Resolver{
+			Mode: ModeWorkspace,
+			Config: &config.LoomConfig{Workspaces: map[string]config.WorkspaceConfig{
+				key: *ws,
+			}},
+			Workspace: key,
+		}, nil
+	}
+
 	cfg, err := config.LoadConfigCached()
 	if err != nil {
 		return nil, fmt.Errorf("load workspace config: %w", err)
@@ -569,13 +590,20 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 	return nil
 }
 
-// GetWorkspaceRuntimeDir returns the workspace root used for runtime files.
-// This is the configured workspace root path shared across repos.
+// GetWorkspaceRuntimeDir returns the workspace root used for local runtime
+// files. Cloud workers use their cloned repository's current directory instead.
 // The result is cached for the lifetime of the process.
 func GetWorkspaceRuntimeDir() string {
 	workspaceRuntimeDirOnce.Do(func() {
 		if dir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR"); dir != "" {
 			workspaceRuntimeDirCache = dir
+			return
+		}
+		// Cloud workers run from their cloned repository and do not have a
+		// machine-local workspace path. More importantly, loading the global
+		// workspace config would require workspace.list, which scoped keys lack.
+		if bootstrap.DetectMode() == bootstrap.ModeCloud {
+			workspaceRuntimeDirCache = "."
 			return
 		}
 

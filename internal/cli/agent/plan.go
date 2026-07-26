@@ -26,6 +26,7 @@ import (
 var (
 	planAutoMode    bool
 	planDaemonMode  bool // Hidden: for internal tmux session use
+	planSandboxMode bool
 	planInterval    int
 	planMaxTasks    int
 	planIdleTimeout int
@@ -71,6 +72,7 @@ func init() {
 	planCmd.Flags().BoolVarP(&planAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
 	planCmd.Flags().BoolVar(&planDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
 	_ = planCmd.Flags().MarkHidden("daemon-mode")
+	planCmd.Flags().BoolVar(&planSandboxMode, "sandbox", false, "Run the agent inside an isolated OpenShell sandbox container")
 	planCmd.Flags().IntVarP(&planInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	planCmd.Flags().IntVarP(&planMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	planCmd.Flags().IntVarP(&planIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
@@ -94,6 +96,11 @@ func runPlan(cmd *cobra.Command, args []string) {
 
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
+
+	if planSandboxMode {
+		handleSandboxMode("plan", agentName, worktreePath, planParentID, planAutoMode)
+		return
+	}
 
 	if planDaemonMode {
 		runPlanDaemon(deps, worktreePath, agentName)
