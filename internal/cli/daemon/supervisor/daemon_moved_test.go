@@ -583,8 +583,8 @@ func TestShouldRestart(t *testing.T) {
 		if !result {
 			t.Error("shouldRestart() = false, want true for NoWork (always restart)")
 		}
-		if ap.RestartCount != 0 {
-			t.Errorf("restartCount = %d, want 0 (should be reset for NoWork)", ap.RestartCount)
+		if ap.RestartCount != 3 {
+			t.Errorf("restartCount = %d, want 3 (preserved across NoWork, not reset)", ap.RestartCount)
 		}
 		if ap.RateRetryCount != 0 {
 			t.Errorf("rateRetryCount = %d, want 0 (should be reset for NoWork)", ap.RateRetryCount)

@@ -449,6 +449,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := ClearYieldFile(ap.WorktreePath); err != nil {
 		slog.Warn("failed to clear stale yield file", "worktree", ap.Entry.Worktree, "err", err)
 	}
+	if err := ClearNoWorkFile(ap.WorktreePath); err != nil {
+		slog.Warn("failed to clear stale no-work file", "worktree", ap.Entry.Worktree, "err", err)
+	}
 
 	epicID := s.assignEpic(ap)
 	if !s.claimTask(ap, epicID) {
@@ -947,6 +950,7 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 			AssignedEpicID:         ap.AssignedEpicID,
 			StopReason:             ap.StopReason,
 			NoWorkCount:            ap.NoWorkCount,
+			NoWorkSpawnCount:       ap.NoWorkSpawnCount,
 			BlockCount:             ap.BlockCount,
 			BackoffUntil:           ap.BackoffUntil,
 			OwnershipLeaseID:       ap.OwnershipLeaseID,

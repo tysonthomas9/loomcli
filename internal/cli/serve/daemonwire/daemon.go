@@ -304,6 +304,7 @@ func restartPolicyFromDomain(r domain.RestartPolicy) config.RestartPolicy {
 		RateLimitNoCount: cloneBoolPtr(r.RateLimitNoCount),
 		TimeoutBackoff:   cloneIntPtr(r.TimeoutBackoff),
 		NoWorkBackoff:    cloneIntPtr(r.NoWorkBackoff),
+		NoWorkBackoffMax: cloneIntPtr(r.NoWorkBackoffMax),
 		IdlePollInterval: cloneIntPtr(r.IdlePollInterval),
 		YieldTimeout:     cloneIntPtr(r.YieldTimeout),
 		SigtermTimeout:   cloneIntPtr(r.SigtermTimeout),

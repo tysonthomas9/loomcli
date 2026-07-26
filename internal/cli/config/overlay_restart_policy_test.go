@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+)
 
 // ---------------------------------------------------------------------------
 // overlayRestartPolicy YieldTimeout tests
@@ -45,6 +49,67 @@ func TestOverlayRestartPolicy_YieldTimeout(t *testing.T) {
 			t.Errorf("dst.YieldTimeout = %d, want 180", *dst.YieldTimeout)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// overlayRestartPolicy NoWorkBackoffMax tests
+// ---------------------------------------------------------------------------
+
+func TestOverlayRestartPolicy_NoWorkBackoffMax(t *testing.T) {
+	t.Run("src sets NoWorkBackoffMax on nil dst", func(t *testing.T) {
+		dst := RestartPolicy{}
+		src := RestartPolicy{NoWorkBackoffMax: IntPtr(600)}
+		overlayRestartPolicy(&dst, &src)
+
+		if dst.NoWorkBackoffMax == nil {
+			t.Fatal("dst.NoWorkBackoffMax is nil, want 600")
+		}
+		if *dst.NoWorkBackoffMax != 600 {
+			t.Errorf("dst.NoWorkBackoffMax = %d, want 600", *dst.NoWorkBackoffMax)
+		}
+	})
+
+	t.Run("src nil does not overwrite dst", func(t *testing.T) {
+		dst := RestartPolicy{NoWorkBackoffMax: IntPtr(900)}
+		src := RestartPolicy{} // NoWorkBackoffMax is nil
+		overlayRestartPolicy(&dst, &src)
+
+		if dst.NoWorkBackoffMax == nil {
+			t.Fatal("dst.NoWorkBackoffMax became nil, should remain 900")
+		}
+		if *dst.NoWorkBackoffMax != 900 {
+			t.Errorf("dst.NoWorkBackoffMax = %d, want 900 (should not be overwritten)", *dst.NoWorkBackoffMax)
+		}
+	})
+
+	t.Run("src overwrites existing dst", func(t *testing.T) {
+		dst := RestartPolicy{NoWorkBackoffMax: IntPtr(300)}
+		src := RestartPolicy{NoWorkBackoffMax: IntPtr(1200)}
+		overlayRestartPolicy(&dst, &src)
+
+		if dst.NoWorkBackoffMax == nil {
+			t.Fatal("dst.NoWorkBackoffMax is nil, want 1200")
+		}
+		if *dst.NoWorkBackoffMax != 1200 {
+			t.Errorf("dst.NoWorkBackoffMax = %d, want 1200", *dst.NoWorkBackoffMax)
+		}
+	})
+}
+
+func TestRestartPolicyFromDomain_NoWorkBackoffMax(t *testing.T) {
+	val := 1200
+	rp := restartPolicyFromDomain(domain.RestartPolicy{NoWorkBackoffMax: &val})
+	if rp.NoWorkBackoffMax == nil {
+		t.Fatal("NoWorkBackoffMax is nil after restartPolicyFromDomain")
+	}
+	if *rp.NoWorkBackoffMax != val {
+		t.Errorf("NoWorkBackoffMax = %d, want %d", *rp.NoWorkBackoffMax, val)
+	}
+	// Independence: mutating the source pointer must not alias the clone.
+	val = 1
+	if *rp.NoWorkBackoffMax != 1200 {
+		t.Errorf("restartPolicyFromDomain did not clone NoWorkBackoffMax: aliased on source mutation")
+	}
 }
 
 // ---------------------------------------------------------------------------

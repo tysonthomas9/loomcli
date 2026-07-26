@@ -102,6 +102,7 @@ func stopAfterEphemeralTask(ap *AgentProcess) bool {
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
+	ap.NoWorkSpawnCount = 0
 	ap.StopReason = StopReasonEphemeralDone
 	log.Printf("[daemon] Agent %s: ephemeral task complete, exiting supervisor", ap.Entry.Worktree)
 	return true
@@ -113,6 +114,7 @@ func (s *Supervisor) applyFatalStop(ap *AgentProcess, outcome agenterr.Outcome) 
 	log.Printf("[daemon] Agent %s: fatal error (%s), stopping supervisor",
 		ap.Entry.Worktree, outcome)
 	ap.NoWorkCount = 0
+	ap.NoWorkSpawnCount = 0
 	ap.StopReason = StopReasonFatalError
 }
 
@@ -122,6 +124,7 @@ func (s *Supervisor) applyFastFailStop(ap *AgentProcess, outcome agenterr.Outcom
 	log.Printf("[daemon] Agent %s: deterministic failure (%s), stopping supervisor (fast-fail)",
 		ap.Entry.Worktree, outcome)
 	ap.NoWorkCount = 0
+	ap.NoWorkSpawnCount = 0
 	ap.StopReason = StopReasonFastFail
 }
 
@@ -132,6 +135,7 @@ func (s *Supervisor) applyFailoverExhaustedStop(ap *AgentProcess, outcome agente
 	log.Printf("[daemon] Agent %s: failover-only error (%s) with no fallback remaining, stopping supervisor (fast-fail)",
 		ap.Entry.Worktree, outcome)
 	ap.NoWorkCount = 0
+	ap.NoWorkSpawnCount = 0
 	ap.StopReason = StopReasonFastFail
 }
 
@@ -142,6 +146,7 @@ func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
+	ap.NoWorkSpawnCount = 0
 	ap.BlockCount = 0
 	ap.StopReason = ""
 	if time.Since(ap.LastStart) > time.Minute {
@@ -153,6 +158,7 @@ func (s *Supervisor) applyCleanSuccessRestart(ap *AgentProcess) {
 func (s *Supervisor) applyRateLimitedRestart(ap *AgentProcess) {
 	ap.RateRetryCount++
 	ap.NoWorkCount = 0
+	ap.NoWorkSpawnCount = 0
 	ap.StopReason = ""
 	log.Printf("[daemon] Agent %s: rate limited (retry %d, not counted toward max_retries)",
 		ap.Entry.Worktree, ap.RateRetryCount)
@@ -169,6 +175,7 @@ func (s *Supervisor) applyCountedRestart(ap *AgentProcess, d agentpolicy.Disposi
 	ap.RestartCount++
 	ap.RateRetryCount = 0 // reset rate counter on non-rate error
 	ap.NoWorkCount = 0
+	ap.NoWorkSpawnCount = 0
 	if ap.RestartCount <= maxRetries {
 		ap.StopReason = ""
 		return true
@@ -213,6 +220,7 @@ func (s *Supervisor) applyMaxRetriesBlock(ap *AgentProcess) {
 	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
+	ap.NoWorkSpawnCount = 0
 	ap.StopReason = StopReasonMaxRetriesBlocked
 	log.Printf("[daemon] Agent %s: restart budget exhausted, blocking (cycle %d) — will recheck in %s",
 		ap.Entry.Worktree, ap.BlockCount, s.maxRetriesBlockBackoff())
@@ -227,18 +235,33 @@ func (s *Supervisor) maxRetriesBlockBackoff() time.Duration {
 	return defaultMaxRetriesBlockInterval
 }
 
-// applyNoWorkRestart resets retry counters for a NoWork exit and, if the
-// agent has failed over to a fallback backend, periodically returns to the
-// primary to test recovery. Caller holds ap.Mu. NoWork never counts toward
-// max_retries — task availability is not a backend-health signal.
+// applyNoWorkRestart handles a NoWork exit and, if the agent has failed over
+// to a fallback backend, periodically returns to the primary to test
+// recovery. Caller holds ap.Mu. NoWork never counts toward max_retries — task
+// availability is not a backend-health signal.
+//
+// RestartCount is deliberately left untouched (neither incremented nor
+// reset): resetting it on every no-op made max_retries unreachable for any
+// agent whose failures interleave with no-work exits. The
+// budget still resets on a genuinely clean run (applyCleanSuccessRestart) —
+// the correct "progress" signal.
 func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
-	ap.RestartCount = 0
 	ap.RateRetryCount = 0
 	ap.NoWorkCount++
+	if ap.LastNoWorkPostSpawn {
+		ap.NoWorkSpawnCount++
+	} else {
+		ap.NoWorkSpawnCount = 0
+	}
 	if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, s.getNoWorkBackoff()) {
 		ap.CurrentBackendIdx = 0
 	}
 	ap.StopReason = ""
+	if ap.NoWorkSpawnCount > 1 {
+		next := s.noWorkBackoff(true, ap.NoWorkSpawnCount)
+		log.Printf("[daemon] Agent %s: post-spawn no-work streak %d, next poll in %s",
+			ap.Entry.Worktree, ap.NoWorkSpawnCount, next)
+	}
 }
 
 // applyBackendUnavailableRestart keeps an agent retrying when the backend CLI
@@ -250,6 +273,7 @@ func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 func (s *Supervisor) applyBackendUnavailableRestart(ap *AgentProcess) {
 	ap.RateRetryCount = 0
 	ap.NoWorkCount = 0
+	ap.NoWorkSpawnCount = 0
 	ap.StopReason = StopReasonBackendUnavailable
 	log.Printf("[daemon] Agent %s: backend unavailable, will recheck in %s (not counted toward max_retries)",
 		ap.Entry.Worktree, s.backendRecheckBackoff())
@@ -275,6 +299,8 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	count := ap.RestartCount
 	rateCount := ap.RateRetryCount
 	blocked := ap.StopReason == StopReasonMaxRetriesBlocked
+	noWorkPostSpawn := ap.LastNoWorkPostSpawn
+	noWorkSpawnCount := ap.NoWorkSpawnCount
 	ap.Mu.Unlock()
 
 	// A blocked agent sleeps the fixed block interval — keyed on StopReason,
@@ -293,8 +319,7 @@ func (s *Supervisor) computeBackoff(ap *AgentProcess) time.Duration {
 	var retryN int
 	switch d.Backoff {
 	case agentpolicy.BPNoWork:
-		// Fixed poll: task availability is not a backend-health signal.
-		return time.Duration(s.getNoWorkBackoff()) * time.Second
+		return s.noWorkBackoff(noWorkPostSpawn, noWorkSpawnCount)
 	case agentpolicy.BPBackendUnavailable:
 		// Fixed recheck: waiting for the backend CLI to reappear, not
 		// backing off a flaky run.
@@ -432,6 +457,36 @@ func (s *Supervisor) getNoWorkBackoff() int {
 		return *cfg.Daemon.RestartPolicy.NoWorkBackoff
 	}
 	return 30 // default seconds
+}
+
+// getNoWorkBackoffMax returns the configured cap for the post-spawn
+// exponential no-work backoff. A configured max below the base interval is a
+// misconfiguration that must never shorten the poll below no_work_backoff, so
+// it clamps up rather than taking effect.
+func (s *Supervisor) getNoWorkBackoffMax() int {
+	cfg := s.ConfigSnapshot()
+	max := 900 // default seconds
+	if cfg.Daemon.RestartPolicy.NoWorkBackoffMax != nil && *cfg.Daemon.RestartPolicy.NoWorkBackoffMax > 0 {
+		max = *cfg.Daemon.RestartPolicy.NoWorkBackoffMax
+	}
+	if base := s.getNoWorkBackoff(); max < base {
+		return base
+	}
+	return max
+}
+
+// noWorkBackoff returns the sleep duration for a NoWork exit. Pre-spawn
+// no-work (the claim gate rejected before spawning — one HTTP query) keeps
+// the cheap, fixed no_work_backoff poll. Post-spawn no-work (a whole agent
+// process ran and found nothing) backs off exponentially, capped at
+// no_work_backoff_max, once a streak of more than one has been observed:
+// n=1,2 -> base; n=3 -> 2x base; n=4 -> 4x base; ... capped at the max.
+func (s *Supervisor) noWorkBackoff(postSpawn bool, noWorkSpawnCount int) time.Duration {
+	base := s.getNoWorkBackoff()
+	if !postSpawn || noWorkSpawnCount <= 1 {
+		return time.Duration(base) * time.Second
+	}
+	return exponentialBackoff(base, noWorkSpawnCount-2, s.getNoWorkBackoffMax(), 0)
 }
 
 // GetIdlePollInterval returns the configured idle poll interval in seconds.
