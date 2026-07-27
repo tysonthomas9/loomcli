@@ -386,7 +386,34 @@ func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey 
 	if len(selectors) > 0 {
 		return nil, fmt.Errorf("no workspace repo matches task repo selector %q", strings.Join(selectors, ", "))
 	}
+
+	// No selector at all: the task carries no source_repo and no placement ref.
+	// repos was sorted by name above, so this picks the alphabetically first
+	// workspace repo, which is arbitrary — in a workspace holding both, a
+	// loomcli task is worked inside the fleet-db checkout and the diff lands
+	// against the wrong tree.
+	//
+	// Left as a fallback rather than promoted to an error on purpose: most
+	// issues currently arrive with no source_repo (drops it on the
+	// API-backend create path), so failing here would stop dispatch outright
+	// the way did. Warn loudly enough to be auditable instead.
+	slog.WarnContext(ctx, "task has no repo selector; defaulting to the alphabetically first workspace repo",
+		"task", req.TaskID,
+		"workspace", workspaceKey,
+		"chosen_repo", repos[0].Name,
+		"candidates", strings.Join(repoNames(repos), ","))
 	return repos[0], nil
+}
+
+// repoNames renders a repo list for logging.
+func repoNames(repos []*domain.Repo) []string {
+	out := make([]string, 0, len(repos))
+	for _, repo := range repos {
+		if repo != nil {
+			out = append(out, repo.Name)
+		}
+	}
+	return out
 }
 
 func taskWorktreeRepoSelectors(req TaskExecRequest) []string {
