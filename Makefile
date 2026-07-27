@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down ensure-frontend-dist local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -168,6 +168,20 @@ ensure-frontend-dist:
 	  $(MAKE) build-frontend; \
 	fi
 
+# Guard for every target that shells into the frontend toolchain. npm scripts
+# resolve binaries out of node_modules/.bin, which is gitignored and therefore
+# absent in a fresh clone and in any new git worktree (worktrees do not inherit
+# the parent's ignored files). Without this the gate dies with a bare
+#   sh: prettier: command not found
+#   make[1]: *** [check-frontend] Error 127
+# and because check-frontend runs inside the pre-push hook, that surfaces as
+# "git push is broken" with nothing pointing at missing dependencies.
+ensure-frontend-deps:
+	@if [ ! -x "$(FRONTEND_DIR)/node_modules/.bin/prettier" ]; then \
+	  echo "Frontend dependencies are missing; installing them once on the host..."; \
+	  cd $(FRONTEND_DIR) && npm install; \
+	fi
+
 # Start the fleet-db regression stack: redis, fleet-db, loom serve on the
 # fleet-db backend, the Web UI sidecar, and a one-shot fixture seeder.
 fleetdb-regression-up: ensure-frontend-dist
@@ -320,7 +334,7 @@ test-coverage: test
 	@./scripts/check-coverage.sh
 
 # Run frontend tests with coverage threshold enforcement
-test-frontend-coverage:
+test-frontend-coverage: ensure-frontend-deps
 	@echo "Running frontend tests with coverage..."
 	@cd $(FRONTEND_DIR) && npm run test:coverage
 
@@ -369,14 +383,14 @@ check-go-api-staleness:
 	@./scripts/check-go-api-staleness.sh
 
 # Run frontend linter + typecheck
-lint-frontend:
+lint-frontend: ensure-frontend-deps
 	@echo "Running frontend typecheck..."
 	@cd $(FRONTEND_DIR) && npm run typecheck
 	@echo "Running frontend ESLint..."
 	@cd $(FRONTEND_DIR) && npm run lint
 
 # Run frontend unit tests (vitest)
-test-frontend:
+test-frontend: ensure-frontend-deps
 	@echo "Running frontend unit tests..."
 	@cd $(FRONTEND_DIR) && npx vitest run
 
@@ -536,7 +550,7 @@ check-go:
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)
-check-frontend:
+check-frontend: ensure-frontend-deps
 	@echo "=== [1/6] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
 	@echo "=== [2/6] Frontend: typecheck ==="
