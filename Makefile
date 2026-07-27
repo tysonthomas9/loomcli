@@ -613,8 +613,17 @@ hooks:
 	@echo "Pre-commit hooks installed"
 
 # Ensure hooks are installed (runs once — skips if pre-push hook already exists)
+# Reinstall when the hook is missing *or* has drifted from scripts/hooks/pre-push.
+# An existence-only check lets a stale hook survive forever, which is not
+# hypothetical: a pre-push installed before scripts/hooks/pre-push started
+# clearing `git rev-parse --local-env-vars` leaves GIT_DIR exported into
+# `make check`. Every test that drives a throwaway repo under t.TempDir() then
+# resolves git against this checkout instead — `git commit` fires this repo's
+# pre-commit hook ("No .pre-commit-config.yaml file was found") and branch
+# lookups return the branch being pushed. Ten packages fail that way and the
+# gate can never pass, so nothing can be pushed at all.
 ensure-hooks:
-	@test -f '$(GIT_HOOKS_DIR)/pre-push' || $(MAKE) hooks
+	@cmp -s scripts/hooks/pre-push '$(GIT_HOOKS_DIR)/pre-push' || $(MAKE) hooks
 
 # Check dev dependencies
 dev-check:
