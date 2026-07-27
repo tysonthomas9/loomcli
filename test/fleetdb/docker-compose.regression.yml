@@ -10,10 +10,15 @@
 #   - fleetdb-regression-seed-fleet one-shot seeder that populates fleet-db fixtures
 #
 # Usage (from loomcli repo root):
-#   docker compose -f test/fleetdb/docker-compose.regression.yml up --build -d
-#   docker compose -f test/fleetdb/docker-compose.regression.yml run --rm fleetdb-regression-seed-fleet
+#   make fleetdb-regression-up
 #   # open http://localhost:8082 (API) or http://localhost:8083 (UI)
-#   docker compose -f test/fleetdb/docker-compose.regression.yml down -v
+#   make fleetdb-regression-down
+#
+# Prefer the make targets over raw `docker compose`: they build the gitignored
+# Web UI bundle first. Without it the UI sidecar bind-mounts a directory Docker
+# silently creates empty, and http://localhost:8083 serves 404 with no error
+# anywhere. The seeder runs automatically on `up`; to re-seed, use
+#   docker compose -f test/fleetdb/docker-compose.regression.yml run --rm fleetdb-regression-seed-fleet
 #
 # Build contexts are relative to this compose file's directory. The
 # fleet-db context is the sibling repo next to loomcli (accessed as
@@ -193,6 +198,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.seed
+      # Makes the fleet-db service image a build-time dependency so `fdb` can be
+      # copied out of it. Referencing the tag from a FROM line instead races the
+      # parallel build and falls through to a registry pull (`pull access denied`).
+      additional_contexts:
+        fdb-source: "service:fleet-db"
     depends_on:
       fleet-db:
         condition: service_started
