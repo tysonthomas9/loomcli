@@ -108,7 +108,7 @@ func init() {
 	agentAddCmd.Flags().BoolVar(&agentAddCrossRepo, "cross-repo", false, "Allow tasks spanning repos")
 	agentAddCmd.Flags().StringVar(&agentAddParent, "parent", "", "Epic ID to scope this agent to")
 	agentAddCmd.Flags().StringVar(&agentAddMode, "mode", "", "Agent mode: ephemeral or service")
-	agentAddCmd.Flags().StringVar(&agentAddTaskFilter, "task-filter", "", "Task filter for task-driven agents")
+	agentAddCmd.Flags().StringVar(&agentAddTaskFilter, "task-filter", "", "Task filter for task-driven agents: needs_design, has_design, or any")
 	agentAddCmd.Flags().IntVar(&agentAddMaxConc, "max-concurrency", 0, "Maximum concurrent runs for orchestrator/service agents")
 	agentAddCmd.Flags().StringVar(&agentAddBudget, "budget-policy", "", "Budget/retry policy name")
 	agentAddCmd.Flags().StringVar(&agentAddTask, "task", "", "Pin this agent's first cycle to a specific task ID (claims that task instead of polling Ready)")
@@ -131,7 +131,11 @@ func runAgentAdd(cmd *cobra.Command, args []string) error {
 		if orchestratorID == "" {
 			orchestratorID = os.Getenv(envOrchestratorSessionID)
 		}
-		a, err := h.Store.Agents().Create(ctx, agentCreateFromFlags(ws, args[0], mode))
+		create, err := agentCreateFromFlags(ws, args[0], mode)
+		if err != nil {
+			return err
+		}
+		a, err := h.Store.Agents().Create(ctx, create)
 		if err != nil {
 			return fmt.Errorf("create agent: %w", err)
 		}
@@ -149,10 +153,18 @@ func runAgentAdd(cmd *cobra.Command, args []string) error {
 	})
 }
 
-func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) store.AgentCreate {
+func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) (store.AgentCreate, error) {
 	desiredState := domain.AgentDesiredState("")
 	if agentAddTask != "" {
 		desiredState = domain.AgentDesiredStopped
+	}
+	// Store the canonical spelling. Unvalidated, a filter the router does not
+	// recognize is accepted here and then silently treated as "has_design" at
+	// dispatch time, so a planner created with the documented "needs_design"
+	// runs as a second worker (DOGFOOD-43).
+	taskFilter, err := cli.ValidateTaskFilter(agentAddTaskFilter)
+	if err != nil {
+		return store.AgentCreate{}, err
 	}
 	return store.AgentCreate{
 		WorkspaceKey:   workspace,
@@ -165,11 +177,11 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) store.A
 		CrossRepo:      agentAddCrossRepo,
 		Parent:         agentAddParent,
 		Mode:           mode,
-		TaskFilter:     agentAddTaskFilter,
+		TaskFilter:     taskFilter,
 		MaxConcurrency: agentAddMaxConc,
 		BudgetPolicy:   agentAddBudget,
 		DesiredState:   desiredState,
-	}
+	}, nil
 }
 
 func enqueueAgentAddTaskStart(ctx context.Context, st store.Store, workspace, agentName, orchestratorID string) error {
