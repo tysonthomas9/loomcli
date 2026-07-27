@@ -121,7 +121,11 @@ func issueDataMatches(issue backend.IssueData, opts issueDataFilter) bool {
 	if len(opts.LabelsAny) > 0 && !hasAnyOfStrings(issue.Labels, opts.LabelsAny) {
 		return false
 	}
-	if len(opts.SourceRepos) > 0 && !hasAnyString(opts.SourceRepos, issue.SourceRepo) {
+	// An issue with no source repo is unscoped work, not a repo mismatch: it
+	// stays eligible for any repo-scoped agent. Excluding it starved every
+	// multi-repo agent, because `loom data create` drops --source-repo
+	// (DOGFOOD-8) so most issues carry no source repo at all.
+	if len(opts.SourceRepos) > 0 && issue.SourceRepo != "" && !hasAnyString(opts.SourceRepos, issue.SourceRepo) {
 		return false
 	}
 	return true
