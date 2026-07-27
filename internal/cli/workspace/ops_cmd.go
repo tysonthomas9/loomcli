@@ -87,6 +87,30 @@ type WorkspaceOpsStatus struct {
 	Repos        []WorkspaceOpsRepo        `json:"repos"`
 	Agents       []WorkspaceOpsAgent       `json:"agents"`
 	Problems     []WorkspaceOpsProblem     `json:"problems,omitempty"`
+
+	// EnsureRuntime is set only by `workspace ops ensure-runtime`, and reports
+	// whether that command actually did anything. Without it the command's
+	// output is indistinguishable from `workspace ops status`, so a caller
+	// reading ok=true concludes the runtime was ensured when the command may
+	// have returned without acting.
+	EnsureRuntime *WorkspaceOpsEnsureRuntime `json:"ensure_runtime,omitempty"`
+}
+
+// WorkspaceOpsEnsureRuntime records what ensure-runtime did, so "no action
+// needed" is distinguishable from "runtime started" by a machine as well as a
+// human.
+type WorkspaceOpsEnsureRuntime struct {
+	// ActionTaken is false when the command returned without touching the
+	// runtime.
+	ActionTaken bool `json:"action_taken"`
+
+	// Reason explains a skip. Empty when ActionTaken is true.
+	Reason string `json:"reason,omitempty"`
+
+	// Scope names what this command can and cannot manage, because the name
+	// oversells it: it governs the local desktop runtime only and never starts
+	// the agent supervisor.
+	Scope string `json:"scope,omitempty"`
 }
 
 // WorkspaceOpsLocalRuntime reports whether the local desktop runtime is
@@ -199,6 +223,15 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), workspaceOpsEnsureTimeout())
 	defer cancel()
 	if !shouldEnsureLocalRuntime(initial) {
+		reason := "local desktop runtime not applicable to this deployment"
+		if initial != nil && initial.LocalRuntime != nil && initial.LocalRuntime.Reason != "" {
+			reason = initial.LocalRuntime.Reason
+		}
+		initial.EnsureRuntime = &WorkspaceOpsEnsureRuntime{
+			ActionTaken: false,
+			Reason:      reason,
+			Scope:       ensureRuntimeScopeNote,
+		}
 		return renderWorkspaceOpsStatus(cmd, initial)
 	}
 	if _, err := local.EnsureRuntimeStarted(ctx, initial.Daemon.DataDir, 0); err != nil {
@@ -215,6 +248,12 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("wait for workspace daemon: %w", err)
 	}
+	if status != nil {
+		status.EnsureRuntime = &WorkspaceOpsEnsureRuntime{
+			ActionTaken: true,
+			Scope:       ensureRuntimeScopeNote,
+		}
+	}
 	return renderWorkspaceOpsStatus(cmd, status)
 }
 
@@ -228,6 +267,11 @@ func workspaceOpsEnsureTimeout() time.Duration {
 	}
 	return time.Duration(workspaceOpsTimeoutSec) * time.Second
 }
+
+// ensureRuntimeScopeNote states the command's limits. The name implies it will
+// make the workspace runnable; it governs the local desktop runtime only, and a
+// wedged agent supervisor is outside what it can repair.
+const ensureRuntimeScopeNote = "manages the local desktop runtime only; does not start or repair the agent supervisor"
 
 func withWorkspaceOpsStatus(args []string, fn func(*WorkspaceOpsStatus) error) error {
 	status, err := workspaceOpsStatusForArgs(args)
@@ -732,6 +776,13 @@ func renderWorkspaceOpsStatus(cmd *cobra.Command, status *WorkspaceOpsStatus) er
 	}
 	out := cmd.OutOrStdout()
 	_, _ = fmt.Fprintf(out, "Workspace: %s (%s)\n", status.Workspace.Key, status.Workspace.State)
+	if er := status.EnsureRuntime; er != nil {
+		if er.ActionTaken {
+			_, _ = fmt.Fprintf(out, "Ensure:    runtime started (%s)\n", er.Scope)
+		} else {
+			_, _ = fmt.Fprintf(out, "Ensure:    NO ACTION TAKEN - %s (%s)\n", er.Reason, er.Scope)
+		}
+	}
 	if status.LocalRuntime != nil && !status.LocalRuntime.Applicable {
 		_, _ = fmt.Fprintf(out, "Runtime:   not applicable (%s)\n", status.LocalRuntime.Reason)
 	} else if status.LocalRuntime != nil && status.LocalRuntime.Runtime != nil {
