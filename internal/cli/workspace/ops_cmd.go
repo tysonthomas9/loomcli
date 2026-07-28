@@ -212,15 +212,7 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 	if !shouldEnsureLocalRuntime(initial) {
-		reason := "local desktop runtime not applicable to this deployment"
-		if initial != nil && initial.LocalRuntime != nil && initial.LocalRuntime.Reason != "" {
-			reason = initial.LocalRuntime.Reason
-		}
-		initial.EnsureRuntime = &WorkspaceOpsEnsureRuntime{
-			ActionTaken: false,
-			Reason:      reason,
-			Scope:       ensureRuntimeScopeNote,
-		}
+		initial.EnsureRuntime = ensureRuntimeSkipped(initial)
 		return renderWorkspaceOpsStatus(cmd, initial)
 	}
 	if _, err := local.EnsureRuntimeStarted(ctx, initial.Daemon.DataDir, 0); err != nil {
@@ -244,6 +236,18 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return renderWorkspaceOpsStatus(cmd, status)
+}
+
+// ensureRuntimeSkipped records that ensure-runtime returned without acting, and
+// why. Without it the command's output is indistinguishable from
+// `workspace ops status` and a caller reading ok=true concludes the runtime was
+// ensured (DOGFOOD-46).
+func ensureRuntimeSkipped(status *WorkspaceOpsStatus) *WorkspaceOpsEnsureRuntime {
+	reason := "local desktop runtime not applicable to this deployment"
+	if status != nil && status.LocalRuntime != nil && status.LocalRuntime.Reason != "" {
+		reason = status.LocalRuntime.Reason
+	}
+	return &WorkspaceOpsEnsureRuntime{ActionTaken: false, Reason: reason, Scope: ensureRuntimeScopeNote}
 }
 
 // ensureRuntimeScopeNote states the command's limits. The name implies it will
