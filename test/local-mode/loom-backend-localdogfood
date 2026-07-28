@@ -33,6 +33,25 @@ run_planner() {
   loom complete
 }
 
+# run_reviewer is a non-closing stage: it claims, comments, and completes,
+# leaving the terminal transition and any label writes to the supervisor's
+# on_complete hooks. A review pipeline cannot be modeled without one — the
+# coder path closes its task, which strands the hand-off and ends
+# the loop on the first round.
+run_reviewer() {
+  task_id="${LOOM_ASSIGNED_TASK_ID:-}"
+  agent="${LOOM_AGENT_NAME:-reviewer}"
+
+  echo "[localdogfood] reviewer ${agent} handling ${task_id:-<none>}"
+  write_transcript "Reviewer ${agent} reviewed ${task_id}."
+  [ -n "$task_id" ] && loom claim "$task_id" || true
+  sleep "${LOOM_LOCAL_MODE_STEP_DELAY:-2}"
+  if [ -n "$task_id" ]; then
+    loom data comment "$task_id" "localdogfood reviewer ${agent}: reviewed this round." || true
+  fi
+  loom complete
+}
+
 run_coder() {
   task_id="${LOOM_ASSIGNED_TASK_ID:-${LOOM_LOCAL_MODE_CODE_TASK_ID:-${LOOM_WORKSPACE:-LOCALMODE}-3}}"
   agent="${LOOM_AGENT_NAME:-local-coder}"
@@ -84,10 +103,14 @@ case "$cmd" in
         task)
           run_coder
           ;;
+        critic|review|reviewer)
+          run_reviewer
+          ;;
         *)
           case "${LOOM_AGENT_NAME:-}" in
-            *planner*) run_planner ;;
-            *) run_coder ;;
+            *planner*)              run_planner ;;
+            *critic*|*review*)      run_reviewer ;;
+            *)                      run_coder ;;
           esac
           ;;
       esac
