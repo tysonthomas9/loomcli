@@ -25,6 +25,11 @@ case "$AGENT_BACKEND" in
 esac
 PLAN_AGENT="${LOOM_LOCAL_MODE_PLAN_AGENT:-$DEFAULT_PLAN_AGENT}"
 CODE_AGENT="${LOOM_LOCAL_MODE_CODE_AGENT:-$DEFAULT_CODE_AGENT}"
+MAX_AGENTS="${LOOM_LOCAL_MODE_MAX_AGENTS:-2}"
+# name:role pairs, comma separated, e.g. "critic:critic,reviewer:critic". A role
+# that is not built in (plan/task) is created as a worker role with a generated
+# prompt file, because a custom role without prompt_file fails daemon creation.
+EXTRA_AGENTS="${LOOM_LOCAL_MODE_EXTRA_AGENTS:-}"
 PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-2}"
 CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-3}"
 LOOM_BIND="${LOOM_LOCAL_MODE_BIND:-0.0.0.0}"
@@ -174,7 +179,7 @@ register_agents() {
   loom daemon profile set issue_backend fleetdb
   loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
   loom daemon profile set events_dir "${WORKSPACE_ROOT}/.loom/events"
-  loom daemon profile set max_agents 2
+  loom daemon profile set max_agents "$MAX_AGENTS"
   loom daemon profile set startup_timeout 30
 
   if [ "$AGENT_BACKEND" != "localdogfood" ]; then
@@ -186,6 +191,40 @@ register_agents() {
   loom agentdef remove "$CODE_AGENT" >/dev/null 2>&1 || true
   loom agentdef add "$PLAN_AGENT" --role plan --auto --backend "$AGENT_BACKEND" --repos source-repo
   loom agentdef add "$CODE_AGENT" --role task --auto --backend "$AGENT_BACKEND" --repos source-repo
+  seed_extra_agents
+}
+
+# seed_extra_agents mirrors a real workspace's agent topology so a test stack can
+# reproduce dispatch behaviour that only appears with more than two agents.
+seed_extra_agents() {
+  [ -n "$EXTRA_AGENTS" ] || return 0
+  mkdir -p "${WORKSPACE_ROOT}/prompts"
+  local spec name role prompt
+  echo "$EXTRA_AGENTS" | tr ',' '\n' | while IFS= read -r spec; do
+    spec="$(echo "$spec" | tr -d '[:space:]')"
+    [ -n "$spec" ] || continue
+    case "$spec" in
+      *:*) name="${spec%%:*}"; role="${spec#*:}" ;;
+      *)   name="$spec";       role="task" ;;
+    esac
+    [ -n "$role" ] || role="task"
+
+    case "$role" in
+      plan|task) ;;
+      *)
+        prompt="prompts/${role}.md"
+        if [ ! -f "${WORKSPACE_ROOT}/${prompt}" ]; then
+          printf 'Test-stack %s role. Inspect the assigned task and record a short assessment.\n' "$role" \
+            > "${WORKSPACE_ROOT}/${prompt}"
+        fi
+        loom role add "$role" --kind worker --prompt-file "$prompt" >/dev/null 2>&1 || true
+        ;;
+    esac
+
+    loom agentdef remove "$name" >/dev/null 2>&1 || true
+    loom agentdef add "$name" --role "$role" --auto --backend "$AGENT_BACKEND" --repos source-repo \
+      || echo "[local-mode] WARNING: could not seed extra agent ${name} (role ${role})"
+  done
 }
 
 prepare_codex_credentials() {
