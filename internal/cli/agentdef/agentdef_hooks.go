@@ -3,6 +3,7 @@ package agentdef
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -20,10 +21,12 @@ var (
 	agentAddCommentReply bool
 	agentAddLabels       []string
 	agentAddClose        bool
+	agentAddCycle        string
 
 	agentUpdateCommentReply bool
 	agentUpdateLabels       []string
 	agentUpdateClose        bool
+	agentUpdateCycle        string
 	agentUpdateClear        bool
 )
 
@@ -42,18 +45,22 @@ the run to failed so the owned task is reopened and retried.
 	RunE: runAgentUpdate,
 }
 
-func registerHookFlags(cmd *cobra.Command, reply *bool, labels *[]string, closeTask *bool) {
+func registerHookFlags(cmd *cobra.Command, reply *bool, labels *[]string, closeTask *bool, cycleSpec *string) {
 	cmd.Flags().BoolVar(reply, "on-complete-comment-reply", false,
 		"After a successful run, post the agent's final reply as a comment on the owned task")
 	cmd.Flags().StringArrayVar(labels, "on-complete-add-label", nil,
 		"After a successful run, add this label to the owned task (repeat for several; applied in flag order, always after the comment)")
+	cmd.Flags().StringVar(cycleSpec, "on-complete-cycle", "",
+		"After a successful run, advance a bounded review loop: THRESHOLD:REARM_LABEL:SHIP_LABEL[:PREFIX]. "+
+			"Below the threshold it removes REARM_LABEL to hand the task back to the previous stage and bumps a counter label; "+
+			"at the threshold it stamps SHIP_LABEL instead. Example: 3:criticized:ready-to-implement")
 	cmd.Flags().BoolVar(closeTask, "on-complete-close", false,
 		"After a successful run, close the owned task. Always applied last, so preceding comments and labels land first. Use this instead of closing from the agent's prompt: an agent-side close makes those writes fail against a closed task and strands the hand-off")
 }
 
 // hooksFromFlags builds the pipeline in the only order the invariant permits:
 // the comment first, then labels in the order the flags were given.
-func hooksFromFlags(commentReply bool, labels []string, closeTask bool) (*domain.AgentHooks, error) {
+func hooksFromFlags(commentReply bool, labels []string, closeTask bool, cycleSpec string) (*domain.AgentHooks, error) {
 	actions := make([]domain.AgentHookAction, 0, 2+len(labels))
 	if commentReply {
 		actions = append(actions, domain.AgentHookAction{
@@ -71,6 +78,13 @@ func hooksFromFlags(commentReply bool, labels []string, closeTask bool) (*domain
 			Value: label,
 		})
 	}
+	if cycleSpec != "" {
+		cyc, err := parseCycleSpec(cycleSpec)
+		if err != nil {
+			return nil, err
+		}
+		actions = append(actions, domain.AgentHookAction{Type: domain.AgentHookActionCycle, Cycle: cyc})
+	}
 	// Appended last, and Validate enforces that: the close is what makes every
 	// write above observable to the next stage instead of failing against a
 	// task the agent already closed.
@@ -85,6 +99,29 @@ func hooksFromFlags(commentReply bool, labels []string, closeTask bool) (*domain
 		return nil, err
 	}
 	return hooks, nil
+}
+
+// parseCycleSpec reads THRESHOLD:REARM:SHIP[:PREFIX]. Positional rather than
+// four flags because the parts are meaningless apart — a threshold without the
+// labels it drives configures nothing.
+func parseCycleSpec(spec string) (*domain.AgentHookCycle, error) {
+	parts := strings.Split(spec, ":")
+	if len(parts) < 3 || len(parts) > 4 {
+		return nil, fmt.Errorf("--on-complete-cycle expects THRESHOLD:REARM_LABEL:SHIP_LABEL[:PREFIX], got %q", spec)
+	}
+	threshold, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return nil, fmt.Errorf("--on-complete-cycle threshold %q is not a number", parts[0])
+	}
+	cyc := &domain.AgentHookCycle{
+		Threshold:  threshold,
+		RearmLabel: strings.TrimSpace(parts[1]),
+		ShipLabel:  strings.TrimSpace(parts[2]),
+	}
+	if len(parts) == 4 {
+		cyc.Prefix = strings.TrimSpace(parts[3])
+	}
+	return cyc, nil
 }
 
 func runAgentUpdate(_ *cobra.Command, args []string) error {
@@ -111,7 +148,7 @@ func runAgentUpdate(_ *cobra.Command, args []string) error {
 // empty pipeline means "clear". Conflicting and no-op invocations are errors
 // rather than silent successes, so a typo never looks like it took effect.
 func agentUpdateHooksPatch() (*domain.AgentHooks, error) {
-	setRequested := agentUpdateCommentReply || len(agentUpdateLabels) > 0 || agentUpdateClose
+	setRequested := agentUpdateCommentReply || len(agentUpdateLabels) > 0 || agentUpdateClose || agentUpdateCycle != ""
 	switch {
 	case agentUpdateClear && setRequested:
 		return nil, fmt.Errorf("--clear-on-complete cannot be combined with --on-complete-comment-reply, --on-complete-add-label or --on-complete-close")
@@ -120,7 +157,7 @@ func agentUpdateHooksPatch() (*domain.AgentHooks, error) {
 	case !setRequested:
 		return nil, fmt.Errorf("nothing to update: pass --on-complete-comment-reply, --on-complete-add-label and/or --on-complete-close, or --clear-on-complete")
 	}
-	return hooksFromFlags(agentUpdateCommentReply, agentUpdateLabels, agentUpdateClose)
+	return hooksFromFlags(agentUpdateCommentReply, agentUpdateLabels, agentUpdateClose, agentUpdateCycle)
 }
 
 // printHookPipeline renders the ordered steps as stored, so an operator can see
@@ -138,6 +175,9 @@ func printHookPipeline(h *domain.AgentHooks) {
 			fmt.Printf("  %d. add_label %s\n", i+1, a.Value)
 		case domain.AgentHookActionClose:
 			fmt.Printf("  %d. close\n", i+1)
+		case domain.AgentHookActionCycle:
+			fmt.Printf("  %d. cycle threshold=%d rearm=%s ship=%s\n",
+				i+1, a.Cycle.Threshold, a.Cycle.RearmLabel, a.Cycle.ShipLabel)
 		default:
 			fmt.Printf("  %d. %s\n", i+1, a.Type)
 		}
