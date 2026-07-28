@@ -72,6 +72,7 @@ tests:
       - run: >-
           python3 -c 'import json,os; events=json.load(open(os.environ["AFT_WORK_DIR"]+"/lifecycleEvents")); closes=[e for e in events if e.get("event_type")=="issue.closed"]; assert len(closes)==1, events; assert closes[0].get("comment")=="aft lifecycle test", closes[0]'
         intent: "An operator's readback confirms exactly one close event carries the completion reason"
+      - fill: { testid: search-input-field, value: "lifecycle ${RUN_ID:-local}" }
       - wait:
           fn: >-
             document.querySelectorAll("section[data-status=done] article[aria-label*='lifecycle ${RUN_ID:-local}']").length === 1

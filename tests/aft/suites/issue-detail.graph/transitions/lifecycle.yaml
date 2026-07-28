@@ -19,7 +19,7 @@ transitions:
       - select: { testid: status-dropdown, value: closed }
 
   return-to-closed-board:
-    intent: A human closes the detail panel and reloads the board to verify the issue remains closed.
+    intent: A human closes the detail panel, reloads the board, and searches for the issue to verify it remains closed.
     actor: human
     via: ui
     steps:
@@ -29,3 +29,6 @@ transitions:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
         intent: Wait until the fresh workspace board is ready.
+      - fill:
+          testid: search-input-field
+          value: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
