@@ -24,9 +24,30 @@ func TestHooksFromFlags(t *testing.T) {
 		name         string
 		commentReply bool
 		labels       []string
+		closeTask    bool
 		want         []domain.AgentHookAction
 		wantErr      string
 	}{
+		{
+			// The pipeline DOGFOOD-68 exists for: the supervisor stamps, then
+			// closes, so the hand-off label lands before the task goes terminal.
+			name:         "comment, label, then close",
+			commentReply: true,
+			labels:       []string{"stage-reviewed"},
+			closeTask:    true,
+			want: []domain.AgentHookAction{
+				{Type: domain.AgentHookActionComment, Source: domain.AgentHookCommentSourceFinalReply},
+				{Type: domain.AgentHookActionAddLabel, Value: "stage-reviewed"},
+				{Type: domain.AgentHookActionClose},
+			},
+		},
+		{
+			name:      "close alone",
+			closeTask: true,
+			want: []domain.AgentHookAction{
+				{Type: domain.AgentHookActionClose},
+			},
+		},
 		{
 			name: "no flags yields no pipeline",
 		},
@@ -73,7 +94,7 @@ func TestHooksFromFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := hooksFromFlags(tt.commentReply, tt.labels)
+			got, err := hooksFromFlags(tt.commentReply, tt.labels, tt.closeTask)
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("hooksFromFlags() error = %v, want it to contain %q", err, tt.wantErr)

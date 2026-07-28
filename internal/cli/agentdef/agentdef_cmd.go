@@ -118,8 +118,8 @@ func init() {
 	agentShowCmd.Flags().BoolVar(&agentShowJSON, "json", false, "JSON output")
 	agentStopCmd.Flags().BoolVar(&agentStopForce, "force", false, "Stop without graceful yield when handled by a local daemon")
 
-	registerHookFlags(agentAddCmd, &agentAddCommentReply, &agentAddLabels)
-	registerHookFlags(agentUpdateCmd, &agentUpdateCommentReply, &agentUpdateLabels)
+	registerHookFlags(agentAddCmd, &agentAddCommentReply, &agentAddLabels, &agentAddClose)
+	registerHookFlags(agentUpdateCmd, &agentUpdateCommentReply, &agentUpdateLabels, &agentUpdateClose)
 	agentUpdateCmd.Flags().BoolVar(&agentUpdateClear, "clear-on-complete", false, "Remove all on_complete hooks from this agent")
 
 	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd, agentUpdateCmd)
@@ -162,7 +162,7 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) (store.
 	if agentAddTask != "" {
 		desiredState = domain.AgentDesiredStopped
 	}
-	hooks, err := hooksFromFlags(agentAddCommentReply, agentAddLabels)
+	hooks, err := hooksFromFlags(agentAddCommentReply, agentAddLabels, agentAddClose)
 	if err != nil {
 		return store.AgentCreate{}, err
 	}
