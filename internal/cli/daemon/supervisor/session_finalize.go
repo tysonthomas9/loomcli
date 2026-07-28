@@ -285,11 +285,41 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 	return exitCode
 }
 
+// currentCompletionHooks reads the agent's pipeline from the live config rather
+// than from the Entry captured when the AgentProcess was constructed.
+//
+// Hooks are supervisor-owned writes decided at finalize, not spawn parameters,
+// so binding them at construction made `agentdef update --on-complete-*`
+// silently inert against a running agent: the CLI printed the pipeline, fleet-db
+// stored it, `agentdef list` showed it, and the run did nothing. Only a daemon
+// restart applied it. The daemon already refreshes its config every
+// 30s, so re-reading here costs a map lookup and makes the change take effect on
+// the next run.
+//
+// Falls back to the captured Entry when the agent is absent from the snapshot —
+// mid-removal, for instance — so a disappearing config never silently drops a
+// pipeline the run was started with.
+func (s *Supervisor) currentCompletionHooks(ap *AgentProcess) *domain.AgentHooks {
+	if s.ConfigSnapshot == nil {
+		return ap.Entry.Hooks
+	}
+	cfg := s.ConfigSnapshot()
+	if cfg == nil {
+		return ap.Entry.Hooks
+	}
+	for i := range cfg.Agents {
+		if cfg.Agents[i].Worktree == ap.Entry.Worktree {
+			return cfg.Agents[i].Hooks
+		}
+	}
+	return ap.Entry.Hooks
+}
+
 // completionHookTarget reports whether this exit is eligible for hooks and, if
 // so, the pipeline and the task to write to. Everything except a clean,
 // self-concluded run that owned a task is skipped, preserving pre-hook behavior.
 func (s *Supervisor) completionHookTarget(ap *AgentProcess, exitCode int) (*domain.AgentHooks, string, bool) {
-	hooks := ap.Entry.Hooks
+	hooks := s.currentCompletionHooks(ap)
 	if hooks.IsEmpty() || exitCode != 0 {
 		return nil, "", false
 	}
