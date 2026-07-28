@@ -41,6 +41,11 @@ services:
       LOOM_LOCAL_MODE_CODE_AGENT: worker
       LOOM_LOCAL_MODE_EXTRA_AGENTS: "critic:critic"
 
+      # A second repo, so repo selection is exercisable. DOGFOOD has four; one
+      # is enough to reach the no-selector fallback that a single-repo
+      # workspace short-circuits past (DOGFOOD-47).
+      LOOM_LOCAL_MODE_EXTRA_REPOS: "second-repo"
+
       # The base stack pins these to LOCALMODE-*, which do not exist in this
       # workspace — the seeder then 404s and the stack never becomes ready.
       LOOM_LOCAL_MODE_PLAN_TASK_ID: TESTMIRROR-2

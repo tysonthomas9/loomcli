@@ -30,6 +30,11 @@ MAX_AGENTS="${LOOM_LOCAL_MODE_MAX_AGENTS:-2}"
 # that is not built in (plan/task) is created as a worker role with a generated
 # prompt file, because a custom role without prompt_file fails daemon creation.
 EXTRA_AGENTS="${LOOM_LOCAL_MODE_EXTRA_AGENTS:-}"
+# Comma-separated extra repo names to register in the workspace. A single-repo
+# workspace cannot exercise repo selection at all: selectRepo returns early
+# before reaching the no-selector fallback, so behaviour that depends on
+# choosing between repos (DOGFOOD-47) is unreachable without this.
+EXTRA_REPOS="${LOOM_LOCAL_MODE_EXTRA_REPOS:-}"
 PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-2}"
 CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-3}"
 LOOM_BIND="${LOOM_LOCAL_MODE_BIND:-0.0.0.0}"
@@ -175,6 +180,34 @@ trust_codex_local_mode_paths() {
   trust_codex_project_path "${WORKSPACE_ROOT}/worktrees/source-repo/${CODE_AGENT}"
 }
 
+# seed_extra_repos registers additional repos so the workspace can reproduce
+# multi-repo routing. Each gets its own bare origin and an initial commit, so it
+# is a real repo rather than an empty registration.
+seed_extra_repos() {
+  [ -n "$EXTRA_REPOS" ] || return 0
+  local name path origin
+  echo "$EXTRA_REPOS" | tr ',' '\n' | while IFS= read -r name; do
+    name="$(echo "$name" | tr -d '[:space:]')"
+    [ -n "$name" ] || continue
+    path="/workspace/${name}"
+    origin="/workspace/${name}-origin.git"
+    if [ ! -d "$path/.git" ]; then
+      mkdir -p "$path"
+      git init -q "$path"
+      git -C "$path" config user.email loom@local
+      git -C "$path" config user.name loom
+      printf '# %s\n' "$name" > "$path/README.md"
+      git -C "$path" add README.md
+      git -C "$path" commit -q -m "Initial ${name} fixture"
+      [ -d "$origin" ] || git init -q --bare "$origin"
+      git -C "$path" remote add origin "$origin" 2>/dev/null || git -C "$path" remote set-url origin "$origin"
+      git -C "$path" push -q -u origin "$(git -C "$path" branch --show-current)" 2>/dev/null || true
+    fi
+    loom repo add "$name" "$origin" >/dev/null 2>&1 \
+      || echo "[local-mode] WARNING: could not register extra repo ${name}"
+  done
+}
+
 register_agents() {
   loom daemon profile set issue_backend fleetdb
   loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
@@ -191,6 +224,7 @@ register_agents() {
   loom agentdef remove "$CODE_AGENT" >/dev/null 2>&1 || true
   loom agentdef add "$PLAN_AGENT" --role plan --auto --backend "$AGENT_BACKEND" --repos source-repo
   loom agentdef add "$CODE_AGENT" --role task --auto --backend "$AGENT_BACKEND" --repos source-repo
+  seed_extra_repos
   seed_extra_agents
 }
 
