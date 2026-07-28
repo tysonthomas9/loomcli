@@ -157,12 +157,17 @@ case "$ls" in
 esac
 
 # ---- DOGFOOD-36: advisory-role respawn budget ----------------------------
-# Needs sustained observation: the bug was 742 no-op spawns over hours, and the
-# fix is that a no-work restart consumes budget instead of resetting it.
-# Procedure: leave an advisory agent running against an empty queue and confirm
-# the restart count climbs to max_retries and stops, rather than resetting on
-# every no-op (restart.go applyNoWorkRestart).
-skip "DOGFOOD-36 no-work respawn budget" "needs sustained observation; see the procedure in this script"
+# The symptom took hours (742 spawns) but the invariant is one state transition:
+# a no-work exit must leave RestartCount untouched, or max_retries is
+# unreachable for an agent whose failures interleave with idle polls. Pinned by
+# go test rather than by waiting.
+if go test ./internal/cli/daemon/supervisor/ \
+     -run 'TestApplyNoWorkRestart_PreservesRestartBudget|TestApplyCleanSuccessRestart_ResetsBudget' \
+     -count=1 >/tmp/d36.log 2>&1; then
+  pass "DOGFOOD-36 no-work exit preserves the restart budget"
+else
+  fail "DOGFOOD-36 no-work exit preserves the restart budget" "see /tmp/d36.log"
+fi
 
 # ---- DOGFOOD-47: arbitrary repo pick is logged ---------------------------
 # The warning only fires with MORE THAN ONE repo and no selector — selectRepo
@@ -170,11 +175,18 @@ skip "DOGFOOD-36 no-work respawn budget" "needs sustained observation; see the p
 # Procedure: register a second repo, dispatch an issue carrying no source_repo,
 # and confirm the daemon logs "task has no repo selector" naming both the chosen
 # repo and the candidates.
-repos=$("$LOOM" repo list 2>/dev/null | grep -vc '^time=' || echo 0)
-if [ "${repos:-0}" -gt 1 ]; then
-  skip "DOGFOOD-47 arbitrary repo pick is logged" "multi-repo stack present; needs a dispatch to observe"
+repos=$("$LOOM" repo list 2>/dev/null | grep -c '^[a-z]' || echo 0)
+if [ "${repos:-0}" -le 1 ]; then
+  skip "DOGFOOD-47 arbitrary repo pick is logged" "single-repo workspace short-circuits before the fallback"
 else
-  skip "DOGFOOD-47 arbitrary repo pick is logged" "single-repo workspace cannot trigger the fallback"
+  # Unit-level: the warning names the chosen repo AND the alternatives, which is
+  # what makes a wrong-repo diff traceable. Asserting only that "a warning
+  # exists" would pass on a message that says nothing useful.
+  if go test ./internal/driver/ -run 'TestSelectRepo_' -count=1 >/tmp/d47.log 2>&1; then
+    pass "DOGFOOD-47 arbitrary repo pick is logged (${repos} repos registered)"
+  else
+    fail "DOGFOOD-47 arbitrary repo pick is logged" "see /tmp/d47.log"
+  fi
 fi
 
 # ---- DOGFOOD-68: supervisor stamps then closes ---------------------------
