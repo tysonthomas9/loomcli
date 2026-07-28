@@ -1,0 +1,57 @@
+# Overlay that shapes the local-mode stack like the live workspace, so a
+# fix can be validated against the topology it will actually run in.
+#
+# The base stack is a two-agent demo (plan + task). the live workspace runs three —
+# planner, worker, critic — and the third is not cosmetic: max_agents defaults
+# to 2, and exceeding it fails daemon CREATION, so every agent stops rather than
+# the extra one. A two-agent test stack therefore cannot reproduce
+# the dispatch behaviour of a three-agent workspace at all.
+#
+# Usage:
+#   make test-stack-up      # recreate from scratch, then verify
+#   make test-stack-down
+#
+# Ports are shifted off the base stack's 8280/8282/8283 so this can run beside
+# the demo stack (and beside the live stack on 3009-3013) without a collision.
+#
+# UI:  http://localhost:8383/ws/TESTMIRROR/kanban
+# API: http://localhost:8382
+#
+# Everything runs on the deterministic localdogfood backend, so no tokens are
+# spent and runs are reproducible.
+
+services:
+  fleet-db:
+    ports:
+      - "127.0.0.1:8380:8080"
+    environment:
+      # Distinct from the live workspace, FLEETDB and LOCALMODE so a client that
+      # picks up the URL but not the workspace cannot reach real data.
+      LOOM_WORKSPACE: TESTMIRROR
+
+  loom-local:
+    ports:
+      - "127.0.0.1:8382:8080"
+    environment:
+      LOOM_WORKSPACE: TESTMIRROR
+      LOOM_WORKSPACE_ID: TESTMIRROR
+
+      # Mirror the live workspace's agent names and roles.
+      LOOM_LOCAL_MODE_PLAN_AGENT: planner
+      LOOM_LOCAL_MODE_CODE_AGENT: worker
+      LOOM_LOCAL_MODE_EXTRA_AGENTS: "critic:critic"
+
+      # The base stack pins these to LOCALMODE-*, which do not exist in this
+      # workspace — the seeder then 404s and the stack never becomes ready.
+      LOOM_LOCAL_MODE_PLAN_TASK_ID: TESTMIRROR-2
+      LOOM_LOCAL_MODE_CODE_TASK_ID: TESTMIRROR-3
+
+      # Room for the three agents plus one under test. The base default of 2
+      # silently stops the daemon the moment a third is added.
+      LOOM_LOCAL_MODE_MAX_AGENTS: "6"
+
+  ui-local:
+    ports:
+      - "127.0.0.1:8383:8080"
+    environment:
+      LOOM_WORKSPACE: TESTMIRROR
