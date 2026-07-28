@@ -125,6 +125,58 @@ case "$out" in
   *) fail "DOGFOOD-8 server-mode misconfig names the real fix" "got: $(echo "$out" | head -1)" ;;
 esac
 
+# ---- DOGFOOD-27: plan approve clears needs-revision ----------------------
+# A frontend behaviour, so it is pinned by the unit test rather than the API.
+# The suite runs the real assertion instead of restating it: the e2e suite used
+# to encode the BUG (expect(patchCalls[0]).toEqual({status:"open"})), so
+# "a test exists" was never evidence here.
+fe=internal/webui/frontend
+if [ -x "$fe/node_modules/.bin/vitest" ]; then
+  if (cd "$fe" && node_modules/.bin/vitest run src/__tests__/App.test.tsx \
+        -t "plan approve reopens the issue and clears needs-revision" >/tmp/d27.log 2>&1); then
+    pass "DOGFOOD-27 plan approve clears needs-revision"
+  else
+    fail "DOGFOOD-27 plan approve clears needs-revision" "see /tmp/d27.log"
+  fi
+else
+  skip "DOGFOOD-27 plan approve clears needs-revision" "frontend deps absent — run: make ensure-frontend-deps"
+fi
+
+# ---- DOGFOOD-7: dead agents must not report live_status=working ----------
+# live_status is a fleet-db-derived field, so it is observable here — but
+# forcing the failure means killing an agent mid-lease and waiting out the TTL
+# (up to 30 min), which does not belong in a fast suite. Assert the field is
+# present and sane; the transition itself is covered by fleet-db's own tests.
+ls=$(curl -s -m 5 -H "X-Actor: $LOOM_FLEET_DB_ACTOR" \
+  "$LOOM_FLEET_DB_URL/api/v1/$LOOM_WORKSPACE/agents" 2>/dev/null \
+  | jq -r '[.agents[]?.live_status] | map(select(. != null)) | join(",")')
+case "$ls" in
+  "") skip "DOGFOOD-7  agent liveness is reported" "no agents carry live_status yet" ;;
+  *working*|*idle*) pass "DOGFOOD-7  agent liveness is reported (${ls})" ;;
+  *) fail "DOGFOOD-7 agent liveness is reported" "unexpected live_status values: ${ls}" ;;
+esac
+
+# ---- DOGFOOD-36: advisory-role respawn budget ----------------------------
+# Needs sustained observation: the bug was 742 no-op spawns over hours, and the
+# fix is that a no-work restart consumes budget instead of resetting it.
+# Procedure: leave an advisory agent running against an empty queue and confirm
+# the restart count climbs to max_retries and stops, rather than resetting on
+# every no-op (restart.go applyNoWorkRestart).
+skip "DOGFOOD-36 no-work respawn budget" "needs sustained observation; see the procedure in this script"
+
+# ---- DOGFOOD-47: arbitrary repo pick is logged ---------------------------
+# The warning only fires with MORE THAN ONE repo and no selector — selectRepo
+# returns early for a single-repo workspace, so this stack cannot exercise it.
+# Procedure: register a second repo, dispatch an issue carrying no source_repo,
+# and confirm the daemon logs "task has no repo selector" naming both the chosen
+# repo and the candidates.
+repos=$("$LOOM" repo list 2>/dev/null | grep -vc '^time=' || echo 0)
+if [ "${repos:-0}" -gt 1 ]; then
+  skip "DOGFOOD-47 arbitrary repo pick is logged" "multi-repo stack present; needs a dispatch to observe"
+else
+  skip "DOGFOOD-47 arbitrary repo pick is logged" "single-repo workspace cannot trigger the fallback"
+fi
+
 # ---- DOGFOOD-68: supervisor stamps then closes ---------------------------
 # Not automated here: it needs a live agent run plus a supervisor rebuilt with
 # the hooks already in config (DOGFOOD-69 — hooks added to a RUNNING agent are
