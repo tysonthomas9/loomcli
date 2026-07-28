@@ -30,6 +30,11 @@ MAX_AGENTS="${LOOM_LOCAL_MODE_MAX_AGENTS:-2}"
 # that is not built in (plan/task) is created as a worker role with a generated
 # prompt file, because a custom role without prompt_file fails daemon creation.
 EXTRA_AGENTS="${LOOM_LOCAL_MODE_EXTRA_AGENTS:-}"
+# Comma-separated extra repo names to register in the workspace. A single-repo
+# workspace cannot exercise repo selection at all: selectRepo returns early
+# before reaching the no-selector fallback, so behavior that depends on
+# choosing between repos (DOGFOOD-47) is unreachable without this.
+EXTRA_REPOS="${LOOM_LOCAL_MODE_EXTRA_REPOS:-}"
 PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-2}"
 CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-3}"
 LOOM_BIND="${LOOM_LOCAL_MODE_BIND:-0.0.0.0}"
@@ -175,6 +180,34 @@ trust_codex_local_mode_paths() {
   trust_codex_project_path "${WORKSPACE_ROOT}/worktrees/source-repo/${CODE_AGENT}"
 }
 
+# seed_extra_repos registers additional repos so the workspace can reproduce
+# multi-repo routing. Each gets its own bare origin and an initial commit, so it
+# is a real repo rather than an empty registration.
+seed_extra_repos() {
+  [ -n "$EXTRA_REPOS" ] || return 0
+  local name path origin
+  echo "$EXTRA_REPOS" | tr ',' '\n' | while IFS= read -r name; do
+    name="$(echo "$name" | tr -d '[:space:]')"
+    [ -n "$name" ] || continue
+    path="/workspace/${name}"
+    origin="/workspace/${name}-origin.git"
+    if [ ! -d "$path/.git" ]; then
+      mkdir -p "$path"
+      git init -q "$path"
+      git -C "$path" config user.email loom@local
+      git -C "$path" config user.name loom
+      printf '# %s\n' "$name" > "$path/README.md"
+      git -C "$path" add README.md
+      git -C "$path" commit -q -m "Initial ${name} fixture"
+      [ -d "$origin" ] || git init -q --bare "$origin"
+      git -C "$path" remote add origin "$origin" 2>/dev/null || git -C "$path" remote set-url origin "$origin"
+      git -C "$path" push -q -u origin "$(git -C "$path" branch --show-current)" 2>/dev/null || true
+    fi
+    loom repo add "$name" "$origin" >/dev/null 2>&1 \
+      || echo "[local-mode] WARNING: could not register extra repo ${name}"
+  done
+}
+
 register_agents() {
   loom daemon profile set issue_backend fleetdb
   loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
@@ -191,11 +224,63 @@ register_agents() {
   loom agentdef remove "$CODE_AGENT" >/dev/null 2>&1 || true
   loom agentdef add "$PLAN_AGENT" --role plan --auto --backend "$AGENT_BACKEND" --repos source-repo
   loom agentdef add "$CODE_AGENT" --role task --auto --backend "$AGENT_BACKEND" --repos source-repo
+  seed_extra_repos
   seed_extra_agents
+  seed_pipeline
+}
+
+# seed_pipeline wires a label-routed pipeline while the daemon is still down.
+# Applying the same configuration to a RUNNING workspace can stop every agent
+# from spawning, permanently and with no error recorded anywhere (DOGFOOD-70), so
+# ordering here is not cosmetic.
+#
+# Spec: STAGE_ROLE:EXCLUDE_LABEL:STAMP_LABEL for the first stage, and
+# CYCLE_ROLE:THRESHOLD:REARM:SHIP for the stage that owns the counter.
+seed_pipeline() {
+  [ -n "${LOOM_LOCAL_MODE_PIPELINE:-}" ] || return 0
+  local stage_role stage_exclude stage_stamp cycle_role threshold rearm ship
+  IFS=':' read -r stage_role stage_exclude stage_stamp <<EOF2
+${LOOM_LOCAL_MODE_PIPELINE_STAGE:-}
+EOF2
+  IFS=':' read -r cycle_role threshold rearm ship <<EOF2
+${LOOM_LOCAL_MODE_PIPELINE_CYCLE:-}
+EOF2
+
+  if [ -n "$stage_role" ]; then
+    loom role set "$stage_role" exclude_labels "$stage_exclude" >/dev/null 2>&1 || true
+    loom role set "$stage_role" task_filter any >/dev/null 2>&1 || true
+    loom agentdef update "$(pipeline_agent_for_role "$stage_role")" \
+      --on-complete-add-label "$stage_stamp" >/dev/null 2>&1 || true
+    echo "[local-mode] pipeline: ${stage_role} claims un-${stage_exclude} tasks, stamps ${stage_stamp}"
+  fi
+  if [ -n "$cycle_role" ]; then
+    loom role set "$cycle_role" labels "$rearm" >/dev/null 2>&1 || true
+    loom role set "$cycle_role" task_filter any >/dev/null 2>&1 || true
+    loom agentdef update "$(pipeline_agent_for_role "$cycle_role")" \
+      --on-complete-cycle "${threshold}:${rearm}:${ship}" >/dev/null 2>&1 || true
+    echo "[local-mode] pipeline: ${cycle_role} runs ${threshold} rounds, then ships ${ship}"
+
+    # Constrain whoever consumes the ship label. Without this the downstream
+    # role keeps its broad filter and claims the task before the loop ever
+    # starts — exclusion only binds agents that declare it (DOGFOOD-51).
+    if [ -n "${LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE:-}" ]; then
+      loom role set "$LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE" labels "$ship" >/dev/null 2>&1 || true
+      echo "[local-mode] pipeline: ${LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE} waits for ${ship}"
+    fi
+  fi
+}
+
+# pipeline_agent_for_role maps a role name to the agent that runs it.
+pipeline_agent_for_role() {
+  case "$1" in
+    plan) echo "$PLAN_AGENT" ;;
+    task) echo "$CODE_AGENT" ;;
+    *)    echo "$1" ;;
+  esac
 }
 
 # seed_extra_agents mirrors a real workspace's agent topology so a test stack can
-# reproduce dispatch behaviour that only appears with more than two agents.
+# reproduce dispatch behavior that only appears with more than two agents.
 seed_extra_agents() {
   [ -n "$EXTRA_AGENTS" ] || return 0
   mkdir -p "${WORKSPACE_ROOT}/prompts"
