@@ -346,6 +346,15 @@ func (s *Supervisor) executeCompletionHooks(
 			err = s.postFinalReplyComment(ctx, ap, taskID, reply)
 		case domain.AgentHookActionAddLabel:
 			err = s.IssueBackend.AddLabel(ctx, taskID, action.Value)
+		case domain.AgentHookActionClose:
+			// Ordered last by Validate, so every write above has already
+			// landed. Closing here rather than letting the agent do it is the
+			// whole point: an agent-side close makes the preceding writes fail
+			// against a terminal issue, which silently strands the hand-off.
+			_, err = s.IssueBackend.Close(ctx, taskID, backend.CloseParams{
+				Reason:  "completed by agent " + ap.Entry.Worktree,
+				Session: sessionID,
+			})
 		default:
 			err = fmt.Errorf("unsupported action type %q", action.Type)
 		}
