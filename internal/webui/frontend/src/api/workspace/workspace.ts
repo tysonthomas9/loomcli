@@ -36,6 +36,11 @@ export interface WorkspaceAgentInfo {
   repos: string[];
   repo_groups: string[];
   cross_repo: boolean;
+  /**
+   * Creation-time role placement. Older workspace snapshots omit this field,
+   * so callers must continue to tolerate it being absent.
+   */
+  kind?: "interactive" | "worker" | "supervised";
   role_name?: string;
   backend?: string;
 }

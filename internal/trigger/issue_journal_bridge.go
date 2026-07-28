@@ -136,8 +136,15 @@ type IssueJournalBridge struct {
 	// it by default and keeps LOOM_TASK_READY_EVENTS as an opt-out rollback knob.
 	// See issue_journal_bridge_task_ready.go.
 	EmitTaskReady bool
+	// EmitTaskReview turns on the task-review transition lane: a proven
+	// issue.update transition from a non-review status into review emits a
+	// task.review internal event. The field itself defaults false for explicit
+	// construction; loom serve enables it by default and keeps
+	// LOOM_TASK_REVIEW_EVENTS as an opt-out rollback knob. See
+	// issue_journal_bridge_task_review.go.
+	EmitTaskReview bool
 	// IssueLookup resolves the CURRENT design/labels/type of an issue for
-	// task.ready payload enrichment. It is needed because an issue.update
+	// task.ready/task.review payload enrichment. It is needed because an issue.update
 	// journal entry's After snapshot is a DELTA (only the changed fields): an
 	// absent design key there means UNKNOWN, not "no design" — emitting a
 	// false hasDesign mis-routes the planner/coder phase gate both ways (the
@@ -200,6 +207,9 @@ type IssueJournalSweepResult struct {
 	// TaskReadyEmitted counts task.ready events emitted by the flag-gated
 	// task-ready lane (EmitTaskReady); zero when the flag is off.
 	TaskReadyEmitted int
+	// TaskReviewEmitted counts task.review events emitted by the flag-gated
+	// review-transition lane (EmitTaskReview); zero when the flag is off.
+	TaskReviewEmitted int
 	// TaskReadyBlocked counts current repository-required tasks moved to the
 	// Work Items blocked state instead of being emitted to Automation.
 	TaskReadyBlocked int
@@ -365,47 +375,68 @@ func (b *IssueJournalBridge) drainFrom(ctx context.Context, ws, cursor string, o
 // emitBatch processes one page oldest-first. It returns the cursor to persist
 // (the stream id of the last durably-handled event, "" when none advanced) and
 // the first non-terminal Emit error, which stops the drain so the unhandled
-// entry is retried next pass. Each entry may emit up to two events: the normal
+// entry is retried next pass. Each entry may emit up to three events: the normal
 // allowlisted re-emission and, when the flag-gated task-ready lane is on, an
-// additional task.ready event; the cursor advances only after BOTH are durably
-// handled, so a failure in either resumes exactly at this entry next pass.
+// additional task.ready event, plus a task.review event when its independently
+// gated transition lane is on; the cursor advances only after every applicable
+// event is durably handled, so a failure resumes exactly at this entry.
 func (b *IssueJournalBridge) emitBatch(ctx context.Context, ws string, events []store.JournalEvent, out *IssueJournalSweepResult) (string, error) {
 	advanced := ""
 	for _, ev := range events {
 		if ctx.Err() != nil {
 			return advanced, ctx.Err()
 		}
-		if b.actionAllowed(ev.Action) {
-			if err := b.emitOne(ctx, ws, ev); err != nil {
-				return advanced, err
-			}
-			out.Emitted++
-		} else {
-			out.Skipped++
-		}
-		if b.EmitTaskReady && isTaskReadyEntry(ev) {
-			reconciled, err := b.taskReadyJournalGenerationReconciled(ctx, ws, ev)
-			if err != nil {
-				return advanced, err
-			}
-			if reconciled {
-				advanced = ev.ID
-				continue
-			}
-			emitted, blocked, err := b.emitTaskReady(ctx, ws, ev)
-			if err != nil {
-				return advanced, err
-			}
-			if emitted {
-				out.TaskReadyEmitted++
-			}
-			if blocked {
-				out.TaskReadyBlocked++
-			}
+		if err := b.emitJournalEntry(ctx, ws, ev, out); err != nil {
+			return advanced, err
 		}
 		advanced = ev.ID
 	}
 	return advanced, nil
+}
+
+func (b *IssueJournalBridge) emitJournalEntry(
+	ctx context.Context,
+	ws string,
+	ev store.JournalEvent,
+	out *IssueJournalSweepResult,
+) error {
+	if b.actionAllowed(ev.Action) {
+		if err := b.emitOne(ctx, ws, ev); err != nil {
+			return err
+		}
+		out.Emitted++
+	} else {
+		out.Skipped++
+	}
+	if b.EmitTaskReady && isTaskReadyEntry(ev) {
+		reconciled, err := b.taskReadyJournalGenerationReconciled(ctx, ws, ev)
+		if err != nil {
+			return err
+		}
+		if reconciled {
+			return nil
+		}
+		emitted, blocked, err := b.emitTaskReady(ctx, ws, ev)
+		if err != nil {
+			return err
+		}
+		if emitted {
+			out.TaskReadyEmitted++
+		}
+		if blocked {
+			out.TaskReadyBlocked++
+		}
+	}
+	if b.EmitTaskReview && isTaskReviewEntry(ev) {
+		emitted, err := b.emitTaskReview(ctx, ws, ev)
+		if err != nil {
+			return err
+		}
+		if emitted {
+			out.TaskReviewEmitted++
+		}
+	}
+	return nil
 }
 
 // emitOne re-enters one journal entry into the router as a system-origin

@@ -33,10 +33,17 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-// maxResponseBody caps response reads at 16 MiB to prevent OOM if
-// fleet-db ever sends a malformed/huge body. Workspace metadata is
-// kilobytes; this is generous.
-const maxResponseBody = 16 << 20
+const (
+	// maxResponseBody caps generic JSON response reads at 16 MiB to prevent OOM
+	// if fleet-db ever sends a malformed/huge metadata body. Workspace metadata
+	// is kilobytes; this is generous.
+	maxResponseBody = 16 << 20
+
+	// maxArtifactContentBody is the raw artifact-content contract shared with
+	// FleetDB and the task-run artifact upload surface. Artifact payloads include
+	// transcripts and patches that may legitimately exceed the generic JSON cap.
+	maxArtifactContentBody = 64 << 20
+)
 
 // ErrRateLimited identifies a retryable FleetDB admission failure. It must
 // never be collapsed into a domain conflict: doing so makes Execution treat a
@@ -402,12 +409,12 @@ func (c *Client) doBytes(ctx context.Context, method, path string) ([]byte, erro
 		}
 		return nil, classifyHTTPError(method, path, resp.StatusCode, respBody)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxArtifactContentBody+1))
 	if err != nil {
 		return nil, fmt.Errorf("fleetdb: read response (%s %s): %w", method, path, err)
 	}
-	if len(body) > maxResponseBody {
-		return nil, fmt.Errorf("fleetdb: %s %s: response body exceeds %d bytes", method, path, maxResponseBody)
+	if len(body) > maxArtifactContentBody {
+		return nil, fmt.Errorf("fleetdb: %s %s: artifact content exceeds %d bytes", method, path, maxArtifactContentBody)
 	}
 	return body, nil
 }
@@ -473,6 +480,9 @@ func classifyHTTPError(method, path string, status int, body []byte) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrGone)
 	case http.StatusTooManyRequests:
 		return fmt.Errorf("%s: %w", prefix, ErrRateLimited)
+	}
+	if status >= 500 && strings.Contains(path, "/artifacts/") {
+		return fmt.Errorf("%s: %w", prefix, ErrArtifactsUnavailable)
 	}
 	if status >= 400 && status < 500 {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrConflict)

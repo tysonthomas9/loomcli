@@ -48,15 +48,18 @@ import {
   LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME,
   LEGACY_DAEMON_TEMPLATES,
   NEW_ROLE_TEMPLATE,
+  ROLE_TRIGGER_OPTIONS,
   SCRIPTED_WORKFLOW_TEMPLATES,
   customRoleTemplate,
   grantsForRepo,
+  roleTriggerOption,
   rolePromptFilename,
   supervisedTemplateForRole,
   templateForRole,
   TEMPLATE_SECTIONS,
   type AgentTemplate,
   type DefaultRole,
+  type RoleTrigger,
   type SupervisedRole,
 } from "./agentTemplates";
 import styles from "./CreateAgentModal.module.css";
@@ -143,6 +146,7 @@ function isPromptAgentTaskFilterSupported(
     case "any":
     case "needs_plan":
     case "has_design":
+    case "review":
     case "bug":
       return true;
     default:
@@ -157,7 +161,8 @@ function isCustomPromptAgentRoleCandidate(role: WorkspaceRole): boolean {
     !BUILTIN_ROLE_NAMES.has(roleName.toLowerCase()) &&
     !isInteractiveWorkspaceRole(role) &&
     isPromptAgentTaskFilterSupported(role.task_filter) &&
-    (role.task_filter?.trim() !== "bug" || role.read_only === true)
+    (role.task_filter?.trim() !== "bug" || role.read_only === true) &&
+    (role.task_filter?.trim() !== "review" || role.read_only !== true)
   );
 }
 
@@ -337,6 +342,7 @@ export function CreateAgentModal({
   const [cadence, setCadence] = useState<string>(DEFAULT_CADENCE);
   const [newRoleName, setNewRoleName] = useState<string>("");
   const [rolePrompt, setRolePrompt] = useState<string>("");
+  const [newRoleTrigger, setNewRoleTrigger] = useState<RoleTrigger>("ready");
   const [existingRoles, setExistingRoles] = useState<WorkspaceRole[]>([]);
   const [selectedBuiltinPromptID, setSelectedBuiltinPromptID] = useState<
     string | null
@@ -352,7 +358,7 @@ export function CreateAgentModal({
     backends,
     isLoading: backendsLoading,
     error: backendsError,
-  } = useBackends();
+  } = useBackends(isOpen);
   // active=false: mutations do not require loading the automations catalog.
   const { createBinding, updateBinding, setEnabled } = useAutomations(
     workspaceId,
@@ -369,7 +375,7 @@ export function CreateAgentModal({
   // authority, while the field lets current servers warn before submission.
   const githubUsable = githubCredentialStatus?.usable ?? githubConfigured;
   const { prompts: fetchedInteractivePrompts, error: promptLoadError } =
-    useInteractivePrompts(workspaceId);
+    useInteractivePrompts(workspaceId, isOpen);
 
   const customRoleTemplates = useMemo(
     () =>
@@ -420,13 +426,22 @@ export function CreateAgentModal({
       selectedTemplate.kind === "builtin-role" ||
       selectedTemplate.kind === "custom-role");
   const isWorkflow = !isInteractive && selectedTemplate.kind === "workflow";
+  const selectedRoleTrigger = isRoleCreate
+    ? newRoleTrigger
+    : (selectedTemplate.roleTrigger ?? "ready");
+  const selectedRoleTriggerOption = roleTriggerOption(selectedRoleTrigger);
   const workflowSpec = isWorkflow ? selectedTemplate.workflow : undefined;
   const needsConnector = (workflowSpec?.grants?.length ?? 0) > 0;
   const needsGitHub = workflowSpec?.requiresGitHub === true;
   const showCadence = isWorkflow;
   const isActivation = isWorkflow || isRoleBehavior;
   const showBackend = isInteractive || isRoleBehavior || isLegacyDaemon;
-  const showRepos = !isRoleBehavior && !isInteractive;
+  // Interactive agents use the same explicit repository-scope contract as
+  // supervised agents: selected chips scope the agent to those repositories,
+  // while an empty selection grants workspace-wide scope. Keeping these
+  // controls visible prevents the default first repository from becoming an
+  // invisible, immutable choice.
+  const showRepos = !isRoleBehavior;
   // Scripted workflows do not expose a backend picker. Review/local-review
   // require Codex explicitly; bug-fix intentionally keeps using the current
   // workspace/default backend and only verifies that it is runnable.
@@ -519,13 +534,14 @@ export function CreateAgentModal({
 
   const crossRepo = selectedRepos.length === 0;
   const toggleRepo = (repo: string): void =>
-    setSelectedRepos((prev) =>
-      prev.includes(repo)
+    setSelectedRepos((prev) => {
+      if (isWorkflow) {
+        return prev.length === 1 && prev[0] === repo ? [] : [repo];
+      }
+      return prev.includes(repo)
         ? prev.filter((r) => r !== repo)
-        : isWorkflow
-          ? [repo]
-          : [...prev, repo],
-    );
+        : [...prev, repo];
+    });
 
   const readyBackends = useMemo(
     () => backends.filter((candidate) => isBackendReady(candidate)),
@@ -555,6 +571,7 @@ export function CreateAgentModal({
     setCadence(DEFAULT_CADENCE);
     setNewRoleName("");
     setRolePrompt("");
+    setNewRoleTrigger("ready");
     setSelectedBuiltinPromptID(
       supervisedRole ? null : defaultRole === "lead" ? "lead" : null,
     );
@@ -679,17 +696,26 @@ export function CreateAgentModal({
       ? customPrompt.trim() !== ""
       : (selectedBuiltinPromptID?.trim() ?? "") !== "");
   const legacyRepoReady = !isLegacyDaemon || repoOptions.length > 0;
+  const workflowRepoReady =
+    !isWorkflow || (selectedRepos.length === 1 && targetRepo !== undefined);
   const canSubmit =
     nameError === null &&
     roleCreateReady &&
     hasPromptSelection &&
     legacyRepoReady &&
+    workflowRepoReady &&
     backendReadinessMessage === null &&
     !isSubmitting;
 
   const selectTemplate = (templateID: string): void => {
     setSelectedBuiltinPromptID(null);
     setSelectedTemplateId(templateID);
+    const nextTemplate = allTemplates.find(
+      (template) => template.id === templateID,
+    );
+    if (nextTemplate?.kind === "workflow") {
+      setSelectedRepos((current) => current.slice(0, 1));
+    }
   };
 
   const selectInteractive = (promptID: string): void => {
@@ -740,9 +766,7 @@ export function CreateAgentModal({
                     ...(selectedTemplate.roleCreate?.description
                       ? { description: selectedTemplate.roleCreate.description }
                       : {}),
-                    ...(selectedTemplate.roleCreate?.taskFilter
-                      ? { task_filter: selectedTemplate.roleCreate.taskFilter }
-                      : {}),
+                    task_filter: selectedRoleTriggerOption.taskFilter,
                     ...(trimmedBackend ? { backend: trimmedBackend } : {}),
                   },
                 }
@@ -750,7 +774,7 @@ export function CreateAgentModal({
           },
           trigger: {
             source_kind: "internal",
-            event_type_patterns: ["internal.task.ready"],
+            event_type_patterns: [selectedRoleTriggerOption.eventTypePattern],
           },
           enabled: true,
         };
@@ -768,10 +792,10 @@ export function CreateAgentModal({
         dispatchBindingsChanged(workspaceId);
         onClose();
         resetToDefaults();
-        // The detail resolver still accepts binding ids; a later wave switches
-        // this route to the durable agent record id returned as agentRecord.id.
+        // Route by the durable AgentService identity so its Runs tab can
+        // aggregate history across every attached trigger binding.
         navigate(
-          `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(bindingId)}`,
+          `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(agentRecord.id)}`,
         );
         return;
       }
@@ -781,6 +805,10 @@ export function CreateAgentModal({
       // loop additionally reaches GitHub through a connector that reuses the
       // Settings runtime credential.
       if (isWorkflow && workflowSpec) {
+        if (selectedRepos.length !== 1 || !targetRepo) {
+          setError("Select exactly one target repo for this workflow.");
+          return;
+        }
         const wf = workflowSpec;
         const cron =
           CADENCE_OPTIONS.find((c) => c.value === cadence)?.cron ??
@@ -969,7 +997,14 @@ export function CreateAgentModal({
         ...request,
         ...(trimmedBackend ? { backend: trimmedBackend } : {}),
       });
-      onSuccess(agent);
+      // The workspace-agent response predates role kinds and may omit them.
+      // Preserve the kind selected in this modal so the shell can immediately
+      // place every interactive template (not just legacy role names) in its
+      // Terminal without waiting for a workspace refetch.
+      onSuccess({
+        ...agent,
+        kind: isInteractive ? "interactive" : (agent.kind ?? "worker"),
+      });
       resetToDefaults();
     } catch (err) {
       if (err instanceof ApiError) {
@@ -1317,10 +1352,39 @@ export function CreateAgentModal({
               className={`${styles.fieldGroup} ${styles.fieldGroupSpaced}`}
               data-testid="create-agent-role-trigger"
             >
-              <span className={styles.label}>Trigger</span>
-              <div className={styles.readOnlyField}>
-                Runs when a task becomes ready
-              </div>
+              {isRoleCreate ? (
+                <>
+                  <label
+                    className={styles.label}
+                    htmlFor="prompt-agent-role-trigger"
+                  >
+                    Runs when
+                  </label>
+                  <select
+                    id="prompt-agent-role-trigger"
+                    className={styles.select}
+                    value={newRoleTrigger}
+                    onChange={(event) =>
+                      setNewRoleTrigger(event.target.value as RoleTrigger)
+                    }
+                    disabled={isSubmitting}
+                    data-testid="create-agent-role-trigger-select"
+                  >
+                    {ROLE_TRIGGER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <>
+                  <span className={styles.label}>Trigger</span>
+                  <div className={styles.readOnlyField}>
+                    {selectedRoleTriggerOption.readOnlyLabel}
+                  </div>
+                </>
+              )}
             </div>
           )}
 

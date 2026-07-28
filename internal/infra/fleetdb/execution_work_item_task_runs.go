@@ -21,11 +21,12 @@ import (
 const (
 	executionDriverRunReviewClaimFingerprintPrefix = "driver-run-work-item-claim-v2:"
 
-	executionDriverRunReviewPriorityMin     = 0
-	executionDriverRunReviewPriorityMax     = 4
-	executionDriverRunReviewMaxLabels       = 8
-	executionDriverRunReviewMaxLabelBytes   = 64
-	executionDriverRunReviewMaxCommentBytes = 10000
+	executionDriverRunReviewPriorityMin         = 0
+	executionDriverRunReviewPriorityMax         = 4
+	executionDriverRunReviewMaxLabels           = 8
+	executionDriverRunReviewMaxLabelBytes       = 64
+	executionDriverRunReviewMaxCommentBytes     = 10000
+	executionDriverRunReviewMaxExternalRefBytes = 512
 )
 
 type executionTaskRunRequestBody struct {
@@ -52,6 +53,22 @@ type executionTaskRunRequestBody struct {
 	Input                json.RawMessage         `json:"input,omitempty"`
 	RequestedAt          time.Time               `json:"requested_at"`
 	ReplayOnly           bool                    `json:"replay_only,omitempty"`
+}
+
+type executionDriverRunReviewHandoffRequest struct {
+	CommandID     string    `json:"command_id"`
+	NodeID        string    `json:"node_id"`
+	LeaseID       string    `json:"lease_id"`
+	FencingToken  int64     `json:"fencing_token"`
+	ClaimActionID string    `json:"claim_action_id"`
+	TaskRunID     string    `json:"task_run_id"`
+	TargetStatus  string    `json:"target_status"`
+	Reason        string    `json:"reason"`
+	Priority      *int      `json:"priority,omitempty"`
+	Labels        []string  `json:"labels,omitempty"`
+	CommentBody   string    `json:"comment_body,omitempty"`
+	ExternalRef   *string   `json:"external_ref,omitempty"`
+	HandedOffAt   time.Time `json:"handed_off_at"`
 }
 
 func (s *executionStore) RequestTaskRun(ctx context.Context, command ExecutionTaskRunRequestCommand) (*ExecutionTaskRunRequestResult, error) {
@@ -291,35 +308,16 @@ func (s *executionStore) HandoffDriverRunReviewWorkItem(
 	ctx context.Context,
 	command ExecutionDriverRunReviewWorkItemHandoffCommand,
 ) (*ExecutionDriverRunWorkItemResult, error) {
-	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
-	command.TargetStatus = strings.TrimSpace(command.TargetStatus)
-	command.Reason = strings.TrimSpace(command.Reason)
-	command.Labels = normalizeExecutionDriverRunReviewLabels(command.Labels)
-	if !validExecutionDriverRunWorkItemOwner(command.WorkspaceKey, command.CommandID, command.RunID, command.TaskID,
-		command.NodeID, command.LeaseID, command.LeaseToken, command.FencingToken) ||
-		strings.TrimSpace(command.ClaimActionID) == "" || command.TaskRunID == "" ||
-		(command.TargetStatus != "open" && command.TargetStatus != "review" && command.TargetStatus != "closed") ||
-		!validExecutionDriverRunReviewAnnotations(command) ||
-		command.HandedOffAt.IsZero() {
+	command = normalizeExecutionDriverRunReviewHandoffCommand(command)
+	if !validExecutionDriverRunReviewHandoffCommand(command) {
 		return nil, fmt.Errorf("execution DriverRun review handoff identity, owner, token, claim action, TaskRun, target, and time are required: %w", ErrExecutionInvalid)
 	}
-	body := struct {
-		CommandID     string    `json:"command_id"`
-		NodeID        string    `json:"node_id"`
-		LeaseID       string    `json:"lease_id"`
-		FencingToken  int64     `json:"fencing_token"`
-		ClaimActionID string    `json:"claim_action_id"`
-		TaskRunID     string    `json:"task_run_id"`
-		TargetStatus  string    `json:"target_status"`
-		Reason        string    `json:"reason"`
-		Priority      *int      `json:"priority,omitempty"`
-		Labels        []string  `json:"labels,omitempty"`
-		CommentBody   string    `json:"comment_body,omitempty"`
-		HandedOffAt   time.Time `json:"handed_off_at"`
-	}{
-		command.CommandID, command.NodeID, command.LeaseID, command.FencingToken,
-		command.ClaimActionID, command.TaskRunID, command.TargetStatus, command.Reason,
-		command.Priority, command.Labels, command.CommentBody, command.HandedOffAt,
+	body := executionDriverRunReviewHandoffRequest{
+		CommandID: command.CommandID, NodeID: command.NodeID, LeaseID: command.LeaseID,
+		FencingToken: command.FencingToken, ClaimActionID: command.ClaimActionID,
+		TaskRunID: command.TaskRunID, TargetStatus: command.TargetStatus, Reason: command.Reason,
+		Priority: command.Priority, Labels: command.Labels, CommentBody: command.CommentBody,
+		ExternalRef: command.ExternalRef, HandedOffAt: command.HandedOffAt,
 	}
 	path := "/api/v1/" + pathEscape(command.WorkspaceKey) + "/driver-runs/" + pathEscape(command.RunID) +
 		"/work-items/" + pathEscape(command.TaskID) + "/review-handoff"
@@ -335,6 +333,34 @@ func (s *executionStore) HandoffDriverRunReviewWorkItem(
 		return nil, fmt.Errorf("DriverRun review Work Item handoff returned divergent receipt: %w", ErrExecutionUnavailable)
 	}
 	return &result, nil
+}
+
+func normalizeExecutionDriverRunReviewHandoffCommand(
+	command ExecutionDriverRunReviewWorkItemHandoffCommand,
+) ExecutionDriverRunReviewWorkItemHandoffCommand {
+	command.TaskRunID = strings.TrimSpace(command.TaskRunID)
+	command.TargetStatus = strings.TrimSpace(command.TargetStatus)
+	command.Reason = strings.TrimSpace(command.Reason)
+	command.Labels = normalizeExecutionDriverRunReviewLabels(command.Labels)
+	if command.ExternalRef != nil {
+		externalRef := strings.TrimSpace(*command.ExternalRef)
+		command.ExternalRef = &externalRef
+	}
+	return command
+}
+
+func validExecutionDriverRunReviewHandoffCommand(command ExecutionDriverRunReviewWorkItemHandoffCommand) bool {
+	return validExecutionDriverRunWorkItemOwner(command.WorkspaceKey, command.CommandID, command.RunID, command.TaskID,
+		command.NodeID, command.LeaseID, command.LeaseToken, command.FencingToken) &&
+		strings.TrimSpace(command.ClaimActionID) != "" &&
+		command.TaskRunID != "" &&
+		validExecutionDriverRunReviewTargetStatus(command.TargetStatus) &&
+		validExecutionDriverRunReviewAnnotations(command) &&
+		!command.HandedOffAt.IsZero()
+}
+
+func validExecutionDriverRunReviewTargetStatus(status string) bool {
+	return status == "open" || status == "review" || status == "closed"
 }
 
 func validExecutionDriverRunReviewWorkItemHandoffResult(
@@ -386,14 +412,18 @@ func validExecutionDriverRunReviewResultComment(
 
 func validExecutionDriverRunReviewAnnotations(command ExecutionDriverRunReviewWorkItemHandoffCommand) bool {
 	if command.TargetStatus != "review" {
-		return command.Priority == nil && len(command.Labels) == 0 && strings.TrimSpace(command.CommentBody) == ""
+		return command.Priority == nil &&
+			len(command.Labels) == 0 &&
+			strings.TrimSpace(command.CommentBody) == "" &&
+			command.ExternalRef == nil
 	}
 	if command.Priority == nil ||
 		*command.Priority < executionDriverRunReviewPriorityMin ||
 		*command.Priority > executionDriverRunReviewPriorityMax ||
 		strings.TrimSpace(command.CommentBody) == "" ||
 		len(command.CommentBody) > executionDriverRunReviewMaxCommentBytes ||
-		len(command.Labels) > executionDriverRunReviewMaxLabels {
+		len(command.Labels) > executionDriverRunReviewMaxLabels ||
+		(command.ExternalRef != nil && !validExecutionDriverRunReviewExternalRef(*command.ExternalRef)) {
 		return false
 	}
 	for _, label := range command.Labels {
@@ -429,8 +459,66 @@ func validExecutionDriverRunReviewResultAnnotations(
 	if command.Priority == nil || issue.Priority != *command.Priority {
 		return false
 	}
+	if command.ExternalRef != nil && issue.ExternalRef != *command.ExternalRef {
+		return false
+	}
 	for _, label := range command.Labels {
 		if !slices.Contains(issue.Labels, label) {
+			return false
+		}
+	}
+	return true
+}
+
+func validExecutionDriverRunReviewExternalRef(externalRef string) bool {
+	if externalRef != strings.TrimSpace(externalRef) ||
+		!utf8.ValidString(externalRef) ||
+		len(externalRef) > executionDriverRunReviewMaxExternalRefBytes ||
+		!strings.HasPrefix(externalRef, "local-branch:") {
+		return false
+	}
+	value := strings.TrimPrefix(externalRef, "local-branch:")
+	separator := strings.LastIndex(value, "@")
+	if separator <= 0 {
+		return false
+	}
+	branch, head := value[:separator], value[separator+1:]
+	return validExecutionDriverRunReviewBranch(branch) &&
+		validExecutionDriverRunReviewCommit(head)
+}
+
+func validExecutionDriverRunReviewBranch(branch string) bool {
+	if branch == "@" ||
+		strings.HasPrefix(branch, "-") ||
+		strings.HasPrefix(branch, "/") ||
+		strings.HasSuffix(branch, "/") ||
+		strings.HasPrefix(branch, ".") ||
+		strings.HasSuffix(branch, ".") ||
+		strings.HasSuffix(branch, ".lock") ||
+		strings.Contains(branch, "..") ||
+		strings.Contains(branch, "//") ||
+		strings.Contains(branch, "@{") ||
+		strings.TrimSpace(branch) != branch ||
+		strings.IndexFunc(branch, func(r rune) bool {
+			return unicode.IsControl(r) || unicode.IsSpace(r) ||
+				strings.ContainsRune(`~^:?*[\`, r)
+		}) >= 0 {
+		return false
+	}
+	for _, component := range strings.Split(branch, "/") {
+		if strings.HasPrefix(component, ".") || strings.HasSuffix(component, ".lock") {
+			return false
+		}
+	}
+	return true
+}
+
+func validExecutionDriverRunReviewCommit(head string) bool {
+	if len(head) != 40 {
+		return false
+	}
+	for _, char := range head {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
 			return false
 		}
 	}

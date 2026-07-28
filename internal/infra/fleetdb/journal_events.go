@@ -30,8 +30,8 @@ type mutationsResponse struct {
 
 // journalEventWire mirrors fleet-db's EventResponse (api/event_types.go). The
 // before/after fields arrive as JSON-encoded strings (the entity snapshot is
-// itself serialized JSON, not an inline object); after is unwrapped into raw
-// JSON for the projection and before is dropped.
+// itself serialized JSON, not an inline object); both are unwrapped into raw
+// JSON for the projection.
 type journalEventWire struct {
 	ID         string            `json:"id"`
 	Timestamp  time.Time         `json:"timestamp"`
@@ -39,6 +39,7 @@ type journalEventWire struct {
 	Action     string            `json:"action"`
 	EntityType string            `json:"entity_type"`
 	EntityID   string            `json:"entity_id"`
+	Before     string            `json:"before"`
 	After      string            `json:"after"`
 	Metadata   map[string]string `json:"metadata"`
 }
@@ -49,9 +50,9 @@ type journalEventWire struct {
 // "" maps to fleet-db's "0" beginning-of-stream sentinel. nextCursor is the
 // response Cursor (the resume position), and hasMore is the response has_more.
 //
-// A malformed after-state on any one event is skipped (its After left nil)
-// rather than failing the whole batch — a single poisoned snapshot must not
-// stall the bridge's forward progress.
+// A malformed before/after state on any one event is skipped (that field is
+// left nil) rather than failing the whole batch — a single poisoned snapshot
+// must not stall the bridge's forward progress.
 func (s *triggerEventStore) ListIssueEvents(ctx context.Context, ws, afterCursor string, limit int) ([]store.JournalEvent, string, bool, error) {
 	q := url.Values{}
 	q.Set("entity_type", "issue")
@@ -78,7 +79,8 @@ func (s *triggerEventStore) ListIssueEvents(ctx context.Context, ws, afterCursor
 			Actor:     e.Actor,
 			EntityID:  e.EntityID,
 			Timestamp: e.Timestamp,
-			After:     unwrapAfter(e.After),
+			Before:    unwrapJournalSnapshot(e.Before),
+			After:     unwrapJournalSnapshot(e.After),
 			Metadata:  e.Metadata,
 		})
 	}
@@ -93,14 +95,14 @@ func (s *triggerEventStore) ListIssueEvents(ctx context.Context, ws, afterCursor
 	return events, nextCursor, resp.HasMore, nil
 }
 
-// unwrapAfter turns fleet-db's JSON-encoded after-state string into raw JSON.
-// Empty or malformed input yields nil — a missing/poisoned snapshot is skipped
-// rather than propagated as a hard error (see ListIssueEvents).
-func unwrapAfter(after string) json.RawMessage {
-	if after == "" {
+// unwrapJournalSnapshot turns a fleet-db JSON-encoded entity-state string into
+// raw JSON. Empty or malformed input yields nil — a missing/poisoned snapshot
+// is skipped rather than propagated as a hard error (see ListIssueEvents).
+func unwrapJournalSnapshot(snapshot string) json.RawMessage {
+	if snapshot == "" {
 		return nil
 	}
-	raw := json.RawMessage(after)
+	raw := json.RawMessage(snapshot)
 	if !json.Valid(raw) {
 		return nil
 	}

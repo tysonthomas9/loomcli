@@ -2630,7 +2630,7 @@ describe("App", () => {
   });
 
   describe("lead agent creation opens the terminal", () => {
-    it("refreshes live agent status after creating a custom interactive agent", async () => {
+    it("opens the Terminal and refreshes status after creating a custom interactive agent", async () => {
       localStorage.clear();
       const fetchData = vi.fn().mockResolvedValue(undefined);
       mockCreateWorkspaceAgent.mockResolvedValue({
@@ -2664,6 +2664,7 @@ describe("App", () => {
           target: { value: "Review changes and wait." },
         },
       );
+      mockNavigate.mockClear();
       fireEvent.click(
         within(dialog).getByRole("button", { name: "Create Agent" }),
       );
@@ -2671,6 +2672,61 @@ describe("App", () => {
       await waitFor(() => {
         expect(mockCreateWorkspaceAgent).toHaveBeenCalled();
         expect(fetchData).toHaveBeenCalled();
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith(
+          expect.stringContaining("/agents/custom-review"),
+        );
+      });
+    });
+
+    it("opens the Terminal after creating a PR Review agent", async () => {
+      localStorage.clear();
+      mockCreateWorkspaceAgent.mockResolvedValue({
+        name: "pr-review-nova",
+        role_name: "pr-review",
+        repos: ["Hello-World"],
+        repo_groups: [],
+        cross_repo: false,
+      });
+      mockStoreState = createMockUseIssuesReturn({
+        issues: [createMockIssue({ id: "T-1" })],
+      });
+      mockHelloWorldWorkspaceContext({
+        agents: [{ name: "existing-planner", role_name: "plan" }],
+      });
+
+      render(<App />);
+
+      fireEvent.click(screen.getByRole("button", { name: "+ Add agent" }));
+      const dialog = await screen.findByRole("dialog", { name: "New Agent" });
+      fireEvent.click(
+        within(dialog).getByTestId(
+          "create-agent-template-interactive-pr-review",
+        ),
+      );
+      fireEvent.change(within(dialog).getByLabelText("Name"), {
+        target: { value: "pr-review-nova" },
+      });
+      mockNavigate.mockClear();
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Create Agent" }),
+      );
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.objectContaining({
+            name: "pr-review-nova",
+            role_name: "pr-review",
+            kind: "interactive",
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith(
+          expect.stringContaining("/agents/pr-review-nova"),
+        );
       });
     });
 

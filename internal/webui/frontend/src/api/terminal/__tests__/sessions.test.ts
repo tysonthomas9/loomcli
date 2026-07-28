@@ -9,8 +9,10 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { ApiError, api } from "@/api/common";
+import { ApiError, api, get } from "@/api/common";
+import type { TranscriptEntry } from "@/types/agent";
 import {
+  getAgentSessionTranscript,
   getTaskSessions,
   getSession,
   getSessionTranscript,
@@ -35,6 +37,7 @@ vi.mock("@/api/common", async (importOriginal) => {
 });
 
 const mockApiGet = vi.mocked(api.GET);
+const mockGet = vi.mocked(get);
 
 describe("sessions API", () => {
   beforeEach(() => {
@@ -127,6 +130,20 @@ describe("sessions API", () => {
       const result = await getTaskSessions("test-ws-id", "loom-nonexistent");
 
       expect(result).toEqual([]);
+    });
+
+    it("preserves a 404 when the caller needs unavailable-state handling", async () => {
+      mockApiGet.mockResolvedValueOnce({
+        data: undefined,
+        error: { error: "Not Found" },
+        response: new Response(null, { status: 404, statusText: "Not Found" }),
+      } as never);
+
+      await expect(
+        getSessionTranscript("test-ws-id", "loom-123", "s-missing", {
+          preserveNotFound: true,
+        }),
+      ).rejects.toMatchObject({ status: 404 });
     });
 
     it("throws on non-404 API errors", async () => {
@@ -287,20 +304,20 @@ describe("sessions API", () => {
 
   describe("getSessionTranscript", () => {
     it("returns transcript entries from response data", async () => {
-      const entries = [
+      const entries: TranscriptEntry[] = [
         {
           seq: 1,
-          ts: "2026-01-01T00:00:00Z",
+          timestamp: "2026-01-01T00:00:00Z",
           role: "user",
           type: "text",
-          content: "Hello",
+          text: "Hello",
         },
         {
           seq: 2,
-          ts: "2026-01-01T00:00:01Z",
+          timestamp: "2026-01-01T00:00:01Z",
           role: "assistant",
           type: "text",
-          content: "Hi there",
+          text: "Hi there",
         },
       ];
 
@@ -403,6 +420,55 @@ describe("sessions API", () => {
           },
         },
       );
+    });
+  });
+
+  // ============= getAgentSessionTranscript =============
+
+  describe("getAgentSessionTranscript", () => {
+    it("fetches canonical entries through the encoded agent-session route", async () => {
+      const entries = [
+        {
+          seq: 1,
+          timestamp: "2026-01-01T00:00:00Z",
+          role: "assistant",
+          type: "text",
+          text: "Review complete",
+        },
+      ];
+      mockGet.mockResolvedValueOnce({
+        success: true,
+        data: { session_id: "session/1", entries },
+      });
+
+      const result = await getAgentSessionTranscript(
+        "workspace id",
+        "review/agent",
+        "session/1",
+      );
+
+      expect(result).toEqual(entries);
+      expect(mockGet).toHaveBeenCalledWith(
+        "/api/workspaces/workspace%20id/agents/review%2Fagent/sessions/session%2F1/transcript",
+      );
+    });
+
+    it("returns an empty list when an agent transcript is not available yet", async () => {
+      mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+
+      await expect(
+        getAgentSessionTranscript("WS", "reviewer", "session-1"),
+      ).resolves.toEqual([]);
+    });
+
+    it("preserves an unavailable agent transcript when requested", async () => {
+      mockGet.mockRejectedValueOnce(new ApiError(404, "Not Found"));
+
+      await expect(
+        getAgentSessionTranscript("WS", "reviewer", "session-1", {
+          preserveNotFound: true,
+        }),
+      ).rejects.toMatchObject({ status: 404 });
     });
   });
 

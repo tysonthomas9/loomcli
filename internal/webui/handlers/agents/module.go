@@ -2,11 +2,13 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -23,6 +25,7 @@ type BindingGrantCompatibility interface {
 // run-history concerns that move in later phases.
 type Config struct {
 	AgentService         service.AgentService
+	SessionTranscripts   service.AgentSessionTranscriptService
 	Store                store.Store
 	Hub                  *realtime.Hub
 	Bindings             automation.BindingOperations
@@ -34,6 +37,7 @@ type Config struct {
 // Module registers fleet-db-backed agent assignment routes.
 type Module struct {
 	agentSvc             service.AgentService
+	sessionTranscripts   service.AgentSessionTranscriptService
 	store                store.Store
 	hub                  *realtime.Hub
 	bindings             automation.BindingOperations
@@ -45,7 +49,8 @@ type Module struct {
 // New constructs the Automation-aware agent HTTP module.
 func New(config Config) *Module {
 	return &Module{
-		agentSvc: config.AgentService, store: config.Store, hub: config.Hub,
+		agentSvc: config.AgentService, sessionTranscripts: config.SessionTranscripts,
+		store: config.Store, hub: config.Hub,
 		bindings: config.Bindings, operatorAuthority: config.OperatorAuthority,
 		workspaceFromContext: config.WorkspaceFromContext, bindingGrants: config.BindingGrants,
 	}
@@ -58,7 +63,7 @@ func NewModule(agentSvc service.AgentService, st store.Store, hub *realtime.Hub)
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
-	if m.agentSvc == nil && m.store == nil {
+	if m.agentSvc == nil && m.store == nil && m.sessionTranscripts == nil {
 		return
 	}
 	mux.HandleFunc("GET /api/workspaces/{ws}/interactive-prompts", HandleInteractivePrompts())
@@ -80,4 +85,22 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{id}/enable", m.setRecordEnabled(true))
 	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{id}/disable", m.setRecordEnabled(false))
 	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{id}/runs", m.listAgentRuns)
+	mux.HandleFunc(
+		"GET /api/workspaces/{ws}/agents/{id}/sessions/{session_id}/transcript",
+		m.getAgentSessionTranscript,
+	)
+}
+
+func writeAgentSessionTranscriptServiceError(w http.ResponseWriter, err error) {
+	var svcErr *service.ServiceError
+	status := http.StatusInternalServerError
+	message := "internal server error"
+	if errors.As(err, &svcErr) {
+		status = handler.StatusForKind(svcErr.Kind)
+		message = svcErr.Message
+	}
+	handler.WriteJSON(w, status, agentSessionTranscriptResponse{
+		Success: false,
+		Error:   message,
+	})
 }

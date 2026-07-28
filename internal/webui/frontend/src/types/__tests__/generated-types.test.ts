@@ -1,10 +1,9 @@
 /**
- * Unit tests verifying that OpenAPI-generated type aliases are structurally
- * correct and that the generated openapi.ts file exports the expected shapes.
+ * Runtime smoke tests for values shaped like OpenAPI-generated aliases.
  *
- * These tests create objects matching generated schemas and assign them to the
- * aliased types, confirming the aliases resolve correctly at both the type
- * level and runtime.
+ * Vitest transpiles this excluded test file without making it part of the
+ * production TypeScript program. Compile-only compatibility locks therefore
+ * live beside the exported aliases under src/types.
  */
 
 import { describe, it, expect } from "vitest";
@@ -12,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import type { components, paths } from "../generated/openapi";
 import type { Comment } from "@/types/issue";
 import type { EditorInfo } from "@/types/common";
-import type { SessionRecord, TranscriptEntry } from "@/types/agent";
+import type { SessionRecord } from "@/types/agent";
 import type { Statistics } from "@/types/issue";
 import type {
   UsageSession,
@@ -182,19 +181,19 @@ describe("SessionRecord alias", () => {
 });
 
 describe("TranscriptEntry alias", () => {
-  it("has expected fields from generated TranscriptEntry schema", () => {
-    const entry: TranscriptEntry = {
+  it("preserves the expected transcript fields at runtime", () => {
+    const entry = {
       seq: 1,
-      ts: "2024-07-01T10:01:00Z",
+      timestamp: "2024-07-01T10:01:00Z",
       role: "assistant",
-      type: "text",
-      content: "I will fix the bug.",
+      type: "reasoning",
+      text: "I will inspect the failing path.",
     };
 
     expect(entry.seq).toBe(1);
     expect(entry.role).toBe("assistant");
-    expect(entry.type).toBe("text");
-    expect(entry.content).toBe("I will fix the bug.");
+    expect(entry.type).toBe("reasoning");
+    expect(entry.text).toBe("I will inspect the failing path.");
   });
 });
 

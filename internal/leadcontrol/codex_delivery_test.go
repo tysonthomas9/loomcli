@@ -463,6 +463,14 @@ func (f *fakeCodexClient) ReadThread(context.Context, string) (*CodexThread, err
 	return &CodexThread{ID: "thread-1", Cwd: "/repo", Status: f.status}, nil
 }
 
+func (f *fakeCodexClient) ReadThreadWithTurns(context.Context, string) (*CodexThread, error) {
+	return &CodexThread{ID: "thread-1", Cwd: "/repo", Status: f.status}, nil
+}
+
+func (f *fakeCodexClient) ReadThreadTranscript(context.Context, string) (*CodexThread, error) {
+	return &CodexThread{ID: "thread-1", Cwd: "/repo", Status: f.status}, nil
+}
+
 func (f *fakeCodexClient) StartTurn(_ context.Context, _ string, text string) error {
 	f.turnText = text
 	return nil

@@ -100,7 +100,8 @@ func (adapter *fleetDriverRunCommandPort) HandoffDriverRunReviewWorkItem(
 		ClaimActionID: command.ClaimActionID, TaskRunID: command.TaskRunID,
 		TargetStatus: command.TargetStatus, Reason: command.Reason,
 		Priority: command.Priority, Labels: append([]string(nil), command.Labels...),
-		CommentBody: command.CommentBody, HandedOffAt: command.HandedOffAt,
+		CommentBody: command.CommentBody, ExternalRef: command.ExternalRef,
+		HandedOffAt: command.HandedOffAt,
 	})
 	if err != nil {
 		return execution.DriverRunWorkItemMutationResult{}, mapFleetExecutionPortError(err)
@@ -153,7 +154,8 @@ func executionDriverRunWorkItemMutationResult(
 		WorkItem: &execution.DriverRunWorkItem{
 			WorkspaceKey: issue.Workspace, WorkItemID: issue.ID, Title: issue.Title, Status: issue.Status,
 			Priority: issue.Priority, IssueType: issue.Type, Assignee: issue.Assignee,
-			Labels: append([]string(nil), issue.Labels...), SourceRepo: issue.Repo, ParentID: issue.ParentID,
+			Labels: append([]string(nil), issue.Labels...), SourceRepo: issue.Repo,
+			ExternalRef: issue.ExternalRef, ParentID: issue.ParentID,
 			UpdatedAt: issue.UpdatedAt,
 		},
 		Action: &execution.DriverRunWorkItemAction{

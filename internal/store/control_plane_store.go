@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -237,6 +238,12 @@ type ArtifactStore interface {
 type ArtifactContentReader interface {
 	ReadContent(ctx context.Context, workspaceKey, artifactID string) ([]byte, error)
 }
+
+// ErrArtifactContentUnavailable identifies a temporary failure of the managed
+// artifact content plane. Services should preserve it as an unavailable
+// response rather than collapsing a retryable FleetDB/content-store outage into
+// an internal error.
+var ErrArtifactContentUnavailable = errors.New("artifact content temporarily unavailable")
 
 type AgentLeaseCreate struct {
 	WorkspaceKey string

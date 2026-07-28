@@ -229,6 +229,21 @@ test("LoomDriverClient rejects incomplete review handoffs before HTTP", async ()
       }),
       /only valid for review status/,
     );
+    await assert.rejects(
+      client.tasks.handoffReview({
+        taskId: "TASK-1", taskRunId: "review-child-1", status: "review",
+        priority: 2, commentBody: "documented", externalRef: "local-branch:loom/docs@bad",
+      }),
+      /externalRef must be a canonical local-branch reference/,
+    );
+    await assert.rejects(
+      client.tasks.handoffReview({
+        taskId: "TASK-1", taskRunId: "review-child-1", status: "review",
+        priority: 2, commentBody: "documented",
+        externalRef: `local-branch:bad branch@${"a".repeat(40)}`,
+      }),
+      /externalRef must be a canonical local-branch reference/,
+    );
     assert.equal(calls.length, 0);
   });
 });
@@ -251,6 +266,7 @@ test("LoomDriverClient serializes atomic Review annotations in camelCase", async
       priority: 0,
       labels: ["bug", "triaged"],
       commentBody: "Automated triage completed.",
+      externalRef: `local-branch:loom/TASK-1@${"a".repeat(40)}`,
     });
 
     assert.deepEqual(calls[0].body, {
@@ -260,6 +276,7 @@ test("LoomDriverClient serializes atomic Review annotations in camelCase", async
       priority: 0,
       labels: ["bug", "triaged"],
       commentBody: "Automated triage completed.",
+      externalRef: `local-branch:loom/TASK-1@${"a".repeat(40)}`,
     });
   });
 });

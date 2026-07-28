@@ -141,6 +141,13 @@
   cursor: not-allowed;
 }
 
+.runNowHint {
+  max-width: 320px;
+  font-size: var(--font-size-xs);
+  line-height: 1.35;
+  color: var(--color-text-secondary);
+}
+
 /* ---- tab strip ---- */
 .tabStrip {
   display: flex;
@@ -229,8 +236,65 @@
   line-height: 1.5;
 }
 
+.emptyText {
+  margin: 0;
+}
+
 .errorText {
   color: var(--color-danger);
+}
+
+.recordBindingList {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.recordBindingRow {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.recordBindingRow:hover {
+  border-color: var(--color-primary);
+  background: var(--color-bg-hover);
+}
+
+.recordBindingName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-sm);
+  font-weight: 800;
+}
+
+.recordBindingMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.recordBindingId {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  background: transparent;
 }
 
 /* ---- run list ---- */

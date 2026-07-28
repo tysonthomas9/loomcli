@@ -7,7 +7,7 @@ import type { TaskWorkflowRun } from "@/api/workflows";
 
 import { SessionTimelineRow } from "./SessionTimelineRow";
 import { WorkflowRunTimelineRow } from "./WorkflowRunTimelineRow";
-import styles from "./SessionsTab.module.css";
+import styles from "@/styles/SessionRunDetail.module.css";
 
 export interface SessionTimelineProps {
   sessions: SessionRecord[];

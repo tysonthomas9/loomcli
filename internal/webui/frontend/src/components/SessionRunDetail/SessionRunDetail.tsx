@@ -10,17 +10,26 @@
 import { useMemo, useState } from "react";
 
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
-import {
-  MarkdownRenderer,
-  sessionTabStyles as styles,
-} from "@/components/IssueDetailPanel";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { useSessionTranscript, useSessionDiff } from "@/hooks/terminal";
+import styles from "@/styles/SessionRunDetail.module.css";
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 import { formatStatusLabel } from "@/utils/issue";
 
 export interface SessionRunDetailProps {
   taskId: string;
+  /** Agent owner for an interactive session that has no taskId. */
+  agentId?: string;
   session: SessionRecord;
+  /**
+   * Retry an initially unavailable transcript. Used only for a synthesized
+   * terminal workflow session while the durable session projection catches up.
+   */
+  retryTranscriptUnavailable?: boolean;
+  /** Whether exit_code came from durable session evidence. */
+  exitCodeKnown?: boolean;
+  /** Whether token and cost fields came from durable usage evidence. */
+  telemetryKnown?: boolean;
 }
 
 type InnerTab = "transcript" | "diff";
@@ -114,6 +123,10 @@ type TurnItem = TextItem | ToolItem;
 
 type RenderBlock =
   | {
+      kind: "notice";
+      seq: number;
+    }
+  | {
       kind: "interjection";
       seq: number;
       text: string;
@@ -167,6 +180,20 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
   for (const e of entries) {
     // Skip tool_result — rendered inline inside its tool_use
     if (e.type === "tool_result") continue;
+
+    // Canonical capture emits one exact system/session_meta marker when Loom
+    // truncates source history or bounded output. Render a fixed product notice
+    // rather than the backend text so arbitrary system metadata and reasoning
+    // remain hidden.
+    if (
+      e.role === "system" &&
+      e.type === "session_meta" &&
+      (e.text ?? "").startsWith("Transcript truncated by Loom because ")
+    ) {
+      flushCurrent();
+      blocks.push({ kind: "notice", seq: e.seq });
+      continue;
+    }
 
     if (e.role === "user" && e.type === "text") {
       const text = (e.text ?? "").trim();
@@ -222,7 +249,10 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
       continue;
     }
 
-    // Ignore system / other roles for now (not emitted by the current parser)
+    // Reasoning, result, session metadata, and system events are accepted by
+    // the canonical wire type but intentionally not exposed in this worklog.
+    // In particular, do not leak hidden reasoning merely because it is present
+    // in a backend transcript.
   }
   flushCurrent();
 
@@ -325,9 +355,20 @@ function formatTranscriptError(message: string): string {
 
 // ─── Main component ───────────────────────────────────────────────────
 
-export function SessionRunDetail({
+export function SessionRunDetail(props: SessionRunDetailProps): JSX.Element {
+  // SessionRunDetail owns tab selection and diff/transcript hook state. A keyed
+  // inner component guarantees none of that evidence survives when a caller
+  // switches the selected run without unmounting this wrapper.
+  return <SessionRunDetailContent key={props.session.session_id} {...props} />;
+}
+
+function SessionRunDetailContent({
   taskId,
+  agentId,
   session,
+  retryTranscriptUnavailable = false,
+  exitCodeKnown = true,
+  telemetryKnown = true,
 }: SessionRunDetailProps): JSX.Element {
   const [innerTab, setInnerTab] = useState<InnerTab>("transcript");
   const [expandedTools, setExpandedTools] = useState<Set<number>>(
@@ -337,8 +378,12 @@ export function SessionRunDetail({
   const {
     entries,
     isLoading: transcriptLoading,
+    isUnavailable: transcriptUnavailable,
     error: transcriptError,
-  } = useSessionTranscript(taskId, session.session_id, session.is_active);
+  } = useSessionTranscript(taskId, session.session_id, session.is_active, {
+    retryUnavailable: retryTranscriptUnavailable,
+    ...(agentId ? { agentId } : {}),
+  });
 
   const {
     diff,
@@ -435,7 +480,7 @@ export function SessionRunDetail({
           <div className={styles.stat}>
             <div className={styles.statLabel}>Exit</div>
             <div className={styles.statValue}>
-              {formatExitCode(session.exit_code)}
+              {exitCodeKnown ? formatExitCode(session.exit_code) : "—"}
             </div>
           </div>
           <div className={styles.stat}>
@@ -446,12 +491,14 @@ export function SessionRunDetail({
           </div>
           <div className={styles.stat}>
             <div className={styles.statLabel}>Tokens</div>
-            <div className={styles.statValue}>{formatTokens(totalTokens)}</div>
+            <div className={styles.statValue}>
+              {telemetryKnown ? formatTokens(totalTokens) : "—"}
+            </div>
           </div>
           <div className={styles.stat}>
             <div className={styles.statLabel}>Cost</div>
             <div className={styles.statValue}>
-              {formatCost(session.estimated_cost_usd)}
+              {telemetryKnown ? formatCost(session.estimated_cost_usd) : "—"}
             </div>
           </div>
           {(session.files_changed > 0 ||
@@ -585,19 +632,45 @@ export function SessionRunDetail({
           className={styles.transcriptContainer}
           data-testid="session-transcript"
         >
-          {transcriptLoading && entries.length === 0 && (
-            <div className={styles.emptyState}>Loading transcript...</div>
+          {transcriptLoading &&
+            !transcriptUnavailable &&
+            entries.length === 0 && (
+              <div className={styles.emptyState}>Loading transcript...</div>
+            )}
+          {transcriptUnavailable && entries.length === 0 && (
+            <div
+              className={styles.emptyState}
+              data-testid="session-transcript-unavailable"
+            >
+              Transcript is unavailable for this session.
+            </div>
           )}
           {transcriptError && (
             <div className={styles.errorText}>
               {formatTranscriptError(transcriptError.message)}
             </div>
           )}
-          {!transcriptLoading && !transcriptError && entries.length === 0 && (
-            <div className={styles.emptyState}>No transcript entries</div>
-          )}
+          {!transcriptLoading &&
+            !transcriptUnavailable &&
+            !transcriptError &&
+            entries.length === 0 && (
+              <div className={styles.emptyState}>No transcript entries</div>
+            )}
 
           {grouped.blocks.map((block) => {
+            if (block.kind === "notice") {
+              return (
+                <div
+                  key={`notice-${block.seq}`}
+                  className={styles.transcriptNotice}
+                  role="status"
+                  data-testid="transcript-truncation-notice"
+                >
+                  Transcript truncated by Loom. Some transcript entries are not
+                  shown.
+                </div>
+              );
+            }
             if (block.kind === "interjection") {
               return (
                 <article

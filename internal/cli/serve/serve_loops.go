@@ -147,7 +147,9 @@ func startOutboxDispatcher(ctx context.Context, st store.Store) {
 // LOOM_ISSUE_BRIDGE_INTERVAL sets the poll cadence in seconds (default 2,
 // matching the sweepers, capped at one hour); LOOM_ISSUE_BRIDGE_STATE_PATH
 // overrides the cursor file; LOOM_ISSUE_BRIDGE_REPLAY=1 opts into
-// replay-from-zero on first observation (handled inside the bridge).
+// replay-from-zero on first observation (handled inside the bridge);
+// LOOM_TASK_READY_EVENTS and LOOM_TASK_REVIEW_EVENTS independently opt their
+// specialized lanes out with 0/false/off/no.
 func startIssueJournalBridge(
 	ctx context.Context,
 	st store.Store,
@@ -162,16 +164,17 @@ func startIssueJournalBridge(
 	}
 	interval := issueBridgeInterval()
 	slog.Info("Issue journal bridge enabled", "workspace", bridge.WorkspaceKey, "interval", interval,
-		"state_path", issueBridgeStatePath(), "task_ready_events", bridge.EmitTaskReady)
+		"state_path", issueBridgeStatePath(), "task_ready_events", bridge.EmitTaskReady,
+		"task_review_events", bridge.EmitTaskReview)
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			if result, err := bridge.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				slog.Error("issue journal bridge pass failed", "err", err)
-			} else if result != nil && (result.Emitted > 0 || result.TaskReadyEmitted > 0 || result.TaskReadyBlocked > 0 || result.FastForwarded > 0) {
+			} else if result != nil && (result.Emitted > 0 || result.TaskReadyEmitted > 0 || result.TaskReviewEmitted > 0 || result.TaskReadyBlocked > 0 || result.FastForwarded > 0) {
 				slog.Info("issue journal bridge pass", "emitted", result.Emitted, "task_ready_emitted", result.TaskReadyEmitted,
-					"task_ready_blocked", result.TaskReadyBlocked, "skipped", result.Skipped,
+					"task_review_emitted", result.TaskReviewEmitted, "task_ready_blocked", result.TaskReadyBlocked, "skipped", result.Skipped,
 					"fast_forwarded", result.FastForwarded, "backed_off", result.BackedOff)
 			}
 			select {
@@ -223,6 +226,7 @@ func buildIssueJournalBridge(
 		WorkspaceKey:              driverAutomationWorkspaceScope(),
 		Cursors:                   cursors,
 		EmitTaskReady:             taskReadyEventsEnabled(),
+		EmitTaskReview:            taskReviewEventsEnabled(),
 		IssueLookup:               issueLookup,
 		ReadySnapshots:            readySnapshots,
 		RepositoryRequiredBlocker: repositoryRequiredBlocker,
@@ -262,6 +266,18 @@ func issueBridgeDisabled() bool {
 // rollback switch for deployments that need to disable it.
 func taskReadyEventsEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomTaskReadyEvents))) {
+	case "0", "false", "off", "no":
+		return false
+	default:
+		return true
+	}
+}
+
+// taskReviewEventsEnabled reports whether the issue-journal bridge emits the
+// task.review transition lane. It defaults on; LOOM_TASK_REVIEW_EVENTS is an
+// explicit rollback switch for deployments that need to disable Review agents.
+func taskReviewEventsEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoomTaskReviewEvents))) {
 	case "0", "false", "off", "no":
 		return false
 	default:
@@ -351,7 +367,8 @@ func repositoryRequiredDispatchSnapshot(result *backend.RepositoryRequirementRes
 		RepositoryRequired: false,
 		UpdatedAt:          result.Issue.UpdatedAt,
 	}
-	if !strings.EqualFold(strings.TrimSpace(canonical.Status), "open") ||
+	status := strings.ToLower(strings.TrimSpace(canonical.Status))
+	if (status != "open" && status != "review") ||
 		strings.EqualFold(strings.TrimSpace(canonical.IssueType), "epic") {
 		return nil, nil
 	}

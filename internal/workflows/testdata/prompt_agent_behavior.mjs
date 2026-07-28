@@ -69,7 +69,21 @@ function makeLoom(options = {}) {
         options.claimReadyResult === undefined ? { id: TASK_ID } : options.claimReadyResult,
         options.claimReadyError,
       ),
+      claimReview: async (params) => call(
+        "tasks.claimReview",
+        params,
+        options.claimReviewResult === undefined
+          ? { id: TASK_ID, priority: 2 }
+          : options.claimReviewResult,
+        options.claimReviewError,
+      ),
       release: async (params) => call("tasks.release", params, undefined, options.releaseError),
+      releaseReview: async (params) => call(
+        "tasks.releaseReview",
+        params,
+        undefined,
+        options.releaseReviewError,
+      ),
       handoffReview: async (params) => call(
         "tasks.handoffReview",
         params,
@@ -101,7 +115,9 @@ function makeLoom(options = {}) {
       blockRepositoryRequired: async (params) => call(
         "issues.blockRepositoryRequired",
         params,
-        options.blockRepositoryRequiredResult || {},
+        options.blockRepositoryRequiredResult === undefined
+          ? { blocked: true, issue: { status: "blocked" } }
+          : options.blockRepositoryRequiredResult,
         options.blockRepositoryRequiredError,
       ),
     },
@@ -243,6 +259,48 @@ test("repository-required block failure is terminal and never claims", async () 
   none(calls, "binding.config", "roles.get", "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
 });
 
+test("a repository-required Review card that cannot enter Blocked fails closed", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "review",
+    blockRepositoryRequiredResult: {
+      blocked: false,
+      outcome: "not_required",
+      issue: { status: "review" },
+    },
+  }, {
+    roleName: "documentation",
+    event: {
+      taskId: TASK_ID,
+      status: "review",
+      sourceRepo: "",
+      repositoryRequired: true,
+    },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "prompt_agent_repository_block_not_applied");
+  assert.equal(result.issueId, TASK_ID);
+  assert.equal(result.claimed, false);
+  assert.equal(result.skipped, true);
+  assert.equal(result.blocker, "repository_required");
+  assert.match(result.summary, /could not enter Blocked/);
+  assert.deepEqual(one(calls, "issues.blockRepositoryRequired"), { issueId: TASK_ID });
+  none(
+    calls,
+    "binding.config",
+    "roles.get",
+    "tasks.claim",
+    "tasks.claimReady",
+    "tasks.claimReview",
+    "issues.get",
+    "tasks.release",
+    "tasks.releaseReview",
+    "taskRuns.request",
+    "taskRuns.await",
+  );
+});
+
 test("flat Automation planner payload rejects a completed design before claiming", async () => {
   const { result, calls, caught } = await invoke({ taskFilter: "needs_plan" }, {
     roleName: "planner",
@@ -313,7 +371,7 @@ for (const legacyFilter of ["", "any"]) {
 }
 
 test("a named role with an unknown filter fails closed before claiming", async () => {
-  const { result, calls, caught } = await invoke({ taskFilter: "review" }, {
+  const { result, calls, caught } = await invoke({ taskFilter: "unsupported_docs" }, {
     roleName: "custom-reviewer",
     event: { taskId: TASK_ID, hasDesign: true, labels: [] },
   });
@@ -323,9 +381,299 @@ test("a named role with an unknown filter fails closed before claiming", async (
   assert.equal(result.errorClass, "prompt_agent_unsupported_task_filter");
   assert.equal(result.claimed, false);
   assert.equal(result.roleName, "custom-reviewer");
-  assert.equal(result.taskFilter, "review");
-  assert.match(result.summary, /unsupported task_filter "review"/);
-  none(calls, "tasks.claim", "tasks.claimReady", "issues.get", "tasks.release", "taskRuns.request", "taskRuns.await");
+  assert.equal(result.taskFilter, "unsupported_docs");
+  assert.match(result.summary, /unsupported task_filter "unsupported_docs"/);
+  none(calls, "tasks.claim", "tasks.claimReady", "tasks.claimReview", "issues.get", "tasks.release", "tasks.releaseReview", "taskRuns.request", "taskRuns.await");
+});
+
+test("a read-only Review role fails before claiming or dispatching", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "review",
+    readOnly: true,
+  }, {
+    roleName: "read-only-documentation",
+    event: { taskId: TASK_ID, status: "review" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "failed");
+  assert.equal(result.errorClass, "prompt_agent_review_filter_requires_mutating_role");
+  assert.equal(result.claimed, false);
+  assert.match(result.summary, /must publish a local branch/);
+  none(
+    calls,
+    "issues.get",
+    "tasks.claim",
+    "tasks.claimReady",
+    "tasks.claimReview",
+    "tasks.release",
+    "tasks.releaseReview",
+    "taskRuns.request",
+    "taskRuns.await",
+  );
+});
+
+test("a review role claims the exact Review generation and returns it to Review", async () => {
+  const branch = "loom/docs-task-42";
+  const previousHead = "1".repeat(40);
+  const newHead = "2".repeat(40);
+  const { result, calls, caught } = await invoke({
+    taskFilter: "review",
+    issue: {
+      externalRef: `local-branch:${branch}@${previousHead}`,
+    },
+    claimReviewResult: {
+      id: TASK_ID,
+      priority: 1,
+      sourceRepo: "phase4-terra-ui-repo",
+      claimActionId: "claim-review-1",
+    },
+    awaitResult: {
+      status: "completed",
+      runtime_metadata: {
+        delivery: "local_branch",
+        backend: "codex",
+        files_changed: "1",
+        local_branch: branch,
+        head_sha: newHead,
+      },
+    },
+  }, {
+    roleName: "documentation",
+    taskId: TASK_ID,
+    status: "review",
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.outcome, "review-role-review");
+  assert.equal(result.external_ref, `local-branch:${branch}@${newHead}`);
+  assert.deepEqual(one(calls, "tasks.claimReview"), { taskId: TASK_ID });
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  const request = taskRunRequest(calls);
+  assert.equal(request.repoRef, "phase4-terra-ui-repo");
+  assert.equal(request.input.deliveryMode, "local-branch");
+  assert.equal(request.input.requireLocalBranchDelivery, true);
+  assert.equal(request.input.localBranchName, branch);
+  assert.equal(request.input.localBranchBaseRef, previousHead);
+  assert.equal(request.retainWorkItemClaim, true);
+  assert.deepEqual(one(calls, "tasks.handoffReview"), {
+    taskId: TASK_ID,
+    taskRunId: "promptagent-driver-run-7-TASK-42",
+    status: "review",
+    priority: 1,
+    commentBody: "Review-triggered role documentation completed TaskRun promptagent-driver-run-7-TASK-42."
+      + "\n\nfiles_changed=1; delivery=local_branch."
+      + `\nDelivered branch: ${branch} @ ${newHead}.`,
+    reason: "review-triggered role completed",
+    externalRef: `local-branch:${branch}@${newHead}`,
+  });
+  assert.ok(callIndex(calls, "tasks.claimReview") < callIndex(calls, "issues.get"));
+  assert.ok(callIndex(calls, "issues.get") < callIndex(calls, "taskRuns.request"));
+  assert.ok(callIndex(calls, "taskRuns.await") < callIndex(calls, "tasks.handoffReview"));
+  none(
+    calls,
+    "tasks.claim",
+    "tasks.claimReady",
+    "tasks.release",
+    "tasks.releaseReview",
+    "issues.update",
+    "needsReview",
+  );
+});
+
+for (const invalidDelivery of [
+  {
+    name: "patch-back delivery",
+    metadata: { delivery: "patch_back", local_branch: "loom/docs", head_sha: "2".repeat(40) },
+  },
+  {
+    name: "missing local branch",
+    metadata: { delivery: "local_branch", head_sha: "2".repeat(40) },
+  },
+  {
+    name: "invalid local branch",
+    metadata: { delivery: "local_branch", local_branch: "bad branch", head_sha: "2".repeat(40) },
+  },
+  {
+    name: "non-40-hex head",
+    metadata: { delivery: "local_branch", local_branch: "loom/docs", head_sha: "not-a-commit" },
+  },
+]) {
+  test(`a completed Review child with ${invalidDelivery.name} fails the required delivery`, async () => {
+    const { result, calls, caught } = await invoke({
+      taskFilter: "review",
+      claimReviewResult: { id: TASK_ID, priority: 2, sourceRepo: "review-repo" },
+      awaitResult: {
+        status: "completed",
+        runtime_metadata: {
+          backend: "codex",
+          files_changed: "0",
+          ...invalidDelivery.metadata,
+        },
+      },
+    }, {
+      roleName: "documentation",
+      taskId: TASK_ID,
+      status: "review",
+    });
+
+    assert.equal(caught, undefined);
+    assert.equal(result.disposition, "needs_review");
+    assert.equal(result.errorClass, "prompt_agent_review_delivery_invalid");
+    assert.match(result.summary, /without valid local-branch delivery evidence/);
+    const handoff = one(calls, "tasks.handoffReview");
+    assert.equal(handoff.taskId, TASK_ID);
+    assert.equal(handoff.taskRunId, "promptagent-driver-run-7-TASK-42");
+    assert.equal(handoff.status, "review");
+    assert.equal(handoff.priority, 2);
+    assert.equal(handoff.reason, "review-triggered role delivery invalid");
+    assert.equal(Object.prototype.hasOwnProperty.call(handoff, "reviewTriggerPolicy"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(handoff, "externalRef"), false);
+    assert.match(handoff.commentBody, /operator review is required/);
+    none(calls, "issues.update", "tasks.releaseReview", "completed");
+  });
+}
+
+test("review contention skips before child or model dispatch", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "review",
+    claimReviewError: error("conflict", "already claimed"),
+  }, {
+    roleName: "documentation",
+    event: { taskId: TASK_ID, status: "review" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "completed");
+  assert.equal(result.claimed, false);
+  assert.match(result.summary, /not claimable in Review/);
+  one(calls, "tasks.claimReview");
+  none(calls, "tasks.claim", "tasks.claimReady", "taskRuns.request", "taskRuns.await", "tasks.handoffReview");
+});
+
+test("a claimed Review card read failure restores the exact Review claim", async () => {
+  const readError = error("unavailable", "Review projection unavailable");
+  const { caught, calls } = await invoke({
+    taskFilter: "review",
+    issueError: readError,
+  }, {
+    roleName: "documentation",
+    taskId: TASK_ID,
+    status: "review",
+  });
+
+  assert.equal(caught, readError);
+  assert.deepEqual(one(calls, "tasks.claimReview"), { taskId: TASK_ID });
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  assert.deepEqual(one(calls, "tasks.releaseReview"), { taskId: TASK_ID });
+  assert.ok(callIndex(calls, "tasks.claimReview") < callIndex(calls, "issues.get"));
+  assert.ok(callIndex(calls, "issues.get") < callIndex(calls, "tasks.releaseReview"));
+  none(
+    calls,
+    "tasks.claim",
+    "tasks.claimReady",
+    "tasks.release",
+    "taskRuns.request",
+    "taskRuns.await",
+    "tasks.handoffReview",
+    "issues.update",
+  );
+});
+
+test("an unsupported Review external_ref restores the exact Review claim without dispatch", async () => {
+  const externalRef = "https://example.invalid/reviews/TASK-42";
+  const { result, calls, caught } = await invoke({
+    taskFilter: "review",
+    issue: { externalRef },
+  }, {
+    roleName: "documentation",
+    taskId: TASK_ID,
+    status: "review",
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "prompt_agent_review_external_ref_unsupported");
+  assert.equal(result.issueId, TASK_ID);
+  assert.equal(result.claimed, false);
+  assert.equal(result.released, true);
+  assert.match(result.summary, /unsupported external_ref/);
+  assert.deepEqual(one(calls, "tasks.claimReview"), { taskId: TASK_ID });
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  assert.deepEqual(one(calls, "tasks.releaseReview"), { taskId: TASK_ID });
+  none(
+    calls,
+    "tasks.claim",
+    "tasks.claimReady",
+    "tasks.release",
+    "taskRuns.request",
+    "taskRuns.await",
+    "tasks.handoffReview",
+    "issues.update",
+  );
+});
+
+test("a definitive review child request failure restores the exact Review claim", async () => {
+  const conflict = error("conflict", "TaskRun request rejected");
+  const { caught, calls } = await invoke({
+    taskFilter: "review",
+    requestError: conflict,
+  }, {
+    roleName: "documentation",
+    taskId: TASK_ID,
+    status: "review",
+  });
+
+  assert.equal(caught, conflict);
+  one(calls, "tasks.claimReview");
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  const request = taskRunRequest(calls);
+  assert.equal(request.input.requireLocalBranchDelivery, true);
+  assert.deepEqual(one(calls, "tasks.releaseReview"), { taskId: TASK_ID });
+  none(calls, "tasks.release", "taskRuns.await", "tasks.handoffReview", "issues.update");
+});
+
+test("an ambiguous review child request retains its exact claim", async () => {
+  const timeout = error("timeout", "response lost after request");
+  const { caught, calls } = await invoke({
+    taskFilter: "review",
+    requestError: timeout,
+  }, {
+    roleName: "documentation",
+    taskId: TASK_ID,
+    status: "review",
+  });
+
+  assert.equal(caught, timeout);
+  one(calls, "tasks.claimReview");
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  const request = taskRunRequest(calls);
+  assert.equal(request.input.requireLocalBranchDelivery, true);
+  none(calls, "tasks.releaseReview", "tasks.release", "taskRuns.await", "tasks.handoffReview", "issues.update");
+});
+
+test("a failed review child preserves Fleet's terminal policy", async () => {
+  const { result, calls, caught } = await invoke({
+    taskFilter: "review",
+    awaitResult: {
+      status: "failed",
+      error_class: "local_agent_failed",
+      error_message: "documentation command failed",
+    },
+  }, {
+    roleName: "documentation",
+    event: { taskId: TASK_ID, status: "review" },
+  });
+
+  assert.equal(caught, undefined);
+  assert.equal(result.disposition, "needs_review");
+  assert.equal(result.errorClass, "local_agent_failed");
+  assert.match(result.summary, /policy-owned terminal state/);
+  assert.deepEqual(one(calls, "issues.get"), { issueId: TASK_ID });
+  const request = taskRunRequest(calls);
+  assert.equal(request.input.requireLocalBranchDelivery, true);
+  none(calls, "tasks.handoffReview", "tasks.releaseReview", "tasks.release", "issues.update", "completed");
 });
 
 test("a mutating bug-filtered role fails closed before reading or claiming", async () => {

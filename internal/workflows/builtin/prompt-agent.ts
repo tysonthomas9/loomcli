@@ -87,8 +87,9 @@ export async function run(ctx) {
     // alternate/manual hosts, using the same conditional Work Items command:
     // a stale event must never overwrite a concurrent claim or repository
     // assignment. It deliberately precedes role/prompt resolution.
+    let blockResult;
     try {
-      await loom.issues.blockRepositoryRequired({ issueId: blockedTaskId });
+      blockResult = await loom.issues.blockRepositoryRequired({ issueId: blockedTaskId });
     } catch (err) {
       return loom.failed({
         summary: "prompt-agent: could not move repository-required task " + blockedTaskId
@@ -96,14 +97,42 @@ export async function run(ctx) {
         errorClass: "prompt_agent_repository_block_failed",
       });
     }
-    return loom.completed({
-      summary: "prompt-agent: target task " + (blockedTaskId || "?")
-        + " requires a repository before it can run",
-      issueId: blockedTaskId,
-      claimed: false,
-      skipped: true,
-      blocker: "repository_required",
-    });
+    const blockedStatus = stringValue(
+      blockResult && blockResult.issue && blockResult.issue.status,
+    ).trim().toLowerCase();
+    const dispatchReady = blockResult && blockResult.dispatchReady === true
+      && (blockedStatus === "open" || blockedStatus === "review");
+    if (dispatchReady) {
+      // The pre-read raced repository admission. Fleet's canonical projection
+      // is commit-time dispatch authority, so continue to the role/claim gate
+      // instead of waiting for a repository event that does not update the card.
+      event.repositoryRequired = false;
+      event.status = blockedStatus;
+      event.sourceRepo = stringValue(
+        blockResult && blockResult.issue && (
+          blockResult.issue.sourceRepo || blockResult.issue.source_repo
+        ),
+      );
+    } else if (!blockResult || (blockResult.blocked !== true && blockedStatus !== "blocked")) {
+      return loom.needsReview({
+        summary: "prompt-agent: repository-required task " + blockedTaskId
+          + " could not enter Blocked from its current lifecycle state; no claim or child run was started",
+        errorClass: "prompt_agent_repository_block_not_applied",
+        issueId: blockedTaskId,
+        claimed: false,
+        skipped: true,
+        blocker: "repository_required",
+      });
+    } else {
+      return loom.completed({
+        summary: "prompt-agent: target task " + (blockedTaskId || "?")
+          + " requires a repository before it can run",
+        issueId: blockedTaskId,
+        claimed: false,
+        skipped: true,
+        blocker: "repository_required",
+      });
+    }
   }
 
   // 1. Resolve the role prompt as DATA. Precedence (documented):
@@ -132,14 +161,16 @@ export async function run(ctx) {
   // historically persisted either an empty filter or "any"; treat both as the
   // safe coder phase so they cannot claim work that still needs planning.
   // A read-only "bug" role is an issue-type owner instead of a design-phase
-  // owner. Unknown named-role filters fail closed before any claim. A non-role
-  // prompt (input.prompt / taskPrompt) remains intentionally filterless.
+  // owner. A "review" role owns one exact Review-column generation and returns
+  // it to Review after its child completes. Unknown named-role filters fail
+  // closed before any claim. A non-role prompt (input.prompt / taskPrompt)
+  // remains intentionally filterless.
   const rolePhase = resolveRolePhase(resolved);
   if (!rolePhase.supported) {
     return loom.failed({
       summary: "prompt-agent: role " + (stringValue(resolved.roleName) || "?")
         + " has unsupported task_filter " + JSON.stringify(rolePhase.rawTaskFilter)
-        + "; expected needs_plan, has_design, or read-only bug",
+        + "; expected needs_plan, has_design, review, or read-only bug",
       errorClass: "prompt_agent_unsupported_task_filter",
       roleName: stringValue(resolved.roleName),
       taskFilter: rolePhase.rawTaskFilter,
@@ -150,6 +181,7 @@ export async function run(ctx) {
   const isPlanner = taskFilter === "needs_plan";
   const isReadOnly = resolved.readOnly === true;
   const isBugFilter = taskFilter === "bug";
+  const isReview = taskFilter === "review";
   const targetId = resolveTargetTaskId(input);
 
   if (isBugFilter && !isReadOnly) {
@@ -160,6 +192,39 @@ export async function run(ctx) {
       roleName: stringValue(resolved.roleName),
       taskFilter,
       claimed: false,
+    });
+  }
+  if (isReview && isReadOnly) {
+    return loom.failed({
+      summary: "prompt-agent: role " + (stringValue(resolved.roleName) || "?")
+        + " uses task_filter \"review\" with read_only=true, but Review roles must publish a local branch",
+      errorClass: "prompt_agent_review_filter_requires_mutating_role",
+      roleName: stringValue(resolved.roleName),
+      taskFilter,
+      claimed: false,
+    });
+  }
+
+  // Review roles are event-targeted by construction. There is no filterless
+  // Review queue claim in the driver SDK: requiring the target keeps two
+  // bindings from scanning and racing unrelated cards, while claimReview below
+  // remains the atomic authority for the named card.
+  if (isReview && !targetId) {
+    return loom.completed({
+      summary: "prompt-agent: review role " + (stringValue(resolved.roleName) || "?")
+        + " requires a target task; skipped filterless pickup",
+      claimed: false,
+      skipped: true,
+    });
+  }
+  const eventStatus = stringValue(event && event.status).trim().toLowerCase();
+  if (isReview && eventStatus && eventStatus !== "review") {
+    return loom.completed({
+      summary: "prompt-agent: review role " + (stringValue(resolved.roleName) || "?")
+        + " received task " + (targetId || "?") + " with status "
+        + JSON.stringify(eventStatus) + "; skipped before claim",
+      claimed: false,
+      skipped: true,
     });
   }
 
@@ -228,15 +293,55 @@ export async function run(ctx) {
   //    the InternalSource provenance envelope for a task-ready event
   //    (input.event.taskId — the loopback wraps the emitter payload under
   //    "event"; see internal/trigger issue_journal_bridge_task_ready.go).
-  const claimed = await claimTargetTask(loom, actor, targetId);
+  const claimed = isReview
+    ? await claimTargetReviewTask(loom, targetId)
+    : await claimTargetTask(loom, actor, targetId);
   const issueId = claimed && stringValue(claimed.id || claimed.ID);
   if (!issueId) {
     return loom.completed({
-      summary: targetId
+      summary: isReview
+        ? "prompt-agent: target task " + (targetId || "?")
+          + " was not claimable in Review (not in Review or already claimed)"
+        : targetId
         ? "prompt-agent: target task " + targetId + " was not claimable (not ready or already claimed)"
         : "prompt-agent: no ready task to claim",
       claimed: false,
     });
+  }
+  let reviewBranchResume = null;
+  if (isReview) {
+    let claimedCard;
+    try {
+      claimedCard = (await loom.issues.get({ issueId })) || {};
+    } catch (err) {
+      await releaseClaimAfterError(loom, issueId, "read the claimed Review task", err, true);
+      throw err;
+    }
+    const externalRef = stringValue(claimedCard.externalRef || claimedCard.external_ref).trim();
+    reviewBranchResume = parseLocalBranchExternalRef(externalRef);
+    if (externalRef && !reviewBranchResume) {
+      try {
+        await loom.tasks.releaseReview({ taskId: issueId });
+      } catch (releaseError) {
+        return loom.failed({
+          summary: "prompt-agent: Review task " + issueId + " has unsupported external_ref "
+            + JSON.stringify(externalRef) + ", and typed Review release failed: "
+            + errorMessage(releaseError),
+          errorClass: "prompt_agent_review_external_ref_release_failed",
+          issueId,
+          claimed: true,
+          released: false,
+        });
+      }
+      return loom.needsReview({
+        summary: "prompt-agent: Review task " + issueId + " has unsupported external_ref "
+          + JSON.stringify(externalRef) + "; returned it to Review without starting a child run",
+        errorClass: "prompt_agent_review_external_ref_unsupported",
+        issueId,
+        claimed: false,
+        released: true,
+      });
+    }
   }
   // The pre-claim issue read avoids unnecessary ownership/spend, but it is not
   // the authority boundary: issue type may change before the atomic claim
@@ -323,6 +428,16 @@ export async function run(ctx) {
   const taskRunId = "promptagent-" + (stringValue(loom.driverRunId) || "run") + "-" + issueId;
   const requestInput = { taskPrompt: prompt, openPullRequest: false };
   requestInput.deliveryMode = isPlanner || isReadOnly ? "patch-back" : "local-branch";
+  if (isReview) {
+    // A mutating Review role must publish one reviewable branch artifact. It
+    // may not silently fall back to patch-back on a non-filesystem origin,
+    // which would leave an existing review reference stale.
+    requestInput.requireLocalBranchDelivery = true;
+    if (reviewBranchResume) {
+      requestInput.localBranchName = reviewBranchResume.branch;
+      requestInput.localBranchBaseRef = reviewBranchResume.headSha;
+    }
+  }
   if (isBugFilter && isReadOnly) {
     // The trusted local-task-runner appends the authoritative, placement-aware
     // handoff contract and accepts the typed triaged outcome only in this mode.
@@ -346,11 +461,12 @@ export async function run(ctx) {
     requestParams.repoRef = sourceRepo;
   }
   requestParams.closeTask = false;
-  if (isBugFilter) {
+  if (isBugFilter || isReview) {
     // Successful bug-triage TaskRuns do not retire the parent generation.
-    // The host consumes that exact generation with one atomic Review handoff
-    // after validating the typed outcome. Failed/cancelled children still use
-    // Fleet's terminal policy and never grant this workflow an unfenced write.
+    // Review-role TaskRuns likewise retain the exact Review claim so the host
+    // can return the card to Review atomically. Failed/cancelled children still
+    // use Fleet's terminal policy and never grant this workflow an unfenced
+    // write.
     requestParams.retainWorkItemClaim = true;
   }
   try {
@@ -364,7 +480,7 @@ export async function run(ctx) {
       // Exact durable request replay is resolved inside the SDK/service before
       // returning. A 409 here is therefore a real lineage/envelope conflict,
       // not evidence that a resumable child exists; never await a phantom run.
-      await releaseClaimAfterError(loom, issueId, "request the TaskRun", e);
+      await releaseClaimAfterError(loom, issueId, "request the TaskRun", e, isReview);
     }
     throw e;
   }
@@ -382,6 +498,20 @@ export async function run(ctx) {
 
   // 4. Report the outcome.
   if (status === "completed") {
+    if (isReview) {
+      return completeReviewRoleHandoff(loom, {
+        issueId,
+        taskRunId,
+        roleName: resolved.roleName,
+        promptSource,
+        backend: runBackend,
+        filesChanged,
+        delivery,
+        localBranch,
+        headSha,
+        priority: reviewHandoffPriority(claimed && claimed.priority),
+      });
+    }
     if (isPlanner) {
       // The planner backend writes the design only. The TaskRun terminal receipt
       // has now retired its live Work Item claim. Verify the claimed card really
@@ -536,6 +666,20 @@ export async function run(ctx) {
     });
   }
   const resultErrorClass = stringValue(result && (result.error_class || result.errorClass));
+  if (isReview) {
+    // A failed/cancelled retained child is finalized by Fleet's exact Work Item
+    // policy. Do not rewrite it with a generic issue.update after the retained
+    // generation has been retired or recovered.
+    return loom.needsReview({
+      summary: "prompt-agent: review-role task-run " + taskRunId + " for " + issueId
+        + " ended " + status
+        + (result && result.error_message ? " - " + stringValue(result.error_message) : "")
+        + " (left in its policy-owned terminal state)",
+      errorClass: resultErrorClass || "prompt_agent_review_task_failed",
+      issueId,
+      taskRunId,
+    });
+  }
   if (isBugFilter && status === "cancelled") {
     // Bug-triage mode is read-only and has exactly one successful disposition:
     // triaged. An older/custom runner must not convert a cancellation (including
@@ -651,7 +795,7 @@ function resolveRolePhase(resolved) {
     return { supported: true, taskFilter: "", rawTaskFilter: "" };
   }
   const rawTaskFilter = stringValue(resolved.taskFilter).trim();
-  if (rawTaskFilter === "needs_plan" || rawTaskFilter === "has_design") {
+  if (rawTaskFilter === "needs_plan" || rawTaskFilter === "has_design" || rawTaskFilter === "review") {
     return { supported: true, taskFilter: rawTaskFilter, rawTaskFilter };
   }
   if (rawTaskFilter === "bug") {
@@ -661,6 +805,19 @@ function resolveRolePhase(resolved) {
     return { supported: true, taskFilter: "has_design", rawTaskFilter };
   }
   return { supported: false, taskFilter: "", rawTaskFilter };
+}
+
+// claimTargetReviewTask claims one exact Review-column card. Review roles never
+// fall through to the ready queue. A conflict is an honest contention/no-longer-
+// Review outcome and costs no child/model dispatch.
+async function claimTargetReviewTask(loom, targetId) {
+  if (!targetId) return null;
+  try {
+    return await loom.tasks.claimReview({ taskId: targetId });
+  } catch (e) {
+    if (isConflictError(e)) return null;
+    throw e;
+  }
 }
 
 // claimTargetTask claims a ready task via the existing task lease. A specific
@@ -724,10 +881,11 @@ function eventPayload(input) {
   if (!input || typeof input !== "object") return null;
   if (typeof input.event === "object" && input.event) return input.event;
   if (!stringValue(input.taskId)) return null;
-  const openStatus = stringValue(input.status).toLowerCase() === "open";
+  const status = stringValue(input.status).toLowerCase();
+  const lifecycleStatus = status === "open" || status === "review";
   const typedTaskReadyGate = typeof input.repositoryRequired === "boolean"
     || typeof input.hasDesign === "boolean";
-  return openStatus || typedTaskReadyGate ? input : null;
+  return lifecycleStatus || typedTaskReadyGate ? input : null;
 }
 
 // isGatingFilter reports whether a role's TaskFilter participates in phase
@@ -795,14 +953,122 @@ async function unclaimTask(loom, issueId) {
 // typed release succeeds the caller rethrows the original operation error. If
 // release itself fails, surface that authoritative cleanup failure with the
 // original cause in the message rather than pretending the Work Item is free.
-async function releaseClaimAfterError(loom, issueId, operation, originalError) {
+async function releaseClaimAfterError(loom, issueId, operation, originalError, restoreReview = false) {
   try {
-    await unclaimTask(loom, issueId);
+    if (restoreReview) {
+      await loom.tasks.releaseReview({ taskId: issueId });
+    } else {
+      await unclaimTask(loom, issueId);
+    }
   } catch (releaseError) {
     throw new Error("prompt-agent: failed to " + operation + " for " + issueId
       + " (" + errorMessage(originalError) + ") and typed release also failed: "
       + errorMessage(releaseError));
   }
+}
+
+function reviewHandoffPriority(claimedPriority) {
+  const priority = Number(claimedPriority);
+  return Number.isInteger(priority) && priority >= 0 && priority <= 4 ? priority : 2;
+}
+
+function parseLocalBranchExternalRef(externalRef) {
+  const value = stringValue(externalRef).trim();
+  if (!value.startsWith("local-branch:")) return null;
+  const body = value.slice("local-branch:".length);
+  const separator = body.lastIndexOf("@");
+  if (separator <= 0) return null;
+  const branch = body.slice(0, separator).trim();
+  const headSha = body.slice(separator + 1).trim().toLowerCase();
+  if (!validLocalBranchExternalRefBranch(branch) || !/^[0-9a-f]{40}$/.test(headSha)) return null;
+  return { branch, headSha };
+}
+
+function validLocalBranchExternalRefBranch(branch) {
+  return branch !== "" &&
+    branch !== "@" &&
+    !branch.startsWith("-") &&
+    !branch.startsWith("/") &&
+    !branch.endsWith("/") &&
+    !branch.startsWith(".") &&
+    !branch.endsWith(".") &&
+    !branch.endsWith(".lock") &&
+    !branch.includes("..") &&
+    !branch.includes("//") &&
+    !branch.includes("@{") &&
+    !/[\s\u0000-\u001f\u007f~^:?*[\]\\]/u.test(branch);
+}
+
+async function completeReviewRoleHandoff(loom, context) {
+  const roleName = stringValue(context.roleName) || "custom";
+  const filesChanged = stringValue(context.filesChanged) || "0";
+  const delivery = stringValue(context.delivery) || "patch_back";
+  const deliveredBranch = delivery === "local_branch"
+    ? parseLocalBranchExternalRef(
+      "local-branch:" + stringValue(context.localBranch) + "@" + stringValue(context.headSha),
+    )
+    : null;
+  const branch = deliveredBranch ? deliveredBranch.branch : "";
+  const headSha = deliveredBranch ? deliveredBranch.headSha : "";
+  const deliveryValid = deliveredBranch !== null;
+  const externalRef = deliveryValid ? "local-branch:" + branch + "@" + headSha : "";
+  let commentBody = "Review-triggered role " + roleName + " completed TaskRun "
+    + context.taskRunId + ".\n\nfiles_changed=" + filesChanged + "; delivery=" + delivery + ".";
+  if (deliveryValid) {
+    commentBody += "\nDelivered branch: " + branch + " @ " + headSha + ".";
+  } else {
+    commentBody += "\nRequired local-branch delivery evidence was missing or invalid; operator review is required.";
+  }
+  const handoff = {
+    taskId: context.issueId,
+    taskRunId: context.taskRunId,
+    status: "review",
+    priority: context.priority,
+    commentBody,
+    reason: deliveryValid
+      ? "review-triggered role completed"
+      : "review-triggered role delivery invalid",
+  };
+  if (deliveryValid) {
+    handoff.externalRef = externalRef;
+  }
+  try {
+    await loom.tasks.handoffReview(handoff);
+  } catch (err) {
+    return loom.needsReview({
+      summary: "prompt-agent: review-role TaskRun " + context.taskRunId
+        + " completed, but the host could not return " + context.issueId
+        + " to Review: " + errorMessage(err),
+      errorClass: "prompt_agent_review_handoff_failed",
+      issueId: context.issueId,
+      taskRunId: context.taskRunId,
+    });
+  }
+  if (!deliveryValid) {
+    return loom.needsReview({
+      summary: "prompt-agent: review-role TaskRun " + context.taskRunId
+        + " completed without valid local-branch delivery evidence; "
+        + context.issueId + " was returned to Review for operator inspection",
+      errorClass: "prompt_agent_review_delivery_invalid",
+      issueId: context.issueId,
+      taskRunId: context.taskRunId,
+      delivery,
+    });
+  }
+  return loom.completed({
+    summary: "prompt-agent: " + context.issueId + " completed review-triggered role "
+      + roleName + " via " + (context.backend || "backend") + " and returned to Review",
+    issueId: context.issueId,
+    taskRunId: context.taskRunId,
+    promptSource: context.promptSource,
+    backend: context.backend,
+    filesChanged,
+    delivery,
+    local_branch: branch,
+    head_sha: headSha,
+    external_ref: externalRef,
+    outcome: "review-role-review",
+  });
 }
 
 // releaseTerminalCard runs only after taskRuns.await returned a terminal

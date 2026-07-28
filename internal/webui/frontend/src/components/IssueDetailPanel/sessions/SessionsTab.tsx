@@ -13,7 +13,7 @@ import type { SessionRecord } from "@/types/agent";
 import { SessionTimeline } from "./SessionTimeline";
 import { SessionDetailView } from "./SessionDetailView";
 import { WorkflowRunDetail } from "./WorkflowRunDetail";
-import styles from "./SessionsTab.module.css";
+import styles from "@/styles/SessionRunDetail.module.css";
 
 export interface SessionsTabProps {
   taskId: string;

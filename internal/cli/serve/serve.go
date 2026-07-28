@@ -52,6 +52,7 @@ const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
 const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
 const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
 const envLoomTaskReadyEvents = "LOOM_TASK_READY_EVENTS"
+const envLoomTaskReviewEvents = "LOOM_TASK_REVIEW_EVENTS"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -132,6 +133,7 @@ ENVIRONMENT VARIABLES
   LOOM_ISSUE_BRIDGE_STATE_PATH          Bridge cursor state file (default: <state dir>/issue-bridge-cursor.json)
   LOOM_ISSUE_BRIDGE_REPLAY              Replay journal from zero on first observation (set 1/true)
   LOOM_TASK_READY_EVENTS                Task-ready internal event toggle (default: on; set 0/false/off/no to disable)
+  LOOM_TASK_REVIEW_EVENTS               Task-review internal event toggle (default: on; set 0/false/off/no to disable)
 
 EXAMPLES
   loom serve                                              # Default port 8080

@@ -1599,10 +1599,10 @@ function App() {
           upsertWorkspaceAgent?.(agent);
           refetchAgentStatusAfterAgentCreate();
           showToast(`Agent "${agent.name}" created`, { type: "success" });
-          // A lead is an interactive terminal agent — drop the user straight
-          // into its terminal rather than leaving them on the board. plan/task
-          // workers run under daemon supervision and need no terminal.
-          if (isLeadRole(agent.role_name)) {
+          // Interactive agents are browser-launched, so open their Terminal
+          // immediately. Keep the legacy role-name fallback for older modal
+          // and server responses that predate the explicit kind.
+          if (agent.kind === "interactive" || isLeadRole(agent.role_name)) {
             handleAgentClick(agent.name);
           }
           if (

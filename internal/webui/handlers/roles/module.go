@@ -295,8 +295,9 @@ func normalizePromptBody(prompt string) string {
 // ValidatePromptAgentRole rejects role definitions that the prompt-agent
 // workflow cannot execute. Keep this set aligned with
 // builtin/prompt-agent.ts resolveRolePhase: legacy empty/"any" roles map to
-// has_design, plan/coder roles use the two explicit phase filters, and the
-// issue-type "bug" filter is restricted to read-only roles.
+// has_design, plan/coder roles use the two explicit phase filters, Review
+// event roles use the target-only review filter, and the issue-type "bug"
+// filter is restricted to read-only roles.
 func ValidatePromptAgentRole(role *domain.Role) error {
 	if role == nil {
 		return fmt.Errorf("prompt-agent role is required: %w", domain.ErrInvalid)
@@ -307,6 +308,14 @@ func ValidatePromptAgentRole(role *domain.Role) error {
 	switch taskFilter := strings.TrimSpace(role.TaskFilter); taskFilter {
 	case "", "any", "needs_plan", "has_design":
 		return nil
+	case "review":
+		if !role.ReadOnly {
+			return nil
+		}
+		return fmt.Errorf(
+			"role %q task_filter %q requires read_only=false in prompt-agent because Review delivery must publish a local branch: %w",
+			role.Name, taskFilter, domain.ErrInvalid,
+		)
 	case "bug":
 		if role.ReadOnly {
 			return nil
@@ -317,7 +326,7 @@ func ValidatePromptAgentRole(role *domain.Role) error {
 		)
 	default:
 		return fmt.Errorf(
-			"role %q task_filter %q is unsupported by prompt-agent; expected any, needs_plan, has_design, or bug: %w",
+			"role %q task_filter %q is unsupported by prompt-agent; expected any, needs_plan, has_design, review, or bug: %w",
 			role.Name, taskFilter, domain.ErrInvalid,
 		)
 	}

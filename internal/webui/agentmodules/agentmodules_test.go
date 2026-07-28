@@ -30,6 +30,7 @@ func TestProductionCompositionUsesAutomationAwareAgentsConstructor(t *testing.T)
 	}
 	for _, required := range []string{
 		"agents.New(agents.Config{", "Bindings: deps.AutomationBindings",
+		"SessionTranscripts: deps.AgentSessionTranscripts",
 		"OperatorAuthority: deps.AutomationOperator", "automationModules.BindingGrants",
 		"CreateWorkflow: deps.Capabilities.WorkflowBinding",
 	} {

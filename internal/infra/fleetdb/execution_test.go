@@ -656,6 +656,7 @@ func TestExecutionDriverRunReviewHandoffSendsAndValidatesAtomicReviewAnnotations
 	handedOffAt := time.Date(2026, 7, 23, 5, 45, 0, 123456789, time.UTC)
 	commandID := "handoff-review-work-item:sha256:" + strings.Repeat("e", 64)
 	claimActionID := "driver-run-work-item-claim:claim-work-item:sha256:" + strings.Repeat("a", 64)
+	externalRef := "local-branch:loom/TASK-1@" + strings.Repeat("b", 40)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost ||
 			r.URL.Path != "/api/v1/WS/driver-runs/run-1/work-items/TASK-1/review-handoff" {
@@ -673,11 +674,13 @@ func TestExecutionDriverRunReviewHandoffSendsAndValidatesAtomicReviewAnnotations
 		if string(raw["target_status"]) != `"review"` ||
 			string(raw["priority"]) != `4` ||
 			string(raw["labels"]) != `["bug","triaged"]` ||
-			string(raw["comment_body"]) != `"Automated bug triage completed."` {
+			string(raw["comment_body"]) != `"Automated bug triage completed."` ||
+			string(raw["external_ref"]) != `"`+externalRef+`"` {
 			t.Fatalf("review handoff body = %s", encoded)
 		}
 		receipt := executionDriverRunWorkItemFixture("review", commandID, handedOffAt.Truncate(time.Microsecond))
 		receipt.Comment.Body = "Automated bug triage completed."
+		receipt.Issue.ExternalRef = externalRef
 		writeJSON(t, w, receipt)
 	}))
 	t.Cleanup(server.Close)
@@ -691,10 +694,12 @@ func TestExecutionDriverRunReviewHandoffSendsAndValidatesAtomicReviewAnnotations
 		NodeID: "node-1", LeaseID: "lease-1", LeaseToken: "raw-driver-secret", FencingToken: 7,
 		ClaimActionID: claimActionID, TaskRunID: "review-child-1", TargetStatus: "review",
 		Priority: &priority, Labels: []string{" bug ", "triaged", "bug"},
-		CommentBody: "Automated bug triage completed.", HandedOffAt: handedOffAt,
+		CommentBody: "Automated bug triage completed.", ExternalRef: &externalRef,
+		HandedOffAt: handedOffAt,
 	})
 	if err != nil || result.Issue == nil || result.Issue.Status != "review" ||
 		result.Issue.Priority != priority ||
+		result.Issue.ExternalRef != externalRef ||
 		!slices.Equal(result.Issue.Labels, []string{"existing", "bug", "triaged"}) {
 		t.Fatalf("HandoffDriverRunReviewWorkItem() = %+v, %v", result, err)
 	}
@@ -733,6 +738,31 @@ func TestExecutionDriverRunReviewHandoffRejectsInvalidAnnotationsBeforeHTTP(t *t
 			c.Labels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"}
 		}},
 		{"invalid label", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) { c.Labels = []string{"bad;label"} }},
+		{"invalid external ref", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) {
+			value := "local-branch:loom/docs@bad"
+			c.ExternalRef = &value
+		}},
+		{"invalid external ref branch", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) {
+			value := "local-branch:bad branch@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
+		{"oversized external ref", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) {
+			value := "local-branch:" + strings.Repeat("a", executionDriverRunReviewMaxExternalRefBytes) +
+				"@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
+		{"invalid UTF-8 external ref", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) {
+			value := "local-branch:loom/" + string([]byte{0xff}) + "@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
+		{"dot-prefixed branch component", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) {
+			value := "local-branch:foo/.bar@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
+		{"lock-suffixed branch component", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) {
+			value := "local-branch:foo/bar.lock@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
 		{"open annotations", func(c *ExecutionDriverRunReviewWorkItemHandoffCommand) { c.TargetStatus = "open" }},
 	}
 	for _, tc := range tests {
@@ -753,16 +783,20 @@ func TestValidExecutionDriverRunReviewHandoffResultChecksReviewPriorityAndLabels
 	at := time.Date(2026, 7, 23, 5, 45, 0, 0, time.UTC)
 	commandID := "handoff-review-work-item:sha256:" + strings.Repeat("e", 64)
 	priority := 4
+	externalRef := "local-branch:loom/TASK-1@" + strings.Repeat("b", 40)
 	command := ExecutionDriverRunReviewWorkItemHandoffCommand{
 		WorkspaceKey: "WS", CommandID: commandID, RunID: "run-1", TaskID: "TASK-1",
 		TaskRunID: "review-child-1", TargetStatus: "review", Priority: &priority,
-		Labels: []string{"bug", "triaged"}, CommentBody: "triaged", HandedOffAt: at,
+		Labels: []string{"bug", "triaged"}, CommentBody: "triaged",
+		ExternalRef: &externalRef, HandedOffAt: at,
 	}
 	result := executionDriverRunWorkItemFixture("review", commandID, at)
+	result.Issue.ExternalRef = externalRef
 	if !validExecutionDriverRunReviewWorkItemHandoffResult(&result, command) {
 		t.Fatal("valid review result was rejected")
 	}
 	replayed := executionDriverRunWorkItemFixture("review", commandID, at)
+	replayed.Issue.ExternalRef = externalRef
 	replayed.Replayed = true
 	retryCommand := command
 	retryCommand.HandedOffAt = at.Add(time.Minute)
@@ -786,6 +820,11 @@ func TestValidExecutionDriverRunReviewHandoffResultChecksReviewPriorityAndLabels
 	result.Issue.Labels = []string{"bug"}
 	if validExecutionDriverRunReviewWorkItemHandoffResult(&result, command) {
 		t.Fatal("missing requested review label was accepted")
+	}
+	result.Issue.Labels = []string{"existing", "bug", "triaged"}
+	result.Issue.ExternalRef = "local-branch:loom/other@" + strings.Repeat("c", 40)
+	if validExecutionDriverRunReviewWorkItemHandoffResult(&result, command) {
+		t.Fatal("divergent review external ref was accepted")
 	}
 
 	for _, tc := range []struct {
@@ -813,6 +852,7 @@ func TestValidExecutionDriverRunReviewHandoffResultChecksReviewPriorityAndLabels
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			divergent := executionDriverRunWorkItemFixture("review", commandID, at)
+			divergent.Issue.ExternalRef = externalRef
 			tc.edit(&divergent)
 			if validExecutionDriverRunReviewWorkItemHandoffResult(&divergent, command) {
 				t.Fatal("divergent atomic comment receipt was accepted")

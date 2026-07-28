@@ -510,8 +510,13 @@ export class LoomDriverClient {
     const hasPriority = Object.prototype.hasOwnProperty.call(input, "priority");
     const hasLabels = Object.prototype.hasOwnProperty.call(input, "labels");
     const hasCommentBody = Object.prototype.hasOwnProperty.call(input, "commentBody");
-    if (status !== "review" && (hasPriority || hasLabels || hasCommentBody)) {
-      throw new Error("tasks.handoffReview priority, labels, and commentBody are only valid for review status");
+    const hasExternalRef = Object.prototype.hasOwnProperty.call(input, "externalRef");
+    if (status !== "review" && (
+      hasPriority || hasLabels || hasCommentBody || hasExternalRef
+    )) {
+      throw new Error(
+        "tasks.handoffReview priority, labels, commentBody, and externalRef are only valid for review status",
+      );
     }
     if (status === "review") {
       if (!Number.isInteger(input.priority) || input.priority < 0 || input.priority > 4) {
@@ -522,6 +527,15 @@ export class LoomDriverClient {
       }
       if (hasLabels && (!Array.isArray(input.labels) || input.labels.some((label) => typeof label !== "string"))) {
         throw new Error("tasks.handoffReview labels must be an array of strings");
+      }
+      if (
+        hasExternalRef &&
+        (
+          typeof input.externalRef !== "string" ||
+          !isCanonicalLocalBranchExternalRef(input.externalRef)
+        )
+      ) {
+        throw new Error("tasks.handoffReview externalRef must be a canonical local-branch reference");
       }
     }
     const params = {
@@ -535,6 +549,9 @@ export class LoomDriverClient {
       params.commentBody = input.commentBody;
       if (hasLabels) {
         params.labels = input.labels;
+      }
+      if (hasExternalRef) {
+        params.externalRef = input.externalRef;
       }
     }
     return this.#httpCall("handoff-review", params, { rawKeys: ["labels"] });
@@ -1184,6 +1201,32 @@ function sanitizeTaskRunResult(result = {}) {
   delete sanitized.leaseToken;
   delete sanitized.lease_token;
   return sanitized;
+}
+
+function isCanonicalLocalBranchExternalRef(externalRef) {
+  if (
+    externalRef !== externalRef.trim() ||
+    !externalRef.startsWith("local-branch:")
+  ) {
+    return false;
+  }
+  const body = externalRef.slice("local-branch:".length);
+  const separator = body.lastIndexOf("@");
+  if (separator <= 0 || !/^[0-9a-f]{40}$/.test(body.slice(separator + 1))) {
+    return false;
+  }
+  const branch = body.slice(0, separator);
+  return branch !== "@" &&
+    !branch.startsWith("-") &&
+    !branch.startsWith("/") &&
+    !branch.endsWith("/") &&
+    !branch.startsWith(".") &&
+    !branch.endsWith(".") &&
+    !branch.endsWith(".lock") &&
+    !branch.includes("..") &&
+    !branch.includes("//") &&
+    !branch.includes("@{") &&
+    !/[\s\u0000-\u001f\u007f~^:?*[\]\\]/u.test(branch);
 }
 
 function pickEnv(env, key) {

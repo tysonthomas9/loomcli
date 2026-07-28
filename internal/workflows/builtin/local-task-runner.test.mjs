@@ -123,6 +123,10 @@ const ENV_KEYS = [
   "FAKE_GIT_WRITE_SECRET_AFTER_CHECKOUT",
   "FAKE_GIT_MOVE_HEAD_BEFORE_PUSH",
   "FAKE_GIT_MOVE_HEAD_MARKER",
+  "FAKE_GIT_ADVANCE_REMOTE_BEFORE_PUSH",
+  "FAKE_GIT_REMOTE_BARE",
+  "FAKE_GIT_REMOTE_BRANCH",
+  "FAKE_GIT_REMOTE_HEAD_MARKER",
   "FAKE_COMMIT_CHANGES",
   "REAL_GIT_BIN",
   "FAKE_STREAM_ERROR",
@@ -187,6 +191,21 @@ function installGitFaultWrapper() {
     "  const moved = spawnSync(process.env.REAL_GIT_BIN, [\"-C\", cwd, \"rev-parse\", \"HEAD\"], { encoding: \"utf8\", env: process.env });",
     "  if (moved.error || moved.status !== 0) process.exit(moved.status == null ? 1 : moved.status);",
     "  if (process.env.FAKE_GIT_MOVE_HEAD_MARKER) fs.writeFileSync(process.env.FAKE_GIT_MOVE_HEAD_MARKER, moved.stdout.trim() + \"\\n\");",
+    "}",
+    "if (process.env.FAKE_GIT_ADVANCE_REMOTE_BEFORE_PUSH === \"1\" && args.includes(\"push\")) {",
+    "  const bare = process.env.FAKE_GIT_REMOTE_BARE;",
+    "  const branch = process.env.FAKE_GIT_REMOTE_BRANCH;",
+    "  const ref = \"refs/heads/\" + branch;",
+    "  const current = spawnSync(process.env.REAL_GIT_BIN, [\"--git-dir\", bare, \"rev-parse\", ref], { encoding: \"utf8\", env: process.env });",
+    "  if (current.error || current.status !== 0) process.exit(current.status == null ? 1 : current.status);",
+    "  const tree = spawnSync(process.env.REAL_GIT_BIN, [\"--git-dir\", bare, \"rev-parse\", current.stdout.trim() + \"^{tree}\"], { encoding: \"utf8\", env: process.env });",
+    "  if (tree.error || tree.status !== 0) process.exit(tree.status == null ? 1 : tree.status);",
+    "  const commitEnv = { ...process.env, GIT_AUTHOR_NAME: \"Race\", GIT_AUTHOR_EMAIL: \"race@example.test\", GIT_COMMITTER_NAME: \"Race\", GIT_COMMITTER_EMAIL: \"race@example.test\" };",
+    "  const moved = spawnSync(process.env.REAL_GIT_BIN, [\"--git-dir\", bare, \"commit-tree\", tree.stdout.trim(), \"-p\", current.stdout.trim(), \"-m\", \"concurrent remote advance\"], { encoding: \"utf8\", env: commitEnv });",
+    "  if (moved.error || moved.status !== 0) process.exit(moved.status == null ? 1 : moved.status);",
+    "  const update = spawnSync(process.env.REAL_GIT_BIN, [\"--git-dir\", bare, \"update-ref\", ref, moved.stdout.trim(), current.stdout.trim()], { stdio: \"inherit\", env: process.env });",
+    "  if (update.error || update.status !== 0) process.exit(update.status == null ? 1 : update.status);",
+    "  if (process.env.FAKE_GIT_REMOTE_HEAD_MARKER) fs.writeFileSync(process.env.FAKE_GIT_REMOTE_HEAD_MARKER, moved.stdout.trim() + \"\\n\");",
     "}",
     "const result = spawnSync(process.env.REAL_GIT_BIN, args, { stdio: \"inherit\", env: process.env });",
     "if (result.error || result.status !== 0) process.exit(result.status == null ? 1 : result.status);",
@@ -1424,6 +1443,174 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.ok(files.includes("local-branch.txt"), "pushed branch should contain the backend change");
   });
 
+  it("resumes a stamped local review branch and preserves its existing implementation", async () => {
+    const origin = createBareOrigin("review-resume-origin");
+    const hostBase = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    const branch = "loom/T-REVIEW";
+    fs.writeFileSync(path.join(worktree, "review-existing-code.txt"), "existing implementation\n");
+    execFileSync("git", ["add", "review-existing-code.txt"], { cwd: worktree });
+    execFileSync("git", ["commit", "-q", "-m", "existing implementation"], { cwd: worktree });
+    const reviewHead = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    execFileSync("git", ["push", "-q", "origin", `${reviewHead}:refs/heads/${branch}`], { cwd: worktree });
+    execFileSync("git", ["reset", "--hard", "-q", hostBase], { cwd: worktree });
+
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "review-docs.md";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-review-resume",
+      task_id: "T-REVIEW",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        title: "Document the reviewed implementation",
+        deliveryMode: "local-branch",
+        requireLocalBranchDelivery: true,
+        localBranchName: branch,
+        localBranchBaseRef: reviewHead,
+      },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "completed");
+    assert.equal(out.base_ref, reviewHead, "review changes must be based on the stamped branch head");
+    assert.equal(out.runtimeMetadata.delivery, "local_branch");
+    assert.equal(out.runtimeMetadata.local_branch, branch);
+    const published = refSha(origin, `refs/heads/${branch}`);
+    assert.equal(out.runtimeMetadata.head_sha, published);
+    assert.equal(
+      execFileSync("git", ["--git-dir", origin, "rev-list", "--count", `${reviewHead}..${published}`]).toString().trim(),
+      "1",
+      "documentation delivery must extend the reviewed implementation",
+    );
+    const files = execFileSync("git", ["--git-dir", origin, "ls-tree", "-r", "--name-only", published]).toString();
+    assert.ok(files.includes("review-existing-code.txt"), "the prior reviewed implementation must be preserved");
+    assert.ok(files.includes("review-docs.md"), "the documentation agent change must be published");
+    assert.ok(out.patch.includes("review-docs.md"));
+  });
+
+  it("fails before backend execution when a stamped review branch has drifted", async () => {
+    const origin = createBareOrigin("review-drift-origin");
+    const hostBase = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    const branch = "loom/T-DRIFT";
+    fs.writeFileSync(path.join(worktree, "first.txt"), "first\n");
+    execFileSync("git", ["add", "first.txt"], { cwd: worktree });
+    execFileSync("git", ["commit", "-q", "-m", "first review head"], { cwd: worktree });
+    const stampedHead = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    fs.writeFileSync(path.join(worktree, "second.txt"), "second\n");
+    execFileSync("git", ["add", "second.txt"], { cwd: worktree });
+    execFileSync("git", ["commit", "-q", "-m", "moved review head"], { cwd: worktree });
+    const movedHead = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    execFileSync("git", ["push", "-q", "origin", `${movedHead}:refs/heads/${branch}`], { cwd: worktree });
+    execFileSync("git", ["reset", "--hard", "-q", hostBase], { cwd: worktree });
+    const backendMarker = path.join(tmpRoot, "drift-backend-ran.txt");
+
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = backendMarker;
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-review-drift",
+      task_id: "T-DRIFT",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        title: "Do not overwrite a moved review branch",
+        deliveryMode: "local-branch",
+        requireLocalBranchDelivery: true,
+        localBranchName: branch,
+        localBranchBaseRef: stampedHead,
+      },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_branch_base_drift");
+    assert.equal(refSha(origin, `refs/heads/${branch}`), movedHead, "the moved branch must remain untouched");
+    assert.equal(fs.existsSync(backendMarker), false, "the backend must not run after a resume fence conflict");
+  });
+
+  it("does not overwrite a stamped review branch that advances after preflight", async () => {
+    const origin = createBareOrigin("review-race-origin");
+    const hostBase = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    const branch = "loom/T-REVIEW-RACE";
+    fs.writeFileSync(path.join(worktree, "review-base.txt"), "review base\n");
+    execFileSync("git", ["add", "review-base.txt"], { cwd: worktree });
+    execFileSync("git", ["commit", "-q", "-m", "review race base"], { cwd: worktree });
+    const stampedHead = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    execFileSync("git", ["push", "-q", "origin", `${stampedHead}:refs/heads/${branch}`], { cwd: worktree });
+    execFileSync("git", ["reset", "--hard", "-q", hostBase], { cwd: worktree });
+
+    const remoteHeadMarker = path.join(tmpRoot, "concurrent-remote-head.txt");
+    installGitFaultWrapper();
+    process.env.FAKE_GIT_ADVANCE_REMOTE_BEFORE_PUSH = "1";
+    process.env.FAKE_GIT_REMOTE_BARE = origin;
+    process.env.FAKE_GIT_REMOTE_BRANCH = branch;
+    process.env.FAKE_GIT_REMOTE_HEAD_MARKER = remoteHeadMarker;
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "review-after-preflight.md";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-review-race",
+      task_id: "T-REVIEW-RACE",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        title: "Do not overwrite concurrent review work",
+        deliveryMode: "local-branch",
+        requireLocalBranchDelivery: true,
+        localBranchName: branch,
+        localBranchBaseRef: stampedHead,
+      },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_branch_push_failed");
+    const concurrentHead = fs.readFileSync(remoteHeadMarker, "utf8").trim();
+    assert.notEqual(concurrentHead, stampedHead);
+    assert.equal(
+      refSha(origin, `refs/heads/${branch}`),
+      concurrentHead,
+      "the exact force-with-lease must preserve the concurrent remote head",
+    );
+  });
+
+  it("fails before backend execution when required local-branch delivery has a network origin", async () => {
+    execFileSync("git", ["remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: worktree });
+    const backendMarker = path.join(tmpRoot, "network-origin-backend-ran.txt");
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = backendMarker;
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-review-network-origin",
+      task_id: "T-NETWORK",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        title: "Do not silently fall back",
+        deliveryMode: "local-branch",
+        requireLocalBranchDelivery: true,
+      },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_branch_origin_unsupported");
+    assert.equal(fs.existsSync(backendMarker), false, "the backend must not run without required delivery");
+  });
+
   it("deliveryMode=local-branch reuses backend output that is already committed", async () => {
     const origin = createBareOrigin("backend-committed-origin");
     const base = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
@@ -1545,6 +1732,32 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.equal(out.patch, "");
     assert.ok(out.base_ref && out.base_ref.length > 0);
     assert.equal(refExists(origin, "refs/heads/loom/T-EMPTY"), false);
+  });
+
+  it("required local-branch delivery fails when the backend produces no changes", async () => {
+    const origin = createBareOrigin("required-empty-origin");
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    delete process.env.FAKE_WRITE_FILE;
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-required-empty-local",
+      task_id: "T-REQUIRED-EMPTY",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        title: "Required empty local branch",
+        deliveryMode: "local-branch",
+        requireLocalBranchDelivery: true,
+      },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "failed");
+    assert.equal(out.errorClass, "local_branch_delivery_missing");
+    assert.equal(refExists(origin, "refs/heads/loom/T-REQUIRED-EMPTY"), false);
   });
 
   it("deliveryMode=local-branch force-pushes rework to the same task branch", async () => {

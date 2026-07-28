@@ -822,9 +822,11 @@ paths:
       description: |
         Rechecks the current Issue, first-class workspace repository count,
         claim generation, live lock, and pending Issue projections in one
-        storage transaction. An eligible open, non-epic, repository-less Issue
-        in a workspace with zero or multiple repositories becomes blocked and
-        unassigned with the private `repository_required` reason marker.
+        storage transaction. An eligible open or review, non-epic,
+        repository-less Issue in a workspace with zero or multiple repositories
+        becomes blocked and unassigned with the private `repository_required`
+        reason marker. Fleet also preserves whether repository admission must
+        restore the Issue to open or review.
         Stale and repeated requests are successful no-ops and never overwrite a
         live claim.
       operationId: blockIssueRepositoryRequired
@@ -860,8 +862,9 @@ paths:
         to `name`) on the Issue. If and only if the Issue is blocked with both
         Fleet's exact visible `repository_required` marker and the matching
         private repository-policy authority state, the same commit removes the
-        marker and reopens the Issue. A visible marker alone cannot mint policy
-        authority; other blocked Issues remain blocked.
+        marker and restores the Issue to its pre-policy open or review status. A
+        visible marker alone cannot mint policy authority; other blocked Issues
+        remain blocked.
       operationId: setIssueRepository
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -5019,9 +5022,14 @@ paths:
         TaskRun lineage, and immutable retained-claim policy before moving the
         work item to open, review, or closed and retiring its claim in one
         transaction. A review handoff also atomically sets priority, adds
-        normalized labels, and creates one server-authored comment. Exact
-        command replay returns the immutable original response without creating
-        another comment. For review handoffs, handed_off_at is commit metadata
+        normalized labels, creates one server-authored comment, and may stamp
+        canonical local-branch evidence in `external_ref`. When FleetDB proves
+        that a Review-origin claim came from the same task's canonical
+        `internal.task.review` Automation event and delivery, it server-stamps
+        the successor issue.update with private suppression provenance. The
+        request cannot mint or omit that decision. Exact command replay returns
+        the immutable original response without creating another comment. For
+        review handoffs, handed_off_at is commit metadata
         rather than part of idempotency identity, so timestamp-only retries
         replay the first committed issue, action, and comment. A claim
         originating in open may hand off only to review; a claim originating in
@@ -9210,10 +9218,10 @@ components:
           type: boolean
           description: |
             Commit-time signal for a no-op block request. True only when the
-            current Issue remains open and non-epic and its repository
-            requirement is already satisfied by an assigned source repository
-            or an exactly single-repository workspace. Downstream dispatch
-            still performs its normal readiness and claim checks.
+            current Issue remains open or review and non-epic and its
+            repository requirement is already satisfied by an assigned source
+            repository or an exactly single-repository workspace. Downstream
+            dispatch still performs its normal readiness and claim checks.
         blocked:
           type: boolean
         reopened:
@@ -10014,7 +10022,7 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [agents.lifecycle_command_fencing.v1, agents.lifecycle_command_ownership_fencing.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, work_items.repository_requirement.v1, workflow_catalog.version_lifecycle.v1]
+          example: [agents.lifecycle_command_fencing.v1, agents.lifecycle_command_ownership_fencing.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_review_work_item_handoff.v2, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, work_items.repository_requirement.v1, workflow_catalog.version_lifecycle.v1]
 
     AutomationErrorResponse:
       type: object
@@ -12376,6 +12384,7 @@ components:
                 - required: [priority]
                 - required: [labels]
                 - required: [comment_body]
+                - required: [external_ref]
       properties:
         command_id: { type: string, maxLength: 128 }
         node_id: { type: string }
@@ -12415,6 +12424,14 @@ components:
           description: >-
             Required only when target_status is review. Persisted as one
             server-authored immutable comment tied to this handoff command.
+        external_ref:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: '^local-branch:.+@[0-9a-f]{40}$'
+          description: >-
+            Optional only when target_status is review. Canonical local branch
+            delivery evidence stamped atomically with the status handoff.
         handed_off_at: { type: string, format: date-time }
 
     DriverRunWorkItemCommandResult:

@@ -93,6 +93,7 @@ describe("SessionDetailView", () => {
     mockUseSessionTranscript.mockReturnValue({
       entries: [],
       isLoading: false,
+      isUnavailable: false,
       error: null,
     });
     mockUseSessionDiff.mockReturnValue({
@@ -187,6 +188,7 @@ describe("SessionDetailView", () => {
           createEntry({ seq: 2, role: "assistant", text: "ok" }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -206,6 +208,7 @@ describe("SessionDetailView", () => {
           createEntry({ seq: 2, role: "assistant", text: "ok" }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       const { container } = render(
@@ -227,6 +230,7 @@ describe("SessionDetailView", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [createEntry({ seq: 1, role: "assistant", text: "hi" })],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -297,6 +301,7 @@ describe("SessionDetailView", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [],
         isLoading: true,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -307,6 +312,7 @@ describe("SessionDetailView", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [],
         isLoading: false,
+        isUnavailable: false,
         error: new Error("Network error"),
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -324,6 +330,7 @@ describe("SessionDetailView", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [createEntry({ seq: 1, role: "assistant", text: "Hi there" })],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -343,6 +350,7 @@ describe("SessionDetailView", () => {
           }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       const { container } = render(
@@ -370,6 +378,7 @@ describe("SessionDetailView", () => {
           }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -400,6 +409,7 @@ describe("SessionDetailView", () => {
           }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -423,6 +433,7 @@ describe("SessionDetailView", () => {
           }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -447,6 +458,7 @@ describe("SessionDetailView", () => {
           }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -474,6 +486,7 @@ describe("SessionDetailView", () => {
           }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -489,6 +502,7 @@ describe("SessionDetailView", () => {
           createEntry({ seq: 3, role: "user", type: "text", text: "second" }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -512,6 +526,7 @@ describe("SessionDetailView", () => {
           }),
         ],
         isLoading: false,
+        isUnavailable: false,
         error: null,
       });
       render(<SessionDetailView taskId="task-1" session={defaultSession} />);
@@ -572,6 +587,7 @@ describe("SessionDetailView", () => {
         "task-1",
         "sess-1",
         false,
+        { retryUnavailable: false },
       );
     });
 
@@ -582,6 +598,7 @@ describe("SessionDetailView", () => {
         "task-1",
         "sess-1",
         true,
+        { retryUnavailable: false },
       );
     });
 

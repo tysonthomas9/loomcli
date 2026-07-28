@@ -3,7 +3,7 @@
  */
 
 /**
- * Unit tests for MarkdownRenderer component.
+ * Unit tests for the shared MarkdownRenderer component.
  */
 
 import { render, screen } from "@testing-library/react";

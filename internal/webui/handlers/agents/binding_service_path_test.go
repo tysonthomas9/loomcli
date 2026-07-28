@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type agentServiceCASBindingStore struct {
@@ -19,6 +21,7 @@ type agentServiceCASBindingStore struct {
 	managedCreate  int
 	managedReplace int
 	managedDelete  int
+	replaceErr     error
 }
 
 func newAgentServiceCASBindingStore() *agentServiceCASBindingStore {
@@ -62,6 +65,9 @@ func (s *agentServiceCASBindingStore) ReplaceManagedBinding(
 	_ context.Context,
 	replacement automation.ManagedBindingReplacement,
 ) (*automation.Binding, error) {
+	if s.replaceErr != nil {
+		return nil, s.replaceErr
+	}
 	current := s.bindings[replacement.Expected.BindingID]
 	if current == nil || replacement.Binding == nil ||
 		current.WorkspaceKey != replacement.Expected.WorkspaceKey ||
@@ -102,6 +108,29 @@ func cloneAgentServiceTestBinding(binding *automation.Binding) *automation.Bindi
 	clone.EventTypePatterns = append([]string(nil), binding.EventTypePatterns...)
 	clone.Permissions = append([]string(nil), binding.Permissions...)
 	return &clone
+}
+
+type countingAgentServiceStore struct {
+	store.AgentServiceStore
+	updates int
+}
+
+func (s *countingAgentServiceStore) Update(
+	ctx context.Context,
+	workspaceKey, serviceID string,
+	patch store.AgentServiceUpdate,
+) (*domain.AgentService, error) {
+	s.updates++
+	return s.AgentServiceStore.Update(ctx, workspaceKey, serviceID, patch)
+}
+
+type storeWithCountingAgentServices struct {
+	store.Store
+	services *countingAgentServiceStore
+}
+
+func (s *storeWithCountingAgentServices) AgentServices() store.AgentServiceStore {
+	return s.services
 }
 
 type agentServiceCatalog struct{}
@@ -150,6 +179,8 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 		automation.WithClock(func() time.Time { return now }),
 	)
 	st := newAgentRecordStore(t)
+	countingServices := &countingAgentServiceStore{AgentServiceStore: st.AgentServices()}
+	countingStore := &storeWithCountingAgentServices{Store: st, services: countingServices}
 	seedPromptAgentRole(t, st, "docs")
 	seedRole(t, st, "reviewer")
 	resolver := boundaryOperatorResolverFunc(func(_ *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, error) {
@@ -163,7 +194,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 		return issuer.IssueOperator(principal, workspace, action)
 	})
 	module := New(Config{
-		Store: st, Bindings: bindings, OperatorAuthority: resolver,
+		Store: countingStore, Bindings: bindings, OperatorAuthority: resolver,
 		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS },
 		BindingGrants:        testBindingGrantCompatibility{grants: st.ConnectorGrants()},
 	})
@@ -178,7 +209,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 	}
 
 	created := request(http.MethodPost, "/api/workspaces/WS/agents",
-		`{"kind":"prompt","name":"Docs","behavior":{"role_name":"docs"},"trigger":{"source_kind":"internal"}}`)
+		`{"kind":"prompt","name":"Docs","behavior":{"role_name":"docs"},"trigger":{"source_kind":"cron","schedule":"*/10 * * * *","schedule_timezone":"UTC"}}`)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status = %d; body=%s", created.Code, created.Body.String())
 	}
@@ -187,13 +218,84 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 	if createdDTO.ID == "" || persistence.managedCreate != 1 || persistence.ordinaryCreate != 0 {
 		t.Fatalf("create id=%q managed=%d ordinary=%d", createdDTO.ID, persistence.managedCreate, persistence.ordinaryCreate)
 	}
-	patched := request(http.MethodPatch, "/api/workspaces/WS/agents/"+createdDTO.ID,
-		`{"behavior":{"role_name":"reviewer"}}`)
-	if patched.Code != http.StatusOK {
-		t.Fatalf("patch status = %d; body=%s", patched.Code, patched.Body.String())
+	invalidSchedule := request(http.MethodPatch, "/api/workspaces/WS/agents/"+createdDTO.ID,
+		`{"binding_id":"`+createdDTO.ID+`-1","schedule":"not a cron"}`)
+	if invalidSchedule.Code != http.StatusBadRequest {
+		t.Fatalf("invalid schedule status = %d; body=%s", invalidSchedule.Code, invalidSchedule.Body.String())
 	}
-	if persistence.managedReplace != 1 || !strings.Contains(persistence.bindings[createdDTO.ID+"-1"].SourceConfigRef, "reviewer") {
-		t.Fatalf("patch replacements=%d binding=%+v", persistence.managedReplace, persistence.bindings[createdDTO.ID+"-1"])
+	if persistence.managedReplace != 0 || persistence.bindings[createdDTO.ID+"-1"].Schedule != "*/10 * * * *" {
+		t.Fatalf("invalid schedule mutated binding: replacements=%d binding=%+v",
+			persistence.managedReplace, persistence.bindings[createdDTO.ID+"-1"])
+	}
+	foreignKind := request(http.MethodPatch, "/api/workspaces/WS/agents/"+createdDTO.ID,
+		`{"name":"Must not persist","backend":"claude"}`)
+	if foreignKind.Code != http.StatusBadRequest {
+		t.Fatalf("foreign-kind patch status = %d; body=%s", foreignKind.Code, foreignKind.Body.String())
+	}
+	unchangedRecord, err := st.AgentServices().Get(t.Context(), agentRecordTestWS, createdDTO.ID)
+	if err != nil || unchangedRecord.Name != "Docs" {
+		t.Fatalf("foreign-kind patch mutated record = %+v err=%v", unchangedRecord, err)
+	}
+	rejectedRole := request(http.MethodPatch, "/api/workspaces/WS/agents/"+createdDTO.ID,
+		`{"name":"Must not persist","behavior":{"role_name":"reviewer"}}`)
+	if rejectedRole.Code != http.StatusBadRequest ||
+		!strings.Contains(rejectedRole.Body.String(), "behavior.role_name is immutable") {
+		t.Fatalf("role patch status = %d; body=%s", rejectedRole.Code, rejectedRole.Body.String())
+	}
+	unchangedRecord, err = st.AgentServices().Get(t.Context(), agentRecordTestWS, createdDTO.ID)
+	if err != nil || unchangedRecord.Name != "Docs" || unchangedRecord.RoleName != "docs" ||
+		countingServices.updates != 0 || persistence.managedReplace != 0 ||
+		!strings.Contains(persistence.bindings[createdDTO.ID+"-1"].SourceConfigRef, `"roleName":"docs"`) {
+		t.Fatalf("rejected role patch record=%+v updates=%d replacements=%d binding=%+v err=%v",
+			unchangedRecord, countingServices.updates, persistence.managedReplace,
+			persistence.bindings[createdDTO.ID+"-1"], err)
+	}
+
+	patched := request(http.MethodPatch, "/api/workspaces/WS/agents/"+createdDTO.ID, `{"name":"Daily review"}`)
+	if patched.Code != http.StatusOK {
+		t.Fatalf("name patch status = %d; body=%s", patched.Code, patched.Body.String())
+	}
+	if countingServices.updates != 1 || persistence.managedReplace != 0 {
+		t.Fatalf("name patch updates=%d replacements=%d", countingServices.updates, persistence.managedReplace)
+	}
+	var patchedDTO agentRecordDTO
+	decodeJSON(t, patched.Body.Bytes(), &patchedDTO)
+	if patchedDTO.Name != "Daily review" || patchedDTO.Behavior.RoleName != "docs" {
+		t.Fatalf("patched record = %+v", patchedDTO)
+	}
+
+	mixed := request(http.MethodPatch, "/api/workspaces/WS/agents/"+createdDTO.ID,
+		`{"name":"Must not persist","binding_id":"`+createdDTO.ID+`-1","schedule":"0 9 * * *"}`)
+	if mixed.Code != http.StatusBadRequest {
+		t.Fatalf("mixed patch status = %d; body=%s", mixed.Code, mixed.Body.String())
+	}
+	if countingServices.updates != 1 || persistence.managedReplace != 0 {
+		t.Fatalf("mixed patch updates=%d replacements=%d", countingServices.updates, persistence.managedReplace)
+	}
+
+	persistence.replaceErr = automation.ErrUnavailable
+	failedSchedule := request(http.MethodPatch, "/api/workspaces/WS/agents/"+createdDTO.ID,
+		`{"binding_id":"`+createdDTO.ID+`-1","schedule":"0 9 * * *"}`)
+	if failedSchedule.Code != http.StatusServiceUnavailable {
+		t.Fatalf("failed schedule status = %d; body=%s", failedSchedule.Code, failedSchedule.Body.String())
+	}
+	if countingServices.updates != 1 || persistence.managedReplace != 0 ||
+		persistence.bindings[createdDTO.ID+"-1"].Schedule != "*/10 * * * *" {
+		t.Fatalf("failed schedule updates=%d replacements=%d binding=%+v",
+			countingServices.updates, persistence.managedReplace, persistence.bindings[createdDTO.ID+"-1"])
+	}
+	persistence.replaceErr = nil
+
+	scheduled := request(http.MethodPatch, "/api/workspaces/WS/agents/"+createdDTO.ID,
+		`{"binding_id":"`+createdDTO.ID+`-1","schedule":"0 9 * * *","schedule_timezone":"America/Los_Angeles"}`)
+	if scheduled.Code != http.StatusOK {
+		t.Fatalf("schedule patch status = %d; body=%s", scheduled.Code, scheduled.Body.String())
+	}
+	if countingServices.updates != 1 || persistence.managedReplace != 1 ||
+		persistence.bindings[createdDTO.ID+"-1"].Schedule != "0 9 * * *" ||
+		persistence.bindings[createdDTO.ID+"-1"].ScheduleTimezone != "America/Los_Angeles" {
+		t.Fatalf("schedule updates=%d replacements=%d binding=%+v",
+			countingServices.updates, persistence.managedReplace, persistence.bindings[createdDTO.ID+"-1"])
 	}
 	deleted := request(http.MethodDelete, "/api/workspaces/WS/agents/"+createdDTO.ID, "")
 	if deleted.Code != http.StatusOK {

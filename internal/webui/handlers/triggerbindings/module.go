@@ -49,6 +49,22 @@ type ConnectorCompatibility interface {
 	RevokeBindingGrants(ctx context.Context, workspaceKey, bindingID string) (int, error)
 }
 
+// UnattachedBindingIdentityChecker prevents an ordinary trigger binding from
+// occupying an identifier already owned by either supervised-agent
+// representation. Managed bindings attached to an AgentService bypass this
+// HTTP create path and retain their existing aggregate-owned lifecycle.
+//
+// Agent and TriggerBinding identities live in separate FleetDB namespaces, so
+// this check cannot reserve a name atomically. The HTTP adapter therefore
+// checks before and after create and compensates a failed post-check through
+// Automation's fenced disable/delete commands. Another process can still
+// create an Agent after the final successful check; eliminating that last
+// interval requires a FleetDB identity-reservation transaction shared by both
+// aggregate create paths.
+type UnattachedBindingIdentityChecker interface {
+	CheckUnattachedBindingID(ctx context.Context, workspaceKey, bindingID string) error
+}
+
 // Config contains only the public Automation ports and narrow compatibility
 // reads needed by this transport.
 type Config struct {
@@ -60,6 +76,7 @@ type Config struct {
 	WorkspaceFromContext func(context.Context) string
 	Runs                 RunQueries
 	Connectors           ConnectorCompatibility
+	AgentIdentities      UnattachedBindingIdentityChecker
 }
 
 type Module struct {
@@ -71,6 +88,7 @@ type Module struct {
 	workspaceFromContext func(context.Context) string
 	runs                 RunQueries
 	connectors           ConnectorCompatibility
+	agentIdentities      UnattachedBindingIdentityChecker
 	active               bool
 }
 
@@ -81,7 +99,7 @@ func New(config Config) *Module {
 		createWorkflow: config.CreateWorkflow,
 		commands:       config.Commands, queries: config.Queries, manualDispatch: config.ManualDispatch,
 		operatorAuthority: config.OperatorAuthority, workspaceFromContext: config.WorkspaceFromContext,
-		runs: config.Runs, connectors: config.Connectors, active: true,
+		runs: config.Runs, connectors: config.Connectors, agentIdentities: config.AgentIdentities, active: true,
 	}
 }
 
@@ -271,7 +289,7 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 	if !ok {
 		return
 	}
-	if m.createWorkflow == nil || m.queries == nil {
+	if m.createWorkflow == nil || m.commands == nil || m.queries == nil {
 		writeAutomationError(w, automation.ErrUnavailable, "create trigger binding failed")
 		return
 	}
@@ -339,6 +357,10 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 			writeAutomationError(w, fmt.Errorf("trigger binding %q already exists: %w", bindingID, automation.ErrConflict), "create trigger binding failed")
 			return
 		}
+		if err := m.checkUnattachedBindingID(r.Context(), workspace, bindingID); err != nil {
+			writeAutomationError(w, err, "check trigger binding identifier failed")
+			return
+		}
 		if err := m.validateEnsureIdentity(r.Context(), workspace, request, existing, sourceKind, routeKey, driverID, workflowName); err != nil {
 			writeAutomationError(w, err, "create trigger binding failed")
 			return
@@ -350,6 +372,10 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		return
 	} else if !errors.Is(err, automation.ErrNotFound) {
 		writeAutomationError(w, err, "get trigger binding failed")
+		return
+	}
+	if err := m.checkUnattachedBindingID(r.Context(), workspace, bindingID); err != nil {
+		writeAutomationError(w, err, "check trigger binding identifier failed")
 		return
 	}
 	binding, err := m.createWorkflow.Create(r.Context(), auth, workflowbinding.CreateRequest{
@@ -374,10 +400,66 @@ func (m *Module) createBinding(w http.ResponseWriter, r *http.Request) { //nolin
 		writeAutomationError(w, automation.ErrInvalidPersistedState, "create trigger binding failed")
 		return
 	}
+	if identityErr := m.checkUnattachedBindingID(r.Context(), workspace, binding.BindingID); identityErr != nil {
+		if rollbackErr := m.rollbackCreatedBinding(r, workspace, binding); rollbackErr != nil {
+			writeAutomationError(
+				w,
+				fmt.Errorf(
+					"post-create identity check failed (%v) and compensating delete failed (%v): %w",
+					identityErr, rollbackErr, automation.ErrInvalidPersistedState,
+				),
+				"trigger binding identity validation and rollback failed",
+			)
+			return
+		}
+		writeAutomationError(w, identityErr, "check created trigger binding identifier failed")
+		return
+	}
 	if !m.configureSecret(w, r, workspace, binding.BindingID, binding.SourceKind, secret) {
 		return
 	}
 	handler.WriteJSON(w, http.StatusCreated, binding)
+}
+
+func (m *Module) checkUnattachedBindingID(ctx context.Context, workspace, bindingID string) error {
+	if m == nil || m.agentIdentities == nil {
+		return automation.ErrUnavailable
+	}
+	return m.agentIdentities.CheckUnattachedBindingID(ctx, workspace, bindingID)
+}
+
+// rollbackCreatedBinding removes only the unmanaged binding just returned by
+// Automation. Disable/Delete each re-read and compare the persisted snapshot,
+// so a concurrent mutation fails closed instead of deleting somebody else's
+// newer state. Cleanup deliberately ignores client cancellation because the
+// durable create may already have committed.
+func (m *Module) rollbackCreatedBinding(r *http.Request, workspace string, binding *automation.Binding) error {
+	if m == nil || r == nil || binding == nil || m.commands == nil || m.operatorAuthority == nil {
+		return automation.ErrUnavailable
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	command := automation.BindingCommand{
+		WorkspaceKey: strings.TrimSpace(workspace),
+		BindingID:    strings.TrimSpace(binding.BindingID),
+	}
+	if binding.Enabled {
+		disableAuth, err := m.operatorAuthority.ResolveOperatorAuthority(r, workspace, automation.ActionDisableBinding)
+		if err != nil {
+			return fmt.Errorf("resolve disable authority: %w", err)
+		}
+		if _, err := m.commands.DisableBinding(cleanupCtx, disableAuth, command); err != nil {
+			return fmt.Errorf("disable created binding: %w", err)
+		}
+	}
+	deleteAuth, err := m.operatorAuthority.ResolveOperatorAuthority(r, workspace, automation.ActionDeleteBinding)
+	if err != nil {
+		return fmt.Errorf("resolve delete authority: %w", err)
+	}
+	if err := m.commands.DeleteBinding(cleanupCtx, deleteAuth, command); err != nil {
+		return fmt.Errorf("delete created binding: %w", err)
+	}
+	return nil
 }
 
 // validateEnsureIdentity makes POST's browser-oriented ensure semantics safe:

@@ -1,5 +1,5 @@
 /**
- * SessionsTab styles.
+ * Shared session timeline and run-detail styles.
  * Two-column layout: timeline left (~35%), detail right (~65%).
  */
 
@@ -895,6 +895,17 @@
   background: rgba(59, 130, 246, 0.04);
   border-top: 1px solid #3b82f6;
   border-bottom: 1px solid #3b82f6;
+}
+
+.transcriptNotice {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--aether-border-warning, #a16207);
+  border-radius: 6px;
+  color: var(--aether-text-warning, #fbbf24);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 [data-theme="light"] .interjection {

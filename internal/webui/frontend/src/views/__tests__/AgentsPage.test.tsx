@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import { existsSync } from "node:fs";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startWorkflowRun } from "@/api";
+import type { AgentRecordSummary } from "@/api";
 
 import { AgentsPage } from "../AgentsPage";
 
@@ -25,7 +27,12 @@ const mocks = vi.hoisted(() => {
     updateBinding: vi.fn(),
     deleteBinding: vi.fn(),
     runBinding: vi.fn(),
-    routeAgentName: "lead-1",
+    setRecordEnabled: vi.fn(),
+    deleteRecord: vi.fn(),
+    useAgentHistory: vi.fn(),
+    routeWorkspaceId: "DESKTOP-QA",
+    routeAgentName: "lead-1" as string | undefined,
+    agentRecords: [],
     bindings: [],
     localSettings: { settings: null },
     workspaceContext: { repos: [] },
@@ -61,7 +68,7 @@ vi.mock("react-router-dom", async (importOriginal) => {
     ...actual,
     useNavigate: () => mocks.navigate,
     useParams: () => ({
-      workspaceId: "DESKTOP-QA",
+      workspaceId: mocks.routeWorkspaceId,
       agentName: mocks.routeAgentName,
     }),
     useSearchParams: () => [new URLSearchParams(), vi.fn()],
@@ -94,12 +101,23 @@ vi.mock("@/hooks", () => ({
   useAgentStoreInstance: () => mocks.agentStore,
 }));
 
+vi.mock("@/hooks/agents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/agents")>();
+  return {
+    ...actual,
+    useAgentHistory: (...args: unknown[]) => mocks.useAgentHistory(...args),
+  };
+});
+
 vi.mock("@/hooks/workspace", () => ({
   useAutomations: () => ({
+    agentRecords: mocks.agentRecords,
     bindings: mocks.bindings,
     initialized: true,
     setEnabled: mocks.setBindingEnabled,
+    setRecordEnabled: mocks.setRecordEnabled,
     updateBinding: mocks.updateBinding,
+    deleteRecord: mocks.deleteRecord,
     deleteBinding: mocks.deleteBinding,
     runBinding: mocks.runBinding,
   }),
@@ -184,10 +202,25 @@ vi.mock("@/components/FileExplorer", () => ({
   ),
 }));
 
+function durableRecord(
+  overrides: Partial<AgentRecordSummary> = {},
+): AgentRecordSummary {
+  return {
+    id: "agent-record-1",
+    name: "Documentation reviewer",
+    kind: "prompt",
+    enabled: true,
+    behavior: { role_name: "documentation" },
+    workspace_key: "DESKTOP-QA",
+    ...overrides,
+  };
+}
+
 describe("AgentsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    mocks.routeWorkspaceId = "DESKTOP-QA";
     mocks.routeAgentName = "lead-1";
     mocks.agents = [
       {
@@ -200,10 +233,20 @@ describe("AgentsPage", () => {
       },
     ];
     mocks.bindings = [];
+    mocks.agentRecords = [];
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [],
+      sessions: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
     mocks.localSettings = { settings: null };
     mocks.workspaceContext = { repos: [] };
     mocks.listTriggerBindingRuns.mockResolvedValue({ runs: [] });
     mocks.promptAgentRoleName.mockReturnValue("");
+    mocks.setRecordEnabled.mockResolvedValue(undefined);
+    mocks.deleteRecord.mockResolvedValue(undefined);
     mocks.startWorkflowRun.mockResolvedValue({
       run_id: "run-1",
       status: "queued",
@@ -276,6 +319,227 @@ describe("AgentsPage", () => {
     expect(screen.queryByRole("button", { name: "Terminal" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Git" })).toBeNull();
     expect(screen.getByTestId("workflow-agent-run-now")).toBeTruthy();
+    expect(mocks.useAgentHistory).not.toHaveBeenCalled();
+  });
+
+  it("resolves a durable agent id and reads aggregate history across its bindings", async () => {
+    mocks.routeAgentName = "agent-record-1";
+    mocks.agents = [];
+    mocks.agentRecords = [durableRecord()];
+    mocks.bindings = [
+      {
+        workspace_key: "DESKTOP-QA",
+        binding_id: "binding-review",
+        name: "Documentation reviewer",
+        source_kind: "internal",
+        route_key: "binding-review",
+        driver_id: "prompt-agent",
+        driver_version_id: "v1",
+        target_agent_service_id: "agent-record-1",
+        event_type_patterns: ["internal.task.ready"],
+        enabled: true,
+      },
+      {
+        workspace_key: "DESKTOP-QA",
+        binding_id: "binding-schedule",
+        name: "Documentation reviewer",
+        source_kind: "cron",
+        route_key: "binding-schedule",
+        driver_id: "prompt-agent",
+        driver_version_id: "v1",
+        target_agent_service_id: "agent-record-1",
+        enabled: true,
+        schedule: "0 9 * * *",
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByTestId("workflow-agent-no-runs")).toBeTruthy();
+    expect(mocks.useAgentHistory).toHaveBeenCalledWith(
+      "DESKTOP-QA",
+      "agent-record-1",
+      true,
+    );
+    expect(screen.queryByTestId("workflow-agent-run-now")).toBeNull();
+    expect(screen.getByTestId("agent-record-header")).toHaveTextContent(
+      "2 trigger bindings",
+    );
+    fireEvent.click(screen.getByTestId("agent-record-toggle-enabled"));
+    await waitFor(() => {
+      expect(mocks.setRecordEnabled).toHaveBeenCalledWith(
+        "agent-record-1",
+        false,
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    expect(screen.getByTestId("agent-record-trigger-list")).toHaveTextContent(
+      "binding-review",
+    );
+    expect(screen.getByTestId("agent-record-trigger-list")).toHaveTextContent(
+      "binding-schedule",
+    );
+    fireEvent.click(screen.getByTestId("agent-record-trigger-binding-review"));
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      "/ws/DESKTOP-QA/agents/binding-review",
+    );
+  });
+
+  it("keeps binding-specific Run now on a record route with exactly one trigger", async () => {
+    mocks.routeAgentName = "agent-record-1";
+    mocks.agents = [];
+    mocks.agentRecords = [durableRecord()];
+    mocks.bindings = [
+      {
+        workspace_key: "DESKTOP-QA",
+        binding_id: "binding-review",
+        name: "Documentation reviewer",
+        source_kind: "internal",
+        route_key: "binding-review",
+        driver_id: "prompt-agent",
+        driver_version_id: "v1",
+        target_agent_service_id: "agent-record-1",
+        event_type_patterns: ["internal.task.ready"],
+        enabled: true,
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByTestId("workflow-agent-run-now")).toBeTruthy();
+    expect(screen.getByTestId("agent-record-header")).toHaveTextContent(
+      "1 trigger binding",
+    );
+  });
+
+  it("replaces Run now with the Review-transition hint on a single-binding record route", async () => {
+    mocks.routeAgentName = "agent-record-1";
+    mocks.agents = [];
+    mocks.agentRecords = [durableRecord()];
+    mocks.bindings = [
+      {
+        workspace_key: "DESKTOP-QA",
+        binding_id: "binding-review",
+        name: "Documentation reviewer",
+        source_kind: "internal",
+        route_key: "binding-review",
+        driver_id: "prompt-agent",
+        driver_version_id: "v1",
+        target_agent_service_id: "agent-record-1",
+        event_type_patterns: ["internal.task.review"],
+        enabled: true,
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    expect(
+      await screen.findByTestId("workflow-agent-run-now-hint"),
+    ).toHaveTextContent("Move a task to Review to run this agent.");
+    expect(screen.queryByTestId("workflow-agent-run-now")).toBeNull();
+    expect(mocks.runBinding).not.toHaveBeenCalled();
+  });
+
+  it("replaces Run now with the Review-transition hint on a binding-child route", async () => {
+    mocks.routeAgentName = "binding-review";
+    mocks.agents = [];
+    mocks.agentRecords = [];
+    mocks.bindings = [
+      {
+        workspace_key: "DESKTOP-QA",
+        binding_id: "binding-review",
+        name: "Documentation reviewer",
+        source_kind: "internal",
+        route_key: "binding-review",
+        driver_id: "prompt-agent",
+        driver_version_id: "v1",
+        event_type_patterns: ["internal.task.review"],
+        enabled: true,
+      },
+    ];
+
+    render(<AgentsPage />);
+
+    const hint = await screen.findByTestId("workflow-agent-run-now-hint");
+    expect(hint).toHaveTextContent("Move a task to Review to run this agent.");
+    expect(hint).toHaveAttribute(
+      "title",
+      "Move a task to Review to run this agent.",
+    );
+    expect(screen.queryByTestId("workflow-agent-run-now")).toBeNull();
+    expect(mocks.runBinding).not.toHaveBeenCalled();
+  });
+
+  it("keeps an orphan record visible and offers record-scoped archival recovery", async () => {
+    mocks.routeAgentName = "agent-record-1";
+    mocks.agents = [];
+    mocks.agentRecords = [durableRecord({ enabled: false })];
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByTestId("agent-record-header")).toHaveTextContent(
+      "No trigger bindings",
+    );
+    expect(screen.getByTestId("agent-record-status-pill")).toHaveTextContent(
+      "Disabled",
+    );
+    expect(screen.queryByTestId("workflow-agent-run-now")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    expect(screen.getByTestId("agent-record-trigger-list")).toHaveTextContent(
+      "No trigger bindings are configured",
+    );
+    fireEvent.click(screen.getByTestId("agent-record-archive"));
+    fireEvent.click(screen.getByTestId("agent-record-archive-confirm-yes"));
+
+    await waitFor(() => {
+      expect(mocks.deleteRecord).toHaveBeenCalledWith("agent-record-1");
+    });
+    expect(mocks.navigate).toHaveBeenCalledWith("/ws/DESKTOP-QA/kanban");
+  });
+
+  it("does not auto-route a bare workspace B URL through workspace A records", async () => {
+    mocks.routeWorkspaceId = "WS-A";
+    mocks.routeAgentName = undefined;
+    mocks.agents = [];
+    mocks.agentRecords = [
+      durableRecord({
+        id: "agent-record-a",
+        workspace_key: "WS-A",
+      }),
+    ];
+
+    const rendered = render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(mocks.navigate).toHaveBeenCalledWith(
+        "/ws/WS-A/agents/agent-record-a",
+        { replace: true },
+      );
+    });
+
+    mocks.navigate.mockClear();
+    mocks.routeWorkspaceId = "WS-B";
+    mocks.agentRecords = [];
+    rendered.rerender(<AgentsPage />);
+
+    expect(mocks.navigate).not.toHaveBeenCalled();
+
+    mocks.agentRecords = [
+      durableRecord({
+        id: "agent-record-b",
+        workspace_key: "WS-B",
+      }),
+    ];
+    rendered.rerender(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(mocks.navigate).toHaveBeenCalledWith(
+        "/ws/WS-B/agents/agent-record-b",
+        { replace: true },
+      );
+    });
   });
 
   it("does not expose or seed Terminal for a daemon-supervised advanced worker", async () => {
@@ -295,12 +559,14 @@ describe("AgentsPage", () => {
 
     render(<AgentsPage />);
 
-    expect(await screen.findByRole("button", { name: "Info" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Runs" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Info" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Git" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Diff" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Files" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Terminal" })).toBeNull();
     expect(screen.queryByTestId("agent-detail")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
     expect(screen.getByTestId("agent-lifecycle-controls").textContent).toBe(
       "triage-1",
     );
@@ -329,6 +595,7 @@ describe("AgentsPage", () => {
 
       const terminal = await screen.findByRole("button", { name: "Terminal" });
       expect(terminal.getAttribute("aria-current")).toBe("page");
+      expect(screen.getByRole("button", { name: "Runs" })).toBeTruthy();
       expect(screen.getByTestId("agent-detail")).toBeTruthy();
     },
   );

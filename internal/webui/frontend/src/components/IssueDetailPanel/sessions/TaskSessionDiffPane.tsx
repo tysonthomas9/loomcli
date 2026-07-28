@@ -9,7 +9,7 @@ import { useMemo } from "react";
 import { CodeMirrorEditor } from "@/components/CodeMirrorEditor";
 import { useSessionDiff, useTaskSessions } from "@/hooks/terminal";
 
-import styles from "./SessionsTab.module.css";
+import styles from "@/styles/SessionRunDetail.module.css";
 
 export interface TaskSessionDiffPaneProps {
   taskId: string;

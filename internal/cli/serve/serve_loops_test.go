@@ -214,6 +214,49 @@ func TestTaskReadyEventsEnabledDefaultsOnWithExplicitOptOut(t *testing.T) {
 	}
 }
 
+func TestTaskReviewEventsEnabledDefaultsOnWithExplicitOptOut(t *testing.T) {
+	for _, value := range []string{"", "1", "true", "TRUE", "yes", "on", "unexpected"} {
+		t.Run("enabled_"+value, func(t *testing.T) {
+			t.Setenv(envLoomTaskReviewEvents, value)
+			if !taskReviewEventsEnabled() {
+				t.Fatalf("taskReviewEventsEnabled() = false for %q", value)
+			}
+		})
+	}
+	for _, value := range []string{"0", "false", "FALSE", "off", "no"} {
+		t.Run("disabled_"+value, func(t *testing.T) {
+			t.Setenv(envLoomTaskReviewEvents, value)
+			if taskReviewEventsEnabled() {
+				t.Fatalf("taskReviewEventsEnabled() = true for %q", value)
+			}
+		})
+	}
+}
+
+func TestBuildIssueJournalBridgeWiresTaskReviewToggle(t *testing.T) {
+	mem := memstore.New()
+	source := &trigger.InternalSource{Store: mem}
+
+	t.Run("default on", func(t *testing.T) {
+		t.Setenv(envLoomIssueBridgeDisabled, "")
+		t.Setenv(envLoomIssueBridgeStatePath, filepath.Join(t.TempDir(), "cursor.json"))
+		t.Setenv(envLoomTaskReviewEvents, "")
+		bridge := buildIssueJournalBridge(readerCapableStore{Store: mem}, nil, nil, nil, source)
+		if bridge == nil || !bridge.EmitTaskReview {
+			t.Fatalf("bridge = %+v, want task-review lane enabled", bridge)
+		}
+	})
+	t.Run("explicit opt out", func(t *testing.T) {
+		t.Setenv(envLoomIssueBridgeDisabled, "")
+		t.Setenv(envLoomIssueBridgeStatePath, filepath.Join(t.TempDir(), "cursor.json"))
+		t.Setenv(envLoomTaskReviewEvents, "off")
+		bridge := buildIssueJournalBridge(readerCapableStore{Store: mem}, nil, nil, nil, source)
+		if bridge == nil || bridge.EmitTaskReview {
+			t.Fatalf("bridge = %+v, want task-review lane disabled", bridge)
+		}
+	})
+}
+
 func TestTaskReadyRepositoryRequired(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -277,6 +320,18 @@ func TestBlockRepositoryRequiredTaskUsesAtomicExtension(t *testing.T) {
 	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-COUNT")
 	if err != nil || result.DispatchReady == nil || result.DispatchReady.SourceRepo != "" || result.DispatchReady.RepositoryRequired {
 		t.Fatalf("single-repo dispatch result/error = %+v/%v", result, err)
+	}
+
+	atomic.result = &backend.RepositoryRequirementResult{
+		DispatchReady: true,
+		Issue: &backend.IssueData{
+			ID: "TASK-REVIEW", Status: "review", IssueType: "task", SourceRepo: "fleet-source",
+		},
+	}
+	result, err = blockRepositoryRequiredTask(t.Context(), atomic, "TASK-REVIEW")
+	if err != nil || result.DispatchReady == nil || result.DispatchReady.Status != "review" ||
+		result.DispatchReady.SourceRepo != "fleet-source" {
+		t.Fatalf("review dispatch result/error = %+v/%v", result, err)
 	}
 
 	atomic.result = &backend.RepositoryRequirementResult{

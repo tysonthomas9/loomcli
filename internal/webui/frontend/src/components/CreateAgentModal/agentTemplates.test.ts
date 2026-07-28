@@ -4,6 +4,9 @@ import {
   AGENT_TEMPLATES,
   NEW_ROLE_TEMPLATE,
   SCRIPTED_WORKFLOW_TEMPLATES,
+  customRoleTemplate,
+  roleTriggerForTaskFilter,
+  roleTriggerOption,
 } from "./agentTemplates";
 
 describe("agent template role defaults", () => {
@@ -13,6 +16,30 @@ describe("agent template role defaults", () => {
       AGENT_TEMPLATES.find((template) => template.id === "role-new")?.roleCreate
         ?.taskFilter,
     ).toBe("has_design");
+  });
+
+  it("maps typed role triggers to their task filter and internal event", () => {
+    expect(roleTriggerOption("ready")).toMatchObject({
+      taskFilter: "has_design",
+      eventTypePattern: "internal.task.ready",
+    });
+    expect(roleTriggerOption("review")).toMatchObject({
+      taskFilter: "review",
+      eventTypePattern: "internal.task.review",
+    });
+  });
+
+  it("projects a persisted review role with its review trigger", () => {
+    expect(roleTriggerForTaskFilter("review")).toBe("review");
+    expect(
+      customRoleTemplate({
+        name: "documentation",
+        task_filter: "review",
+      }),
+    ).toMatchObject({
+      roleTrigger: "review",
+      description: "Runs the documentation role when a task enters Review.",
+    });
   });
 
   it("restricts the advanced bug-triage worker to bug cards", () => {

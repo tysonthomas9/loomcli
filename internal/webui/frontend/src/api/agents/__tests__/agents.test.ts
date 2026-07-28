@@ -26,6 +26,7 @@ import {
   restartAgent,
   startAgent,
   stopAgent,
+  listAgentRuns,
   listAgentRecords,
   setAgentRecordEnabled,
   updateAgentRecord,
@@ -67,8 +68,27 @@ describe("durable agent record lifecycle", () => {
     mockGet.mockResolvedValueOnce({
       success: true,
       data: [
-        { id: "prompt-1", name: "Prompt agent", kind: "prompt" },
-        { id: "scripted-1", name: "Scripted agent", kind: "scripted" },
+        {
+          id: "prompt-1",
+          name: "Prompt agent",
+          kind: "prompt",
+          enabled: false,
+          behavior: { role_name: "documentation" },
+          workspace_key: "TEAM A",
+          budget_policy: "conservative",
+          last_run_status: "failed",
+          consecutive_failures: 2,
+          next_fire_at: "2026-07-29T09:00:00Z",
+          metadata: { owner: "docs" },
+        },
+        {
+          id: "scripted-1",
+          name: "Scripted agent",
+          kind: "scripted",
+          enabled: true,
+          behavior: { driver_id: "review-loop-agent" },
+          workspace_key: "TEAM A",
+        },
         { id: "lead", name: "lead", kind: "supervised" },
         { id: "legacy", name: "Legacy binding", kind: "binding" },
       ],
@@ -76,10 +96,55 @@ describe("durable agent record lifecycle", () => {
     });
 
     await expect(listAgentRecords("TEAM A")).resolves.toEqual([
-      { id: "prompt-1", name: "Prompt agent", kind: "prompt" },
-      { id: "scripted-1", name: "Scripted agent", kind: "scripted" },
+      {
+        id: "prompt-1",
+        name: "Prompt agent",
+        kind: "prompt",
+        enabled: false,
+        behavior: { role_name: "documentation" },
+        workspace_key: "TEAM A",
+        budget_policy: "conservative",
+        last_run_status: "failed",
+        consecutive_failures: 2,
+        next_fire_at: "2026-07-29T09:00:00Z",
+        metadata: { owner: "docs" },
+      },
+      {
+        id: "scripted-1",
+        name: "Scripted agent",
+        kind: "scripted",
+        enabled: true,
+        behavior: { driver_id: "review-loop-agent" },
+        workspace_key: "TEAM A",
+      },
     ]);
     expect(mockGet).toHaveBeenCalledWith("/api/workspaces/TEAM%20A/agents");
+  });
+
+  it("lists encoded agent history with an optional limit", async () => {
+    const response = {
+      agent_id: "agent/one",
+      runs: [],
+      sessions: [
+        {
+          workspace_key: "TEAM A",
+          session_id: "session-1",
+          agent_id: "agent/one",
+          kind: "task" as const,
+          status: "completed" as const,
+          created_at: "2026-07-25T00:00:00Z",
+          updated_at: "2026-07-25T00:01:00Z",
+        },
+      ],
+    };
+    mockGet.mockResolvedValueOnce(response);
+
+    await expect(
+      listAgentRuns("TEAM A", "agent/one", { limit: 7 }),
+    ).resolves.toEqual(response);
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/TEAM%20A/agents/agent%2Fone/runs?limit=7",
+    );
   });
 
   it("patches the record id rather than an attached binding id", async () => {

@@ -9,6 +9,26 @@
 
 import type { TriggerBinding } from "@/api";
 
+export const MANAGED_REVIEW_RUN_NOW_HINT =
+  "Move a task to Review to run this agent.";
+
+/**
+ * Managed Review bindings consume one exact task-transition generation. A
+ * manual run has no task/review generation to claim, so the UI must not offer
+ * Run now for this exact binding contract. Other internal bindings, including
+ * Planner/Coder's internal.task.ready trigger, remain manually runnable.
+ */
+export function bindingRunNowUnavailableReason(
+  b: TriggerBinding,
+): string | null {
+  const patterns = b.event_type_patterns ?? [];
+  const isManagedReview =
+    (b.source_kind ?? "").trim() === "internal" &&
+    patterns.length === 1 &&
+    (patterns[0] ?? "").trim() === "internal.task.review";
+  return isManagedReview ? MANAGED_REVIEW_RUN_NOW_HINT : null;
+}
+
 /**
  * Display name for a binding "agent": the operator-entered Name when set, else
  * the binding_id as an honest fallback. One source of truth so the sidebar row,

@@ -53,8 +53,8 @@ export function agentTabsForCapabilities(
   capabilities: AgentCapabilities,
 ): AgentEditorTab[] {
   const tabs: AgentEditorTab[] = [];
-  if (capabilities.runs) tabs.push("runs");
   if (capabilities.pty) tabs.push("terminal");
+  if (capabilities.runs) tabs.push("runs");
   if (capabilities.config) tabs.push("info");
   if (capabilities.worktree) tabs.push("git", "diff", "files");
   return tabs.length > 0 ? tabs : [...FALLBACK_TABS];

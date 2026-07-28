@@ -64,8 +64,10 @@ const (
 	ExecutionDriverRunWorkItemClaimCapability             = "execution.driver_run_work_item_claim.v1"
 	// ExecutionDriverRunReviewWorkItemHandoffCapability certifies the atomic
 	// completed-child handoff that validates retained claim generation and
-	// retires it while publishing the Work Item's open-or-closed lifecycle.
-	ExecutionDriverRunReviewWorkItemHandoffCapability = "execution.driver_run_review_work_item_handoff.v1"
+	// retires it while publishing lifecycle, immutable Review evidence, and the
+	// narrow self-trigger policy in one transaction. V2 prevents a new Loom
+	// from sending those strict fields to a V1 Fleet that cannot decode them.
+	ExecutionDriverRunReviewWorkItemHandoffCapability = "execution.driver_run_review_work_item_handoff.v2"
 	ExecutionTaskRunLogIdempotencyCapability          = "execution.task_run_log_idempotency.v1"
 	// AgentsLifecycleCommandFencingCapability certifies client-ID Create
 	// recovery, atomic node/stable-owner Ack binding, and owner-fenced,

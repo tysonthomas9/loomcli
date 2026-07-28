@@ -704,7 +704,7 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 	// session completion. Own context so it can't eat the Update's timeout budget.
 	if len(input.transcriptData) > 0 {
 		upCtx, upCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-		if ref := s.uploadTranscriptArtifact(upCtx, input.sessionID, input.taskID, backend, input.transcriptData); ref != "" {
+		if ref := s.uploadTranscriptArtifact(upCtx, ap.Entry.Worktree, input.sessionID, input.taskID, backend, input.transcriptData); ref != "" {
 			metadata["transcript_ref"] = ref
 		}
 		upCancel()
@@ -736,16 +736,17 @@ func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input ag
 // stable per session so a retried finalize reuses it (UploadContentArtifact is
 // idempotent). Owner is the agent session — the daemon leaf has no task_run, which
 // is the driver's owner type.
-func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, sessionID, taskID, backend string, data []byte) string {
+func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, agentID, sessionID, taskID, backend string, data []byte) string {
 	if s.ControlStore == nil {
 		return ""
 	}
 	finalized, err := store.UploadContentArtifact(ctx, s.ControlStore.Artifacts(), store.ArtifactCreate{
 		WorkspaceKey:  s.WorkspaceID,
 		ArtifactID:    "transcript-" + sessionID,
+		AgentID:       agentID,
 		SessionID:     sessionID,
 		TaskID:        taskID,
-		OwnerType:     "session", // fleet-db's valid owner type for a session-owned artifact (OwnerID=sessionID)
+		OwnerType:     "session",
 		OwnerID:       sessionID,
 		Type:          "transcript",
 		Summary:       "agent session transcript",
@@ -982,14 +983,4 @@ func (s *Supervisor) GetAgents() []SupervisedAgentStatus {
 		result[i].RemoteBranch = ap.ResolveRemoteBranch()
 	}
 	return result
-}
-
-// resolveRoleConfig looks up a role by name, supporting both built-in and custom roles.
-func (s *Supervisor) resolveRoleConfig(roleName string, agentIndex int) (config.RoleConfig, error) {
-	cfg := s.ConfigSnapshot()
-	rc, err := ResolveRoleConfigStatic(roleName, cfg, s.ProjectDir)
-	if err != nil {
-		return config.RoleConfig{}, fmt.Errorf("agent[%d]: %w", agentIndex, err)
-	}
-	return rc, nil
 }

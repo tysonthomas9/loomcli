@@ -1301,8 +1301,13 @@ export interface paths {
     /**
      * Update one unified agent entry
      * @description The accepted fields depend on the stored kind. Supervised assignments
-     *     use assignment fields; prompt/scripted records use identity and
-     *     behavior fields; legacy binding entries only support `name`.
+     *     use assignment fields; prompt/scripted records accept mutable record
+     *     fields, while their behavior role is immutable after creation. A
+     *     prompt/scripted cron record also accepts an exact
+     *     attached `binding_id` with `schedule` and/or `schedule_timezone`;
+     *     schedule fields cannot be combined with record fields
+     *     in one request so a failed PATCH never commits a cross-aggregate prefix.
+     *     legacy binding entries only support `name`.
      */
     patch: operations["patchAgent"];
     trace?: never;
@@ -1368,8 +1373,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List runs attributed to a durable agent record */
+    /** List run or session history attributed to an agent */
     get: operations["listAgentRuns"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/agents/{id}/sessions/{session_id}/transcript": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get an agent-owned session transcript
+     * @description Returns the canonical transcript for a session owned by the selected agent. This route supports interactive sessions that do not have a task identifier. A session owned by another agent is reported as not found.
+     */
+    get: operations["getAgentSessionTranscript"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3462,15 +3487,17 @@ export interface components {
     };
     /**
      * @description Kind-sensitive partial update. Durable records accept `name`,
-     *     `behavior`, and `budget_policy`; legacy binding entries accept only
+     *     `budget_policy`, and agent-owned cron schedule fields; their behavior
+     *     role is immutable after creation. Legacy binding entries accept only
      *     `name`; supervised assignments accept the remaining assignment fields.
      */
     PatchUnifiedAgentRequest: {
       name?: string;
-      behavior?: {
-        role_name?: string;
-      };
       budget_policy?: string;
+      /** @description Exact attached managed binding; required for cron schedule updates. Schedule updates cannot be combined with mutable record fields. */
+      binding_id?: string;
+      schedule?: string;
+      schedule_timezone?: string;
       role_name?: string;
       auto?: boolean;
       backend?: string;
@@ -3500,6 +3527,59 @@ export interface components {
     AgentRunsResponse: {
       agent_id: string;
       runs: components["schemas"]["DriverRun"][];
+      /** @description Task, terminal, and orchestration sessions for supervised or interactive agents. Durable record and workflow-binding agents return an empty array and use runs instead. */
+      sessions: components["schemas"]["AgentHistorySession"][];
+    };
+    AgentHistorySession: {
+      workspace_key: string;
+      session_id: string;
+      agent_id: string;
+      node_id?: string;
+      /** @enum {string} */
+      kind: "task" | "orchestration" | "terminal" | "maintenance" | "ad_hoc";
+      task_id?: string;
+      terminal_id?: string;
+      parent_session_id?: string;
+      /** @enum {string} */
+      status:
+        | "queued"
+        | "leased"
+        | "starting"
+        | "running"
+        | "idle"
+        | "yielded"
+        | "completed"
+        | "failed"
+        | "cancelled"
+        | "expired";
+      phase?: string;
+      attempt?: number;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      last_heartbeat?: string;
+      /** Format: date-time */
+      finished_at?: string | null;
+      summary?: string;
+      error_class?: string;
+      exit_code?: number | null;
+      /** @description Allowlisted, non-sensitive execution metadata. */
+      metadata?: {
+        backend?: string;
+        runtime_strategy?: string;
+        delivery?: string;
+        patch_back_status?: string;
+        local_branch?: string;
+        head_sha?: string;
+        github_head_sha?: string;
+        patch_back_head_sha?: string;
+        github_branch?: string;
+        github_pr_url?: string;
+      };
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
     };
     TaskWorkflowRunsResponse: {
       task_id: string;
@@ -3599,19 +3679,37 @@ export interface components {
       github_branch?: string;
       github_pr_url?: string;
     };
+    TranscriptResponse: {
+      success: boolean;
+      data?: components["schemas"]["TranscriptData"];
+      error?: string;
+    };
+    TranscriptData: {
+      session_id: string;
+      entries: components["schemas"]["TranscriptEntry"][];
+    };
     /** @description Single transcript entry from a session */
     TranscriptEntry: {
       seq: number;
       /** Format: date-time */
-      ts: string;
+      timestamp: string;
       /** @enum {string} */
       role: "user" | "assistant" | "system" | "tool";
       /** @enum {string} */
-      type: "text" | "tool_use" | "tool_result";
-      content?: string;
+      type:
+        | "text"
+        | "reasoning"
+        | "tool_use"
+        | "tool_result"
+        | "result"
+        | "session_meta";
+      text?: string;
       tool_name?: string;
-      tool_input?: string;
-      raw?: string;
+      tool_use_id?: string;
+      /** @description Backend-specific tool arguments. */
+      tool_input?: unknown;
+      output?: string;
+      uuid?: string;
     };
     /** @description Session history record (Redis-backed, per-issue) */
     SessionHistoryRecord: {
@@ -4113,7 +4211,7 @@ export interface components {
     IssueId: string;
     /** @description Unified agent identifier or supervised assignment name */
     AgentName: string;
-    /** @description Durable agent record identifier */
+    /** @description Unified agent, supervised assignment, or legacy binding identifier */
     AgentId: string;
   };
   requestBodies: never;
@@ -5702,13 +5800,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": {
-            success: boolean;
-            data?: {
-              session_id?: string;
-              entries?: components["schemas"]["TranscriptEntry"][];
-            };
-          };
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Invalid task or session identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
         };
       };
       /** @description Session not found */
@@ -5716,7 +5817,27 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Session transcript retrieval failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Session transcript service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
       };
     };
   };
@@ -7021,7 +7142,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Durable agent record identifier */
+        /** @description Unified agent, supervised assignment, or legacy binding identifier */
         id: components["parameters"]["AgentId"];
       };
       cookie?: never;
@@ -7091,7 +7212,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Durable agent record identifier */
+        /** @description Unified agent, supervised assignment, or legacy binding identifier */
         id: components["parameters"]["AgentId"];
       };
       cookie?: never;
@@ -7163,7 +7284,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Durable agent record identifier */
+        /** @description Unified agent, supervised assignment, or legacy binding identifier */
         id: components["parameters"]["AgentId"];
       };
       cookie?: never;
@@ -7179,7 +7300,7 @@ export interface operations {
           "application/json": components["schemas"]["AgentRunsResponse"];
         };
       };
-      /** @description Unsupported agent kind or invalid limit */
+      /** @description Invalid limit */
       400: {
         headers: {
           [name: string]: unknown;
@@ -7188,7 +7309,7 @@ export interface operations {
           "application/json": components["schemas"]["AgentErrorResponse"];
         };
       };
-      /** @description Agent record not found */
+      /** @description Agent not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -7222,6 +7343,68 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+    };
+  };
+  getAgentSessionTranscript: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Unified agent, supervised assignment, or legacy binding identifier */
+        id: components["parameters"]["AgentId"];
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Canonical transcript */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Invalid agent or session identifier */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Session or transcript not found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Agent session transcript retrieval failed */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
+        };
+      };
+      /** @description Agent session transcript service unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TranscriptResponse"];
         };
       };
     };

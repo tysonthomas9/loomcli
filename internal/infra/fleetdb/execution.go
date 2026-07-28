@@ -261,6 +261,7 @@ type ExecutionDriverRunReviewWorkItemHandoffCommand struct {
 	Priority      *int
 	Labels        []string
 	CommentBody   string
+	ExternalRef   *string
 	HandedOffAt   time.Time
 }
 
@@ -433,17 +434,18 @@ type ExecutionTerminalDriverRunWorkRecoveryResult struct {
 // ExecutionIssue is the claim result subset needed to verify that FleetDB
 // claimed the exact Work Item backing the started TaskRun.
 type ExecutionIssue struct {
-	ID        string    `json:"id"`
-	Workspace string    `json:"workspace"`
-	Title     string    `json:"title"`
-	Status    string    `json:"status"`
-	Priority  int       `json:"priority"`
-	Type      string    `json:"type"`
-	Assignee  string    `json:"assignee,omitempty"`
-	Labels    []string  `json:"labels"`
-	Repo      string    `json:"repo,omitempty"`
-	ParentID  string    `json:"parent_id,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Workspace   string    `json:"workspace"`
+	Title       string    `json:"title"`
+	Status      string    `json:"status"`
+	Priority    int       `json:"priority"`
+	Type        string    `json:"type"`
+	Assignee    string    `json:"assignee,omitempty"`
+	Labels      []string  `json:"labels"`
+	Repo        string    `json:"repo,omitempty"`
+	ExternalRef string    `json:"external_ref,omitempty"`
+	ParentID    string    `json:"parent_id,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // ExecutionActionLedger is the minimal committed action receipt returned by

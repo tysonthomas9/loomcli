@@ -219,12 +219,15 @@ export type LoomReviewHandoffInput = LoomTaskSelector & {
   labels?: string[];
   /** Required nonblank immutable comment authored by the host in the same fenced command. */
   commentBody: string;
+  /** Optional canonical local branch artifact stamped atomically with the Review transition. */
+  externalRef?: `local-branch:${string}@${string}`;
 } | {
   status: "open" | "closed";
   /** Review annotations are forbidden for open/closed handoffs. */
   priority?: never;
   labels?: never;
   commentBody?: never;
+  externalRef?: never;
 });
 
 export interface LoomEpicInput {

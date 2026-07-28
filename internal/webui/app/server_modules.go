@@ -12,6 +12,7 @@ import (
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
@@ -136,6 +137,9 @@ func (app *Server) buildStoreBackedInfraModules() {
 		DriverAPIToken:         app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
 		LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
 		WorkflowCatalog: app.config.WorkflowCatalogAPI,
+	}
+	if transcripts, ok := app.sessSvc.(service.AgentSessionTranscriptService); ok {
+		unifiedDeps.AgentSessionTranscripts = transcripts
 	}
 	if capability := app.config.ArtifactsCapability; capability != nil {
 		unifiedDeps.Artifacts = capability.ArtifactsAPI()

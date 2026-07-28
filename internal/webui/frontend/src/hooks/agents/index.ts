@@ -8,6 +8,9 @@ export type {
   UseAgentDiffStatReturn,
 } from "./useAgentDiffStat";
 
+export { useAgentHistory } from "./useAgentHistory";
+export type { UseAgentHistoryResult } from "./useAgentHistory";
+
 export { useCreateWorkspaceAgent } from "./useCreateWorkspaceAgent";
 
 export { useEnsureWorkspaceRole } from "./useEnsureWorkspaceRole";

@@ -3,10 +3,14 @@
  * Polls every 3s when the session is active; fetches once when inactive.
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { getSessionTranscript } from "@/api/terminal";
+import {
+  getAgentSessionTranscript,
+  getSessionTranscript,
+} from "@/api/terminal";
 import type { TranscriptEntry } from "@/types/agent";
+import { ApiError } from "@/types/common";
 import { useWorkspaceContext } from "@/hooks/workspace";
 
 /** Return type for the useSessionTranscript hook. */
@@ -15,73 +19,209 @@ export interface UseSessionTranscriptResult {
   entries: TranscriptEntry[];
   /** Whether a fetch is in progress. */
   isLoading: boolean;
+  /** The server has no transcript for this terminal session. */
+  isUnavailable: boolean;
   /** Error from the last fetch, null if successful. */
   error: Error | null;
 }
 
+export interface UseSessionTranscriptOptions {
+  /**
+   * Retry a missing or failed one-shot fetch until the transcript is available.
+   * Workflow run detail uses this while a terminal run's durable session
+   * projection is still catching up with the run projection.
+   */
+  retryUnavailable?: boolean;
+  /**
+   * Fetch through the generic agent-session route when the session has no
+   * owning task (for example, an interactive Lead or PR Review terminal).
+   * Task-scoped sessions continue to use taskId when both are provided.
+   */
+  agentId?: string;
+}
+
+interface TranscriptState extends UseSessionTranscriptResult {
+  requestKey: string;
+}
+
 /** Poll interval when session is active (ms). */
 const POLL_INTERVAL_ACTIVE = 3_000;
+/** Bound eventual-consistency retries for a completed session to 15 seconds. */
+const MAX_UNAVAILABLE_RETRIES = 5;
 
 export function useSessionTranscript(
   taskId: string | null,
   sessionId: string | null,
   isActive: boolean,
+  options: UseSessionTranscriptOptions = {},
 ): UseSessionTranscriptResult {
   const { workspaceId } = useWorkspaceContext();
-  const [entries, setEntries] = useState<TranscriptEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-
-  const mountedRef = useRef(true);
+  const retryUnavailable = options.retryUnavailable === true;
+  const agentId = options.agentId?.trim() || null;
+  const transcriptOwnerKind = taskId ? "task" : agentId ? "agent" : null;
+  const transcriptOwnerId = taskId || agentId;
+  const requestKey = useMemo(
+    () =>
+      transcriptOwnerKind && transcriptOwnerId && sessionId
+        ? JSON.stringify([
+            workspaceId,
+            transcriptOwnerKind,
+            transcriptOwnerId,
+            sessionId,
+          ])
+        : "",
+    [workspaceId, transcriptOwnerKind, transcriptOwnerId, sessionId],
+  );
+  const [state, setState] = useState<TranscriptState>({
+    requestKey,
+    entries: [],
+    isLoading: false,
+    isUnavailable: false,
+    error: null,
+  });
 
   useEffect(() => {
-    mountedRef.current = true;
-
-    if (!taskId || !sessionId) {
-      setEntries([]);
-      setError(null);
+    if (!transcriptOwnerKind || !transcriptOwnerId || !sessionId) {
+      setState({
+        requestKey,
+        entries: [],
+        isLoading: false,
+        isUnavailable: false,
+        error: null,
+      });
       return;
     }
 
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    let activeTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let latestRequest = 0;
+    let unavailableRetries = 0;
+
+    setState((current) => ({
+      requestKey,
+      entries: current.requestKey === requestKey ? current.entries : [],
+      isLoading: true,
+      isUnavailable: false,
+      error: current.requestKey === requestKey ? current.error : null,
+    }));
+
+    const scheduleUnavailableRetry = (): boolean => {
+      if (
+        !retryUnavailable ||
+        isActive ||
+        retryTimer ||
+        unavailableRetries >= MAX_UNAVAILABLE_RETRIES
+      ) {
+        return false;
+      }
+      unavailableRetries += 1;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        void fetchTranscript();
+      }, POLL_INTERVAL_ACTIVE);
+      return true;
+    };
 
     const fetchTranscript = async () => {
-      setIsLoading(true);
+      const request = ++latestRequest;
+      setState((current) =>
+        current.requestKey === requestKey
+          ? {
+              ...current,
+              isLoading: true,
+              isUnavailable: false,
+              error: null,
+            }
+          : current,
+      );
       try {
-        const result = await getSessionTranscript(
-          workspaceId,
-          taskId,
-          sessionId,
-        );
-        if (mountedRef.current) {
-          setEntries(result);
-          setError(null);
+        const result =
+          transcriptOwnerKind === "task"
+            ? await getSessionTranscript(
+                workspaceId,
+                transcriptOwnerId,
+                sessionId,
+                { preserveNotFound: true },
+              )
+            : await getAgentSessionTranscript(
+                workspaceId,
+                transcriptOwnerId,
+                sessionId,
+                { preserveNotFound: true },
+              );
+        if (!cancelled && request === latestRequest) {
+          unavailableRetries = 0;
+          setState({
+            requestKey,
+            entries: result,
+            isLoading: false,
+            isUnavailable: false,
+            error: null,
+          });
         }
       } catch (err) {
-        if (mountedRef.current) {
-          setError(err instanceof Error ? err : new Error(String(err)));
-        }
-      } finally {
-        if (mountedRef.current) {
-          setIsLoading(false);
+        if (!cancelled && request === latestRequest) {
+          const unavailable = err instanceof ApiError && err.status === 404;
+          const willRetry = scheduleUnavailableRetry();
+          const projectionPending = unavailable && (isActive || willRetry);
+          setState((current) => ({
+            requestKey,
+            entries: current.requestKey === requestKey ? current.entries : [],
+            // A missing durable projection is still pending while a bounded
+            // retry is scheduled. Keep the transcript in its loading state
+            // instead of briefly claiming that it has no entries.
+            isLoading: projectionPending,
+            isUnavailable: unavailable && !isActive && !willRetry,
+            error: unavailable
+              ? null
+              : err instanceof Error
+                ? err
+                : new Error(String(err)),
+          }));
         }
       }
     };
 
-    void fetchTranscript();
-
-    // Poll only when active
-    if (isActive) {
-      timer = setInterval(() => {
-        void fetchTranscript();
+    const scheduleActivePoll = () => {
+      if (cancelled || !isActive) return;
+      activeTimer = setTimeout(() => {
+        activeTimer = null;
+        void fetchTranscript().finally(scheduleActivePoll);
       }, POLL_INTERVAL_ACTIVE);
-    }
+    };
+
+    // Chain active polling from request completion so a slow server never
+    // accumulates overlapping reads or invalidates every response.
+    void fetchTranscript().finally(scheduleActivePoll);
 
     return () => {
-      mountedRef.current = false;
-      if (timer) clearInterval(timer);
+      cancelled = true;
+      if (activeTimer) clearTimeout(activeTimer);
+      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [workspaceId, taskId, sessionId, isActive]);
+  }, [
+    workspaceId,
+    transcriptOwnerKind,
+    transcriptOwnerId,
+    sessionId,
+    isActive,
+    retryUnavailable,
+    requestKey,
+  ]);
 
-  return { entries, isLoading, error };
+  if (state.requestKey !== requestKey) {
+    return {
+      entries: [],
+      isLoading: requestKey !== "",
+      isUnavailable: false,
+      error: null,
+    };
+  }
+  return {
+    entries: state.entries,
+    isLoading: state.isLoading,
+    isUnavailable: state.isUnavailable,
+    error: state.error,
+  };
 }

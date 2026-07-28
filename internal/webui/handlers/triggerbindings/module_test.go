@@ -63,8 +63,33 @@ func seededMux(t *testing.T) (*http.ServeMux, store.Store) {
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
 		Runs: s.DriverRuns(), Connectors: &testConnectorCompatibility{store: s},
+		AgentIdentities: testAgentIdentityChecker{store: s},
 	}).Register(mux)
 	return mux, s
+}
+
+func muxWithIdentityChecker(
+	t *testing.T,
+	s store.Store,
+	checker UnattachedBindingIdentityChecker,
+) *http.ServeMux {
+	t.Helper()
+	automationAPI := &testAutomationAPI{store: s}
+	createWorkflow, err := workflowbinding.New(&testWorkflowTargetPreparer{
+		target: workflowbinding.WorkflowTarget{DriverID: "driver-1", DriverVersionID: "version-1"},
+	}, automationAPI)
+	if err != nil {
+		t.Fatalf("new workflow binding: %v", err)
+	}
+	mux := http.NewServeMux()
+	New(Config{
+		CreateWorkflow: createWorkflow,
+		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
+		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
+		Runs: s.DriverRuns(), Connectors: &testConnectorCompatibility{store: s},
+		AgentIdentities: checker,
+	}).Register(mux)
+	return mux
 }
 
 func do(t *testing.T, mux *http.ServeMux, method, path, body string) *httptest.ResponseRecorder {
@@ -84,6 +109,59 @@ func (testOperatorResolver) ResolveOperatorAuthority(r *http.Request, _ string, 
 		return authority.OperatorAuthority{}, workflowcataloghttp.ErrUnauthenticated
 	}
 	return authority.OperatorAuthority{}, nil
+}
+
+type testAgentIdentityChecker struct {
+	store store.Store
+}
+
+func (checker testAgentIdentityChecker) CheckUnattachedBindingID(
+	ctx context.Context,
+	workspace, bindingID string,
+) error {
+	if _, err := checker.store.Agents().Get(ctx, workspace, bindingID); err == nil {
+		return fmt.Errorf("trigger binding identifier %q is already used by a supervised agent: %w", bindingID, automation.ErrConflict)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
+	}
+	if _, err := checker.store.AgentServices().Get(ctx, workspace, bindingID); err == nil {
+		return fmt.Errorf("trigger binding identifier %q is already used by a durable agent record: %w", bindingID, automation.ErrConflict)
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
+type postCreateCollisionChecker struct {
+	store store.Store
+	mu    sync.Mutex
+	calls int
+}
+
+func (checker *postCreateCollisionChecker) CheckUnattachedBindingID(
+	ctx context.Context,
+	workspace, bindingID string,
+) error {
+	checker.mu.Lock()
+	defer checker.mu.Unlock()
+	checker.calls++
+	if checker.calls == 2 {
+		if _, err := checker.store.Agents().Create(ctx, store.AgentCreate{
+			WorkspaceKey: workspace,
+			Name:         bindingID,
+			RoleName:     "review",
+			Auto:         true,
+		}); err != nil {
+			return fmt.Errorf("insert concurrent agent fixture: %w", err)
+		}
+	}
+	return testAgentIdentityChecker{store: checker.store}.CheckUnattachedBindingID(ctx, workspace, bindingID)
+}
+
+func (checker *postCreateCollisionChecker) callCount() int {
+	checker.mu.Lock()
+	defer checker.mu.Unlock()
+	return checker.calls
 }
 
 type testWorkflowTargetPreparer struct {
@@ -358,6 +436,67 @@ func TestCreateBinding_CreatesThenDisables(t *testing.T) {
 	}
 }
 
+func TestCreateBinding_RejectsSupervisedAgentIdentifier(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "WS",
+		Name:         "task",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: "WS",
+		Name:         "s3-local-review",
+		RoleName:     "task",
+		Auto:         true,
+	}); err != nil {
+		t.Fatalf("create supervised agent: %v", err)
+	}
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"s3-local-review","enabled":false}`)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by a supervised agent") {
+		t.Fatalf("create status = %d body=%s, want clean supervised-agent 409", rec.Code, rec.Body.String())
+	}
+	if _, err := st.TriggerBindings().Get(ctx, "WS", "s3-local-review"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("binding after rejected create err = %v, want not found", err)
+	}
+}
+
+func TestCreateBinding_RejectsArchivedAgentRecordIdentifier(t *testing.T) {
+	mux, st := seededMux(t)
+	ctx := context.Background()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey: "WS",
+		Name:         "review",
+	}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "WS",
+		ServiceID:    "s2-review-loop",
+		Name:         "Review loop",
+		Kind:         domain.AgentServiceKindEvent,
+		DesiredState: domain.AgentServiceDesiredPaused,
+		RoleName:     "review",
+	}); err != nil {
+		t.Fatalf("create agent record: %v", err)
+	}
+	if err := st.AgentServices().Delete(ctx, "WS", "s2-review-loop"); err != nil {
+		t.Fatalf("archive agent record: %v", err)
+	}
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
+		`{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"s2-review-loop","enabled":false}`)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by a durable agent record") {
+		t.Fatalf("create status = %d body=%s, want clean durable-record 409", rec.Code, rec.Body.String())
+	}
+	if _, err := st.TriggerBindings().Get(ctx, "WS", "s2-review-loop"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("binding after rejected create err = %v, want not found", err)
+	}
+}
+
 func TestCreateAndPatchBindingPreserveRouterV2Fields(t *testing.T) {
 	mux, _ := seededMux(t)
 	created := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", `{
@@ -463,6 +602,59 @@ func TestCreateBinding_IsIdempotent(t *testing.T) {
 	}
 }
 
+func TestCreateBinding_IdempotentEnsureRechecksAgentIdentity(t *testing.T) {
+	mux, st := seededMux(t)
+	const body = `{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"ensure-collision","enabled":true}`
+	if rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body); rec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := st.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "review"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := st.Agents().Create(t.Context(), store.AgentCreate{
+		WorkspaceKey: "WS", Name: "ensure-collision", RoleName: "review", Auto: true,
+	}); err != nil {
+		t.Fatalf("create colliding agent fixture: %v", err)
+	}
+
+	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings", body)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by a supervised agent") {
+		t.Fatalf("ensure status = %d body=%s, want clean supervised-agent 409", rec.Code, rec.Body.String())
+	}
+}
+
+// This deterministically inserts the supervised Agent after the preflight
+// check but before the post-create check. The handler must catch that
+// interleaving and remove the newly-created enabled binding through
+// Automation's fenced disable/delete commands.
+func TestCreateBinding_PostCreateCollisionRollsBackBinding(t *testing.T) {
+	_, st := seededMux(t)
+	if _, err := st.Roles().Create(t.Context(), store.RoleCreate{WorkspaceKey: "WS", Name: "review"}); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	checker := &postCreateCollisionChecker{store: st}
+	mux := muxWithIdentityChecker(t, st, checker)
+	rec := do(
+		t,
+		mux,
+		http.MethodPost,
+		"/api/workspaces/WS/trigger-bindings",
+		`{"driver_id":"driver-1","driver_version_id":"version-1","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"raced-identity","enabled":true}`,
+	)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by a supervised agent") {
+		t.Fatalf("create status = %d body=%s, want post-create identity 409", rec.Code, rec.Body.String())
+	}
+	if checker.callCount() != 2 {
+		t.Fatalf("identity checks = %d, want pre- and post-create checks", checker.callCount())
+	}
+	if _, err := st.TriggerBindings().Get(t.Context(), "WS", "raced-identity"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("binding after compensated race err = %v, want not found", err)
+	}
+	if _, err := st.Agents().Get(t.Context(), "WS", "raced-identity"); err != nil {
+		t.Fatalf("colliding agent should remain authoritative: %v", err)
+	}
+}
+
 func TestCreateBinding_EnsureRejectsImmutableIdentityMismatch(t *testing.T) {
 	const original = `{"driver_id":"driver-1","driver_version_id":"version-1","route_key":"epics.runs.create","source_kind":"http","binding_id":"b-fixed","entrypoint":"run","enabled":true}`
 	tests := []struct {
@@ -543,6 +735,7 @@ func TestCreateBinding_EnsureResolvesWorkflowBeforeReusingBinding(t *testing.T) 
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
 		Runs: st.DriverRuns(), Connectors: &testConnectorCompatibility{store: st},
+		AgentIdentities: testAgentIdentityChecker{store: st},
 	}).Register(mux)
 
 	rec := do(t, mux, http.MethodPost, "/api/workspaces/WS/trigger-bindings",
@@ -604,6 +797,7 @@ func TestCreateBinding_WorkflowTargetFreshStoreReturns201Then200(t *testing.T) {
 		Commands:       automationAPI, Queries: automationAPI, ManualDispatch: automationAPI,
 		OperatorAuthority: testOperatorResolver{}, WorkspaceFromContext: func(context.Context) string { return "WS" },
 		Runs: st.DriverRuns(), Connectors: &testConnectorCompatibility{store: st},
+		AgentIdentities: testAgentIdentityChecker{store: st},
 	}).Register(mux)
 	body := `{"workflow":"github-review-agent","source_kind":"cron","schedule":"*/10 * * * *","binding_id":"fresh-review","enabled":true}`
 

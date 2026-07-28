@@ -260,6 +260,7 @@ type HandoffDriverRunReviewWorkItemCommand struct {
 	Priority      *int
 	Labels        []string
 	CommentBody   string
+	ExternalRef   *string
 	HandedOffAt   time.Time
 }
 
@@ -275,6 +276,7 @@ type DriverRunWorkItem struct {
 	Assignee     string
 	Labels       []string
 	SourceRepo   string
+	ExternalRef  string
 	ParentID     string
 	UpdatedAt    time.Time
 }

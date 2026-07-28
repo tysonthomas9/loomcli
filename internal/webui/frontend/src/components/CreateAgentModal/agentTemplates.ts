@@ -17,6 +17,46 @@ export type AgentTemplateKind =
 
 export type TemplateSection = "behavior" | "advanced";
 
+export type RoleTrigger = "ready" | "review";
+
+export interface RoleTriggerOption {
+  value: RoleTrigger;
+  label: string;
+  readOnlyLabel: string;
+  taskFilter: "has_design" | "review";
+  eventTypePattern: "internal.task.ready" | "internal.task.review";
+}
+
+export const ROLE_TRIGGER_OPTIONS: readonly RoleTriggerOption[] = [
+  {
+    value: "ready",
+    label: "Task becomes ready",
+    readOnlyLabel: "Runs when a task becomes ready",
+    taskFilter: "has_design",
+    eventTypePattern: "internal.task.ready",
+  },
+  {
+    value: "review",
+    label: "Task enters Review",
+    readOnlyLabel: "Runs when a task enters Review",
+    taskFilter: "review",
+    eventTypePattern: "internal.task.review",
+  },
+];
+
+export function roleTriggerOption(trigger: RoleTrigger): RoleTriggerOption {
+  return (
+    ROLE_TRIGGER_OPTIONS.find((option) => option.value === trigger) ??
+    ROLE_TRIGGER_OPTIONS[0]!
+  );
+}
+
+export function roleTriggerForTaskFilter(
+  taskFilter: string | undefined,
+): RoleTrigger {
+  return taskFilter?.trim() === "review" ? "review" : "ready";
+}
+
 /** Provisioning data for a legacy `custom-role` daemon template. */
 export interface CustomRoleSpec {
   /** Canonical role name to ensure (e.g. "bug-triage"). */
@@ -113,6 +153,8 @@ export interface AgentTemplate {
   testId: string;
   /** Canonical role name for role and legacy daemon templates. */
   roleName: string;
+  /** Typed prompt-agent trigger; role-backed templates default to ready. */
+  roleTrigger?: RoleTrigger;
   /** Set when kind === "role-create". */
   roleCreate?: RoleCreateDefaults;
   /** Set when kind === "custom-role". */
@@ -245,6 +287,7 @@ export const NEW_ROLE_TEMPLATE: AgentTemplate = {
   accentColor: ACCENTS.newRole,
   defaultName: "custom-agent",
   testId: "create-agent-template-new-role",
+  roleTrigger: "ready",
   roleCreate: {
     promptFilename: "custom-role.md",
     taskFilter: "has_design",
@@ -435,8 +478,10 @@ export function templatesForSection(section: TemplateSection): AgentTemplate[] {
 export function customRoleTemplate(role: {
   name: string;
   description?: string;
+  task_filter?: string;
 }): AgentTemplate {
   const roleName = role.name.trim();
+  const trigger = roleTriggerForTaskFilter(role.task_filter);
   return {
     id: `role-${roleName}`,
     kind: "role",
@@ -445,11 +490,14 @@ export function customRoleTemplate(role: {
     title: roleName,
     description:
       role.description?.trim() ||
-      `Runs the ${roleName} role when a task becomes ready.`,
+      `Runs the ${roleName} role when a task ${
+        trigger === "review" ? "enters Review" : "becomes ready"
+      }.`,
     glyph: roleName.slice(0, 1).toUpperCase() || "R",
     accentColor: ACCENTS.custom,
     defaultName: roleName || "custom-agent",
     testId: `create-agent-template-role-${roleName}`,
+    roleTrigger: trigger,
   };
 }
 

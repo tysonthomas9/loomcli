@@ -303,6 +303,7 @@ func (adapter testDriverRunExecution) HandoffDriverRunReviewWorkItem(
 			WorkspaceKey: command.WorkspaceKey, WorkItemID: command.WorkItemID,
 			Status: command.TargetStatus, Assignee: "", UpdatedAt: command.HandedOffAt,
 			Priority: reviewHandoffPriority(command.Priority), Labels: append([]string(nil), command.Labels...),
+			ExternalRef: reviewHandoffExternalRef(command.ExternalRef),
 		},
 		Action: &execution.DriverRunWorkItemAction{
 			WorkspaceKey: command.WorkspaceKey, ActionID: actionID, IdempotencyKey: actionID,
@@ -318,6 +319,13 @@ func reviewHandoffPriority(priority *int) int {
 		return 0
 	}
 	return *priority
+}
+
+func reviewHandoffExternalRef(externalRef *string) string {
+	if externalRef == nil {
+		return ""
+	}
+	return *externalRef
 }
 
 func (testDriverRunExecution) CascadeChildDriverRuns(
@@ -1082,6 +1090,7 @@ func TestDriverAPIHandoffReviewCarriesAtomicReviewAnnotations(t *testing.T) {
 	h := newTestHarness(t, "")
 	taskID := "TASK-TRIAGE-7"
 	taskRunID := "triage-child-7"
+	externalRef := "local-branch:loom/TASK-TRIAGE-7@" + strings.Repeat("a", 40)
 
 	resp, decoded := h.do(t, opRequest{
 		op: "handoff-review",
@@ -1089,6 +1098,7 @@ func TestDriverAPIHandoffReviewCarriesAtomicReviewAnnotations(t *testing.T) {
 			"taskId": taskID, "taskRunId": taskRunID, "status": "review",
 			"priority": 4, "labels": []string{"bug", "triaged"},
 			"commentBody": "Automated bug triage completed.",
+			"externalRef": externalRef,
 		},
 		headers: h.ownerHeaders(),
 	})
@@ -1101,8 +1111,9 @@ func TestDriverAPIHandoffReviewCarriesAtomicReviewAnnotations(t *testing.T) {
 	command := h.backend.typedHandoffs[0]
 	if command.Priority == nil || *command.Priority != 4 ||
 		!slices.Equal(command.Labels, []string{"bug", "triaged"}) ||
-		command.CommentBody != "Automated bug triage completed." {
-		t.Fatalf("handoff annotations = %+v, want exact priority, labels, and comment", command)
+		command.CommentBody != "Automated bug triage completed." ||
+		command.ExternalRef == nil || *command.ExternalRef != externalRef {
+		t.Fatalf("handoff annotations = %+v, want exact priority, labels, comment, and ref", command)
 	}
 }
 
@@ -1136,6 +1147,13 @@ func TestDriverAPIHandoffReviewRejectsInvalidAnnotationEnvelope(t *testing.T) {
 			body: map[string]any{
 				"taskId": "TASK-1", "taskRunId": "run-1", "status": "review",
 				"priority": 2, "labels": nil, "commentBody": "triaged",
+			},
+		},
+		{
+			name: "review null external ref",
+			body: map[string]any{
+				"taskId": "TASK-1", "taskRunId": "run-1", "status": "review",
+				"priority": 2, "commentBody": "documented", "externalRef": nil,
 			},
 		},
 		{

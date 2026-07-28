@@ -252,6 +252,17 @@ func TestModuleCreateRoutesInteractiveKindToAgentService(t *testing.T) {
 		t.Fatalf("patch status = %d body = %s, want 200", patchRR.Code, patchRR.Body.String())
 	}
 	assertSupervisedAgentWireResponse(t, patchRR, "review-nova")
+
+	scheduleReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/workspaces/TEST2/agents/review-nova",
+		bytes.NewBufferString(`{"binding_id":"binding-1","schedule":"0 9 * * *"}`),
+	)
+	scheduleRR := httptest.NewRecorder()
+	mux.ServeHTTP(scheduleRR, scheduleReq)
+	if scheduleRR.Code != http.StatusBadRequest {
+		t.Fatalf("supervised schedule patch status = %d body = %s, want 400", scheduleRR.Code, scheduleRR.Body.String())
+	}
 }
 
 func TestModuleCreateDispatchesSupportedKindNamespaces(t *testing.T) {

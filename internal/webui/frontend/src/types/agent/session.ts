@@ -3,13 +3,12 @@
  *
  * SessionRecord is aliased from the generated OpenAPI schema.
  *
- * TranscriptEntry is hand-written as the canonical backend-agnostic event
- * shape emitted by internal/sessions/transcript.Event. The Go side parses
- * Claude Code / Codex / OpenCode native JSONL into this uniform shape before
- * returning it on the session transcript endpoint.
+ * TranscriptEntry is also aliased from the generated contract so parser
+ * vocabulary additions (for example reasoning and result events) cannot drift
+ * from the UI's accepted wire shape.
  */
 
-import type { components } from "@/types/generated/openapi";
+import type { components, operations } from "@/types/generated/openapi";
 
 /** Lifecycle state of a session. */
 export type SessionStatus = "running" | "completed" | "failed" | "aborted";
@@ -17,36 +16,49 @@ export type SessionStatus = "running" | "completed" | "failed" | "aborted";
 /** A single agent session record. Aliased from generated SessionResponse schema. */
 export type SessionRecord = components["schemas"]["SessionResponse"];
 
+/** A single canonical transcript event from the generated API contract. */
+export type TranscriptEntry = components["schemas"]["TranscriptEntry"];
+
 /** Canonical role values in the transcript event stream. */
-export type TranscriptEntryRole = "user" | "assistant" | "tool" | "system";
+export type TranscriptEntryRole = TranscriptEntry["role"];
 
 /** Canonical event type values in the transcript event stream. */
-export type TranscriptEntryType =
-  | "text"
-  | "tool_use"
-  | "tool_result"
-  | "session_meta";
+export type TranscriptEntryType = TranscriptEntry["type"];
+
+type Assert<Condition extends true> = Condition;
+type IsAssignable<Actual, Expected> = [Actual] extends [Expected]
+  ? true
+  : false;
 
 /**
- * A single entry (event) in a session transcript. Matches the Go
- * transcript.Event wire format. Entries are emitted in monotonic seq order
- * from the captured native JSONL.
+ * Compile-only contract fixture. This module is part of the production
+ * TypeScript program, unlike Vitest files, so `npm run typecheck` fails if the
+ * generated transcript entry stops accepting the canonical UI shape.
  */
-export interface TranscriptEntry {
-  seq: number;
-  timestamp?: string;
-  role: TranscriptEntryRole;
-  type: TranscriptEntryType;
-  text?: string;
-  tool_name?: string;
-  tool_use_id?: string;
-  /** Raw JSON of the tool's arguments (varies per tool). */
-  tool_input?: unknown;
-  /** tool_result content (plain text). */
-  output?: string;
-  /** Native message UUID when the backend provides one (Claude Code). */
-  uuid?: string;
-}
+export type TranscriptEntryCompatibilityTypecheck = Assert<
+  IsAssignable<
+    {
+      seq: number;
+      timestamp: string;
+      role: "assistant";
+      type: "reasoning";
+      text: string;
+    },
+    TranscriptEntry
+  >
+>;
+
+type TaskTranscriptErrorStatus = 400 | 404 | 500 | 503;
+type TaskTranscriptErrorPayload =
+  operations["getSessionTranscript"]["responses"][TaskTranscriptErrorStatus]["content"]["application/json"];
+
+/** Compile-only lock for the documented task-transcript error envelope. */
+export type TaskTranscriptErrorContractTypecheck = Assert<
+  IsAssignable<
+    TaskTranscriptErrorPayload,
+    components["schemas"]["TranscriptResponse"]
+  >
+>;
 
 /** Response from GET /api/workspaces/{ws}/tasks/{taskId}/sessions */
 export interface SessionListResponse {

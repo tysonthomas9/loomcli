@@ -24,6 +24,7 @@ import (
 type Deps struct {
 	Store                         store.Store
 	AgentSvc                      service.AgentService
+	AgentSessionTranscripts       service.AgentSessionTranscriptService
 	IssueSvc                      service.IssueService
 	Hub                           *realtime.Hub
 	FleetBaseURL                  string

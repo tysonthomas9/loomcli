@@ -3,9 +3,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentRecordSummary } from "@/api/agents";
 import type { TriggerBinding } from "@/api/workflows";
 
-import { useAutomations } from "../useAutomations";
+import { dispatchBindingsChanged, useAutomations } from "../useAutomations";
 
 const mocks = vi.hoisted(() => ({
   createTriggerBinding: vi.fn(),
@@ -76,6 +77,28 @@ const legacyBinding: TriggerBinding = {
   schedule: "0 * * * *",
   enabled: true,
 };
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function durableRecord(id: string, workspaceId = "WS"): AgentRecordSummary {
+  return {
+    id,
+    name: id,
+    kind: "prompt",
+    enabled: true,
+    behavior: { role_name: "reviewer" },
+    workspace_key: workspaceId,
+  };
+}
 
 async function renderAutomations(bindings: TriggerBinding[]) {
   mocks.listTriggerBindings.mockResolvedValue(bindings);
@@ -154,26 +177,104 @@ describe("useAutomations durable agent lifecycle dispatch", () => {
     );
   });
 
-  it("keeps attached schedule edits on the binding while routing the name to the record", async () => {
+  it("routes attached name and schedule edits as separate agent-owned patches", async () => {
     const { result } = await renderAutomations([attachedPromptBinding]);
 
     await act(async () => {
       await result.current.updateBinding("prompt-binding", {
         name: "Daily prompt agent",
+      });
+      await result.current.updateBinding("prompt-binding", {
         schedule: "0 9 * * *",
         schedule_timezone: "UTC",
       });
     });
 
-    expect(mocks.updateTriggerBinding).toHaveBeenCalledWith(
-      "WS",
-      "prompt-binding",
-      { schedule: "0 9 * * *", schedule_timezone: "UTC" },
-    );
-    expect(mocks.updateAgentRecord).toHaveBeenCalledWith(
+    expect(mocks.updateTriggerBinding).not.toHaveBeenCalled();
+    expect(mocks.updateAgentRecord).toHaveBeenNthCalledWith(
+      1,
       "WS",
       "agent-prompt-1",
       { name: "Daily prompt agent" },
+    );
+    expect(mocks.updateAgentRecord).toHaveBeenNthCalledWith(
+      2,
+      "WS",
+      "agent-prompt-1",
+      {
+        binding_id: "prompt-binding",
+        schedule: "0 9 * * *",
+        schedule_timezone: "UTC",
+      },
+    );
+  });
+
+  it("routes an attached schedule-only edit through the owning agent record", async () => {
+    const { result } = await renderAutomations([attachedPromptBinding]);
+
+    await act(async () => {
+      await result.current.updateBinding("prompt-binding", {
+        schedule: "30 8 * * 1-5",
+      });
+    });
+
+    expect(mocks.updateAgentRecord).toHaveBeenCalledWith(
+      "WS",
+      "agent-prompt-1",
+      {
+        binding_id: "prompt-binding",
+        schedule: "30 8 * * 1-5",
+      },
+    );
+    expect(mocks.updateTriggerBinding).not.toHaveBeenCalled();
+  });
+
+  it("rejects a mixed managed name and schedule patch before any request", async () => {
+    const { result } = await renderAutomations([attachedPromptBinding]);
+
+    await expect(
+      result.current.updateBinding("prompt-binding", {
+        name: "Daily prompt agent",
+        schedule: "0 9 * * *",
+      }),
+    ).rejects.toThrow("Save the agent name and cadence separately.");
+
+    expect(mocks.updateAgentRecord).not.toHaveBeenCalled();
+    expect(mocks.updateTriggerBinding).not.toHaveBeenCalled();
+  });
+
+  it("returns the authoritative managed binding from the agent response", async () => {
+    mocks.updateAgentRecord.mockResolvedValueOnce({
+      id: "agent-prompt-1",
+      name: "Prompt agent",
+      kind: "prompt",
+      enabled: true,
+      behavior: { role_name: "reviewer" },
+      workspace_key: "WS",
+      bindings: [
+        {
+          ...attachedPromptBinding,
+          schedule: "0 9 * * *",
+          created_at: "2026-07-28T12:00:00Z",
+          updated_at: "2026-07-28T12:05:00Z",
+          concurrency_policy: "one_active_per_epic",
+        },
+      ],
+    });
+    const { result } = await renderAutomations([attachedPromptBinding]);
+
+    let updated: TriggerBinding | undefined;
+    await act(async () => {
+      updated = await result.current.updateBinding("prompt-binding", {
+        schedule: " 0 9 * * * ",
+      });
+    });
+
+    expect(updated).toEqual(
+      expect.objectContaining({
+        schedule: "0 9 * * *",
+        updated_at: "2026-07-28T12:05:00Z",
+      }),
     );
   });
 
@@ -189,6 +290,37 @@ describe("useAutomations durable agent lifecycle dispatch", () => {
       "agent-scripted-1",
     );
     expect(mocks.deleteTriggerBinding).not.toHaveBeenCalled();
+  });
+
+  it("exposes record-scoped enable and archive actions for orphan recovery", async () => {
+    const { result } = await renderAutomations([]);
+
+    await act(async () => {
+      await result.current.setRecordEnabled("orphan-agent", true);
+      await result.current.deleteRecord("orphan-agent");
+    });
+
+    expect(mocks.setAgentRecordEnabled).toHaveBeenCalledWith(
+      "WS",
+      "orphan-agent",
+      true,
+    );
+    expect(mocks.deleteAgentRecord).toHaveBeenCalledWith("WS", "orphan-agent");
+  });
+
+  it("routes an attached binding toggle through its durable agent record", async () => {
+    const { result } = await renderAutomations([attachedPromptBinding]);
+
+    await act(async () => {
+      await result.current.setEnabled("prompt-binding", false);
+    });
+
+    expect(mocks.setAgentRecordEnabled).toHaveBeenCalledWith(
+      "WS",
+      "agent-prompt-1",
+      false,
+    );
+    expect(mocks.setTriggerBindingEnabled).not.toHaveBeenCalled();
   });
 
   it("uses record names for attached agents after a fresh reload", async () => {
@@ -217,6 +349,13 @@ describe("useAutomations durable agent lifecycle dispatch", () => {
         name: "Legacy binding",
       }),
     ]);
+    expect(result.current.agentRecords).toEqual([
+      {
+        id: "agent-prompt-1",
+        name: "Durable renamed agent",
+        kind: "prompt",
+      },
+    ]);
   });
 
   it("preserves direct binding rename and delete for legacy unattached bindings", async () => {
@@ -240,5 +379,106 @@ describe("useAutomations durable agent lifecycle dispatch", () => {
     );
     expect(mocks.updateAgentRecord).not.toHaveBeenCalled();
     expect(mocks.deleteAgentRecord).not.toHaveBeenCalled();
+  });
+
+  it("does not let a deferred initial snapshot overwrite a newer binding-change refresh", async () => {
+    const initialBindings = deferred<TriggerBinding[]>();
+    const initialRecords = deferred<AgentRecordSummary[]>();
+    const refreshedRecord = durableRecord("agent-refreshed");
+    const refreshedBinding: TriggerBinding = {
+      ...attachedPromptBinding,
+      binding_id: "binding-refreshed",
+      route_key: "binding-refreshed",
+      target_agent_service_id: refreshedRecord.id,
+    };
+    mocks.listTriggerBindings
+      .mockReturnValueOnce(initialBindings.promise)
+      .mockResolvedValueOnce([refreshedBinding]);
+    mocks.listAgentRecords
+      .mockReturnValueOnce(initialRecords.promise)
+      .mockResolvedValueOnce([refreshedRecord]);
+
+    const { result } = renderHook(() => useAutomations("WS", true));
+    await waitFor(() =>
+      expect(mocks.listTriggerBindings).toHaveBeenCalledTimes(1),
+    );
+
+    act(() => dispatchBindingsChanged("WS"));
+
+    await waitFor(() => {
+      expect(mocks.listTriggerBindings).toHaveBeenCalledTimes(2);
+      expect(result.current.agentRecords).toEqual([refreshedRecord]);
+    });
+
+    await act(async () => {
+      initialBindings.resolve([]);
+      initialRecords.resolve([]);
+      await Promise.all([initialBindings.promise, initialRecords.promise]);
+    });
+
+    expect(result.current.agentRecords).toEqual([refreshedRecord]);
+    expect(result.current.bindings).toEqual([
+      expect.objectContaining({
+        binding_id: "binding-refreshed",
+        target_agent_service_id: "agent-refreshed",
+      }),
+    ]);
+    expect(result.current.initialized).toBe(true);
+  });
+
+  it("masks workspace A records while workspace B bare-route data loads", async () => {
+    const workspaceABindings = deferred<TriggerBinding[]>();
+    const workspaceARecords = deferred<AgentRecordSummary[]>();
+    const workspaceBRecord = durableRecord("agent-b", "WS-B");
+    const workspaceBBinding: TriggerBinding = {
+      ...attachedPromptBinding,
+      workspace_key: "WS-B",
+      binding_id: "binding-b",
+      route_key: "binding-b",
+      target_agent_service_id: workspaceBRecord.id,
+    };
+    mocks.listTriggerBindings
+      .mockReturnValueOnce(workspaceABindings.promise)
+      .mockResolvedValueOnce([workspaceBBinding]);
+    mocks.listAgentRecords
+      .mockReturnValueOnce(workspaceARecords.promise)
+      .mockResolvedValueOnce([workspaceBRecord]);
+
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) => useAutomations(workspaceId, true),
+      { initialProps: { workspaceId: "WS-A" } },
+    );
+    await waitFor(() =>
+      expect(mocks.listTriggerBindings).toHaveBeenCalledWith("WS-A"),
+    );
+
+    rerender({ workspaceId: "WS-B" });
+
+    expect(result.current.agentRecords).toEqual([]);
+    expect(result.current.bindings).toEqual([]);
+    expect(result.current.initialized).toBe(false);
+    expect(result.current.loading).toBe(true);
+
+    await waitFor(() => {
+      expect(mocks.listTriggerBindings).toHaveBeenCalledWith("WS-B");
+      expect(result.current.agentRecords).toEqual([workspaceBRecord]);
+    });
+
+    await act(async () => {
+      workspaceABindings.resolve([]);
+      workspaceARecords.resolve([]);
+      await Promise.all([
+        workspaceABindings.promise,
+        workspaceARecords.promise,
+      ]);
+    });
+
+    expect(result.current.agentRecords).toEqual([workspaceBRecord]);
+    expect(result.current.bindings).toEqual([
+      expect.objectContaining({
+        binding_id: "binding-b",
+        workspace_key: "WS-B",
+      }),
+    ]);
   });
 });

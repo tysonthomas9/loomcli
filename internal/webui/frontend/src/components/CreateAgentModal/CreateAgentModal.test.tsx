@@ -112,9 +112,10 @@ describe("CreateAgentModal", () => {
     });
     fireEvent.click(screen.getByTestId("create-agent-template-lead"));
     expect(screen.queryByText(/^Lead agent$/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("create-agent-repo-chips")).toBeInTheDocument();
     expect(
-      screen.queryByTestId("create-agent-repo-chips"),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: /hello-world/i }),
+    ).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
 
@@ -135,6 +136,7 @@ describe("CreateAgentModal", () => {
       repos: [],
       repo_groups: [],
       cross_repo: false,
+      kind: "interactive",
     });
   });
 });

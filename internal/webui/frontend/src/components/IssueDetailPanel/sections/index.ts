@@ -31,8 +31,8 @@ export type { EditableDescriptionProps } from "./EditableDescription";
 export { EpicRollup } from "./EpicRollup";
 export type { EpicRollupProps } from "./EpicRollup";
 
-export { MarkdownRenderer } from "./MarkdownRenderer";
-export type { MarkdownRendererProps } from "./MarkdownRenderer";
+export { MarkdownRenderer } from "@/components/MarkdownRenderer";
+export type { MarkdownRendererProps } from "@/components/MarkdownRenderer";
 
 export { RejectCommentForm } from "./RejectCommentForm";
 export type { RejectCommentFormProps } from "./RejectCommentForm";

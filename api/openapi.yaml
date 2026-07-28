@@ -1495,22 +1495,31 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [success]
-                properties:
-                  success:
-                    type: boolean
-                  data:
-                    type: object
-                    properties:
-                      session_id:
-                        type: string
-                      entries:
-                        type: array
-                        items:
-                          $ref: "#/components/schemas/TranscriptEntry"
+                $ref: "#/components/schemas/TranscriptResponse"
+        "400":
+          description: Invalid task or session identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
         "404":
           description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "500":
+          description: Session transcript retrieval failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "503":
+          description: Session transcript service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
 
   /api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/diff:
     get:
@@ -2501,8 +2510,13 @@ paths:
       summary: Update one unified agent entry
       description: |
         The accepted fields depend on the stored kind. Supervised assignments
-        use assignment fields; prompt/scripted records use identity and
-        behavior fields; legacy binding entries only support `name`.
+        use assignment fields; prompt/scripted records accept mutable record
+        fields, while their behavior role is immutable after creation. A
+        prompt/scripted cron record also accepts an exact
+        attached `binding_id` with `schedule` and/or `schedule_timezone`;
+        schedule fields cannot be combined with record fields
+        in one request so a failed PATCH never commits a cross-aggregate prefix.
+        legacy binding entries only support `name`.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2711,7 +2725,7 @@ paths:
     get:
       operationId: listAgentRuns
       tags: [agent-control]
-      summary: List runs attributed to a durable agent record
+      summary: List run or session history attributed to an agent
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentId"
@@ -2728,13 +2742,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentRunsResponse"
         "400":
-          description: Unsupported agent kind or invalid limit
+          description: Invalid limit
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentErrorResponse"
         "404":
-          description: Agent record not found
+          description: Agent not found
           content:
             application/json:
               schema:
@@ -2757,6 +2771,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentErrorResponse"
+
+  /api/workspaces/{ws}/agents/{id}/sessions/{session_id}/transcript:
+    get:
+      operationId: getAgentSessionTranscript
+      tags: [agent-control, sessions]
+      summary: Get an agent-owned session transcript
+      description: >-
+        Returns the canonical transcript for a session owned by the selected
+        agent. This route supports interactive sessions that do not have a task
+        identifier. A session owned by another agent is reported as not found.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentId"
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Canonical transcript
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "400":
+          description: Invalid agent or session identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "404":
+          description: Session or transcript not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "500":
+          description: Agent session transcript retrieval failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "503":
+          description: Agent session transcript service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
 
   /api/workspaces/{ws}/agents/{name}/stop:
     post:
@@ -4939,7 +5002,7 @@ components:
       name: id
       in: path
       required: true
-      description: Durable agent record identifier
+      description: Unified agent, supervised assignment, or legacy binding identifier
       schema:
         type: string
 
@@ -6831,17 +6894,22 @@ components:
       additionalProperties: false
       description: |
         Kind-sensitive partial update. Durable records accept `name`,
-        `behavior`, and `budget_policy`; legacy binding entries accept only
+        `budget_policy`, and agent-owned cron schedule fields; their behavior
+        role is immutable after creation. Legacy binding entries accept only
         `name`; supervised assignments accept the remaining assignment fields.
       properties:
         name:
           type: string
-        behavior:
-          type: object
-          properties:
-            role_name:
-              type: string
         budget_policy:
+          type: string
+        binding_id:
+          type: string
+          description: >-
+            Exact attached managed binding; required for cron schedule updates.
+            Schedule updates cannot be combined with mutable record fields.
+        schedule:
+          type: string
+        schedule_timezone:
           type: string
         role_name:
           type: string
@@ -6905,7 +6973,7 @@ components:
 
     AgentRunsResponse:
       type: object
-      required: [agent_id, runs]
+      required: [agent_id, runs, sessions]
       properties:
         agent_id:
           type: string
@@ -6913,6 +6981,91 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DriverRun"
+        sessions:
+          type: array
+          description: >-
+            Task, terminal, and orchestration sessions for supervised or
+            interactive agents. Durable record and workflow-binding agents
+            return an empty array and use runs instead.
+          items:
+            $ref: "#/components/schemas/AgentHistorySession"
+
+    AgentHistorySession:
+      type: object
+      required:
+        [workspace_key, session_id, agent_id, kind, status, created_at, updated_at]
+      properties:
+        workspace_key:
+          type: string
+        session_id:
+          type: string
+        agent_id:
+          type: string
+        node_id:
+          type: string
+        kind:
+          type: string
+          enum: [task, orchestration, terminal, maintenance, ad_hoc]
+        task_id:
+          type: string
+        terminal_id:
+          type: string
+        parent_session_id:
+          type: string
+        status:
+          type: string
+          enum:
+            [queued, leased, starting, running, idle, yielded, completed, failed, cancelled, expired]
+        phase:
+          type: string
+        attempt:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+        last_heartbeat:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        summary:
+          type: string
+        error_class:
+          type: string
+        exit_code:
+          type: [integer, "null"]
+        metadata:
+          type: object
+          additionalProperties: false
+          description: Allowlisted, non-sensitive execution metadata.
+          properties:
+            backend:
+              type: string
+            runtime_strategy:
+              type: string
+            delivery:
+              type: string
+            patch_back_status:
+              type: string
+            local_branch:
+              type: string
+            head_sha:
+              type: string
+            github_head_sha:
+              type: string
+            patch_back_head_sha:
+              type: string
+            github_branch:
+              type: string
+            github_pr_url:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
 
     TaskWorkflowRunsResponse:
       type: object
@@ -7117,14 +7270,36 @@ components:
         github_pr_url:
           type: string
 
+    TranscriptResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+        data:
+          $ref: "#/components/schemas/TranscriptData"
+        error:
+          type: string
+
+    TranscriptData:
+      type: object
+      required: [session_id, entries]
+      properties:
+        session_id:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptEntry"
+
     TranscriptEntry:
       type: object
       description: Single transcript entry from a session
-      required: [seq, ts, role, type]
+      required: [seq, timestamp, role, type]
       properties:
         seq:
           type: integer
-        ts:
+        timestamp:
           type: string
           format: date-time
         role:
@@ -7132,14 +7307,18 @@ components:
           enum: [user, assistant, system, tool]
         type:
           type: string
-          enum: [text, tool_use, tool_result]
-        content:
+          enum: [text, reasoning, tool_use, tool_result, result, session_meta]
+        text:
           type: string
         tool_name:
           type: string
-        tool_input:
+        tool_use_id:
           type: string
-        raw:
+        tool_input:
+          description: Backend-specific tool arguments.
+        output:
+          type: string
+        uuid:
           type: string
 
     SessionHistoryRecord:

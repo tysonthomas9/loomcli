@@ -52,18 +52,12 @@ func TestTSLeafCorpusConformsToCanonicalSchema(t *testing.T) {
 			total++
 			seenType[e.Type] = true
 			seenRole[e.Role] = true
-			// (3) type + role must be within the shared canonical vocabulary.
-			if !transcript.KnownEventTypes[e.Type] {
-				t.Errorf("%s[%d]: event type %q is not in transcript.KnownEventTypes", backend, i, e.Type)
+			// (3) type, role, and timestamp must satisfy the shared canonical
+			// validator used by both local and durable transcript readers.
+			if err := transcript.ValidateCanonicalEvent(e); err != nil {
+				t.Errorf("%s[%d]: %v", backend, i, err)
 			}
-			if !transcript.KnownRoles[e.Role] {
-				t.Errorf("%s[%d]: role %q is not in transcript.KnownRoles", backend, i, e.Role)
-			}
-			// (4) timestamps are real instants (decode already enforced RFC3339).
-			if e.Timestamp.IsZero() {
-				t.Errorf("%s[%d]: zero/missing timestamp", backend, i)
-			}
-			// (5) seq is monotonically increasing within a backend's transcript.
+			// (4) seq is monotonically increasing within a backend's transcript.
 			if e.Seq <= lastSeq {
 				t.Errorf("%s[%d]: seq %d not greater than previous %d", backend, i, e.Seq, lastSeq)
 			}

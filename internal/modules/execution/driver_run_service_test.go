@@ -596,10 +596,12 @@ func TestDriverRunReviewWorkItemHandoffValidatesAtomicReviewAnnotationsAndResult
 	actionID := DriverRunReviewWorkItemHandoffActionID(requestID)
 	claimActionID := DriverRunWorkItemClaimActionID(ClaimDriverRunWorkItemRequestID(owner.ResourceID, taskID))
 	priority := 4
+	externalRef := "local-branch:loom/TASK-TRIAGE-1@" + strings.Repeat("a", 40)
 	port := &driverRunWorkItemPortStub{handoffResult: DriverRunWorkItemMutationResult{
 		WorkItem: &DriverRunWorkItem{
 			WorkspaceKey: "TEST", WorkItemID: taskID, Status: "review", Priority: priority,
 			Labels: []string{"existing", "bug", "triaged"}, Assignee: "", UpdatedAt: appliedAt,
+			ExternalRef: externalRef,
 		},
 		Action: &DriverRunWorkItemAction{
 			WorkspaceKey: "TEST", ActionID: actionID, IdempotencyKey: actionID,
@@ -617,7 +619,8 @@ func TestDriverRunReviewWorkItemHandoffValidatesAtomicReviewAnnotationsAndResult
 		WorkspaceKey: "TEST", RequestID: requestID, Owner: owner, WorkItemID: taskID,
 		ClaimActionID: claimActionID, TaskRunID: taskRunID, TargetStatus: "review",
 		Priority: &priority, Labels: []string{" bug ", "triaged", "bug"},
-		CommentBody: "Automated bug triage completed.", HandedOffAt: now,
+		CommentBody: "Automated bug triage completed.", ExternalRef: &externalRef,
+		HandedOffAt: now,
 	}
 	result, err := service.HandoffDriverRunReviewWorkItem(
 		context.Background(),
@@ -628,7 +631,8 @@ func TestDriverRunReviewWorkItemHandoffValidatesAtomicReviewAnnotationsAndResult
 		port.handoffCalls != 1 || port.handoffCommand.Priority == nil ||
 		*port.handoffCommand.Priority != priority ||
 		!slices.Equal(port.handoffCommand.Labels, []string{"bug", "triaged"}) ||
-		port.handoffCommand.CommentBody != command.CommentBody {
+		port.handoffCommand.CommentBody != command.CommentBody ||
+		port.handoffCommand.ExternalRef == nil || *port.handoffCommand.ExternalRef != externalRef {
 		t.Fatalf("handoff=%+v command=%+v calls=%d err=%v", result, port.handoffCommand, port.handoffCalls, err)
 	}
 
@@ -680,6 +684,15 @@ func TestDriverRunReviewWorkItemHandoffValidatesAtomicReviewAnnotationsAndResult
 		t.Fatalf("missing returned label error=%v, want conflict", err)
 	}
 	port.handoffResult.WorkItem.Labels = []string{"existing", "bug", "triaged"}
+	port.handoffResult.WorkItem.ExternalRef = "local-branch:loom/other@" + strings.Repeat("b", 40)
+	if _, err := service.HandoffDriverRunReviewWorkItem(
+		context.Background(),
+		issueExecution(t, issuer, ActionHandoffDriverRunReviewWorkItem, owner),
+		command,
+	); !errors.Is(err, ErrConflict) {
+		t.Fatalf("divergent external ref error=%v, want conflict", err)
+	}
+	port.handoffResult.WorkItem.ExternalRef = externalRef
 	port.handoffResult.Comment.Body = "different"
 	if _, err := service.HandoffDriverRunReviewWorkItem(
 		context.Background(),
@@ -723,6 +736,31 @@ func TestDriverRunReviewWorkItemHandoffRejectsInvalidReviewAnnotationsBeforePort
 			c.Labels = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"}
 		}},
 		{"invalid label", func(c *HandoffDriverRunReviewWorkItemCommand) { c.Labels = []string{"bad,label"} }},
+		{"invalid external ref", func(c *HandoffDriverRunReviewWorkItemCommand) {
+			value := "local-branch:loom/docs@NOT-A-SHA"
+			c.ExternalRef = &value
+		}},
+		{"invalid external ref branch", func(c *HandoffDriverRunReviewWorkItemCommand) {
+			value := "local-branch:bad branch@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
+		{"oversized external ref", func(c *HandoffDriverRunReviewWorkItemCommand) {
+			value := "local-branch:" + strings.Repeat("a", driverRunReviewWorkItemMaxExternalRefBytes) +
+				"@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
+		{"invalid UTF-8 external ref", func(c *HandoffDriverRunReviewWorkItemCommand) {
+			value := "local-branch:loom/" + string([]byte{0xff}) + "@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
+		{"dot-prefixed branch component", func(c *HandoffDriverRunReviewWorkItemCommand) {
+			value := "local-branch:foo/.bar@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
+		{"lock-suffixed branch component", func(c *HandoffDriverRunReviewWorkItemCommand) {
+			value := "local-branch:foo/bar.lock@" + strings.Repeat("a", 40)
+			c.ExternalRef = &value
+		}},
 		{"open annotations", func(c *HandoffDriverRunReviewWorkItemCommand) { c.TargetStatus = "open" }},
 	}
 	for _, tc := range tests {

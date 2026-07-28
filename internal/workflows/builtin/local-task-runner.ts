@@ -100,6 +100,62 @@ export async function run(ctx = {}) {
     );
   }
 
+  const deliveryMode = stringValue(inputValue(request, "deliveryMode"));
+  const localBranchRequested = deliveryMode === "local-branch";
+  const requireLocalBranchDelivery = booleanValue(
+    inputValue(request, "requireLocalBranchDelivery"),
+  );
+  const localBranchResume = localBranchResumeSpec(request);
+  if (localBranchResume.errorClass) {
+    return failed(localBranchResume.errorClass, localBranchResume.errorMessage, {
+      taskRunId,
+      taskId,
+      backend,
+      request,
+      logs,
+    });
+  }
+  if (requireLocalBranchDelivery && !localBranchRequested) {
+    return failed(
+      "local_branch_delivery_required",
+      "requireLocalBranchDelivery requires deliveryMode=local-branch",
+      { taskRunId, taskId, backend, request, logs },
+    );
+  }
+  const hostOriginRemoteUrl = await resolveOriginRemoteUrl(worktree);
+  const hostFilesystemOrigin = isFilesystemOrigin(hostOriginRemoteUrl);
+  if (requireLocalBranchDelivery && !hostFilesystemOrigin) {
+    return failed(
+      "local_branch_origin_unsupported",
+      "required local-branch delivery needs a filesystem origin remote",
+      { taskRunId, taskId, backend, request, logs },
+    );
+  }
+  if (localBranchResume.branch && !hostFilesystemOrigin) {
+    return failed(
+      "local_branch_resume_origin_unsupported",
+      "resuming an existing local review branch requires a filesystem origin remote",
+      { taskRunId, taskId, backend, request, logs },
+    );
+  }
+  if (localBranchResume.branch) {
+    const prepared = await prepareLocalBranchResume(
+      worktree,
+      localBranchResume.branch,
+      localBranchResume.headSha,
+      logs,
+    );
+    if (prepared.errorClass) {
+      return failed(prepared.errorClass, prepared.errorMessage, {
+        taskRunId,
+        taskId,
+        backend,
+        request,
+        logs,
+      });
+    }
+  }
+
   const headBefore = await gitHead(worktree);
 
   // Run the CLI in an ISOLATED git worktree checked out at HEAD so the host
@@ -120,7 +176,16 @@ export async function run(ctx = {}) {
   const stackBaseRef = stringValue(process.env.LOOM_TASK_RUN_BASE_REF);
   const stackId = stringValue(process.env.LOOM_TASK_RUN_STACK_ID);
 
-  const isolated = stacked ? null : await setupIsolatedWorktree(worktree, taskRunId, logs);
+  const isolated = stacked
+    ? null
+    : await setupIsolatedWorktree(worktree, taskRunId, logs, localBranchResume.headSha);
+  if (localBranchResume.branch && !isolated) {
+    return failed(
+      "local_branch_resume_worktree_failed",
+      "could not create an isolated worktree at the stamped local review head",
+      { taskRunId, taskId, backend, request, logs, headBefore },
+    );
+  }
   const execWorktree = isolated ? isolated.path : worktree;
   const baseRef = stacked ? stackBaseRef : (isolated ? isolated.base : "");
   if (readOnly && !isolated) {
@@ -160,16 +225,21 @@ export async function run(ctx = {}) {
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
   const openPR = booleanValue(inputValue(request, "openPullRequest"));
-  const deliveryMode = stringValue(inputValue(request, "deliveryMode"));
   const originRemoteUrl = await resolveOriginRemoteUrl(execWorktree);
   const filesystemOrigin = isFilesystemOrigin(originRemoteUrl);
-  const localBranchRequested = deliveryMode === "local-branch";
   // Local-branch delivery is intentionally narrow: it is allowed only for local
   // filesystem remotes, where an exact scanned commit SHA is pushed to the bare
   // repo used by local-mode. An explicit deliveryMode on a GitHub/http/ssh origin
   // does NOT activate this path; those deployments keep the existing patch-back
   // or PR behavior instead of silently inventing a "local" publish.
   const localBranchDelivery = !stacked && filesystemOrigin && localBranchRequested;
+  if (requireLocalBranchDelivery && !localBranchDelivery) {
+    return failed(
+      "local_branch_delivery_required",
+      "required local-branch delivery is unavailable for this worktree",
+      { taskRunId, taskId, backend, request, logs, headBefore },
+    );
+  }
   if (localBranchRequested && !filesystemOrigin) {
     logs.push("local-branch delivery requested but origin is not a filesystem path; keeping existing delivery behavior");
   }
@@ -279,13 +349,25 @@ export async function run(ctx = {}) {
         prFailure = { class: "local_branch_worktree_missing", message: "local-branch delivery requires a git isolated worktree" };
       } else if (patchInfo.filesChanged === 0) {
         logs.push("local-branch: the agent produced no changes; no branch pushed");
+        if (requireLocalBranchDelivery) {
+          prFailure = {
+            class: "local_branch_delivery_missing",
+            message: "required local-branch delivery produced no changes and no reviewable branch head",
+          };
+        }
       } else {
-        const branch = localBranchName(taskId, taskRunId);
+        const branch = localBranchResume.branch || localBranchName(taskId, taskRunId);
         const title = stringValue(inputValue(request, "branchTitle"))
           || stringValue(inputValue(request, "prTitle"))
           || stringValue((task && (task.title || task.name)) || ("Loom task " + (taskId || taskRunId)));
         try {
-          localBranchInfo = await deliverLocalBranch({ worktreePath: execWorktree, baseRef, branch, title });
+          localBranchInfo = await deliverLocalBranch({
+            worktreePath: execWorktree,
+            baseRef,
+            branch,
+            title,
+            expectedRemoteHead: localBranchResume.headSha,
+          });
           logs.push("pushed local branch " + localBranchInfo.branch + " @ " + localBranchInfo.head.slice(0, 12));
         } catch (error) {
           prFailure = isRunnerCredentialDeliveryError(error)
@@ -938,13 +1020,88 @@ async function execBackend(binary, args, options) {
   });
 }
 
+function localBranchResumeSpec(request) {
+  const branch = stringValue(inputValue(request, "localBranchName")).trim();
+  const headSha = stringValue(inputValue(request, "localBranchBaseRef")).trim().toLowerCase();
+  if (!branch && !headSha) return { branch: "", headSha: "" };
+  if (!branch || !headSha) {
+    return {
+      branch: "",
+      headSha: "",
+      errorClass: "local_branch_resume_invalid",
+      errorMessage: "localBranchName and localBranchBaseRef must be provided together",
+    };
+  }
+  if (branch.startsWith("-") || !/^[0-9a-f]{40}$/.test(headSha)) {
+    return {
+      branch: "",
+      headSha: "",
+      errorClass: "local_branch_resume_invalid",
+      errorMessage: "local review branch or stamped head is invalid",
+    };
+  }
+  return { branch, headSha };
+}
+
+// prepareLocalBranchResume resolves the current filesystem-origin branch and
+// proves it still equals the exact SHA stamped on the Review card. This occurs
+// before model execution: a moved or missing review branch must fail closed
+// instead of rebuilding and force-pushing the canonical task branch from main.
+async function prepareLocalBranchResume(hostWorktree, branch, expectedHead, logs) {
+  const valid = await execBackend(
+    "git",
+    ["-C", hostWorktree, "check-ref-format", "--branch", branch],
+    { cwd: hostWorktree },
+  );
+  if (valid.code !== 0) {
+    return {
+      errorClass: "local_branch_resume_invalid",
+      errorMessage: "stamped local review branch is not a valid git branch",
+    };
+  }
+  const fetched = await execBackend(
+    "git",
+    ["-C", hostWorktree, "fetch", "--no-tags", "origin", "refs/heads/" + branch],
+    { cwd: hostWorktree, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
+  );
+  if (fetched.code !== 0) {
+    return {
+      errorClass: "local_branch_resume_unavailable",
+      errorMessage: "could not fetch stamped local review branch: "
+        + textTail(fetched.stderr || fetched.stdout, 400),
+    };
+  }
+  const resolved = await execBackend(
+    "git",
+    ["-C", hostWorktree, "rev-parse", "--verify", "FETCH_HEAD^{commit}"],
+    { cwd: hostWorktree },
+  );
+  const actualHead = resolved.code === 0 ? stringValue(resolved.stdout).trim().toLowerCase() : "";
+  if (!actualHead) {
+    return {
+      errorClass: "local_branch_resume_unavailable",
+      errorMessage: "fetched local review branch has no commit",
+    };
+  }
+  if (actualHead !== expectedHead) {
+    return {
+      errorClass: "local_branch_base_drift",
+      errorMessage: "stamped local review head " + expectedHead
+        + " does not match origin/" + branch + " at " + actualHead,
+    };
+  }
+  logs.push("local-branch resume: verified " + branch + " @ " + expectedHead);
+  return { headSha: expectedHead };
+}
+
 // setupIsolatedWorktree creates a linked git worktree checked out at the host
-// worktree's HEAD, so the backend CLI edits an isolated copy and the host
-// worktree stays clean for the driver host-bridge to patch-back the result.
+// worktree's HEAD, or at an exact previously stamped local-branch head for a
+// Review-role continuation, so the backend CLI edits an isolated copy and the
+// host worktree stays clean for the driver host-bridge to patch-back the result.
 // Returns null when the host worktree is not a git repo / has no HEAD (the CLI
 // then runs in place, like the legacy behavior, with no base_ref).
-async function setupIsolatedWorktree(hostWorktree, taskRunId, logs) {
-  const head = await gitHead(hostWorktree);
+async function setupIsolatedWorktree(hostWorktree, taskRunId, logs, requestedBaseRef = "") {
+  const head = stringValue(requestedBaseRef).trim() || await gitHead(hostWorktree);
   if (!head) {
     logs.push("isolated worktree: host worktree has no git HEAD; running in place (no patch base_ref)");
     return null;
@@ -954,7 +1111,7 @@ async function setupIsolatedWorktree(hostWorktree, taskRunId, logs) {
   // Some local CLIs, notably OpenCode, enforce project-directory permissions and
   // auto-reject writes to temp/external directories even when --dir points there.
   const isolatedPath = path.join(path.dirname(hostWorktree), ".loom-local-runner-" + safe + "-" + Date.now());
-  const add = await execBackend("git", ["-C", hostWorktree, "worktree", "add", "--detach", isolatedPath, "HEAD"], {
+  const add = await execBackend("git", ["-C", hostWorktree, "worktree", "add", "--detach", isolatedPath, head], {
     cwd: hostWorktree,
   });
   if (add.code !== 0) {
@@ -1606,7 +1763,13 @@ async function deliverStackBranch({ worktreePath, baseRef, token, owner, repo, b
 // actual `origin` remote. There is deliberately no owner/repo parsing or GitHub
 // URL construction here; activation is gated before this helper on a filesystem
 // origin, so `git push origin ...` is the correct primitive.
-async function deliverLocalBranch({ worktreePath, baseRef, branch, title }) {
+async function deliverLocalBranch({
+  worktreePath,
+  baseRef,
+  branch,
+  title,
+  expectedRemoteHead = "",
+}) {
   const git = async (...args) => {
     const r = await execBackend("git", ["-C", worktreePath, "-c", "core.hooksPath=/dev/null", ...args], { cwd: worktreePath });
     if (r.code !== 0) {
@@ -1616,12 +1779,18 @@ async function deliverLocalBranch({ worktreePath, baseRef, branch, title }) {
   };
   await git("checkout", "-B", branch);
   const head = await secureCommitForDelivery({ git, worktreePath, baseRef, title });
-  // Each task owns its canonical loom/<task> branch. Rework runs start from the
-  // host base again, so their isolated commits can diverge from the previous
-  // pushed branch; a non-force push would reject and loop failed rework forever.
+  // Each task owns its canonical loom/<task> branch. Ordinary rework runs start
+  // from the host base again, so their isolated commits can diverge from the
+  // previous pushed branch and keep the existing task-owned force semantics.
+  // A Review continuation is different: its stamped head is an optimistic
+  // concurrency fence. Use the exact remote ref+SHA lease so a branch movement
+  // after preflight cannot be overwritten by the eventual delivery push.
+  const forceArg = expectedRemoteHead
+    ? "--force-with-lease=refs/heads/" + branch + ":" + expectedRemoteHead
+    : "--force";
   const pushRes = await execBackend(
     "git",
-    ["-C", worktreePath, "push", "--no-verify", "--force", "origin", branchPushRefspec(head, branch)],
+    ["-C", worktreePath, "push", "--no-verify", forceArg, "origin", branchPushRefspec(head, branch)],
     { cwd: worktreePath, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
   );
   if (pushRes.code !== 0) {

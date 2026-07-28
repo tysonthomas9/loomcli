@@ -245,8 +245,59 @@ func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req T
 	// task cannot leave its AgentSession running without further heartbeats.
 	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), flueTaskSessionFinalizeTimeout)
 	defer cancelFinalize()
+	patch := finalFlueTaskSessionPatch(req, session, result, runner, execErr)
+	return updateFlueAgentSession(finalizeCtx, e.Store, req.WorkspaceKey, session.SessionID, patch)
+}
+
+func finalFlueTaskSessionPatch(
+	req TaskExecRequest,
+	session *flueTaskSession,
+	result TaskExecResult,
+	runner *bridgeTaskRunnerResult,
+	execErr error,
+) store.AgentSessionUpdate {
 	status := flueTaskSessionStatus(result, execErr)
-	metadata := mergeStringMaps(session.Metadata, result.RuntimeMetadata)
+	metadata := finalFlueTaskSessionMetadata(req, session, result, runner, execErr)
+	exitCode := result.ExitCode
+	if status != domain.AgentSessionCompleted && exitCode == 0 {
+		exitCode = 1
+	}
+	exitCodePtr := &exitCode
+	finishedAt := time.Now().UTC()
+	finishedAtPtr := &finishedAt
+	errorClass := result.ErrorClass
+	if execErr != nil && errorClass == "" {
+		errorClass = "task_runner_error"
+	}
+	summary := "task run completed"
+	if status != domain.AgentSessionCompleted {
+		summary = firstNonEmpty(result.ErrorMessage, "task run failed")
+	}
+	return store.AgentSessionUpdate{
+		Status:     &status,
+		FinishedAt: &finishedAtPtr,
+		Summary:    &summary,
+		ErrorClass: optionalString(errorClass),
+		ExitCode:   &exitCodePtr,
+		Metadata:   &metadata,
+	}
+}
+
+func finalFlueTaskSessionMetadata(
+	req TaskExecRequest,
+	session *flueTaskSession,
+	result TaskExecResult,
+	runner *bridgeTaskRunnerResult,
+	execErr error,
+) map[string]string {
+	// Runtime metadata is runner-controlled. Reapply the immutable host-owned
+	// identity after merging so a fenced child cannot retarget the durable
+	// AgentSession at another task, TaskRun, DriverRun, or runner.
+	metadata := mergeStringMaps(
+		session.Metadata,
+		result.RuntimeMetadata,
+		flueTaskSessionMetadata(req, session.SessionID),
+	)
 	if metadata == nil {
 		metadata = make(map[string]string)
 	}
@@ -264,29 +315,7 @@ func (e HostBridgeTaskExecutor) finishFlueTaskSession(ctx context.Context, req T
 	if execErr != nil {
 		metadata["task_runner_error"] = execErr.Error()
 	}
-	exitCode := result.ExitCode
-	if status != domain.AgentSessionCompleted && exitCode == 0 {
-		exitCode = 1
-	}
-	exitCodePtr := &exitCode
-	finishedAt := time.Now().UTC()
-	finishedAtPtr := &finishedAt
-	errorClass := result.ErrorClass
-	if execErr != nil && errorClass == "" {
-		errorClass = "task_runner_error"
-	}
-	summary := "task run completed"
-	if status != domain.AgentSessionCompleted {
-		summary = firstNonEmpty(result.ErrorMessage, "task run failed")
-	}
-	return updateFlueAgentSession(finalizeCtx, e.Store, req.WorkspaceKey, session.SessionID, store.AgentSessionUpdate{
-		Status:     &status,
-		FinishedAt: &finishedAtPtr,
-		Summary:    &summary,
-		ErrorClass: optionalString(errorClass),
-		ExitCode:   &exitCodePtr,
-		Metadata:   &metadata,
-	})
+	return metadata
 }
 
 func stopFlueTaskSessionHeartbeat(session *flueTaskSession) {

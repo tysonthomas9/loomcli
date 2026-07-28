@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -554,8 +553,11 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:c
 		handler.WriteDomainError(w, recordErr, "get agent record failed")
 		return
 	}
+	if req.Behavior != nil && req.Behavior.RoleName != nil {
+		handler.RespondError(w, http.StatusBadRequest, "behavior.role_name is immutable for managed agent records")
+		return
+	}
 	patch := store.AgentServiceUpdate{}
-	var newRoleName string
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
 		if name == "" {
@@ -568,35 +570,42 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:c
 		budgetPolicy := strings.TrimSpace(*req.BudgetPolicy)
 		patch.BudgetPolicy = &budgetPolicy
 	}
-	if req.Behavior != nil && req.Behavior.RoleName != nil {
-		roleName := strings.TrimSpace(*req.Behavior.RoleName)
-		if roleName == "" {
-			handler.RespondError(w, http.StatusBadRequest, "behavior.role_name cannot be empty")
-			return
-		}
-		newRoleName = roleName
-		patch.RoleName = &roleName
+
+	bindingID, bindingPatch, ok := m.buildAttachedSchedulePatch(w, r, ws, existingRecord.ServiceID, req)
+	if !ok {
+		return
 	}
-	if patch.Name == nil && patch.BudgetPolicy == nil && patch.RoleName == nil {
+	hasBindingPatch := bindingPatch.Schedule != nil || bindingPatch.ScheduleTimezone != nil
+	if hasBindingPatch && (req.Name != nil || req.Behavior != nil || req.BudgetPolicy != nil) {
+		handler.RespondError(w, http.StatusBadRequest, "schedule updates cannot be combined with agent record updates")
+		return
+	}
+	if patch.Name == nil && patch.BudgetPolicy == nil && !hasBindingPatch {
 		handler.RespondError(w, http.StatusBadRequest, "no fields to update")
 		return
 	}
 	var updateBindingAuth authority.OperatorAuthority
-	if newRoleName != "" {
+	if hasBindingPatch {
 		var ok bool
 		updateBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionUpdateManagedBinding)
 		if !ok {
 			return
 		}
 	}
-	record, err := m.store.AgentServices().Update(r.Context(), ws, existingRecord.ServiceID, patch)
-	if err != nil {
-		handler.WriteDomainError(w, err, "update agent record failed")
-		return
+	record := existingRecord
+	if patch.Name != nil || patch.BudgetPolicy != nil {
+		updatedRecord, updateErr := m.store.AgentServices().Update(r.Context(), ws, existingRecord.ServiceID, patch)
+		if updateErr != nil {
+			handler.WriteDomainError(w, updateErr, "update agent record failed")
+			return
+		}
+		record = updatedRecord
 	}
-	if newRoleName != "" {
-		if err := m.updateAttachedBindingRole(r.Context(), updateBindingAuth, ws, record.ServiceID, newRoleName); err != nil {
-			writeBindingError(w, err, "update attached binding role failed")
+	if hasBindingPatch {
+		if _, err := m.bindings.UpdateManagedBinding(r.Context(), updateBindingAuth, automation.UpdateManagedBindingCommand{
+			WorkspaceKey: ws, BindingID: bindingID, AgentServiceID: record.ServiceID, Patch: bindingPatch,
+		}); err != nil {
+			writeBindingError(w, err, "update attached binding schedule failed")
 			return
 		}
 	}
@@ -618,10 +627,39 @@ func (m *Module) patchSupervisedAgent(w http.ResponseWriter, r *http.Request, ws
 			handler.HandleServiceError(w, service.ErrUnavailable("agent service not configured"))
 			return true
 		}
+		if !rejectRecordOnlySupervisedPatchFields(w, r) {
+			return true
+		}
 		HandleUpdate(m.agentSvc, m.hub)(w, r)
 		return true
 	}
 	return false
+}
+
+func rejectRecordOnlySupervisedPatchFields(w http.ResponseWriter, r *http.Request) bool {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, handler.MaxRequestBody))
+	if err != nil {
+		handler.HandleServiceError(w, service.ErrPayloadTooLarge("request body too large (max 1MB)"))
+		return false
+	}
+	resetAgentCreateBody(r, body)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		handler.HandleServiceError(w, service.ErrValidation("invalid request body"))
+		return false
+	}
+	allowed := map[string]struct{}{
+		"role_name": {}, "auto": {}, "backend": {}, "fallback_backends": {},
+		"repos": {}, "repo_groups": {}, "cross_repo": {}, "parent": {},
+		"state": {}, "desired_state": {},
+	}
+	for field := range fields {
+		if _, supported := allowed[field]; !supported {
+			handler.RespondError(w, http.StatusBadRequest, field+" is not supported for supervised agents")
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen // Lifecycle deletion keeps kind routing, binding cleanup, and archival visibly ordered.
@@ -757,7 +795,8 @@ func (m *Module) patchLegacyBindingAgent(w http.ResponseWriter, r *http.Request,
 		handler.WriteDomainError(w, domain.ErrNotFound, "get agent record failed")
 		return
 	}
-	if req.Name == nil || req.Behavior != nil || req.BudgetPolicy != nil {
+	if req.Name == nil || req.Behavior != nil || req.BudgetPolicy != nil ||
+		req.BindingID != nil || req.Schedule != nil || req.ScheduleTimezone != nil {
 		handler.RespondError(w, http.StatusBadRequest, "legacy binding agents only support name updates")
 		return
 	}
@@ -806,6 +845,42 @@ func (m *Module) deleteLegacyBindingAgent(w http.ResponseWriter, r *http.Request
 	}
 	broadcastAgentRefresh(m.hub, ws, binding.BindingID, r.Header.Get("X-Actor"))
 	handler.WriteJSON(w, http.StatusOK, result)
+}
+
+func (m *Module) requireAgentRunsStore(w http.ResponseWriter) bool {
+	if m.store != nil {
+		return true
+	}
+	handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
+	return false
+}
+
+func (m *Module) listAgentSessionsForHistory(
+	ctx context.Context,
+	ws, agentID string,
+	limit int,
+) ([]*domain.AgentSession, error) {
+	return m.store.AgentSessions().List(ctx, ws, store.AgentSessionFilter{AgentID: agentID, Limit: limit})
+}
+
+func (m *Module) agentServiceForHistory(ctx context.Context, ws, id string) (*domain.AgentService, error) {
+	return m.store.AgentServices().Get(ctx, ws, id)
+}
+
+func (m *Module) listAgentServiceRunsForHistory(
+	ctx context.Context,
+	ws, agentID string,
+	limit int,
+) ([]*domain.DriverRun, error) {
+	return m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{AgentServiceID: agentID, Limit: limit})
+}
+
+func (m *Module) listBindingRunsForHistory(
+	ctx context.Context,
+	ws, bindingID string,
+	limit int,
+) ([]*domain.DriverRun, error) {
+	return m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{BindingID: bindingID, Limit: limit})
 }
 
 func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc { //nolint:funlen // The handler keeps authority, record state, and attached-binding updates in one ordered transaction-like flow.
@@ -864,93 +939,6 @@ func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc { //nolint:funl
 		broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
 		handler.WriteJSON(w, http.StatusOK, out)
 	}
-}
-
-func (m *Module) listAgentRuns(w http.ResponseWriter, r *http.Request) {
-	if m.store == nil {
-		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
-		return
-	}
-	ws, ok := m.requireCanonicalWorkspace(w, r)
-	if !ok {
-		return
-	}
-	id := agentRouteValue(r, "id", "name")
-	if _, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-		writeBindingError(w, err, "get supervised agent failed")
-		return
-	} else if ok {
-		handler.RespondError(w, http.StatusBadRequest, "agent runs are available for record agents")
-		return
-	}
-	record, err := m.store.AgentServices().Get(r.Context(), ws, id)
-	if err != nil {
-		handler.WriteDomainError(w, err, "get agent record failed")
-		return
-	}
-	limit, ok := runhistory.ParseRunLimit(w, r)
-	if !ok {
-		return
-	}
-	runs, err := m.runsForAgent(r.Context(), ws, record.ServiceID, limit)
-	if err != nil {
-		writeBindingError(w, err, "list agent runs failed")
-		return
-	}
-	handler.WriteJSON(w, http.StatusOK, map[string]any{
-		"agent_id": record.ServiceID,
-		"runs":     runs,
-	})
-}
-
-func (m *Module) runsForAgent(ctx context.Context, ws, agentID string, limit int) ([]*domain.DriverRun, error) {
-	runs, err := m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{
-		AgentServiceID: agentID,
-		Limit:          limit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	seen := make(map[string]struct{}, len(runs))
-	for _, run := range runs {
-		if run != nil {
-			seen[run.RunID] = struct{}{}
-		}
-	}
-
-	// Compatibility for runs created before fleet-db stamped agent_service_id:
-	// while their binding remains attached, retain the historical binding join.
-	if m.bindings == nil {
-		return nil, automation.ErrUnavailable
-	}
-	bindings, err := m.bindings.ListBindings(ctx, ws, automation.BindingFilter{TargetAgentServiceID: agentID})
-	if err != nil {
-		return nil, err
-	}
-	for _, b := range bindings {
-		if b == nil {
-			continue
-		}
-		bindingRuns, err := m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{
-			BindingID: b.BindingID,
-			Limit:     limit,
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, run := range bindingRuns {
-			if run == nil {
-				continue
-			}
-			if _, ok := seen[run.RunID]; ok {
-				continue
-			}
-			seen[run.RunID] = struct{}{}
-			runs = append(runs, run)
-		}
-	}
-	runs = runhistory.SortAndTrim(runs, limit)
-	return runs, nil
 }
 
 func (m *Module) supervisedByName(ctx context.Context, ws, name string) (*domain.Agent, bool, error) {

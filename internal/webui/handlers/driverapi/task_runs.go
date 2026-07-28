@@ -549,12 +549,14 @@ type handoffReviewParams struct {
 	Priority    *int      `json:"priority"`
 	Labels      *[]string `json:"labels"`
 	CommentBody *string   `json:"commentBody"`
+	ExternalRef *string   `json:"externalRef"`
 }
 
 type handoffReviewFieldPresence struct {
 	priority    bool
 	labels      bool
 	commentBody bool
+	externalRef bool
 }
 
 type handoffReviewRequest struct {
@@ -565,6 +567,7 @@ type handoffReviewRequest struct {
 	priority     *int
 	labels       []string
 	commentBody  string
+	externalRef  *string
 }
 
 func decodeHandoffReviewParams(body []byte) (handoffReviewParams, handoffReviewFieldPresence, error) {
@@ -580,8 +583,10 @@ func decodeHandoffReviewParams(body []byte) (handoffReviewParams, handoffReviewF
 	_, priorityProvided := rawFields["priority"]
 	_, labelsProvided := rawFields["labels"]
 	_, commentBodyProvided := rawFields["commentBody"]
+	_, externalRefProvided := rawFields["externalRef"]
 	return params, handoffReviewFieldPresence{
 		priority: priorityProvided, labels: labelsProvided, commentBody: commentBodyProvided,
+		externalRef: externalRefProvided,
 	}, nil
 }
 
@@ -597,6 +602,10 @@ func normalizeHandoffReviewRequest(params handoffReviewParams) handoffReviewRequ
 	if params.CommentBody != nil {
 		request.commentBody = *params.CommentBody
 	}
+	if params.ExternalRef != nil {
+		externalRef := strings.TrimSpace(*params.ExternalRef)
+		request.externalRef = &externalRef
+	}
 	return request
 }
 
@@ -610,8 +619,8 @@ func validateHandoffReviewRequest(request handoffReviewRequest, fields handoffRe
 		}
 		return nil
 	}
-	if fields.priority || fields.labels || fields.commentBody {
-		return fmt.Errorf("priority, labels, and commentBody are only valid for review status: %w", domain.ErrInvalid)
+	if fields.priority || fields.labels || fields.commentBody || fields.externalRef {
+		return fmt.Errorf("priority, labels, commentBody, and externalRef are only valid for review status: %w", domain.ErrInvalid)
 	}
 	return nil
 }
@@ -629,7 +638,8 @@ func validHandoffReviewAnnotations(request handoffReviewRequest, fields handoffR
 		*request.priority <= execution.DriverRunReviewWorkItemPriorityMax &&
 		fields.commentBody &&
 		strings.TrimSpace(request.commentBody) != "" &&
-		(!fields.labels || request.labels != nil)
+		(!fields.labels || request.labels != nil) &&
+		(!fields.externalRef || request.externalRef != nil)
 }
 
 func (m *Module) handoffReview(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
@@ -671,6 +681,7 @@ func (m *Module) handoffReview(ctx context.Context, ws string, id driverIdentity
 		Priority:      request.priority,
 		Labels:        request.labels,
 		CommentBody:   request.commentBody,
+		ExternalRef:   request.externalRef,
 		HandedOffAt:   time.Now().UTC(),
 	})
 	if err != nil {

@@ -11,7 +11,10 @@ export type { UseSessionDiffResult } from "./useSessionDiff";
 export { useSessionRestore } from "./useSessionRestore";
 
 export { useSessionTranscript } from "./useSessionTranscript";
-export type { UseSessionTranscriptResult } from "./useSessionTranscript";
+export type {
+  UseSessionTranscriptOptions,
+  UseSessionTranscriptResult,
+} from "./useSessionTranscript";
 
 export { useTaskLogPolling } from "./useTaskLogPolling";
 export type {

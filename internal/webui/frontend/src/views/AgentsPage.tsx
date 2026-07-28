@@ -38,6 +38,11 @@ import {
 } from "@/components/AgentDetailMain/AgentDetailMain";
 import { AgentConfigModal } from "@/components/AgentConfigModal";
 import {
+  AgentRecordActionBar,
+  AgentRecordHeader,
+  AgentRecordInfoPane,
+  AgentRecordRunsPane,
+  AgentSessionRunsPane,
   WorkflowAgentActionBar,
   WorkflowAgentHeader,
   WorkflowAgentInfoPane,
@@ -156,15 +161,6 @@ function AgentsPageInner(): JSX.Element {
     () => orderAgentsForEpicRunner(agents).find(isLiveAgentRailVisible)?.name,
     [agents],
   );
-  useEffect(() => {
-    if (agentName) return;
-    const target = queryAgent ?? firstAgentName;
-    if (target) {
-      navigate(`/ws/${workspaceId}/agents/${encodeURIComponent(target)}`, {
-        replace: true,
-      });
-    }
-  }, [agentName, queryAgent, firstAgentName, navigate, workspaceId]);
 
   const selected = useMemo(
     () => (agentName ? agents.find((a) => a.name === agentName) : undefined),
@@ -175,21 +171,84 @@ function AgentsPageInner(): JSX.Element {
   // the URL segment is not a role agent, it may be a trigger-binding "agent";
   // resolve it from the automations list and render the workflow-agent detail.
   const {
+    agentRecords,
     bindings,
     initialized: bindingsInitialized,
+    setRecordEnabled,
+    deleteRecord,
     setEnabled: setBindingEnabled,
     updateBinding,
     deleteBinding,
     runBinding,
   } = useAutomations(workspaceId, !!workspaceId);
-  const selectedBinding = useMemo(
+  useEffect(() => {
+    if (agentName) return;
+    const firstRecordID = agentRecords[0]?.id;
+    const firstLegacyBindingID = bindings.find(
+      (binding) => !binding.target_agent_service_id?.trim(),
+    )?.binding_id;
+    const target =
+      queryAgent ?? firstAgentName ?? firstRecordID ?? firstLegacyBindingID;
+    if (target) {
+      navigate(`/ws/${workspaceId}/agents/${encodeURIComponent(target)}`, {
+        replace: true,
+      });
+    }
+  }, [
+    agentName,
+    queryAgent,
+    firstAgentName,
+    agentRecords,
+    bindings,
+    navigate,
+    workspaceId,
+  ]);
+  const selectedAgentRecord = useMemo(
     () =>
       agentName && !selected
-        ? bindings.find((b) => b.binding_id === agentName)
+        ? agentRecords.find((record) => record.id === agentName)
         : undefined,
-    [agentName, selected, bindings],
+    [agentName, selected, agentRecords],
+  );
+  const routeBinding = useMemo(
+    () =>
+      agentName && !selected && !selectedAgentRecord
+        ? bindings.find((binding) => binding.binding_id === agentName)
+        : undefined,
+    [agentName, selected, selectedAgentRecord, bindings],
+  );
+  // Record-id routes use one attached binding for configuration/actions, but
+  // only when that trigger identity is unambiguous. Multi-binding record routes
+  // stay aggregate and link to exact binding-id routes for trigger actions.
+  const recordBindings = useMemo(
+    () =>
+      selectedAgentRecord
+        ? bindings.filter(
+            (binding) =>
+              binding.target_agent_service_id?.trim() ===
+              selectedAgentRecord.id,
+          )
+        : [],
+    [bindings, selectedAgentRecord],
+  );
+  const selectedBinding = useMemo(
+    () =>
+      selectedAgentRecord
+        ? recordBindings.length === 1
+          ? recordBindings[0]
+          : undefined
+        : routeBinding,
+    [recordBindings, routeBinding, selectedAgentRecord],
   );
   const agentCapabilities = useMemo<AgentCapabilities>(() => {
+    if (selectedAgentRecord) {
+      return {
+        worktree: false,
+        pty: false,
+        runs: true,
+        config: true,
+      };
+    }
     if (selectedBinding) {
       return { worktree: false, pty: false, runs: true, config: true };
     }
@@ -203,12 +262,12 @@ function AgentsPageInner(): JSX.Element {
       return {
         worktree: hasWorktree,
         pty: isInteractiveAgent(selected),
-        runs: false,
+        runs: true,
         config: true,
       };
     }
     return { worktree: false, pty: false, runs: false, config: true };
-  }, [selected, selectedBinding]);
+  }, [selected, selectedAgentRecord, selectedBinding]);
   const agentTabs = useMemo(
     () => agentTabsForCapabilities(agentCapabilities),
     [agentCapabilities],
@@ -222,7 +281,11 @@ function AgentsPageInner(): JSX.Element {
   // While the URL points at an unknown name and bindings have not yet loaded,
   // hold the shell (don't flash the role terminal for a name that is a binding).
   const resolvingBinding =
-    !!agentName && !selected && !selectedBinding && !bindingsInitialized;
+    !!agentName &&
+    !selected &&
+    !selectedAgentRecord &&
+    !routeBinding &&
+    !bindingsInitialized;
 
   // Inline task-detail selection, restored per agent from scoped storage.
   const [selectedTask, setSelectedTask] = useState<Issue | null>(null);
@@ -467,7 +530,27 @@ function AgentsPageInner(): JSX.Element {
     (tab: AgentEditorTab, isActive: boolean) => {
       switch (tab) {
         case "runs":
-          if (!selectedBinding) {
+          if (selectedAgentRecord) {
+            return (
+              <AgentRecordRunsPane
+                workspaceId={workspaceId}
+                record={selectedAgentRecord}
+                bindings={recordBindings}
+                active={isActive}
+              />
+            );
+          }
+          if (selectedBinding) {
+            return (
+              <WorkflowAgentRunsPane
+                workspaceId={workspaceId}
+                binding={selectedBinding}
+                detail={workflowDetail}
+                active={isActive}
+              />
+            );
+          }
+          if (!selected) {
             return (
               <div className={styles.tabFallback}>
                 This agent has no run history.
@@ -475,10 +558,10 @@ function AgentsPageInner(): JSX.Element {
             );
           }
           return (
-            <WorkflowAgentRunsPane
+            <AgentSessionRunsPane
               workspaceId={workspaceId}
-              binding={selectedBinding}
-              detail={workflowDetail}
+              agentName={selected.name}
+              active={isActive}
             />
           );
         case "terminal":
@@ -501,6 +584,21 @@ function AgentsPageInner(): JSX.Element {
             </div>
           );
         case "info":
+          if (selectedAgentRecord && selectedBinding == null) {
+            return (
+              <AgentRecordInfoPane
+                record={selectedAgentRecord}
+                bindings={recordBindings}
+                onSelectBinding={(bindingId) =>
+                  navigate(
+                    `/ws/${encodeURIComponent(workspaceId)}/agents/${encodeURIComponent(bindingId)}`,
+                  )
+                }
+                onDelete={deleteRecord}
+                onDeleted={handleBindingDeleted}
+              />
+            );
+          }
           if (selectedBinding) {
             return (
               <WorkflowAgentInfoPane
@@ -673,11 +771,15 @@ function AgentsPageInner(): JSX.Element {
       workspaceId,
       pendingTerminalInput,
       selected,
+      selectedAgentRecord,
+      recordBindings,
       selectedBinding,
       workflowDetail,
       updateBinding,
       deleteBinding,
+      deleteRecord,
       handleBindingDeleted,
+      navigate,
       agentCapabilities.pty,
       agentCapabilities.worktree,
       selColor,
@@ -704,7 +806,25 @@ function AgentsPageInner(): JSX.Element {
     <div className={styles.page} data-testid="agents-page">
       {/* Main panel: Aether tab strip over the live agent surfaces */}
       <section className={styles.main} aria-label="Agent details">
-        {selectedBinding ? (
+        {selectedAgentRecord ? (
+          <>
+            <AgentRecordHeader
+              record={selectedAgentRecord}
+              bindings={recordBindings}
+            />
+            {selectedBinding ? (
+              <WorkflowAgentActionBar
+                binding={selectedBinding}
+                detail={workflowDetail}
+              />
+            ) : (
+              <AgentRecordActionBar
+                record={selectedAgentRecord}
+                onSetEnabled={setRecordEnabled}
+              />
+            )}
+          </>
+        ) : selectedBinding ? (
           <>
             <WorkflowAgentHeader
               binding={selectedBinding}
@@ -730,7 +850,7 @@ function AgentsPageInner(): JSX.Element {
       </section>
 
       {/* Right column: epic-runner Open Queue or inline task detail */}
-      {selectedBinding ? null : selectedTask ? (
+      {selectedBinding || selectedAgentRecord ? null : selectedTask ? (
         <div className={styles.inlineDetail} style={{ width: openQueueWidth }}>
           <PanelWidthResizeHandle
             width={openQueueWidth}

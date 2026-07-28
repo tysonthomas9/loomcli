@@ -12,7 +12,7 @@ import {
 } from "react";
 
 import styles from "./EditableDescription.module.css";
-import { MarkdownRenderer } from "./MarkdownRenderer";
+import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 
 export interface EditableDescriptionProps {
   /** Current description value */

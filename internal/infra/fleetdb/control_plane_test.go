@@ -3,6 +3,7 @@ package fleetdb
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -388,6 +389,82 @@ func TestControlPlaneClientArtifactReadContent(t *testing.T) {
 	}
 	if !bytes.Equal(got, body) {
 		t.Fatalf("body = %q, want %q", got, body)
+	}
+}
+
+func TestControlPlaneClientArtifactReadContentAboveGenericResponseLimit(t *testing.T) {
+	const bodySize = maxResponseBody + (1 << 20)
+	chunk := bytes.Repeat([]byte("x"), 32<<10)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/WS/artifacts/large-patch/content" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "text/x-diff")
+		remaining := bodySize
+		for remaining > 0 {
+			n := min(remaining, len(chunk))
+			if _, err := w.Write(chunk[:n]); err != nil {
+				return
+			}
+			remaining -= n
+		}
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.Artifacts().(store.ArtifactContentReader).
+		ReadContent(t.Context(), "WS", "large-patch")
+	if err != nil {
+		t.Fatalf("read content above generic limit: %v", err)
+	}
+	if len(got) != bodySize {
+		t.Fatalf("body length = %d, want %d", len(got), bodySize)
+	}
+	if got[0] != 'x' || got[len(got)-1] != 'x' {
+		t.Fatal("artifact content was corrupted")
+	}
+}
+
+func TestControlPlaneClientArtifactReadContentPreservesTypedFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		body       string
+		wantTarget error
+	}{
+		{
+			name:       "managed content missing",
+			status:     http.StatusNotFound,
+			body:       `{"error":{"code":"not_found","message":"content not found"}}`,
+			wantTarget: domain.ErrNotFound,
+		},
+		{
+			name:       "content store unavailable",
+			status:     http.StatusServiceUnavailable,
+			body:       `{"error":{"code":"internal_error","message":"content store unavailable"}}`,
+			wantTarget: store.ErrArtifactContentUnavailable,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer ts.Close()
+			client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Artifacts().(store.ArtifactContentReader).
+				ReadContent(t.Context(), "WS", "transcript-1")
+			if !errors.Is(err, tc.wantTarget) {
+				t.Fatalf("ReadContent() error = %v, want errors.Is(%v)", err, tc.wantTarget)
+			}
+		})
 	}
 }
 

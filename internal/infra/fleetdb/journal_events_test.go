@@ -42,7 +42,7 @@ func TestListIssueEvents(t *testing.T) {
 		assertEvents func(t *testing.T, events []store.JournalEvent)
 	}{
 		{
-			name:        "filter params, since/limit echo and after unwrap",
+			name:        "filter params, since/limit echo and snapshots unwrap",
 			afterCursor: "1707001234560-0",
 			limit:       50,
 			handler: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
@@ -64,8 +64,9 @@ func TestListIssueEvents(t *testing.T) {
 						"action":      "issue.opened",
 						"entity_type": "issue",
 						"entity_id":   "issue-42",
-						// fleet-db serializes the snapshot as a JSON STRING.
-						"after":    `{"number":42,"title":"bug"}`,
+						// fleet-db serializes snapshots as JSON STRINGS.
+						"before":   `{"number":42,"status":"open"}`,
+						"after":    `{"number":42,"title":"bug","status":"review"}`,
 						"metadata": map[string]string{"repo": "owner/repo"},
 					}},
 					"cursor":   "1707001234561-0",
@@ -80,7 +81,10 @@ func TestListIssueEvents(t *testing.T) {
 				if e.ID != "1707001234561-0" || e.Action != "issue.opened" || e.Actor != "octocat" || e.EntityID != "issue-42" {
 					t.Errorf("event projection = %+v", e)
 				}
-				if string(e.After) != `{"number":42,"title":"bug"}` {
+				if string(e.Before) != `{"number":42,"status":"open"}` {
+					t.Errorf("before unwrap = %s, want unwrapped JSON object", e.Before)
+				}
+				if string(e.After) != `{"number":42,"title":"bug","status":"review"}` {
 					t.Errorf("after unwrap = %s, want unwrapped JSON object", e.After)
 				}
 				if e.Metadata["repo"] != "owner/repo" {
@@ -154,7 +158,7 @@ func TestListIssueEvents(t *testing.T) {
 			wantHasMore: true,
 		},
 		{
-			name:        "malformed after JSON skipped, event retained",
+			name:        "malformed snapshots skipped, event retained",
 			afterCursor: "0",
 			limit:       10,
 			handler: func(t *testing.T, w http.ResponseWriter, r *http.Request) {
@@ -166,6 +170,7 @@ func TestListIssueEvents(t *testing.T) {
 							"action":      "issue.opened",
 							"entity_type": "issue",
 							"entity_id":   "issue-1",
+							"before":      `{also not json`,
 							"after":       `{not json`,
 						},
 						{
@@ -185,8 +190,14 @@ func TestListIssueEvents(t *testing.T) {
 			wantCursor:  "1707001234562-0",
 			wantHasMore: false,
 			assertEvents: func(t *testing.T, events []store.JournalEvent) {
+				if events[0].Before != nil {
+					t.Errorf("malformed before should be nil, got %s", events[0].Before)
+				}
 				if events[0].After != nil {
 					t.Errorf("malformed after should be nil, got %s", events[0].After)
+				}
+				if events[1].Before != nil {
+					t.Errorf("absent before should be nil, got %s", events[1].Before)
 				}
 				if events[1].After != nil {
 					t.Errorf("absent after should be nil, got %s", events[1].After)

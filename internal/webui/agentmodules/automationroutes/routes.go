@@ -26,6 +26,8 @@ type Deps struct {
 	AwaitResolver   store.AtomicAwaitStore
 	TriggerBindings store.TriggerBindingStore
 	ConnectorGrants store.ConnectorGrantStore
+	Agents          store.AgentStore
+	AgentServices   store.AgentServiceStore
 }
 
 // EventAwaitDispatcher is the shared post-admission await notification seam.
@@ -56,6 +58,7 @@ func New(deps Deps) Modules {
 		eventAwaits = trigger.NewAwaitMatcherWithResolver(deps.Awaits, deps.DriverRuns, deps.AwaitResolver)
 	}
 	connectorCompatibility := newStoreConnectorCompatibility(deps.TriggerBindings, deps.ConnectorGrants)
+	agentIdentityCompatibility := newStoreAgentIdentityCompatibility(deps.Agents, deps.AgentServices)
 
 	return Modules{
 		Webhooks: webhooks.New(webhooks.Config{
@@ -69,7 +72,7 @@ func New(deps Deps) Modules {
 			ManualDispatch:       deps.Capabilities.AutomationBindings,
 			OperatorAuthority:    deps.Capabilities.AutomationOperator,
 			WorkspaceFromContext: middleware.WorkspaceFromContext, Runs: deps.DriverRuns,
-			Connectors: connectorCompatibility,
+			Connectors: connectorCompatibility, AgentIdentities: agentIdentityCompatibility,
 		}),
 		EventAwaits:          eventAwaits,
 		BindingGrants:        connectorCompatibility,

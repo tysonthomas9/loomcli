@@ -13,7 +13,7 @@
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import "@testing-library/jest-dom";
 
 import { CreateAgentModal } from "../CreateAgentModal";
@@ -53,7 +53,8 @@ const mockUseBackends = vi.fn();
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
   useEnsureWorkspaceRole: () => mockEnsureRole,
-  useInteractivePrompts: () => mockUseInteractivePrompts(),
+  useInteractivePrompts: (...args: unknown[]) =>
+    mockUseInteractivePrompts(...args),
 }));
 vi.mock("@/api/agents", () => ({
   createPromptAgentRecord: (...args: unknown[]) =>
@@ -72,14 +73,14 @@ vi.mock("@/hooks/workspace", () => ({
     updateBinding: mockUpdateBinding,
     setEnabled: mockSetEnabled,
   }),
-  useBackends: () => mockUseBackends(),
+  useBackends: (...args: unknown[]) => mockUseBackends(...args),
   useConnectorProvisioning: () => ({
     preflightCredential: mockPreflightCredential,
     ensureConnector: mockEnsureConnector,
     addGrant: mockAddGrant,
     replaceGrants: mockReplaceGrants,
   }),
-  useLocalSettings: () => mockUseLocalSettings(),
+  useLocalSettings: (...args: unknown[]) => mockUseLocalSettings(...args),
 }));
 
 // ---------- Helpers ----------
@@ -154,9 +155,15 @@ function renderModal(
         onSuccess={onSuccess}
         {...overrides}
       />
+      <RouteProbe />
     </MemoryRouter>,
   );
   return { ...utils, onClose, onSuccess };
+}
+
+function RouteProbe(): JSX.Element {
+  const location = useLocation();
+  return <div data-testid="route-probe">{location.pathname}</div>;
 }
 
 function modalWithRouter(
@@ -274,6 +281,30 @@ describe("CreateAgentModal: open/close gate", () => {
       }),
     );
     expect(container.firstChild).toBeNull();
+  });
+
+  it("keeps sibling route content mounted and disables closed-modal reads", () => {
+    render(
+      <MemoryRouter initialEntries={["/ws/ws-1/agents"]}>
+        <CreateAgentModal
+          isOpen={false}
+          workspaceId="ws-1"
+          repos={repos}
+          onClose={vi.fn()}
+          onSuccess={vi.fn()}
+        />
+        <RouteProbe />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("dialog", { name: /new agent/i })).toBeNull();
+    expect(screen.getByTestId("route-probe")).toHaveTextContent(
+      "/ws/ws-1/agents",
+    );
+    expect(mockListWorkspaceRoles).not.toHaveBeenCalled();
+    expect(mockUseBackends).toHaveBeenCalledWith(false);
+    expect(mockUseLocalSettings).toHaveBeenCalledWith(false);
+    expect(mockUseInteractivePrompts).toHaveBeenCalledWith("ws-1", false);
   });
 
   it("renders the dialog when isOpen is true", () => {
@@ -413,6 +444,19 @@ describe("CreateAgentModal: default prop seeding", () => {
       },
       {
         workspace_key: "ws-1",
+        name: "documentation-review",
+        kind: "worker",
+        task_filter: "review",
+      },
+      {
+        workspace_key: "ws-1",
+        name: "read-only-documentation-review",
+        kind: "worker",
+        task_filter: "review",
+        read_only: true,
+      },
+      {
+        workspace_key: "ws-1",
         name: "bug-triage",
         kind: "worker",
         task_filter: "bug",
@@ -448,17 +492,21 @@ describe("CreateAgentModal: default prop seeding", () => {
             task_filter:
               name === "docs-worker"
                 ? "has_design"
-                : name === "bug-triage"
-                  ? "bug"
-                  : "any",
+                : name === "documentation-review"
+                  ? "review"
+                  : name === "bug-triage"
+                    ? "bug"
+                    : "any",
             read_only: name === "bug-triage",
           },
           prompt:
             name === "docs-worker"
               ? "Write documentation."
-              : name === "bug-triage"
-                ? "Triage the assigned bug."
-                : "",
+              : name === "documentation-review"
+                ? "Review and update documentation."
+                : name === "bug-triage"
+                  ? "Triage the assigned bug."
+                  : "",
         }),
     );
 
@@ -469,6 +517,15 @@ describe("CreateAgentModal: default prop seeding", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByTestId("create-agent-template-role-bug-triage"),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByTestId("create-agent-template-role-documentation-review"),
+    );
+    expect(
+      screen.queryByTestId("create-agent-role-trigger-select"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Runs when a task enters Review"),
     ).toBeInTheDocument();
     expect(
       screen.queryByTestId("create-agent-template-role-pr-review"),
@@ -486,9 +543,14 @@ describe("CreateAgentModal: default prop seeding", () => {
       screen.queryByTestId("create-agent-template-role-unsafe-bug-triage"),
     ).not.toBeInTheDocument();
     expect(
+      screen.queryByTestId(
+        "create-agent-template-role-read-only-documentation-review",
+      ),
+    ).not.toBeInTheDocument();
+    expect(
       screen.getByTestId("create-agent-template-interactive-pr-review"),
     ).toBeInTheDocument();
-    expect(mockGetWorkspaceRole).toHaveBeenCalledTimes(3);
+    expect(mockGetWorkspaceRole).toHaveBeenCalledTimes(4);
   });
 
   it.each([
@@ -582,7 +644,53 @@ describe("CreateAgentModal: default prop seeding", () => {
     );
   });
 
-  it("hides repository controls for interactive agents", () => {
+  it("submits a hydrated review role through its review trigger", async () => {
+    mockListWorkspaceRoles.mockResolvedValueOnce([
+      {
+        workspace_key: "ws-1",
+        name: "documentation",
+        kind: "worker",
+        task_filter: "review",
+      },
+    ]);
+    mockGetWorkspaceRole.mockResolvedValueOnce({
+      role: {
+        workspace_key: "ws-1",
+        name: "documentation",
+        kind: "worker",
+        task_filter: "review",
+      },
+      prompt: "Review and update documentation.",
+    });
+
+    renderModal({ defaultName: "docs-agent" });
+    fireEvent.click(
+      await screen.findByTestId("create-agent-template-role-documentation"),
+    );
+    expect(
+      screen.queryByTestId("create-agent-role-trigger-select"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Runs when a task enters Review"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
+
+    await waitFor(() =>
+      expect(mockCreatePromptAgentRecord).toHaveBeenCalledWith("ws-1", {
+        kind: "prompt",
+        name: "docs-agent",
+        backend: "codex",
+        behavior: { role_name: "documentation" },
+        trigger: {
+          source_kind: "internal",
+          event_type_patterns: ["internal.task.review"],
+        },
+        enabled: true,
+      }),
+    );
+  });
+
+  it("keeps repository controls visible for interactive agents", () => {
     renderModal();
     fireEvent.click(screen.getByTestId("create-agent-template-legacy-task"));
     expect(screen.getByTestId("create-agent-repo-chips")).toBeInTheDocument();
@@ -590,12 +698,14 @@ describe("CreateAgentModal: default prop seeding", () => {
     fireEvent.click(
       screen.getByTestId("create-agent-template-interactive-pr-review"),
     );
+    expect(screen.getByTestId("create-agent-repo-chips")).toBeInTheDocument();
     expect(
-      screen.queryByTestId("create-agent-repo-chips"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Repos", { selector: "#agent-repos-label" }),
-    ).not.toBeInTheDocument();
+      screen.getByText("Repos", { selector: "#agent-repos-label" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /alpha/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });
 
@@ -653,6 +763,13 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
     fireEvent.change(screen.getByTestId("create-agent-name"), {
       target: { value: "user-typed" },
     });
+    fireEvent.click(screen.getByTestId("create-agent-template-new-role"));
+    fireEvent.change(screen.getByTestId("create-agent-role-trigger-select"), {
+      target: { value: "review" },
+    });
+    expect(screen.getByTestId("create-agent-role-trigger-select")).toHaveValue(
+      "review",
+    );
     // Close.
     rerender(
       modalWithRouter({
@@ -677,6 +794,10 @@ describe("CreateAgentModal: state preservation across re-renders", () => {
     );
     expect(screen.getByTestId("create-agent-name")).toHaveValue(
       "second-default",
+    );
+    fireEvent.click(screen.getByTestId("create-agent-template-new-role"));
+    expect(screen.getByTestId("create-agent-role-trigger-select")).toHaveValue(
+      "ready",
     );
   });
 });
@@ -774,7 +895,10 @@ describe("CreateAgentModal: submission", () => {
       auto: true,
     });
     expect(mockCreatePromptAgentRecord).not.toHaveBeenCalled();
-    expect(onSuccess).toHaveBeenCalledWith(sampleAgent);
+    expect(onSuccess).toHaveBeenCalledWith({
+      ...sampleAgent,
+      kind: "worker",
+    });
   });
 
   it.each([
@@ -838,6 +962,121 @@ describe("CreateAgentModal: submission", () => {
     });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onSuccess).not.toHaveBeenCalled();
+    expect(screen.getByTestId("route-probe")).toHaveTextContent(
+      "/ws/ws-1/agents/agt-coder",
+    );
+  });
+
+  it("submits the Planner behavior card with its ready-task trigger", async () => {
+    renderModal({
+      defaultName: "planning-agent",
+      defaultBackend: "claude",
+    });
+    fireEvent.click(screen.getByTestId("create-agent-template-planner"));
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
+
+    await waitFor(() =>
+      expect(mockCreatePromptAgentRecord).toHaveBeenCalledTimes(1),
+    );
+    expect(mockCreatePromptAgentRecord).toHaveBeenCalledWith("ws-1", {
+      kind: "prompt",
+      name: "planning-agent",
+      backend: "claude",
+      behavior: { role_name: "plan" },
+      trigger: {
+        source_kind: "internal",
+        event_type_patterns: ["internal.task.ready"],
+      },
+      enabled: true,
+    });
+    expect(mockCreateAgent).not.toHaveBeenCalled();
+  });
+
+  it("submits + New role with the role definition in one transaction", async () => {
+    renderModal({
+      defaultName: "docs-agent",
+      defaultBackend: "codex",
+    });
+    fireEvent.click(screen.getByTestId("create-agent-template-new-role"));
+    expect(screen.getByTestId("create-agent-role-trigger-select")).toHaveValue(
+      "ready",
+    );
+    fireEvent.change(screen.getByTestId("create-agent-role-name"), {
+      target: { value: "Docs-Assistant" },
+    });
+    fireEvent.change(screen.getByTestId("create-agent-role-prompt"), {
+      target: { value: "Summarize the repository documentation." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
+
+    await waitFor(() =>
+      expect(mockCreatePromptAgentRecord).toHaveBeenCalledTimes(1),
+    );
+    expect(mockCreatePromptAgentRecord).toHaveBeenCalledWith("ws-1", {
+      kind: "prompt",
+      name: "docs-agent",
+      backend: "codex",
+      behavior: {
+        role_name: "docs-assistant",
+        role_create: {
+          prompt: "Summarize the repository documentation.",
+          prompt_filename: "docs-assistant.md",
+          task_filter: "has_design",
+          backend: "codex",
+        },
+      },
+      trigger: {
+        source_kind: "internal",
+        event_type_patterns: ["internal.task.ready"],
+      },
+      enabled: true,
+    });
+    expect(mockCreateAgent).not.toHaveBeenCalled();
+  });
+
+  it("submits + New role with the Review trigger", async () => {
+    renderModal({
+      defaultName: "documentation-agent",
+      defaultBackend: "codex",
+    });
+    expect(
+      screen.queryByTestId("create-agent-role-trigger-select"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("create-agent-template-new-role"));
+    fireEvent.change(screen.getByTestId("create-agent-role-trigger-select"), {
+      target: { value: "review" },
+    });
+    fireEvent.change(screen.getByTestId("create-agent-role-name"), {
+      target: { value: "Documentation" },
+    });
+    fireEvent.change(screen.getByTestId("create-agent-role-prompt"), {
+      target: { value: "Review and update the repository documentation." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /activate/i }));
+
+    await waitFor(() =>
+      expect(mockCreatePromptAgentRecord).toHaveBeenCalledTimes(1),
+    );
+    expect(mockCreatePromptAgentRecord).toHaveBeenCalledWith("ws-1", {
+      kind: "prompt",
+      name: "documentation-agent",
+      backend: "codex",
+      behavior: {
+        role_name: "documentation",
+        role_create: {
+          prompt: "Review and update the repository documentation.",
+          prompt_filename: "documentation.md",
+          task_filter: "review",
+          backend: "codex",
+        },
+      },
+      trigger: {
+        source_kind: "internal",
+        event_type_patterns: ["internal.task.review"],
+      },
+      enabled: true,
+    });
+    expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
   // (The "omit backend when empty" case is unreachable now that AI Backend is a
@@ -872,28 +1111,33 @@ describe("CreateAgentModal: submission", () => {
     });
   });
 
-  it("submits lead agent when Lead template is selected", async () => {
+  it("submits Lead with every explicitly selected repo", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "lead-nova" });
     fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+    fireEvent.click(screen.getByRole("button", { name: /beta/i }));
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
     await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
     expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
       name: "lead-nova",
       role_name: "lead",
       auto: false,
+      cross_repo: false,
+      repos: ["alpha", "beta"],
     });
     expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("kind");
     expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
   });
 
-  it("submits interactive agent with a built-in prompt", async () => {
+  it("submits PR Review with only the repos the user selected", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "review-nova" });
 
     fireEvent.click(
       screen.getByTestId("create-agent-template-interactive-pr-review"),
     );
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
+    fireEvent.click(screen.getByRole("button", { name: /beta/i }));
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
 
     await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
@@ -904,15 +1148,16 @@ describe("CreateAgentModal: submission", () => {
       prompt_file: "builtin:pr-review",
       auto: false,
       cross_repo: false,
-      repos: ["alpha"],
+      repos: ["beta"],
     });
   });
 
-  it("reveals a textarea and submits a custom inline prompt", async () => {
+  it("submits Custom with workspace scope when no repo is selected", async () => {
     mockCreateAgent.mockResolvedValueOnce(sampleAgent);
     renderModal({ defaultName: "custom-review" });
 
     fireEvent.click(screen.getByTestId("create-agent-template-custom-prompt"));
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
     const textarea = screen.getByTestId("create-agent-interactive-prompt");
     expect(textarea).toBeInTheDocument();
     fireEvent.change(textarea, {
@@ -927,8 +1172,8 @@ describe("CreateAgentModal: submission", () => {
       kind: "interactive",
       prompt: "Review literally: {{ marker }}",
       auto: false,
-      cross_repo: false,
-      repos: ["alpha"],
+      cross_repo: true,
+      repos: [],
     });
     expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
   });
@@ -1196,6 +1441,63 @@ describe("CreateAgentModal: submission", () => {
 // ---------- scripted workflow activation ----------
 
 describe("CreateAgentModal: scripted workflow activation", () => {
+  it("collapses multi-repo scope and keeps workflow selection exclusive", () => {
+    renderModal({ repos: workflowRepos });
+    fireEvent.click(
+      screen.getByTestId("create-agent-template-interactive-pr-review"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /beta/i }));
+    expect(screen.getByRole("button", { name: /alpha/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /beta/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(screen.getByTestId("create-agent-template-local-review"));
+    expect(screen.getByRole("button", { name: /alpha/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /beta/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /beta/i }));
+    expect(screen.getByRole("button", { name: /alpha/i })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: /beta/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("rejects a workflow without exactly one target before any mutation", async () => {
+    renderModal({
+      defaultName: "local-review",
+      repos: workflowRepos,
+    });
+    fireEvent.click(screen.getByTestId("create-agent-template-local-review"));
+    fireEvent.click(screen.getByRole("button", { name: /alpha/i }));
+
+    expect(screen.getByTestId("create-agent-submit")).toBeDisabled();
+    fireEvent.submit(document.getElementById("create-agent-form")!);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Select exactly one target repo for this workflow.",
+    );
+    expect(mockCreateBinding).not.toHaveBeenCalled();
+    expect(mockUpdateBinding).not.toHaveBeenCalled();
+    expect(mockSetEnabled).not.toHaveBeenCalled();
+    expect(mockEnsureConnector).not.toHaveBeenCalled();
+    expect(mockReplaceGrants).not.toHaveBeenCalled();
+  });
+
   it("checks bug-fix workspace backend health without pinning a backend in run input", async () => {
     renderModal({
       defaultName: "bug-fix",

@@ -47,23 +47,33 @@ func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 		"resolveRolePhase(resolved)",
 		`errorClass: "prompt_agent_unsupported_task_filter"`,
 		`return { supported: true, taskFilter: "has_design", rawTaskFilter };`,
+		`rawTaskFilter === "review"`,
 		`if (rawTaskFilter === "bug") {`,
 		`errorClass: "prompt_agent_bug_filter_requires_read_only"`,
+		`errorClass: "prompt_agent_review_filter_requires_mutating_role"`,
 		`errorClass: "prompt_agent_bug_filter_card_read_failed"`,
 		"issueTypeAllowsBug",
 		// GAP B: targeted claim-by-id, plus filterless pickup retained.
 		"loom.tasks.claim({ taskId: targetId, actor })",
 		"loom.tasks.claimReady({ actor, limit: 1 })",
+		"loom.tasks.claimReview({ taskId: targetId })",
+		"loom.tasks.releaseReview({ taskId: issueId })",
+		`errorClass: "prompt_agent_repository_block_not_applied"`,
+		`errorClass: "prompt_agent_review_external_ref_unsupported"`,
+		"parseLocalBranchExternalRef",
 		// A conflict from claim-by-id means the target is not claimable.
 		"isConflictError(e)",
 		// GAP A: dispatches the builtin runner by name.
 		`runner: "local-task-runner"`,
 		`taskPrompt: prompt`,
+		"requestInput.requireLocalBranchDelivery = true",
+		"requestInput.localBranchName = reviewBranchResume.branch",
+		"requestInput.localBranchBaseRef = reviewBranchResume.headSha",
 		// A lost TaskRun response is not proof that enqueue failed; only a
 		// certified pre-commit rejection may unclaim the Work Item. A 409 is a
 		// real conflict because exact durable replay resolves before this layer.
 		"if (!isAmbiguousTaskRunRequestError(e)) {",
-		`await releaseClaimAfterError(loom, issueId, "request the TaskRun", e)`,
+		`await releaseClaimAfterError(loom, issueId, "request the TaskRun", e, isReview)`,
 		// Event payloads are an early spend gate, not authoritative after claim;
 		// every role rechecks the current card before dispatch.
 		"if (isGatingFilter(taskFilter)) {",
@@ -77,6 +87,10 @@ func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 		// claimed by a DriverRun whose typed generation was retired.
 		`loom.issues.update({ issueId, status: "open", assignee: "" })`,
 		`errorClass: "prompt_agent_terminal_handoff_failed"`,
+		`errorClass: "prompt_agent_review_handoff_failed"`,
+		`errorClass: "prompt_agent_review_delivery_invalid"`,
+		"handoff.externalRef = externalRef",
+		`outcome: "review-role-review"`,
 		// A needs-revision card belongs exclusively to the planner even when it
 		// still carries an older design.
 		`if (taskFilter === "has_design") return hasDesign === true && !hasRevision;`,
@@ -86,7 +100,7 @@ func TestPromptAgentWorkflowSourceContract(t *testing.T) {
 		}
 	}
 	bugRead := strings.Index(source, "currentCard = (await loom.issues.get({ issueId: targetId }))")
-	targetClaim := strings.Index(source, "const claimed = await claimTargetTask(loom, actor, targetId)")
+	targetClaim := strings.Index(source, ": await claimTargetTask(loom, actor, targetId)")
 	if bugRead < 0 || targetClaim < 0 || bugRead >= targetClaim {
 		t.Fatal("bug-filtered prompt-agent must read and verify the current card before claiming")
 	}

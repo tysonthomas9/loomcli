@@ -1334,6 +1334,65 @@ func TestFinishFlueTaskSessionFinalizesAfterCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestFinishFlueTaskSessionPreservesHostOwnedIdentityMetadata(t *testing.T) {
+	ctx := t.Context()
+	st := memstore.New()
+	req := TaskExecRequest{
+		WorkspaceKey: "WS",
+		TaskID:       "TASK-1",
+		TaskRunID:    "task-run-1",
+		DriverRunID:  "driver-run-1",
+		Runner:       "prompt-agent",
+		RunnerKind:   RunnerKindFlueWorkflow,
+	}
+	sessionID := flueTaskSessionID(req)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: "WS",
+		SessionID:    sessionID,
+		AgentID:      "task-agent",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       req.TaskID,
+		Status:       domain.AgentSessionRunning,
+		Metadata:     flueTaskSessionMetadata(req, sessionID),
+	}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	err := (HostBridgeTaskExecutor{Store: st}).finishFlueTaskSession(
+		ctx,
+		req,
+		&flueTaskSession{SessionID: sessionID, Metadata: flueTaskSessionMetadata(req, sessionID)},
+		TaskExecResult{
+			Status: domain.TaskRunCompleted,
+			RuntimeMetadata: map[string]string{
+				"task_id":       "TASK-OTHER",
+				"task_run_id":   "task-run-other",
+				"driver_run_id": "driver-run-other",
+				"runner":        "forged-runner",
+				"custom":        "retained",
+			},
+		},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("finish session: %v", err)
+	}
+	final, err := st.AgentSessions().Get(ctx, "WS", sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if final.Metadata["task_id"] != req.TaskID ||
+		final.Metadata["task_run_id"] != req.TaskRunID ||
+		final.Metadata["driver_run_id"] != req.DriverRunID ||
+		final.Metadata["runner"] != req.Runner {
+		t.Fatalf("host-owned metadata was overwritten: %+v", final.Metadata)
+	}
+	if final.Metadata["custom"] != "retained" {
+		t.Fatalf("ordinary runtime metadata = %+v, want custom field retained", final.Metadata)
+	}
+}
+
 type taskHeartbeatTestStore struct {
 	store.Store
 	sessions store.AgentSessionStore

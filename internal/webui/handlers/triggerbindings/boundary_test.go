@@ -94,6 +94,12 @@ type connectorCompatibilityStub struct {
 	revoke    func(context.Context, string, string) (int, error)
 }
 
+type allowUnattachedBindingIdentity struct{}
+
+func (allowUnattachedBindingIdentity) CheckUnattachedBindingID(context.Context, string, string) error {
+	return nil
+}
+
 type unexpectedWorkflowTargetPreparer struct{}
 
 func (unexpectedWorkflowTargetPreparer) PrepareWorkflowTarget(context.Context, string, string) (workflowbinding.WorkflowTarget, error) {
@@ -124,6 +130,7 @@ func registerBoundaryModule(api *stubBindingAPI, resolver workflowcataloghttp.Op
 		CreateWorkflow: createWorkflow,
 		Commands:       api, Queries: api, ManualDispatch: api, OperatorAuthority: resolver,
 		WorkspaceFromContext: func(context.Context) string { return "CANONICAL" }, Connectors: connectors,
+		AgentIdentities: allowUnattachedBindingIdentity{},
 	}).Register(mux)
 	return mux
 }

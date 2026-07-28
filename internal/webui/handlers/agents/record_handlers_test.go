@@ -121,6 +121,21 @@ func TestUnifiedLegacyBindingFallbackSupportsDetailRenameAndDelete(t *testing.T)
 		t.Fatalf("legacy GET = %+v", got)
 	}
 
+	rec = doAgentRequest(
+		t,
+		mux,
+		http.MethodPatch,
+		"/api/workspaces/WS/agents/legacy-review",
+		`{"name":"Must not persist","backend":"claude"}`,
+	)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("legacy foreign-kind PATCH status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+	unchanged, err := st.TriggerBindings().Get(ctx, agentRecordTestWS, "legacy-review")
+	if err != nil || unchanged.Name != "Legacy review" {
+		t.Fatalf("legacy foreign-kind PATCH mutated binding = %+v err=%v", unchanged, err)
+	}
+
 	rec = doAgentRequest(t, mux, http.MethodPatch, "/api/workspaces/WS/agents/legacy-review", `{"name":"Renamed review"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("legacy PATCH status = %d body=%s", rec.Code, rec.Body.String())
@@ -392,6 +407,37 @@ func TestPromptAgentCreateTransactionCreatesRecordBindingAndRole(t *testing.T) {
 	}
 }
 
+func TestPromptAgentCreateTransactionAcceptsReviewRoleAndDedicatedTrigger(t *testing.T) {
+	st := newAgentRecordStore(t)
+	body := `{
+		"kind":"prompt",
+		"name":"Documentation agent",
+		"backend":"codex",
+		"behavior":{"role_name":"documentation","role_create":{
+			"prompt":"Update repository documentation for the task under review.",
+			"prompt_filename":"documentation.md",
+			"task_filter":"review"
+		}},
+		"trigger":{"source_kind":"internal","event_type_patterns":["internal.task.review"]},
+		"enabled":true
+	}`
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodPost, "/api/workspaces/WS/agents", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST /agents status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created agentRecordDTO
+	decodeJSON(t, rec.Body.Bytes(), &created)
+	if len(created.Bindings) != 1 ||
+		len(created.Bindings[0].EventTypePatterns) != 1 ||
+		created.Bindings[0].EventTypePatterns[0] != "internal.task.review" {
+		t.Fatalf("created bindings = %+v, want dedicated internal.task.review", created.Bindings)
+	}
+	role, err := st.Roles().Get(context.Background(), agentRecordTestWS, "documentation")
+	if err != nil || role.TaskFilter != "review" {
+		t.Fatalf("ensured review role = %+v err=%v", role, err)
+	}
+}
+
 func TestPromptAgentCreateAcceptsReadOnlyBugFilter(t *testing.T) {
 	st := newAgentRecordStore(t)
 	body := `{
@@ -454,6 +500,12 @@ func TestPromptAgentCreateRejectsUnreadyRoleBeforeAgentArtifacts(t *testing.T) {
 			name:       "new mutating bug-filter role",
 			body:       `{"kind":"prompt","name":"Unsafe triage","behavior":{"role_name":"docs-assistant","role_create":{"prompt":"Triage bugs.","task_filter":"bug","read_only":false}},"trigger":{"source_kind":"internal"},"enabled":true}`,
 			wantError:  "read_only=true",
+			wantNoRole: true,
+		},
+		{
+			name:       "new read-only review role",
+			body:       `{"kind":"prompt","name":"Unrunnable docs audit","behavior":{"role_name":"docs-assistant","role_create":{"prompt":"Audit docs.","task_filter":"review","read_only":true}},"trigger":{"source_kind":"internal","event_type_patterns":["internal.task.review"]},"enabled":true}`,
+			wantError:  "read_only=false",
 			wantNoRole: true,
 		},
 	}
@@ -907,6 +959,113 @@ func TestAgentRunsNewestFirstAndExcludesUnattributedRuns(t *testing.T) {
 	decodeJSON(t, rec.Body.Bytes(), &out)
 	if len(out.Runs) != 2 || out.Runs[0].RunID != "run-new" || out.Runs[1].RunID != "run-old" {
 		t.Fatalf("archived runs = %+v, want durable run-new then run-old", out.Runs)
+	}
+}
+
+func TestAgentRunsReturnsSupervisedSessionsNewestFirst(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+		WorkspaceKey: agentRecordTestWS,
+		Name:         "falcon",
+		RoleName:     "task",
+		Backend:      "codex",
+	}); err != nil {
+		t.Fatalf("create supervised agent: %v", err)
+	}
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: agentRecordTestWS,
+		SessionID:    "session-old",
+		AgentID:      "falcon",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-1",
+		Status:       domain.AgentSessionCompleted,
+	}); err != nil {
+		t.Fatalf("create old session: %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
+		WorkspaceKey: agentRecordTestWS,
+		SessionID:    "session-new",
+		AgentID:      "falcon",
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       "TASK-2",
+		Status:       domain.AgentSessionRunning,
+		Metadata: map[string]string{
+			"backend":         "codex",
+			"transcript_path": "/tmp/private-session.jsonl",
+		},
+	}); err != nil {
+		t.Fatalf("create new session: %v", err)
+	}
+
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodGet, "/api/workspaces/WS/agents/falcon/runs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("supervised runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var out agentRunsResponse
+	decodeJSON(t, rec.Body.Bytes(), &out)
+	if out.AgentID != "falcon" || len(out.Runs) != 0 {
+		t.Fatalf("supervised history envelope = %+v", out)
+	}
+	if len(out.Sessions) != 2 || out.Sessions[0].SessionID != "session-new" || out.Sessions[1].SessionID != "session-old" {
+		t.Fatalf("supervised sessions = %+v, want newest then oldest", out.Sessions)
+	}
+	if out.Sessions[0].StartedAt != nil {
+		t.Fatalf("zero started_at must be omitted, got %v", out.Sessions[0].StartedAt)
+	}
+	if len(out.Sessions[0].Metadata) != 1 || out.Sessions[0].Metadata["backend"] != "codex" {
+		t.Fatalf("public session metadata = %#v, want backend only", out.Sessions[0].Metadata)
+	}
+	if strings.Contains(rec.Body.String(), "private-session") || strings.Contains(rec.Body.String(), "transcript_path") {
+		t.Fatalf("agent history leaked internal metadata: %s", rec.Body.String())
+	}
+
+	rec = doAgentRequest(t, newAgentsMux(st), http.MethodGet, "/api/workspaces/WS/agents/falcon/runs?limit=1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("limited supervised runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	out = agentRunsResponse{}
+	decodeJSON(t, rec.Body.Bytes(), &out)
+	if len(out.Sessions) != 1 || out.Sessions[0].SessionID != "session-new" {
+		t.Fatalf("limited supervised sessions = %+v", out.Sessions)
+	}
+}
+
+func TestAgentRunsReturnsLegacyBindingRuns(t *testing.T) {
+	st := newAgentRecordStore(t)
+	ctx := context.Background()
+	seedDriverVersion(t, st, "legacy-driver", "legacy-version")
+	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
+		WorkspaceKey:    agentRecordTestWS,
+		BindingID:       "legacy-review",
+		Name:            "Legacy review",
+		SourceKind:      store.CronSourceKind,
+		DriverID:        "legacy-driver",
+		DriverVersionID: "legacy-version",
+		Schedule:        "*/10 * * * *",
+		Enabled:         true,
+	}); err != nil {
+		t.Fatalf("create legacy binding: %v", err)
+	}
+	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
+		WorkspaceKey:     agentRecordTestWS,
+		RunID:            "legacy-run",
+		DriverID:         "legacy-driver",
+		DriverVersionID:  "legacy-version",
+		TriggerBindingID: "legacy-review",
+	}); err != nil {
+		t.Fatalf("create legacy run: %v", err)
+	}
+
+	rec := doAgentRequest(t, newAgentsMux(st), http.MethodGet, "/api/workspaces/WS/agents/legacy-review/runs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("legacy binding runs status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var out agentRunsResponse
+	decodeJSON(t, rec.Body.Bytes(), &out)
+	if out.AgentID != "legacy-review" || len(out.Sessions) != 0 || len(out.Runs) != 1 || out.Runs[0].RunID != "legacy-run" {
+		t.Fatalf("legacy binding history = %+v", out)
 	}
 }
 

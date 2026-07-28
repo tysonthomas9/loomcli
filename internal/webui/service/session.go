@@ -40,6 +40,14 @@ type SessionService interface {
 	GetSessionScrollback(ctx context.Context, wsID, issueID, recordID string) (*SessionScrollbackResult, error)
 }
 
+// AgentSessionTranscriptService is the narrow read port used by the unified
+// agent history surface. Interactive sessions are not necessarily task-owned,
+// so their transcript authorization is the {workspace, agent, session}
+// relationship recorded by AgentSession.
+type AgentSessionTranscriptService interface {
+	GetAgentSessionTranscript(ctx context.Context, wsID, agentID, sessionID string) ([]transcript.Event, error)
+}
+
 // SessionListItem extends a session record with computed UI fields.
 type SessionListItem struct {
 	sessions.SessionRecord

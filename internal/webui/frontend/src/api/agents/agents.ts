@@ -23,6 +23,8 @@ import {
   post,
   wsUrl,
 } from "@/api/common";
+import type { WorkflowRun } from "@/api/workflows";
+import type { components } from "@/types/generated/openapi";
 
 function monitorPath(path: string, workspaceId?: string): string {
   if (!workspaceId) return path;
@@ -282,15 +284,7 @@ export interface AgentRecordBehavior {
   driver_version_id?: string;
 }
 
-export interface AgentRecordBinding {
-  binding_id: string;
-  name?: string;
-  source_kind?: string;
-  event_type_patterns?: string[];
-  schedule?: string;
-  schedule_timezone?: string;
-  enabled?: boolean;
-}
+export type AgentRecordBinding = components["schemas"]["AgentRecordBinding"];
 
 export interface AgentRecord {
   id: string;
@@ -300,12 +294,22 @@ export interface AgentRecord {
   behavior: AgentRecordBehavior;
   workspace_key: string;
   bindings?: AgentRecordBinding[];
+  budget_policy?: string;
+  last_run_status?: string;
+  consecutive_failures?: number;
+  next_fire_at?: string;
+  metadata?: Record<string, string>;
   created_at?: string;
   updated_at?: string;
 }
 
-/** Identity fields shared by prompt/scripted records in the unified list. */
-export type AgentRecordSummary = Pick<AgentRecord, "id" | "name" | "kind">;
+/**
+ * Prompt/scripted records in the unified list already carry their complete
+ * record state. Keep that state instead of reducing the response to identity
+ * fields: record routes and orphan recovery cannot infer desired state,
+ * behavior, or aggregate health from a trigger binding that may not exist.
+ */
+export type AgentRecordSummary = AgentRecord;
 
 export interface PromptRoleCreateInput {
   prompt?: string;
@@ -342,10 +346,11 @@ export interface CreatePromptAgentRecordRequest {
 /** Mutable fields on a durable prompt/scripted AgentService record. */
 export interface UpdateAgentRecordRequest {
   name?: string;
-  behavior?: {
-    role_name?: string;
-  };
   budget_policy?: string;
+  /** Exact attached managed binding whose cron configuration is changing. */
+  binding_id?: string;
+  schedule?: string;
+  schedule_timezone?: string;
 }
 
 /** Result of archiving an AgentService and deleting all attached bindings. */
@@ -355,6 +360,15 @@ export interface DeleteAgentRecordResult {
   bindings_deleted: number;
   grants_revoked: number;
 }
+
+export type AgentHistorySession = components["schemas"]["AgentHistorySession"];
+export type AgentHistorySessionStatus = AgentHistorySession["status"];
+export type AgentRunsResponse = Omit<
+  components["schemas"]["AgentRunsResponse"],
+  "runs"
+> & {
+  runs: WorkflowRun[];
+};
 
 interface UnifiedAgentListResponse {
   success: boolean;
@@ -481,6 +495,23 @@ export async function listAgentRecords(
   );
   return (response.data ?? []).filter(
     (item) => item.kind === "prompt" || item.kind === "scripted",
+  );
+}
+
+/** List one agent's durable workflow runs or supervised session history. */
+export async function listAgentRuns(
+  workspaceId: string,
+  agentId: string,
+  opts?: { limit?: number },
+): Promise<AgentRunsResponse> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  const query = params.toString();
+  return get<AgentRunsResponse>(
+    wsUrl(
+      workspaceId,
+      `/agents/${encodeURIComponent(agentId)}/runs${query ? `?${query}` : ""}`,
+    ),
   );
 }
 

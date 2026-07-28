@@ -2,6 +2,8 @@ package fleetdb
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/url"
 	"strconv"
 	"time"
@@ -403,7 +405,14 @@ func (s *artifactStore) UploadContent(ctx context.Context, ws, artifactID string
 }
 
 func (s *artifactStore) ReadContent(ctx context.Context, ws, artifactID string) ([]byte, error) {
-	return s.client.doBytes(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID)+"/content")
+	content, err := s.client.doBytes(ctx, "GET", "/api/v1/"+pathEscape(ws)+"/artifacts/"+pathEscape(artifactID)+"/content")
+	if errors.Is(err, ErrArtifactsUnavailable) {
+		return nil, fmt.Errorf(
+			"read artifact content: %w",
+			errors.Join(store.ErrArtifactContentUnavailable, err),
+		)
+	}
+	return content, err
 }
 
 func (s *artifactStore) Finalize(ctx context.Context, ws, artifactID string, finalize store.ArtifactFinalize) (*domain.Artifact, error) {

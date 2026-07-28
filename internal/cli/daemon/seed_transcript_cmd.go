@@ -86,6 +86,7 @@ func runDaemonSeedTranscript(_ *cobra.Command, _ []string) error {
 		finalized, uerr := store.UploadContentArtifact(ctx, h.Store.Artifacts(), store.ArtifactCreate{
 			WorkspaceKey:  ws,
 			ArtifactID:    "transcript-" + seedTranscriptSession,
+			AgentID:       "distributed-smoke-seed",
 			SessionID:     seedTranscriptSession,
 			TaskID:        seedTranscriptTask,
 			OwnerType:     "session", // fleet-db's valid session-owned artifact owner type

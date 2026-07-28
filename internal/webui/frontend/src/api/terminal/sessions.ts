@@ -5,7 +5,24 @@
 
 import type { SessionRecord, TranscriptEntry } from "@/types/agent";
 
-import { api, ApiError, apiErrorFromResponse } from "@/api/common";
+import { api, ApiError, apiErrorFromResponse, get, wsUrl } from "@/api/common";
+
+interface TranscriptResponse {
+  success: boolean;
+  data?: {
+    session_id?: string;
+    entries?: TranscriptEntry[] | null;
+  } | null;
+}
+
+export interface TranscriptFetchOptions {
+  /**
+   * Preserve a 404 so polling hooks can distinguish a transcript that is not
+   * projected/available from a valid transcript containing zero entries.
+   * Existing direct API callers retain the historical empty-array behavior.
+   */
+  preserveNotFound?: boolean;
+}
 
 /**
  * Fetch all sessions for a task.
@@ -67,6 +84,7 @@ export async function getSessionTranscript(
   workspaceId: string,
   taskId: string,
   sessionId: string,
+  options: TranscriptFetchOptions = {},
 ): Promise<TranscriptEntry[]> {
   try {
     const { data, error, response } = await api.GET(
@@ -78,7 +96,44 @@ export async function getSessionTranscript(
     if (error) throw apiErrorFromResponse(error, response);
     return (data!.data?.entries ?? []) as unknown as TranscriptEntry[];
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) {
+    if (
+      err instanceof ApiError &&
+      err.status === 404 &&
+      !options.preserveNotFound
+    ) {
+      return [];
+    }
+    throw err;
+  }
+}
+
+/**
+ * Fetch a transcript by agent-session ownership rather than task ownership.
+ *
+ * Interactive terminal sessions are not task-scoped, so they cannot use the
+ * task session route above. The response intentionally shares the canonical
+ * transcript envelope with that route.
+ */
+export async function getAgentSessionTranscript(
+  workspaceId: string,
+  agentId: string,
+  sessionId: string,
+  options: TranscriptFetchOptions = {},
+): Promise<TranscriptEntry[]> {
+  try {
+    const response = await get<TranscriptResponse>(
+      wsUrl(
+        workspaceId,
+        `/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/transcript`,
+      ),
+    );
+    return response.data?.entries ?? [];
+  } catch (err) {
+    if (
+      err instanceof ApiError &&
+      err.status === 404 &&
+      !options.preserveNotFound
+    ) {
       return [];
     }
     throw err;

@@ -12,6 +12,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
+const driverRunReviewWorkItemMaxExternalRefBytes = 512
+
 func (service *Service) HandoffDriverRunReviewWorkItem(
 	ctx context.Context,
 	auth authority.ExecutionAuthority,
@@ -46,6 +48,10 @@ func normalizeDriverRunReviewHandoffCommand(
 	command.TargetStatus = strings.TrimSpace(command.TargetStatus)
 	command.Reason = strings.TrimSpace(command.Reason)
 	command.Labels = normalizeDriverRunReviewHandoffLabels(command.Labels)
+	if command.ExternalRef != nil {
+		externalRef := strings.TrimSpace(*command.ExternalRef)
+		command.ExternalRef = &externalRef
+	}
 	return command
 }
 
@@ -91,14 +97,18 @@ func validDriverRunReviewHandoffResult(
 
 func validDriverRunReviewHandoffAnnotations(command HandoffDriverRunReviewWorkItemCommand) bool {
 	if command.TargetStatus != DriverRunWorkItemRestoreReview {
-		return command.Priority == nil && len(command.Labels) == 0 && strings.TrimSpace(command.CommentBody) == ""
+		return command.Priority == nil &&
+			len(command.Labels) == 0 &&
+			strings.TrimSpace(command.CommentBody) == "" &&
+			command.ExternalRef == nil
 	}
 	if command.Priority == nil ||
 		*command.Priority < DriverRunReviewWorkItemPriorityMin ||
 		*command.Priority > DriverRunReviewWorkItemPriorityMax ||
 		strings.TrimSpace(command.CommentBody) == "" ||
 		len(command.CommentBody) > DriverRunReviewWorkItemMaxCommentBytes ||
-		len(command.Labels) > DriverRunReviewWorkItemMaxLabels {
+		len(command.Labels) > DriverRunReviewWorkItemMaxLabels ||
+		(command.ExternalRef != nil && !validDriverRunReviewExternalRef(*command.ExternalRef)) {
 		return false
 	}
 	for _, label := range command.Labels {
@@ -134,8 +144,66 @@ func validDriverRunReviewHandoffWorkItem(
 	if command.Priority == nil || workItem.Priority != *command.Priority {
 		return false
 	}
+	if command.ExternalRef != nil && workItem.ExternalRef != *command.ExternalRef {
+		return false
+	}
 	for _, label := range command.Labels {
 		if !slices.Contains(workItem.Labels, label) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDriverRunReviewExternalRef(externalRef string) bool {
+	if externalRef != strings.TrimSpace(externalRef) ||
+		!utf8.ValidString(externalRef) ||
+		len(externalRef) > driverRunReviewWorkItemMaxExternalRefBytes ||
+		!strings.HasPrefix(externalRef, "local-branch:") {
+		return false
+	}
+	value := strings.TrimPrefix(externalRef, "local-branch:")
+	separator := strings.LastIndex(value, "@")
+	if separator <= 0 {
+		return false
+	}
+	branch, head := value[:separator], value[separator+1:]
+	return validDriverRunReviewBranch(branch) &&
+		validDriverRunReviewCommit(head)
+}
+
+func validDriverRunReviewBranch(branch string) bool {
+	if branch == "@" ||
+		strings.HasPrefix(branch, "-") ||
+		strings.HasPrefix(branch, "/") ||
+		strings.HasSuffix(branch, "/") ||
+		strings.HasPrefix(branch, ".") ||
+		strings.HasSuffix(branch, ".") ||
+		strings.HasSuffix(branch, ".lock") ||
+		strings.Contains(branch, "..") ||
+		strings.Contains(branch, "//") ||
+		strings.Contains(branch, "@{") ||
+		strings.TrimSpace(branch) != branch ||
+		strings.IndexFunc(branch, func(r rune) bool {
+			return unicode.IsControl(r) || unicode.IsSpace(r) ||
+				strings.ContainsRune(`~^:?*[\`, r)
+		}) >= 0 {
+		return false
+	}
+	for _, component := range strings.Split(branch, "/") {
+		if strings.HasPrefix(component, ".") || strings.HasSuffix(component, ".lock") {
+			return false
+		}
+	}
+	return true
+}
+
+func validDriverRunReviewCommit(head string) bool {
+	if len(head) != 40 {
+		return false
+	}
+	for _, char := range head {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
 			return false
 		}
 	}
