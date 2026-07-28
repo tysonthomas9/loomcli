@@ -338,6 +338,33 @@ func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycl
 			}
 		}
 	}
+	// The re-arm is only real if the previous stage can claim the task again,
+	// and claiming requires `open` (task_router rejects anything else as "not
+	// open"). A stage that finished in any other state would otherwise strand
+	// the loop: labels correct, nothing able to act on them.
+	//
+	// What the cycle must NOT do is override a decision somebody made
+	// deliberately. In loom that means `closed` and `blocked`: closed is
+	// terminal, and blocked is how a stage escalates to a human. Everything
+	// else — `review` included — is just where a stage happened to finish, and
+	// is fair game to advance.
+	//
+	// `review` specifically is NOT treated as a gate here, which is a departure
+	// from the design this is modeled on. There a reviewer *elects* `review` to
+	// escalate, so it is a deliberate gesture; in loom a planning stage lands
+	// there as its ordinary completion, so honoring it would stall every loop
+	// at round one. Use `blocked` to stop a loop for a human.
+	if issue.Status == "closed" || issue.Status == "blocked" {
+		slog.InfoContext(ctx, "review cycle stopped: task is not available to re-arm",
+			"task", taskID, "round", completed, "status", issue.Status)
+		return nil
+	}
+	if issue.Status != "open" {
+		open := "open"
+		if err := s.IssueBackend.Update(ctx, taskID, backend.UpdateParams{Status: &open}); err != nil {
+			return fmt.Errorf("reopen for the next round: %w", err)
+		}
+	}
 	slog.InfoContext(ctx, "review cycle re-armed",
 		"task", taskID, "round", completed, "threshold", cycle.Threshold, "rearmed", cycle.RearmLabel)
 	return nil

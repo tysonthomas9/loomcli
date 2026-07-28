@@ -144,3 +144,59 @@ func TestAdvanceReviewCycle_RearmFailureFailsTheRun(t *testing.T) {
 		t.Errorf("error should name the re-arm: %v", err)
 	}
 }
+
+// The re-arm must leave the task claimable, or the loop stalls with correct
+// labels and nothing able to act on them: task_router rejects anything not
+// `open`. A planning stage routinely finishes at `review`, so that state has to
+// advance rather than gate.
+func TestAdvanceReviewCycle_ReopensSoThePreviousStageCanClaim(t *testing.T) {
+	for _, status := range []string{"review", "in_progress"} {
+		t.Run(status, func(t *testing.T) {
+			var updated string
+			m := clitest.NewMockIssueBackend()
+			m.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+				return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: status, Labels: []string{"criticized"}}}, nil
+			}
+			m.UpdateFn = func(_ context.Context, _ string, p backend.UpdateParams) error {
+				if p.Status != nil {
+					updated = *p.Status
+				}
+				return nil
+			}
+			s := &Supervisor{IssueBackend: m}
+
+			if err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3)); err != nil {
+				t.Fatalf("advanceReviewCycle: %v", err)
+			}
+			if updated != "open" {
+				t.Errorf("status after re-arm = %q, want open so the previous stage can claim", updated)
+			}
+		})
+	}
+}
+
+// closed and blocked are decisions somebody made: closed is terminal, blocked is
+// how a stage escalates to a human. The loop must not drag a task out of either.
+func TestAdvanceReviewCycle_DoesNotOverrideADeliberateStop(t *testing.T) {
+	for _, status := range []string{"closed", "blocked"} {
+		t.Run(status, func(t *testing.T) {
+			touched := false
+			m := clitest.NewMockIssueBackend()
+			m.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+				return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: status, Labels: []string{"criticized"}}}, nil
+			}
+			m.UpdateFn = func(_ context.Context, _ string, _ backend.UpdateParams) error {
+				touched = true
+				return nil
+			}
+			s := &Supervisor{IssueBackend: m}
+
+			if err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3)); err != nil {
+				t.Fatalf("advanceReviewCycle: %v", err)
+			}
+			if touched {
+				t.Errorf("a %s task must not be reopened by the loop", status)
+			}
+		})
+	}
+}
