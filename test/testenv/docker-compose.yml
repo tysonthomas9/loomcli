@@ -1,0 +1,82 @@
+# Disposable fleet-db backend for tests that need a real control plane.
+#
+# This exists so a test never has to touch the live stack. The deployed
+# fleet-db on :3011 holds the DOGFOOD workspace — real issues, real agent
+# definitions — and a test that creates probe issues, flips an agentdef's
+# task_filter, or closes a task there is mutating production data. Point tests
+# here instead.
+#
+#   scripts/test-env.sh up          # build, start, wait for /healthz, create the workspace
+#   eval "$(scripts/test-env.sh env)"   # export LOOM_FLEET_DB_URL / LOOM_WORKSPACE / actor
+#   scripts/test-env.sh down        # stop and delete the volumes
+#
+# Everything about this stack is deliberately disposable:
+#   - Redis runs with no persistence, so every `up` is a clean slate and no
+#     state survives a `down -v`. Cross-run bleed is the failure mode that makes
+#     a flaky suite look like a product bug.
+#   - The workspace key is LOOMTEST, distinct from DOGFOOD (live), FLEETDB
+#     (test/fleetdb regression stack) and LOCALMODE (test/local-mode dogfood
+#     stack), so a mis-pointed client fails loudly instead of writing somewhere
+#     real.
+#   - Host port 53351 sits well clear of the live stack (3009/3011/3012/3013),
+#     the regression stack (8080/8082/8083) and local-mode (8280/8282/8283), so
+#     this can run alongside all of them.
+#
+# fleet-db is built from the sibling checkout (../../../fleet-db), matching the
+# other stacks in this repo — so a local fleet-db change is testable before it
+# is pushed anywhere.
+
+name: loomcli-testenv
+
+networks:
+  testenv:
+    driver: bridge
+
+services:
+  redis:
+    image: docker.io/library/redis:7-alpine
+    # No persistence: test state is disposable, and a fresh Redis is what makes
+    # each `up` a clean slate.
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    networks: [testenv]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+
+  fleet-db:
+    image: loomcli-testenv-fleet-db:latest
+    build:
+      context: ../../../fleet-db
+      dockerfile: deploy/docker/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      FLEETDB_REDIS_ADDR: redis:6379
+      FLEETDB_BIND: ":8080"
+    # ENTRYPOINT is already `fleet-db`; command: is args.
+    #
+    # auth stays ENABLED: fleet-db's admin endpoints (workspace create/list)
+    # are gated behind it and are unreachable otherwise. --auth-dev-mode
+    # accepts the X-Actor header as identity, which the loom CLI always sends.
+    # Acceptable here only because the port binds to localhost and the whole
+    # stack is throwaway.
+    command:
+      - "--redis-addr"
+      - "redis:6379"
+      - "--addr"
+      - ":8080"
+      - "--auth-dev-mode"
+      - "--authz-enabled=false"
+      # Tests fan out probe requests far harder than a human does; rate-limit
+      # behaviour has its own coverage in fleet-db. Leaving it on here only
+      # produces 429s that read as product bugs.
+      - "--rate-limit-enabled=false"
+    networks: [testenv]
+    ports:
+      - "127.0.0.1:53351:8080"
+    # fleet-db's image is distroless — no shell, no curl — so an in-container
+    # healthcheck is not viable. scripts/test-env.sh polls /healthz from the
+    # host instead and refuses to hand back a URL until it answers.
