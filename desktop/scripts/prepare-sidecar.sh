@@ -11,7 +11,15 @@ WEBUI_DIST_DIR="${WEBUI_FRONTEND_DIR}/dist"
 WEBUI_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/webui"
 LICENSE_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/licenses"
 RUNTIME_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/runtime"
-PACKAGED_PROMPT_AGENT_DIST="${REPO_ROOT}/internal/workflows/builtin-dist/prompt-agent/dist"
+PACKAGED_BUILTIN_ROOT="${REPO_ROOT}/internal/workflows/builtin-dist"
+PACKAGED_BUILTIN_WORKFLOWS=(
+  "prompt-agent"
+  "epic-runner"
+  "github-review-agent"
+  "bug-fix-agent"
+  "review-loop-agent"
+  "local-review-agent"
+)
 NODE_VERSION_FILE="${DESKTOP_DIR}/NODE_VERSION"
 NODE_ENTITLEMENTS="${DESKTOP_DIR}/src-tauri/node-runtime.entitlements"
 
@@ -83,31 +91,40 @@ if [ -z "${FLUE_REPO:-}" ]; then
   done
 fi
 if [ -z "${FLUE_REPO:-}" ] || [ ! -f "${FLUE_REPO}/packages/cli/bin/flue.mjs" ]; then
-  echo "pinned Flue CLI is required to package the prompt-agent workflow; set FLUE_REPO" >&2
+  echo "pinned Flue CLI is required to package the built-in workflows; set FLUE_REPO" >&2
   exit 1
 fi
 
-echo "[desktop] building packaged prompt-agent workflow"
-FLUE_REPO="${FLUE_REPO}" \
-BUILTIN_WORKFLOW=prompt-agent \
-BUILTIN_DIST_DEST="${PACKAGED_PROMPT_AGENT_DIST}" \
-  "${REPO_ROOT}/scripts/rebuild-builtin-bundle.sh"
-# Source maps dominate the generated bundle size and are not used by the
-# product runtime. Keep them in scratch/diagnostic builds, but not in the
-# signed sidecar payload.
-find "${PACKAGED_PROMPT_AGENT_DIST}" -type f -name '*.map' -delete
-if [ ! -f "${PACKAGED_PROMPT_AGENT_DIST}/server.mjs" ] || [ ! -s "${PACKAGED_PROMPT_AGENT_DIST}/source-digest.txt" ]; then
-  echo "packaged prompt-agent bundle is incomplete at ${PACKAGED_PROMPT_AGENT_DIST}" >&2
-  exit 1
-fi
+# The tagged Go embed includes every directory present under builtin-dist.
+# Recreate that ignored tree so a developer's unrelated scratch bundle cannot
+# leak into the signed sidecar and so every package build has the same payload.
+rm -rf "${PACKAGED_BUILTIN_ROOT}"
+mkdir -p "${PACKAGED_BUILTIN_ROOT}"
+for builtin_workflow in "${PACKAGED_BUILTIN_WORKFLOWS[@]}"; do
+  packaged_dist="${PACKAGED_BUILTIN_ROOT}/${builtin_workflow}/dist"
+  echo "[desktop] building packaged ${builtin_workflow} workflow"
+  FLUE_REPO="${FLUE_REPO}" \
+  BUILTIN_WORKFLOW="${builtin_workflow}" \
+  BUILTIN_DIST_DEST="${packaged_dist}" \
+    "${REPO_ROOT}/scripts/rebuild-builtin-bundle.sh"
+  # Source maps dominate the generated bundle size and are not used by the
+  # product runtime. Keep them in scratch/diagnostic builds, but not in the
+  # signed sidecar payload.
+  find "${packaged_dist}" -type f -name '*.map' -delete
+  if [ ! -f "${packaged_dist}/server.mjs" ] || [ ! -s "${packaged_dist}/source-digest.txt" ]; then
+    echo "packaged ${builtin_workflow} bundle is incomplete at ${packaged_dist}" >&2
+    exit 1
+  fi
+done
 
 # The script and Go spec intentionally keep separate file lists. Compile the
-# tagged embed and compare its marker to SourceDigest(spec.Files) so a future
-# spec change cannot silently ship a stale generated bundle.
+# tagged embed and compare every required marker to SourceDigest(spec.Files) so
+# a future spec change cannot silently ship a missing or stale generated
+# bundle.
 (
   cd "${REPO_ROOT}"
   go test -tags loom_packaged_builtins ./internal/workflows \
-    -run '^TestEmbeddedPackagedPromptAgentMatchesSource$' -count=1
+    -run '^TestEmbeddedPackagedBuiltins' -count=1
 )
 
 BUILD="${BUILD:-$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"

@@ -23,8 +23,8 @@ func (absentPackagedBuiltinFS) Open(name string) (fs.File, error) {
 // registerPackagedBuiltinWorkflow activates a build-time generated bundle when
 // the sidecar carries one for the exact embedded source digest. Packaged apps
 // therefore never need the source-tree @loom/sdk or Flue toolchain merely to
-// refresh a managed built-in after an upgrade. Ordinary source builds compile
-// with an empty FS and fall through to BuildAndRegister.
+// activate or refresh a bundled managed built-in. Ordinary source builds
+// compile with an empty FS and fall through to BuildAndRegister.
 func registerPackagedBuiltinWorkflow(
 	ctx context.Context,
 	st DriverCatalog,

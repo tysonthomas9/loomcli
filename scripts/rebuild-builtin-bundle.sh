@@ -3,12 +3,13 @@
 # pinned Flue CLI, and refresh source-digest.txt so it matches
 # SourceDigest(spec.Files). Generated bundle output is not committed; set
 # BUILTIN_DIST_DEST to choose a specific output directory. epic-runner remains
-# the default for existing CI callers; desktop packaging selects prompt-agent.
+# the default for existing CI callers; desktop packaging builds every built-in.
 #
 #   usage: scripts/rebuild-builtin-bundle.sh        (requires pinned Flue built)
 #   env:   FLUE_REPO=/path/to/flue  (default: ../flue)
 #          BUILTIN_DIST_DEST=/path/to/output
-#          BUILTIN_WORKFLOW=epic-runner|prompt-agent (default: epic-runner)
+#          BUILTIN_WORKFLOW=<built-in workflow name> (default: epic-runner)
+#          KEEP_BUILTIN_STAGE=1  (retain the temporary build tree for debugging)
 #
 # Note: DEST is replaced wholesale (rm -rf + copy) so content-hashed assets from
 # prior builds never accrete.
@@ -45,17 +46,44 @@ case "$BUILTIN_WORKFLOW" in
     # builtinEpicRunnerSpec in internal/workflows/workflows.go.
     SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts openshell-task-runner.ts)
     ;;
+  github-review-agent)
+    # builtinGitHubReviewAgentSpec in internal/workflows/workflows.go.
+    SPEC_FILES=(github-review-agent.ts github-review-task-runner.ts)
+    ;;
+  bug-fix-agent)
+    # builtinBugFixAgentSpec in internal/workflows/workflows.go.
+    SPEC_FILES=(bug-fix-agent.ts local-task-runner.ts daytona-task-runner.ts)
+    ;;
+  review-loop-agent)
+    # builtinReviewLoopAgentSpec in internal/workflows/workflows.go.
+    SPEC_FILES=(review-loop-agent.ts github-review-task-runner.ts)
+    ;;
+  local-review-agent)
+    # builtinLocalReviewAgentSpec in internal/workflows/workflows.go.
+    SPEC_FILES=(local-review-agent.ts github-review-task-runner.ts)
+    ;;
   prompt-agent)
     # builtinPromptAgentSpec in internal/workflows/workflows.go.
     SPEC_FILES=(prompt-agent.ts local-task-runner.ts)
     ;;
   *)
-    echo "ERROR: unsupported BUILTIN_WORKFLOW=$BUILTIN_WORKFLOW (expected epic-runner or prompt-agent)" >&2
+    echo "ERROR: unsupported BUILTIN_WORKFLOW=$BUILTIN_WORKFLOW" >&2
     exit 2
     ;;
 esac
 
 STAGE="$(mktemp -d -t loom-bundle-regen.XXXXXX)"
+cleanup_stage() {
+  if [ "${KEEP_BUILTIN_STAGE:-0}" = "1" ]; then
+    echo "==> staging kept at $STAGE"
+    return
+  fi
+  if ! rm -rf -- "$STAGE"; then
+    echo "WARNING: failed to remove temporary staging tree $STAGE" >&2
+  fi
+}
+trap cleanup_stage EXIT
+
 echo "==> staging $BUILTIN_WORKFLOW workflow repo at $STAGE"
 mkdir -p "$STAGE/workflows"
 # shellcheck source=scripts/stage-builtin-modules.sh
@@ -68,9 +96,43 @@ echo "==> flue build --target node --root $STAGE --output $STAGE/dist"
 ( cd "$STAGE"; node "$FLUE_REPO/packages/cli/bin/flue.mjs" build --target node --root "$STAGE" --output "$STAGE/dist" )
 [ -f "$STAGE/dist/server.mjs" ] || { echo "ERROR: flue build produced no dist/server.mjs" >&2; exit 1; }
 
+# Rolldown emits source-region and source-map comments into executable output.
+# Those comments retain the absolute Flue checkout/build paths even after the
+# .map files are removed for Desktop. Strip only those non-runtime annotations,
+# then fail if a known builder root remains in executable JavaScript.
+# shellcheck disable=SC2016 # JavaScript template expressions are intentionally single-quoted from the shell.
+node -e '
+const fs = require("fs"), path = require("path");
+const root = process.argv[1], forbidden = process.argv.slice(2).filter(Boolean);
+function files(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap((entry) => {
+      const item = path.join(dir, entry.name);
+      return entry.isDirectory() ? files(item) : [item];
+    });
+}
+const annotation = /^\s*\/\/#(?:(?:end)?region(?:\s.*)?|\s*sourceMappingURL=.*)$/;
+const leaks = [];
+for (const file of files(root)) {
+  if (!/\.(?:cjs|mjs|js)$/.test(file)) continue;
+  const original = fs.readFileSync(file, "utf8");
+  const cleaned = original.split("\n").filter((line) => !annotation.test(line)).join("\n");
+  if (cleaned !== original) fs.writeFileSync(file, cleaned);
+  for (const builderRoot of forbidden) {
+    if (cleaned.includes(builderRoot)) leaks.push(`${file}: ${builderRoot}`);
+  }
+}
+if (leaks.length > 0) {
+  process.stderr.write(`ERROR: generated workflow bundle retained builder paths:\n${leaks.join("\n")}\n`);
+  process.exit(1);
+}
+' "$STAGE/dist" "$STAGE" "$FLUE_REPO" "$ROOT"
+
 # Digest = byte-exact mirror of workflows.SourceDigest over the spec files. The
 # file list comes from SPEC_FILES (single source of truth in this script) — it
-# must stay in sync with builtinEpicRunnerSpec() in internal/workflows/workflows.go.
+# must stay in sync with the matching builtin*Spec() in
+# internal/workflows/workflows.go.
 DIGEST="$(node -e '
 const fs=require("fs"),crypto=require("crypto");
 const dir=process.argv[1], names=process.argv.slice(2);
@@ -90,4 +152,4 @@ echo "==> copying dist -> $DEST"
 rm -rf "$DEST"
 mkdir -p "$DEST"
 cp -R "$STAGE/dist/." "$DEST/"
-echo "==> done. staging kept at $STAGE (remove manually if desired)"
+echo "==> done"
