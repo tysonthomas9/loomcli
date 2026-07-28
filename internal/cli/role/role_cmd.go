@@ -131,6 +131,9 @@ func init() {
 }
 
 func runRoleAdd(_ *cobra.Command, args []string) error {
+	if err := validateRolePromptFile(roleAddKind, roleAddPromptFile); err != nil {
+		return err
+	}
 	if err := validateRoleKindValue(roleAddKind); err != nil {
 		return err
 	}
@@ -386,6 +389,45 @@ func validateRoleKindValue(value string) error {
 	default:
 		return fmt.Errorf("kind must be interactive or worker")
 	}
+}
+
+// validateRolePromptFile rejects a builtin: prompt on a worker role.
+//
+// The builtin registry holds interactive terminal prompts only (lead,
+// pr-review, pr-review-checkout), and only GenerateTerminalPrompt resolves the
+// prefix. The daemon's role resolver does not: it joins the literal string onto
+// the project dir, so a worker role carrying builtin:pr-review stores fine and
+// then fails daemon startup with
+//
+//	prompt file ".../builtin:pr-review" not found
+//
+// which names a path nobody wrote and takes the whole supervisor down with it
+// (DOGFOOD-66/-67). Refuse it here, where the mistake is still attributable.
+func validateRolePromptFile(kind, promptFile string) error {
+	promptFile = strings.TrimSpace(promptFile)
+	if !strings.HasPrefix(promptFile, builtinPromptPrefix) {
+		return nil
+	}
+	if normalizeRoleKindValue(kind) == string(domain.RoleKindInteractive) {
+		return nil
+	}
+	return fmt.Errorf(
+		"prompt-file %q is a built-in interactive prompt and cannot be used by a worker role; "+
+			"pass --kind interactive to use it, or give a prompt file path relative to the workspace root (built-ins: %s)",
+		promptFile, strings.Join(builtinPromptIDs(), ", "))
+}
+
+const builtinPromptPrefix = "builtin:"
+
+func builtinPromptIDs() []string {
+	prompts := domain.BuiltinInteractivePrompts()
+	ids := make([]string, 0, len(prompts))
+	for _, p := range prompts {
+		if !p.Hidden {
+			ids = append(ids, p.ID)
+		}
+	}
+	return ids
 }
 
 // sliceCSVPtr returns a non-nil *[]string for the patch. Empty input
