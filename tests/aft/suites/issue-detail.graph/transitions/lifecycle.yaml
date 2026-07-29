@@ -19,7 +19,26 @@ transitions:
       - select: { testid: status-dropdown, value: closed }
 
   return-to-closed-board:
-    intent: A human closes the detail panel, reloads the board, and searches for the issue to verify it remains closed.
+    intent: A human closes the detail panel and follows a search-filtered board URL to verify the issue remains closed.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - open: "/ws/${AFT_WS:-E2E-WS}/kanban?search=aft%20issue%20detail%20${RUN_ID:-local}-${AFT_CASE_ID}"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the search-filtered board is ready.
+
+  defer-issue:
+    intent: A human defers the issue through the mounted status control.
+    actor: human
+    via: ui
+    steps:
+      - select: { testid: status-dropdown, value: deferred }
+
+  return-to-backlog-board:
+    intent: A human closes the panel and reloads the board to verify the deferred issue moved to Backlog.
     actor: human
     via: ui
     steps:
@@ -28,7 +47,23 @@ transitions:
       - wait:
           fn: >-
             !!document.querySelector('[data-testid=board-toolbar]')
-        intent: Wait until the fresh workspace board is ready.
-      - fill:
-          testid: search-input-field
-          value: "aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}"
+        intent: Wait until the reloaded workspace board is ready after deferring.
+
+  send-to-review:
+    intent: A human sends the issue to review through the mounted status control.
+    actor: human
+    via: ui
+    steps:
+      - select: { testid: status-dropdown, value: review }
+
+  return-to-review-board:
+    intent: A human closes the panel and reloads the board to verify the review issue moved to Review.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: header-close-button }
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the reloaded workspace board is ready after review status.

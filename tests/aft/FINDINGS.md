@@ -296,6 +296,51 @@ left unpushed for a PR. The stack-improvement items in §3 remain open follow-up
 - **Suspected orphaned per-task-run worktree** on terminal failure (masked in aft by the
   workspace wipe on next boot). LOW.
 
+### 1.21 Posted comment vanishes from the panel: issue-prop sync clobbers the optimistic append
+- **Severity:** MED (data appears lost) · **Fix:** loom frontend · **Status:** FIXED (found 2026-07-29 by the issue-detail graph's comment branch, fixed same day)
+- `CommentForm` POSTs the comment (201) and appends it to `localComments` optimistically —
+  nothing ever refetches comments afterwards. The sync effect in `IssueDetailPanel`
+  replaced `localComments` wholesale with `issue.comments` on **every issue-prop identity
+  change**, and SSE/store refreshes deliver stale pre-POST snapshots constantly, so the
+  just-posted comment disappeared from Activity until a full reload. Evidence: `POST
+  /comments` 201 with zero subsequent GETs, Activity stuck at (1) for 15s+. Intermittent
+  under light SSE traffic; near-deterministic once the graph suite ran 12+ concurrent cases.
+- Fix: the sync effect now merges — snapshot first, then optimistic comments (matched by
+  `issue_id`, deduped by `id`) the snapshot doesn't know about yet.
+
+### 1.22 Saved metadata visually reverts in the panel under SSE churn (owner observed)
+- **Severity:** MED (server saved, UI shows old value) · **Fix:** loom frontend · **Status:** OPEN (found 2026-07-29 by the issue-detail graph's owner branch)
+- `set-owner` PATCH returned 200 (owner persisted; the fresh-reload card badge proves it),
+  the panel rendered the new owner — then reverted to "Unassigned" within the same second.
+  The board→details sync effect (`App.tsx:575-604`) has an `updated_at` staleness guard,
+  but it is bypassed when either timestamp fails to parse, and the field-diff then
+  overwrites `issueDetails` with the board snapshot wholesale. Reproduces with cases
+  running strictly sequentially — the 2026-07-29 green run's own screenshots catch the
+  owner rendering and reverting ~50ms later (c02 s37→s38) — so a single board's SSE/store
+  refresh suffices; the instant expect lost the race in ~1 of 4 runs. Same family as
+  §1.21; sibling exposure: every panel field with an instant post-save display (type,
+  priority, title, status, labels).
+- Until fixed, `owner-saved` in the issue-detail graph pins the live render in its `wait`
+  (proves the new owner rendered at least once) and its `expect`s assert the stable
+  no-error contract; tighten back to an instant display assertion once the overwrite is
+  ordering-safe.
+
+### 1.23 Dependency section never shows the dependency it just created
+- **Severity:** LOW (UX; state is correct after reload) · **Fix:** loom frontend · **Status:** OPEN (found 2026-07-29 verifying the issue-detail graph's dependency branch)
+- `POST /issues/{id}/dependencies` returns 200 and the picker form closes, but the
+  "Blocked By" section still reads "No blocking dependencies" — `handleAddDependency`
+  (`IssueDetailPanel.tsx`) neither refetches nor optimistically appends, and screenshots
+  125ms after the 200 confirm it. The board reflects the blocked state after reload, so
+  the graph asserts there; add a panel-side assertion to `dependency-recorded` once the
+  section refreshes in-session.
+
+### 1.24 Activity log misses removal/defer entries
+- **Severity:** LOW (audit-trail gap) · **Fix:** loom · **Status:** OPEN (found 2026-07-29, screenshot-vetted across graph cases)
+- "added label" and "created this issue" get timeline entries, but removing a label
+  (PATCH `remove_labels` 200) and deferring an issue (defer 200) leave the activity log
+  untouched. If mutations are supposed to be audited in the timeline, these two paths
+  are silent.
+
 ---
 
 ## 2. Product bugs — resolved this session (traceability)

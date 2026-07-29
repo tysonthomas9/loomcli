@@ -32,3 +32,14 @@ transitions:
         intent: Wait until the reloaded workspace board is ready.
       - click:
           selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+
+  attempt-empty-comment:
+    intent: A human submits a whitespace-only comment with the keyboard shortcut and finds it blocked.
+    actor: human
+    via: ui
+    steps:
+      - fill:
+          testid: comment-textarea
+          value: "   "
+      - focus: { testid: comment-textarea }
+      - press: Control+Enter

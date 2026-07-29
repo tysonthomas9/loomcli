@@ -68,12 +68,13 @@ imported files under `transitions/` contain ordinary AFT mechanics. AFT discover
 the manifest—not its fragments—and validates the complete DAG before opening a browser.
 
 `tests/aft/suites/issue-detail.graph/` is the first product-correctness pilot. Its shared
-UI-create prefix fans out to description, priority, label, comment, lifecycle, and card
-reopen journeys. Transition coverage selects six complete root-to-terminal paths; two
-named golden journeys run independently, for eight fresh-browser replays total. Every
-path gets a stable `AFT_CASE_ID`, suite-level cleanup, source-line provenance, and a graph
-plan/evidence section in the reports. Read the package's `README.md` and manifest before
-editing mechanics in a fragment.
+UI-create prefix fans out to description save/cancel, type, priority/owner, label,
+comment, lifecycle, title, dependency, and card-reopen journeys. Transition coverage
+selects twelve complete root-to-terminal paths; two named golden journeys run
+independently, for fourteen fresh-browser replays total. Every path gets a stable
+`AFT_CASE_ID`, suite-level cleanup, source-line provenance, and a graph plan/evidence
+section in the reports. Read the package's `README.md` and manifest before editing
+mechanics in a fragment.
 
 ## Real codex tier
 

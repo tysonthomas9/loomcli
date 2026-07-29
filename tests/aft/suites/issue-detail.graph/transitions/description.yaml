@@ -41,3 +41,44 @@ transitions:
         intent: Wait until the reloaded workspace board is ready.
       - click:
           selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"
+
+  open-description-editor:
+    intent: A human opens the description editor and types a draft without saving it.
+    actor: human
+    via: ui
+    steps:
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=description-edit-button]')
+        intent: Wait until the description editor control is ready.
+      - wait: { load: networkidle }
+      - run: >-
+          for i in 1 2 3; do
+          agent-browser --session "$AFT_SESSION" find testid description-edit-button click || true;
+          sleep 1;
+          agent-browser --session "$AFT_SESSION" eval "!!document.querySelector('[data-testid=description-textarea]')" | grep -q true && exit 0;
+          done; echo "description edit click never opened the editor"; exit 1
+        intent: A human retries the edit control until the mounted textarea opens.
+      - fill:
+          testid: description-textarea
+          value: "discarded draft ${RUN_ID:-local}-${AFT_CASE_ID}"
+
+  cancel-description-edit:
+    intent: A human cancels the unsaved description draft through the mounted cancel control.
+    actor: human
+    via: ui
+    steps:
+      - click: { testid: description-cancel }
+
+  reload-and-reopen-discarded:
+    intent: A human reloads the board and reopens the issue card to verify the cancelled draft stayed discarded.
+    actor: human
+    via: ui
+    steps:
+      - reload: true
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=board-toolbar]')
+        intent: Wait until the reloaded workspace board is ready.
+      - click:
+          selector: "section[data-status=ready] article[aria-label='Issue: aft issue detail ${RUN_ID:-local}-${AFT_CASE_ID}']"

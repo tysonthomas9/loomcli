@@ -10,9 +10,11 @@ imports:
   - transitions/entry-and-creation.yaml
   - transitions/description.yaml
   - transitions/metadata.yaml
+  - transitions/title.yaml
   - transitions/collaboration.yaml
   - transitions/lifecycle.yaml
   - transitions/navigation.yaml
+  - transitions/dependencies.yaml
 
 start: browser-ready
 
@@ -28,23 +30,52 @@ graph:
 
   detail-panel-ready:
     edit-description: description-saved
-    change-priority: priority-saved
+    change-type: type-saved
     add-label: label-saved
+    change-priority: priority-saved
     post-comment: comment-visible
     start-work: in-progress-detail
+    defer-issue: deferred-detail
+    send-to-review: review-detail
+    open-title-editor: title-editor-open
+    open-description-editor: description-editor-open
     close-panel: issue-card-ready
 
   description-saved:
     reload-and-reopen-description: description-persisted
 
-  priority-saved:
-    close-and-filter-priority: priority-persisted
+  type-saved:
+    close-and-filter-type: type-persisted
 
   label-saved:
     close-and-filter-label: label-persisted
 
+  label-persisted:
+    reopen-labeled-card: label-panel-reopened
+
+  label-panel-reopened:
+    remove-label: label-removed
+
+  label-removed:
+    close-and-refilter-label: label-removal-persisted
+
+  priority-saved:
+    close-and-filter-priority: priority-persisted
+
+  priority-persisted:
+    reopen-prioritized-card: priority-panel-reopened
+
+  priority-panel-reopened:
+    set-owner: owner-saved
+
+  owner-saved:
+    close-and-reload-owner-board: owner-persisted-on-card
+
   comment-visible:
     reload-and-reopen-comment: comment-persisted
+
+  comment-persisted:
+    attempt-empty-comment: empty-comment-blocked
 
   in-progress-detail:
     set-status-closed: closed-detail
@@ -52,8 +83,39 @@ graph:
   closed-detail:
     return-to-closed-board: closed-on-board
 
+  deferred-detail:
+    return-to-backlog-board: deferred-on-board
+
+  review-detail:
+    return-to-review-board: review-on-board
+
+  title-editor-open:
+    submit-empty-title: title-rejected-empty
+
+  title-rejected-empty:
+    rename-title: title-renamed
+
+  title-renamed:
+    reload-board-after-rename: title-persisted-on-board
+
+  description-editor-open:
+    cancel-description-edit: description-edit-cancelled
+
+  description-edit-cancelled:
+    reload-and-reopen-discarded: description-edit-discarded
+
   issue-card-ready:
     reopen-card: reopened-detail-panel
+    create-blocker-issue: blocker-panel-ready
+
+  blocker-panel-ready:
+    reopen-original-from-blocker: original-panel-for-dependency
+
+  original-panel-for-dependency:
+    add-blocking-dependency: dependency-recorded
+
+  dependency-recorded:
+    reload-blocked-board: blocked-on-board
 
 coverage:
   strategy: transition

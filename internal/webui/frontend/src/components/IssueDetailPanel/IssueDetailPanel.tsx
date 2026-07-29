@@ -802,10 +802,22 @@ function DefaultContent({
   // Local state for events (activity log)
   const [events, setEvents] = useState<Event[]>([]);
 
-  // Sync local comments when issue changes (e.g., different issue selected)
+  // Sync local comments when the issue prop changes. Same-issue refreshes
+  // (SSE/store updates) carry comment snapshots taken before a just-posted
+  // comment existed; replacing wholesale would clobber the optimistic append
+  // for good, since nothing refetches comments afterwards. Merge instead:
+  // the snapshot, then any optimistic comments it doesn't know about yet.
   useEffect(() => {
     if (issue && isIssueDetails(issue)) {
-      setLocalComments(issue.comments);
+      setLocalComments((prev) => {
+        const snapshot = issue.comments ?? [];
+        if (!prev) return snapshot;
+        const known = new Set(snapshot.map((c) => c.id));
+        const optimistic = prev.filter(
+          (c) => c.issue_id === issue.id && !known.has(c.id),
+        );
+        return [...snapshot, ...optimistic];
+      });
     } else {
       setLocalComments(undefined);
     }

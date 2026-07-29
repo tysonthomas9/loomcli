@@ -9,7 +9,10 @@ base="${AFT_BASE_URL:?AFT_BASE_URL not set}"
 ws="${AFT_WS:-E2E-WS}"
 
 list_open_ids() {
-    curl -sf "$base/api/workspaces/$ws/issues" | python3 -c '
+    # include_blocked=true routes through the kanban list path, which merges the
+    # deferred overlay — the plain list hides deferred issues, so without it a
+    # deferred issue survives this sweep AND the emptiness check below.
+    curl -sf "$base/api/workspaces/$ws/issues?include_blocked=true" | python3 -c '
 import json, sys
 
 payload = json.load(sys.stdin)
