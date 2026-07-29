@@ -103,6 +103,25 @@ func TestAgentHooks_Validate_CycleAction(t *testing.T) {
 			actions: []AgentHookAction{{Type: AgentHookActionCycle, Value: "oops", Cycle: cycle(2)}},
 			wantErr: "must not set value or source",
 		},
+		{
+			// Self-defeating in both branches: a re-arm hands the task to the
+			// previous stage and the close immediately takes it away; a ship
+			// stamps a label nothing can act on once the task is closed.
+			name:    "cycle then close",
+			actions: []AgentHookAction{cyc, {Type: AgentHookActionClose}},
+			wantErr: "must not be combined with a cycle action",
+		},
+		{
+			name:    "comment, cycle then close",
+			actions: []AgentHookAction{comment, cyc, {Type: AgentHookActionClose}},
+			wantErr: "must not be combined with a cycle action",
+		},
+		{
+			// The generic close-is-terminal rule already covers this order.
+			name:    "close then cycle",
+			actions: []AgentHookAction{{Type: AgentHookActionClose}, cyc},
+			wantErr: "must not follow a close action",
+		},
 	}
 
 	for _, tt := range tests {

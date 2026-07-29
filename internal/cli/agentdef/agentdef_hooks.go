@@ -151,11 +151,11 @@ func agentUpdateHooksPatch() (*domain.AgentHooks, error) {
 	setRequested := agentUpdateCommentReply || len(agentUpdateLabels) > 0 || agentUpdateClose || agentUpdateCycle != ""
 	switch {
 	case agentUpdateClear && setRequested:
-		return nil, fmt.Errorf("--clear-on-complete cannot be combined with --on-complete-comment-reply, --on-complete-add-label or --on-complete-close")
+		return nil, fmt.Errorf("--clear-on-complete cannot be combined with --on-complete-comment-reply, --on-complete-add-label, --on-complete-close or --on-complete-cycle")
 	case agentUpdateClear:
 		return &domain.AgentHooks{}, nil
 	case !setRequested:
-		return nil, fmt.Errorf("nothing to update: pass --on-complete-comment-reply, --on-complete-add-label and/or --on-complete-close, or --clear-on-complete")
+		return nil, fmt.Errorf("nothing to update: pass --on-complete-comment-reply, --on-complete-add-label, --on-complete-close and/or --on-complete-cycle, or --clear-on-complete")
 	}
 	return hooksFromFlags(agentUpdateCommentReply, agentUpdateLabels, agentUpdateClose, agentUpdateCycle)
 }

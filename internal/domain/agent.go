@@ -228,6 +228,16 @@ func (h *AgentHooks) Validate() error {
 		if a.Type == AgentHookActionCycle && sawCycle {
 			return fmt.Errorf("hooks.on_complete[%d]: only one cycle action is allowed", i)
 		}
+		// cycle + close is self-defeating in BOTH of the cycle's branches, so it
+		// is never what anyone meant: on a re-arm the close immediately closes
+		// the task the cycle just handed back, killing the loop at round one;
+		// on a ship it closes the task the ship label was supposed to route, so
+		// nothing can claim it. Validate exists to make unsatisfiable pipelines
+		// unrepresentable rather than to let them fail quietly at runtime.
+		if a.Type == AgentHookActionClose && sawCycle {
+			return fmt.Errorf("hooks.on_complete[%d]: close action must not be combined with a cycle action "+
+				"(a cycle hands the task to the next stage; closing it makes that hand-off unclaimable)", i)
+		}
 		if err := validateHookAction(i, a, sawLabel); err != nil {
 			return err
 		}

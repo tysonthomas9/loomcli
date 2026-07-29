@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
@@ -175,8 +176,61 @@ func TestAdvanceReviewCycle_ReopensSoThePreviousStageCanClaim(t *testing.T) {
 	}
 }
 
+// The ship hand-off has the same claimability requirement as the re-arm: the
+// worker picks the task up by label, and task_router scores anything that is not
+// `open` as 0. Without this the loop bounds correctly and then stalls forever
+// with the ship label stamped on a task nothing can claim.
+func TestAdvanceReviewCycle_ShipLeavesTheTaskClaimable(t *testing.T) {
+	for _, status := range []string{"review", "in_progress"} {
+		t.Run(status, func(t *testing.T) {
+			labels := []string{"criticized", "review-cycle=2"}
+			var updated string
+			m := clitest.NewMockIssueBackend()
+			m.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+				return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: status, Labels: labels}}, nil
+			}
+			m.AddLabelFn = func(_ context.Context, _ string, l string) error {
+				labels = append(labels, l)
+				return nil
+			}
+			m.UpdateFn = func(_ context.Context, _ string, p backend.UpdateParams) error {
+				if p.Status != nil {
+					updated = *p.Status
+				}
+				return nil
+			}
+			s := &Supervisor{IssueBackend: m}
+
+			if err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3)); err != nil {
+				t.Fatalf("advanceReviewCycle: %v", err)
+			}
+			if updated != "open" {
+				t.Fatalf("status after ship = %q, want open so the next stage can claim", updated)
+			}
+
+			// Prove the end state is genuinely claimable rather than merely
+			// "open": run the router the worker actually uses. `any` isolates
+			// the status gate — the design/label filters are the caller's
+			// business, not the cycle's.
+			shipped := backend.IssueData{ID: "T-1", IssueType: "task", Status: updated, Labels: labels}
+			match := cli.MatchTask(shipped, cli.RoleConstraints{TaskFilter: "any"})
+			if match.Score == 0 {
+				t.Fatalf("the shipped task is not claimable: %s", match.Reason)
+			}
+			if !containsLabel(labels, "ready") {
+				t.Fatalf("labels = %v, want the ship label stamped", labels)
+			}
+		})
+	}
+}
+
 // closed and blocked are decisions somebody made: closed is terminal, blocked is
 // how a stage escalates to a human. The loop must not drag a task out of either.
+//
+// The backend here refuses label mutation on a terminal issue the way fleet-db
+// does (ValidateModifiable → "issue is closed"), so the test fails unless the
+// status is checked BEFORE any write. A permissive mock would let a
+// check-after-write implementation pass while the real backend demoted the run.
 func TestAdvanceReviewCycle_DoesNotOverrideADeliberateStop(t *testing.T) {
 	for _, status := range []string{"closed", "blocked"} {
 		t.Run(status, func(t *testing.T) {
@@ -184,6 +238,21 @@ func TestAdvanceReviewCycle_DoesNotOverrideADeliberateStop(t *testing.T) {
 			m := clitest.NewMockIssueBackend()
 			m.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
 				return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: status, Labels: []string{"criticized"}}}, nil
+			}
+			terminal := status == "closed"
+			m.AddLabelFn = func(_ context.Context, _ string, _ string) error {
+				touched = true
+				if terminal {
+					return backend.ErrConflict("AddLabel", "issue is closed")
+				}
+				return nil
+			}
+			m.RemoveLabelFn = func(_ context.Context, _ string, _ string) error {
+				touched = true
+				if terminal {
+					return backend.ErrConflict("RemoveLabel", "issue is closed")
+				}
+				return nil
 			}
 			m.UpdateFn = func(_ context.Context, _ string, _ backend.UpdateParams) error {
 				touched = true
@@ -195,8 +264,45 @@ func TestAdvanceReviewCycle_DoesNotOverrideADeliberateStop(t *testing.T) {
 				t.Fatalf("advanceReviewCycle: %v", err)
 			}
 			if touched {
-				t.Errorf("a %s task must not be reopened by the loop", status)
+				t.Errorf("a %s task must not be written to by the loop", status)
 			}
 		})
 	}
+}
+
+// Same guard, at the other branch: a task closed while the final round ran must
+// not be written to by the ship path either.
+func TestAdvanceReviewCycle_ShipDoesNotWriteToAClosedTask(t *testing.T) {
+	touched := false
+	m := clitest.NewMockIssueBackend()
+	m.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+		return &backend.IssueDetailData{IssueData: backend.IssueData{
+			ID: id, Status: "closed", Labels: []string{"criticized", "review-cycle=2"},
+		}}, nil
+	}
+	m.AddLabelFn = func(_ context.Context, _ string, _ string) error {
+		touched = true
+		return backend.ErrConflict("AddLabel", "issue is closed")
+	}
+	m.UpdateFn = func(_ context.Context, _ string, _ backend.UpdateParams) error {
+		touched = true
+		return nil
+	}
+	s := &Supervisor{IssueBackend: m}
+
+	if err := s.advanceReviewCycle(context.Background(), "T-1", testCycle(3)); err != nil {
+		t.Fatalf("advanceReviewCycle: %v", err)
+	}
+	if touched {
+		t.Error("the ship branch must not write to a closed task")
+	}
+}
+
+func containsLabel(labels []string, want string) bool {
+	for _, l := range labels {
+		if l == want {
+			return true
+		}
+	}
+	return false
 }

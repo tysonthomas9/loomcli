@@ -313,14 +313,44 @@ func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycl
 	}
 	issue, err := s.IssueBackend.Get(ctx, taskID)
 	if err != nil {
-		return fmt.Errorf("read labels: %w", err)
+		return fmt.Errorf("read status and labels: %w", err)
 	}
+
+	// The deliberate-stop check comes FIRST, before any write, for two reasons.
+	// Semantically, `closed` and `blocked` are decisions somebody made — closed
+	// is terminal, blocked is how a stage escalates to a human — and the loop
+	// must not drag a task out of either. Mechanically, a terminal issue also
+	// rejects label mutation server-side (fleet-db's ValidateModifiable), so
+	// checking after the writes would never reach this branch on a real
+	// backend: the run would already have failed on the label instead.
+	//
+	// `review` is deliberately NOT a gate, a departure from the design this is
+	// modeled on. There a reviewer *elects* `review` to escalate, so it is a
+	// deliberate gesture; in loom a planning stage lands there as its ordinary
+	// completion, so honoring it would stall every loop at round one. Use
+	// `blocked` to stop a loop for a human.
+	if issue.Status == "closed" || issue.Status == "blocked" {
+		slog.InfoContext(ctx, "review cycle stopped: task is not available to advance",
+			"task", taskID, "status", issue.Status)
+		return nil
+	}
+
 	completed := cycle.CompletedRounds(issue.Labels) + 1 // this pass finished a round
 
 	if completed >= cycle.Threshold {
+		if err := s.IssueBackend.AddLabel(ctx, taskID, cycle.ShipLabel); err != nil {
+			return fmt.Errorf("stamp %q: %w", cycle.ShipLabel, err)
+		}
+		// The ship label routes the task to the next stage, and that stage can
+		// only claim an `open` task — exactly like the re-arm below. Without
+		// this the loop bounds correctly and then stalls at the hand-off:
+		// ship label stamped, nothing able to act on it.
+		if err := s.reopenForNextStage(ctx, taskID, issue.Status); err != nil {
+			return err
+		}
 		slog.InfoContext(ctx, "review cycle complete; shipping",
 			"task", taskID, "rounds", completed, "threshold", cycle.Threshold, "ship_label", cycle.ShipLabel)
-		return s.IssueBackend.AddLabel(ctx, taskID, cycle.ShipLabel)
+		return nil
 	}
 
 	if err := s.IssueBackend.RemoveLabel(ctx, taskID, cycle.RearmLabel); err != nil {
@@ -339,35 +369,28 @@ func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycl
 			}
 		}
 	}
-	// The re-arm is only real if the previous stage can claim the task again,
-	// and claiming requires `open` (task_router rejects anything else as "not
-	// open"). A stage that finished in any other state would otherwise strand
-	// the loop: labels correct, nothing able to act on them.
-	//
-	// What the cycle must NOT do is override a decision somebody made
-	// deliberately. In loom that means `closed` and `blocked`: closed is
-	// terminal, and blocked is how a stage escalates to a human. Everything
-	// else — `review` included — is just where a stage happened to finish, and
-	// is fair game to advance.
-	//
-	// `review` specifically is NOT treated as a gate here, which is a departure
-	// from the design this is modeled on. There a reviewer *elects* `review` to
-	// escalate, so it is a deliberate gesture; in loom a planning stage lands
-	// there as its ordinary completion, so honoring it would stall every loop
-	// at round one. Use `blocked` to stop a loop for a human.
-	if issue.Status == "closed" || issue.Status == "blocked" {
-		slog.InfoContext(ctx, "review cycle stopped: task is not available to re-arm",
-			"task", taskID, "round", completed, "status", issue.Status)
-		return nil
-	}
-	if issue.Status != "open" {
-		open := "open"
-		if err := s.IssueBackend.Update(ctx, taskID, backend.UpdateParams{Status: &open}); err != nil {
-			return fmt.Errorf("reopen for the next round: %w", err)
-		}
+	// The re-arm is only real if the previous stage can claim the task again.
+	if err := s.reopenForNextStage(ctx, taskID, issue.Status); err != nil {
+		return err
 	}
 	slog.InfoContext(ctx, "review cycle re-armed",
 		"task", taskID, "round", completed, "threshold", cycle.Threshold, "rearmed", cycle.RearmLabel)
+	return nil
+}
+
+// reopenForNextStage returns the task to the only state another stage can claim
+// from: task_router scores anything that is not `open` as 0 ("not open"), and
+// the clean-exit recovery path trusts whatever status the agent left behind. So
+// a stage that finished at `in_progress` or `review` has to be normalized here,
+// or the hand-off — re-arm or ship — never happens.
+func (s *Supervisor) reopenForNextStage(ctx context.Context, taskID, status string) error {
+	if status == "open" {
+		return nil
+	}
+	open := "open"
+	if err := s.IssueBackend.Update(ctx, taskID, backend.UpdateParams{Status: &open}); err != nil {
+		return fmt.Errorf("return the task to open for the next stage: %w", err)
+	}
 	return nil
 }
 
