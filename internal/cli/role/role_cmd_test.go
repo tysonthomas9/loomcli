@@ -1,6 +1,13 @@
 package role
 
-import "testing"
+import (
+	"io"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+)
 
 func TestBuildRolePatchKind(t *testing.T) {
 	tests := []struct {
@@ -139,5 +146,110 @@ func TestRunRoleAdd_WhitespaceOnlyLabelDoesNotReintroduceGuardBug(t *testing.T) 
 	if len(got) != 0 {
 		t.Fatalf("trimFilterLabels([\" \"]) = %v, want empty slice so a whitespace-only "+
 			"--labels value is never stored as a non-empty constraint", got)
+	}
+}
+
+// warnDroppedLabelConstraints is the only signal an operator gets when the
+// backend predates label constraints: the write returns 200, the fields are
+// dropped, and the role keeps claiming everything. The warning must fire in
+// exactly that case and stay quiet otherwise.
+func TestWarnDroppedLabelConstraints(t *testing.T) {
+	tests := []struct {
+		name        string
+		stored      *domain.Role
+		wantLabels  []string
+		wantExclude []string
+		want        []string // substrings the warning must contain; nil = silent
+	}{
+		{
+			name:       "backend dropped labels",
+			stored:     &domain.Role{Name: "reviewer"},
+			wantLabels: []string{"plan-ready"},
+			want:       []string{"labels", "NOT active"},
+		},
+		{
+			name:        "backend dropped exclude_labels",
+			stored:      &domain.Role{Name: "reviewer"},
+			wantExclude: []string{"plan-reviewed"},
+			want:        []string{"exclude_labels", "NOT active"},
+		},
+		{
+			name:        "backend dropped both",
+			stored:      &domain.Role{Name: "reviewer"},
+			wantLabels:  []string{"plan-ready"},
+			wantExclude: []string{"plan-reviewed"},
+			want:        []string{"labels and exclude_labels"},
+		},
+		{
+			name:        "backend persisted both",
+			stored:      &domain.Role{Name: "reviewer", Labels: []string{"plan-ready"}, ExcludeLabels: []string{"plan-reviewed"}},
+			wantLabels:  []string{"plan-ready"},
+			wantExclude: []string{"plan-reviewed"},
+		},
+		{
+			name:   "nothing configured, nothing stored",
+			stored: &domain.Role{Name: "reviewer"},
+		},
+		{
+			name:       "nil role cannot confirm the write",
+			stored:     nil,
+			wantLabels: []string{"plan-ready"},
+			want:       []string{"labels"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := captureStderr(t, func() {
+				warnDroppedLabelConstraints(tt.stored, tt.wantLabels, tt.wantExclude)
+			})
+			if len(tt.want) == 0 {
+				if got != "" {
+					t.Fatalf("warned when the constraints were stored: %q", got)
+				}
+				return
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("warning %q does not mention %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+// captureStderr swaps os.Stderr for a pipe and returns what fn wrote to it.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	prev := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = prev }()
+
+	fn()
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe: %v", err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+	return string(out)
+}
+
+func TestDerefSlice(t *testing.T) {
+	if got := derefSlice(nil); got != nil {
+		t.Errorf("derefSlice(nil) = %v, want nil (patch leaves the field alone)", got)
+	}
+	empty := []string{}
+	if got := derefSlice(&empty); len(got) != 0 {
+		t.Errorf("derefSlice(&[]) = %v, want empty", got)
+	}
+	set := []string{"plan-ready"}
+	if got := derefSlice(&set); len(got) != 1 || got[0] != "plan-ready" {
+		t.Errorf("derefSlice(&[plan-ready]) = %v", got)
 	}
 }
