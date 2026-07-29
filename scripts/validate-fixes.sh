@@ -233,7 +233,7 @@ esac
 # go test rather than by waiting.
 go_test_pinned "no-work exit preserves the restart budget" \
   ./internal/cli/daemon/supervisor/ \
-  'TestApplyNoWorkRestart_PreservesRestartBudget|TestApplyCleanSuccessRestart_ResetsBudget' \
+  'TestShouldRestart_NoWork_PreservesRestartCount|TestShouldRestart_CleanSuccess_ResetsNoWorkSpawnCount|TestShouldRestart_NoWork_FiftyPostSpawnExits' \
   /tmp/validate-respawn-budget.log
 
 # ---- arbitrary repo pick is logged ---------------------------
