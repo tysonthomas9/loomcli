@@ -23,6 +23,13 @@
 # Build contexts are relative to this compose file's directory. The
 # fleet-db context is the sibling repo next to loomcli (accessed as
 # ../../../fleet-db from this file).
+#
+# Requires docker compose >= 2.22: the seeder declares a `service:` named build
+# context (see fleetdb-regression-seed-fleet below), which is not known to be
+# supported by podman-compose or `podman compose`. The make targets keep those
+# fallbacks for parity with the empty stack, but on a podman engine the seeder
+# build falls back to resolving the bare image tag and fails with `pull access
+# denied` — the exact defect the named context exists to prevent.
 
 name: loomcli-fleetdb-regression
 
