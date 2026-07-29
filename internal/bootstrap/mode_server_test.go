@@ -120,12 +120,37 @@ func TestOpenStore_RefusesInsteadOfSpawningEmbeddedForServerURL(t *testing.T) {
 
 // The message is the deliverable here: it replaces a "workspace not found" that
 // named the wrong problem, so assert it stays actionable.
-func TestErrServerModeNoFleetDB_NamesTheFix(t *testing.T) {
+//
+// Both exits must be named. Pointing at a fleet-db is right for someone who
+// meant to talk to the server's store; unsetting the server URL is right for
+// someone with a populated local store who exported it only for `loom data`,
+// and whose previously-working setup this guard now refuses.
+func TestErrServerModeNoFleetDB_NamesBothRemedies(t *testing.T) {
 	msg := ErrServerModeNoFleetDB.Error()
 
-	for _, want := range []string{EnvServerURL, EnvFleetDBURL, EnvFleetDBActor} {
+	for _, want := range []string{
+		EnvServerURL,
+		EnvFleetDBURL,
+		EnvFleetDBActor,
+		"unset " + EnvServerURL,
+	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error message does not mention %q:\n%s", want, msg)
 		}
+	}
+}
+
+// A copy-pasteable host from whichever deployment happened to be at hand points
+// every other install at nothing. The example must stay a placeholder.
+func TestErrServerModeNoFleetDB_ExampleURLIsNotADeploymentAddress(t *testing.T) {
+	msg := ErrServerModeNoFleetDB.Error()
+
+	for _, banned := range []string{"127.0.0.1", "localhost", "0.0.0.0"} {
+		if strings.Contains(msg, banned) {
+			t.Errorf("error message hardcodes %q as an example address:\n%s", banned, msg)
+		}
+	}
+	if !strings.Contains(msg, "<fleet-db-host>") {
+		t.Errorf("error message does not show a placeholder fleet-db URL:\n%s", msg)
 	}
 }

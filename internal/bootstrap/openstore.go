@@ -130,9 +130,11 @@ var ErrServerModeNoFleetDB = errors.New(
 		"metadata are read directly from fleet-db, which the server does not proxy.\n" +
 		"Refusing to start an embedded fleet-db, which would answer from an empty\n" +
 		"store and report the active workspace as missing.\n\n" +
-		"Point the CLI at the same fleet-db the loom server uses:\n\n" +
-		"    export " + EnvFleetDBURL + "=http://127.0.0.1:3011\n" +
-		"    export " + EnvFleetDBActor + "=loom      # or " + EnvFleetDBAPIKey)
+		"Either point the CLI at the same fleet-db the loom server uses:\n\n" +
+		"    export " + EnvFleetDBURL + "=http://<fleet-db-host>:<port>\n" +
+		"    export " + EnvFleetDBActor + "=loom      # or " + EnvFleetDBAPIKey + "\n\n" +
+		"or drop back to the local store, if that is the one you want:\n\n" +
+		"    unset " + EnvServerURL + "      # or pass --server only on `loom data` commands")
 
 func openCloudStore(cfg fleetdb.Config, logger *slog.Logger) (*StoreHandle, error) {
 	cfg.BaseURL = os.Getenv(EnvFleetDBURL)
