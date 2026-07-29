@@ -394,9 +394,10 @@ func (r LocalTaskWorktreeResolver) selectRepo(ctx context.Context, workspaceKey 
 	// against the wrong tree.
 	//
 	// Left as a fallback rather than promoted to an error on purpose: most
-	// issues currently arrive with no source_repo (drops it on the
-	// API-backend create path), so failing here would stop dispatch outright
-	// the way did. Warn loudly enough to be auditable instead.
+	// issues currently arrive with no source_repo (the API-backend create path
+	// drops it), so failing here would stop dispatch outright the way an
+	// over-strict repo filter already has. Warn loudly enough to be auditable
+	// instead.
 	slog.WarnContext(ctx, "task has no repo selector; defaulting to the alphabetically first workspace repo",
 		"task", req.TaskID,
 		"workspace", workspaceKey,

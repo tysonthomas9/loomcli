@@ -36,7 +36,7 @@ func TestSelectRepo_NoSelectorWarnsAboutTheArbitraryPick(t *testing.T) {
 	}
 	r := LocalTaskWorktreeResolver{}
 
-	got, err := r.selectRepo(context.Background(), "the live workspace", repos, TaskExecRequest{TaskID: ""})
+	got, err := r.selectRepo(context.Background(), "the live workspace", repos, TaskExecRequest{TaskID: "task-42"})
 	if err != nil {
 		t.Fatalf("selectRepo returned error: %v", err)
 	}
@@ -48,9 +48,10 @@ func TestSelectRepo_NoSelectorWarnsAboutTheArbitraryPick(t *testing.T) {
 	if !strings.Contains(logged, "no repo selector") {
 		t.Errorf("fallback was not logged:\n%s", logged)
 	}
-	// The chosen repo and the alternatives both matter: without the candidate
-	// list a reader cannot tell the pick was arbitrary rather than resolved.
-	for _, want := range []string{"", "fleet-db", "loomcli"} {
+	// The task id makes a wrong-repo diff traceable back to this pick, and the
+	// full candidate list is what tells a reader the pick was arbitrary rather
+	// than resolved — a chosen repo on its own looks deliberate.
+	for _, want := range []string{"task-42", "fleet-db", "harness-wrapper", "loomcli"} {
 		if !strings.Contains(logged, want) {
 			t.Errorf("warning does not mention %q:\n%s", want, logged)
 		}
