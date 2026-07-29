@@ -13,6 +13,10 @@
 #
 # Ports are shifted off the base stack's 8280/8282/8283 so this can run beside
 # the demo stack (and beside the live stack on 3009-3013) without a collision.
+# Every `ports:` list below carries `!override` (compose >= 2.24): compose MERGES
+# sequences by appending, so without it the overlay adds the mirror ports and
+# keeps the base ones — the mirror would publish 8280 on 0.0.0.0 as well, refuse
+# to start whenever the demo stack is up, and otherwise silently answer for it.
 #
 # UI:  http://localhost:8383/ws/TESTMIRROR/kanban
 # API: http://localhost:8382
@@ -22,7 +26,7 @@
 
 services:
   fleet-db:
-    ports:
+    ports: !override
       - "127.0.0.1:8380:8080"
     environment:
       # Distinct from the live workspace, FLEETDB and LOCALMODE so a client that
@@ -30,7 +34,7 @@ services:
       LOOM_WORKSPACE: TESTMIRROR
 
   loom-local:
-    ports:
+    ports: !override
       - "127.0.0.1:8382:8080"
     environment:
       LOOM_WORKSPACE: TESTMIRROR
@@ -66,7 +70,7 @@ services:
       LOOM_LOCAL_MODE_MAX_AGENTS: "6"
 
   ui-local:
-    ports:
+    ports: !override
       - "127.0.0.1:8383:8080"
     environment:
       LOOM_WORKSPACE: TESTMIRROR

@@ -238,7 +238,7 @@ register_agents() {
 # CYCLE_ROLE:THRESHOLD:REARM:SHIP for the stage that owns the counter.
 seed_pipeline() {
   [ -n "${LOOM_LOCAL_MODE_PIPELINE:-}" ] || return 0
-  local stage_role stage_exclude stage_stamp cycle_role threshold rearm ship
+  local stage_role stage_exclude stage_stamp cycle_role threshold rearm ship failures_before
   IFS=':' read -r stage_role stage_exclude stage_stamp <<EOF2
 ${LOOM_LOCAL_MODE_PIPELINE_STAGE:-}
 EOF2
@@ -246,28 +246,66 @@ EOF2
 ${LOOM_LOCAL_MODE_PIPELINE_CYCLE:-}
 EOF2
 
+  PIPELINE_WIRING_FAILED=0
+
   if [ -n "$stage_role" ]; then
-    loom role set "$stage_role" exclude_labels "$stage_exclude" >/dev/null 2>&1 || true
-    loom role set "$stage_role" task_filter any >/dev/null 2>&1 || true
-    loom agentdef update "$(pipeline_agent_for_role "$stage_role")" \
-      --on-complete-add-label "$stage_stamp" >/dev/null 2>&1 || true
-    echo "[local-mode] pipeline: ${stage_role} claims un-${stage_exclude} tasks, stamps ${stage_stamp}"
+    failures_before=$PIPELINE_WIRING_FAILED
+    pipeline_wire loom role set "$stage_role" exclude_labels "$stage_exclude"
+    pipeline_wire loom role set "$stage_role" task_filter any
+    pipeline_wire loom agentdef update "$(pipeline_agent_for_role "$stage_role")" \
+      --on-complete-add-label "$stage_stamp"
+    if [ "$PIPELINE_WIRING_FAILED" -eq "$failures_before" ]; then
+      echo "[local-mode] pipeline: ${stage_role} claims un-${stage_exclude} tasks, stamps ${stage_stamp}"
+    fi
   fi
   if [ -n "$cycle_role" ]; then
-    loom role set "$cycle_role" labels "$rearm" >/dev/null 2>&1 || true
-    loom role set "$cycle_role" task_filter any >/dev/null 2>&1 || true
-    loom agentdef update "$(pipeline_agent_for_role "$cycle_role")" \
-      --on-complete-cycle "${threshold}:${rearm}:${ship}" >/dev/null 2>&1 || true
-    echo "[local-mode] pipeline: ${cycle_role} runs ${threshold} rounds, then ships ${ship}"
+    failures_before=$PIPELINE_WIRING_FAILED
+    pipeline_wire loom role set "$cycle_role" labels "$rearm"
+    pipeline_wire loom role set "$cycle_role" task_filter any
+    pipeline_wire loom agentdef update "$(pipeline_agent_for_role "$cycle_role")" \
+      --on-complete-cycle "${threshold}:${rearm}:${ship}"
+    if [ "$PIPELINE_WIRING_FAILED" -eq "$failures_before" ]; then
+      echo "[local-mode] pipeline: ${cycle_role} runs ${threshold} rounds, then ships ${ship}"
+    fi
 
     # Constrain whoever consumes the ship label. Without this the downstream
     # role keeps its broad filter and claims the task before the loop ever
     # starts — exclusion only binds agents that declare it.
     if [ -n "${LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE:-}" ]; then
-      loom role set "$LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE" labels "$ship" >/dev/null 2>&1 || true
-      echo "[local-mode] pipeline: ${LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE} waits for ${ship}"
+      failures_before=$PIPELINE_WIRING_FAILED
+      pipeline_wire loom role set "$LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE" labels "$ship"
+      if [ "$PIPELINE_WIRING_FAILED" -eq "$failures_before" ]; then
+        echo "[local-mode] pipeline: ${LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE} waits for ${ship}"
+      fi
     fi
   fi
+
+  # A partially wired pipeline is worse than none: agents still start, tasks
+  # still move, and the stack reports ready — so a fix "validated" against it
+  # was validated against routing that does not exist. Fail the entrypoint
+  # instead (set -e), which surfaces as the API never coming up.
+  if [ "$PIPELINE_WIRING_FAILED" -ne 0 ]; then
+    echo "[local-mode] FATAL: ${PIPELINE_WIRING_FAILED} pipeline wiring call(s) failed; refusing to start a half-wired stack" >&2
+    return 1
+  fi
+}
+
+# pipeline_wire runs one wiring call and reports what went wrong. Every call
+# here used to end in `>/dev/null 2>&1 || true` followed by an unconditional
+# success echo, so a typo'd role name, a rejected flag or a racing daemon left
+# the pipeline half-wired behind success-shaped logs — and nothing downstream
+# (agent count, UI, daemon status) can see the difference.
+pipeline_wire() {
+  local out
+  if out="$("$@" 2>&1)"; then
+    return 0
+  fi
+  echo "[local-mode] ERROR: pipeline wiring failed: $*" >&2
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out" | sed 's/^/[local-mode]   /' >&2
+  fi
+  PIPELINE_WIRING_FAILED=$((PIPELINE_WIRING_FAILED + 1))
+  return 0
 }
 
 # pipeline_agent_for_role maps a role name to the agent that runs it.

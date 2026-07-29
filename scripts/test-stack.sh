@@ -65,9 +65,18 @@ case "${1:-}" in
       'LOOM_FLEET_DB_URL=http://fleet-db:8080 LOOM_WORKSPACE='"$WORKSPACE"' LOOM_FLEET_DB_ACTOR=loom loom daemon status 2>/dev/null' \
       | head -1 || true)
     echo "    ${status:-daemon status unavailable}"
+    # Match precisely, and put the failure string FIRST. `loom daemon status`
+    # prints exactly "Daemon: running (PID n)" or "Daemon: not running"
+    # (internal/cli/daemon/daemon_cmd.go:491,495) — a `*running*` glob matches
+    # BOTH, so the check passed on a dead supervisor, which is the one silent
+    # failure this stack exists to surface. Anything unrecognised fails too:
+    # an empty status means `docker exec` itself did not work.
     case "$status" in
-      *running*) ;;
-      *) echo "daemon is not running — see: $0 logs" >&2; exit 1 ;;
+      *"Daemon: not running"*)
+        echo "daemon is not running — see: $0 logs" >&2; exit 1 ;;
+      *"Daemon: running"*) ;;
+      *)
+        echo "unrecognised daemon status: [${status:-<empty>}] — see: $0 logs" >&2; exit 1 ;;
     esac
     ;;
   env)
