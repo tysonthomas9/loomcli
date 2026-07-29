@@ -2,8 +2,11 @@ package supervisor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,10 +15,12 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // --- chunking ---------------------------------------------------------------
@@ -401,8 +406,196 @@ func TestRunCompletionHooks_DemotesOnFailureAndPreservesOnSkip(t *testing.T) {
 
 func TestFinalAssistantReply_RequiresSessionID(t *testing.T) {
 	s := &Supervisor{}
-	if _, err := s.finalAssistantReply(context.Background(), ""); err == nil {
+	ap := newHookAgentProcess(t, "T-1", hookPipeline())
+	if _, err := s.finalAssistantReply(context.Background(), ap, ""); err == nil {
 		t.Fatal("expected an error for a missing session id")
+	}
+}
+
+// --- end-to-end composition -------------------------------------------------
+
+// hookSessionRuntime points the supervisor's session lookups at a private
+// runtime dir and returns a store rooted there.
+func hookSessionRuntime(t *testing.T) *sessions.Store {
+	t.Helper()
+	t.Setenv("LOOM_REDACT_TRANSCRIPTS", "off")
+	runtimeDir := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", runtimeDir)
+	cli.ResetWorkspaceRuntimeDirCache()
+	t.Cleanup(cli.ResetWorkspaceRuntimeDirCache)
+
+	store, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	return store
+}
+
+// canonicalReplyTranscript is what the TS leaf writes before it exits: every
+// UUID empty, the final prose after the last tool cycle.
+const canonicalReplyTranscript = `{"seq":0,"role":"system","type":"session_meta","text":"start"}
+{"seq":1,"role":"user","type":"text","text":"review the plan"}
+{"seq":2,"role":"assistant","type":"text","text":"reading the design"}
+{"seq":3,"role":"assistant","type":"tool_use","tool_name":"Read"}
+{"seq":4,"role":"tool","type":"tool_result","output":"the design"}
+{"seq":5,"role":"assistant","type":"text","text":"PLAN CRITIQUE:"}
+{"seq":6,"role":"assistant","type":"text","text":"The ordering invariant is unenforced."}
+{"seq":7,"role":"system","type":"result","output":"{\"cost_usd\":1}"}
+`
+
+const wantFinalReply = "PLAN CRITIQUE:\n\nThe ordering invariant is unenforced."
+
+func syncCanonicalTranscript(t *testing.T, store *sessions.Store, sessionID, body string) {
+	t.Helper()
+	src := filepath.Join(t.TempDir(), "native.jsonl")
+	if err := os.WriteFile(src, []byte(body), 0o600); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	if err := store.SyncNativeTranscript(sessionID, src, sessions.TranscriptFormatCanonical); err != nil {
+		t.Fatalf("SyncNativeTranscript: %v", err)
+	}
+}
+
+// TestRunCompletionHooks_HappyPath drives the PRODUCTION entry point over a
+// multi-action pipeline and a real on-disk transcript — eligibility, extraction,
+// comment, then both labels — so a regression in the real loop cannot hide
+// behind a test-local reimplementation of it.
+func TestRunCompletionHooks_HappyPath(t *testing.T) {
+	store := hookSessionRuntime(t)
+	sess, err := store.CreateSession(sessions.CreateOptions{AgentName: "critic", Backend: backendnames.Codex})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	syncCanonicalTranscript(t, store, sess.SessionID(), canonicalReplyTranscript)
+
+	hooks := &domain.AgentHooks{OnComplete: []domain.AgentHookAction{
+		{Type: domain.AgentHookActionComment, Source: domain.AgentHookCommentSourceFinalReply},
+		{Type: domain.AgentHookActionAddLabel, Value: "criticized"},
+		{Type: domain.AgentHookActionAddLabel, Value: "ready-for-worker"},
+	}}
+	ap := newHookAgentProcess(t, "T-1", hooks)
+	ap.AgentSessionID = sess.SessionID()
+	rb := newRecordingBackend(nil, nil)
+	s := &Supervisor{IssueBackend: rb}
+
+	if got := s.runCompletionHooks(ap, 0); got != 0 {
+		t.Fatalf("exit code = %d, want the clean exit preserved", got)
+	}
+	if ap.LastError != nil {
+		t.Fatalf("LastError = %+v, want nil for a fully applied pipeline", ap.LastError)
+	}
+	want := []string{"comment", "label:criticized", "label:ready-for-worker"}
+	if got := rb.seq(); !equalStrings(got, want) {
+		t.Fatalf("write order = %v, want %v", got, want)
+	}
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	if len(rb.comments) != 1 || rb.comments[0] != wantFinalReply {
+		t.Fatalf("comment body = %q, want the extracted final reply %q", rb.comments, wantFinalReply)
+	}
+}
+
+// TestRunCompletionHooks_MirrorsCodexRolloutBeforeExtraction pins the fix for
+// the codex-on-the-Go-leaf hole: nothing mirrors the rollout into the session
+// before finalize, which runs AFTER this pipeline, so without the mirror the
+// extraction burns the whole flush window and demotes a successful run.
+func TestRunCompletionHooks_MirrorsCodexRolloutBeforeExtraction(t *testing.T) {
+	withShortFlushWindow(t)
+	store := hookSessionRuntime(t)
+	sess, err := store.CreateSession(sessions.CreateOptions{AgentName: "critic", Backend: backendnames.Codex})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	ap := newHookAgentProcess(t, "T-1", hookPipeline())
+	ap.AgentSessionID = sess.SessionID()
+	ap.Session = sess
+	// The rollout codex itself wrote, still only under CODEX_HOME: the session's
+	// own transcript does not exist yet.
+	writeCodexRollout(t, ap.WorktreePath, "The ordering invariant is unenforced.")
+
+	rb := newRecordingBackend(nil, nil)
+	s := &Supervisor{IssueBackend: rb}
+
+	if got := s.runCompletionHooks(ap, 0); got != 0 {
+		t.Fatalf("exit code = %d, want 0: the codex reply must be readable before finalize", got)
+	}
+	want := []string{"comment", "label:criticized"}
+	if got := rb.seq(); !equalStrings(got, want) {
+		t.Fatalf("write order = %v, want %v", got, want)
+	}
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
+	if len(rb.comments) != 1 || rb.comments[0] != "The ordering invariant is unenforced." {
+		t.Fatalf("comment body = %q, want the codex final reply", rb.comments)
+	}
+}
+
+// TestRunCompletionHooks_ReportsAMirrorFailure covers the degraded path: when
+// no native transcript can be mirrored either, the run still fails closed and
+// the error names the mirror failure instead of only the silent timeout.
+func TestRunCompletionHooks_ReportsAMirrorFailure(t *testing.T) {
+	withShortFlushWindow(t)
+	store := hookSessionRuntime(t)
+	sess, err := store.CreateSession(sessions.CreateOptions{AgentName: "critic", Backend: backendnames.Codex})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	t.Setenv("CODEX_HOME", t.TempDir()) // no sessions/ dir: nothing to mirror
+
+	ap := newHookAgentProcess(t, "T-1", hookPipeline())
+	ap.AgentSessionID = sess.SessionID()
+	ap.Session = sess
+	rb := newRecordingBackend(nil, nil)
+	s := &Supervisor{IssueBackend: rb}
+
+	if got := s.runCompletionHooks(ap, 0); got != -1 {
+		t.Fatalf("exit code = %d, want -1", got)
+	}
+	if ap.LastError == nil || !strings.Contains(ap.LastError.Message, "mirroring the backend transcript") {
+		t.Fatalf("LastError = %+v, want the mirror failure named in the diagnosis", ap.LastError)
+	}
+	if got := rb.seq(); len(got) != 0 {
+		t.Fatalf("no write may happen without a reply, got %v", got)
+	}
+}
+
+// writeCodexRollout lays down a codex rollout for workDir under a private
+// CODEX_HOME, in the date layout the real CLI uses.
+func writeCodexRollout(t *testing.T, workDir, finalText string) {
+	t.Helper()
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	// Codex dates its directories in local time and timestamps its records in
+	// UTC; the mirror has to cope with both.
+	now := time.Now()
+	dir := filepath.Join(codexHome, "sessions",
+		fmt.Sprintf("%04d", now.Year()), fmt.Sprintf("%02d", int(now.Month())), fmt.Sprintf("%02d", now.Day()))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir rollout dir: %v", err)
+	}
+	meta, err := json.Marshal(map[string]any{
+		"timestamp": now.UTC().Format(time.RFC3339),
+		"type":      "session_meta",
+		"payload":   map[string]any{"id": "codex-1", "cwd": workDir},
+	})
+	if err != nil {
+		t.Fatalf("marshal session_meta: %v", err)
+	}
+	reply, err := json.Marshal(map[string]any{
+		"timestamp": now.UTC().Format(time.RFC3339),
+		"type":      "response_item",
+		"payload": map[string]any{
+			"type": "message", "role": "assistant",
+			"content": []map[string]any{{"type": "output_text", "text": finalText}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal reply: %v", err)
+	}
+	body := string(meta) + "\n" + string(reply) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "rollout-2026-07-29T00-00-00-codex-1.jsonl"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write rollout: %v", err)
 	}
 }
 

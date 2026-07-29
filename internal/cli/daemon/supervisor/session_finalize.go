@@ -12,6 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -289,7 +290,17 @@ func (s *Supervisor) runCompletionHooks(ap *AgentProcess, exitCode int) int {
 // self-concluded run that owned a task is skipped, preserving pre-hook behavior.
 func (s *Supervisor) completionHookTarget(ap *AgentProcess, exitCode int) (*domain.AgentHooks, string, bool) {
 	hooks := ap.Entry.Hooks
-	if hooks.IsEmpty() || exitCode != 0 || s.IssueBackend == nil {
+	if hooks.IsEmpty() || exitCode != 0 {
+		return nil, "", false
+	}
+	if s.IssueBackend == nil {
+		// The configured writes cannot happen at all. Skipping silently would
+		// report success for a run whose hooks never ran, so say so loudly.
+		// It stays a skip rather than a demotion because no retry can conjure a
+		// backend: demoting would only reopen the task and loop until the
+		// agent's block budget is gone.
+		slog.Warn("completion hooks configured but no issue backend is available; skipping them",
+			"worktree", ap.Entry.Worktree, "actions", len(hooks.OnComplete))
 		return nil, "", false
 	}
 	ap.Mu.Lock()
@@ -330,7 +341,7 @@ func (s *Supervisor) executeCompletionHooks(
 	var reply string
 	if completionHooksNeedReply(hooks) {
 		var err error
-		reply, err = s.finalAssistantReply(ctx, sessionID)
+		reply, err = s.finalAssistantReply(ctx, ap, sessionID)
 		if err != nil {
 			return err
 		}
@@ -347,6 +358,9 @@ func (s *Supervisor) executeCompletionHooks(
 		case domain.AgentHookActionAddLabel:
 			err = s.IssueBackend.AddLabel(ctx, taskID, action.Value)
 		default:
+			// Unreachable: Validate above rejects unknown types. Kept so a new
+			// action added to the vocabulary but not to this switch fails the
+			// run instead of being silently skipped.
 			err = fmt.Errorf("unsupported action type %q", action.Type)
 		}
 		if err != nil {
@@ -414,16 +428,73 @@ func chunkComment(s string, budget int) []string {
 	return chunks
 }
 
+// mirrorNativeTranscript copies the backend's own transcript into this run's
+// session, the way sessionfinalize.WithWorktree does at finalize.
+//
+// Hooks run BEFORE finalize, so without this the raw backends have nothing for
+// the extraction to read: codex mirrors its rollout only inside finalize, and
+// the daemon-mode subprocess adopts the inherited session as nil, so its own
+// finalize no-ops too. Claude usually needs nothing here because `loom hooks`
+// mirrors its transcript live on every hook event — hence the caller reads
+// first and only mirrors on a miss, which also keeps a canonical TS-leaf
+// transcript (which finalize still reads for usage and the transcript_ref
+// artifact) from being overwritten by a raw stream.
+//
+// Best-effort by design: the return value only sharpens the diagnosis when the
+// reply cannot be found.
+func (s *Supervisor) mirrorNativeTranscript(ap *AgentProcess) error {
+	ap.Mu.Lock()
+	sess := ap.Session
+	ap.Mu.Unlock()
+	if sess == nil {
+		return fmt.Errorf("no local session handle for this run")
+	}
+	switch sess.Meta.Backend {
+	case backendnames.Codex:
+		path, err := sess.SyncLatestCodexRollout(ap.WorktreePath, sess.Meta.StartedAt)
+		if err == nil && path == "" {
+			return fmt.Errorf("no codex rollout for %s since %s",
+				ap.WorktreePath, sess.Meta.StartedAt.Format(time.RFC3339))
+		}
+		return err
+	case backendnames.Claude:
+		// Empty claudeUUID: newest-by-mtime in the worktree's project dir, the
+		// same resolution the supervisor's finalize uses.
+		path, err := sess.SyncLatestClaudeTranscript(ap.WorktreePath, "", sess.Meta.StartedAt)
+		if err == nil && path == "" {
+			return fmt.Errorf("no claude transcript for %s since %s",
+				ap.WorktreePath, sess.Meta.StartedAt.Format(time.RFC3339))
+		}
+		return err
+	default:
+		return nil
+	}
+}
+
 // finalAssistantReply returns the run's final assistant prose, waiting a
 // bounded window for the leaf to flush its transcript. Missing or empty output
 // is an error: a configured comment action must never be silently skipped.
-func (s *Supervisor) finalAssistantReply(ctx context.Context, sessionID string) (string, error) {
+func (s *Supervisor) finalAssistantReply(ctx context.Context, ap *AgentProcess, sessionID string) (string, error) {
 	if sessionID == "" {
 		return "", fmt.Errorf("extract final reply: no session id for this run")
 	}
 	sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
 		return "", fmt.Errorf("extract final reply: open session store: %w", err)
+	}
+	// Read before mirroring: the TS leaf writes its canonical transcript before
+	// exiting and Claude's live hook dispatch keeps the session's copy current,
+	// so those runs answer immediately and never have their transcript rewritten.
+	if reply, readErr := sessStore.FinalAssistantReply(sessionID); readErr == nil && reply != "" {
+		return reply, nil
+	}
+	// Nothing to read yet — mirror the backend's native transcript here rather
+	// than waiting for a finalize that only runs after this pipeline.
+	mirrorNote := ""
+	if mirrorErr := s.mirrorNativeTranscript(ap); mirrorErr != nil {
+		mirrorNote = fmt.Sprintf(" (mirroring the backend transcript also failed: %v)", mirrorErr)
+		slog.Warn("could not mirror the native transcript for a completion hook",
+			"worktree", ap.Entry.Worktree, "session_id", sessionID, "err", mirrorErr)
 	}
 	deadline := time.Now().Add(transcriptFlushWindow)
 	var lastErr error
@@ -446,9 +517,10 @@ func (s *Supervisor) finalAssistantReply(ctx context.Context, sessionID string) 
 		}
 	}
 	if lastErr != nil {
-		return "", fmt.Errorf("extract final reply for session %s: %w", sessionID, lastErr)
+		return "", fmt.Errorf("extract final reply for session %s: %w%s", sessionID, lastErr, mirrorNote)
 	}
-	return "", fmt.Errorf("extract final reply for session %s: no substantive assistant output within %s", sessionID, transcriptFlushWindow)
+	return "", fmt.Errorf("extract final reply for session %s: no substantive assistant output within %s%s",
+		sessionID, transcriptFlushWindow, mirrorNote)
 }
 
 // markCompletionHookFailure converts the clean run into a synthetic failure so

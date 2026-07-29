@@ -396,7 +396,12 @@ hook failure lives in the session state and `last_error_class`.
 text events, stopping at the preceding tool cycle or user turn. The boundary is
 structural rather than identity-based because canonical TS-leaf events carry no
 message UUID. The read waits a bounded window for the leaf to flush, then fails
-closed. Replies over fleet-db's 10,000-byte comment cap are split at rune
+closed. When the session has nothing readable yet — the case for a raw backend
+such as codex, whose rollout is otherwise only mirrored during finalize, which
+runs *after* the hooks — the supervisor mirrors the backend's native transcript
+itself before waiting. Sessions that already have a transcript (the TS leaf, and
+Claude via live hook dispatch) are read as-is and never re-mirrored. Replies over
+fleet-db's 10,000-byte comment cap are split at rune
 boundaries with `[final reply - part i/n]` headers, and every chunk must land
 before a label action runs. Reply text is never logged.
 

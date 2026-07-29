@@ -812,7 +812,11 @@ func (s *Supervisor) spawnAndWait(ap *AgentProcess) {
 	exitCode := s.waitForAgent(ap)
 	s.classifyAgentExit(ap, exitCode)
 	// Ledger hook: LastError is set, the lock is still present, and
-	// AgentSessionID has not been cleared by finalize yet.
+	// AgentSessionID has not been cleared by finalize yet. It runs with the
+	// FACTUAL exit code, so a clean run that later fails a completion hook
+	// evicts its ledger entry and the hook failure never counts toward task
+	// quarantine — deliberate (hook outcomes are agent-side, not task-side) and
+	// bounded instead by the agent's block budget via CompletionHookFailure.
 	s.recordTaskExitForQuarantine(ap, exitCode)
 	// Completion hooks run while the session id, claim, and transcript still
 	// exist, and before finalize/checkpoint/recovery decide the run's fate: a
