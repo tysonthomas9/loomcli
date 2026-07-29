@@ -84,30 +84,48 @@ curl -fsS -m 5 "$LOOM_FLEET_DB_URL/healthz" >/dev/null 2>&1 || {
 echo "Validating against $LOOM_WORKSPACE ($LOOM_FLEET_DB_URL)"
 echo
 
+# This stack runs REAL agents, and a probe issue is indistinguishable from real
+# work: the pipeline claims it, stamps its cycle/ship labels and closes it,
+# concurrently with the assertions below. So probes assert on what this suite
+# actually changed (membership of its own label, the issue's own transition) and
+# never on the whole label set or on the issue still being open — an exact-set
+# assertion here fails on a healthy stack, which is a false alarm, and the one
+# thing a validation suite must not produce.
+has_label() { "$LOOM" data show "$1" -o json 2>/dev/null | jq -e --arg l "$2" '((.labels // []) | index($l)) != null' >/dev/null; }
+issue_status() { field "$1" .status; }
+
 # ---- label mutation -------------------------------------------
 id=$(mkissue "validate: label mutation")
 if [ -z "$id" ]; then fail "label mutation" "could not create an issue"; else
   loom data update "$id" --add-label probe-a >/dev/null
-  added=$(field "$id" '.labels // [] | join(",")')
+  if has_label "$id" probe-a; then added=yes; else added=no; fi
   loom data update "$id" --remove-label probe-a >/dev/null
-  removed=$(field "$id" '.labels // [] | join(",")')
-  if [ "$added" = "probe-a" ] && [ "$removed" = "" ]; then
+  if has_label "$id" probe-a; then removed=still-present; else removed=gone; fi
+  if [ "$added" = yes ] && [ "$removed" = gone ]; then
     pass "label add/remove round-trips"
   else
-    fail "label add/remove round-trips" "after add=[$added] after remove=[$removed]"
+    fail "label add/remove round-trips" "after add: probe-a present=$added; after remove: $removed"
   fi
 fi
 
 # ---- closing stamps updated_at --------------------------------
 id=$(mkissue "validate: updated_at on close")
 if [ -z "$id" ]; then fail "updated_at on close" "could not create an issue"; else
-  before=$(field "$id" .updated_at); sleep 2
-  loom data close "$id" --reason "validation probe" >/dev/null
-  after=$(field "$id" .updated_at)
-  if [ -n "$before" ] && [ "$before" != "$after" ]; then
-    pass "close advances updated_at"
+  before=$(field "$id" .updated_at)
+  was=$(issue_status "$id")
+  sleep 2
+  if [ "$was" = "closed" ]; then
+    # An agent got there first. Closing again is a no-op by design, so the
+    # timestamp legitimately does not move and this probe can prove nothing.
+    skip "close advances updated_at" "an agent closed the probe first; a second close is a documented no-op"
   else
-    fail "close advances updated_at" "before=$before after=$after"
+    loom data close "$id" --reason "validation probe" >/dev/null
+    after=$(field "$id" .updated_at)
+    if [ -n "$before" ] && [ "$before" != "$after" ]; then
+      pass "close advances updated_at"
+    else
+      fail "close advances updated_at" "before=$before after=$after (status before close: $was)"
+    fi
   fi
 fi
 
