@@ -304,23 +304,113 @@ func TestList_QueryParams(t *testing.T) {
 	defer ts.Close()
 
 	// Only fleet-db-supported fields: Status, IssueType, Assignee, Labels,
-	// SourceRepos, ParentID, UpdatedAfter, UpdatedBefore, Limit.
+	// ParentID, UpdatedAfter, UpdatedBefore, Limit. SourceRepos is deliberately
+	// absent — see TestList_ClientFiltersSingleRepoWithoutServerParam.
 	_, _ = fb.List(context.Background(), backend.ListOpts{
 		Status:       "open",
 		Limit:        5,
 		Assignee:     "agent-1",
 		Labels:       []string{"urgent"},
 		UpdatedAfter: "2026-01-01",
-		SourceRepos:  []string{"repo-a"},
 	})
 
 	for _, want := range []string{
 		"status=open", "limit=5", "assignee=agent-1",
-		"label=urgent", "updated_after=2026-01-01", "repo=repo-a",
+		"label=urgent", "updated_after=2026-01-01",
 	} {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query %q missing %q", gotQuery, want)
 		}
+	}
+}
+
+// A single-repo filter used to go to the server as a bare `repo=` param, which
+// fleet-db rejects outright — the list hard-failed before the client predicate
+// could run, and a workspace with one repo could not list its own issues. It is
+// now filtered client-side like the multi-repo case, which also means unscoped
+// issues survive it.
+func TestList_ClientFiltersSingleRepoWithoutServerParam(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		respondOK(w, []*types.IssueWithCounts{
+			{Issue: &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now}},
+			{Issue: &types.Issue{ID: "b", Title: "B", Status: types.StatusOpen, SourceRepo: "repo-b", CreatedAt: now, UpdatedAt: now}},
+			{Issue: &types.Issue{ID: "c", Title: "C", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+		})
+	})
+	defer ts.Close()
+
+	result, err := fb.List(context.Background(), backend.ListOpts{
+		SourceRepos: []string{"repo-a"},
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if strings.Contains(gotQuery, "repo=") {
+		t.Fatalf("query = %q, want no server-side repo filter", gotQuery)
+	}
+	if len(result) != 2 || result[0].ID != "a" || result[1].ID != "c" {
+		t.Fatalf("result = %+v, want the in-scope issue plus the unscoped one", result)
+	}
+}
+
+// Count answers the same question as List, so its repo filter has to travel the
+// same client-side route: /issues/count returns a total with no rows to filter.
+func TestCount_RepoFilterIsCountedClientSide(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var gotPath, gotQuery string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		respondOK(w, []*types.IssueWithCounts{
+			{Issue: &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, SourceRepo: "repo-a", CreatedAt: now, UpdatedAt: now}},
+			{Issue: &types.Issue{ID: "b", Title: "B", Status: types.StatusOpen, SourceRepo: "repo-b", CreatedAt: now, UpdatedAt: now}},
+			{Issue: &types.Issue{ID: "c", Title: "C", Status: types.StatusOpen, CreatedAt: now, UpdatedAt: now}},
+		})
+	})
+	defer ts.Close()
+
+	got, err := fb.Count(context.Background(), backend.CountOpts{
+		Status:      "open",
+		SourceRepos: []string{"repo-a"},
+	})
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if strings.HasSuffix(gotPath, "/issues/count") {
+		t.Fatalf("path = %q, want the list endpoint for a repo-scoped count", gotPath)
+	}
+	if strings.Contains(gotQuery, "repo=") {
+		t.Fatalf("query = %q, want no server-side repo filter", gotQuery)
+	}
+	if !strings.Contains(gotQuery, "status=open") {
+		t.Errorf("query = %q, want the other count filters preserved", gotQuery)
+	}
+	if got != 2 {
+		t.Fatalf("Count = %d, want 2 (in-scope + unscoped)", got)
+	}
+}
+
+// Without a repo filter Count must stay on the count endpoint: the list
+// round-trip exists only to make the repo predicate runnable.
+func TestCount_WithoutRepoFilterUsesCountEndpoint(t *testing.T) {
+	var gotPath string
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		respondOK(w, countIssuesResponse{Total: 7})
+	})
+	defer ts.Close()
+
+	got, err := fb.Count(context.Background(), backend.CountOpts{Status: "open"})
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if !strings.HasSuffix(gotPath, "/issues/count") {
+		t.Fatalf("path = %q, want /issues/count", gotPath)
+	}
+	if got != 7 {
+		t.Fatalf("Count = %d, want 7", got)
 	}
 }
 

@@ -39,6 +39,34 @@ func TestIssueDataMatches_DropsIssueOutOfScope(t *testing.T) {
 	}
 }
 
+// No repo filter at all must leave every issue eligible, scoped or not. This is
+// the baseline the repo predicate narrows from; pinning it keeps a future edit
+// from turning "no filter" into "match nothing".
+func TestIssueDataMatches_NoRepoFilterKeepsEverything(t *testing.T) {
+	for _, issue := range []backend.IssueData{
+		{ID: "X-1"},
+		{ID: "X-2", SourceRepo: "loomcli"},
+	} {
+		if !issueDataMatches(issue, issueDataFilter{SourceRepos: nil}) {
+			t.Errorf("issue %q must match when no repo filter is set", issue.ID)
+		}
+	}
+}
+
+// Unscoped means "not a repo mismatch", not "exempt from filtering". An
+// over-broad edit that short-circuits the whole predicate for unscoped issues
+// would pass every other test in this file, so pin the interaction directly.
+func TestIssueDataMatches_UnscopedIssueStillObeysOtherFilters(t *testing.T) {
+	issue := backend.IssueData{ID: "X-1", Labels: []string{"chore"}}
+	opts := issueDataFilter{
+		SourceRepos: []string{"loomcli"},
+		Labels:      []string{"needs-revision"},
+	}
+	if issueDataMatches(issue, opts) {
+		t.Error("unscoped issue must still be dropped by a non-matching label filter")
+	}
+}
+
 func TestFilterIssueData_UnscopedAndInScopeSurviveRepoFilter(t *testing.T) {
 	issues := []backend.IssueData{
 		{ID: "X-1"},                          // unscoped

@@ -178,7 +178,7 @@ func TestListOptsToQuery_UsesTypeNotIssueType(t *testing.T) {
 	}
 }
 
-func TestListOptsToQuery_UsesFleetLabelAndRepoParams(t *testing.T) {
+func TestListOptsToQuery_UsesFleetLabelParamAndNoRepoParam(t *testing.T) {
 	q := listOptsToQuery(backend.ListOpts{
 		Labels:      []string{"urgent"},
 		SourceRepos: []string{"repo-a"},
@@ -187,8 +187,10 @@ func TestListOptsToQuery_UsesFleetLabelAndRepoParams(t *testing.T) {
 	if got := v.Get("label"); got != "urgent" {
 		t.Errorf("label = %q, want urgent", got)
 	}
-	if got := v.Get("repo"); got != "repo-a" {
-		t.Errorf("repo = %q, want repo-a", got)
+	// The repo filter is client-side: fleet-db 400s on a bare repo name, and a
+	// server-side repo filter would also drop unscoped issues.
+	if got := v.Get("repo"); got != "" {
+		t.Errorf("repo = %q, want absent", got)
 	}
 	if v.Get("labels") != "" {
 		t.Errorf("labels = %q, want absent", v.Get("labels"))
