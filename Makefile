@@ -170,6 +170,14 @@ ensure-frontend-dist:
 
 # Start the fleet-db regression stack: redis, fleet-db, loom serve on the
 # fleet-db backend, the Web UI sidecar, and a one-shot fixture seeder.
+#
+# Engine support: this stack needs docker compose >= 2.22, which is where
+# `additional_contexts: fdb-source: "service:fleet-db"` (the build-time edge the
+# seeder image depends on) landed. The podman-compose / `podman compose`
+# fallbacks below are kept for parity with fleetdb-empty-up, but they are not
+# known to implement `service:` build contexts: on those engines the seeder
+# build degrades back to the original "pull access denied" failure. Use docker
+# compose for the regression stack.
 fleetdb-regression-up: ensure-frontend-dist
 	@echo "Starting fleet-db regression stack (API http://localhost:8082, UI http://localhost:8083)..."
 	@set -e; \
