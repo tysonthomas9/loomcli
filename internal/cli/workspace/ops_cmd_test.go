@@ -681,12 +681,13 @@ func TestBuildWorkspaceOpsStatusUsesNodeRegistry(t *testing.T) {
 	}
 }
 
-// TestBuildWorkspaceOpsStatusIgnoresTaskWorkerNode is the regression test for
-// downstream regression. `loom serve` registers itself as a fresh local
-// Node carrying only loom-driver-executor / loom-task-worker labels. With
-// a runnable agent and no supervisor anywhere, diagnose must report the
-// registered daemon as down, emit daemon_not_running, and fail overall —
-// previously that Node alone flipped the whole verdict to healthy.
+// TestBuildWorkspaceOpsStatusIgnoresTaskWorkerNode is the downstream half of
+// the daemonregistry regression: it pins the same bug where diagnose consumes
+// it. `loom serve` registers itself as a fresh local Node carrying only
+// loom-driver-executor / loom-task-worker labels. With a runnable agent and no
+// supervisor anywhere, diagnose must report the registered daemon as down,
+// emit daemon_not_running, and fail overall — previously that Node alone
+// flipped the whole verdict to healthy.
 func TestBuildWorkspaceOpsStatusIgnoresTaskWorkerNode(t *testing.T) {
 	t.Setenv("LOOM_ISSUE_BACKEND", "fleet") // skip local-runtime probe
 	// Isolate the path-based AppData probe from any real desktop daemon

@@ -87,12 +87,17 @@ const (
 //     check any of them would masquerade as a live supervisor.
 //     loom.daemon.cwd / loom.daemon.socket are optional metadata and
 //     never establish identity on their own.
-//  4. If the qualifying Node was registered by this host (NodeID
-//     contains the local hostname), lockfile.IsProcessRunning must
-//     report the PID alive. This guards against ghost Node rows where
-//     the daemon crashed mid-shutdown and the TTL hasn't elapsed yet.
-//     For Nodes from other hosts we trust the heartbeat alone — we
-//     cannot probe a PID on a different machine.
+//  4. If the qualifying Node claims to be a supervisor on this host
+//     — NodeID of the form "loom-supervisor-<localhost>-<pid>", i.e.
+//     the prefix AND the hostname must both match (see
+//     hostnameMatchesLocal) — lockfile.IsProcessRunning must report
+//     the PID alive. This guards against ghost Node rows where the
+//     daemon crashed mid-shutdown and the TTL hasn't elapsed yet.
+//     Every other qualifying Node is trusted on its heartbeat alone:
+//     a PID on another machine cannot be probed from here, and a
+//     same-host Node using some other NodeID scheme is
+//     indistinguishable from a remote one at this layer. Rule 3 is
+//     what keeps that fallback narrow.
 //
 // Candidate filtering happens before most-recent-heartbeat selection,
 // so a newer non-daemon Node can never displace or suppress a valid

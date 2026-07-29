@@ -108,10 +108,11 @@ func testHostname(t *testing.T) string {
 	return host
 }
 
-// TestDetect_IgnoresTaskWorkerNode is the regression test for the
-// `loom serve` task worker registers a fresh local Node with only
-// loom-driver-executor / loom-task-worker labels and no daemon PID.
-// It is not a supervisor and must never confirm daemon liveness.
+// TestDetect_IgnoresTaskWorkerNode is the regression test for the `loom serve`
+// task worker being mistaken for a supervisor. That worker registers a fresh
+// local Node carrying only loom-driver-executor / loom-task-worker labels and
+// no daemon PID. It is not a supervisor and must never confirm daemon
+// liveness.
 func TestDetect_IgnoresTaskWorkerNode(t *testing.T) {
 	st := memstore.New()
 	_, err := st.Nodes().Create(context.Background(), store.NodeCreate{
