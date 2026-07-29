@@ -143,10 +143,13 @@ func init() {
 }
 
 func runRoleAdd(_ *cobra.Command, args []string) error {
-	if err := validateRolePromptFile(roleAddKind, roleAddPromptFile); err != nil {
+	// Kind first: an invalid kind is the more fundamental error, and reporting
+	// the prompt problem ahead of it suggests `--kind interactive` on a value
+	// that was never going to be accepted.
+	if err := validateRoleKindValue(roleAddKind); err != nil {
 		return err
 	}
-	if err := validateRoleKindValue(roleAddKind); err != nil {
+	if err := validateRolePromptFile(args[0], roleAddKind, roleAddPromptFile); err != nil {
 		return err
 	}
 	inputPolicy, err := buildAddInputPolicy(roleAddInputPolicyDef, roleAddInputPolicy)
@@ -277,6 +280,9 @@ func runRoleSet(_ *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+		if err := validateRoleUpdate(ctx, h.Store.Roles(), ws, name, key, value); err != nil {
+			return err
+		}
 		if _, err := h.Store.Roles().Update(ctx, ws, name, patch); err != nil {
 			return fmt.Errorf("update role: %w", err)
 		}
@@ -290,6 +296,11 @@ func runRoleUnset(_ *cobra.Command, args []string) error {
 		name, key := args[0], args[1]
 		patch, err := buildRolePatch(key, "" /* value */, true /* unset */)
 		if err != nil {
+			return err
+		}
+		// Clearing the kind is a mutation like any other: it drops an
+		// interactive role back to the worker default, builtin: prompt and all.
+		if err := validateRoleUpdate(ctx, h.Store.Roles(), ws, name, key, "" /* value */); err != nil {
 			return err
 		}
 		if _, err := h.Store.Roles().Update(ctx, ws, name, patch); err != nil {
@@ -443,7 +454,7 @@ func validateRoleKindValue(value string) error {
 	}
 }
 
-// validateRolePromptFile rejects a builtin: prompt on a worker role.
+// validateRolePromptFile rejects a builtin: prompt a role cannot actually use.
 //
 // The builtin registry holds interactive terminal prompts only (lead,
 // pr-review, pr-review-checkout), and only GenerateTerminalPrompt resolves the
@@ -453,20 +464,67 @@ func validateRoleKindValue(value string) error {
 //
 //	prompt file ".../builtin:pr-review" not found
 //
-// which names a path nobody wrote and takes the whole supervisor down with it
-// (/-67). Refuse it here, where the mistake is still attributable.
-func validateRolePromptFile(kind, promptFile string) error {
+// which names a path nobody wrote and takes the whole supervisor down with it —
+// every agent in the workspace, not just the misconfigured one. Refuse it here,
+// where the mistake is still attributable to the command that made it.
+//
+// The kind is resolved the way the daemon resolves it (domain.ResolveRoleKind),
+// so a legacy interactive role name with no explicit --kind is judged the same
+// on both sides.
+//
+// An unknown id is refused too, on interactive roles as well: the role stores
+// fine and then fails at terminal spawn with "unknown built-in interactive
+// prompt", far from the typo that caused it, and the valid ids are already in
+// hand here.
+func validateRolePromptFile(roleName, kind, promptFile string) error {
 	promptFile = strings.TrimSpace(promptFile)
 	if !strings.HasPrefix(promptFile, builtinPromptPrefix) {
 		return nil
 	}
-	if normalizeRoleKindValue(kind) == string(domain.RoleKindInteractive) {
+	role := &domain.Role{Kind: domain.RoleKind(normalizeRoleKindValue(kind))}
+	if domain.ResolveRoleKind(role, roleName) != domain.RoleKindInteractive {
+		return fmt.Errorf(
+			"prompt-file %q is a built-in interactive prompt and cannot be used by a worker role; "+
+				"pass --kind interactive to use it, or give a prompt file path relative to the workspace root (built-ins: %s)",
+			promptFile, strings.Join(builtinPromptIDs(), ", "))
+	}
+	id := strings.TrimSpace(strings.TrimPrefix(promptFile, builtinPromptPrefix))
+	if !domain.IsBuiltinInteractivePrompt(id) {
+		return fmt.Errorf(
+			"prompt-file %q names no built-in interactive prompt; "+
+				"use one of the built-ins (%s), or give a prompt file path relative to the workspace root",
+			promptFile, strings.Join(builtinPromptIDs(), ", "))
+	}
+	return nil
+}
+
+// validateRoleUpdate applies that same rule to the update path.
+//
+// buildRolePatch sees one key at a time and knows nothing about what the role
+// already holds, so three separate updates can each assemble the
+// daemon-killing pair from a valid starting point: setting prompt_file to a
+// builtin: on a worker role, setting kind to worker on an interactive role that
+// legitimately carries one, or unsetting the kind so it falls back to worker.
+// Validating the value alone cannot see any of them — this validates the
+// combination the store would be left holding.
+func validateRoleUpdate(ctx context.Context, roles store.RoleStore, ws, name, key, value string) error {
+	if key != "kind" && key != "prompt_file" {
 		return nil
 	}
-	return fmt.Errorf(
-		"prompt-file %q is a built-in interactive prompt and cannot be used by a worker role; "+
-			"pass --kind interactive to use it, or give a prompt file path relative to the workspace root (built-ins: %s)",
-		promptFile, strings.Join(builtinPromptIDs(), ", "))
+	current, err := roles.Get(ctx, ws, name)
+	if err != nil {
+		return fmt.Errorf("read role %q: %w", name, err)
+	}
+	var kind, promptFile string
+	if current != nil {
+		kind, promptFile = string(current.Kind), current.PromptFile
+	}
+	if key == "kind" {
+		kind = value
+	} else {
+		promptFile = value
+	}
+	return validateRolePromptFile(name, kind, promptFile)
 }
 
 const builtinPromptPrefix = "builtin:"
