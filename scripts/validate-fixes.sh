@@ -72,6 +72,38 @@ go_test_pinned() {
 
 loom() { "$LOOM" "$@" 2>/dev/null | grep -v '^time='; }
 mkissue() { "$LOOM" data create --title "$1" --type task --priority 4 ${2:+--design "$2"} 2>/dev/null | grep -oE "${LOOM_WORKSPACE}-[0-9]+" | head -1; }
+
+# mkprobe <title> — an issue the pipeline will not take.
+#
+# This stack runs REAL agents and a probe issue is ordinary work to them: left
+# open it gets claimed, stamped with the pipeline's cycle/ship labels and
+# closed, concurrently with whatever this suite is asserting. Worse, once an
+# agent closes it, fleet-db rejects the suite's own label writes, so the check
+# fails on a perfectly healthy stack.
+#
+# `blocked` keeps the issue out of the ready queue while still accepting the
+# label and close mutations these probes need — it is not a terminal status.
+# The reason is mandatory (and correct: it tells a human reading the board that
+# this row is instrumentation, not work).
+mkprobe() {
+  local id
+  # Unique title per run, and it has to be. `data create` is idempotent on
+  # title: a second create with a title this suite already used returns the
+  # EXISTING issue rather than a new one. That issue is by then closed (an agent
+  # took it, or the previous run closed it), every mutation below fails against
+  # a terminal issue, and the suite reports a fix as broken on its second run —
+  # which is exactly backwards for a suite whose job is re-validation.
+  #
+  # Deliberately not `|| return 1` on mkissue: it ends in `grep | head -1`, so
+  # head closes the pipe, grep dies of SIGPIPE, and pipefail reports 141 even
+  # though the id was captured fine. The id itself is the success signal.
+  id=$(mkissue "$1 [$(date +%Y%m%dT%H%M%S)-$$]")
+  [ -n "$id" ] || return 1
+  "$LOOM" data update "$id" --status blocked \
+    --notes "BLOCKED: validation-suite probe, not real work — kept out of the ready queue so live agents do not race the assertion" \
+    >/dev/null 2>&1 || return 1
+  printf '%s' "$id"
+}
 field() { "$LOOM" data show "$1" -o json 2>/dev/null | jq -r "$2"; }
 
 [ -x "$LOOM" ] || { echo "build the CLI first: go build -o $LOOM ./cmd/loom" >&2; exit 1; }
@@ -95,7 +127,7 @@ has_label() { "$LOOM" data show "$1" -o json 2>/dev/null | jq -e --arg l "$2" '(
 issue_status() { field "$1" .status; }
 
 # ---- label mutation -------------------------------------------
-id=$(mkissue "validate: label mutation")
+id=$(mkprobe "validate: label mutation")
 if [ -z "$id" ]; then fail "label mutation" "could not create an issue"; else
   loom data update "$id" --add-label probe-a >/dev/null
   if has_label "$id" probe-a; then added=yes; else added=no; fi
@@ -109,7 +141,7 @@ if [ -z "$id" ]; then fail "label mutation" "could not create an issue"; else
 fi
 
 # ---- closing stamps updated_at --------------------------------
-id=$(mkissue "validate: updated_at on close")
+id=$(mkprobe "validate: updated_at on close")
 if [ -z "$id" ]; then fail "updated_at on close" "could not create an issue"; else
   before=$(field "$id" .updated_at)
   was=$(issue_status "$id")
@@ -117,7 +149,7 @@ if [ -z "$id" ]; then fail "updated_at on close" "could not create an issue"; el
   if [ "$was" = "closed" ]; then
     # An agent got there first. Closing again is a no-op by design, so the
     # timestamp legitimately does not move and this probe can prove nothing.
-    skip "close advances updated_at" "an agent closed the probe first; a second close is a documented no-op"
+    skip "close advances updated_at" "the probe was already closed before this suite closed it; a second close is a documented no-op"
   else
     loom data close "$id" --reason "validation probe" >/dev/null
     after=$(field "$id" .updated_at)
@@ -183,7 +215,11 @@ ready_ids() { # <query-suffix>
 if ! curl -fsS -m 5 "$api/api/workspaces" >/dev/null 2>&1; then
   skip "repo filter" "loom-api not reachable at $api"
 else
-  probe=$(mkissue "validate: unscoped repo-filter probe")
+  # Unique title for the same reason mkprobe uses one: create is idempotent on
+  # title, so a re-run would resurrect the previous run's probe — by then
+  # claimed and out of the ready queue — and skip forever. This probe must stay
+  # OPEN to reach the ready queue at all, so it cannot use mkprobe.
+  probe=$(mkissue "validate: unscoped repo-filter probe [$(date +%Y%m%dT%H%M%S)-$$]")
   scope=$([ -n "$probe" ] && field "$probe" '.source_repo // ""')
   if [ -z "$probe" ]; then
     skip "repo filter" "could not create the unscoped probe issue"
