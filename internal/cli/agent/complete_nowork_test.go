@@ -148,3 +148,61 @@ func writeLockFileForTest(t *testing.T, dir, taskID, agentName string) {
 		t.Fatalf("failed to write lock file: %v", err)
 	}
 }
+
+// An advisory role can claim a task, discover there is nothing actionable, and
+// report --no-work. Reporting no work must not strand that task: the claim has
+// to be released so the issue returns from in_progress to open with no owner,
+// otherwise the "no work" signal quietly parks a real task forever.
+//
+// runComplete calls releaseClaimOnComplete unconditionally, before the marker
+// is written; backend.ClaimReleaser's contract (and FleetBackend's /release
+// call) is what performs the in_progress -> open transition. This pins that the
+// --no-work path does not skip that step and that the marker still records the
+// task the agent had claimed.
+func TestRunComplete_NoWork_ReleasesHeldClaim(t *testing.T) {
+	stub := newReleaserStub(nil)
+	cli.SetDefaultIssueBackend(stub)
+	t.Cleanup(cli.ResetDefaultIssueBackend)
+
+	worktreePath := t.TempDir()
+	resolvedPath, err := filepath.EvalSymlinks(worktreePath)
+	if err != nil {
+		resolvedPath = worktreePath
+	}
+	writeReleaseTestLock(t, worktreePath, "ISSUE-77")
+
+	t.Setenv("LOOM_WORKTREE_PATH", worktreePath)
+	t.Setenv("LOOM_AGENT_NAME", "")
+
+	completeNoWork = true
+	completeReason = "reviewed, nothing to change"
+	t.Cleanup(func() {
+		completeNoWork = false
+		completeReason = ""
+		os.Remove(GetSignalFilePath(resolvedPath))
+	})
+
+	runComplete(nil, nil)
+
+	if got := stub.called.Load(); got != 1 {
+		t.Fatalf("ReleaseClaim call count = %d, want 1 -- --no-work must not skip the claim release", got)
+	}
+	if got, _ := stub.lastID.Load().(string); got != "ISSUE-77" {
+		t.Errorf("released %q, want ISSUE-77 (the task recorded in the agent lock)", got)
+	}
+	if got, _ := stub.lastActor.Load().(string); got != "test-planner" {
+		t.Errorf("release actor = %q, want the lock's agent name", got)
+	}
+
+	data, err := os.ReadFile(filepath.Join(resolvedPath, noWorkFileName))
+	if err != nil {
+		t.Fatalf("expected a no-work marker: %v", err)
+	}
+	var report noWorkReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("no-work marker is not valid JSON: %v", err)
+	}
+	if report.TaskID != "ISSUE-77" {
+		t.Errorf("marker TaskID = %q, want ISSUE-77 so an operator can see which task was claimed and then abandoned", report.TaskID)
+	}
+}

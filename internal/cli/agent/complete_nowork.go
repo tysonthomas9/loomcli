@@ -8,8 +8,9 @@ import (
 )
 
 // noWorkFileName mirrors supervisor.NoWorkFileName.
-// SYNC: Must stay aligned with internal/cli/daemon/supervisor/nowork.go
-// (NoWorkFileName / NoWorkReport). internal/cli/agent cannot import
+// SYNC: Must stay aligned with internal/cli/daemon/supervisor/yield.go
+// (NoWorkFileName / NoWorkReport, at the bottom of that file next to the
+// yield marker they are modeled on). internal/cli/agent cannot import
 // internal/cli/daemon/supervisor (supervisor already imports this package),
 // so the marker channel's wire shape is duplicated here rather than shared.
 const noWorkFileName = ".agent.nowork"

@@ -253,7 +253,7 @@ func (s *Supervisor) applyNoWorkRestart(ap *AgentProcess) {
 	} else {
 		ap.NoWorkSpawnCount = 0
 	}
-	if ap.CurrentBackendIdx > 0 && shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, s.getNoWorkBackoff()) {
+	if ap.CurrentBackendIdx > 0 && s.shouldRetryPrimaryAfterNoWork(ap.NoWorkCount, ap.NoWorkSpawnCount) {
 		ap.CurrentBackendIdx = 0
 	}
 	ap.StopReason = ""
@@ -367,11 +367,65 @@ func exponentialBackoff(initial, retryN, maxBackoff int, hint time.Duration) tim
 	return backoff
 }
 
-func shouldRetryPrimaryAfterNoWork(noWorkCount, noWorkBackoffSeconds int) bool {
-	if noWorkCount <= 0 || noWorkBackoffSeconds <= 0 {
-		return false
+// noWorkIdleCeiling bounds noWorkIdleEstimate. Any cooldown compared against it
+// is minutes, so saturating here costs nothing and keeps a pathologically long
+// streak from overflowing the duration arithmetic into a negative value.
+const noWorkIdleCeiling = 24 * time.Hour
+
+// noWorkIdleEstimate returns a lower bound on the wall-clock time an agent has
+// spent idle over its current no-work streak.
+//
+// It cannot be a plain count x base product any more. Post-spawn no-work exits
+// sleep on an exponential schedule (see noWorkBackoff), so count x base
+// under-estimates real elapsed time by a factor that grows with the streak.
+// Everything needed to reconstruct the true schedule is already on the
+// AgentProcess: noWorkCount - noWorkSpawnCount exits were detected pre-spawn and
+// each slept exactly base, and the current post-spawn streak slept
+// noWorkBackoff(true, 1..noWorkSpawnCount). Order within the streak does not
+// affect the sum, so no timestamp is needed.
+func (s *Supervisor) noWorkIdleEstimate(noWorkCount, noWorkSpawnCount int) time.Duration {
+	if noWorkCount <= 0 {
+		return 0
 	}
-	return time.Duration(noWorkCount)*time.Duration(noWorkBackoffSeconds)*time.Second >= primaryBackendRetryCooldown
+	base := time.Duration(s.getNoWorkBackoff()) * time.Second
+	if base <= 0 {
+		return 0
+	}
+	if noWorkSpawnCount < 0 {
+		noWorkSpawnCount = 0
+	}
+	if noWorkSpawnCount > noWorkCount {
+		// Defensive: the two counters are incremented and reset together, so
+		// this should not happen.
+		noWorkSpawnCount = noWorkCount
+	}
+
+	total := time.Duration(noWorkCount-noWorkSpawnCount) * base
+	capSleep := time.Duration(s.getNoWorkBackoffMax()) * time.Second
+	for n := 1; n <= noWorkSpawnCount; n++ {
+		d := s.noWorkBackoff(true, n)
+		total += d
+		if total >= noWorkIdleCeiling {
+			return noWorkIdleCeiling
+		}
+		if d >= capSleep {
+			// The schedule has saturated; every remaining exit slept the cap.
+			if remaining := noWorkSpawnCount - n; remaining > 0 {
+				total += time.Duration(remaining) * capSleep
+			}
+			break
+		}
+	}
+	if total >= noWorkIdleCeiling || total < 0 {
+		return noWorkIdleCeiling
+	}
+	return total
+}
+
+// shouldRetryPrimaryAfterNoWork reports whether a failed-over agent has been
+// idle long enough that it is worth re-probing its primary backend.
+func (s *Supervisor) shouldRetryPrimaryAfterNoWork(noWorkCount, noWorkSpawnCount int) bool {
+	return s.noWorkIdleEstimate(noWorkCount, noWorkSpawnCount) >= primaryBackendRetryCooldown
 }
 
 // Helper functions to safely access config.RestartPolicy fields with defaults.

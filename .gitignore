@@ -57,5 +57,6 @@ services/auth/dist/
 # Local worktrees
 worktrees/
 .agent.yield
+.agent.nowork
 node_modules/
 *.agent.lock.flock

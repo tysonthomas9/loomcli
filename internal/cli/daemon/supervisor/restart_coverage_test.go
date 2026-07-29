@@ -734,3 +734,156 @@ func TestSupervisor_ResolveRoleConfig_UnknownRole(t *testing.T) {
 		t.Error("expected error for unknown role, got nil")
 	}
 }
+
+// TestShouldRestart_NoWork_FiftyPostSpawnExits drives the full policy loop —
+// shouldRestart -> applyNoWorkRestart -> computeBackoff — across a long
+// no-work streak, which is the shape of the failure this policy exists to
+// bound: a role that never has work respawning forever on a flat 30s poll.
+//
+// The short streak tests stop at n=3 and the backoff table pokes computeBackoff
+// directly at fixed counter values. Neither shows that the two invariants hold
+// TOGETHER over a long run, which is exactly what went wrong before: the
+// restart budget was reset on every no-work exit (so max_retries was
+// unreachable) while the poll interval never grew (so the loop was unbounded).
+func TestShouldRestart_NoWork_FiftyPostSpawnExits(t *testing.T) {
+	base, maxBackoff := 30, 900
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{
+			NoWorkBackoff:    &base,
+			NoWorkBackoffMax: &maxBackoff,
+		}},
+	})
+
+	ap := &AgentProcess{
+		RestartCount:        2, // budget already partly spent by real failures
+		LastExitCode:        0,
+		LastStart:           time.Now(),
+		LastError:           &agenterr.AgentError{Class: agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome)},
+		LastNoWorkPostSpawn: true,
+	}
+
+	const exits = 50
+	capSleep := time.Duration(maxBackoff) * time.Second
+	var prev time.Duration
+	var total time.Duration
+
+	for i := 1; i <= exits; i++ {
+		if !s.shouldRestart(ap) {
+			t.Fatalf("shouldRestart() = false at no-work exit %d; a no-work exit must never consume the restart budget", i)
+		}
+		got := s.computeBackoff(ap)
+
+		if got > capSleep {
+			t.Fatalf("backoff at exit %d = %v, want <= the configured cap %v", i, got, capSleep)
+		}
+		if got < prev {
+			t.Fatalf("backoff at exit %d = %v, dropped below the previous %v; the cadence must never shrink mid-streak", i, got, prev)
+		}
+		if ap.RestartCount != 2 {
+			t.Fatalf("RestartCount = %d at no-work exit %d, want 2 preserved; resetting it makes max_retries unreachable", ap.RestartCount, i)
+		}
+		prev = got
+		total += got
+	}
+
+	if ap.NoWorkSpawnCount != exits {
+		t.Errorf("NoWorkSpawnCount = %d after %d post-spawn no-work exits, want %d", ap.NoWorkSpawnCount, exits, exits)
+	}
+	if prev != capSleep {
+		t.Errorf("backoff after %d exits = %v, want the cap %v (the streak must saturate, not keep doubling)", exits, prev, capSleep)
+	}
+	// Spawns per hour is the number the policy is judged on: on the flat 30s
+	// poll, 50 exits fit in 25 minutes. Capped, they span most of a day.
+	if total < 10*time.Hour {
+		t.Errorf("total idle time across %d exits = %v, want >= 10h; the streak is not being bounded", exits, total)
+	}
+
+	// One genuinely clean run ends the streak and restores the cheap poll -- an
+	// agent that finally finds work must not stay parked at the 15-minute cap.
+	ap.LastError = nil
+	ap.LastNoWorkPostSpawn = false
+	ap.LastStart = time.Now().Add(-10 * time.Minute)
+	if !s.shouldRestart(ap) {
+		t.Fatal("shouldRestart() = false after a clean run")
+	}
+	if ap.NoWorkSpawnCount != 0 {
+		t.Errorf("NoWorkSpawnCount = %d after a clean run, want 0", ap.NoWorkSpawnCount)
+	}
+}
+
+// noWorkIdleEstimate feeds the "has this failed-over agent been idle long
+// enough to re-probe the primary backend?" decision. Modeling elapsed time as
+// count x base was correct only while the cadence was flat; under the
+// exponential post-spawn schedule it under-reports without bound and pins a
+// failed-over agent to its fallback backend far past the cooldown.
+func TestNoWorkIdleEstimate_TracksTheExponentialSchedule(t *testing.T) {
+	base, maxBackoff := 30, 900
+	s := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{
+			NoWorkBackoff:    &base,
+			NoWorkBackoffMax: &maxBackoff,
+		}},
+	})
+
+	tests := []struct {
+		name       string
+		count      int
+		spawnCount int
+		want       time.Duration
+	}{
+		{"no exits yet", 0, 0, 0},
+		{"all pre-spawn stays linear", 5, 0, 150 * time.Second},
+		{"one post-spawn exit", 1, 1, 30 * time.Second},
+		// 30 + 30 + 60 + 120 + 240
+		{"five post-spawn exits", 5, 5, 480 * time.Second},
+		// linear 2x30 for the pre-spawn pair, then the five-exit schedule
+		{"mixed pre- and post-spawn", 7, 5, 540 * time.Second},
+		// 30+30+60+120+240+480+900+900 -- saturated at the cap
+		{"saturated schedule", 8, 8, 2760 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.noWorkIdleEstimate(tt.count, tt.spawnCount); got != tt.want {
+				t.Errorf("noWorkIdleEstimate(%d, %d) = %v, want %v", tt.count, tt.spawnCount, got, tt.want)
+			}
+		})
+	}
+
+	// A very long streak must saturate rather than overflow into a negative
+	// duration, which would silently disable the primary re-probe forever.
+	if got := s.noWorkIdleEstimate(1<<30, 1<<30); got != noWorkIdleCeiling {
+		t.Errorf("noWorkIdleEstimate() on a pathological streak = %v, want the ceiling %v", got, noWorkIdleCeiling)
+	}
+}
+
+// At the default base (30s) the count threshold is reached before the
+// exponential growth starts, so correcting the estimate must not move the
+// default behavior. With a small configured base it very much does.
+func TestShouldRetryPrimaryAfterNoWork(t *testing.T) {
+	defaults := newTestSupervisorWithConfig(&config.DaemonConfig{})
+	if defaults.shouldRetryPrimaryAfterNoWork(1, 1) {
+		t.Error("shouldRetryPrimaryAfterNoWork(1, 1) = true at defaults, want false (30s < 1m cooldown)")
+	}
+	if !defaults.shouldRetryPrimaryAfterNoWork(2, 2) {
+		t.Error("shouldRetryPrimaryAfterNoWork(2, 2) = false at defaults, want true (60s >= 1m cooldown)")
+	}
+
+	smallBase := 1
+	fast := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{NoWorkBackoff: &smallBase}},
+	})
+	// 1+1+2+4+8+16+32+64 = 128s >= the 1m cooldown. The old count x base model
+	// reported 8s here and would have waited for a 60-exit streak.
+	if !fast.shouldRetryPrimaryAfterNoWork(8, 8) {
+		t.Error("shouldRetryPrimaryAfterNoWork(8, 8) = false with a 1s base, want true; " +
+			"the estimate is still ignoring the exponential schedule")
+	}
+
+	zeroBase := 0
+	disabled := newTestSupervisorWithConfig(&config.DaemonConfig{
+		Daemon: config.DaemonSettings{RestartPolicy: config.RestartPolicy{NoWorkBackoff: &zeroBase}},
+	})
+	if disabled.shouldRetryPrimaryAfterNoWork(100, 100) {
+		t.Error("shouldRetryPrimaryAfterNoWork() = true with a non-positive base, want false")
+	}
+}
