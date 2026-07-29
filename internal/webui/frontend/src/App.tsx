@@ -27,7 +27,7 @@ import {
 } from "@/api/workspace";
 import type { IssueContext } from "@/api/terminal";
 import { buildShareUrl } from "@/utils/buildShareUrl";
-import { getReviewType } from "@/utils/issue";
+import { getReviewType, NEEDS_REVISION_LABEL } from "@/utils/issue";
 import { ViewSubSwitcher } from "@/components/ViewSubSwitcher/ViewSubSwitcher";
 import {
   isOnboardingRepo,
@@ -733,7 +733,7 @@ function App() {
           // approving a never-rejected issue is a no-op server-side.
           await updateIssue(workspaceId, issue.id, {
             status: "open",
-            remove_labels: ["needs-revision"],
+            remove_labels: [NEEDS_REVISION_LABEL],
           });
           await refetch();
         } else if (reviewType === "help") {
@@ -773,7 +773,7 @@ function App() {
         // Add needs-revision label and set status to open
         await updateIssue(workspaceId, issue.id, {
           status: "open",
-          add_labels: ["needs-revision"],
+          add_labels: [NEEDS_REVISION_LABEL],
         });
 
         // Refetch to reflect label/status changes and close panel
