@@ -1,6 +1,6 @@
 # Target Architecture and Capability Boundaries
 
-- **Status:** Target reviewed and approved; the Phase 4 architecture slice is complete, and its repository-admission hardening has paired contract, refreshed packaged Desktop, Podman/raw-browser, exact-head architecture, and aggregate Loom gate proof at Loom `67c45972f`; Phase 5 has not started
+- **Status:** Target reviewed and approved; the Phase 4 architecture slice is complete, with paired full gates and exact packaged-Desktop positive, fail-closed, and restart-persistence proof at Loom `f0011b248` with FleetDB `de89f0544`; Phase 5 has not started
 - **Scope:** In-process ownership and dependencies inside `loom serve`, operator CLI transport behavior, and corresponding frontend feature boundaries
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -206,15 +206,18 @@ Polymorphic persistence mechanisms do not erase ownership. For the generic Lease
 
 `app/serve` constructs one low-level, concurrency-safe fleet-db transport client with shared authentication, retry, tracing, and connection pooling. Capability-local adapters wrap that client and expose only their owner's narrow ports. Modules never receive the low-level client or the composite Store, and the migration does not create ten independent HTTP clients.
 
-New required backend behavior is negotiated before adapters become ready. The required fleet-db endpoint is `GET /api/v1/capabilities`, returning an API revision and versioned capability keys. Advertised keys describe the **running deployment**, not merely compiled code: the active Redis/Postgres backend, registered routes, feature configuration, authenticated boundary, and required storage implementation must make the operation usable. Loom derives its required key set from the capability slices enabled in its own configuration, checks those keys during readiness, and reports the exact missing keys. A 404 from an older fleet-db is an explicit incompatibility for a new Loom that requires the key; failure is not deferred until the first mutation. Old Loom continues to work against new fleet-db, and no generic mutation fallback is allowed.
+New required backend behavior is negotiated before adapters become ready. The required fleet-db endpoint is `GET /api/v1/capabilities`, returning an API revision and versioned capability keys. Advertised keys describe the **running deployment**, not merely compiled code: the active Redis/Postgres backend, registered routes, feature configuration, authenticated boundary, and required storage implementation must make the operation usable. Loom derives its required key set from the capability slices enabled in its own configuration, checks those keys during readiness, and reports the exact missing keys. A 404 from an older fleet-db is an explicit incompatibility for a new Loom that requires the key; failure is not deferred until the first mutation. Old Loom continues to work against new fleet-db through the bounded, deprecated AgentCommand HTTP bridge: a bodyless Ack may bind both claimant dimensions to nonblank `X-Actor`, and an unfenced Complete may infer that actor only when the durable command already has the same nonblank `target_node_id` and `acked_by`. Storage remains strict, partial or ambiguous claimant inputs fail closed, and new Loom never uses this bridge.
 
 The Execution-owned await dispatcher is always hosted by `loom serve`, so
 every serve profile requires `execution.await_atomic_resume.v1`. Phase 4 adds
-one indivisible, exact 18-key Execution/Artifacts/Work Items foundation profile:
+one indivisible, exact 21-key Agents/Execution/Artifacts/Work Items foundation profile:
+`agents.lifecycle_command_fencing.v1`,
+`agents.lifecycle_command_ownership_fencing.v1`,
 `artifacts.owner_fenced_lifecycle.v1`,
 `execution.driver_run_child_cascade.v1`,
 `execution.driver_run_child_start.v1`,
 `execution.driver_run_lease_fencing.v1`,
+`execution.driver_run_review_work_item_handoff.v2`,
 `execution.driver_run_work_item_claim.v1`,
 `execution.driver_step_terminal_repair.v1`,
 `execution.issue_claim_next_task_run_start.v1`,
@@ -234,6 +237,19 @@ Enabling Workflow Catalog additionally requires
 `workflow_catalog.version_lifecycle.v1`; enabling Automation additionally
 requires `automation.trigger_admission.v1`. Disabling Catalog or Automation
 never removes the always-on await or Phase 4 foundation requirements.
+
+The review-handoff V2 key extends the retained-generation transition without
+weakening its fence: Review status, immutable comment/annotations, and an
+optional canonical `local-branch:<branch>@<40-hex-head>` `external_ref` commit
+in the same transaction and receipt. No public handoff request can select
+trigger suppression. FleetDB derives a server-private
+`review_trigger_policy=suppress_successor` marker only when the handoff carries
+the exact `task.review` DriverRun, TriggerEvent, and Delivery lineage. Because
+the original event already fanned out to every matching binding, Loom suppresses
+the entire successor event. Caller-provided or legacy `suppress_self` metadata
+has no authority and follows normal fanout. New Loom requires V2 so it fails
+readiness against a strict V1 FleetDB instead of discovering the schema mismatch
+at mutation time.
 
 These are deployment-parity gates, not one key per public method. In
 particular, `execution.driver_run_work_item_claim.v1` is advertised only when
