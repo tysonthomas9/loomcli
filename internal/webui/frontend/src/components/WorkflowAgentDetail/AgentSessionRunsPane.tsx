@@ -6,6 +6,7 @@ import { useTaskSessions } from "@/hooks/terminal";
 import type { AgentHistorySession } from "@/api/agents";
 import type { SessionRecord } from "@/types/agent";
 
+import { TaskLink } from "./TaskLink";
 import styles from "./WorkflowAgentDetail.module.css";
 
 const ACTIVE_SESSION_STATUSES = new Set([
@@ -226,7 +227,17 @@ export function AgentSessionRunsPane({
           <dl className={styles.detailGrid}>
             <div>
               <dt>Task</dt>
-              <dd>{selected.task_id || "—"}</dd>
+              <dd>
+                {selected.task_id ? (
+                  <TaskLink
+                    workspaceId={workspaceId}
+                    taskId={selected.task_id}
+                    className={styles.taskLink}
+                  />
+                ) : (
+                  "—"
+                )}
+              </dd>
             </div>
             <div>
               <dt>Started</dt>
@@ -271,13 +282,17 @@ export function AgentSessionRunsPane({
             data-testid="supervised-agent-session-list"
           >
             {sessions.map((session) => (
-              <li key={session.session_id}>
+              <li
+                key={session.session_id}
+                className={styles.runRow}
+                data-selected={
+                  session.session_id === selected?.session_id || undefined
+                }
+              >
                 <button
                   type="button"
-                  className={styles.runRow}
-                  data-selected={
-                    session.session_id === selected?.session_id || undefined
-                  }
+                  className={styles.runRowSelect}
+                  data-testid={`supervised-agent-session-${session.session_id}`}
                   onClick={() => setSelectedSessionId(session.session_id)}
                 >
                   <span
@@ -291,9 +306,7 @@ export function AgentSessionRunsPane({
                   <span className={styles.runMain}>
                     <span className={styles.runStatus}>{session.status}</span>
                     <span className={styles.runMeta}>
-                      {session.task_id
-                        ? `${session.task_id} · `
-                        : `${session.kind} · `}
+                      {session.task_id ? "" : `${session.kind} · `}
                       {displayTime(sessionStartedAt(session))}
                     </span>
                     {session.summary ? (
@@ -308,6 +321,16 @@ export function AgentSessionRunsPane({
                     ) : null}
                   </span>
                 </button>
+                {session.task_id ? (
+                  <span className={styles.runTaskLinks} aria-label="Run task">
+                    <span className={styles.runTaskLabel}>Task</span>
+                    <TaskLink
+                      workspaceId={workspaceId}
+                      taskId={session.task_id}
+                      className={styles.taskLink}
+                    />
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>

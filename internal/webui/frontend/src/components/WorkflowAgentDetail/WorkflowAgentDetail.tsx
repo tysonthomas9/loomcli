@@ -50,9 +50,11 @@ import {
   linkedRunSessionKey,
   linkedSessionsForRun,
   mergeWorkflowRun,
+  workedTaskIdsForRun,
   type LinkedRunSession,
 } from "@/utils/workflowRunDetail";
 
+import { TaskLink } from "./TaskLink";
 import styles from "./WorkflowAgentDetail.module.css";
 
 /**
@@ -549,15 +551,18 @@ function RunsTab({
               const started = formatFireTime(run.started_at);
               const finished = formatFireTime(run.finished_at);
               return (
-                <li key={run.run_id}>
+                <li
+                  key={run.run_id}
+                  className={styles.runRow}
+                  data-selected={
+                    (selectedRunId
+                      ? run.run_id === selectedRunId
+                      : run.run_id === focusRun?.run_id) || undefined
+                  }
+                >
                   <button
                     type="button"
-                    className={styles.runRow}
-                    data-selected={
-                      (selectedRunId
-                        ? run.run_id === selectedRunId
-                        : run.run_id === focusRun?.run_id) || undefined
-                    }
+                    className={styles.runRowSelect}
                     onClick={() => onSelectRun(run.run_id)}
                   >
                     <span
@@ -649,6 +654,10 @@ export function RunDetailCard({
     () => linkedSessionsForRun(displayedRun),
     [displayedRun],
   );
+  const taskIds = useMemo(
+    () => workedTaskIdsForRun(displayedRun),
+    [displayedRun],
+  );
   const linkedSession = useMemo(
     () =>
       linkedSessions.find(
@@ -732,6 +741,21 @@ export function RunDetailCard({
           <div>
             <dt>Error</dt>
             <dd className={styles.runErr}>{displayedRun.error_class}</dd>
+          </div>
+        ) : null}
+        {taskIds.length > 0 ? (
+          <div>
+            <dt>{taskIds.length === 1 ? "Task" : "Tasks"}</dt>
+            <dd className={styles.detailTaskLinks}>
+              {taskIds.map((taskId) => (
+                <TaskLink
+                  key={taskId}
+                  workspaceId={workspaceId}
+                  taskId={taskId}
+                  className={styles.taskLink}
+                />
+              ))}
+            </dd>
           </div>
         ) : null}
       </dl>

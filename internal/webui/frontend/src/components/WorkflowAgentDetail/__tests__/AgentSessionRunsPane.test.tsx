@@ -160,7 +160,16 @@ describe("AgentSessionRunsPane", () => {
       "data-retry",
       "false",
     );
-    fireEvent.click(screen.getByRole("button", { name: /TASK-2/ }));
+    expect(screen.getAllByRole("link", { name: "TASK-1" })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "TASK-1" })[0]).toHaveAttribute(
+      "href",
+      "/ws/WS/issues/TASK-1",
+    );
+    expect(screen.getByRole("link", { name: "TASK-2" })).toHaveAttribute(
+      "href",
+      "/ws/WS/issues/TASK-2",
+    );
+    fireEvent.click(screen.getByTestId("supervised-agent-session-session-2"));
     expect(screen.getByTestId("session-run-detail")).toHaveTextContent(
       "TASK-2:session-2",
     );
@@ -302,7 +311,9 @@ describe("AgentSessionRunsPane", () => {
       "patch-head-sha",
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /TASK-GITHUB/ }));
+    fireEvent.click(
+      screen.getByTestId("supervised-agent-session-session-github"),
+    );
     expect(screen.getByTestId("session-run-detail")).toHaveAttribute(
       "data-patch-back-status",
       "pull_request_opened",

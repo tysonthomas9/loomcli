@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -218,7 +224,23 @@ describe("RunDetailCard", () => {
       error: null,
       refetch: vi.fn(),
     });
-    mocks.getWorkflowRun.mockResolvedValue(first);
+    mocks.getWorkflowRun.mockResolvedValue(
+      enrichedRun({
+        run_id: first.run_id,
+        status: "completed",
+        output: undefined,
+        steps: [
+          {
+            id: "step-docs",
+            step_kind: "task_run",
+            task_run_id: "task-run-docs",
+            task_id: "TASK-DOCS",
+            status: "completed",
+          },
+        ],
+        summary: first.summary,
+      }),
+    );
 
     render(
       <AgentRecordRunsPane
@@ -258,6 +280,15 @@ describe("RunDetailCard", () => {
     expect(screen.getByTestId("workflow-agent-run-list")).toHaveTextContent(
       "Refreshed documentation",
     );
+    expect(
+      within(await screen.findByTestId("workflow-agent-run-detail")).getByRole(
+        "link",
+        { name: "TASK-DOCS" },
+      ),
+    ).toHaveAttribute("href", "/ws/WS/issues/TASK-DOCS");
+    expect(
+      within(screen.getByTestId("workflow-agent-run-list")).queryByRole("link"),
+    ).not.toBeInTheDocument();
   });
 
   it("exposes every task session from a multi-step workflow run", async () => {
@@ -269,8 +300,15 @@ describe("RunDetailCard", () => {
     const selector = await screen.findByTestId(
       "workflow-agent-session-selector",
     );
+    const detail = screen.getByTestId("workflow-agent-run-detail");
     expect(selector).toHaveTextContent("TASK-1");
     expect(selector).toHaveTextContent("TASK-2");
+    expect(
+      within(detail).getByRole("link", { name: "TASK-1" }),
+    ).toHaveAttribute("href", "/ws/WS/issues/TASK-1");
+    expect(
+      within(detail).getByRole("link", { name: "TASK-2" }),
+    ).toHaveAttribute("href", "/ws/WS/issues/TASK-2");
     expect(screen.getByTestId("session-run-detail")).toHaveTextContent(
       "TASK-1:flue-task-run-1",
     );
@@ -370,6 +408,7 @@ describe("RunDetailCard", () => {
     expect(
       await screen.findByText(/did not create a child task or invoke a model/i),
     ).toHaveTextContent(/no eligible task was available/i);
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
   it("preserves the generic transcript copy while child linkage is ambiguous", async () => {
