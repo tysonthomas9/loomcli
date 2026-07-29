@@ -26,8 +26,9 @@ process.stdin.on("end", () => {
 // TestRunBundledTaskRunner_RealBundle (Phase U / U1, increment 2) proves the
 // core delegation mechanism end-to-end LOCALLY: it runs the actual committed bundle's
 // local-task-runner against a real git worktree + a fake codex backend, and asserts
-// the runner returns a transcript + top-level usage and tees the backend's live output
-// to the caller's stderr (the supervisor watchdog feed). No podman required.
+// the runner returns a transcript + top-level usage and emits a credential-safe
+// activity signal to the caller's stderr (the supervisor watchdog feed). No podman
+// required.
 func TestRunBundledTaskRunner_RealBundle(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not available")
@@ -84,8 +85,13 @@ func TestRunBundledTaskRunner_RealBundle(t *testing.T) {
 	if result.InputTokens != 50 || result.OutputTokens != 5 || result.CacheReadTokens != 2 {
 		t.Errorf("usage = in:%d out:%d cacheRead:%d, want 50/5/2; raw: %s", result.InputTokens, result.OutputTokens, result.CacheReadTokens, raw)
 	}
-	// The backend's live output must reach the caller's stderr (the watchdog feed).
-	if !bytes.Contains(serr.Bytes(), []byte("hi from fake")) {
-		t.Errorf("backend output not teed to caller stderr (watchdog feed); stderr:\n%s", serr.String())
+	// The watchdog needs proof of backend activity, never raw backend bytes: a
+	// credential can span arbitrary stream chunks and cannot be redacted safely
+	// while live-streaming.
+	if !bytes.Contains(serr.Bytes(), []byte("[loom task-runner] backend activity")) {
+		t.Errorf("backend activity signal did not reach caller stderr (watchdog feed); stderr:\n%s", serr.String())
+	}
+	if bytes.Contains(serr.Bytes(), []byte("hi from fake")) {
+		t.Errorf("raw backend output leaked to caller stderr; stderr:\n%s", serr.String())
 	}
 }

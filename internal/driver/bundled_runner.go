@@ -47,9 +47,10 @@ type BundledRunnerOptions struct {
 	Prompt string
 	// LeaseToken is the task-run lease token; gated against the request's lease_token.
 	LeaseToken string
-	// StreamStderr tees the backend's live output to Stderr per turn (watchdog feed).
+	// StreamStderr emits fixed backend-activity signals to Stderr (watchdog feed)
+	// without exposing raw backend output, which may contain credentials.
 	StreamStderr bool
-	// Stderr receives the runner's live diagnostic output; defaults to os.Stderr.
+	// Stderr receives the runner's live diagnostics/activity signals; defaults to os.Stderr.
 	Stderr io.Writer
 }
 
@@ -89,7 +90,7 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 	cmd.Stdin = strings.NewReader(requestJSON)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = stderr // live runner/backend output -> caller's stderr (watchdog feed)
+	cmd.Stderr = stderr // live runner diagnostics/activity signals -> caller's stderr (watchdog feed)
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
