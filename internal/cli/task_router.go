@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
@@ -255,6 +256,22 @@ func ValidateTaskFilter(filter string) (string, error) {
 	return canonical, nil
 }
 
+// warnedTaskFilters records the unrecognized filter values already reported by
+// warnUnknownTaskFilterOnce.
+var warnedTaskFilters sync.Map
+
+// warnUnknownTaskFilterOnce logs the unrecognized-filter warning at most once
+// per distinct value per process. applyTaskFilter runs once per ready issue per
+// scoring pass (SelectBestTask fetches up to 10k) on every claim tick and
+// availability poll, so an unguarded log.Printf turns one bad stored value into
+// thousands of identical lines a minute.
+func warnUnknownTaskFilterOnce(filter string) {
+	if _, seen := warnedTaskFilters.LoadOrStore(filter, struct{}{}); seen {
+		return
+	}
+	log.Printf("warning: unrecognized task filter %q; treating as has_design", filter)
+}
+
 // applyTaskFilter checks if the issue passes the given task filter.
 // Returns an empty string if the issue passes, or a rejection reason.
 func applyTaskFilter(issue backend.IssueData, filter string) string {
@@ -279,7 +296,7 @@ func applyTaskFilter(issue backend.IssueData, filter string) string {
 		// Reachable only for a filter that bypassed ValidateTaskFilter (a
 		// hand-edited config, or one stored before validation existed). Say so
 		// rather than quietly behaving as has_design.
-		log.Printf("warning: unrecognized task filter %q; treating as has_design", filter)
+		warnUnknownTaskFilterOnce(filter)
 		if !ReadyToImplement(issue) {
 			return "filter: not ready to implement"
 		}

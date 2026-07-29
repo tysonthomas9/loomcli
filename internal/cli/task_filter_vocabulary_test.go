@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"log"
 	"strings"
 	"testing"
 
@@ -77,5 +79,33 @@ func TestValidateTaskFilter_ErrorNamesAcceptedValues(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error does not mention %q: %v", want, err)
 		}
+	}
+}
+
+// applyTaskFilter runs once per ready issue per scoring pass, so the
+// unrecognized-filter warning must not scale with the queue.
+func TestApplyTaskFilter_UnknownWarnsOncePerValue(t *testing.T) {
+	var buf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(prevOut)
+		log.SetFlags(prevFlags)
+		warnedTaskFilters.Delete("bogus_filter_a")
+		warnedTaskFilters.Delete("bogus_filter_b")
+	})
+
+	issue := backend.IssueData{ID: "T-1", Status: "open"}
+	for i := 0; i < 100; i++ {
+		applyTaskFilter(issue, "bogus_filter_a")
+	}
+	applyTaskFilter(issue, "bogus_filter_b")
+
+	if got := strings.Count(buf.String(), "bogus_filter_a"); got != 1 {
+		t.Errorf("warned %d times for one bad value, want 1:\n%s", got, buf.String())
+	}
+	if got := strings.Count(buf.String(), "bogus_filter_b"); got != 1 {
+		t.Errorf("second distinct value warned %d times, want 1:\n%s", got, buf.String())
 	}
 }
