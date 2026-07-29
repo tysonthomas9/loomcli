@@ -27,6 +27,15 @@ var (
 	workspaceOpsTimeoutSec int
 )
 
+// Seams for ensure-runtime. The command's whole deliverable is an honest report
+// of what it did, so every outcome of these three calls has to be reachable
+// from a test without a live desktop runtime.
+var (
+	ensureRuntimeStartedFn  = local.EnsureRuntimeStarted
+	readRuntimeStatusFn     = local.ReadRuntimeStatus
+	waitForWorkspaceReadyFn = local.WaitForWorkspaceReady
+)
+
 const envLocalRuntimeMode = "LOOM_LOCAL_RUNTIME"
 
 // defaultEnsureRuntimeTimeout budgets the whole ensure-then-wait sequence
@@ -101,10 +110,18 @@ type WorkspaceOpsStatus struct {
 // human.
 type WorkspaceOpsEnsureRuntime struct {
 	// ActionTaken is false when the command returned without touching the
-	// runtime.
+	// runtime — including the common local case where the runtime was already
+	// healthy and EnsureRuntimeStarted returned immediately.
 	ActionTaken bool `json:"action_taken"`
 
-	// Reason explains a skip. Empty when ActionTaken is true.
+	// Action names the outcome precisely: "none", "started" or "restarted".
+	// ActionTaken alone cannot distinguish a cold start from a restart of a
+	// runtime that was recorded but unhealthy.
+	Action string `json:"action,omitempty"`
+
+	// Reason explains the outcome, whether or not anything was done. A skip
+	// carries the reason it was skipped; a no-op carries the reason there was
+	// nothing to do.
 	Reason string `json:"reason,omitempty"`
 
 	// Scope names what this command can and cannot manage, because the name
@@ -222,29 +239,10 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), workspaceOpsEnsureTimeout())
 	defer cancel()
-	if !shouldEnsureLocalRuntime(initial) {
-		initial.EnsureRuntime = ensureRuntimeSkipped(initial)
-		return renderWorkspaceOpsStatus(cmd, initial)
-	}
-	if _, err := local.EnsureRuntimeStarted(ctx, initial.Daemon.DataDir, 0); err != nil {
-		return fmt.Errorf("ensure local runtime: %w", err)
-	}
-	if rt, err := local.ReadRuntimeStatus(ctx, initial.Daemon.DataDir); err == nil &&
-		rt != nil && rt.Runtime != nil && rt.Runtime.URL != "" {
-		if err := local.WaitForWorkspaceReady(ctx, rt.Runtime.URL, key); err != nil {
-			return fmt.Errorf("ensure local runtime: %w", err)
-		}
-	}
 
-	status, err := waitForWorkspaceOpsDaemon(ctx, key, initial, loadWorkspaceOpsStatus)
+	status, err := ensureRuntimeAndReport(ctx, key, initial, loadWorkspaceOpsStatus)
 	if err != nil {
-		return fmt.Errorf("wait for workspace daemon: %w", err)
-	}
-	if status != nil {
-		status.EnsureRuntime = &WorkspaceOpsEnsureRuntime{
-			ActionTaken: true,
-			Scope:       ensureRuntimeScopeNote,
-		}
+		return err
 	}
 	return renderWorkspaceOpsStatus(cmd, status)
 }
@@ -260,6 +258,76 @@ func workspaceOpsEnsureTimeout() time.Duration {
 	return time.Duration(workspaceOpsTimeoutSec) * time.Second
 }
 
+// ensureRuntimeAndReport is everything ensure-runtime decides: whether to act,
+// what acting actually did, and what to report. It is split out from the
+// workspace-selection preamble so every outcome is reachable from a test —
+// the "runtime started" this command used to print for an already-healthy
+// runtime was untruthful precisely because nothing exercised the path.
+func ensureRuntimeAndReport(
+	ctx context.Context,
+	key string,
+	initial *WorkspaceOpsStatus,
+	load workspaceOpsStatusLoader,
+) (*WorkspaceOpsStatus, error) {
+	if !shouldEnsureLocalRuntime(initial) {
+		initial.EnsureRuntime = ensureRuntimeSkipped(initial)
+		return initial, nil
+	}
+	var dataDir string
+	if initial != nil {
+		dataDir = initial.Daemon.DataDir
+	}
+	action, err := ensureLocalRuntime(ctx, key, dataDir)
+	if err != nil {
+		return nil, err
+	}
+	status, err := waitForWorkspaceOpsDaemon(ctx, key, initial, load)
+	if err != nil {
+		return nil, fmt.Errorf("wait for workspace daemon: %w", err)
+	}
+	if status != nil {
+		status.EnsureRuntime = ensureRuntimeActed(action)
+	}
+	return status, nil
+}
+
+func ensureLocalRuntime(ctx context.Context, key, dataDir string) (local.RuntimeEnsureAction, error) {
+	_, action, err := ensureRuntimeStartedFn(ctx, dataDir, 0)
+	if err != nil {
+		return action, fmt.Errorf("ensure local runtime: %w", err)
+	}
+	if rt, err := readRuntimeStatusFn(ctx, dataDir); err == nil &&
+		rt != nil && rt.Runtime != nil && rt.Runtime.URL != "" {
+		if err := waitForWorkspaceReadyFn(ctx, rt.Runtime.URL, key); err != nil {
+			return action, fmt.Errorf("ensure local runtime: %w", err)
+		}
+	}
+	return action, nil
+}
+
+// ensureRuntimeActed reports what EnsureRuntimeStarted did rather than assuming
+// it started something. It early-returns when the runtime is already healthy,
+// which is the common local case; claiming "runtime started" there recreates
+// exactly the authoritative-but-wrong report this command exists to fix, and
+// does it in the scenario that prompted the report — everything reads green
+// while nothing is actually being driven.
+func ensureRuntimeActed(action local.RuntimeEnsureAction) *WorkspaceOpsEnsureRuntime {
+	out := &WorkspaceOpsEnsureRuntime{Action: string(action), Scope: ensureRuntimeScopeNote}
+	switch action {
+	case local.RuntimeEnsureNoAction:
+		out.Reason = "local desktop runtime was already healthy"
+	case local.RuntimeEnsureRestarted:
+		out.ActionTaken = true
+		out.Reason = "local desktop runtime was not healthy and was restarted"
+	case local.RuntimeEnsureStarted:
+		out.ActionTaken = true
+		out.Reason = "local desktop runtime was not running and was started"
+	default:
+		out.ActionTaken = true
+	}
+	return out
+}
+
 // ensureRuntimeSkipped records that ensure-runtime returned without acting, and
 // why. Without it the command's output is indistinguishable from
 // `workspace ops status` and a caller reading ok=true concludes the runtime was
@@ -269,7 +337,12 @@ func ensureRuntimeSkipped(status *WorkspaceOpsStatus) *WorkspaceOpsEnsureRuntime
 	if status != nil && status.LocalRuntime != nil && status.LocalRuntime.Reason != "" {
 		reason = status.LocalRuntime.Reason
 	}
-	return &WorkspaceOpsEnsureRuntime{ActionTaken: false, Reason: reason, Scope: ensureRuntimeScopeNote}
+	return &WorkspaceOpsEnsureRuntime{
+		ActionTaken: false,
+		Action:      string(local.RuntimeEnsureNoAction),
+		Reason:      reason,
+		Scope:       ensureRuntimeScopeNote,
+	}
 }
 
 // ensureRuntimeScopeNote states the command's limits. The name implies it will
@@ -782,7 +855,7 @@ func renderWorkspaceOpsStatus(cmd *cobra.Command, status *WorkspaceOpsStatus) er
 	_, _ = fmt.Fprintf(out, "Workspace: %s (%s)\n", status.Workspace.Key, status.Workspace.State)
 	if er := status.EnsureRuntime; er != nil {
 		if er.ActionTaken {
-			_, _ = fmt.Fprintf(out, "Ensure:    runtime started (%s)\n", er.Scope)
+			_, _ = fmt.Fprintf(out, "Ensure:    %s (%s)\n", ensureRuntimeActionText(er), er.Scope)
 		} else {
 			_, _ = fmt.Fprintf(out, "Ensure:    NO ACTION TAKEN - %s (%s)\n", er.Reason, er.Scope)
 		}
@@ -814,6 +887,15 @@ func renderWorkspaceOpsStatus(cmd *cobra.Command, status *WorkspaceOpsStatus) er
 		}
 	}
 	return nil
+}
+
+// ensureRuntimeActionText names the action for a human. A restart of a wedged
+// runtime and a cold start are different events to whoever is debugging one.
+func ensureRuntimeActionText(er *WorkspaceOpsEnsureRuntime) string {
+	if er.Action == string(local.RuntimeEnsureRestarted) {
+		return "runtime restarted"
+	}
+	return "runtime started"
 }
 
 func daemonHuman(info DaemonInfo) string {
