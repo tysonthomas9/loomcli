@@ -175,10 +175,21 @@ ensure-frontend-dist:
 #   sh: prettier: command not found
 #   make[1]: *** [check-frontend] Error 127
 # and because check-frontend runs inside the pre-push hook, that surfaces as
-# "git push is broken" with nothing pointing at missing dependencies.
+# "git push is broken" with nothing pointing at missing dependencies. The
+# playwright targets fail worse: npx reaches for the registry and runs an
+# unpinned browser driver instead of failing at all.
+#
+# Marker is node_modules/.package-lock.json, the file npm writes when it
+# finishes reifying the tree — same idiom as scripts/dev.sh:61-68. A bare
+# presence check on a binary passes for an interrupted install and for a tree
+# that predates a package.json/package-lock.json change (e.g. after `git pull`),
+# which then fails at import time instead of here.
 ensure-frontend-deps:
-	@if [ ! -x "$(FRONTEND_DIR)/node_modules/.bin/prettier" ]; then \
-	  echo "Frontend dependencies are missing; installing them once on the host..."; \
+	@marker="$(FRONTEND_DIR)/node_modules/.package-lock.json"; \
+	if [ ! -f "$$marker" ] \
+	   || [ "$(FRONTEND_DIR)/package-lock.json" -nt "$$marker" ] \
+	   || [ "$(FRONTEND_DIR)/package.json" -nt "$$marker" ]; then \
+	  echo "Frontend dependencies are missing or stale; installing them once on the host..."; \
 	  cd $(FRONTEND_DIR) && npm install; \
 	fi
 
@@ -405,18 +416,18 @@ test-frontend: ensure-frontend-deps
 # Run Playwright e2e tests — mocked chromium tests (no server needed)
 e2e: test-e2e
 
-test-e2e:
+test-e2e: ensure-frontend-deps
 	@echo "Running Playwright e2e tests (mocked)..."
 	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
 	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium --workers=1
 
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
-test-e2e-api:
+test-e2e-api: ensure-frontend-deps
 	@echo "Running Playwright API e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=api
 
 # Run Playwright API e2e tests against already-running loom serve
-test-e2e-api-local:
+test-e2e-api-local: ensure-frontend-deps
 	@echo "Running Playwright API e2e tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=api
 
@@ -441,37 +452,37 @@ test-e2e-stackpublish:
 	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2EStackPublisher ./internal/stackpublish -timeout 10m
 
 # Run the real Playwright smoke suite: browser + API contracts against FleetDB-backed loom serve.
-test-e2e-real-smoke:
+test-e2e-real-smoke: ensure-frontend-deps
 	@echo "Running real Playwright smoke tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration-smoke --project=api-smoke
 
 # Run the real Playwright smoke suite against an already-running loom serve/UI.
-test-e2e-real-smoke-local:
+test-e2e-real-smoke-local: ensure-frontend-deps
 	@echo "Running real Playwright smoke tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration-smoke --project=api-smoke
 
 # Run the real Playwright regression suite: slower browser + API contracts.
-test-e2e-real-regression:
+test-e2e-real-regression: ensure-frontend-deps
 	@echo "Running real Playwright regression tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration-regression --project=api-regression
 
 # Run the real Playwright regression suite against an already-running loom serve/UI.
-test-e2e-real-regression-local:
+test-e2e-real-regression-local: ensure-frontend-deps
 	@echo "Running real Playwright regression tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration-regression --project=api-regression
 
 # Run Playwright integration e2e tests (self-contained, starts loom serve automatically)
-test-e2e-integration:
+test-e2e-integration: ensure-frontend-deps
 	@echo "Running Playwright integration e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration
 
 # Run Playwright integration e2e tests against local loom serve
-test-e2e-integration-local:
+test-e2e-integration-local: ensure-frontend-deps
 	@echo "Running Playwright integration e2e tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration
 
 # Run ALL Playwright integration e2e tests including cross-workspace and terminal-fleetdb-regression
-test-e2e-integration-full:
+test-e2e-integration-full: ensure-frontend-deps
 	@echo "Running full Playwright integration e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 RUN_LOCAL_INTEGRATION_TESTS=1 npx playwright test --project=integration --project=local-integration
 
