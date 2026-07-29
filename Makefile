@@ -564,8 +564,13 @@ hooks:
 	@pre-commit install
 	@echo "Pre-commit hooks installed"
 
-# Ensure hooks are installed (runs once — skips if pre-push hook already exists)
+# Ensure hooks are installed (skips only when the installed pre-push already
+# matches scripts/hooks/pre-push byte for byte)
 # Reinstall when the hook is missing *or* has drifted from scripts/hooks/pre-push.
+# scripts/hooks/pre-push is the source of truth and the installed hook is a
+# managed artifact: `cmp` sees any difference, so a hand-edited local hook is
+# overwritten on the next `make dev`. That is deliberate — local copies drifting
+# is the whole failure mode below — and `make hooks` announces the reinstall.
 # An existence-only check lets a stale hook survive forever, which is not
 # hypothetical: a pre-push installed before scripts/hooks/pre-push started
 # clearing `git rev-parse --local-env-vars` leaves GIT_DIR exported into
