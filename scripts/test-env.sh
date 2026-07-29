@@ -54,6 +54,22 @@ wait_healthy() {
   return 1
 }
 
+# Issue count for the workspace. jq rather than `grep -o '"id"' | wc -l`: an
+# empty workspace answers {"issues":[]}, grep matches nothing and exits 1, and
+# under `set -o pipefail` that fails the whole command substitution — so the
+# SUCCESS path (zero issues left) is exactly what used to kill the script.
+# Returns non-zero when the count could not be read at all.
+count_issues() {
+  local body
+  command -v jq >/dev/null 2>&1 || {
+    echo "jq is required to read the issue count (brew install jq)" >&2
+    return 1
+  }
+  body="$(curl -fsS -H "X-Actor: $ACTOR" \
+    "$URL/api/v1/$WORKSPACE/issues?limit=1000" 2>/dev/null)" || return 1
+  printf '%s' "$body" | jq -r '(.issues // []) | length'
+}
+
 # Idempotent: a workspace that already exists is success, not an error, so `up`
 # can be re-run against a live stack without special-casing.
 ensure_workspace() {
@@ -97,10 +113,8 @@ case "${1:-up}" in
     "${COMPOSE[@]}" ps
     if curl -fsS "$URL/healthz" >/dev/null 2>&1; then
       echo "healthz: ok ($URL)"
-      local_count="$(curl -fsS -H "X-Actor: $ACTOR" \
-        "$URL/api/v1/$WORKSPACE/issues?limit=1000" 2>/dev/null \
-        | grep -o '"id"' | wc -l | tr -d ' ' || echo '?')"
-      echo "workspace $WORKSPACE: $local_count issue(s)"
+      local_count="$(count_issues)" || local_count='?'
+      echo "workspace $WORKSPACE: ${local_count:-?} issue(s)"
     else
       echo "healthz: unreachable ($URL)"
     fi
@@ -121,9 +135,10 @@ case "${1:-up}" in
     ensure_workspace
     # Assert rather than assume: a reset that silently left data behind would
     # surface later as a test failure with no obvious cause.
-    remaining="$(curl -fsS -H "X-Actor: $ACTOR" \
-      "$URL/api/v1/$WORKSPACE/issues?limit=1000" 2>/dev/null \
-      | grep -o '"id"' | wc -l | tr -d ' ')"
+    if ! remaining="$(count_issues)"; then
+      echo "reset failed: could not read the issue count for $WORKSPACE" >&2
+      exit 1
+    fi
     if [ "$remaining" != "0" ]; then
       echo "reset failed: $WORKSPACE still holds $remaining issue(s)" >&2
       exit 1
