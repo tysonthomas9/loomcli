@@ -235,12 +235,24 @@ export function EventProvider({
     const handleSignOut = () => {
       client.destroy();
     };
+    const handlePageHide = () => {
+      client.disconnect();
+    };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        client.connect(undefined, sourceReposRef.current);
+      }
+    };
     window.addEventListener("auth-sign-out", handleSignOut);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
 
     return () => {
       mountedRef.current = false;
       prevSourceReposRef.current = undefined;
       window.removeEventListener("auth-sign-out", handleSignOut);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
       client.destroy();
       clientRef.current = null;
     };

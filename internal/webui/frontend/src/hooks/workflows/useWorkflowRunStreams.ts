@@ -112,6 +112,8 @@ export function useWorkflowRunStreams({
     });
 
     let cancelled = false;
+    let pageHidden = false;
+    let streamEpoch = 0;
     const sources = new Set<EventSource>();
     const pollIntervals = new Set<number>();
     const retryTimers = new Set<number>();
@@ -201,7 +203,7 @@ export function useWorkflowRunStreams({
     };
 
     const connect = (epicId: string, runId: string): void => {
-      if (cancelled) return;
+      if (cancelled || pageHidden) return;
       let source: EventSource;
       try {
         source = new EventSource(workflowRunStreamUrl(workspaceId, runId));
@@ -221,10 +223,18 @@ export function useWorkflowRunStreams({
         // Single refresh so the UI does not go stale while the stream is
         // down, then re-establish the stream if the run is still active.
         void refresh(epicId, runId);
-        if (cancelled) return;
+        if (cancelled || pageHidden) return;
+        const epoch = streamEpoch;
         const timer = window.setTimeout(() => {
           retryTimers.delete(timer);
-          if (!cancelled && isRunActive(epicId)) connect(epicId, runId);
+          if (
+            !cancelled &&
+            !pageHidden &&
+            streamEpoch === epoch &&
+            isRunActive(epicId)
+          ) {
+            connect(epicId, runId);
+          }
         }, STREAM_RETRY_MS);
         retryTimers.add(timer);
       };
@@ -239,18 +249,45 @@ export function useWorkflowRunStreams({
     const canStream =
       typeof EventSource !== "undefined" && getAuthToken() === null;
 
-    entries.forEach(({ epicId, runId }, index) => {
-      if (canStream && index < MAX_RUN_STREAMS) {
-        connect(epicId, runId);
-      } else {
-        startPolling(epicId, runId);
-      }
-    });
+    const closeSources = (): void => {
+      for (const source of sources) source.close();
+      sources.clear();
+    };
+
+    const connectEntries = (): void => {
+      entries.forEach(({ epicId, runId }, index) => {
+        if (canStream && index < MAX_RUN_STREAMS) {
+          connect(epicId, runId);
+        } else {
+          startPolling(epicId, runId);
+        }
+      });
+    };
+
+    const handlePageHide = (): void => {
+      pageHidden = true;
+      streamEpoch += 1;
+      closeSources();
+    };
+    const handlePageShow = (event: PageTransitionEvent): void => {
+      if (!event.persisted) return;
+      pageHidden = false;
+      entries.forEach(({ epicId, runId }, index) => {
+        if (canStream && index < MAX_RUN_STREAMS && isRunActive(epicId)) {
+          connect(epicId, runId);
+        }
+      });
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
+
+    connectEntries();
 
     return () => {
       cancelled = true;
-      for (const source of sources) source.close();
-      sources.clear();
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
+      closeSources();
       for (const interval of pollIntervals) window.clearInterval(interval);
       pollIntervals.clear();
       for (const timer of retryTimers) window.clearTimeout(timer);
