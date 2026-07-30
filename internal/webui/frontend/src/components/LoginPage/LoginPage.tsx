@@ -94,6 +94,26 @@ export function LoginPage({
       tabIndex={-1}
     >
       <div className={styles.content}>
+        <div
+          className={styles.wordmark}
+          role="img"
+          aria-label={PRODUCT_NAME}
+        >
+          <img
+            className={`${styles.wordmarkImage} ${styles.wordmarkLight}`}
+            src="/brand/superfactory-wordmark-light-cropped.png"
+            alt=""
+            aria-hidden="true"
+            data-testid="superfactory-wordmark-light"
+          />
+          <img
+            className={`${styles.wordmarkImage} ${styles.wordmarkDark}`}
+            src="/brand/superfactory-wordmark-dark-cropped.png"
+            alt=""
+            aria-hidden="true"
+            data-testid="superfactory-wordmark-dark"
+          />
+        </div>
         <h2 id="login-title" className={styles.title}>
           Sign in to {PRODUCT_NAME}
         </h2>

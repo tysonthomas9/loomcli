@@ -78,6 +78,26 @@ describe("LoginPage", () => {
       );
     });
 
+    it("renders the supplied Superfactory wordmark", () => {
+      render(<LoginPage error={null} onErrorClear={vi.fn()} />);
+
+      expect(
+        screen.getByRole("img", { name: "Superfactory" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("superfactory-wordmark-light"),
+      ).toHaveAttribute(
+        "src",
+        "/brand/superfactory-wordmark-light-cropped.png",
+      );
+      expect(
+        screen.getByTestId("superfactory-wordmark-dark"),
+      ).toHaveAttribute(
+        "src",
+        "/brand/superfactory-wordmark-dark-cropped.png",
+      );
+    });
+
     it("OAuth and toggle buttons have type=button (only form submit is type=submit)", () => {
       render(<LoginPage error={null} onErrorClear={vi.fn()} />);
       const submitButtons = screen

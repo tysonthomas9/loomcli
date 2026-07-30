@@ -26,17 +26,39 @@
 }
 
 .brandMark {
-  color: var(--color-primary);
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: -0.08em;
-  line-height: 1;
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  overflow: hidden;
+  border-radius: 5px;
+}
+
+.brandMarkImage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.brandMarkDark {
+  display: none;
+}
+
+:global(html[data-theme="dark"]) .brandMarkLight {
+  display: none;
+}
+
+:global(html[data-theme="dark"]) .brandMarkDark {
+  display: block;
 }
 
 .brandName {
   font-size: 1rem;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
 }
 
 /* ===========================

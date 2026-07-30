@@ -19,7 +19,7 @@ import { useStore } from "zustand";
 
 import { useParams, useNavigate, Outlet } from "react-router-dom";
 
-import { PRODUCT_HOME_LABEL, PRODUCT_MARK, PRODUCT_NAME } from "@/utils/brand";
+import { PRODUCT_HOME_LABEL, PRODUCT_NAME } from "@/utils/brand";
 import { updateIssue, addComment, closeIssue, isDesktopRuntime } from "@/api";
 import {
   fetchWorkspaceApi,
@@ -1316,7 +1316,18 @@ function App() {
       aria-label={PRODUCT_HOME_LABEL}
     >
       <span className={styles.brandMark} aria-hidden="true">
-        {PRODUCT_MARK}
+        <img
+          className={`${styles.brandMarkImage} ${styles.brandMarkLight}`}
+          src="/brand/superfactory-logo-black.png"
+          alt=""
+          data-testid="superfactory-brand-mark-light"
+        />
+        <img
+          className={`${styles.brandMarkImage} ${styles.brandMarkDark}`}
+          src="/brand/superfactory-logo-yellow.png"
+          alt=""
+          data-testid="superfactory-brand-mark-dark"
+        />
       </span>
       <span className={styles.brandName}>{PRODUCT_NAME}</span>
     </button>

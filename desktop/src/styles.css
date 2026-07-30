@@ -3,8 +3,8 @@
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
-  background: #f7f8fa;
-  color: #17191d;
+  background: #ffc736;
+  color: #0f0f0e;
 }
 
 * {
@@ -31,29 +31,49 @@ body {
 
 button {
   min-height: 34px;
-  border: 1px solid #c8ced8;
+  border: 1px solid #0f0f0e;
   border-radius: 6px;
-  background: #ffffff;
-  color: #17191d;
+  background: #0f0f0e;
+  color: #ffffff;
   font: inherit;
   font-weight: 600;
   padding: 7px 12px;
 }
 
 button:disabled {
-  color: #8b94a3;
-  background: #eef1f5;
+  color: #5f552f;
+  background: #e6ad28;
 }
 
 button:not(:disabled):hover {
-  border-color: #596579;
+  background: #262623;
 }
 
 .launcher {
   display: grid;
-  gap: 18px;
+  gap: 14px;
   width: min(100vw, 720px);
-  padding: 56px 24px 24px;
+  padding: 50px 24px 24px;
+}
+
+.launcherWordmark {
+  position: relative;
+  width: min(100%, 300px);
+  aspect-ratio: 4.2 / 1;
+  overflow: hidden;
+}
+
+.launcherWordmarkImage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.launcherWordmarkDark {
+  display: none;
 }
 
 .status {
@@ -67,8 +87,8 @@ button:not(:disabled):hover {
   width: 28px;
   height: 28px;
   flex: 0 0 auto;
-  border: 3px solid #dce1e8;
-  border-top-color: #2563eb;
+  border: 3px solid rgba(15, 15, 14, 0.25);
+  border-top-color: #0f0f0e;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -99,7 +119,7 @@ h1 {
 
 p {
   margin: 5px 0 0;
-  color: #596579;
+  color: #51451f;
   font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -121,7 +141,7 @@ body[data-mode="error"] .details {
 }
 
 summary {
-  color: #596579;
+  color: #51451f;
   cursor: pointer;
   font-size: 11px;
   font-weight: 700;
@@ -140,7 +160,7 @@ dl > div {
 
 dt {
   margin-bottom: 4px;
-  color: #596579;
+  color: #51451f;
   font-size: 9px;
   font-weight: 700;
   text-transform: uppercase;
@@ -176,7 +196,7 @@ dd {
 
 @media (width <= 560px) {
   .launcher {
-    padding: 50px 18px 18px;
+    padding: 48px 18px 18px;
   }
 
   dl {
@@ -192,30 +212,43 @@ dd {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    background: #111318;
-    color: #eceff4;
+    background: #0f0f0e;
+    color: #ffffff;
   }
 
   button {
-    border-color: #3c4656;
-    background: #1b2029;
-    color: #eceff4;
+    border-color: #ffc736;
+    background: #ffc736;
+    color: #0f0f0e;
   }
 
   button:disabled {
-    color: #687386;
-    background: #171b22;
+    color: #8d7a3e;
+    background: #322b18;
+    border-color: #665323;
+  }
+
+  button:not(:disabled):hover {
+    background: #ffd568;
+  }
+
+  .launcherWordmarkLight {
+    display: none;
+  }
+
+  .launcherWordmarkDark {
+    display: block;
   }
 
   p,
   summary,
   dt {
-    color: #9aa3b2;
+    color: #b9b5a9;
   }
 
   .spinner {
-    border-color: #2d3542;
-    border-top-color: #60a5fa;
+    border-color: rgba(255, 199, 54, 0.24);
+    border-top-color: #ffc736;
   }
 
   .output {

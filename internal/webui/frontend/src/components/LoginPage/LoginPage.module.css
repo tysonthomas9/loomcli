@@ -25,6 +25,34 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
+.wordmark {
+  position: relative;
+  width: min(100%, 294px);
+  aspect-ratio: 4.2 / 1;
+  overflow: hidden;
+}
+
+.wordmarkImage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.wordmarkDark {
+  display: none;
+}
+
+:global(html[data-theme="dark"]) .wordmarkLight {
+  display: none;
+}
+
+:global(html[data-theme="dark"]) .wordmarkDark {
+  display: block;
+}
+
 .title {
   font-weight: 600;
   font-size: 18px;

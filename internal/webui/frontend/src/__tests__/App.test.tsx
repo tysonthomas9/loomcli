@@ -1419,7 +1419,7 @@ describe("App", () => {
   });
 
   describe("AppLayout integration", () => {
-    it("renders with Superfactory title and SF mark in header", () => {
+    it("renders with the Superfactory title and supplied brand mark", () => {
       const mockReturn = createMockUseIssuesReturn({});
       mockStoreState = mockReturn;
 
@@ -1428,7 +1428,13 @@ describe("App", () => {
       expect(
         screen.getByRole("heading", { name: "Superfactory", level: 1 }),
       ).toBeInTheDocument();
-      expect(screen.getByText("SF")).toHaveAttribute("aria-hidden", "true");
+      expect(
+        screen.getByTestId("superfactory-brand-mark-light"),
+      ).toHaveAttribute("src", "/brand/superfactory-logo-black.png");
+      expect(
+        screen.getByTestId("superfactory-brand-mark-dark"),
+      ).toHaveAttribute("src", "/brand/superfactory-logo-yellow.png");
+      expect(screen.queryByText("SF")).not.toBeInTheDocument();
     });
 
     it("renders header with banner role", () => {

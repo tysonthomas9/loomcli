@@ -42,6 +42,20 @@ app.innerHTML = `
     aria-hidden="true"
   ></div>
   <main class="launcher" aria-live="polite">
+    <div class="launcherWordmark" role="img" aria-label="Superfactory">
+      <img
+        class="launcherWordmarkImage launcherWordmarkLight"
+        src="/brand/superfactory-wordmark-light-cropped.png"
+        alt=""
+        aria-hidden="true"
+      />
+      <img
+        class="launcherWordmarkImage launcherWordmarkDark"
+        src="/brand/superfactory-wordmark-dark-cropped.png"
+        alt=""
+        aria-hidden="true"
+      />
+    </div>
     <section class="status">
       <div id="spinner" class="spinner" aria-hidden="true"></div>
       <div class="statusText">
