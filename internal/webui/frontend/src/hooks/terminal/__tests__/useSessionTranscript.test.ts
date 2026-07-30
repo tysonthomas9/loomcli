@@ -300,6 +300,47 @@ describe("useSessionTranscript", () => {
       });
       expect(result.current.entries).toEqual(second);
     });
+
+    it("does not let a stale failure from the previous session poison the selected session", async () => {
+      let rejectFirst!: (reason?: unknown) => void;
+      let resolveSecond!: (value: TranscriptEntry[]) => void;
+      mockGetTranscript
+        .mockImplementationOnce(
+          () =>
+            new Promise<TranscriptEntry[]>((_, reject) => {
+              rejectFirst = reject;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<TranscriptEntry[]>((resolve) => {
+              resolveSecond = resolve;
+            }),
+        );
+
+      const { result, rerender } = renderHook(
+        ({ sessionId }: { sessionId: string }) =>
+          useSessionTranscript("task-1", sessionId, false),
+        { initialProps: { sessionId: "sess-1" } },
+      );
+      rerender({ sessionId: "sess-2" });
+
+      const second = [createMockEntry({ text: "current session" })];
+      await act(async () => {
+        resolveSecond(second);
+        await Promise.resolve();
+      });
+      expect(result.current.entries).toEqual(second);
+      expect(result.current.error).toBeNull();
+
+      await act(async () => {
+        rejectFirst(new ApiError(500, "failed to load session"));
+        await Promise.resolve();
+      });
+      expect(result.current.entries).toEqual(second);
+      expect(result.current.error).toBeNull();
+      expect(result.current.isLoading).toBe(false);
+    });
   });
 
   describe("polling when active", () => {
@@ -424,6 +465,34 @@ describe("useSessionTranscript", () => {
         vi.advanceTimersByTime(6000);
       });
       expect(mockGetTranscript).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries a transient completed task transcript without projection retry opt-in", async () => {
+      const entries = [createMockEntry({ text: "recovered transcript" })];
+      mockGetTranscript
+        .mockRejectedValueOnce(new ApiError(500, "failed to load session"))
+        .mockResolvedValueOnce(entries);
+
+      const { result } = renderHook(() =>
+        useSessionTranscript("task-1", "sess-1", false),
+      );
+
+      await flushPromises();
+      expect(result.current.entries).toEqual([]);
+      expect(result.current.isLoading).toBe(true);
+      expect(result.current.isUnavailable).toBe(false);
+      expect(result.current.error).toBeNull();
+      expect(mockGetTranscript).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(3_000);
+      });
+      await flushPromises();
+
+      expect(mockGetTranscript).toHaveBeenCalledTimes(2);
+      expect(result.current.entries).toEqual(entries);
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.error).toBeNull();
     });
 
     it("clears the previous error as a bounded retry begins", async () => {

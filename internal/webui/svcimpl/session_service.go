@@ -53,7 +53,7 @@ func NewSessionServiceWithRuntimeDir(st store.Store, histStore *sessionhistory.S
 // search across all repos to find sessions for a given task.
 func (s *sessionServiceImpl) storesForWorkspace(ctx context.Context, wsID string) ([]*sessions.Store, error) {
 	collection := newSessionStoreCollection()
-	collection.add(s.runtimeDir)
+	s.addRuntimeSessionStoreCandidates(wsID, collection)
 	if err := s.addWorkspaceSessionStores(ctx, wsID, collection); err != nil {
 		return nil, err
 	}
@@ -90,6 +90,67 @@ func (c *sessionStoreCollection) add(runtimeDir string) {
 		return
 	}
 	c.stores = append(c.stores, st)
+}
+
+// addExistingRuntimeDir adds the server-configured runtime directory only when
+// it already exists and is a directory. Session reads must not create an
+// arbitrary directory from configuration while resolving a user-supplied
+// session ID. sessions.Store validates and bounds the session ID beneath its
+// sessions directory before it reads metadata.
+func (c *sessionStoreCollection) addExistingRuntimeDir(runtimeDir string) {
+	if runtimeDir == "" {
+		return
+	}
+	absRuntimeDir, err := filepath.Abs(runtimeDir)
+	if err != nil {
+		logger.Warn("failed to resolve local session runtime directory", "runtime_dir", runtimeDir, "err", err)
+		return
+	}
+	info, err := os.Stat(absRuntimeDir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			logger.Warn("failed to inspect local session runtime directory", "runtime_dir", absRuntimeDir, "err", err)
+		}
+		return
+	}
+	if !info.IsDir() {
+		logger.Warn("local session runtime path is not a directory", "runtime_dir", absRuntimeDir)
+		return
+	}
+	c.add(absRuntimeDir)
+}
+
+// addRuntimeSessionStoreCandidates adds the active runtime and, only for the
+// conventional <root>/workspaces/<workspace> layout, the requested workspace's
+// direct sibling. This lets a local serve running in LOCALMODE read a session
+// owned by another local workspace without asking FleetDB to enumerate the
+// workspace topology.
+func (s *sessionServiceImpl) addRuntimeSessionStoreCandidates(wsID string, collection *sessionStoreCollection) {
+	collection.addExistingRuntimeDir(s.runtimeDir)
+	if siblingRuntimeDir, ok := siblingWorkspaceRuntimeDir(s.runtimeDir, wsID); ok {
+		collection.addExistingRuntimeDir(siblingRuntimeDir)
+	}
+}
+
+// siblingWorkspaceRuntimeDir returns <runtime parent>/<wsID> only when the
+// runtime's parent is literally named "workspaces" and wsID is one safe path
+// component. It must not turn a workspace key into an arbitrary filesystem
+// path.
+func siblingWorkspaceRuntimeDir(runtimeDir, wsID string) (string, bool) {
+	if runtimeDir == "" || wsID == "" || wsID == "." || wsID == ".." ||
+		filepath.Clean(wsID) != wsID || filepath.Base(wsID) != wsID ||
+		strings.ContainsAny(wsID, "/\\") {
+		return "", false
+	}
+	absRuntimeDir, err := filepath.Abs(runtimeDir)
+	if err != nil {
+		return "", false
+	}
+	workspacesDir := filepath.Dir(absRuntimeDir)
+	if filepath.Base(workspacesDir) != "workspaces" {
+		return "", false
+	}
+	return filepath.Join(workspacesDir, wsID), true
 }
 
 func (s *sessionServiceImpl) addWorkspaceSessionStores(
@@ -141,6 +202,18 @@ func storeOwningSession(stores []*sessions.Store, sessionID string) *sessions.St
 
 // findStoreForSession returns the first store that has metadata for the given session.
 func (s *sessionServiceImpl) findStoreForSession(ctx context.Context, wsID, sessionID string) (*sessions.Store, error) {
+	// The active runtime or requested workspace's sibling runtime can own the
+	// session even when FleetDB is unavailable or its workspace topology is
+	// stale. Check those local candidates first so loading a transcript, diff,
+	// or detail does not depend on a control-plane fanout.
+	if validSessionID.MatchString(sessionID) {
+		collection := newSessionStoreCollection()
+		s.addRuntimeSessionStoreCandidates(wsID, collection)
+		if st := storeOwningSession(collection.stores, sessionID); st != nil {
+			return st, nil
+		}
+	}
+
 	stores, err := s.storesForWorkspace(ctx, wsID)
 	if err != nil {
 		return nil, err
@@ -455,6 +528,7 @@ func (s *sessionServiceImpl) controlPlaneSessionRecord(ctx context.Context, wsID
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, service.ErrNotFound("session not found")
 		}
+		logger.Error("failed to load control-plane session", "workspace_id", wsID, "task_id", taskID, "session_id", sessionID, "err", err)
 		return nil, service.ErrInternal("failed to load session", err)
 	}
 	if rec.TaskID != taskID && (rec.Metadata == nil || rec.Metadata["task_id"] != taskID) {

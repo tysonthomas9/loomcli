@@ -66,6 +66,9 @@ services:
       FLEET_AUTH_ENABLED: "true"
       FLEET_AUTH_DEV_MODE: "false"
       FLEET_AUTHZ_ENABLED: "true"
+      # Local-mode workers share one container IP, so the production IP rate
+      # bucket would self-throttle this disposable loopback-only stack.
+      FLEET_RATE_LIMIT_ENABLED: "false"
       # Phase 3 local-mode proof must advertise and exercise the complete
       # Automation contract; Loom composes this slice by default alongside
       # Workflow Catalog and fails readiness when Fleet leaves it disabled.

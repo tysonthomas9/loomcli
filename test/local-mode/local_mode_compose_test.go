@@ -49,6 +49,7 @@ func TestLocalModeComposeUsesAuthenticatedFleetDBAndLoopbackPublishedUI(t *testi
 		"FLEET_AUTH_ENABLED":                         "true",
 		"FLEET_AUTH_DEV_MODE":                        "false",
 		"FLEET_AUTHZ_ENABLED":                        "true",
+		"FLEET_RATE_LIMIT_ENABLED":                   "false",
 		"FLEET_AUTOMATION_TRIGGER_ADMISSION_ENABLED": "true",
 		"FLEET_AUTH_BOOTSTRAP_ADMIN_ACTOR":           localModeEnv("LOCAL_MODE_FLEETDB_ADMIN_ACTOR", localModeAdminActor),
 		"FLEET_AUTH_BOOTSTRAP_ADMIN_KEY":             localModeEnv("LOCAL_MODE_FLEETDB_API_KEY", localModeAdminKey),

@@ -268,6 +268,91 @@ func TestSessionServicePathlessWorkspaceTranscriptFallsBackToControlPlaneArtifac
 	}
 }
 
+func TestSessionServiceTranscriptUsesRuntimeStoreBeforeWorkspaceTopology(t *testing.T) {
+	ctx := t.Context()
+	rootDir := t.TempDir()
+	runtimeDir := filepath.Join(rootDir, "workspaces", "LOCALMODE")
+	targetRuntimeDir := filepath.Join(rootDir, "workspaces", "WS")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatalf("create active runtime directory: %v", err)
+	}
+	runtimeStore, err := sessions.NewStore(targetRuntimeDir)
+	if err != nil {
+		t.Fatalf("new target runtime session store: %v", err)
+	}
+	sess, err := runtimeStore.CreateSession(sessions.CreateOptions{
+		AgentName: "runtime-agent",
+		Backend:   "claude",
+		Phase:     "implementation",
+	})
+	if err != nil {
+		t.Fatalf("create target runtime session: %v", err)
+	}
+	sourceTranscript := filepath.Join(t.TempDir(), "codex.jsonl")
+	if err := os.WriteFile(sourceTranscript, []byte(`{"type":"assistant","uuid":"runtime-1","message":{"content":[{"type":"text","text":"from runtime"}]}}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write source transcript: %v", err)
+	}
+	if err := runtimeStore.SyncNativeTranscript(sess.SessionID(), sourceTranscript, sessions.TranscriptFormatRaw); err != nil {
+		t.Fatalf("sync target runtime transcript: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-RUNTIME-1", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize target runtime session: %v", err)
+	}
+
+	baseStore := memstore.New()
+	countingStore := &workspaceAccessCountingStore{Store: baseStore}
+	svc := NewSessionServiceWithRuntimeDir(countingStore, nil, runtimeDir)
+	events, err := svc.GetSessionTranscript(ctx, "WS", "TASK-RUNTIME-1", sess.SessionID())
+	if err != nil {
+		t.Fatalf("GetSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "from runtime" {
+		t.Fatalf("events = %+v, want the runtime transcript", events)
+	}
+	if countingStore.workspaceCalls != 0 {
+		t.Fatalf("workspace topology lookups = %d, want 0", countingStore.workspaceCalls)
+	}
+}
+
+func TestSiblingWorkspaceRuntimeDirRequiresDirectWorkspaceSibling(t *testing.T) {
+	rootDir := t.TempDir()
+	workspaceRuntimeDir := filepath.Join(rootDir, "workspaces", "LOCALMODE")
+	want := filepath.Join(rootDir, "workspaces", "WS")
+
+	tests := []struct {
+		name       string
+		runtimeDir string
+		wsID       string
+		want       string
+		ok         bool
+	}{
+		{name: "direct workspace sibling", runtimeDir: workspaceRuntimeDir, wsID: "WS", want: want, ok: true},
+		{name: "nested workspace id", runtimeDir: workspaceRuntimeDir, wsID: "WS/other"},
+		{name: "traversal workspace id", runtimeDir: workspaceRuntimeDir, wsID: "../WS"},
+		{name: "dot workspace id", runtimeDir: workspaceRuntimeDir, wsID: "."},
+		{name: "empty runtime directory", wsID: "WS"},
+		{name: "non-workspaces parent", runtimeDir: filepath.Join(rootDir, "runtime", "LOCALMODE"), wsID: "WS"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := siblingWorkspaceRuntimeDir(tt.runtimeDir, tt.wsID)
+			if ok != tt.ok || got != tt.want {
+				t.Fatalf("siblingWorkspaceRuntimeDir(%q, %q) = (%q, %v), want (%q, %v)", tt.runtimeDir, tt.wsID, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+type workspaceAccessCountingStore struct {
+	store.Store
+	workspaceCalls int
+}
+
+func (s *workspaceAccessCountingStore) Workspaces() store.WorkspaceStore {
+	s.workspaceCalls++
+	return s.Store.Workspaces()
+}
+
 func TestSessionServiceAgentSessionTranscriptUsesAgentOwnership(t *testing.T) {
 	ctx := t.Context()
 	st := memstore.New()

@@ -46,8 +46,18 @@ interface TranscriptState extends UseSessionTranscriptResult {
 
 /** Poll interval when session is active (ms). */
 const POLL_INTERVAL_ACTIVE = 3_000;
-/** Bound eventual-consistency retries for a completed session to 15 seconds. */
-const MAX_UNAVAILABLE_RETRIES = 5;
+/** Bound recovery retries for a completed session to 15 seconds. */
+const MAX_TRANSCRIPT_RETRIES = 5;
+
+function isTransientTranscriptError(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    (err.status === 0 ||
+      err.status === 408 ||
+      err.status === 429 ||
+      err.status >= 500)
+  );
+}
 
 export function useSessionTranscript(
   taskId: string | null,
@@ -96,7 +106,7 @@ export function useSessionTranscript(
     let activeTimer: ReturnType<typeof setTimeout> | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let latestRequest = 0;
-    let unavailableRetries = 0;
+    let retryAttempts = 0;
 
     setState((current) => ({
       requestKey,
@@ -106,16 +116,16 @@ export function useSessionTranscript(
       error: current.requestKey === requestKey ? current.error : null,
     }));
 
-    const scheduleUnavailableRetry = (): boolean => {
+    const scheduleRetry = (shouldRetry: boolean): boolean => {
       if (
-        !retryUnavailable ||
+        !shouldRetry ||
         isActive ||
         retryTimer ||
-        unavailableRetries >= MAX_UNAVAILABLE_RETRIES
+        retryAttempts >= MAX_TRANSCRIPT_RETRIES
       ) {
         return false;
       }
-      unavailableRetries += 1;
+      retryAttempts += 1;
       retryTimer = setTimeout(() => {
         retryTimer = null;
         void fetchTranscript();
@@ -151,7 +161,7 @@ export function useSessionTranscript(
                 { preserveNotFound: true },
               );
         if (!cancelled && request === latestRequest) {
-          unavailableRetries = 0;
+          retryAttempts = 0;
           setState({
             requestKey,
             entries: result,
@@ -163,21 +173,28 @@ export function useSessionTranscript(
       } catch (err) {
         if (!cancelled && request === latestRequest) {
           const unavailable = err instanceof ApiError && err.status === 404;
-          const willRetry = scheduleUnavailableRetry();
+          const transient = isTransientTranscriptError(err);
+          // retryUnavailable retains its existing projection-catchup behavior
+          // for any one-shot failure. A transient API failure retries even for
+          // canonical completed sessions, whose callers do not opt into that
+          // projection behavior.
+          const willRetry = scheduleRetry(retryUnavailable || transient);
           const projectionPending = unavailable && (isActive || willRetry);
+          const transientRetryPending = transient && (isActive || willRetry);
           setState((current) => ({
             requestKey,
             entries: current.requestKey === requestKey ? current.entries : [],
             // A missing durable projection is still pending while a bounded
             // retry is scheduled. Keep the transcript in its loading state
             // instead of briefly claiming that it has no entries.
-            isLoading: projectionPending,
+            isLoading: projectionPending || transientRetryPending,
             isUnavailable: unavailable && !isActive && !willRetry,
-            error: unavailable
-              ? null
-              : err instanceof Error
-                ? err
-                : new Error(String(err)),
+            error:
+              unavailable || transientRetryPending
+                ? null
+                : err instanceof Error
+                  ? err
+                  : new Error(String(err)),
           }));
         }
       }
