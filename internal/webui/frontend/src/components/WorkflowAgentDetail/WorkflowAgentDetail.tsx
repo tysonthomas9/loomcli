@@ -355,11 +355,13 @@ export function WorkflowAgentRunsPane({
   binding,
   detail,
   active = true,
+  onOpenTask,
 }: {
   workspaceId: string;
   binding: TriggerBinding;
   detail: WorkflowAgentDetailState;
   active?: boolean;
+  onOpenTask?: ((taskId: string) => void) | undefined;
 }): JSX.Element {
   return (
     <RunsTab
@@ -374,6 +376,7 @@ export function WorkflowAgentRunsPane({
       active={active}
       selectedRunId={detail.selectedRunId}
       onSelectRun={detail.setSelectedRunId}
+      onOpenTask={onOpenTask}
     />
   );
 }
@@ -388,11 +391,13 @@ export function AgentRecordRunsPane({
   record,
   bindings,
   active = true,
+  onOpenTask,
 }: {
   workspaceId: string;
   record: AgentRecordSummary;
   bindings: TriggerBinding[];
   active?: boolean;
+  onOpenTask?: ((taskId: string) => void) | undefined;
 }): JSX.Element {
   const { runs, isLoading, error } = useAgentHistory(
     workspaceId,
@@ -426,6 +431,7 @@ export function AgentRecordRunsPane({
       active={active}
       selectedRunId={selectedRun?.run_id ?? focusRun?.run_id ?? null}
       onSelectRun={setSelectedRunId}
+      onOpenTask={onOpenTask}
     />
   );
 }
@@ -495,6 +501,7 @@ function RunsTab({
   active,
   selectedRunId,
   onSelectRun,
+  onOpenTask,
 }: {
   workspaceId: string;
   runs: WorkflowRun[];
@@ -507,6 +514,7 @@ function RunsTab({
   active: boolean;
   selectedRunId: string | null;
   onSelectRun: (runId: string) => void;
+  onOpenTask?: ((taskId: string) => void) | undefined;
 }): JSX.Element {
   return (
     <div className={styles.scroll}>
@@ -519,7 +527,11 @@ function RunsTab({
       </div>
 
       {focusRun && active ? (
-        <RunDetailCard workspaceId={workspaceId} run={focusRun} />
+        <RunDetailCard
+          workspaceId={workspaceId}
+          run={focusRun}
+          onOpenTask={onOpenTask}
+        />
       ) : null}
 
       <section className={styles.card}>
@@ -605,9 +617,11 @@ function RunsTab({
 export function RunDetailCard({
   workspaceId,
   run,
+  onOpenTask,
 }: {
   workspaceId: string;
   run: WorkflowRun;
+  onOpenTask?: ((taskId: string) => void) | undefined;
 }): JSX.Element {
   const [detailRun, setDetailRun] = useState(run);
   const [detailLoadError, setDetailLoadError] = useState<string | null>(null);
@@ -753,6 +767,7 @@ export function RunDetailCard({
                   workspaceId={workspaceId}
                   taskId={taskId}
                   className={styles.taskLink}
+                  onOpenTask={onOpenTask}
                 />
               ))}
             </dd>

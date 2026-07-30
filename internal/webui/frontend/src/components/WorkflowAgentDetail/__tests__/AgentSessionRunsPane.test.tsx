@@ -175,6 +175,38 @@ describe("AgentSessionRunsPane", () => {
     );
   });
 
+  it("opens an ordinary task-link click through the agent task pane callback", () => {
+    const onOpenTask = vi.fn();
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [],
+      sessions: [historySession("session-1", "TASK-1")],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(
+      <AgentSessionRunsPane
+        workspaceId="WS"
+        agentName="coder"
+        onOpenTask={onOpenTask}
+      />,
+    );
+
+    const taskLinks = screen.getAllByRole("link", { name: "TASK-1" });
+    expect(taskLinks).toHaveLength(2);
+    expect(fireEvent.click(taskLinks[0]!)).toBe(false);
+    expect(onOpenTask).toHaveBeenCalledWith("TASK-1");
+    expect(taskLinks[0]).toHaveAttribute("href", "/ws/WS/issues/TASK-1");
+
+    onOpenTask.mockClear();
+    taskLinks[0]!.addEventListener("click", (event) => event.preventDefault(), {
+      once: true,
+    });
+    fireEvent.click(taskLinks[0]!, { ctrlKey: true });
+    expect(onOpenTask).not.toHaveBeenCalled();
+  });
+
   it("retries projected transcript evidence when only the durable session exists", () => {
     const only = historySession("session-1", "TASK-1");
     mocks.useAgentHistory.mockReturnValue({

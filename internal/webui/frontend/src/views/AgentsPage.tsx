@@ -53,10 +53,7 @@ import {
 import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
-import {
-  isLiveAgentRailVisible,
-  orderAgentsForEpicRunner,
-} from "@/components/AgentIconRail/AgentIconRail";
+import { isLiveAgentRailVisible } from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
 import {
   EPIC_RUNNER_WORKFLOW_NAME,
@@ -90,6 +87,7 @@ import {
   issueRepoName,
 } from "@/utils/epicRunnerPayload";
 import { isCustomRole, isInteractiveAgent } from "@/utils/agentRole";
+import { mergeAgentRoster } from "@/utils/agentRoster";
 import { formatStatusLabel } from "@/utils/issue";
 import type { TerminalInputRequest } from "@/components/TerminalView/TerminalView";
 
@@ -134,7 +132,7 @@ function AgentsPageInner(): JSX.Element {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const agentStore = useAgentStoreInstance();
-  const agents = useStore(agentStore, (s) => s.agents);
+  const fleetAgents = useStore(agentStore, (s) => s.agents);
   const { issues, issueDetails, isLoadingDetails, detailError } =
     useWorkspaceViewData();
   const {
@@ -145,7 +143,11 @@ function AgentsPageInner(): JSX.Element {
     handleReject,
     handleCopyLink,
   } = useWorkspaceViewActions();
-  const { repos } = useWorkspaceContext();
+  const {
+    repos,
+    agents: workspaceConfigAgents = [],
+    workspace,
+  } = useWorkspaceContext();
   const { settings: localSettings } = useLocalSettings();
   const { showToast } = useToast();
   const {
@@ -157,11 +159,29 @@ function AgentsPageInner(): JSX.Element {
   // Auto-select an agent when URL is bare /agents: honor a legacy
   // ?agent=<name> deep link first, else fall back to the first rail agent.
   const queryAgent = searchParams.get("agent");
+  const agents = useMemo(
+    () =>
+      mergeAgentRoster(
+        fleetAgents,
+        workspaceConfigAgents,
+        workspace?.name ?? "",
+      ),
+    [fleetAgents, workspaceConfigAgents, workspace?.name],
+  );
   const firstAgentName = useMemo(
-    () => orderAgentsForEpicRunner(agents).find(isLiveAgentRailVisible)?.name,
+    () =>
+      agents.find(isLiveAgentRailVisible)?.name ??
+      agents.find((agent) => agent.status === "configured")?.name,
     [agents],
   );
 
+  const selectedFleetAgent = useMemo(
+    () =>
+      agentName
+        ? fleetAgents.find((agent) => agent.name === agentName)
+        : undefined,
+    [agentName, fleetAgents],
+  );
   const selected = useMemo(
     () => (agentName ? agents.find((a) => a.name === agentName) : undefined),
     [agents, agentName],
@@ -261,13 +281,14 @@ function AgentsPageInner(): JSX.Element {
       );
       return {
         worktree: hasWorktree,
-        pty: isInteractiveAgent(selected),
+        pty:
+          selectedFleetAgent != null && isInteractiveAgent(selectedFleetAgent),
         runs: true,
         config: true,
       };
     }
     return { worktree: false, pty: false, runs: false, config: true };
-  }, [selected, selectedAgentRecord, selectedBinding]);
+  }, [selected, selectedAgentRecord, selectedBinding, selectedFleetAgent]);
   const agentTabs = useMemo(
     () => agentTabsForCapabilities(agentCapabilities),
     [agentCapabilities],
@@ -288,7 +309,7 @@ function AgentsPageInner(): JSX.Element {
     !bindingsInitialized;
 
   // Inline task-detail selection, restored per agent from scoped storage.
-  const [selectedTask, setSelectedTask] = useState<Issue | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showAgentConfig, setShowAgentConfig] = useState(false);
   const [pendingTerminalInput, setPendingTerminalInput] = useState<
     TerminalInputRequest | undefined
@@ -310,21 +331,16 @@ function AgentsPageInner(): JSX.Element {
   useEffect(() => {
     clearIssue();
     if (!agentName) {
-      setSelectedTask(null);
+      setSelectedTaskId(null);
       return;
     }
-    const { selectedTaskId } = loadAgentWorkPanelView(workspaceId, agentName);
-    if (!selectedTaskId) {
-      setSelectedTask(null);
-      return;
-    }
-    const match = issues.find((issue) => issue.id === selectedTaskId);
-    setSelectedTask(match ?? null);
-  }, [agentName, workspaceId, issues, clearIssue]);
+    const saved = loadAgentWorkPanelView(workspaceId, agentName);
+    setSelectedTaskId(saved.selectedTaskId ?? null);
+  }, [agentName, workspaceId, clearIssue]);
   useEffect(() => {
-    if (!selectedTask) return;
-    void fetchIssue(selectedTask.id);
-  }, [selectedTask, fetchIssue]);
+    if (!selectedTaskId) return;
+    void fetchIssue(selectedTaskId);
+  }, [selectedTaskId, fetchIssue]);
   useEffect(() => {
     setEpicRunnerRuns({});
   }, [workspaceId]);
@@ -439,14 +455,14 @@ function AgentsPageInner(): JSX.Element {
   );
 
   const handleCloseInlineDetail = useCallback(() => {
-    setSelectedTask(null);
+    setSelectedTaskId(null);
     clearIssue();
     persistSelectedTaskId(null);
   }, [clearIssue, persistSelectedTaskId]);
 
   const handleInlineTaskNavigate = useCallback(
     (issue: Issue) => {
-      setSelectedTask(issue);
+      setSelectedTaskId(issue.id);
       persistSelectedTaskId(issue.id);
     },
     [persistSelectedTaskId],
@@ -454,8 +470,18 @@ function AgentsPageInner(): JSX.Element {
 
   const handleTaskClick = useCallback(
     (task: Issue) => {
-      setSelectedTask(task);
+      setSelectedTaskId(task.id);
       persistSelectedTaskId(task.id);
+    },
+    [persistSelectedTaskId],
+  );
+
+  const handleTaskIdClick = useCallback(
+    (taskId: string) => {
+      const normalized = taskId.trim();
+      if (!normalized) return;
+      setSelectedTaskId(normalized);
+      persistSelectedTaskId(normalized);
     },
     [persistSelectedTaskId],
   );
@@ -465,10 +491,10 @@ function AgentsPageInner(): JSX.Element {
   }, [navigate, workspaceId]);
 
   const inlinePanelIssue = useMemo(() => {
-    if (!selectedTask) return null;
-    if (issueDetails?.id === selectedTask.id) return issueDetails;
-    return selectedTask;
-  }, [selectedTask, issueDetails]);
+    if (!selectedTaskId) return null;
+    if (issueDetails?.id === selectedTaskId) return issueDetails;
+    return issues.find((issue) => issue.id === selectedTaskId) ?? null;
+  }, [selectedTaskId, issueDetails, issues]);
 
   // Workspace-wide counts for the Info tab stat cards.
   const counts = useMemo(() => {
@@ -537,6 +563,7 @@ function AgentsPageInner(): JSX.Element {
                 record={selectedAgentRecord}
                 bindings={recordBindings}
                 active={isActive}
+                onOpenTask={handleTaskIdClick}
               />
             );
           }
@@ -547,6 +574,7 @@ function AgentsPageInner(): JSX.Element {
                 binding={selectedBinding}
                 detail={workflowDetail}
                 active={isActive}
+                onOpenTask={handleTaskIdClick}
               />
             );
           }
@@ -562,6 +590,7 @@ function AgentsPageInner(): JSX.Element {
               workspaceId={workspaceId}
               agentName={selected.name}
               active={isActive}
+              onOpenTask={handleTaskIdClick}
             />
           );
         case "terminal":
@@ -634,9 +663,9 @@ function AgentsPageInner(): JSX.Element {
                       {formatStatusLabel(roleName)} agent
                     </p>
                   </div>
-                  {!isInteractiveAgent(selected) ? (
+                  {!isInteractiveAgent(selected) && selectedFleetAgent ? (
                     <AgentLifecycleControls
-                      agent={selected}
+                      agent={selectedFleetAgent}
                       onChanged={() => {
                         void agentStore.getState().fetchData();
                       }}
@@ -771,6 +800,7 @@ function AgentsPageInner(): JSX.Element {
       workspaceId,
       pendingTerminalInput,
       selected,
+      selectedFleetAgent,
       selectedAgentRecord,
       recordBindings,
       selectedBinding,
@@ -789,6 +819,7 @@ function AgentsPageInner(): JSX.Element {
       statusType,
       canEditConfig,
       agentStore,
+      handleTaskIdClick,
     ],
   );
 
@@ -849,8 +880,8 @@ function AgentsPageInner(): JSX.Element {
         />
       </section>
 
-      {/* Right column: epic-runner Open Queue or inline task detail */}
-      {selectedBinding || selectedAgentRecord ? null : selectedTask ? (
+      {/* Right column: selected run task, or the role-agent Open Queue. */}
+      {selectedTaskId ? (
         <div className={styles.inlineDetail} style={{ width: openQueueWidth }}>
           <PanelWidthResizeHandle
             width={openQueueWidth}
@@ -875,7 +906,7 @@ function AgentsPageInner(): JSX.Element {
             />
           </div>
         </div>
-      ) : (
+      ) : selectedBinding || selectedAgentRecord ? null : (
         <AgentWorkPanel
           agentName={agentName}
           panelWidth={openQueueWidth}

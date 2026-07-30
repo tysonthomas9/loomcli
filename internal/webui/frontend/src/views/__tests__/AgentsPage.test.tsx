@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { startWorkflowRun } from "@/api";
 import type { AgentRecordSummary } from "@/api";
+import { loadAgentWorkPanelView } from "@/utils/agentWorkPanelStorage";
 
 import { AgentsPage } from "../AgentsPage";
 
@@ -29,13 +30,41 @@ const mocks = vi.hoisted(() => {
     runBinding: vi.fn(),
     setRecordEnabled: vi.fn(),
     deleteRecord: vi.fn(),
+    fetchIssue: vi.fn(),
+    clearIssue: vi.fn(),
+    updateIssueDetails: vi.fn(),
+    handleApprove: vi.fn(),
+    handleReject: vi.fn(),
+    handleCopyLink: vi.fn(),
     useAgentHistory: vi.fn(),
     routeWorkspaceId: "DESKTOP-QA",
     routeAgentName: "lead-1" as string | undefined,
     agentRecords: [],
     bindings: [],
     localSettings: { settings: null },
-    workspaceContext: { repos: [] },
+    workspaceContext: { repos: [] } as {
+      repos: Array<{
+        name: string;
+        remote_url?: string;
+        default_branch: string;
+      }>;
+      agents?: Array<{
+        name: string;
+        repos: string[];
+        repo_groups: string[];
+        cross_repo: boolean;
+        role_name?: string;
+      }>;
+      workspace?: { name: string } | null;
+    },
+    workspaceIssues: [] as Array<{
+      id: string;
+      title: string;
+      status: string;
+      issue_type: string;
+      priority: number;
+    }>,
+    issueDetails: null as { id: string; title?: string } | null,
     agents: [
       {
         name: "lead-1",
@@ -125,6 +154,23 @@ vi.mock("@/hooks/workspace", () => ({
   useWorkspaceContext: () => mocks.workspaceContext,
 }));
 
+vi.mock("@/contexts/WorkspaceViewContext", () => ({
+  useWorkspaceViewData: () => ({
+    issues: mocks.workspaceIssues,
+    issueDetails: mocks.issueDetails,
+    isLoadingDetails: false,
+    detailError: null,
+  }),
+  useWorkspaceViewActions: () => ({
+    fetchIssue: mocks.fetchIssue,
+    clearIssue: mocks.clearIssue,
+    updateIssueDetails: mocks.updateIssueDetails,
+    handleApprove: mocks.handleApprove,
+    handleReject: mocks.handleReject,
+    handleCopyLink: mocks.handleCopyLink,
+  }),
+}));
+
 vi.mock("@/components/WorkflowSourceModal", () => ({
   WorkflowSourceModal: ({ isOpen }: { isOpen: boolean }) =>
     isOpen ? <div data-testid="workflow-source-modal" /> : null,
@@ -180,7 +226,25 @@ vi.mock("@/components/AgentWorkPanel/AgentWorkPanel", () => ({
 }));
 
 vi.mock("@/components/IssueDetailPanel/IssueDetailPanel", () => ({
-  IssueDetailPanel: () => <div data-testid="issue-detail" />,
+  IssueDetailPanel: ({
+    issue,
+    inline,
+    onClose,
+  }: {
+    issue: { id?: string } | null;
+    inline?: boolean;
+    onClose?: () => void;
+  }) => (
+    <div
+      data-testid="issue-detail"
+      data-task-id={issue?.id ?? ""}
+      data-inline={String(inline === true)}
+    >
+      <button type="button" onClick={onClose}>
+        Close task
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/FileExplorer", () => ({
@@ -243,6 +307,8 @@ describe("AgentsPage", () => {
     });
     mocks.localSettings = { settings: null };
     mocks.workspaceContext = { repos: [] };
+    mocks.workspaceIssues = [];
+    mocks.issueDetails = null;
     mocks.listTriggerBindingRuns.mockResolvedValue({ runs: [] });
     mocks.promptAgentRoleName.mockReturnValue("");
     mocks.setRecordEnabled.mockResolvedValue(undefined);
@@ -264,6 +330,62 @@ describe("AgentsPage", () => {
 
     const toggle = await screen.findByTestId("agent-editor-split");
     expect(toggle.getAttribute("aria-label")).toBe("Split editor right");
+  });
+
+  it("resolves a direct route for a configured agent without a live monitor row", async () => {
+    mocks.routeAgentName = "configured-task";
+    mocks.agents = [];
+    mocks.workspaceContext = {
+      repos: [],
+      agents: [
+        {
+          name: "configured-task",
+          repos: ["sandbox"],
+          repo_groups: [],
+          cross_repo: false,
+          role_name: "task",
+        },
+      ],
+      workspace: { name: "Desktop QA" },
+    };
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByRole("button", { name: "Runs" })).toBeTruthy();
+    expect(mocks.useAgentHistory).toHaveBeenCalledWith(
+      "DESKTOP-QA",
+      "configured-task",
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Info" }));
+    expect(screen.queryByText("Select an agent to view info.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Terminal" })).toBeNull();
+    expect(screen.queryByTestId("agent-lifecycle-controls")).toBeNull();
+  });
+
+  it("does not expose Terminal for a configured interactive agent without a live runtime row", async () => {
+    mocks.routeAgentName = "configured-lead";
+    mocks.agents = [];
+    mocks.workspaceContext = {
+      repos: [],
+      agents: [
+        {
+          name: "configured-lead",
+          repos: ["sandbox"],
+          repo_groups: [],
+          cross_repo: false,
+          role_name: "lead",
+        },
+      ],
+      workspace: { name: "Desktop QA" },
+    };
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByRole("button", { name: "Runs" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Info" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Terminal" })).toBeNull();
+    expect(screen.queryByTestId("agent-detail")).toBeNull();
   });
 
   it("queues the built-in epic runner workflow from the lead-panel Run button", async () => {
@@ -384,6 +506,84 @@ describe("AgentsPage", () => {
     expect(mocks.navigate).toHaveBeenCalledWith(
       "/ws/DESKTOP-QA/agents/binding-review",
     );
+  });
+
+  it("opens a durable-agent run task in the inline right pane without leaving the agent route", async () => {
+    mocks.routeAgentName = "agent-record-1";
+    mocks.agents = [];
+    mocks.agentRecords = [durableRecord()];
+    mocks.bindings = [
+      {
+        workspace_key: "DESKTOP-QA",
+        binding_id: "binding-review",
+        name: "Documentation reviewer",
+        source_kind: "internal",
+        route_key: "binding-review",
+        driver_id: "prompt-agent",
+        driver_version_id: "v1",
+        target_agent_service_id: "agent-record-1",
+        event_type_patterns: ["internal.task.review"],
+        enabled: true,
+      },
+    ];
+    mocks.workspaceIssues = [
+      {
+        id: "TASK-1",
+        title: "Document the run",
+        status: "review",
+        issue_type: "task",
+        priority: 2,
+      },
+    ];
+    const run = {
+      workspace_key: "DESKTOP-QA",
+      run_id: "run-task-1",
+      driver_id: "prompt-agent",
+      driver_version_id: "v1",
+      status: "completed",
+      steps: [
+        {
+          id: "step-task-1",
+          step_kind: "task_run",
+          task_run_id: "task-run-1",
+          task_id: "TASK-1",
+          status: "completed",
+        },
+      ],
+      created_at: "2026-07-29T00:00:00Z",
+      updated_at: "2026-07-29T00:01:00Z",
+      finished_at: "2026-07-29T00:01:00Z",
+    };
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [run],
+      sessions: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mocks.getWorkflowRun.mockResolvedValue(run);
+
+    render(<AgentsPage />);
+
+    const taskLink = await screen.findByRole("link", { name: "TASK-1" });
+    expect(fireEvent.click(taskLink)).toBe(false);
+
+    const detail = await screen.findByTestId("issue-detail");
+    expect(detail).toHaveAttribute("data-task-id", "TASK-1");
+    expect(detail).toHaveAttribute("data-inline", "true");
+    expect(
+      loadAgentWorkPanelView("DESKTOP-QA", "agent-record-1").selectedTaskId,
+    ).toBe("TASK-1");
+    await waitFor(() => {
+      expect(mocks.fetchIssue).toHaveBeenCalledWith("TASK-1");
+    });
+    expect(mocks.navigate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close task" }));
+    expect(screen.queryByTestId("issue-detail")).toBeNull();
+    expect(
+      loadAgentWorkPanelView("DESKTOP-QA", "agent-record-1").selectedTaskId,
+    ).toBeNull();
   });
 
   it("keeps binding-specific Run now on a record route with exactly one trigger", async () => {

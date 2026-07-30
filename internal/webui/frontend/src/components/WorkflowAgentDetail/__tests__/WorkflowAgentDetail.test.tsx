@@ -322,6 +322,21 @@ describe("RunDetailCard", () => {
     );
   });
 
+  it("opens a run task through the agent task pane callback", async () => {
+    const run = enrichedRun();
+    const onOpenTask = vi.fn();
+    mocks.getWorkflowRun.mockResolvedValue(run);
+
+    render(
+      <RunDetailCard workspaceId="WS" run={run} onOpenTask={onOpenTask} />,
+    );
+
+    const link = await screen.findByRole("link", { name: "TASK-1" });
+    expect(fireEvent.click(link)).toBe(false);
+    expect(onOpenTask).toHaveBeenCalledWith("TASK-1");
+    expect(link).toHaveAttribute("href", "/ws/WS/issues/TASK-1");
+  });
+
   it("keeps enriched session links on a sparse terminal refresh and retries a transient detail failure", async () => {
     const enriched = enrichedRun();
     mocks.getWorkflowRun.mockResolvedValue(enriched);

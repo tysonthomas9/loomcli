@@ -18,10 +18,8 @@ import {
   mergeAgentSectionOrder,
   parseStoredAgentSectionOrder,
 } from "@/utils/agentSectionOrder";
-import {
-  orderAgentsForEpicRunner,
-  splitAgentsByRuntime,
-} from "@/utils/agentRole";
+import { splitAgentsByRuntime } from "@/utils/agentRole";
+import { mergeAgentRoster } from "@/utils/agentRoster";
 import {
   bindingCadenceLabel,
   bindingDisplayName,
@@ -75,31 +73,15 @@ export function AgentSection({
     [bindings, selectedAgentName],
   );
 
-  // Merge fleet agents with workspace config agents.
-  // Config agents that aren't yet running appear as "configured" placeholders.
-  const agents = useMemo<LoomAgentStatus[]>(() => {
-    const orderedFleetAgents = orderAgentsForEpicRunner(fleetAgents);
-    if (workspaceConfigAgents.length === 0) return orderedFleetAgents;
-
-    const fleetNames = new Set(orderedFleetAgents.map((a) => a.name));
-    const configPlaceholders: LoomAgentStatus[] = workspaceConfigAgents
-      .filter((ca) => !fleetNames.has(ca.name))
-      .map((ca) => {
-        const entry: LoomAgentStatus = {
-          name: ca.name,
-          branch: "",
-          status: "configured",
-          ahead: 0,
-          behind: 0,
-          workspace: workspace?.name ?? "",
-          cross_repo: ca.cross_repo,
-        };
-        if (ca.repos?.[0]) entry.repo = ca.repos[0];
-        if (ca.role_name) entry.role = ca.role_name;
-        return entry;
-      });
-    return [...orderedFleetAgents, ...configPlaceholders];
-  }, [fleetAgents, workspaceConfigAgents, workspace?.name]);
+  const agents = useMemo<LoomAgentStatus[]>(
+    () =>
+      mergeAgentRoster(
+        fleetAgents,
+        workspaceConfigAgents,
+        workspace?.name ?? "",
+      ),
+    [fleetAgents, workspaceConfigAgents, workspace?.name],
+  );
 
   const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents]);
   const agentNamesKey = agentNames.join("\0");

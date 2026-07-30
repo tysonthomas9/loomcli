@@ -186,10 +186,12 @@ export function AgentSessionRunsPane({
   workspaceId,
   agentName,
   active = true,
+  onOpenTask,
 }: {
   workspaceId: string;
   agentName: string;
   active?: boolean;
+  onOpenTask?: ((taskId: string) => void) | undefined;
 }): JSX.Element {
   const { sessions, isLoading, error } = useAgentHistory(
     workspaceId,
@@ -233,6 +235,7 @@ export function AgentSessionRunsPane({
                     workspaceId={workspaceId}
                     taskId={selected.task_id}
                     className={styles.taskLink}
+                    onOpenTask={onOpenTask}
                   />
                 ) : (
                   "—"
@@ -328,6 +331,7 @@ export function AgentSessionRunsPane({
                       workspaceId={workspaceId}
                       taskId={session.task_id}
                       className={styles.taskLink}
+                      onOpenTask={onOpenTask}
                     />
                   </span>
                 ) : null}
