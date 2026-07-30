@@ -36,6 +36,9 @@ fi
 # with a clear workflow error, everything else runs.
 : "${FLUE_REPO:=$REPO_ROOT/../flue}"
 [[ -d "$FLUE_REPO/packages/runtime" ]] || FLUE_REPO=""
+# bfcache retains unloaded documents' SSE sockets ~60s and saturates Chrome's
+# 6-socket pool; the SPA pagehide fix addresses the product, this keeps suite timing deterministic regardless.
+export AGENT_BROWSER_ARGS="--disable-features=BackForwardCache"
 BASE_URL="http://127.0.0.1:${E2E_FRONTEND_PORT}"   # browser entry (vite preview, proxies /api)
 API_URL="http://127.0.0.1:${E2E_PORT}"             # loom serve API
 REPORT_DIR="$SCRIPT_DIR/reports"
@@ -159,6 +162,10 @@ if [[ -n "${AFT_REAL_BACKEND:-}" ]]; then
             exit 1
             ;;
     esac
+    # Strip host GitHub credentials from serve: an inherited PAT flips the degraded
+    # 503 egress_unavailable contract into a live connector-seed + egress attempt
+    # with the operator's real PAT.
+    REAL_UNSET_FLAGS="${REAL_UNSET_FLAGS:+$REAL_UNSET_FLAGS }-u LOOM_WEBUI_GITHUB_TOKEN -u GH_TOKEN -u GITHUB_TOKEN -u GEMINI_API_KEY -u GOOGLE_API_KEY"
 
     echo "[aft] ====================================================================="
     echo "[aft] REAL $(printf '%s' "$AFT_REAL_BACKEND" | tr '[:lower:]' '[:upper:]') MODE -- server $REAL_BIN is the operator's real CLI"
@@ -284,12 +291,19 @@ if [[ -n "$FLUE_REPO" && -f "$FLUE_REPO/packages/cli/bin/flue.mjs" ]]; then
 fi
 if [[ -n "${AFT_REAL_BACKEND:-}" ]]; then
     # $REAL_UNSET_FLAGS is deliberately unquoted: it expands to "-u VAR" pairs or nothing.
+    # shellcheck disable=SC2086
     env $REAL_UNSET_FLAGS E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
         PATH="$REPO_ROOT/e2e/$REAL_STUB_DIR:$PATH" FLUE_REPO="$FLUE_REPO" \
         LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
         bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
 else
-    E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
+    # Strip host GitHub credentials from serve: an inherited PAT flips the degraded
+    # 503 egress_unavailable contract into a live connector-seed + egress attempt
+    # with the operator's real PAT. The deterministic tier also needs no Gemini keys.
+    # Load-bearing: the seed resolver's fallback reads a sealed settings credential; that is only safe because scripts/start-e2e-server.sh exports LOOM_CONFIG_DIR to tmp/e2e-workspace/.loom-config (wiped per run) — do not remove that export.
+    env -u LOOM_WEBUI_GITHUB_TOKEN -u GH_TOKEN -u GITHUB_TOKEN \
+        -u GEMINI_API_KEY -u GOOGLE_API_KEY \
+        E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
         PATH="$REPO_ROOT/e2e/stubs:$PATH" OPENAI_API_KEY="stub-e2e" FLUE_REPO="$FLUE_REPO" \
         LOOM_REAL_FLUE_CMD_JSON="$FLUE_CMD_JSON" \
         bash "$REPO_ROOT/scripts/start-e2e-server.sh" >"$REPORT_DIR/server.log" 2>&1 &
@@ -329,6 +343,23 @@ export RUN_ID="${RUN_ID:-$(date +%s)}"
 export AFT_TESTS_DIR="$SCRIPT_DIR"
 export AFT_WORK_DIR="$REPORT_DIR/work/$RUN_ID"   # scratch space for run-step state (issue ids etc.)
 mkdir -p "$AFT_WORK_DIR"
+
+AFT_NO_AGENT=""
+for arg in "$@"; do
+    if [[ "$arg" == "--no-agent" ]]; then
+        AFT_NO_AGENT=1
+        break
+    fi
+done
+if [[ -n "$AFT_NO_AGENT" && -z "${AFT_REAL_BACKEND:-}" ]]; then
+    # TSK-D10 incident guard, 2026-07-29: deterministic run: steps that miss the
+    # stub PATH must fail on empty auth homes instead of reaching an operator CLI.
+    AFT_EMPTY_AUTH_DIR="$REPORT_DIR/empty-auth"
+    mkdir -p "$AFT_EMPTY_AUTH_DIR/codex" "$AFT_EMPTY_AUTH_DIR/claude"
+    export CODEX_HOME="$AFT_EMPTY_AUTH_DIR/codex"
+    export CLAUDE_CONFIG_DIR="$AFT_EMPTY_AUTH_DIR/claude"
+    unset CURSOR_API_KEY
+fi
 
 # Regenerate the coverage census from the frontend source so it always matches
 # this checkout; aft joins run traces against it and reports untouched surface.
