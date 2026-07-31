@@ -5,18 +5,20 @@
 
 /* Wrapper for horizontal + vertical scrolling with sticky headers */
 .issue-table__wrapper {
+  flex: 1 1 0;
+  min-height: 0;
   width: 100%;
   overflow: auto;
-  max-height: 80vh;
+  max-height: none;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--color-bg-card);
 }
 
 /* Applied when table uses virtualized rendering (>100 rows) */
 .issue-table__wrapper--virtualized {
   overflow-y: auto;
-  max-height: 80vh;
+  max-height: none;
 }
 
 /* Main table */
@@ -129,7 +131,6 @@
 
 .issue-table__row--clickable:focus {
   outline: none;
-  background-color: var(--color-bg-active);
 }
 
 .issue-table__row--clickable:focus-visible {
@@ -369,6 +370,7 @@
   font-weight: var(--font-weight-medium);
   background-color: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
 .issue-table__status.status-open {
@@ -562,7 +564,7 @@
 /* Match selected state background for sticky cells */
 .issue-table__row--selected .issue-table__cell[data-column="id"],
 .issue-table__row--selected:hover .issue-table__cell[data-column="id"] {
-  background-color: var(--color-bg-tertiary);
+  background-color: var(--color-bg-active);
 }
 
 /* Visual separator shadow on sticky column's right edge */
@@ -603,7 +605,7 @@
 /* Match selected state for checkbox cells */
 .issue-table__row--selected .issue-table__cell--checkbox,
 .issue-table__row--selected:hover .issue-table__cell--checkbox {
-  background-color: var(--color-bg-tertiary);
+  background-color: var(--color-bg-active);
 }
 
 /* When checkbox is present, ID column shifts right */

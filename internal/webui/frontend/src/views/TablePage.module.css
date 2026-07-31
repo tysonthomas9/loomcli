@@ -1,3 +1,10 @@
+.tablePage {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
 .bulkDialogField {
   display: flex;
   flex-direction: column;

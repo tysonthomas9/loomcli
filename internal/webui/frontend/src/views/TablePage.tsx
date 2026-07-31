@@ -212,30 +212,32 @@ export function TablePage() {
         onRetry={refetch}
         loadingVariant="table"
       >
-        <IssueTable
-          issues={filteredIssues}
-          sortable
-          groupByEpic
-          showCheckbox
-          selectedIds={selectedIds}
-          onSelectionChange={toggleSelection}
-          onRowClick={handleIssueClick}
-          searchTerm={debouncedSearch}
-          {...(selectedIssueId != null && {
-            selectedId: selectedIssueId,
-          })}
-          {...(blockedIssuesMap !== undefined && {
-            blockedIssues: blockedIssuesMap,
-          })}
-          {...(filters.showBlocked !== undefined && {
-            showBlocked: filters.showBlocked,
-          })}
-        />
-        <BulkActionToolbar
-          selectedIds={selectedIds}
-          onClearSelection={clearSelection}
-          actions={bulkActions}
-        />
+        <div className={styles.tablePage}>
+          <IssueTable
+            issues={filteredIssues}
+            sortable
+            groupByEpic
+            showCheckbox
+            selectedIds={selectedIds}
+            onSelectionChange={toggleSelection}
+            onRowClick={handleIssueClick}
+            searchTerm={debouncedSearch}
+            {...(selectedIssueId != null && {
+              selectedId: selectedIssueId,
+            })}
+            {...(blockedIssuesMap !== undefined && {
+              blockedIssues: blockedIssuesMap,
+            })}
+            {...(filters.showBlocked !== undefined && {
+              showBlocked: filters.showBlocked,
+            })}
+          />
+          <BulkActionToolbar
+            selectedIds={selectedIds}
+            onClearSelection={clearSelection}
+            actions={bulkActions}
+          />
+        </div>
         <ConfirmDialog
           isOpen={pendingDialog === "close"}
           title={closeDialogTitle}

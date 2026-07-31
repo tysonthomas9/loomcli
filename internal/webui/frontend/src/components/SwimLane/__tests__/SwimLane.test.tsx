@@ -1062,7 +1062,7 @@ describe("SwimLane", () => {
 
       // EmptyColumn with status="backlog" should show backlog-specific message
       expect(
-        screen.getByText("No blocked or deferred issues"),
+        screen.getByText("No backlog or deferred issues"),
       ).toBeInTheDocument();
     });
 

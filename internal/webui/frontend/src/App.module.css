@@ -55,7 +55,9 @@
 .boardToolbar {
   display: grid;
   grid-template-columns: 1fr calc(100vw / 3) 1fr;
-  grid-template-areas: "tabs search actions";
+  grid-template-areas:
+    "tabs search actions"
+    "chips chips chips";
   align-items: center;
   gap: 16px;
   min-height: 48px;
@@ -86,12 +88,69 @@
   min-width: 0;
 }
 
+.boardToolbarFilterChips {
+  grid-area: chips;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: -8px;
+}
+
+.filterChip,
+.clearFiltersButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.filterChip:hover,
+.clearFiltersButton:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
+}
+
+.filterChip:focus-visible,
+.clearFiltersButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.filterChip span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clearFiltersButton {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-card);
+}
+
 @media (width <= 768px) {
   .boardToolbar {
     grid-template-columns: 1fr auto;
     grid-template-areas:
       "tabs actions"
-      "search search";
+      "search search"
+      "chips chips";
   }
 
   .boardToolbarSearch {

@@ -730,6 +730,8 @@ interface MockStoreStateOverrides {
   agents: any[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   agentTasks: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  upsertWorkspaceAgent: (agent: any) => void;
   retryNow: () => void;
 }
 
@@ -774,6 +776,7 @@ function createMockUseIssuesReturn(
     // Agent store fields (shared mockStoreState — useStore ignores store arg)
     agents: [],
     agentTasks: {},
+    upsertWorkspaceAgent: vi.fn(),
     retryNow: vi.fn(),
     stats: {
       open: 0,
@@ -1588,7 +1591,7 @@ describe("App", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders no FilterBar in the board toolbar (Aether V3: tabs · search · New Issue)", () => {
+    it("renders no legacy FilterBar in the board toolbar", () => {
       const mockReturn = createMockUseIssuesReturn({
         issues: [createMockIssue()],
       });
@@ -1596,8 +1599,8 @@ describe("App", () => {
 
       render(<App />);
 
-      // The design board-head has only the view tabs, search, and New Issue —
-      // no filter controls.
+      // The legacy mounted FilterBar remains absent; active URL filters render
+      // as compact chips instead.
       expect(screen.queryByTestId("filter-bar")).not.toBeInTheDocument();
       expect(screen.queryByTestId("priority-filter")).not.toBeInTheDocument();
       expect(screen.queryByTestId("type-filter")).not.toBeInTheDocument();
@@ -1606,6 +1609,78 @@ describe("App", () => {
       ).not.toBeInTheDocument();
       expect(screen.getByTestId("search-input")).toBeInTheDocument();
       expect(screen.getByTestId("new-issue-button")).toBeInTheDocument();
+    });
+
+    it("renders active URL filter chips and clears them through filter actions", () => {
+      const mockReturn = createMockUseIssuesReturn({
+        issues: [createMockIssue()],
+      });
+      mockStoreState = mockReturn;
+
+      const filterActions = {
+        setPriority: vi.fn(),
+        setType: vi.fn(),
+        setLabels: vi.fn(),
+        setSearch: vi.fn(),
+        setShowBlocked: vi.fn(),
+        setGroupBy: vi.fn(),
+        clearFilter: vi.fn(),
+        clearAll: vi.fn(),
+      };
+
+      vi.mocked(useFilterState).mockReturnValue([
+        {
+          search: "deploy",
+          priority: 1,
+          type: "bug",
+          labels: ["frontend", "urgent"],
+        },
+        filterActions,
+      ]);
+
+      render(<App />);
+
+      expect(screen.getByTestId("board-filter-chips")).toBeInTheDocument();
+      expect(screen.getByTestId("search-input-field")).toHaveValue("deploy");
+      expect(
+        screen.getByRole("button", { name: "Clear search: deploy filter" }),
+      ).toHaveTextContent("search: deploy");
+      expect(
+        screen.getByRole("button", { name: "Clear priority: P1 filter" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Clear type: bug filter" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Clear label: frontend filter" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Clear label: urgent filter" }),
+      ).toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear search: deploy filter" }),
+      );
+      expect(filterActions.setSearch).toHaveBeenCalledWith(undefined);
+      expect(screen.getByTestId("search-input-field")).toHaveValue("");
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear priority: P1 filter" }),
+      );
+      expect(filterActions.setPriority).toHaveBeenCalledWith(undefined);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear type: bug filter" }),
+      );
+      expect(filterActions.setType).toHaveBeenCalledWith(undefined);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Clear label: frontend filter" }),
+      );
+      expect(filterActions.setLabels).toHaveBeenCalledWith(["urgent"]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+      expect(filterActions.clearAll).toHaveBeenCalledTimes(1);
     });
 
     it("renders filter navigation even in loading state", () => {
@@ -2589,7 +2664,12 @@ describe("App", () => {
       expect(upsertAgent).toHaveBeenCalledWith(
         expect.objectContaining({ name: "planner", role_name: "plan" }),
       );
-      expect(refetchWorkspace).toHaveBeenCalled();
+      expect(mockStoreState.upsertWorkspaceAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "planner", role_name: "plan" }),
+      );
+      await waitFor(() => {
+        expect(refetchWorkspace).toHaveBeenCalled();
+      });
 
       expect(
         screen.queryByRole("dialog", {

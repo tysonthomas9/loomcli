@@ -667,6 +667,13 @@ function App() {
     filterActions.setSearch(undefined);
   }, [filterActions]);
 
+  const handleClearAllBoardFilters = useCallback(() => {
+    hasPendingSearchEditRef.current = false;
+    pendingSearchCommitRef.current = { value: undefined };
+    setSearchValueState("");
+    filterActions.clearAll();
+  }, [filterActions]);
+
   // Handle issue click from SwimLaneBoard/IssueTable
   const handleIssueClick = useCallback(
     (issue: Issue) => {
@@ -1282,9 +1289,55 @@ function App() {
     </button>
   );
 
+  const activeFilterChips = useMemo(() => {
+    const chips: Array<{
+      key: string;
+      label: string;
+      onClear: () => void;
+    }> = [];
+    const search = filters.search?.trim();
+    if (search) {
+      chips.push({
+        key: "search",
+        label: `search: ${search}`,
+        onClear: handleSearchClear,
+      });
+    }
+    if (filters.priority !== undefined) {
+      chips.push({
+        key: "priority",
+        label: `priority: P${filters.priority}`,
+        onClear: () => filterActions.setPriority(undefined),
+      });
+    }
+    if (filters.type !== undefined) {
+      chips.push({
+        key: "type",
+        label: `type: ${filters.type}`,
+        onClear: () => filterActions.setType(undefined),
+      });
+    }
+    for (const label of filters.labels ?? []) {
+      chips.push({
+        key: `label:${label}`,
+        label: `label: ${label}`,
+        onClear: () => {
+          const nextLabels = (filters.labels ?? []).filter(
+            (item) => item !== label,
+          );
+          filterActions.setLabels(
+            nextLabels.length > 0 ? nextLabels : undefined,
+          );
+        },
+      });
+    }
+    return chips;
+  }, [filterActions, filters, handleSearchClear]);
+
   // Board toolbar: view tabs on the left; search · New Issue on the right —
   // exactly the Aether design's board-head (tabs / centered search / New
-  // Issue), with no extra filter controls. Shown only for issue-based views.
+  // Issue), with URL-driven filter chips below when active. Shown only for
+  // issue-based views.
   const showBoardToolbar =
     activeView === "kanban" ||
     activeView === "list" ||
@@ -1297,6 +1350,33 @@ function App() {
       </div>
       <div className={styles.boardToolbarSearch}>{searchControl}</div>
       <div className={styles.boardToolbarActions}>{newIssueButton}</div>
+      {activeFilterChips.length > 0 && (
+        <div
+          className={styles.boardToolbarFilterChips}
+          aria-label="Active filters"
+          data-testid="board-filter-chips"
+        >
+          {activeFilterChips.map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              className={styles.filterChip}
+              onClick={chip.onClear}
+              aria-label={`Clear ${chip.label} filter`}
+            >
+              <span>{chip.label}</span>
+              <span aria-hidden="true">×</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className={styles.clearFiltersButton}
+            onClick={handleClearAllBoardFilters}
+          >
+            Clear all
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -1511,6 +1591,7 @@ function App() {
         onSuccess={(agent) => {
           setShowCreateAgent(false);
           upsertWorkspaceAgent?.(agent);
+          agentStore.getState().upsertWorkspaceAgent(agent);
           showToast(`Agent "${agent.name}" created`, { type: "success" });
           if (shouldPrefillOnboardingIssue) {
             setOnboardingAction("confirming-agent");

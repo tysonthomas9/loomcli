@@ -119,6 +119,7 @@ export function KanbanPage() {
         <div className={styles.kanbanShell}>
           <SwimLaneBoard
             issues={filteredIssues}
+            allIssues={issues}
             filters={filters}
             groupBy={groupBy}
             onDragEnd={handleDragEnd}

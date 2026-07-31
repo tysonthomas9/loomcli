@@ -49,7 +49,7 @@ function getDefaultMessage(status?: Status | string): string {
     case "ready":
       return "No ready issues";
     case "backlog":
-      return "No blocked or deferred issues";
+      return "No backlog or deferred issues";
     case "done":
       return "No completed issues";
     default:
