@@ -3,6 +3,8 @@ package dto
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 func TestWorkspaceResponse_JSONRoundTrip(t *testing.T) {
@@ -409,6 +411,9 @@ func TestWorkspaceRepo_SourceRepoIDOmitted(t *testing.T) {
 func TestWorkspaceAgentInfo_JSONRoundTrip(t *testing.T) {
 	agent := WorkspaceAgentInfo{
 		Name:       "falcon",
+		RoleName:   "lead",
+		RoleKind:   "interactive",
+		Backend:    "codex",
 		Repos:      []string{"frontend", "backend"},
 		RepoGroups: []string{"ui"},
 		CrossRepo:  true,
@@ -426,6 +431,15 @@ func TestWorkspaceAgentInfo_JSONRoundTrip(t *testing.T) {
 
 	if got.Name != agent.Name {
 		t.Errorf("Name = %q, want %q", got.Name, agent.Name)
+	}
+	if got.RoleName != agent.RoleName {
+		t.Errorf("RoleName = %q, want %q", got.RoleName, agent.RoleName)
+	}
+	if got.RoleKind != agent.RoleKind {
+		t.Errorf("RoleKind = %q, want %q", got.RoleKind, agent.RoleKind)
+	}
+	if got.Backend != agent.Backend {
+		t.Errorf("Backend = %q, want %q", got.Backend, agent.Backend)
 	}
 	if len(got.Repos) != 2 {
 		t.Errorf("Repos len = %d, want 2", len(got.Repos))
@@ -485,5 +499,39 @@ func TestWorkspaceAgentInfo_EmptyRepoGroups(t *testing.T) {
 	}
 	if string(val) != "[]" {
 		t.Errorf("repo_groups = %s, want []", val)
+	}
+}
+
+func TestNewWorkspaceAgentInfoInitializesEmptyAssignments(t *testing.T) {
+	agent := &domain.Agent{
+		Name:     "falcon",
+		RoleName: "lead",
+		Backend:  "codex",
+	}
+
+	got := NewWorkspaceAgentInfoWithRoleKind(agent, "Interactive")
+	if got.Name != "falcon" || got.RoleName != "lead" || got.RoleKind != "interactive" || got.Backend != "codex" {
+		t.Fatalf("mapped agent = %#v, want name/role/kind/backend preserved", got)
+	}
+	if got.Repos == nil {
+		t.Fatal("Repos is nil, want empty slice")
+	}
+	if got.RepoGroups == nil {
+		t.Fatal("RepoGroups is nil, want empty slice")
+	}
+
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal raw: %v", err)
+	}
+	if string(raw["repos"]) != "[]" {
+		t.Fatalf("repos = %s, want []", raw["repos"])
+	}
+	if string(raw["repo_groups"]) != "[]" {
+		t.Fatalf("repo_groups = %s, want []", raw["repo_groups"])
 	}
 }

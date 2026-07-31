@@ -32,10 +32,11 @@ export interface RepoInfo {
 
 export interface WorkspaceAgentInfo {
   name: string;
-  repos: string[];
-  repo_groups: string[];
+  repos?: string[];
+  repo_groups?: string[];
   cross_repo: boolean;
   role_name?: string;
+  role_kind?: "interactive" | "worker";
   backend?: string;
 }
 

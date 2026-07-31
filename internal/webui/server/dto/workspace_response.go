@@ -1,5 +1,11 @@
 package dto
 
+import (
+	"strings"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+)
+
 // WorkspaceResponse is the full workspace topology returned by the API.
 // Field names and JSON tags match ops.WorkspaceData.
 type WorkspaceResponse struct {
@@ -51,9 +57,57 @@ type WorkspaceRepo struct {
 type WorkspaceAgentInfo struct {
 	Name     string `json:"name"`
 	RoleName string `json:"role_name,omitempty"`
+	RoleKind string `json:"role_kind,omitempty"`
+	Backend  string `json:"backend,omitempty"`
 	// Initialized to empty slice by mapper; must serialize as [] not null.
 	Repos []string `json:"repos"`
 	// Initialized to empty slice by mapper; must serialize as [] not null.
 	RepoGroups []string `json:"repo_groups"`
 	CrossRepo  bool     `json:"cross_repo"`
+}
+
+// NewWorkspaceAgentInfo maps a domain agent into the web workspace contract.
+// Keep nil repo assignments as JSON [] so create/list payloads match the
+// frontend WorkspaceAgentInfo shape.
+func NewWorkspaceAgentInfo(agent *domain.Agent) WorkspaceAgentInfo {
+	return NewWorkspaceAgentInfoWithRoleKind(agent, "")
+}
+
+// NewWorkspaceAgentInfoWithRoleKind maps a domain agent plus the effective role
+// kind into the web workspace contract.
+func NewWorkspaceAgentInfoWithRoleKind(agent *domain.Agent, roleKind string) WorkspaceAgentInfo {
+	if agent == nil {
+		return WorkspaceAgentInfo{
+			Repos:      []string{},
+			RepoGroups: []string{},
+		}
+	}
+	repos := append([]string{}, agent.Repos...)
+	if repos == nil {
+		repos = []string{}
+	}
+	repoGroups := append([]string{}, agent.RepoGroups...)
+	if repoGroups == nil {
+		repoGroups = []string{}
+	}
+	return WorkspaceAgentInfo{
+		Name:       agent.Name,
+		RoleName:   agent.RoleName,
+		RoleKind:   normalizeWorkspaceRoleKind(roleKind),
+		Backend:    agent.Backend,
+		Repos:      repos,
+		RepoGroups: repoGroups,
+		CrossRepo:  agent.CrossRepo,
+	}
+}
+
+func normalizeWorkspaceRoleKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case string(domain.RoleKindInteractive):
+		return string(domain.RoleKindInteractive)
+	case string(domain.RoleKindWorker):
+		return string(domain.RoleKindWorker)
+	default:
+		return ""
+	}
 }

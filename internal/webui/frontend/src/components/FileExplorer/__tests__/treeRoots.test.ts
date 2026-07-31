@@ -21,8 +21,10 @@ function repo(name: string, groups: string[] = []): RepoInfo {
 function agent(partial: Partial<WorkspaceAgentInfo>): WorkspaceAgentInfo {
   return {
     name: partial.name ?? "agent-a",
-    repos: partial.repos ?? [],
-    repo_groups: partial.repo_groups ?? [],
+    ...(partial.repos !== undefined ? { repos: partial.repos } : {}),
+    ...(partial.repo_groups !== undefined
+      ? { repo_groups: partial.repo_groups }
+      : {}),
     cross_repo: partial.cross_repo ?? false,
   };
 }
@@ -196,6 +198,39 @@ describe("treeRoots", () => {
       changeCount: 2,
       ref: { scope: "repo", target: "docs-repo" },
     });
+  });
+
+  it("treats missing agent assignment arrays as all repos", () => {
+    const sections = buildFileTreeSections({
+      mode: "workspace",
+      agents: [agent({ name: "new-agent" })],
+      repos: [repo("source-repo"), repo("docs-repo")],
+      checkouts: [],
+    });
+
+    const agentRoot = sections[0]?.roots[0];
+    expect(agentRoot).toMatchObject({
+      kind: "agent",
+      label: "new-agent",
+    });
+    expect(agentRoot?.kind === "agent" ? agentRoot.children : []).toEqual([
+      expect.objectContaining({
+        label: "source-repo",
+        ref: {
+          scope: "agent",
+          target: "new-agent",
+          repo: "source-repo",
+        },
+      }),
+      expect.objectContaining({
+        label: "docs-repo",
+        ref: {
+          scope: "agent",
+          target: "new-agent",
+          repo: "docs-repo",
+        },
+      }),
+    ]);
   });
 
   it("agent mode returns only the selected agent checkout roots", () => {
