@@ -154,6 +154,7 @@ const ENV_KEYS = [
   "LOOM_TASK_RUNNER_STREAM_STDERR",
   "LOOM_TASK_RUN_LEASE_TOKEN",
   "LOOM_TASK_RUN_PROMPT",
+  "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL",
 ];
 
 // PATH is mutated by some tests; save/restore it separately so git stays callable.
@@ -1443,6 +1444,43 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.ok(files.includes("local-branch.txt"), "pushed branch should contain the backend change");
   });
 
+  it("uses the host-admitted filesystem remote when the isolated repo has no origin", async () => {
+    const admittedRemote = path.join(tmpRoot, "admitted-source.git");
+    execFileSync("git", ["init", "-q", "--bare", admittedRemote]);
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_TASK_RUN_REPOSITORY_REMOTE_URL = admittedRemote;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "remote-less-local-branch.txt";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-admitted-local",
+      task_id: "T-ADMITTED-LOCAL",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        title: "Remote-less local branch",
+        deliveryMode: "local-branch",
+        requireLocalBranchDelivery: true,
+      },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "completed");
+    assert.equal(out.runtimeMetadata.delivery, "local_branch");
+    assert.equal(out.runtimeMetadata.local_branch, "loom/T-ADMITTED-LOCAL");
+    assert.equal(
+      out.runtimeMetadata.head_sha,
+      refSha(admittedRemote, "refs/heads/loom/T-ADMITTED-LOCAL"),
+    );
+    assert.equal(
+      execFileSync("git", ["remote"], { cwd: worktree }).toString().trim(),
+      "",
+      "trusted delivery metadata must not mutate the task worktree's remotes",
+    );
+  });
+
   it("resumes a stamped local review branch and preserves its existing implementation", async () => {
     const origin = createBareOrigin("review-resume-origin");
     const hostBase = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
@@ -1490,6 +1528,51 @@ describe("local-task-runner pull-request delivery gating", () => {
     assert.ok(files.includes("review-existing-code.txt"), "the prior reviewed implementation must be preserved");
     assert.ok(files.includes("review-docs.md"), "the documentation agent change must be published");
     assert.ok(out.patch.includes("review-docs.md"));
+  });
+
+  it("resumes and extends a stamped branch through the host-admitted remote without origin", async () => {
+    const admittedRemote = path.join(tmpRoot, "admitted-review-source.git");
+    execFileSync("git", ["init", "-q", "--bare", admittedRemote]);
+    const hostBase = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    const branch = "loom/T-ADMITTED-REVIEW";
+    fs.writeFileSync(path.join(worktree, "reviewed-code.txt"), "reviewed implementation\n");
+    execFileSync("git", ["add", "reviewed-code.txt"], { cwd: worktree });
+    execFileSync("git", ["commit", "-q", "-m", "reviewed implementation"], { cwd: worktree });
+    const reviewHead = execFileSync("git", ["-C", worktree, "rev-parse", "HEAD"]).toString().trim();
+    execFileSync("git", ["push", "-q", admittedRemote, `${reviewHead}:refs/heads/${branch}`], { cwd: worktree });
+    execFileSync("git", ["reset", "--hard", "-q", hostBase], { cwd: worktree });
+
+    process.env.LOOM_TASK_RUNNER_BACKEND = "codex";
+    process.env.LOOM_WORKTREE_PATH = worktree;
+    process.env.LOOM_TASK_RUN_REPOSITORY_REMOTE_URL = admittedRemote;
+    process.env.LOOM_CODEX_BIN = fakeBin;
+    process.env.FAKE_EXIT_CODE = "0";
+    process.env.FAKE_WRITE_FILE = "review-docs.md";
+    process.env.LOOM_TASK_RUN_REQUEST_JSON = JSON.stringify({
+      task_run_id: "tr-admitted-review",
+      task_id: "T-ADMITTED-REVIEW",
+      runner: "local-task-runner",
+      workspace_key: "ws",
+      input: {
+        title: "Document admitted reviewed implementation",
+        deliveryMode: "local-branch",
+        requireLocalBranchDelivery: true,
+        localBranchName: branch,
+        localBranchBaseRef: reviewHead,
+      },
+    });
+
+    const out = await run();
+
+    assert.equal(out.status, "completed");
+    assert.equal(out.base_ref, reviewHead);
+    assert.equal(out.runtimeMetadata.delivery, "local_branch");
+    const published = refSha(admittedRemote, `refs/heads/${branch}`);
+    assert.equal(out.runtimeMetadata.head_sha, published);
+    const files = execFileSync("git", ["--git-dir", admittedRemote, "ls-tree", "-r", "--name-only", published]).toString();
+    assert.ok(files.includes("reviewed-code.txt"));
+    assert.ok(files.includes("review-docs.md"));
+    assert.equal(execFileSync("git", ["remote"], { cwd: worktree }).toString().trim(), "");
   });
 
   it("fails before backend execution when a stamped review branch has drifted", async () => {

@@ -134,6 +134,7 @@ func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 	if _, err := st.Repos().Create(ctx, store.RepoCreate{
 		WorkspaceKey:  "TEST",
 		Name:          "app",
+		RemoteURL:     repoPath,
 		DefaultBranch: "main",
 		SourceRepoID:  "frontend",
 	}); err != nil {
@@ -154,8 +155,8 @@ func TestLocalTaskWorktreeResolverCreatesIsolatedTaskRunWorktree(t *testing.T) {
 	if resolved.Path == "" || resolved.Path == repoPath {
 		t.Fatalf("resolved path = %q, want isolated task worktree distinct from repo %q", resolved.Path, repoPath)
 	}
-	if resolved.RepoName != "app" || resolved.SourceRepoID != "frontend" {
-		t.Fatalf("resolved repo metadata = %+v, want app/frontend", resolved)
+	if resolved.RepoName != "app" || resolved.SourceRepoID != "frontend" || resolved.RepositoryRemote != repoPath {
+		t.Fatalf("resolved repo metadata = %+v, want app/frontend with admitted remote %q", resolved, repoPath)
 	}
 	if _, err := os.Stat(filepath.Join(resolved.Path, ".git")); err != nil {
 		t.Fatalf("resolved worktree .git missing: %v", err)

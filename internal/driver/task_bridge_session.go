@@ -110,6 +110,7 @@ func (e *HostBridgeTaskExecutor) resolveLocalTaskWorktree(ctx context.Context, r
 		}
 		e.WorktreePath = resolved.Path
 	}
+	e.repositoryRemote = strings.TrimSpace(resolved.RepositoryRemote)
 	return resolved, TaskExecResult{}, false
 }
 

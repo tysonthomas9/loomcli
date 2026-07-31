@@ -122,25 +122,26 @@ export async function run(ctx = {}) {
       { taskRunId, taskId, backend, request, logs },
     );
   }
-  const hostOriginRemoteUrl = await resolveOriginRemoteUrl(worktree);
-  const hostFilesystemOrigin = isFilesystemOrigin(hostOriginRemoteUrl);
+  const repositoryRemoteUrl = await resolveRepositoryRemoteUrl(worktree);
+  const hostFilesystemOrigin = isFilesystemOrigin(repositoryRemoteUrl);
   if (requireLocalBranchDelivery && !hostFilesystemOrigin) {
     return failed(
       "local_branch_origin_unsupported",
-      "required local-branch delivery needs a filesystem origin remote",
+      "required local-branch delivery needs an admitted filesystem remote",
       { taskRunId, taskId, backend, request, logs },
     );
   }
   if (localBranchResume.branch && !hostFilesystemOrigin) {
     return failed(
       "local_branch_resume_origin_unsupported",
-      "resuming an existing local review branch requires a filesystem origin remote",
+      "resuming an existing local review branch requires an admitted filesystem remote",
       { taskRunId, taskId, backend, request, logs },
     );
   }
   if (localBranchResume.branch) {
     const prepared = await prepareLocalBranchResume(
       worktree,
+      repositoryRemoteUrl,
       localBranchResume.branch,
       localBranchResume.headSha,
       logs,
@@ -225,8 +226,7 @@ export async function run(ctx = {}) {
   const usesStdinPrompt = backendUsesStdinPrompt(backend);
 
   const openPR = booleanValue(inputValue(request, "openPullRequest"));
-  const originRemoteUrl = await resolveOriginRemoteUrl(execWorktree);
-  const filesystemOrigin = isFilesystemOrigin(originRemoteUrl);
+  const filesystemOrigin = isFilesystemOrigin(repositoryRemoteUrl);
   // Local-branch delivery is intentionally narrow: it is allowed only for local
   // filesystem remotes, where an exact scanned commit SHA is pushed to the bare
   // repo used by local-mode. An explicit deliveryMode on a GitHub/http/ssh origin
@@ -241,7 +241,7 @@ export async function run(ctx = {}) {
     );
   }
   if (localBranchRequested && !filesystemOrigin) {
-    logs.push("local-branch delivery requested but origin is not a filesystem path; keeping existing delivery behavior");
+    logs.push("local-branch delivery requested but the admitted repository remote is not a filesystem path; keeping existing delivery behavior");
   }
   let exitCode;
   let stdout = "";
@@ -340,8 +340,8 @@ export async function run(ctx = {}) {
       });
     }
 
-    // Local filesystem-origin delivery: commit (if needed) in the isolated
-    // worktree and push the task branch to the ACTUAL origin remote. This path
+    // Local filesystem delivery: commit (if needed) in the isolated worktree
+    // and push the task branch to the admitted repository remote. This path
     // gives the local review lane a real ref to inspect without pretending a
     // GitHub PR exists.
     if (localBranchDelivery && exitCode === 0) {
@@ -366,6 +366,7 @@ export async function run(ctx = {}) {
             baseRef,
             branch,
             title,
+            repositoryRemoteUrl,
             expectedRemoteHead: localBranchResume.headSha,
           });
           logs.push("pushed local branch " + localBranchInfo.branch + " @ " + localBranchInfo.head.slice(0, 12));
@@ -1043,11 +1044,11 @@ function localBranchResumeSpec(request) {
   return { branch, headSha };
 }
 
-// prepareLocalBranchResume resolves the current filesystem-origin branch and
+// prepareLocalBranchResume resolves the current admitted filesystem branch and
 // proves it still equals the exact SHA stamped on the Review card. This occurs
 // before model execution: a moved or missing review branch must fail closed
 // instead of rebuilding and force-pushing the canonical task branch from main.
-async function prepareLocalBranchResume(hostWorktree, branch, expectedHead, logs) {
+async function prepareLocalBranchResume(hostWorktree, repositoryRemoteUrl, branch, expectedHead, logs) {
   const valid = await execBackend(
     "git",
     ["-C", hostWorktree, "check-ref-format", "--branch", branch],
@@ -1061,7 +1062,7 @@ async function prepareLocalBranchResume(hostWorktree, branch, expectedHead, logs
   }
   const fetched = await execBackend(
     "git",
-    ["-C", hostWorktree, "fetch", "--no-tags", "origin", "refs/heads/" + branch],
+    ["-C", hostWorktree, "fetch", "--no-tags", repositoryRemoteUrl, "refs/heads/" + branch],
     { cwd: hostWorktree, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
   );
   if (fetched.code !== 0) {
@@ -1087,7 +1088,7 @@ async function prepareLocalBranchResume(hostWorktree, branch, expectedHead, logs
     return {
       errorClass: "local_branch_base_drift",
       errorMessage: "stamped local review head " + expectedHead
-        + " does not match origin/" + branch + " at " + actualHead,
+        + " does not match the admitted remote branch " + branch + " at " + actualHead,
     };
   }
   logs.push("local-branch resume: verified " + branch + " @ " + expectedHead);
@@ -1760,14 +1761,15 @@ async function deliverStackBranch({ worktreePath, baseRef, token, owner, repo, b
 
 // deliverLocalBranch is the local-mode counterpart to PR delivery: the task's
 // isolated worktree becomes loom/<task>, and the branch is pushed to the repo's
-// actual `origin` remote. There is deliberately no owner/repo parsing or GitHub
+// admitted filesystem remote. There is deliberately no owner/repo parsing or GitHub
 // URL construction here; activation is gated before this helper on a filesystem
-// origin, so `git push origin ...` is the correct primitive.
+// remote, so pushing the exact host-resolved URL is the correct primitive.
 async function deliverLocalBranch({
   worktreePath,
   baseRef,
   branch,
   title,
+  repositoryRemoteUrl,
   expectedRemoteHead = "",
 }) {
   const git = async (...args) => {
@@ -1790,7 +1792,7 @@ async function deliverLocalBranch({
     : "--force";
   const pushRes = await execBackend(
     "git",
-    ["-C", worktreePath, "push", "--no-verify", forceArg, "origin", branchPushRefspec(head, branch)],
+    ["-C", worktreePath, "push", "--no-verify", forceArg, repositoryRemoteUrl, branchPushRefspec(head, branch)],
     { cwd: worktreePath, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
   );
   if (pushRes.code !== 0) {
@@ -1812,6 +1814,14 @@ async function resolveOriginRemoteUrl(worktree) {
   } catch {
     return "";
   }
+}
+
+async function resolveRepositoryRemoteUrl(worktree) {
+  const admittedRemote = stringValue(process.env.LOOM_TASK_RUN_REPOSITORY_REMOTE_URL).trim();
+  if (admittedRemote !== "") {
+    return admittedRemote;
+  }
+  return resolveOriginRemoteUrl(worktree);
 }
 
 function isFilesystemOrigin(url) {

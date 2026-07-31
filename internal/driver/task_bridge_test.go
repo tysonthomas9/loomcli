@@ -42,6 +42,41 @@ func TestTaskRunnerEnvAPIBaseURL(t *testing.T) {
 	}
 }
 
+func TestTaskRunnerAdmittedRepositoryRemoteEnvIsTrustedLocalOnly(t *testing.T) {
+	executor := HostBridgeTaskExecutor{
+		WorktreePath:     "/wt",
+		repositoryRemote: "/private/tmp/admitted-repo",
+	}
+	req := hostBridgeTaskExecRequest()
+	req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	trustedLocal := executor.taskRunnerEnv(req, "{}")
+	if !envContains(trustedLocal, "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL=/private/tmp/admitted-repo") {
+		t.Fatalf("trusted local env missing admitted repository remote: %v", trustedLocal)
+	}
+
+	req.RunnerTrustLevel = domain.DriverTrustUntrusted
+	if envHasAny(executor.taskRunnerEnv(req, "{}"), "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL") {
+		t.Fatal("untrusted local runner received admitted repository remote")
+	}
+
+	req.RunnerEntrypoint = "daytona-task-runner"
+	req.RunnerTrustLevel = domain.DriverTrustTrusted
+	if envHasAny(executor.taskRunnerEnv(req, "{}"), "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL") {
+		t.Fatal("remote runner received admitted repository remote")
+	}
+
+	localReq := hostBridgeTaskExecRequest()
+	localReq.RunnerEntrypoint = LocalTaskRunnerEntrypoint
+	base := taskRunnerBaseEnvForRequest(localReq, []string{
+		"PATH=/bin",
+		"LOOM_TASK_RUN_REPOSITORY_REMOTE_URL=/private/tmp/forged-repo",
+	})
+	if envHasAny(base, "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL") {
+		t.Fatalf("inherited repository remote bypassed the host-owned seam: %v", base)
+	}
+}
+
 func TestHostBridgeTaskExecutorRequiresTaskRunAPIURL(t *testing.T) {
 	t.Run("preflight", func(t *testing.T) {
 		_, err := (HostBridgeTaskExecutor{Command: []string{"unused"}}).PreflightTaskProvider(

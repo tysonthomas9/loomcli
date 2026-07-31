@@ -18,9 +18,10 @@ import (
 const ErrorClassLocalWorktreeUnprovisioned = "local_worktree_unprovisioned"
 
 type TaskWorktree struct {
-	Path         string
-	RepoName     string
-	SourceRepoID string
+	Path             string
+	RepoName         string
+	SourceRepoID     string
+	RepositoryRemote string
 }
 
 type TaskWorktreeResolver interface {
@@ -208,9 +209,10 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 		return TaskWorktree{}, err
 	}
 	return TaskWorktree{
-		Path:         target,
-		RepoName:     selected.Name,
-		SourceRepoID: firstNonEmpty(selected.SourceRepoID, selected.Name),
+		Path:             target,
+		RepoName:         selected.Name,
+		SourceRepoID:     firstNonEmpty(selected.SourceRepoID, selected.Name),
+		RepositoryRemote: firstNonEmpty(selected.RemoteURL, selected.Remote),
 	}, nil
 }
 

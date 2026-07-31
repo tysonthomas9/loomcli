@@ -84,6 +84,11 @@ type HostBridgeTaskExecutor struct {
 	// which the per-run git worktree does NOT contain — so taskRunnerBundleEnv must
 	// resolve the bundle against this base, not the reassigned worktree.
 	driverBundleBaseDir string
+	// repositoryRemote is the token-free remote resolved from the admitted
+	// Workspace repository. It is exported only to the trusted bundled local
+	// runner, allowing filesystem-backed local-branch delivery without adding a
+	// mutable git remote to the isolated task worktree.
+	repositoryRemote string
 }
 
 type bridgeTaskRunnerResult struct {
@@ -722,6 +727,9 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 		backend := e.resolveTaskRunnerBackend(req, agentPolicy)
 		env = append(env, TaskRunnerBackendEnv+"="+backend)
 		env = append(env, localTaskRunnerRoleEnv(agentPolicy, backend)...)
+		if remote := strings.TrimSpace(e.repositoryRemote); remote != "" && taskRunnerTrustLevel(req.RunnerTrustLevel).Trusted() {
+			env = append(env, "LOOM_TASK_RUN_REPOSITORY_REMOTE_URL="+remote)
+		}
 		existing := env
 		if len(inherited) > 0 && len(inherited[0]) > 0 {
 			existing = append(append([]string{}, inherited[0]...), env...)
