@@ -152,9 +152,16 @@ func runService(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	startLocalDaemonSupervisor(serviceCtx, cfg.dataDir, cfg.exe, cfg.port, cfg.url)
+	daemonDone := startLocalDaemonSupervisor(serviceCtx, cfg.dataDir, cfg.exe, cfg.port, cfg.url)
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Loom local runtime: %s\n", info.URL)
-	return waitServeExit(serviceCtx, serveCmd, cfg.dataDir, info)
+	waitErr := waitServeExit(serviceCtx, serveCmd, cfg.dataDir, info)
+	// waitServeExit can return as soon as the serve child exits. Cancel the
+	// service context explicitly and wait for the managed daemon child before
+	// this process exits; otherwise the goroutine is torn down with its parent
+	// and the isolated daemon survives as an orphan holding a dead Fleet URL.
+	stopSignals()
+	awaitLocalDaemonSupervisor(cfg.dataDir, daemonDone)
+	return waitErr
 }
 
 // localServiceConfig is the resolved environment for a single runService
@@ -476,7 +483,7 @@ func reuseRunningRuntime(dataDir string, force bool) (*RuntimeStartResult, error
 		return nil, nil
 	}
 	if !runtimePIDRunning(info, info.PID) {
-		if runtimePIDRunning(info, info.ServePID) {
+		if runtimeProcessRunning(info) {
 			if err := stopRuntimeProcesses(info, 15*time.Second); err != nil {
 				return nil, fmt.Errorf("stop orphaned local runtime: %w", err)
 			}
@@ -663,9 +670,9 @@ func runtimePIDs(info *runtimeInfo) []int {
 	if info == nil {
 		return nil
 	}
-	pids := make([]int, 0, 2)
+	pids := make([]int, 0, 3)
 	seen := map[int]struct{}{}
-	for _, pid := range []int{info.PID, info.ServePID} {
+	for _, pid := range []int{info.PID, info.ServePID, info.DaemonPID} {
 		if pid <= 0 {
 			continue
 		}
