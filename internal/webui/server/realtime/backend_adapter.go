@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -25,7 +26,7 @@ func BackendMutationToPayload(m backend.MutationData, workspaceID string) *Mutat
 		Action:      m.Action,
 		IssueID:     m.IssueID,
 		Title:       m.Title,
-		Assignee:    m.Assignee,
+		Assignee:    mutationAssignee(m.Action, m.Assignee, m.Actor, m.OldStatus, m.NewStatus),
 		Actor:       m.Actor,
 		Timestamp:   m.Timestamp.UTC().Format(time.RFC3339Nano),
 		OldStatus:   m.OldStatus,
@@ -35,6 +36,23 @@ func BackendMutationToPayload(m backend.MutationData, workspaceID string) *Mutat
 		SourceRepo:  m.SourceRepo,
 		WorkspaceID: workspaceID,
 	}
+}
+
+// mutationAssignee preserves explicit ownership retirement. Fleet's mutation
+// projection otherwise represents both "not present" and "cleared" as the Go
+// zero value. issue.assign is explicit by definition; a task-run transition
+// out of in_progress is the atomic Work Item handoff and also clears ownership.
+// Human status changes remain sparse because they may intentionally retain an
+// assignee. Without this distinction, browser clients display a former task-run
+// claimant until a full reload.
+func mutationAssignee(action, assignee, actor, oldStatus, newStatus string) *string {
+	if assignee == "" && action != "issue.assign" &&
+		!(strings.HasPrefix(actor, "task-run:") && oldStatus == "in_progress" &&
+			newStatus != "" && newStatus != "in_progress") {
+		return nil
+	}
+	value := assignee
+	return &value
 }
 
 // BackendMutationToRPCEvent projects a backend.MutationData to a
