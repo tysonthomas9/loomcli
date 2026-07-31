@@ -118,7 +118,7 @@ tests:
           printf '%s\n' "nova lead log line one" "nova lead AFT-LOG-MARKER $RUN_ID" |
           LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-log --workspace E2E-WS-AGENT --agent nova --content -
         intent: "The local runtime seeds nova with an archived log marker"
-      - click: { selector: "div:has(> [data-testid='log-viewer']) > button" }
+      - click: { testid: log-refresh-button }
       - wait: { text: AFT-LOG-MARKER }
       - expect: { visible: { testid: terminal-container } }
       - open: /ws/E2E-WS-AGENT/monitor

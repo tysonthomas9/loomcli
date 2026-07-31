@@ -71,8 +71,8 @@ teardown: |
 
 tests:
   # covers: TSK-D6; repo-less workspace Task Runner create rejection; create-agent-no-repos contradiction; TSK-B11 defect pin
-  - name: repo-less task runner create fails despite workspace-scope copy
-    intent: An API client and then an operator both discover that a repo-less workspace promises workspace scope but rejects a Task Runner without repos
+  - name: repo-less task runner create explains repo requirement
+    intent: An API client and then an operator both discover that a repo-less workspace rejects a Task Runner without repos and the modal explains the requirement
     steps:
       - api:
           method: "POST"
@@ -147,15 +147,15 @@ tests:
           fn: >-
             (() => {
               const text = document.querySelector('[data-testid=create-agent-no-repos]')?.textContent?.replace(/\s+/g, ' ').trim() || '';
-              return text === 'No repos yet — add one from the sidebar first. This agent will run with workspace scope.';
+              return text === 'No repos in this workspace yet — background agents need at least one repo; interactive agents run with workspace scope.';
             })()
-        intent: "Wait until the modal renders the exact repo-less workspace-scope copy"
+        intent: "Wait until the modal renders the exact repo-less requirement copy"
       - click: { testid: create-agent-template-task }
       - fill: { testid: create-agent-name, value: "orphan-ui-${RUN_ID:-local}" }
       - click: { testid: create-agent-submit }
       - wait:
           fn: >-
-            document.querySelector('[data-testid=create-agent-error]')?.textContent.includes('workspace has no repos for agent')
+            document.querySelector('[data-testid=create-agent-error]')?.textContent.includes('This workspace has no repos yet — add one from the sidebar first.')
         intent: "Wait until the repo-less modal submit surfaces the service validation error"
       - expect: { visible: { testid: create-agent-error } }
       - expect: { visible: { testid: create-agent-overlay } }

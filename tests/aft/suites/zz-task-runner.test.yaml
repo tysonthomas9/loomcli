@@ -526,7 +526,7 @@ tests:
       - click: { testid: create-agent-submit }
       - wait:
           fn: >-
-            document.querySelector('[data-testid=create-agent-error]')?.textContent.includes('already exists')
+            document.querySelector('[data-testid=create-agent-error]')?.textContent.includes('An agent with this name already exists.')
         intent: "Wait until the duplicate-name conflict is rendered in the modal"
       - expect: { visible: { testid: create-agent-error } }
       - expect: { visible: { testid: create-agent-overlay } }
@@ -963,10 +963,10 @@ tests:
           printf '%s\n' "worker-a task log line one" "AFT-TASK-LOG-MARKER ${RUN_ID:-local}" |
           LOOM_TESTSUPPORT=1 LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" daemon seed-log --workspace E2E-WS-TASK --agent "worker-a-${RUN_ID:-local}" --content -
         intent: "The local runtime seeds worker-a with an archived task-agent log marker"
-      - click: { selector: "div:has(> [data-testid='log-viewer']) > button" }
+      - click: { testid: log-refresh-button }
       - wait: { text: AFT-TASK-LOG-MARKER }
       - expect: { visible: { testid: terminal-container } }
-      - expect: { attr: { selector: "[data-testid=log-viewer] span[data-state]", name: "data-state", equals: "connected" } }
+      - expect: { attr: { testid: log-status, name: "data-state", equals: "connected" } }
       - expect: { text: ARCHIVE SNAPSHOT }
 
   # covers: TSK-D17; agents rail; WorkspaceTree background group; monitor; deep-link tabs

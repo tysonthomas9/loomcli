@@ -247,7 +247,7 @@ tests:
         intent: "Wait until the duplicate-name error is rendered before asserting visibility"
       - expect: { visible: { testid: create-agent-error } }
       - expect: { attr: { testid: create-agent-error, name: role, equals: "alert" } }
-      - expect: { text: "already exists" }
+      - expect: { text: "An agent with this name already exists." }
       - expect: { visible: { testid: create-agent-overlay } }
       - run: |
           set -e
@@ -481,9 +481,9 @@ tests:
           fn: >-
             (() => {
               const text = document.querySelector('[data-testid=create-agent-no-repos]')?.textContent?.replace(/\s+/g, ' ').trim() || '';
-              return text === 'No repos yet — add one from the sidebar first. This agent will run with workspace scope.';
+              return text === 'No repos in this workspace yet — background agents need at least one repo; interactive agents run with workspace scope.';
             })()
-        intent: "Wait until the no-repos hint exactly promises workspace scope"
+        intent: "Wait until the no-repos hint exactly explains the background-agent repo requirement"
       - expect: { count: { testid: create-agent-repo-chips, equals: 0 } }
       - fill: { testid: create-agent-name, value: "planner-empty-${RUN_ID:-local}" }
       - click: { testid: create-agent-submit }
@@ -492,7 +492,7 @@ tests:
             !!document.querySelector('[data-testid=create-agent-error]')
         intent: "Wait until the repo-less create error is rendered before asserting visibility"
       - expect: { visible: { testid: create-agent-error } }
-      - expect: { text: "workspace has no repos for agent" }
+      - expect: { text: "This workspace has no repos yet — add one from the sidebar first." }
       - expect: { visible: { testid: create-agent-overlay } }
       - run: |
           set -e
@@ -592,7 +592,7 @@ tests:
           fn: >-
             (() => {
               const el = document.querySelector("[aria-label='Agent: planner-${RUN_ID:-local}']");
-              return !!el && el.textContent.includes('Plan') && el.textContent.includes('Idle');
+              return !!el && /plan(?=[A-Z\s]|$)/.test(el.textContent) && el.textContent.includes('Idle');
             })()
         intent: "Wait until the Planner card renders its Plan role and Idle status"
       - expect: { attr: { selector: "[aria-label='Agent: planner-${RUN_ID:-local}']", name: data-status, equals: "idle" } }

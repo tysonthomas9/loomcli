@@ -62,8 +62,12 @@ tests:
           assert code == "201", (code, body)
           assert body.get("name") == name, body
           assert body.get("role_name") == name, body
+          assert body.get("role_kind") == "interactive", body
           assert body.get("backend") == "codex", body
           assert not body.get("auto"), body
+          assert body.get("repos") == [], body
+          assert body.get("repo_groups") == [], body
+          assert body.get("cross_repo") is False, body
           PY
           LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace E2E-WS-CUSTOM-SURF role show "surf-max-$run" --json > "$AFT_WORK_DIR/d7b-max-role.json"
           python3 - "$AFT_WORK_DIR/d7b-max-role.json" <<'PY'

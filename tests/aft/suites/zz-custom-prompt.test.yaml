@@ -799,7 +799,7 @@ tests:
             !!document.querySelector('[data-testid=create-agent-error]')
         intent: "Wait until the task-name collision error appears after submit"
       - expect: { visible: { testid: create-agent-error } }
-      - expect: { text: "role \"task\" already exists and is not interactive; choose a different agent name" }
+      - expect: { text: "Role \"task\" already exists and is not interactive; choose a different agent name" }
       - expect: { visible: { testid: create-agent-overlay } }
       - run: |
           set -e
@@ -869,7 +869,7 @@ tests:
             !!document.querySelector('[data-testid=create-agent-error]')
         intent: "Wait until the plan-name collision error appears after submit"
       - expect: { visible: { testid: create-agent-error } }
-      - expect: { text: "role \"plan\" already exists and is not interactive; choose a different agent name" }
+      - expect: { text: "Role \"plan\" already exists and is not interactive; choose a different agent name" }
       - expect: { visible: { testid: create-agent-overlay } }
       - run: |
           set -e
@@ -939,7 +939,7 @@ tests:
             !!document.querySelector('[data-testid=create-agent-error]')
         intent: "Wait until the lead-name collision error appears after submit"
       - expect: { visible: { testid: create-agent-error } }
-      - expect: { text: "role \"lead\" already exists with a different prompt; choose a different agent name or reuse its prompt" }
+      - expect: { text: "Role \"lead\" already exists with a different prompt; choose a different agent name or reuse its prompt" }
       - expect: { visible: { testid: create-agent-overlay } }
       - run: |
           set -e
@@ -1921,7 +1921,7 @@ tests:
             !!document.querySelector('[data-testid=create-agent-error]')
         intent: "Wait until the duplicate custom-agent error appears after submit"
       - expect: { visible: { testid: create-agent-error } }
-      - expect: { text: "already exists" }
+      - expect: { text: "An agent with this name already exists." }
       - expect: { visible: { testid: create-agent-overlay } }
       - run: |
           set -e

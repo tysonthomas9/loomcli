@@ -16,6 +16,7 @@ tests:
           path: "/api/workspaces/${AFT_WS:-E2E-WS}/issues"
           body:
             title: "pages detail $RUN_ID"
+            description: "Standalone pages detail description $RUN_ID"
             issue_type: "task"
             priority: 2
           save:
@@ -43,6 +44,7 @@ tests:
       - expect: { visible: { testid: issue-detail-view } }
       - expect: { visible: { testid: detail-title } }
       - expect: { text: "pages detail ${RUN_ID:-local}" }
+      - expect: { text: "Standalone pages detail description ${RUN_ID:-local}" }
       - expect: { visible: { testid: detail-issue-id } }
 
   - name: settings page renders config panels
