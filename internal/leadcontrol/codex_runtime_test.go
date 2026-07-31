@@ -124,6 +124,86 @@ func TestCodexAppServerLifetimeSurvivesParentCancellationUntilExplicitStop(t *te
 	}
 }
 
+func TestCodexLeadChildEnvUsesIsolatedHomeWithoutCopyingCredentials(t *testing.T) {
+	sourceHome := t.TempDir()
+	authPath := filepath.Join(sourceHome, "auth.json")
+	configPath := filepath.Join(sourceHome, "config.toml")
+	if err := os.WriteFile(authPath, []byte("credential bytes stay here"), 0600); err != nil {
+		t.Fatalf("write auth fixture: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("model = \"test\"\n"), 0600); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
+	runtimeHome := t.TempDir()
+
+	env, err := codexLeadChildEnv(runtimeHome, []string{
+		"PATH=/usr/bin",
+		"CODEX_HOME=" + sourceHome,
+		"CODEX_HOME=/must/not/survive",
+	})
+	if err != nil {
+		t.Fatalf("codexLeadChildEnv() error = %v", err)
+	}
+	isolatedHome := filepath.Join(runtimeHome, "codex-home")
+	wantEnv := "CODEX_HOME=" + isolatedHome
+	count := 0
+	for _, entry := range env {
+		if entry == wantEnv {
+			count++
+		}
+		if strings.HasPrefix(entry, "CODEX_HOME=") && entry != wantEnv {
+			t.Fatalf("stale CODEX_HOME survived: %q", entry)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("isolated CODEX_HOME count = %d, want 1: %#v", count, env)
+	}
+	for _, name := range []string{"auth.json", "config.toml"} {
+		target := filepath.Join(isolatedHome, name)
+		info, err := os.Lstat(target)
+		if err != nil {
+			t.Fatalf("lstat %s: %v", name, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%s mode = %v, want symlink", name, info.Mode())
+		}
+		linked, err := os.Readlink(target)
+		if err != nil {
+			t.Fatalf("readlink %s: %v", name, err)
+		}
+		if linked != filepath.Join(sourceHome, name) {
+			t.Fatalf("%s link = %q", name, linked)
+		}
+	}
+}
+
+func TestCodexLeadChildEnvFailsClosedWithoutAuthentication(t *testing.T) {
+	_, err := codexLeadChildEnv(t.TempDir(), []string{"CODEX_HOME=" + t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "auth.json") {
+		t.Fatalf("codexLeadChildEnv() error = %v, want missing auth.json", err)
+	}
+}
+
+func TestCodexLeadChildEnvRejectsCredentialLinkDrift(t *testing.T) {
+	sourceHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceHome, "auth.json"), []byte("auth"), 0600); err != nil {
+		t.Fatalf("write auth fixture: %v", err)
+	}
+	runtimeHome := t.TempDir()
+	isolatedHome := filepath.Join(runtimeHome, "codex-home")
+	if err := os.MkdirAll(isolatedHome, 0700); err != nil {
+		t.Fatalf("mkdir isolated home: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "auth.json"), filepath.Join(isolatedHome, "auth.json")); err != nil {
+		t.Fatalf("write drifted auth link: %v", err)
+	}
+
+	_, err := codexLeadChildEnv(runtimeHome, []string{"CODEX_HOME=" + sourceHome})
+	if err == nil || !strings.Contains(err.Error(), "points outside") {
+		t.Fatalf("codexLeadChildEnv() error = %v, want link drift rejection", err)
+	}
+}
+
 func TestCodexThreadTranscriptEventsCanonicalizesMessages(t *testing.T) {
 	capturedAt := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	events := codexThreadTranscriptEvents(&CodexThread{
