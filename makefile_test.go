@@ -167,6 +167,33 @@ func TestDesktopSidecarChecksPackagedBuiltinsAtPhase5Owner(t *testing.T) {
 	}
 }
 
+func TestDesktopSidecarStampsFleetCommitFromPairedCheckout(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(
+		repoRoot(t),
+		"desktop",
+		"scripts",
+		"prepare-sidecar.sh",
+	)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents)
+	for _, want := range []string{
+		`git -C "${FLEET_DB_REPO}" rev-parse --short HEAD`,
+		`-X main.commit=${FLEET_BUILD}`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("desktop sidecar is missing paired Fleet provenance %q", want)
+		}
+	}
+	if strings.Contains(script, `-X main.commit=${BUILD}`) {
+		t.Fatal("desktop sidecar still stamps Fleet with the Loom commit")
+	}
+}
+
 func TestMakefileLocalModeVerifyAlwaysReadsLiveManifest(t *testing.T) {
 	t.Parallel()
 

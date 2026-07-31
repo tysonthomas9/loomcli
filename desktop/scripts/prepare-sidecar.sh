@@ -172,11 +172,12 @@ echo "[desktop] building loom sidecar: ${OUT}"
 chmod +x "${OUT}"
 
 if [ -d "${FLEET_DB_REPO}" ]; then
+  FLEET_BUILD="${FLEET_BUILD:-$(git -C "${FLEET_DB_REPO}" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
   echo "[desktop] building fleet-db sidecar: ${FLEET_OUT}"
   (
     cd "${FLEET_DB_REPO}"
     go build \
-      -ldflags="-X main.commit=${BUILD}" \
+      -ldflags="-X main.commit=${FLEET_BUILD}" \
       -o "${FLEET_OUT}" \
       ./cmd/fleet-db
   )
