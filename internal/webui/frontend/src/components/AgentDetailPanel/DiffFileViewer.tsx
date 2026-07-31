@@ -30,7 +30,12 @@ export function parsePatch(patchString: string): ParsedPatch {
   let oldNum = 0;
   let newNum = 0;
 
-  for (const rawLine of patchString.split("\n")) {
+  const rawLines = patchString.split("\n");
+  if (rawLines[rawLines.length - 1] === "") {
+    rawLines.pop();
+  }
+
+  for (const rawLine of rawLines) {
     if (rawLine.startsWith("@@")) {
       // Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
       const match = rawLine.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);

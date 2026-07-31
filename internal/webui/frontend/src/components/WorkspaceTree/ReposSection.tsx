@@ -97,7 +97,9 @@ export function ReposSection({
               </div>
             ))}
           </div>
-        ) : null}
+        ) : (
+          <p className={styles.emptyState}>No repos in workspace</p>
+        )}
         {onAddRepo && (
           <button type="button" className={styles.addRepo} onClick={onAddRepo}>
             + Add Repo

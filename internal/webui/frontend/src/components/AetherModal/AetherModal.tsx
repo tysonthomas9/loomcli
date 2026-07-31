@@ -23,11 +23,14 @@ export interface AetherModalProps {
   children: ReactNode;
   footer?: ReactNode;
   dialogRef?: RefObject<HTMLDivElement>;
+  bodyRef?: RefObject<HTMLDivElement>;
   overlayTestId?: string;
   closeTestId?: string;
   showCloseButton?: boolean;
   /** Extra class names merged onto the dialog element (e.g. wide variant). */
   dialogClassName?: string | undefined;
+  /** Extra class names merged onto the scrollable body element. */
+  bodyClassName?: string | undefined;
 }
 
 export function AetherModal({
@@ -41,10 +44,12 @@ export function AetherModal({
   children,
   footer,
   dialogRef,
+  bodyRef,
   overlayTestId,
   closeTestId,
   showCloseButton = true,
   dialogClassName,
+  bodyClassName,
 }: AetherModalProps): JSX.Element | null {
   if (!isOpen) return null;
 
@@ -88,7 +93,12 @@ export function AetherModal({
               </button>
             )}
           </header>
-          <div className={styles.body}>{children}</div>
+          <div
+            ref={bodyRef}
+            className={[styles.body, bodyClassName].filter(Boolean).join(" ")}
+          >
+            {children}
+          </div>
           {footer ? <footer className={styles.foot}>{footer}</footer> : null}
         </div>
       </div>

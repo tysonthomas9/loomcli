@@ -315,7 +315,7 @@ describe("DiffTab", () => {
   });
 
   describe("viewed toggle", () => {
-    it("calls markViewed when checkbox is toggled", async () => {
+    it("calls markViewed when viewed control is toggled", async () => {
       mockUseDiffReturn.files = [makeFile({ path: "a.go" })];
       mockUseDiffReturn.summaryStats = {
         filesChanged: 1,

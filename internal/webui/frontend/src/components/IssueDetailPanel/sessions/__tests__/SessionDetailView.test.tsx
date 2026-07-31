@@ -380,6 +380,30 @@ describe("SessionDetailView", () => {
       expect(container.textContent).not.toContain("`add_state`");
     });
 
+    it("renders JSON transcript envelopes as output text and keeps the raw envelope in details", () => {
+      const raw =
+        '{"status":"completed","output":"Review complete.\\n\\nNo changes needed."}';
+      mockUseSessionTranscript.mockReturnValue({
+        entries: [
+          createEntry({
+            seq: 1,
+            role: "assistant",
+            type: "text",
+            text: raw,
+          }),
+        ],
+        isLoading: false,
+        error: null,
+      });
+      render(<SessionDetailView taskId="task-1" session={defaultSession} />);
+
+      expect(screen.getByText("Review complete.")).toBeInTheDocument();
+      expect(screen.getByText("No changes needed.")).toBeInTheDocument();
+      const details = screen.getByText("Raw envelope").closest("details");
+      expect(details).not.toHaveAttribute("open");
+      expect(details).toHaveTextContent(raw);
+    });
+
     it("renders a user-message interjection as formatted Markdown", () => {
       mockUseSessionTranscript.mockReturnValue({
         entries: [

@@ -109,17 +109,26 @@ describe("AgentCard", () => {
 
       expect(screen.getByText("nova")).toBeInTheDocument();
     });
+
+    it("keeps the raw name available for truncated sidebar labels", () => {
+      render(<AgentCard agent={makeAgent({ name: "planner-1785391718" })} />);
+
+      expect(screen.getByText("planner-1785391718")).toHaveAttribute(
+        "title",
+        "planner-1785391718",
+      );
+    });
   });
 
   describe("role label", () => {
-    it("shows capitalized role when agent has role", () => {
+    it("shows raw role id when agent has role", () => {
       render(<AgentCard agent={makeAgent({ role: "plan" })} />);
-      expect(screen.getByText("Plan")).toBeInTheDocument();
+      expect(screen.getByText("plan")).toBeInTheDocument();
     });
 
-    it('shows "Task" for task role', () => {
+    it('shows raw "task" role id', () => {
       render(<AgentCard agent={makeAgent({ role: "task" })} />);
-      expect(screen.getByText("Task")).toBeInTheDocument();
+      expect(screen.getByText("task")).toBeInTheDocument();
     });
 
     it('shows "Agent" fallback when role is undefined', () => {
@@ -141,7 +150,7 @@ describe("AgentCard", () => {
       expect(screen.getByText("Ready")).toBeInTheDocument();
     });
 
-    it('hides "Idle" for lead agents', () => {
+    it('shows "Idle" for lead agents', () => {
       render(
         <AgentCard
           agent={makeAgent({
@@ -152,7 +161,7 @@ describe("AgentCard", () => {
         />,
       );
 
-      expect(screen.queryByText("Idle")).not.toBeInTheDocument();
+      expect(screen.getByText("Idle")).toBeInTheDocument();
     });
 
     it('still shows "Working" for idle lead agents with live working status', () => {
@@ -174,6 +183,16 @@ describe("AgentCard", () => {
     it('shows "Idle" for idle status', () => {
       render(
         <AgentCard agent={makeAgent({ status: "idle", branch: "dev" })} />,
+      );
+
+      expect(screen.getByText("Idle")).toBeInTheDocument();
+    });
+
+    it('shows "Idle" for configured agents without runtime state', () => {
+      render(
+        <AgentCard
+          agent={makeAgent({ status: "configured", branch: "dev" })}
+        />,
       );
 
       expect(screen.getByText("Idle")).toBeInTheDocument();

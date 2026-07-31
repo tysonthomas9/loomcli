@@ -107,51 +107,55 @@ export function AgentSection({
   );
   const showBackgroundGroup = regular.length > 0 && background.length > 0;
 
-  if (agents.length === 0 && !onAddClick) return <></>;
-
   return (
     <div className={`${styles.section} agentSection`}>
       <div className={`${styles.header} agentSectionHeader`}>
         <span>Agents</span>
       </div>
       <div className={styles.list}>
-        <SortableAgentList
-          agents={regular}
-          fullOrder={agentOrder}
-          onReorder={persistAgentOrder}
-          onAgentClick={onAgentClick}
-          selectedAgentName={selectedAgentName}
-          agentTasks={agentTasks}
-          listClassName={styles.sortableList}
-        />
-        {showBackgroundGroup ? (
-          <div
-            className={styles.subgroup}
-            data-testid="agent-section-background"
-          >
-            <div className={styles.subgroupHeader}>
-              <span>Background</span>
-            </div>
+        {agents.length === 0 ? (
+          <p className={styles.emptyState}>No agents yet</p>
+        ) : (
+          <>
             <SortableAgentList
-              agents={background}
+              agents={regular}
               fullOrder={agentOrder}
               onReorder={persistAgentOrder}
               onAgentClick={onAgentClick}
               selectedAgentName={selectedAgentName}
               agentTasks={agentTasks}
-              listClassName={styles.subgroupList}
+              listClassName={styles.sortableList}
             />
-          </div>
-        ) : (
-          <SortableAgentList
-            agents={background}
-            fullOrder={agentOrder}
-            onReorder={persistAgentOrder}
-            onAgentClick={onAgentClick}
-            selectedAgentName={selectedAgentName}
-            agentTasks={agentTasks}
-            listClassName={styles.sortableList}
-          />
+            {showBackgroundGroup ? (
+              <div
+                className={styles.subgroup}
+                data-testid="agent-section-background"
+              >
+                <div className={styles.subgroupHeader}>
+                  <span>Background</span>
+                </div>
+                <SortableAgentList
+                  agents={background}
+                  fullOrder={agentOrder}
+                  onReorder={persistAgentOrder}
+                  onAgentClick={onAgentClick}
+                  selectedAgentName={selectedAgentName}
+                  agentTasks={agentTasks}
+                  listClassName={styles.subgroupList}
+                />
+              </div>
+            ) : (
+              <SortableAgentList
+                agents={background}
+                fullOrder={agentOrder}
+                onReorder={persistAgentOrder}
+                onAgentClick={onAgentClick}
+                selectedAgentName={selectedAgentName}
+                agentTasks={agentTasks}
+                listClassName={styles.sortableList}
+              />
+            )}
+          </>
         )}
       </div>
       {onAddClick && (

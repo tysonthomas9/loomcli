@@ -29,7 +29,8 @@
  * --terminal-* tokens so the terminal follows :root / [data-theme="light"]
  * automatically. */
 .container:global(.wterm) {
-  padding: 0;
+  box-sizing: border-box;
+  padding: 4px 0 10px;
   border-radius: 0;
   box-shadow: none;
   background: var(--terminal-bg);

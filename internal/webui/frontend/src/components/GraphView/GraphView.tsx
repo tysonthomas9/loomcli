@@ -134,6 +134,26 @@ const edgeTypes = {
   dependency: DependencyEdge,
 } as const;
 
+const MINI_MAP_STYLE = {
+  backgroundColor: "var(--color-bg-secondary)",
+  border: "1px solid var(--color-border)",
+  borderRadius: "var(--radius-sm)",
+  boxShadow: "var(--shadow-sm)",
+} as const;
+
+function getMiniMapNodeColor(node: IssueNodeType): string {
+  if (node.data.isRootBlocker || node.data.status === "blocked") {
+    return "var(--color-blocked)";
+  }
+  if (node.data.status === "in_progress") {
+    return "var(--color-status-in-progress)";
+  }
+  if (node.data.status === "closed") {
+    return "var(--color-status-closed)";
+  }
+  return "var(--color-text-secondary)";
+}
+
 /**
  * Props for the GraphView component.
  */
@@ -416,8 +436,14 @@ export function GraphView({
 
   // Build MiniMap props conditionally
   const miniMapProps: Record<string, unknown> = {
-    maskColor: "rgba(0, 0, 0, 0.1)",
+    maskColor: "rgb(2 6 23 / 0.58)",
+    maskStrokeColor: "var(--color-primary)",
+    maskStrokeWidth: 2,
+    nodeBorderRadius: 2,
+    nodeColor: getMiniMapNodeColor,
+    nodeStrokeColor: "var(--color-bg)",
     position: "bottom-right",
+    style: MINI_MAP_STYLE,
   };
   if (styles.miniMapNode) {
     miniMapProps.nodeClassName = styles.miniMapNode;

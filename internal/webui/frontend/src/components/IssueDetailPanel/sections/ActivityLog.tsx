@@ -21,6 +21,7 @@ const FIELD_LABELS: Record<string, string> = {
   issue_type: "type",
   defer_until: "defer date",
 };
+const BOOKKEEPING_FIELDS = new Set(["created_at", "updated_at"]);
 
 function getTimestamp(item: ActivityItem): number {
   return new Date(item.data.created_at).getTime();
@@ -30,31 +31,47 @@ function fieldLabel(field: string): string {
   return FIELD_LABELS[field] ?? field;
 }
 
+function visibleUpdateFields(fields: string[] | undefined): string[] {
+  return (fields ?? []).filter((field) => !BOOKKEEPING_FIELDS.has(field));
+}
+
 function updateFieldSummary(event: Event, who: string): string {
   const { field, fields, field_count, old_value, new_value } = event;
+  const visibleFields = Array.isArray(fields)
+    ? visibleUpdateFields(fields)
+    : [];
+  const visibleField =
+    field && !BOOKKEEPING_FIELDS.has(field) ? field : undefined;
+
   if ((field_count ?? 0) > 1) {
+    if (visibleFields.length > 0) {
+      return `${who} updated ${visibleFields.map(fieldLabel).join(", ")}`;
+    }
     if (Array.isArray(fields) && fields.length > 0) {
-      return `${who} updated ${fields.map(fieldLabel).join(", ")}`;
+      return `${who} updated this issue`;
     }
     return `${who} updated ${field_count} fields`;
   }
-  if (Array.isArray(fields) && fields.length > 1) {
-    return `${who} updated ${fields.map(fieldLabel).join(", ")}`;
+  if (visibleFields.length > 1) {
+    return `${who} updated ${visibleFields.map(fieldLabel).join(", ")}`;
   }
-  if (Array.isArray(fields) && fields.length === 1 && !field) {
-    const onlyField = fields[0];
+  if (visibleFields.length === 1 && !visibleField) {
+    const onlyField = visibleFields[0];
     if (onlyField) {
       return `${who} updated ${fieldLabel(onlyField)}`;
     }
   }
-  if (field && old_value && new_value) {
-    return `${who} updated ${fieldLabel(field)} from ${old_value} to ${new_value}`;
+  if (visibleField && old_value && new_value) {
+    return `${who} updated ${fieldLabel(visibleField)} from ${old_value} to ${new_value}`;
   }
-  if (old_value && new_value) {
+  if (old_value && new_value && !field) {
     return `${who} updated ${old_value} to ${new_value}`;
   }
+  if (visibleFields.length > 0) {
+    return `${who} updated ${visibleFields.map(fieldLabel).join(", ")}`;
+  }
   if (Array.isArray(fields) && fields.length > 0) {
-    return `${who} updated ${fields.map(fieldLabel).join(", ")}`;
+    return `${who} updated this issue`;
   }
   return `${who} updated this issue`;
 }

@@ -361,10 +361,6 @@ export function WorkspaceTree({
             </div>
           )}
 
-          {!isLoading && !error && workspaceRepos.length === 0 && (
-            <div className={styles.emptyState}>No repos in workspace</div>
-          )}
-
           {/* Agents in board views; terminal sessions in Terminal view */}
           {showTerminalSidebar ? (
             <TerminalSection />

@@ -900,11 +900,18 @@ function WorkerHistory({
                   {item.agent.name}
                 </span>
                 <span className={styles.workerHistoryMeta}>
-                  {item.taskId} · {item.status}
+                  {item.taskId}
                   {item.agent.session_id ? ` · ${item.agent.session_id}` : ""}
                 </span>
               </div>
               <div className={styles.workerHistoryActions}>
+                <span
+                  className={styles.workerHistoryStatus}
+                  data-status={item.status}
+                  data-testid="worker-history-status"
+                >
+                  {item.status}
+                </span>
                 {task ? (
                   <button
                     type="button"

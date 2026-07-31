@@ -403,6 +403,23 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
     });
 
+    it("renders the standard header controls for inline task detail", () => {
+      const mockIssue = createTestIssue({ issue_type: "task" });
+      render(
+        <IssueDetailPanel
+          inline
+          isOpen={true}
+          issue={mockIssue}
+          onClose={() => {}}
+          onCopyLink={() => {}}
+        />,
+      );
+
+      expect(screen.getByTestId("header-close-button")).toBeInTheDocument();
+      expect(screen.getByTestId("header-copy-link-button")).toBeInTheDocument();
+      expect(screen.getByTestId("header-maximize-button")).toBeInTheDocument();
+    });
+
     it("renders children in content area", () => {
       const mockIssue = createTestIssue();
       render(

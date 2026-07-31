@@ -9,6 +9,7 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -16,6 +17,7 @@
 .container {
   display: flex;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -25,11 +27,13 @@
 .costSummary {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--color-border-light);
   background: var(--color-panel-bg);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .summaryItem {
@@ -113,12 +117,11 @@
 /* ============= Timeline (left column) ============= */
 
 .timeline {
-  width: 35%;
-  min-width: 200px;
-  max-width: 340px;
+  flex: 0 1 clamp(180px, 34%, 320px);
+  min-width: 0;
+  max-width: 320px;
   border-right: 1px solid var(--color-border-light);
   overflow-y: auto;
-  flex-shrink: 0;
 }
 
 .timelineSkeleton {
@@ -151,6 +154,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   padding: 10px 12px;
   cursor: pointer;
   border-bottom: 1px solid var(--color-border-light);
@@ -179,9 +183,12 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .agentName {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-primary);
@@ -191,6 +198,9 @@
 }
 
 .phaseBadge {
+  flex: 0 0 auto;
+  min-width: max-content;
+  max-width: 7rem;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -198,6 +208,8 @@
   padding: 1px 5px;
   border-radius: var(--radius-sm);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .phaseBadge[data-phase="planning"] {
@@ -211,6 +223,9 @@
 }
 
 .backendBadge {
+  flex: 0 0 auto;
+  min-width: max-content;
+  max-width: 7rem;
   font-size: 10px;
   font-weight: 600;
   font-family: var(--font-mono);
@@ -220,10 +235,13 @@
   border-radius: var(--radius-sm);
   padding: 1px 5px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .statusLabel {
   margin-left: auto;
+  flex: 0 0 auto;
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
@@ -293,21 +311,31 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   font-size: 11px;
   color: var(--color-text-tertiary);
 }
 
 .duration {
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tokens {
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cost {
+  min-width: 0;
   white-space: nowrap;
   font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ============= Detail View (right column) ============= */
@@ -315,6 +343,7 @@
 .detail {
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -337,6 +366,7 @@
   border-bottom: 1px solid var(--color-border-light);
   background: var(--color-panel-bg);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .mastheadHeader {
@@ -384,6 +414,7 @@
 
 /* Prompt block — initial user kickoff surfaced once in masthead */
 .promptBlock {
+  min-width: 0;
   margin: 0 0 10px;
   padding: 8px 12px;
   background: rgba(59, 130, 246, 0.06);
@@ -405,9 +436,10 @@
 }
 
 .promptBody {
+  min-width: 0;
   word-break: break-word;
-  max-height: 4rem;
-  overflow-y: auto;
+  max-height: 9rem;
+  overflow: auto;
   overscroll-behavior: contain;
   padding-right: 4px;
   scrollbar-gutter: stable;
@@ -682,6 +714,10 @@
   max-width: 72ch;
 }
 
+.msgFrame {
+  max-width: 72ch;
+}
+
 /* Drop the shared MarkdownRenderer block padding so transcript turn spacing
    stays governed by the explicit .msg adjacency margins below, and preserve the
    transcript message's original primary-text typography (the shared .markdown
@@ -695,10 +731,41 @@
 }
 
 .msg + .msg,
+.msg + .msgFrame,
+.msgFrame + .msg,
+.msgFrame + .msgFrame,
 .msg + .toolBlock,
+.msgFrame + .toolBlock,
 .toolBlock + .msg,
+.toolBlock + .msgFrame,
 .toolBlock + .toolBlock {
   margin-top: 10px;
+}
+
+.rawTranscriptDetails {
+  margin-top: 6px;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.rawTranscriptDetails summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.rawTranscriptDetails pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* User-message interjection — rare mid-run user input */

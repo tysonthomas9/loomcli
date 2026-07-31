@@ -92,7 +92,7 @@ type ToolItem = {
   resultTimestamp?: string;
 };
 
-type TextItem = { kind: "text"; seq: number; text: string };
+type TextItem = { kind: "text"; seq: number; text: string; rawText?: string };
 
 type TurnItem = TextItem | ToolItem;
 
@@ -186,8 +186,10 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
       // just assigned). Narrow with a local alias for TS.
       const turn = current!;
       if (e.type === "text") {
-        const text = (e.text ?? "").trim();
-        if (text) turn.items.push({ kind: "text", seq: e.seq, text });
+        const decoded = decodeTranscriptText(e.text ?? "");
+        if (decoded.text) {
+          turn.items.push({ kind: "text", seq: e.seq, ...decoded });
+        }
       } else if (e.type === "tool_use") {
         const paired = e.tool_use_id
           ? resultById.get(e.tool_use_id)
@@ -214,6 +216,51 @@ function groupEvents(entries: TranscriptEntry[]): GroupedEvents {
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────
+
+function decodeTranscriptText(rawText: string): {
+  text: string;
+  rawText?: string;
+} {
+  const trimmed = rawText.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return { text: trimmed };
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "output" in parsed &&
+      typeof (parsed as { output?: unknown }).output === "string"
+    ) {
+      return {
+        text: (parsed as { output: string }).output.trim(),
+        rawText: trimmed,
+      };
+    }
+  } catch {
+    return { text: trimmed };
+  }
+
+  return { text: trimmed };
+}
+
+function TranscriptText({ item }: { item: TextItem }): JSX.Element {
+  if (!item.rawText) {
+    return <MarkdownRenderer content={item.text} className={styles.msg} />;
+  }
+
+  return (
+    <div className={styles.msgFrame} title={item.rawText}>
+      <MarkdownRenderer content={item.text} className={styles.msg} />
+      <details className={styles.rawTranscriptDetails}>
+        <summary>Raw envelope</summary>
+        <pre>{item.rawText}</pre>
+      </details>
+    </div>
+  );
+}
 
 function ToolBlock({
   item,
@@ -561,11 +608,7 @@ export function SessionDetailView({
                 </div>
                 {block.items.map((item) =>
                   item.kind === "text" ? (
-                    <MarkdownRenderer
-                      key={item.seq}
-                      content={item.text}
-                      className={styles.msg}
-                    />
+                    <TranscriptText key={item.seq} item={item} />
                   ) : (
                     <ToolBlock
                       key={item.seq}

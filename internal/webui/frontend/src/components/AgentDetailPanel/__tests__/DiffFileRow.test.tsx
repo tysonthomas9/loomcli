@@ -36,6 +36,12 @@ describe("DiffFileRow", () => {
     vi.clearAllMocks();
   });
 
+  function getRowButton(): HTMLElement {
+    const row = screen.getByText("src/main.go").closest('[role="button"]');
+    expect(row).toBeInTheDocument();
+    return row as HTMLElement;
+  }
+
   it("renders the file path", () => {
     render(<DiffFileRow {...defaultProps} />);
     expect(screen.getByText("src/main.go")).toBeInTheDocument();
@@ -130,49 +136,50 @@ describe("DiffFileRow", () => {
   it("calls onToggleExpand when row is clicked", () => {
     const onToggleExpand = vi.fn();
     render(<DiffFileRow {...defaultProps} onToggleExpand={onToggleExpand} />);
-    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(getRowButton());
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
 
   it("calls onToggleExpand on Enter key", () => {
     const onToggleExpand = vi.fn();
     render(<DiffFileRow {...defaultProps} onToggleExpand={onToggleExpand} />);
-    fireEvent.keyDown(screen.getByRole("button"), { key: "Enter" });
+    fireEvent.keyDown(getRowButton(), { key: "Enter" });
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
 
   it("calls onToggleExpand on Space key", () => {
     const onToggleExpand = vi.fn();
     render(<DiffFileRow {...defaultProps} onToggleExpand={onToggleExpand} />);
-    fireEvent.keyDown(screen.getByRole("button"), { key: " " });
+    fireEvent.keyDown(getRowButton(), { key: " " });
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
 
-  it("renders viewed checkbox unchecked by default", () => {
+  it("renders viewed control unpressed by default", () => {
     render(<DiffFileRow {...defaultProps} />);
-    const checkbox = screen.getByRole("checkbox", {
+    const viewedButton = screen.getByRole("button", {
       name: "Mark src/main.go as viewed",
     });
-    expect(checkbox).not.toBeChecked();
+    expect(viewedButton).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("renders viewed checkbox checked when isViewed is true", () => {
+  it("renders viewed control pressed when isViewed is true", () => {
     render(<DiffFileRow {...defaultProps} isViewed={true} />);
-    const checkbox = screen.getByRole("checkbox", {
-      name: "Mark src/main.go as viewed",
+    const viewedButton = screen.getByRole("button", {
+      name: "Unmark src/main.go as viewed",
     });
-    expect(checkbox).toBeChecked();
+    expect(viewedButton).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("calls onToggleViewed when checkbox is changed", () => {
+  it("calls onToggleViewed when viewed control is clicked", () => {
     const onToggleViewed = vi.fn();
     render(<DiffFileRow {...defaultProps} onToggleViewed={onToggleViewed} />);
-    const checkbox = screen.getByRole("checkbox");
-    fireEvent.click(checkbox);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Mark src/main.go as viewed" }),
+    );
     expect(onToggleViewed).toHaveBeenCalledTimes(1);
   });
 
-  it("checkbox click does not propagate to row click handler", () => {
+  it("viewed control click does not propagate to row click handler", () => {
     const onToggleExpand = vi.fn();
     const onToggleViewed = vi.fn();
     render(
@@ -182,8 +189,9 @@ describe("DiffFileRow", () => {
         onToggleViewed={onToggleViewed}
       />,
     );
-    const checkbox = screen.getByRole("checkbox");
-    fireEvent.click(checkbox);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Mark src/main.go as viewed" }),
+    );
     expect(onToggleViewed).toHaveBeenCalledTimes(1);
     expect(onToggleExpand).not.toHaveBeenCalled();
   });
@@ -208,7 +216,7 @@ describe("DiffFileRow", () => {
 
   it("has role button and tabIndex 0", () => {
     render(<DiffFileRow {...defaultProps} />);
-    const row = screen.getByRole("button");
+    const row = getRowButton();
     expect(row).toHaveAttribute("tabIndex", "0");
   });
 
@@ -223,7 +231,7 @@ describe("DiffFileRow", () => {
     expect(screen.getByText("-8")).toBeInTheDocument();
   });
 
-  it("renders checkbox with correct aria-label including file path", () => {
+  it("renders viewed control with correct aria-label including file path", () => {
     render(
       <DiffFileRow
         {...defaultProps}

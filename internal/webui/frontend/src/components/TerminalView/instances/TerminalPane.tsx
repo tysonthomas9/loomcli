@@ -9,7 +9,10 @@ import {
   type ReconnectOverlayState,
 } from "./ReconnectingOverlay";
 import { TerminalConnectionOverlay } from "./TerminalConnectionOverlay";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import type { TabState } from "@/components/TerminalView/tabs";
+
+import styles from "./TerminalPane.module.css";
 
 export interface TerminalPaneProps {
   tab: TabState;
@@ -77,6 +80,8 @@ export function TerminalPane({
       : tab.connectionState === "disconnected" ||
         tab.connectionState === "error" ||
         tab.connectionState === "session_ended";
+  const showInitialSkeleton =
+    !hasConnected && tab.connectionState === "connecting";
   return (
     <>
       <TerminalInstance
@@ -93,6 +98,11 @@ export function TerminalPane({
         autoStartStaleSession={autoStartStaleSession}
         autoReconnect={autoReconnect}
       />
+      {showInitialSkeleton ? (
+        <div className={styles.initialSkeleton}>
+          <LoadingSkeleton.Terminal />
+        </div>
+      ) : null}
       {tab.crashReason != null ? (
         <CrashOverlay
           reason={tab.crashReason}

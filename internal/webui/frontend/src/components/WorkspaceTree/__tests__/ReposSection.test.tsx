@@ -2,7 +2,13 @@
  * @vitest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 
@@ -67,5 +73,21 @@ describe("ReposSection", () => {
     await waitFor(() => {
       expect(onRepoRemoved).toHaveBeenCalledOnce();
     });
+  });
+
+  it("renders the empty state inside the repos section", () => {
+    render(
+      <ReposSection repos={[]} workspaceId="ws-alpha" onAddRepo={vi.fn()} />,
+    );
+
+    const reposSection = screen
+      .getByRole("heading", { name: "Repos" })
+      .closest("section");
+    expect(reposSection).toHaveTextContent("No repos in workspace");
+    expect(
+      within(reposSection as HTMLElement).getByRole("button", {
+        name: "+ Add Repo",
+      }),
+    ).toBeInTheDocument();
   });
 });

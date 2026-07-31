@@ -10,18 +10,16 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { ViewMode } from "@/types";
-
 import { WorkspaceBreadcrumb } from "../WorkspaceBreadcrumb";
 
 describe("WorkspaceBreadcrumb", () => {
   describe("with workspace name", () => {
-    it("renders the view label", () => {
+    it("renders the Loom brand label", () => {
       render(
         <WorkspaceBreadcrumb workspaceName="my-project" activeView="kanban" />,
       );
 
-      expect(screen.getByText("Loom Project")).toBeInTheDocument();
+      expect(screen.getByText("Loom")).toBeInTheDocument();
     });
 
     it("does not render the workspace name (that lives in the sidebar selector)", () => {
@@ -67,7 +65,7 @@ describe("WorkspaceBreadcrumb", () => {
       expect(root).toHaveClass("custom-class");
     });
 
-    it("renders view label in element with viewLabel CSS class", () => {
+    it("renders brand label in element with viewLabel CSS class", () => {
       const { container } = render(
         <WorkspaceBreadcrumb
           workspaceName="my-project"
@@ -77,7 +75,7 @@ describe("WorkspaceBreadcrumb", () => {
 
       const viewLabel = container.querySelector('[class*="viewLabel"]');
       expect(viewLabel).toBeInTheDocument();
-      expect(viewLabel).toHaveTextContent("Monitor");
+      expect(viewLabel).toHaveTextContent("Loom");
     });
   });
 
@@ -88,7 +86,16 @@ describe("WorkspaceBreadcrumb", () => {
       expect(screen.getByText("Loom")).toBeInTheDocument();
     });
 
-    it("does not render a view label when workspaceName is null", () => {
+    it("renders the shared brand mark when workspaceName is null", () => {
+      const { container } = render(
+        <WorkspaceBreadcrumb workspaceName={null} activeView="agents" />,
+      );
+
+      expect(container.textContent).toContain("◇");
+      expect(screen.getByText("Loom")).toBeInTheDocument();
+    });
+
+    it("does not render a route label when workspaceName is null", () => {
       render(<WorkspaceBreadcrumb workspaceName={null} activeView="kanban" />);
 
       expect(screen.queryByText("Loom Project")).not.toBeInTheDocument();
@@ -117,33 +124,13 @@ describe("WorkspaceBreadcrumb", () => {
     });
   });
 
-  describe("view labels", () => {
-    const viewLabelMap: Record<ViewMode, string> = {
-      kanban: "Loom Project",
-      table: "List",
-      graph: "Graph",
-      monitor: "Monitor",
-      observability: "Observability",
-      terminal: "Monitor",
-      agents: "Agents",
-      workspace: "Workspace",
-      settings: "Settings",
-      files: "Files",
-      "issue-detail": "Issue",
-    };
+  describe("route consistency", () => {
+    it("renders Loom instead of the active route label", () => {
+      render(<WorkspaceBreadcrumb workspaceName="test" activeView="agents" />);
 
-    for (const [viewMode, expectedLabel] of Object.entries(viewLabelMap)) {
-      it(`renders "${expectedLabel}" for view mode "${viewMode}"`, () => {
-        render(
-          <WorkspaceBreadcrumb
-            workspaceName="test"
-            activeView={viewMode as ViewMode}
-          />,
-        );
-
-        expect(screen.getByText(expectedLabel)).toBeInTheDocument();
-      });
-    }
+      expect(screen.getByText("Loom")).toBeInTheDocument();
+      expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+    });
   });
 
   describe("structure", () => {
@@ -165,7 +152,7 @@ describe("WorkspaceBreadcrumb", () => {
       expect(root.tagName).toBe("SPAN");
     });
 
-    it("contains only the view label as child", () => {
+    it("contains the brand mark and view label as children", () => {
       const { container } = render(
         <WorkspaceBreadcrumb workspaceName="test" activeView="graph" />,
       );
@@ -173,8 +160,9 @@ describe("WorkspaceBreadcrumb", () => {
       const root = container.firstChild as HTMLElement;
       const children = Array.from(root.children);
 
-      expect(children).toHaveLength(1);
-      expect(children[0]?.className).toMatch(/viewLabel/);
+      expect(children).toHaveLength(2);
+      expect(children[0]?.className).toMatch(/brandMark/);
+      expect(children[1]?.className).toMatch(/viewLabel/);
     });
   });
 });

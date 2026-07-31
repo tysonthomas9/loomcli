@@ -49,10 +49,38 @@
   stroke-width: 1.5;
 }
 
+.graphView :global(.react-flow__minimap) {
+  background: var(--color-bg-secondary) !important;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.graphView :global(.react-flow__minimap-mask) {
+  fill: rgb(2 6 23 / 0.58);
+  stroke: var(--color-primary);
+  stroke-width: 2;
+}
+
+.graphView :global(.react-flow__attribution) {
+  bottom: var(--space-2) !important;
+  left: var(--space-2) !important;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.2;
+}
+
+.graphView :global(.react-flow__attribution a) {
+  color: inherit;
+}
+
 /* MiniMap node coloring */
 .miniMapNode {
-  fill: var(--color-border);
-  stroke: none;
+  fill: var(--color-text-secondary);
+  stroke: var(--color-bg);
+  stroke-width: 1px;
 }
 
 /* Legend positioned at bottom-left */

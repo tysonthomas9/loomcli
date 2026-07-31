@@ -1812,6 +1812,7 @@ export function IssueDetailPanel({
   // Full-page maximize toggle for the slide-over.
   const [isMaximized, setIsMaximized] = useState(false);
   const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
+  const renderInline = inline && !isMaximized;
   // Reset to the default slide-over width when the panel closes or the
   // selected issue changes, so a maximized panel doesn't "stick" across opens.
   useEffect(() => {
@@ -1822,24 +1823,24 @@ export function IssueDetailPanel({
   }, [issue?.id]);
 
   // Handle Escape key to close panel via global shortcut layer system.
-  // Inline mode skips this — the embedding view owns close semantics.
-  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !inline);
+  // Inline mode skips this until expanded; the embedding view owns close semantics.
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !renderInline);
 
   // Lock body scroll when open as a slide-out overlay. Inline mode is part
   // of the page flow, so don't lock scroll.
   useEffect(() => {
-    if (isOpen && !inline) {
+    if (isOpen && !renderInline) {
       const previousOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = previousOverflow;
       };
     }
-  }, [isOpen, inline]);
+  }, [isOpen, renderInline]);
 
   // Focus management: only meaningful for the slide-out overlay.
-  useFocusReturn(isOpen && !inline, { focusTarget: panelRef });
-  useFocusTrap(panelRef, isOpen && !inline);
+  useFocusReturn(isOpen && !renderInline, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen && !renderInline);
 
   // Determine content: children override default, otherwise render default content
   const content = children ?? (
@@ -1853,16 +1854,14 @@ export function IssueDetailPanel({
       {...(onIssueUpdate !== undefined && { onIssueUpdate })}
       {...(onCopyLink !== undefined && { onCopyLink })}
       {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
-      {...(!inline && {
-        isMaximized,
-        onToggleMaximize: toggleMaximize,
-      })}
+      isMaximized={isMaximized}
+      onToggleMaximize={toggleMaximize}
     />
   );
 
   // Inline mode: render a regular column without overlay, backdrop, or
   // slide-out animation. The embedding layout reserves the space.
-  if (inline) {
+  if (renderInline) {
     return (
       <aside
         ref={panelRef}

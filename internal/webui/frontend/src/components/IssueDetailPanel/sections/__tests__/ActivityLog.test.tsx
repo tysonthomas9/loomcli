@@ -545,6 +545,26 @@ describe("ActivityLog", () => {
       expect(screen.queryByText(/from P2 to P0/)).not.toBeInTheDocument();
     });
 
+    it("hides bookkeeping fields from multi-field update summaries", () => {
+      render(
+        <ActivityLog
+          comments={[]}
+          events={[
+            createTestEvent({
+              event_type: "issue.updated",
+              actor: "alice",
+              fields: ["description", "updated_at"],
+              field_count: 2,
+            }),
+          ]}
+          issueId="test-issue"
+        />,
+      );
+
+      expect(screen.getByText("alice updated description")).toBeInTheDocument();
+      expect(screen.queryByText(/updated_at/)).not.toBeInTheDocument();
+    });
+
     it("summarizes multi-field updates by count when names are unavailable", () => {
       render(
         <ActivityLog

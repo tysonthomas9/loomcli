@@ -40,7 +40,7 @@ vi.mock("@/components/EmbeddedTerminal", () => ({
 }));
 
 function statusEl(): Element | null {
-  return screen.getByTestId("log-viewer").querySelector("[data-state]");
+  return screen.getByTestId("log-status");
 }
 
 function archiveScrollContainer(): HTMLElement {

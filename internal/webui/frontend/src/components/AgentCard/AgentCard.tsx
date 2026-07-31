@@ -9,7 +9,6 @@ import { RepoBadge } from "@/components/RepoBadge";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 import { getStatusDotColor, getStatusLabel } from "@/utils/agent";
-import { isLeadRole } from "@/utils/agentRole";
 
 import styles from "./AgentCard.module.css";
 
@@ -33,6 +32,14 @@ export interface AgentCardProps {
   selected?: boolean;
 }
 
+function normalizeCardStatus(agent: LoomAgentStatus): string {
+  const status = effectiveAgentStatus(agent).trim();
+  if (status === "" || status.toLowerCase() === "configured") {
+    return "idle";
+  }
+  return status;
+}
+
 /**
  * AgentCard displays a single agent's status in a compact row with circular avatar.
  */
@@ -45,7 +52,7 @@ export function AgentCard({
   compact = false,
   selected = false,
 }: AgentCardProps): JSX.Element {
-  const parsed = parseLoomStatus(effectiveAgentStatus(agent));
+  const parsed = parseLoomStatus(normalizeCardStatus(agent));
   const avatarColor = getAvatarColor(agent.name);
   const dotColor = getStatusDotColor(parsed.type);
   const statusLabel = getStatusLabel(parsed);
@@ -58,10 +65,7 @@ export function AgentCard({
   const isError = parsed.type === "error";
   const initial = getCompactAvatarInitials(agent.name);
   const textColor = shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
-  const roleLabel = agent.role
-    ? agent.role.charAt(0).toUpperCase() + agent.role.slice(1)
-    : "Agent";
-  const showStatusLine = !(isLeadRole(agent.role) && parsed.type === "idle");
+  const roleLabel = agent.role?.trim() ? agent.role : "Agent";
 
   const rootClassName = [styles.card, compact && styles.compact, className]
     .filter(Boolean)
@@ -104,7 +108,9 @@ export function AgentCard({
       </div>
 
       <div className={styles.info}>
-        <span className={styles.name}>{agent.name}</span>
+        <span className={styles.name} title={agent.name}>
+          {agent.name}
+        </span>
         <span className={styles.role}>{roleLabel}</span>
         {agent.repo && showRepoBadge && (
           <span className={styles.repoLine}>
@@ -122,17 +128,15 @@ export function AgentCard({
         )}
       </div>
 
-      {showStatusLine && (
-        <div className={styles.meta}>
-          <span
-            className={styles.statusLine}
-            data-error={isError || undefined}
-            title={taskTitle || liveDetail || statusLabel}
-          >
-            {statusLabel}
-          </span>
-        </div>
-      )}
+      <div className={styles.meta}>
+        <span
+          className={styles.statusLine}
+          data-error={isError || undefined}
+          title={taskTitle || liveDetail || statusLabel}
+        >
+          {statusLabel}
+        </span>
+      </div>
     </div>
   );
 }

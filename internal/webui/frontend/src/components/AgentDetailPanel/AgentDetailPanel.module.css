@@ -280,6 +280,134 @@
   margin: 0 0 10px;
 }
 
+.logsContent {
+  padding: 18px var(--panel-padding-md);
+}
+
+.logsSection {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  border-bottom: none;
+}
+
+.logsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.logsTitleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.logsTitleRow .sectionTitle {
+  margin-bottom: 0;
+}
+
+.logsRefreshButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-panel-bg);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.logsRefreshButton:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.logsRefreshButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.logStatusChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: capitalize;
+}
+
+.logStatusChip[data-state="connected"] {
+  border-color: color-mix(in srgb, var(--color-success) 28%, transparent);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success);
+}
+
+.logStatusChip[data-state="disconnected"],
+.logStatusChip[data-state="error"] {
+  border-color: color-mix(in srgb, var(--color-danger) 28%, transparent);
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  color: var(--color-danger);
+}
+
+.logStatusChip[data-state="connecting"] {
+  border-color: color-mix(in srgb, var(--color-warning) 28%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--color-warning);
+}
+
+.logViewer {
+  flex: 1;
+  min-height: 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  background: var(--terminal-bg);
+}
+
+.logViewer .emptyState {
+  margin: auto;
+  padding: 24px;
+  color: var(--terminal-muted, var(--color-text-muted));
+  text-align: center;
+}
+
+.archiveLogPre {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: var(--terminal-fg);
+  font-family: var(--terminal-font-family, var(--font-mono));
+  font-size: var(--terminal-font-size, 12px);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 /* ============= Overview stat cards ============= */
 
 .statGrid {
