@@ -422,6 +422,30 @@ func TestProgressValidationRejectsRegressionAndIncompleteCompletion(t *testing.T
 	}
 }
 
+func TestProgressTransitionTreatsEmptyJSONCollectionsAsCanonicalIntent(t *testing.T) {
+	store := newMemoryProgressStore()
+	operations := newIdempotentOperations()
+	now := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
+	manager := newTestManager(t, store, operations, nil, &now)
+	spec := validSpec()
+	spec.Grants = nil
+	pending, err := manager.begin(t, spec)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+
+	// JSON transports preserve [] as a non-nil empty slice, while clone helpers
+	// may canonicalize it to nil. Both represent the same immutable intent.
+	pending.Spec.Role.PathPatterns = []string{}
+	pending.Spec.Binding.EventPatterns = []string{}
+	pending.Spec.Grants = []GrantSpec{}
+	running := cloneRecord(pending)
+	running.State = StateRunning
+	if err := validateTransition(pending, running); err != nil {
+		t.Fatalf("empty collection representation changed canonical intent: %v", err)
+	}
+}
+
 func TestManagerRejectsMissingServerMintedProvisioningGeneration(t *testing.T) {
 	store := newMemoryProgressStore()
 	store.generation = ""

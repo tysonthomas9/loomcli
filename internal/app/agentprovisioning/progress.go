@@ -97,7 +97,7 @@ func validateTransition(previous, next *Record) error {
 		previous.SpecFingerprint != next.SpecFingerprint ||
 		previous.UnusedRolePolicy != next.UnusedRolePolicy ||
 		!previous.CreatedAt.Equal(next.CreatedAt) ||
-		!reflect.DeepEqual(previous.Spec, next.Spec) {
+		!reflect.DeepEqual(normalizeSpec(previous.Spec), normalizeSpec(next.Spec)) {
 		return fmt.Errorf("provisioning transition changed immutable intent: %w", ErrConflict)
 	}
 	if next.UpdatedAt.Before(previous.UpdatedAt) {
