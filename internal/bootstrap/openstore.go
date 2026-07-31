@@ -343,7 +343,11 @@ func recoverLocalStore(
 			lastErr = capabilityErr
 		}
 
-		emb, err := StartEmbedded(recoveryCtx, dataDir, logger)
+		// The recovery timeout bounds lock/reuse negotiation, but it is not the
+		// lifetime of a replacement process that this StoreHandle will own. Use
+		// the caller's service context for the child; canceling recoveryCtx on a
+		// successful return would otherwise kill the freshly started FleetDB.
+		emb, err := StartEmbedded(ctx, dataDir, logger)
 		if err == nil {
 			handle, openErr := openStartedLocalStore(emb, cfg, logger)
 			if openErr != nil {

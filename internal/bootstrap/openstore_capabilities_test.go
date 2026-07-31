@@ -3,13 +3,16 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -188,5 +191,98 @@ func TestOpenStoreLocalDoesNotRecoverTypedCapabilityIncompatibility(t *testing.T
 	}
 	if got := capabilityCalls.Load(); got != 1 {
 		t.Fatalf("capability calls = %d, want no recovery retry for typed incompatibility", got)
+	}
+}
+
+func TestOpenStoreLocalRecoveredOwnedRuntimeOutlivesNegotiation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("helper launcher uses a POSIX shell")
+	}
+	t.Setenv(EnvFleetDBURL, "")
+	t.Setenv("GO_WANT_FLEETDB_CAPABILITY_HELPER", "1")
+	dataDir := t.TempDir()
+	if _, err := authority.LoadOrCreateLocalFleetDBServiceCredential(embeddedFleetDBAuthDir(dataDir)); err != nil {
+		t.Fatalf("create service credential: %v", err)
+	}
+
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test binary: %v", err)
+	}
+	helperPath := filepath.Join(t.TempDir(), "fleet-db")
+	helperScript := fmt.Sprintf(`#!/bin/sh
+if [ "${1:-}" = "--help" ]; then
+  echo "fleet-db test server help"
+  exit 0
+fi
+exec %q -test.run=^TestFleetDBCapabilityHelperProcess$
+`, testBinary)
+	if err := os.WriteFile(helperPath, []byte(helperScript), 0755); err != nil {
+		t.Fatalf("write helper launcher: %v", err)
+	}
+	t.Setenv(EnvFleetDBBin, helperPath)
+
+	var unavailable atomic.Bool
+	oldRuntime := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			if unavailable.Load() {
+				http.Error(w, "shutting down", http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case fleetdb.CapabilitiesAPIPath:
+			unavailable.Store(true)
+			http.Error(w, "shutting down", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer oldRuntime.Close()
+
+	fleetDir := filepath.Join(dataDir, "fleet-db")
+	if err := writeEmbeddedRuntime(fleetDir, embeddedRuntimeInfo{PID: os.Getpid(), URL: oldRuntime.URL}); err != nil {
+		t.Fatalf("write old runtime: %v", err)
+	}
+
+	handle, err := OpenStoreWithOptions(context.Background(), dataDir, nil, OpenStoreOptions{
+		RequiredFleetDBCapabilities: []string{fleetdb.WorkflowCatalogVersionLifecycleCapability},
+	})
+	if err != nil {
+		t.Fatalf("OpenStoreWithOptions: %v", err)
+	}
+	defer handle.Close()
+	if handle.reusedLocal || handle.embedded == nil {
+		t.Fatalf("recovered handle ownership = reused %t, embedded %v; want owned replacement", handle.reusedLocal, handle.embedded != nil)
+	}
+
+	// recoverLocalStore cancels its negotiation context when it returns. Give
+	// that cancellation time to propagate, then prove the owned replacement is
+	// still serving capabilities under the caller's service lifetime.
+	time.Sleep(100 * time.Millisecond)
+	if err := requireFleetDBCapabilities(context.Background(), handle, []string{fleetdb.WorkflowCatalogVersionLifecycleCapability}); err != nil {
+		t.Fatalf("recovered owned runtime did not outlive negotiation: %v", err)
+	}
+}
+
+func TestFleetDBCapabilityHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_FLEETDB_CAPABILITY_HELPER") != "1" {
+		return
+	}
+	addr := os.Getenv("FLEET_SERVER_ADDR")
+	if addr == "" {
+		t.Fatal("FLEET_SERVER_ADDR is empty")
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc(fleetdb.CapabilitiesAPIPath, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"api_revision":"v1","capabilities":["workflow_catalog.version_lifecycle.v1"]}`))
+	})
+	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: time.Second}
+	if err := server.ListenAndServe(); err != nil {
+		t.Fatalf("serve FleetDB helper: %v", err)
 	}
 }
