@@ -44,7 +44,7 @@ DEST="${BUILTIN_DIST_DEST:-$(mktemp -d -t loom-builtin-dist.XXXXXX)}"
 case "$BUILTIN_WORKFLOW" in
   epic-runner)
     # builtinEpicRunnerSpec in internal/infra/workflowdistribution/catalog_build.go.
-    SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts openshell-task-runner.ts)
+    SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts daytona-provider-host.ts openshell-task-runner.ts)
     ;;
   github-review-agent)
     # builtinGitHubReviewAgentSpec in internal/infra/workflowdistribution/catalog_build.go.
@@ -52,7 +52,7 @@ case "$BUILTIN_WORKFLOW" in
     ;;
   bug-fix-agent)
     # builtinBugFixAgentSpec in internal/infra/workflowdistribution/catalog_build.go.
-    SPEC_FILES=(bug-fix-agent.ts local-task-runner.ts daytona-task-runner.ts)
+    SPEC_FILES=(bug-fix-agent.ts local-task-runner.ts daytona-task-runner.ts daytona-provider-host.ts)
     ;;
   review-loop-agent)
     # builtinReviewLoopAgentSpec in internal/infra/workflowdistribution/catalog_build.go.

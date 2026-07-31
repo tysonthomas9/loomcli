@@ -194,6 +194,24 @@ func TestDesktopSidecarStampsFleetCommitFromPairedCheckout(t *testing.T) {
 	}
 }
 
+func TestPackagedBuiltinDigestIncludesDaytonaProviderHost(t *testing.T) {
+	t.Parallel()
+
+	contents, err := os.ReadFile(filepath.Join(repoRoot(t), "scripts", "rebuild-builtin-bundle.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents)
+	for _, want := range []string{
+		"SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts daytona-provider-host.ts openshell-task-runner.ts)",
+		"SPEC_FILES=(bug-fix-agent.ts local-task-runner.ts daytona-task-runner.ts daytona-provider-host.ts)",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("packaged builtin digest manifest is missing %q", want)
+		}
+	}
+}
+
 func TestMakefileLocalModeVerifyAlwaysReadsLiveManifest(t *testing.T) {
 	t.Parallel()
 
