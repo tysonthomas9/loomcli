@@ -326,12 +326,9 @@ func recoverLocalStore(
 	fleetDir := filepath.Join(dataDir, "fleet-db")
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-	lastErr := initialErr
 
 	for {
-		if handle, ok, err := tryReuseLocalStore(recoveryCtx, fleetDir, cfg, logger); err != nil {
-			lastErr = err
-		} else if ok {
+		if handle, ok, _ := tryReuseLocalStore(recoveryCtx, fleetDir, cfg, logger); ok {
 			capabilityErr := requireFleetDBCapabilities(recoveryCtx, handle, required)
 			if capabilityErr == nil {
 				return handle, nil
@@ -340,7 +337,6 @@ func recoverLocalStore(
 			if isFleetDBCapabilityIncompatibility(capabilityErr) {
 				return nil, fmt.Errorf("openstore: fleet-db compatibility: %w", capabilityErr)
 			}
-			lastErr = capabilityErr
 		}
 
 		// The recovery timeout bounds lock/reuse negotiation, but it is not the
@@ -364,11 +360,9 @@ func recoverLocalStore(
 		if !errors.Is(err, ErrEmbeddedAlreadyRunning) {
 			return nil, fmt.Errorf("openstore: recover local runtime after compatibility failure %v: %w", initialErr, err)
 		}
-		lastErr = err
-
 		select {
 		case <-recoveryCtx.Done():
-			return nil, fmt.Errorf("openstore: recover local runtime after compatibility failure %v: %w (last error: %v)", initialErr, recoveryCtx.Err(), lastErr)
+			return nil, fmt.Errorf("openstore: recover local runtime after compatibility failure %v: %w (last error: %v)", initialErr, recoveryCtx.Err(), err)
 		case <-ticker.C:
 		}
 	}

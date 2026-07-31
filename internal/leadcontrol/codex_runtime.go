@@ -43,11 +43,7 @@ type CodexLeadRuntimeConfig struct {
 
 func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error {
 	cfg = normalizeCodexLeadRuntimeConfig(cfg)
-	runtimeHome, sqliteHome := codexLeadRuntimeDirs(cfg)
-	if err := os.MkdirAll(sqliteHome, 0700); err != nil {
-		return fmt.Errorf("create codex lead runtime directory: %w", err)
-	}
-	childEnv, err := codexLeadChildEnv(runtimeHome, interaction.FilterChildBaseEnv(os.Environ()))
+	runtimeHome, sqliteHome, childEnv, err := prepareCodexLeadRuntime(cfg)
 	if err != nil {
 		return err
 	}
@@ -94,6 +90,18 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	runtime.Status = RuntimeStatusDisconnected
 	_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Runtime, cfg.Workspace, cfg.SessionID, runtime)
 	return tuiErr
+}
+
+func prepareCodexLeadRuntime(cfg CodexLeadRuntimeConfig) (string, string, []string, error) {
+	runtimeHome, sqliteHome := codexLeadRuntimeDirs(cfg)
+	if err := os.MkdirAll(sqliteHome, 0700); err != nil {
+		return "", "", nil, fmt.Errorf("create codex lead runtime directory: %w", err)
+	}
+	childEnv, err := codexLeadChildEnv(runtimeHome, interaction.FilterChildBaseEnv(os.Environ()))
+	if err != nil {
+		return "", "", nil, err
+	}
+	return runtimeHome, sqliteHome, childEnv, nil
 }
 
 func captureCodexTranscriptAfterTUI(
@@ -215,6 +223,7 @@ func codexLeadChildEnv(runtimeHome string, baseEnv []string) ([]string, error) {
 	if err := os.MkdirAll(isolatedHome, 0700); err != nil {
 		return nil, fmt.Errorf("create isolated codex lead home: %w", err)
 	}
+	// #nosec G302 -- this is a private directory, so owner-only traversal is required.
 	if err := os.Chmod(isolatedHome, 0700); err != nil {
 		return nil, fmt.Errorf("secure isolated codex lead home: %w", err)
 	}
@@ -254,7 +263,7 @@ func linkCodexHomeFile(sourceHome, isolatedHome, name string, required bool) err
 		return fmt.Errorf("find Codex %s in configured home: %w", name, err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("Codex %s in configured home is not a regular file", name)
+		return fmt.Errorf("codex %s in configured home is not a regular file", name)
 	}
 	target := filepath.Join(isolatedHome, name)
 	if existing, err := os.Lstat(target); err == nil {
