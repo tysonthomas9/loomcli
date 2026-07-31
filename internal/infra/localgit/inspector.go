@@ -60,26 +60,8 @@ func (Inspector) MatchRemote(
 		return sourcecontrol.CheckoutConflict, nil
 	}
 
-	var stdout limitedBuffer
-	var stderr limitedBuffer
-	stdout.limit = maxGitRemoteOutput
-	stderr.limit = maxGitRemoteOutput
-	cmd := exec.CommandContext(ctx, "git", "-C", targetPath, "remote", "get-url", remoteName) //nolint:gosec // fixed executable and validated remote name.
-	cmd.Env = localGitEnv()
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err = cmd.Run()
-	clearCommandEnv(cmd)
-	if err != nil {
-		stdout.zero()
-		stderr.zero()
-		return sourcecontrol.CheckoutConflict, nil
-	}
-	observed := bytes.TrimSpace(stdout.bytes())
-	matched := bytes.Equal(observed, []byte(expectedRemote))
-	stdout.zero()
-	stderr.zero()
-	if matched {
+	mode := exactCheckoutRemoteMode(ctx, targetPath, remoteName, expectedRemote)
+	if mode != checkoutRemoteUnavailable {
 		return sourcecontrol.CheckoutMatched, nil
 	}
 	return sourcecontrol.CheckoutConflict, nil

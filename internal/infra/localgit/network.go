@@ -65,6 +65,28 @@ func fetchRefAmbient(ctx context.Context, command connectors.GitReadCommand) err
 	return nil
 }
 
+// fetchRefFromLocalSource performs the same exact read-only ref fetch as the
+// named-remote path, but uses the already-admitted absolute source path. It is
+// reached only after exactCheckoutRemoteMode proves the target is a linked
+// worktree of that source repository, so no persistent remote mutation is
+// needed in the user's repository configuration.
+func fetchRefFromLocalSource(ctx context.Context, command connectors.GitReadCommand) error {
+	if err := validateGitReadCommand(command); err != nil {
+		return err
+	}
+	if !filepath.IsAbs(command.RemoteURL) || filepath.Clean(command.RemoteURL) != command.RemoteURL {
+		return fmt.Errorf("local Git source path is invalid")
+	}
+	args := []string{
+		"fetch", "--no-tags", "--force", "--",
+		command.RemoteURL, command.SourceRef + ":" + command.DestinationRef,
+	}
+	if out, err := runNetworkGit(ctx, command.TargetPath, nil, true, args...); err != nil {
+		return fmt.Errorf("ambient local Git fetch failed: %w: %s", err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
 func fetchRefWithCredential(
 	ctx context.Context,
 	command connectors.GitReadCommand,

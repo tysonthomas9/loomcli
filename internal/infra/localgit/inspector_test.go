@@ -41,6 +41,40 @@ func TestInspectorMatchesWithoutReturningObservedRemote(t *testing.T) {
 	}
 }
 
+func TestInspectorMatchesLinkedWorktreeWithoutConfiguredRemote(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	workspace := filepath.Join(root, "workspace")
+	target := filepath.Join(workspace, "repo")
+	inspectorRunGit(t, "", "init", "-b", "main", source)
+	inspectorRunGit(t, source, "config", "user.name", "Test User")
+	inspectorRunGit(t, source, "config", "user.email", "test@example.test")
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("local source\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inspectorRunGit(t, source, "add", "README.md")
+	inspectorRunGit(t, source, "commit", "-m", "seed")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	inspectorRunGit(t, source, "worktree", "add", "--detach", target, "HEAD")
+
+	match, err := (Inspector{}).MatchRemote(t.Context(), target, "origin", source)
+	if err != nil || match != sourcecontrol.CheckoutMatched {
+		t.Fatalf("linked local checkout = %q, %v", match, err)
+	}
+
+	other := filepath.Join(root, "other")
+	inspectorRunGit(t, "", "init", other)
+	match, err = (Inspector{}).MatchRemote(t.Context(), target, "origin", other)
+	if err != nil || match != sourcecontrol.CheckoutConflict {
+		t.Fatalf("different local source = %q, %v", match, err)
+	}
+}
+
 func TestInspectorDoesNotReflectLegacyRemoteCredential(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

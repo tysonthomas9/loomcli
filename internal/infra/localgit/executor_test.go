@@ -111,6 +111,45 @@ func TestExecutorFetchesOnlyExactSourceControlRef(t *testing.T) {
 	}
 }
 
+func TestExecutorFetchesFromAdmittedLocalSourceWithoutMutatingRemoteConfig(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	workspace := filepath.Join(root, "workspace")
+	target := filepath.Join(workspace, "repo")
+	executorRunGit(t, "", "init", "-b", "main", source)
+	executorRunGit(t, source, "config", "user.name", "Test User")
+	executorRunGit(t, source, "config", "user.email", "test@example.test")
+	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("local source\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executorRunGit(t, source, "add", "README.md")
+	executorRunGit(t, source, "commit", "-m", "seed")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	executorRunGit(t, source, "worktree", "add", "--detach", target, "HEAD")
+	want := strings.TrimSpace(executorGitOutput(t, source, "rev-parse", "main"))
+
+	command := connectors.GitReadCommand{
+		WorkspaceKey: "WS-1", OperationID: "fetch-local-1", RepositoryRef: "repo-1",
+		Operation: connectors.GitReadFetchRef, RemoteURL: source,
+		WorkspacePath: workspace, TargetPath: target, RemoteName: "origin",
+		SourceRef: "refs/heads/main", DestinationRef: "refs/loom/tasks/run-local/base",
+	}
+	if err := New(nil).ExecuteGitRead(t.Context(), command); err != nil {
+		t.Fatalf("ExecuteGitRead local fetch: %v", err)
+	}
+	if got := strings.TrimSpace(executorGitOutput(t, target, "rev-parse", command.DestinationRef)); got != want {
+		t.Fatalf("fetched commit = %q, want %q", got, want)
+	}
+	if output := strings.TrimSpace(executorGitOutput(t, target, "remote")); output != "" {
+		t.Fatalf("local fetch persisted remote configuration %q", output)
+	}
+}
+
 func TestExecutorRejectsUnboundedOrMissingOperation(t *testing.T) {
 	if err := (*Executor)(nil).ExecuteGitRead(t.Context(), connectors.GitReadCommand{}); err == nil {
 		t.Fatal("nil executor succeeded")
