@@ -160,6 +160,32 @@ components:
     retry_backoff: "fixed 100ms probe; returns the last runtime error on timeout"
     classification: startup-wait
 
+  - id: embedded-fleetdb-recovery-wait
+    kind: ticker
+    file: internal/bootstrap/openstore.go
+    function: recoverLocalStore
+    site: "time.NewTicker#1"
+    capability: platform
+    owner: embedded fleet-db bootstrap
+    cadence: "100ms while a borrowed local runtime shuts down and its replacement acquires ownership"
+    cancellation: "caller context or the bounded startup timeout"
+    readiness_health: "returns only after a reused or newly owned FleetDB satisfies required capabilities"
+    retry_backoff: "fixed 100ms ownership retry; typed capability incompatibility fails closed"
+    classification: startup-wait
+
+  - id: local-daemon-workspace-rotation
+    kind: ticker
+    file: internal/cli/local/daemon.go
+    function: runLocalDaemonOnce
+    site: "time.NewTicker#1"
+    capability: agents
+    owner: local runtime
+    cadence: "2s active-workspace check while the managed daemon child is running"
+    cancellation: "local runtime context cancellation or managed daemon exit"
+    readiness_health: "workspace drift rotates the managed daemon instead of leaving it bound to stale configuration"
+    retry_backoff: "fixed 2s poll; workspace read failures are logged and retried"
+    classification: managed
+
   - id: local-runtime-startup-wait
     kind: ticker
     file: internal/cli/local/local_cmd.go

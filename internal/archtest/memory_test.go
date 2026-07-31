@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -24,7 +25,7 @@ func TestRepositoryProfileCacheIsIsolatedAndRemoved(t *testing.T) {
 
 	var scoped string
 	err := withRepositoryProfileCache(
-		AnalysisProfile{Name: "cache-test", GOOS: "linux", GOARCH: "amd64"},
+		AnalysisProfile{Name: "cache-test", GOOS: "plan9", GOARCH: "amd64"},
 		func(environment []string) error {
 			for _, entry := range environment {
 				if strings.HasPrefix(entry, "GOCACHE=") {
@@ -49,6 +50,34 @@ func TestRepositoryProfileCacheIsIsolatedAndRemoved(t *testing.T) {
 	}
 	if _, err := os.Stat(inherited); !os.IsNotExist(err) {
 		t.Fatalf("inherited GOCACHE was mutated: %v", err)
+	}
+}
+
+func TestRepositoryNativeProfileReusesExplicitCallerCache(t *testing.T) {
+	inherited := t.TempDir()
+	t.Setenv("GOCACHE", inherited)
+
+	var scoped string
+	err := withRepositoryProfileCache(
+		AnalysisProfile{Name: "native-cache-test", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
+		func(environment []string) error {
+			for _, entry := range environment {
+				if strings.HasPrefix(entry, "GOCACHE=") {
+					scoped = strings.TrimPrefix(entry, "GOCACHE=")
+					break
+				}
+			}
+			return os.WriteFile(filepath.Join(scoped, "proof"), []byte("reused"), 0o600)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scoped != inherited {
+		t.Fatalf("native profile GOCACHE = %q, want inherited %q", scoped, inherited)
+	}
+	if _, err := os.Stat(filepath.Join(inherited, "proof")); err != nil {
+		t.Fatalf("native profile did not reuse caller cache: %v", err)
 	}
 }
 

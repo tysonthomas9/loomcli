@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 // withRepositoryProfileCache gives one repository-scale package analysis an
@@ -14,6 +16,9 @@ import (
 // but retaining every content-addressed variant makes peak disk usage scale
 // with the number of profiles instead of the largest individual profile.
 func withRepositoryProfileCache(profile AnalysisProfile, analyze func([]string) error) (resultErr error) {
+	if cacheDir, ok := reusableNativeProfileCache(profile); ok {
+		return analyze(profileEnvironmentWithCache(profile, cacheDir))
+	}
 	cacheDir, err := os.MkdirTemp("", "loom-archcheck-gocache-")
 	if err != nil {
 		return fmt.Errorf("create build cache for profile %s: %w", profile.Name, err)
@@ -31,4 +36,27 @@ func withRepositoryProfileCache(profile AnalysisProfile, analyze func([]string) 
 	}()
 
 	return analyze(profileEnvironmentWithCache(profile, cacheDir))
+}
+
+// reusableNativeProfileCache avoids holding two full native compilation
+// caches at once during make gate. The preceding vet/build/lint stages have
+// already populated the caller-owned cache for this exact untagged target, so
+// reuse adds no cross-target variants. Tagged, race, and cross-compiled
+// profiles remain isolated and are removed after each analysis.
+func reusableNativeProfileCache(profile AnalysisProfile) (string, bool) {
+	if profile.GOOS != runtime.GOOS || profile.GOARCH != runtime.GOARCH || profile.Race || len(profile.Tags) != 0 {
+		return "", false
+	}
+	for _, entry := range os.Environ() {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok || name != "GOCACHE" || !filepath.IsAbs(value) {
+			continue
+		}
+		info, err := os.Stat(value)
+		if err == nil && info.IsDir() {
+			return filepath.Clean(value), true
+		}
+		return "", false
+	}
+	return "", false
 }
