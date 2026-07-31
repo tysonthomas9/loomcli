@@ -6,7 +6,16 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+type classifyRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function classifyRoundTripFunc) RoundTrip(
+	request *http.Request,
+) (*http.Response, error) {
+	return function(request)
+}
 
 func TestClassifyHTTPError_GoneMapsToErrGone(t *testing.T) {
 	t.Parallel()
@@ -31,12 +40,66 @@ func TestClassifyHTTPError_RateLimitRemainsRetryable(t *testing.T) {
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("err = %v, want errors.Is ErrRateLimited", err)
 	}
+	if !errors.Is(err, store.ErrControlPlaneRateLimited) {
+		t.Fatalf(
+			"err = %v, want errors.Is ErrControlPlaneRateLimited",
+			err,
+		)
+	}
 	if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("err = %v, must not satisfy a deterministic conflict", err)
 	}
 	mapped := mapExecutionTransportError("request TaskRun", err)
 	if !errors.Is(mapped, ErrExecutionUnavailable) || errors.Is(mapped, ErrExecutionConflict) {
 		t.Fatalf("execution mapping = %v, want unavailable and not conflict", mapped)
+	}
+}
+
+func TestClassifyHTTPError_ServerFailureIsControlPlaneUnavailable(
+	t *testing.T,
+) {
+	t.Parallel()
+	err := classifyHTTPError(
+		http.MethodGet,
+		"/api/v1/WS/agent-sessions/session-1",
+		http.StatusServiceUnavailable,
+		[]byte(`{"error":{"code":"unavailable","message":"try again"}}`),
+	)
+	if !errors.Is(err, store.ErrControlPlaneUnavailable) {
+		t.Fatalf(
+			"err = %v, want errors.Is ErrControlPlaneUnavailable",
+			err,
+		)
+	}
+	if errors.Is(err, domain.ErrNotFound) ||
+		errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("err = %v, must not be a deterministic read failure", err)
+	}
+}
+
+func TestClientTransportFailureIsControlPlaneUnavailable(t *testing.T) {
+	t.Parallel()
+	client, err := New(Config{
+		BaseURL: "http://fleet.invalid",
+		HTTPClient: &http.Client{Transport: classifyRoundTripFunc(
+			func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("connection refused")
+			},
+		)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.AgentSessions().Get(
+		t.Context(),
+		"WS",
+		"session-1",
+	)
+	if !errors.Is(err, store.ErrControlPlaneUnavailable) {
+		t.Fatalf(
+			"err = %v, want errors.Is ErrControlPlaneUnavailable",
+			err,
+		)
 	}
 }
 

@@ -18,7 +18,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -136,10 +135,10 @@ type testHarness struct {
 }
 
 func newHarness(t *testing.T) *testHarness {
-	return newHarnessWithConfig(t, "", "")
+	return newHarnessWithRunner(t, "")
 }
 
-func newHarnessWithConfig(t *testing.T, localSettingsDir, runner string) *testHarness {
+func newHarnessWithRunner(t *testing.T, runner string) *testHarness {
 	t.Helper()
 	st := memstore.New()
 	h := &testHarness{
@@ -177,10 +176,9 @@ func newHarnessWithConfig(t *testing.T, localSettingsDir, runner string) *testHa
 		t.Fatalf("compose Execution capability: %v", err)
 	}
 	module := NewModule(Config{
-		Store:            st,
-		Execution:        executionCapability.TaskRunAPI(),
-		Authorities:      executionCapability.TaskRunAuthorityResolver(),
-		LocalSettingsDir: localSettingsDir,
+		Store:       st,
+		Execution:   executionCapability.TaskRunAPI(),
+		Authorities: executionCapability.TaskRunAuthorityResolver(),
 		IssueBackends: func(_, actor string) (backend.IssueBackend, error) {
 			h.backend.actor = actor
 			return h.backend, nil
@@ -478,36 +476,17 @@ func TestTaskRunHeartbeatAndLogs(t *testing.T) {
 	}
 }
 
-func TestTaskRunRuntimeCredentialRequiresDaytonaRunner(t *testing.T) {
-	dir := t.TempDir()
-	settings := runtimesettings.Default()
-	daytona, err := runtimesettings.SealRuntimeCredential(dir, runtimesettings.RuntimeCredentialProviderDaytona, "dtn-secret", time.Now())
-	if err != nil {
-		t.Fatalf("seal daytona credential: %v", err)
+func TestTaskRunRuntimeCredentialOperationIsNotRegistered(t *testing.T) {
+	h := newHarnessWithRunner(t, "daytona-task-runner")
+	resp, decoded := h.postOp(t, "runtime-credential", map[string]any{
+		"provider": "daytona",
+		"value":    "credential-sentinel",
+	}, identity{})
+	if resp.StatusCode != http.StatusNotFound || errorCode(t, decoded) != "unknown_op" {
+		t.Fatalf("runtime credential operation = %d %v, want 404 unknown_op", resp.StatusCode, decoded)
 	}
-	github, err := runtimesettings.SealRuntimeCredential(dir, runtimesettings.RuntimeCredentialProviderGitHub, "gh-secret", time.Now())
-	if err != nil {
-		t.Fatalf("seal github credential: %v", err)
-	}
-	settings.RuntimeCredentials.Daytona = daytona
-	settings.RuntimeCredentials.GitHub = github
-	if err := runtimesettings.Save(dir, settings); err != nil {
-		t.Fatalf("save settings: %v", err)
-	}
-
-	h := newHarnessWithConfig(t, dir, "daytona-task-runner")
-	resp, decoded := h.postOp(t, "runtime-credential", map[string]any{"provider": "daytona"}, identity{})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("runtime-credential status = %d: %v", resp.StatusCode, decoded)
-	}
-	if decoded["value"] != "dtn-secret" || decoded["provider"] != "daytona" {
-		t.Fatalf("runtime credential = %v, want daytona secret", decoded)
-	}
-
-	local := newHarnessWithConfig(t, dir, "local-task-runner")
-	resp, decoded = local.postOp(t, "runtime-credential", map[string]any{"provider": "github"}, identity{})
-	if resp.StatusCode != http.StatusForbidden || errorCode(t, decoded) != "not_owner" {
-		t.Fatalf("local runtime credential = %d %v, want 403 not_owner", resp.StatusCode, decoded)
+	if strings.Contains(fmt.Sprint(decoded), "credential-sentinel") {
+		t.Fatalf("runtime credential response exposed request material: %v", decoded)
 	}
 }
 

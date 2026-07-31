@@ -21,6 +21,7 @@ func TestRunHarnessLeadRuntimeDrainsQueuedInbox(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	createHarnessLeadSession(t, st)
+	sessionRuntime := &storeBackedSessionRuntime{store: st}
 
 	fake := newFakeHarnessConversation()
 	origOpen := openHarnessConversation
@@ -34,6 +35,7 @@ func TestRunHarnessLeadRuntimeDrainsQueuedInbox(t *testing.T) {
 	go func() {
 		runtimeErr <- RunHarnessLeadRuntime(ctx, HarnessLeadRuntimeConfig{
 			Store:     st,
+			Runtime:   sessionRuntime,
 			Workspace: "WS",
 			LeadName:  "nova",
 			SessionID: "lead-session",
@@ -54,7 +56,7 @@ func TestRunHarnessLeadRuntimeDrainsQueuedInbox(t *testing.T) {
 	// Enqueue exactly the way serve does when the registry lookup misses:
 	// a queued inbox message with NO in-process delivery.
 	const message = "follow-up question from the chat panel"
-	if _, err := createLeadInboxMessage(ctx, st, "WS", "nova", "lead-session", message, LeadMessageDeliveryOptions{
+	if _, err := createLeadInboxMessage(ctx, sessionRuntime, "WS", "nova", "lead-session", message, LeadMessageDeliveryOptions{
 		SourceKind: "user_chat",
 		DedupeKey:  "drain-test-1",
 	}); err != nil {

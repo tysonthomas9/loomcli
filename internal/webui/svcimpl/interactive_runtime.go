@@ -12,9 +12,12 @@ import (
 // ownership was established from server-owned tab metadata, not from a
 // caller-supplied Fleet AgentSession.TerminalID.
 type InteractiveRuntimeSession struct {
-	Key    terminal.SessionKey
-	Live   bool
-	Closed bool
+	Key                   terminal.SessionKey
+	InteractionSessionID  string
+	InteractionTerminalID string
+	StreamRef             string
+	Live                  bool
+	Closed                bool
 }
 
 // InteractiveRuntimeController is the process-local ownership seam for
@@ -28,10 +31,12 @@ type InteractiveRuntimeController interface {
 // InteractiveRuntimeTab is the minimum server-owned tab metadata needed to
 // bind an interactive agent assignment to a process-local PTY.
 type InteractiveRuntimeTab struct {
-	SessionName string
-	Kind        string
-	AgentID     string
-	PTYAlive    bool
+	SessionName           string
+	Kind                  string
+	AgentID               string
+	InteractionSessionID  string
+	InteractionTerminalID string
+	PTYAlive              bool
 }
 
 // InteractiveRuntimeTabSource is the server-owned tab-metadata read surface
@@ -92,11 +97,18 @@ func (r *tabOwnedInteractiveRuntime) OwnedAgentSessions(
 		// ListTabs marks metadata created by this server process attachable even
 		// before the first WebSocket creates its PTY. Preserve that key so a
 		// Stop can fence the startup window with a second idempotent Kill.
-		if !live && !closed && !tab.PTYAlive {
+		hasInteractionIdentity := strings.TrimSpace(tab.InteractionSessionID) != "" &&
+			strings.TrimSpace(tab.InteractionTerminalID) != ""
+		if !live && !closed && !tab.PTYAlive && !hasInteractionIdentity {
 			continue
 		}
 		seen[key] = struct{}{}
-		owned = append(owned, InteractiveRuntimeSession{Key: key, Live: live, Closed: closed})
+		owned = append(owned, InteractiveRuntimeSession{
+			Key: key, InteractionSessionID: tab.InteractionSessionID,
+			InteractionTerminalID: tab.InteractionTerminalID,
+			StreamRef:             "terminal:" + key.String(),
+			Live:                  live, Closed: closed,
+		})
 	}
 	sort.Slice(owned, func(i, j int) bool { return owned[i].Key.Name < owned[j].Key.Name })
 	return owned, nil

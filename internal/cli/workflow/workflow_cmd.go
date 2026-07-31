@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,13 +13,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/workflows"
+	workflows "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 )
 
 var (
@@ -40,11 +40,6 @@ var (
 	workflowDigestFiles  []string
 )
 
-var (
-	workflowWithActiveWorkspace = cmdstore.WithActiveWorkspace
-	workflowBuildAndRegister    = workflows.BuildAndRegister
-)
-
 var workflowCmd = &cobra.Command{
 	Use:     "workflow",
 	Short:   "Author, approve, activate, and run Flue workflows",
@@ -59,10 +54,11 @@ var workflowCloneCmd = &cobra.Command{
 }
 
 var workflowBuildCmd = &cobra.Command{
-	Use:   "build <workflow>",
-	Short: "Build local workflow TypeScript source and register a non-active DriverVersion",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkflowBuild,
+	Use:               "build <workflow>",
+	Short:             "Build local workflow TypeScript source and register a non-active DriverVersion",
+	Args:              cobra.ExactArgs(1),
+	PersistentPreRunE: cli.PrepareStandaloneHTTPCommand,
+	RunE:              runWorkflowBuild,
 }
 
 var workflowApproveCmd = &cobra.Command{
@@ -210,72 +206,75 @@ func runWorkflowClone(_ *cobra.Command, args []string) error {
 }
 
 //nolint:funlen // The cobra handler keeps build, diagnostics, and JSON response assembly in one readable path.
-func runWorkflowBuild(_ *cobra.Command, args []string) error {
-	return workflowWithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		source, err := workflows.ReadLocalSource(args[0], workflowBuildSource)
-		if err != nil {
-			return err
-		}
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("resolve work dir: %w", err)
-		}
-		digest := workflows.SourceDigest(source.Files)
-		missingPrereqs := workflowMissingPrerequisites(source)
-		absSource, err := filepath.Abs(workflowBuildSource)
-		if err != nil {
-			return fmt.Errorf("resolve source dir: %w", err)
-		}
-		result, diagnostics, err := workflowBuildAndRegister(ctx, h.Store, workflows.BuildAndRegisterOptions{
-			WorkspaceKey: ws,
-			Name:         source.Manifest.DriverID,
-			Entrypoint:   source.Manifest.Entrypoint,
-			Files:        source.Files,
-			Activate:     false,
-			SourceRef:    "file://" + filepath.ToSlash(absSource) + "#" + digest,
-			SourceDigest: digest,
-			CreatedBy:    workflowActor(),
-			WorkDir:      cwd,
-			Runners:      source.Runners,
-			Manifest:     workflows.SourceManifestProvenance(source.Manifest),
-			Trust:        domain.DriverTrustUntrusted,
-		})
-		if err != nil {
-			if workflowBuildJSON {
-				_ = cmdstore.WriteJSON(workflowBuildOutput{
-					OK:                   false,
-					Status:               "failed",
-					Diagnostics:          diagnostics,
-					Error:                err.Error(),
-					ErrorClass:           "flue_build_failed",
-					SourceDigest:         digest,
-					MissingPrerequisites: missingPrereqs,
-					Source:               source,
-					Runners:              source.Runners,
-				})
-			}
-			return fmt.Errorf("build workflow: %w", err)
-		}
+func runWorkflowBuild(cmd *cobra.Command, args []string) error {
+	ctx := workflowCommandContext(cmd)
+	client, err := newWorkflowManagementClient(ctx)
+	if err != nil {
+		return err
+	}
+	source, err := workflows.ReadLocalSource(args[0], workflowBuildSource)
+	if err != nil {
+		return err
+	}
+	digest, err := workflows.SourceDigest(source.Files)
+	if err != nil {
+		return fmt.Errorf("digest workflow source: %w", err)
+	}
+	missingPrereqs := workflowMissingPrerequisites(source)
+	request := workflowAuthorVersionRequest{
+		Files: source.Files, Entrypoint: source.Manifest.Entrypoint,
+		Runners: source.Runners, Manifest: workflows.SourceManifestProvenance(source.Manifest),
+	}
+	requestID, err := workflowAuthoringRequestID(source.Manifest.DriverID, request)
+	if err != nil {
+		return err
+	}
+	result, err := client.authorVersion(ctx, source.Manifest.DriverID, requestID, request)
+	if err != nil {
 		if workflowBuildJSON {
-			return cmdstore.WriteJSON(workflowBuildOutput{
-				OK:                   true,
-				Status:               "passed",
-				Driver:               result.Driver,
-				Version:              result.Version,
-				Diagnostics:          diagnostics,
+			_ = cmdstore.WriteJSON(workflowBuildOutput{
+				OK:                   false,
+				Status:               "failed",
+				Error:                err.Error(),
+				ErrorClass:           "workflow_authoring_failed",
 				SourceDigest:         digest,
 				MissingPrerequisites: missingPrereqs,
 				Source:               source,
 				Runners:              source.Runners,
 			})
 		}
-		fmt.Printf("Built workflow %s version %s\n", result.Driver.DriverID, result.Version.VersionID)
-		fmt.Printf("Source digest: %s\n", result.Version.SourceDigest)
-		fmt.Println("Management server required: set LOOM_SERVER_URL to its URL, or replace $LOOM_SERVER_URL below with the URL.")
-		fmt.Printf("Target workspace: %s\n", ws)
-		fmt.Printf("Approve and activate after review: loom --server \"$LOOM_SERVER_URL\" --workspace %s workflow approve %s --version %s && loom --server \"$LOOM_SERVER_URL\" --workspace %s workflow activate %s --version %s\n", ws, result.Driver.DriverID, result.Version.VersionID, ws, result.Driver.DriverID, result.Version.VersionID)
-		return nil
-	})
+		return fmt.Errorf("build workflow: %w", err)
+	}
+	if workflowBuildJSON {
+		return cmdstore.WriteJSON(workflowBuildOutput{
+			OK:                   true,
+			Status:               "passed",
+			Driver:               result.Driver,
+			Version:              result.Version,
+			Diagnostics:          result.BuildDiagnostics,
+			SourceDigest:         digest,
+			MissingPrerequisites: missingPrereqs,
+			Source:               source,
+			Runners:              source.Runners,
+		})
+	}
+	fmt.Printf("Built workflow %s version %s\n", result.Driver.DriverID, result.Version.VersionID)
+	fmt.Printf("Source digest: %s\n", result.Version.SourceDigest)
+	fmt.Printf("Target workspace: %s\n", client.workspace)
+	fmt.Printf("Approve and activate after review: loom --server \"$LOOM_SERVER_URL\" --workspace %s workflow approve %s --version %s && loom --server \"$LOOM_SERVER_URL\" --workspace %s workflow activate %s --version %s\n", client.workspace, result.Driver.DriverID, result.Version.VersionID, client.workspace, result.Driver.DriverID, result.Version.VersionID)
+	return nil
+}
+
+func workflowAuthoringRequestID(workflow string, request workflowAuthorVersionRequest) (string, error) {
+	encoded, err := json.Marshal(struct {
+		Workflow string                       `json:"workflow"`
+		Request  workflowAuthorVersionRequest `json:"request"`
+	}{Workflow: workflow, Request: request})
+	if err != nil {
+		return "", fmt.Errorf("encode workflow authoring replay identity: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("workflow-build:%x", digest[:]), nil
 }
 
 func runWorkflowApprove(cmd *cobra.Command, args []string) error {
@@ -548,16 +547,6 @@ func workflowPayload(values []string, epicID string) (json.RawMessage, error) {
 	return payload, nil
 }
 
-func workflowActor() string {
-	if actor := os.Getenv("LOOM_FLEET_ACTOR"); actor != "" {
-		return actor
-	}
-	if actor := os.Getenv("USER"); actor != "" {
-		return actor
-	}
-	return "loom-cli"
-}
-
 func isBuiltinWorkflow(name string) bool {
 	for _, builtin := range workflows.BuiltinWorkflowNames() {
 		if builtin == name {
@@ -608,7 +597,10 @@ func runWorkflowDigest(cmd *cobra.Command, args []string) error {
 		}
 		files = staged
 	}
-	digest := workflows.SourceDigest(files)
+	digest, err := workflows.SourceDigest(files)
+	if err != nil {
+		return fmt.Errorf("digest workflow source: %w", err)
+	}
 	if workflowDigestJSON {
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{
 			"workflow":      name,

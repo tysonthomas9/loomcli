@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 type workerProfileAPIStub struct {
@@ -70,6 +71,7 @@ func TestWorkerProfileCreateRouteStampsWorkspaceAndAction(t *testing.T) {
 	mux := http.NewServeMux()
 	New(Config{WorkerProfiles: api, Authority: resolver}).Register(mux)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/execution/worker-profiles", strings.NewReader(`{"profile_id":"falcon","role":"task"}`))
+	req = withCanonicalWorkspace(req, "WS", "WS")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
@@ -121,6 +123,7 @@ func TestWorkerProfileUpdateAndDeleteRoutesStampExactActionAndRequestIdentity(t 
 			mux := http.NewServeMux()
 			New(Config{WorkerProfiles: api, Authority: resolver}).Register(mux)
 			req := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+			req = withCanonicalWorkspace(req, "WS", "WS")
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
 			if rec.Code != test.wantStatus {
@@ -149,6 +152,7 @@ func TestWorkerProfileRoutesRejectWrongWorkspaceAndDeniedAuthority(t *testing.T)
 			mux := http.NewServeMux()
 			New(Config{WorkerProfiles: api, Authority: resolver}).Register(mux)
 			req := httptest.NewRequest(http.MethodPatch, "/api/workspaces/OTHER/execution/worker-profiles/falcon", strings.NewReader(`{"backend":"codex"}`))
+			req = withCanonicalWorkspace(req, "OTHER", "OTHER")
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
 			if rec.Code != http.StatusForbidden || api.updates != 0 {
@@ -177,6 +181,7 @@ func TestWorkerProfileRoutesRejectEOFAndTrailingJSON(t *testing.T) {
 			mux := http.NewServeMux()
 			New(Config{WorkerProfiles: api, Authority: &workerProfileResolverStub{}}).Register(mux)
 			req := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+			req = withCanonicalWorkspace(req, "WS", "WS")
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
 			if rec.Code != http.StatusBadRequest || api.creates+api.updates+api.deletes != 0 {
@@ -192,6 +197,7 @@ func TestWorkerProfileRouteMapsUnauthenticated(t *testing.T) {
 	mux := http.NewServeMux()
 	New(Config{WorkerProfiles: api, Authority: resolver}).Register(mux)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/execution/worker-profiles", strings.NewReader(`{"profile_id":"falcon","role":"task"}`))
+	req = withCanonicalWorkspace(req, "WS", "WS")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized || api.creates != 0 {
@@ -212,6 +218,7 @@ func TestWorkerProfileRoutesFailClosedWhenCapabilityOrAuthorityUnavailable(t *te
 			mux := http.NewServeMux()
 			New(test.config).Register(mux)
 			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/execution/worker-profiles", strings.NewReader(`{"profile_id":"falcon","role":"task"}`))
+			req = withCanonicalWorkspace(req, "WS", "WS")
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
 			if rec.Code != http.StatusServiceUnavailable {
@@ -226,9 +233,64 @@ func TestWorkerProfileRouteMapsConflictingCreateWithoutSecondMutationPath(t *tes
 	mux := http.NewServeMux()
 	New(Config{WorkerProfiles: api, Authority: &workerProfileResolverStub{}}).Register(mux)
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/WS/execution/worker-profiles", strings.NewReader(`{"profile_id":"falcon","role":"task"}`))
+	req = withCanonicalWorkspace(req, "WS", "WS")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusConflict || api.creates != 1 || api.updates != 0 || api.deletes != 0 {
 		t.Fatalf("status/body/mutation calls = %d/%s/%d,%d,%d", rec.Code, rec.Body.String(), api.creates, api.updates, api.deletes)
 	}
+}
+
+func TestWorkerProfileRoutesUseCanonicalWorkspaceAndFailClosedWithoutResolution(t *testing.T) {
+	body := `{"profile_id":"falcon","role":"task"}`
+
+	t.Run("alias resolves to canonical workspace", func(t *testing.T) {
+		api := &workerProfileAPIStub{}
+		resolver := &workerProfileResolverStub{}
+		mux := http.NewServeMux()
+		New(Config{WorkerProfiles: api, Authority: resolver}).Register(mux)
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/workspaces/ALIAS/execution/worker-profiles",
+			strings.NewReader(body),
+		)
+		req = withCanonicalWorkspace(req, "ALIAS", "CANONICAL")
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status/body = %d/%s", rec.Code, rec.Body.String())
+		}
+		if api.create.WorkspaceKey != "CANONICAL" || resolver.workspace != "CANONICAL" {
+			t.Fatalf("command/authority workspaces = %q/%q", api.create.WorkspaceKey, resolver.workspace)
+		}
+	})
+
+	t.Run("missing canonical workspace fails closed", func(t *testing.T) {
+		api := &workerProfileAPIStub{}
+		resolver := &workerProfileResolverStub{}
+		mux := http.NewServeMux()
+		New(Config{WorkerProfiles: api, Authority: resolver}).Register(mux)
+		req := httptest.NewRequest(
+			http.MethodPost,
+			"/api/workspaces/WS/execution/worker-profiles",
+			strings.NewReader(body),
+		)
+		rec := httptest.NewRecorder()
+
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status/body = %d/%s", rec.Code, rec.Body.String())
+		}
+		if api.creates != 0 || resolver.workspace != "" {
+			t.Fatalf("capability/authority invoked = %d/%q", api.creates, resolver.workspace)
+		}
+	})
+}
+
+func withCanonicalWorkspace(request *http.Request, requested, canonical string) *http.Request {
+	ref := middleware.WorkspaceRef{RequestedID: requested, CanonicalID: canonical}
+	return request.WithContext(middleware.WithWorkspaceRef(request.Context(), ref))
 }

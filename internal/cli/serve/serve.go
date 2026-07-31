@@ -23,9 +23,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/monitorwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimecomposition"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
+	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
@@ -244,21 +246,45 @@ func runServe(cmd *cobra.Command, args []string) {
 	if err := workspacemgr.EnsurePromptAgentIdentityRecords(ctx, storeHandle.Store); err != nil {
 		slog.Warn("prompt-agent identity backfill failed", "err", err)
 	}
-	startOutboxDispatcher(ctx, storeHandle.Store)
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForConfig(
 		storeHandle.URL(),
 		storeHandle.FleetDBClientAPIKey(),
 		fleetState.clientCfg.Actor,
 	)
-	taskReadyCallbacks := buildTaskReadyBridgeCallbacks(storeHandle.Store.Repos(), issueBackendFn)
+	taskReadyCallbacks := runtimecomposition.BuildTaskReadyBridgeCallbacks(
+		storeHandle.Store.Repos(),
+		issueBackendFn,
+	)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
 	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, issueBackendFn)
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)
-	cfg, automationCapability, err := buildServerConfig(monitorHandlers, fleetState, storeHandle)
+	cfg, capabilities, err := buildServerConfig(monitorHandlers, fleetState, storeHandle)
 	if err != nil {
 		log.Fatalf("failed to compose serve capabilities: %v", err)
 	}
-	stopRuntime, err := startServePlatformRuntime(ctx, storeHandle, cfg, automationCapability, taskReadyCallbacks)
+	if capabilities.interaction == nil ||
+		capabilities.interaction.ChatMessenger() == nil {
+		log.Fatal("failed to compose outbox dispatcher: Interaction chat commands are required")
+	}
+	runtimeConfig := buildServeRuntimeConfig()
+	runtimecomposition.StartOutboxDispatcher(
+		ctx,
+		storeHandle.Store,
+		capabilities.interaction.ChatMessenger(),
+		runtimeConfig.WorkspaceScope,
+	)
+	stopRuntime, err := runtimecomposition.Start(
+		ctx,
+		storeHandle,
+		cfg,
+		runtimecomposition.Capabilities{
+			WorkflowCatalog: capabilities.workflowCatalog,
+			Automation:      capabilities.automation,
+			Runtime:         capabilities.runtime,
+		},
+		taskReadyCallbacks,
+		runtimeConfig,
+	)
 	if err != nil {
 		log.Fatalf("failed to start platform runtime: %v", err)
 	}
@@ -270,11 +296,24 @@ func runServe(cmd *cobra.Command, args []string) {
 
 	logServerStartup()
 	serveErr := awaitShutdown(stop, webuiErr, cancel)
-	stopContext, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	if err := stopRuntime(stopContext); err != nil {
+	runtimeStopContext, runtimeStopCancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	if err := stopRuntime(runtimeStopContext); err != nil {
 		slog.Error("platform runtime did not stop cleanly", "err", err)
 	}
-	stopCancel()
+	runtimeStopCancel()
+	if capabilities.workspaceAdmissions != nil {
+		admissionStopContext, admissionStopCancel := context.WithTimeout(
+			context.Background(),
+			10*time.Second,
+		)
+		if err := capabilities.workspaceAdmissions.Stop(admissionStopContext); err != nil {
+			slog.Error("workspace repository materializations did not stop cleanly", "err", err)
+		}
+		admissionStopCancel()
+	}
 	if serveErr != nil {
 		cmd.PrintErrf("Server error: %v\n", serveErr)
 		_ = storeHandle.Close()
@@ -632,44 +671,116 @@ func applyStoreHandleServerConfig(
 	return fs
 }
 
+type serveCapabilitySet struct {
+	workflowCatalog     *serveadapter.WorkflowCatalogModule
+	automation          *serveadapter.AutomationCapability
+	interaction         *serveadapter.InteractionCapability
+	workspaceAdmissions *workspacemgr.StoreBackedWorkspaceAdmissionOperations
+	runtime             []serveadapter.RuntimeContributor
+}
+
+//nolint:funlen // Serve composition assembles the complete dependency graph without moving product policy into the application host.
 func buildServerConfig(
 	monitorHandlers webui.MonitorHandlers,
 	fs fleetState,
 	storeHandle *bootstrap.StoreHandle,
-) (webui.ServerConfig, *serveadapter.AutomationCapability, error) {
+) (webui.ServerConfig, serveCapabilitySet, error) {
 	gitOps := opsimpl.NewGitOps()
 	resolvedBackend := cli.ResolveBackendName()
 	log.Printf("Terminal backend: %s", resolvedBackend)
 
 	cfg := buildCoreServerConfig(monitorHandlers, gitOps, resolvedBackend)
+	cfg.DaytonaProvider = serveadapter.NewDaytonaProviderBroker(cfg.LocalSettingsDir)
 	if storeHandle != nil {
 		fs = applyStoreHandleServerConfig(&cfg, fs, storeHandle, gitOps)
 	}
 	applyFleetConfig(&cfg, fs)
-	applyWorkspaceConfig(&cfg)
 	module, err := buildServeWorkflowCatalogModule(cfg, storeHandle)
 	if err != nil {
-		return webui.ServerConfig{}, nil, err
+		return webui.ServerConfig{}, serveCapabilitySet{}, err
 	}
+	capabilities := serveCapabilitySet{}
 	var automationCapability *serveadapter.AutomationCapability
+	var repositoryAdmissionJournal *workspacemgr.RepositoryAdmissionJournal
 	if module != nil {
+		capabilities.workflowCatalog = module
 		cfg.WorkflowCatalogModule = module
 		cfg.WorkflowCatalogAPI = module.CatalogAPI()
+		cfg.WorkflowCatalogAuthoring = module.VersionAuthoringAPI()
+		cfg.WorkflowCatalogOperator = module.OperatorAuthorityResolver()
+		cfg.WorkflowTargetPreparation = module.PrepareWorkflowTarget
 		automationCapability = module.AutomationCapability()
 		if automationCapability != nil {
 			cfg.AutomationCapability = automationWebCapabilityView{AutomationCapability: automationCapability}
+			capabilities.automation = automationCapability
+			capabilities.runtime = append(capabilities.runtime, automationCapability)
 		}
 	}
 	if storeHandle != nil {
+		var journalErr error
+		repositoryAdmissionJournal, journalErr = workspacemgr.NewRepositoryAdmissionJournal()
+		if journalErr != nil {
+			return webui.ServerConfig{}, serveCapabilitySet{}, fmt.Errorf(
+				"compose repository admission journal: %w",
+				journalErr,
+			)
+		}
+		agentsCapability, agentsErr := serveadapter.BuildAgentsCapability(serveadapter.AgentsConfig{
+			StoreHandle: storeHandle, ExternalAuth: cfg.ExtAuthURL != "",
+			WorkflowCatalogModule: module, LocalSettingsDir: cfg.LocalSettingsDir,
+			Workspace:             driverAutomationWorkspaceScope(),
+			WorkspaceRoleResolver: cfg.WorkspaceRoleResolver,
+			RepositoryAdmissions:  repositoryAdmissionJournal,
+		})
+		if agentsErr != nil {
+			return webui.ServerConfig{}, serveCapabilitySet{}, agentsErr
+		}
+		cfg.AgentsCapability = agentsCapability
+		cfg.SourceControl = agentsCapability.SourceControlMaterializer()
+		cfg.WorkspaceSourceControl = agentsCapability.RepositoryAdmissionMaterializer()
+		if agentsCapability.AgentProvisioningCommands() != nil {
+			cfg.AgentProvisioning = agentsCapability
+			capabilities.runtime = append(capabilities.runtime, agentsCapability)
+		}
+		interactionCapability, interactionErr := serveadapter.BuildInteractionCapability(
+			serveadapter.InteractionConfig{
+				StoreHandle: storeHandle, WorkflowCatalogModule: module,
+				AgentQueries:          agentsCapability.AgentsAPI(),
+				WorkspaceLister:       agentsCapability.WorkspaceLister(),
+				Workspace:             driverAutomationWorkspaceScope(),
+				ExternalAuth:          cfg.ExtAuthURL != "",
+				WorkspaceRoleResolver: cfg.WorkspaceRoleResolver,
+			},
+		)
+		if interactionErr != nil {
+			return webui.ServerConfig{}, serveCapabilitySet{}, interactionErr
+		}
+		cfg.InteractionCapability = interactionCapability
+		capabilities.interaction = interactionCapability
+		capabilities.runtime = append(capabilities.runtime, interactionCapability)
 		executionCapability, artifactsCapability, capabilityErr := serveadapter.BuildExecutionAndArtifactsCapabilities(module, storeHandle)
 		if capabilityErr != nil {
-			return webui.ServerConfig{}, nil, capabilityErr
+			return webui.ServerConfig{}, serveCapabilitySet{}, capabilityErr
 		}
 		cfg.ExecutionCapability = executionCapability
 		cfg.ArtifactsCapability = artifactsCapability
 	}
+	// Workspace clone/add-repo wiring is intentionally last: its only remote
+	// checkout authority is the Source Control materializer composed above.
+	// Store-backed operation remains available for local worktree attachment,
+	// while remote clone requests fail closed if capability composition did not
+	// provide this owner port.
+	workspaceAdmissions := applyWorkspaceConfigWithAdmission(
+		&cfg,
+		storeHandle,
+		repositoryAdmissionJournal,
+	)
+	if workspaceAdmissions != nil {
+		capabilities.workspaceAdmissions = workspaceAdmissions
+		capabilities.runtime = append(capabilities.runtime, workspaceAdmissions)
+	}
 	applyCORSConfig(&cfg)
-	return cfg, automationCapability, nil
+	return cfg, capabilities, nil
 }
 
 func buildServeWorkflowCatalogModule(
@@ -766,9 +877,17 @@ func applyFleetConfig(cfg *webui.ServerConfig, fs fleetState) {
 // applyWorkspaceConfig wires store-backed workspace operations into the webui
 // server. Nil-store serve leaves workspace management unavailable.
 func applyWorkspaceConfig(cfg *webui.ServerConfig) {
+	_ = applyWorkspaceConfigWithAdmission(cfg, nil, nil)
+}
+
+func applyWorkspaceConfigWithAdmission(
+	cfg *webui.ServerConfig,
+	storeHandle *bootstrap.StoreHandle,
+	journal *workspacemgr.RepositoryAdmissionJournal,
+) *workspacemgr.StoreBackedWorkspaceAdmissionOperations {
 	if cfg.Store == nil {
 		applyFleetInitialWorkspaceFallback(cfg, true)
-		return
+		return nil
 	}
 	cfg.WorkspaceIDResolverFn = serveadapter.BuildWorkspaceIDResolverFn(cfg.Store)
 	cfg.InitialWorkspaceID = serveadapter.ResolveInitialWorkspaceID(cfg.Store)
@@ -776,10 +895,26 @@ func applyWorkspaceConfig(cfg *webui.ServerConfig) {
 	cfg.WorkspaceDeleteFn = serveadapter.BuildWorkspaceDeleteFn(cfg.Store)
 	cfg.SetDefaultWorkspaceFn = nil
 	cfg.ClearDefaultWorkspaceFn = nil
-	gitCredentials := workspacemgr.NewLocalSettingsGitCredentials(cfg.LocalSettingsDir)
-	cfg.WorkspaceCreateFn = workspacemgr.BuildStoreBackedCreateWorkspaceWithCredentials(cfg.Store, gitCredentials)
-	cfg.WorkspaceAddReposFn = workspacemgr.BuildStoreBackedAddReposWithCredentials(cfg.Store, gitCredentials)
+	var admissions infrafleetdb.RepositoryAdmissionTransport
+	if storeHandle != nil && storeHandle.FleetDBClient() != nil {
+		admissions = storeHandle.FleetDBClient().RepositoryAdmissions()
+	}
+	operations := workspacemgr.NewStoreBackedWorkspaceAdmissionOperations(
+		cfg.Store,
+		admissions,
+		journal,
+		cfg.WorkspaceSourceControl,
+	)
+	cfg.WorkspaceCreateFn = operations.CreateWorkspace
+	cfg.WorkspaceAddReposFn = operations.AddWorkspaceRepos
+	if len(operations.RuntimeRegistrations()) > 0 {
+		cfg.WorkspaceAdmissions = operations
+	}
 	cfg.DaemonConfigFn = daemonwire.BuildStoreBackedDaemonConfigFn(cfg.Store)
+	if cfg.WorkspaceAdmissions == nil {
+		return nil
+	}
+	return operations
 }
 
 func applyFleetInitialWorkspaceFallback(cfg *webui.ServerConfig, force bool) {

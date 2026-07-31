@@ -12,6 +12,8 @@ export declare const RunnerEnv: Readonly<{
   requestJson: "LOOM_TASK_RUN_REQUEST_JSON";
 }>;
 
+export declare const DaytonaProviderSchemaV1: "daytona-task-run-execution.v1";
+
 /**
  * Request/upload body accepted by fetch on Node >= 18. Local alias because
  * DOM's BodyInit is NOT declared under node-only TypeScript configs (the
@@ -227,10 +229,80 @@ export interface CompleteRunResponse {
   [key: string]: unknown;
 }
 
-export interface RuntimeCredentialResponse {
-  provider: "daytona" | "github" | string;
-  value: string;
-  [key: string]: unknown;
+export interface DaytonaProviderDelivery {
+  openPullRequest: boolean;
+  baseBranch?: string;
+  outputBranch?: string;
+  draft?: boolean;
+}
+
+export interface DaytonaProviderIntent {
+  schemaVersion?: typeof DaytonaProviderSchemaV1;
+  repositoryUrl: string;
+  baseRef?: string;
+  taskPrompt: string;
+  backend: "codex";
+  model?: string;
+  mode?: string;
+  delivery: DaytonaProviderDelivery;
+}
+
+export interface DaytonaTranscriptEntry {
+  sequence: number;
+  timestamp: string;
+  role: "user" | "assistant" | "tool" | "system" | string;
+  type: "text" | "tool_use" | "tool_result" | "session_meta" | string;
+  text?: string;
+  toolName?: string;
+  toolUseId?: string;
+  output?: string;
+  uuid?: string;
+}
+
+export interface DaytonaProviderUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  estimatedCostUsd?: number;
+}
+
+export interface DaytonaSandboxReceipt {
+  provider: "daytona";
+  id?: string;
+  workDir?: string;
+  cwd?: string;
+  repoRef?: string;
+}
+
+export interface DaytonaPatchReceipt {
+  content: string;
+  diffStat?: string;
+  baseRef?: string;
+  headSha?: string;
+}
+
+export interface DaytonaPullRequestReceipt {
+  url: string;
+  number: number;
+  baseBranch: string;
+  headBranch: string;
+  commitSha: string;
+}
+
+export interface DaytonaProviderResult {
+  schemaVersion: typeof DaytonaProviderSchemaV1;
+  status: "completed" | "failed" | "cancelled";
+  exitCode: number;
+  errorClass?: string;
+  errorMessage?: string;
+  logs?: string;
+  transcript?: string;
+  transcriptEntries?: DaytonaTranscriptEntry[];
+  usage: DaytonaProviderUsage;
+  sandbox: DaytonaSandboxReceipt;
+  patch?: DaytonaPatchReceipt;
+  pullRequest?: DaytonaPullRequestReceipt;
 }
 
 export declare class LoomAPIError extends Error {
@@ -264,10 +336,9 @@ export declare class TaskRunClient {
     get(artifactId: string, options?: { signal?: AbortSignal }): Promise<ArtifactHandle>;
     list(input?: { type?: string; durableStatus?: string; durable_status?: string; status?: string; limit?: number }, options?: { signal?: AbortSignal }): Promise<{ artifacts: ArtifactHandle[]; count?: number; [key: string]: unknown }>;
   };
-  readonly runtimeCredentials: {
-    get(input: { provider: "daytona" | "github" | string }, options?: { signal?: AbortSignal }): Promise<RuntimeCredentialResponse>;
+  readonly daytona: {
+    execute(input: DaytonaProviderIntent, options?: { signal?: AbortSignal }): Promise<DaytonaProviderResult>;
   };
-
   constructor(options: TaskRunClientOptions);
   request<T = Record<string, unknown>>(): T;
   input<T = unknown>(): T | undefined;
@@ -280,7 +351,7 @@ export declare class TaskRunClient {
   listArtifacts(input?: { type?: string; durableStatus?: string; durable_status?: string; status?: string; limit?: number }, options?: { signal?: AbortSignal }): Promise<{ artifacts: ArtifactHandle[]; count?: number; [key: string]: unknown }>;
   uploadArtifactContent(artifactId: string, content: RunnerBodyInit, options?: ArtifactUploadOptions): Promise<Artifact>;
   finalizeArtifact(artifactId: string, input?: ArtifactFinalizeInput, options?: { signal?: AbortSignal }): Promise<Artifact>;
-  getRuntimeCredential(input: { provider: "daytona" | "github" | string }, options?: { signal?: AbortSignal }): Promise<RuntimeCredentialResponse>;
+  executeDaytona(input: DaytonaProviderIntent, options?: { signal?: AbortSignal }): Promise<DaytonaProviderResult>;
   completeRun(input?: CompleteRunInput, options?: { signal?: AbortSignal }): Promise<CompleteRunResponse>;
 }
 

@@ -20,7 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/managementapi"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 )
 
 const (
@@ -86,7 +86,7 @@ func init() {
 	epicRunCmd.Flags().IntVar(&runIntervalSeconds, "interval-seconds", 5, "Seconds between reconcile passes")
 	epicRunCmd.Flags().StringVar(&runNodeID, "node-id", "", "Daemon node ID to run spawned workers on (default: the single active local node)")
 	epicRunCmd.Flags().StringVar(&runLead, "lead", "", "Lead agent running this epic (default: $LOOM_AGENT_NAME when set)")
-	epicRunCmd.Flags().StringVar(&runWorkflow, "workflow", workflowdefs.BuiltinEpicRunnerWorkflowName, "Workflow name to run")
+	epicRunCmd.Flags().StringVar(&runWorkflow, "workflow", workflowcatalog.BuiltinEpicRunnerWorkflowName, "Workflow name to run")
 	epicRunCmd.Flags().StringVar(&runRunner, "runner", "local-task-runner", "Runner requested for child task runs")
 	epicRunCmd.Flags().StringVar(&runRepoURL, "repo-url", "", "Repository URL passed to compatible task runners")
 	epicRunCmd.Flags().StringVar(&runBaseBranch, "base-branch", "", "Base branch passed to compatible task runners")
@@ -144,7 +144,7 @@ func runEpicRun(cmd *cobra.Command, _ []string) error {
 	}
 	if runDryRun {
 		printDryRunPayload(payload)
-		if workflowName != workflowdefs.BuiltinEpicRunnerWorkflowName {
+		if workflowName != workflowcatalog.BuiltinEpicRunnerWorkflowName {
 			return nil
 		}
 	}
@@ -286,7 +286,7 @@ func epicRunWorkflow() string {
 	if workflow := strings.TrimSpace(runWorkflow); workflow != "" {
 		return workflow
 	}
-	return workflowdefs.BuiltinEpicRunnerWorkflowName
+	return workflowcatalog.BuiltinEpicRunnerWorkflowName
 }
 
 func resolveLeadName(flagValue string) string {

@@ -30,16 +30,16 @@ rows:
 
   - id: agent-provisioning
     package: ./internal/webui/handlers/agents
-    test_regex: '^TestPromptAgentCreate(TransactionCreatesRecordBindingAndRole|WithoutBuildToolchainFailsAtomically|BindingFailureDeletesAgentRecord)$'
+    test_regex: '^TestPromptAgentCreate(TransactionCreatesRecordBindingAndRole|WithoutBuildToolchainFailsAtomically|BindingFailureRetainsCommittedAgentForRecovery)$'
     expected_tests:
       - TestPromptAgentCreateTransactionCreatesRecordBindingAndRole
       - TestPromptAgentCreateWithoutBuildToolchainFailsAtomically
-      - TestPromptAgentCreateBindingFailureDeletesAgentRecord
+      - TestPromptAgentCreateBindingFailureRetainsCommittedAgentForRecovery
     timeout: 2m
     expected_behavior:
       - Successful prompt-agent provisioning creates its role, agent-service record, and attached binding with the requested configuration.
       - Build preflight failure persists no role, agent-service record, or binding.
-      - Binding failure compensates the partially created agent-service record.
+      - Binding failure retains the durable agent-service step so provisioning recovery can resume without duplicating prior work.
 
   - id: execution-recovery
     package: ./internal/driver

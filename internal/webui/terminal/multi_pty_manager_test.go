@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -45,6 +46,25 @@ func TestNewMultiPTYManager_Empty(t *testing.T) {
 	}
 	if got := mm.MaxSessions(); got != 7 {
 		t.Errorf("MaxSessions=%d want 7", got)
+	}
+}
+
+func TestMultiPTYKillRunsLifecycleHookWithoutProcessLocalManager(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	key := SessionKey{Workspace: "ws1", Name: "persisted-agent-tab"}
+	var calls int
+	mm.SetBeforeKill(func(_ context.Context, got SessionKey, reason string) error {
+		calls++
+		if got != key || reason != ExitReasonKilled {
+			t.Fatalf("hook identity=%+v reason=%q", got, reason)
+		}
+		return nil
+	})
+	if err := mm.Kill(key); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("lifecycle hook calls = %d, want 1", calls)
 	}
 }
 
@@ -451,6 +471,35 @@ func TestDeregister_KillsSessions(t *testing.T) {
 	if !errors.Is(err, ErrWorkspaceNotRegistered) {
 		t.Errorf("post-deregister AttachSession err = %v, want ErrWorkspaceNotRegistered", err)
 	}
+}
+
+func TestDeregisterRetainsManagerUntilLifecycleConvergenceCanRetry(t *testing.T) {
+	mm := newTestMultiManager(t, 0)
+	key := SessionKey{Workspace: "ws1", Name: "agent-tab"}
+	if err := mm.Register(key.Workspace, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := mm.AttachSession(
+		key,
+		80,
+		24,
+		&LaunchSpec{Argv: []string{"-c", "cat"}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := errors.New("fleet unavailable")
+	mm.SetBeforeKill(func(context.Context, SessionKey, string) error {
+		return sentinel
+	})
+	mm.Deregister(key.Workspace)
+	if !mm.HasSession(key) || !mm.hasManager(key.Workspace) {
+		t.Fatal("failed lifecycle convergence orphaned the retained PTY manager")
+	}
+
+	mm.SetBeforeKill(func(context.Context, SessionKey, string) error { return nil })
+	waitUntil(t, func() bool {
+		return !mm.HasSession(key) && !mm.hasManager(key.Workspace)
+	}, 2*time.Second, "background lifecycle retry did not remove the PTY manager")
 }
 
 func TestDeregister_Unknown(t *testing.T) {

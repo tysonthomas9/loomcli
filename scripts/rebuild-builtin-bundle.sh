@@ -25,45 +25,45 @@ FLUE_REPO="${FLUE_REPO:-$(cd "$ROOT/../flue" 2>/dev/null && pwd || true)}"
 # silently broke 3 runtime contracts (defineWorkflow default export,
 # FLUE_INTERNAL_CLI_IPC gating, strict cloneJsonSerializable). To intentionally
 # advance the pin, set ALLOW_FLUE_PIN_DRIFT=1 and bump FLUE_COMMIT in the same commit.
-PIN_FILE="$ROOT/internal/workflows/FLUE_COMMIT"
+PIN_FILE="$ROOT/internal/infra/workflowdistribution/FLUE_COMMIT"
 if [ -f "$PIN_FILE" ] && [ "${ALLOW_FLUE_PIN_DRIFT:-}" != "1" ]; then
   PINNED="$(tr -d '[:space:]' < "$PIN_FILE")"
   HEAD="$(git -C "$FLUE_REPO" rev-parse HEAD 2>/dev/null || true)"
   [ "$HEAD" = "$PINNED" ] || {
-    echo "ERROR: FLUE_REPO HEAD ($HEAD) != pinned $PINNED (internal/workflows/FLUE_COMMIT)." >&2
+    echo "ERROR: FLUE_REPO HEAD ($HEAD) != pinned $PINNED (internal/infra/workflowdistribution/FLUE_COMMIT)." >&2
     echo "       Check out flue at the pin, or set ALLOW_FLUE_PIN_DRIFT=1 and bump FLUE_COMMIT in the same commit." >&2
     exit 1
   }
 fi
 
-SRC="$ROOT/internal/workflows/builtin"
+SRC="$ROOT/internal/infra/workflowdistribution/builtin"
 BUILTIN_WORKFLOW="${BUILTIN_WORKFLOW:-epic-runner}"
 # BUILTIN_DIST_DEST lets CI and local callers choose a scratch dir without
 # recreating deleted generated bundle files in the repo.
 DEST="${BUILTIN_DIST_DEST:-$(mktemp -d -t loom-builtin-dist.XXXXXX)}"
 case "$BUILTIN_WORKFLOW" in
   epic-runner)
-    # builtinEpicRunnerSpec in internal/workflows/workflows.go.
+    # builtinEpicRunnerSpec in internal/infra/workflowdistribution/catalog_build.go.
     SPEC_FILES=(epic-runner.ts local-task-runner.ts daytona-task-runner.ts openshell-task-runner.ts)
     ;;
   github-review-agent)
-    # builtinGitHubReviewAgentSpec in internal/workflows/workflows.go.
+    # builtinGitHubReviewAgentSpec in internal/infra/workflowdistribution/catalog_build.go.
     SPEC_FILES=(github-review-agent.ts github-review-task-runner.ts)
     ;;
   bug-fix-agent)
-    # builtinBugFixAgentSpec in internal/workflows/workflows.go.
+    # builtinBugFixAgentSpec in internal/infra/workflowdistribution/catalog_build.go.
     SPEC_FILES=(bug-fix-agent.ts local-task-runner.ts daytona-task-runner.ts)
     ;;
   review-loop-agent)
-    # builtinReviewLoopAgentSpec in internal/workflows/workflows.go.
+    # builtinReviewLoopAgentSpec in internal/infra/workflowdistribution/catalog_build.go.
     SPEC_FILES=(review-loop-agent.ts github-review-task-runner.ts)
     ;;
   local-review-agent)
-    # builtinLocalReviewAgentSpec in internal/workflows/workflows.go.
+    # builtinLocalReviewAgentSpec in internal/infra/workflowdistribution/catalog_build.go.
     SPEC_FILES=(local-review-agent.ts github-review-task-runner.ts)
     ;;
   prompt-agent)
-    # builtinPromptAgentSpec in internal/workflows/workflows.go.
+    # builtinPromptAgentSpec in internal/infra/workflowdistribution/catalog_build.go.
     SPEC_FILES=(prompt-agent.ts local-task-runner.ts)
     ;;
   *)
@@ -129,10 +129,10 @@ if (leaks.length > 0) {
 }
 ' "$STAGE/dist" "$STAGE" "$FLUE_REPO" "$ROOT"
 
-# Digest = byte-exact mirror of workflows.SourceDigest over the spec files. The
+# Digest = byte-exact mirror of workflowcatalog.SourceDigest over the spec files. The
 # file list comes from SPEC_FILES (single source of truth in this script) — it
 # must stay in sync with the matching builtin*Spec() in
-# internal/workflows/workflows.go.
+# internal/infra/workflowdistribution/catalog_build.go.
 DIGEST="$(node -e '
 const fs=require("fs"),crypto=require("crypto");
 const dir=process.argv[1], names=process.argv.slice(2);

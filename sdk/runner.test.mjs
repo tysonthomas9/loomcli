@@ -80,6 +80,9 @@ describe("TaskRunClient.fromEnv", () => {
     assert.equal("updateTask" in client, false);
     assert.equal("closeTask" in client, false);
     assert.equal("createTask" in client, false);
+    assert.equal("runtimeCredentials" in client, false);
+    assert.equal("getRuntimeCredential" in client, false);
+    assert.equal(typeof client.daytona.execute, "function");
   });
 });
 
@@ -101,6 +104,41 @@ describe("TaskRunClient serve transport", () => {
     assert.equal(client.baseUrl, "http://127.0.0.1:8080");
     assert.equal(client.workspace, "TEST");
     assert.equal(client.leaseToken, "lease-token");
+  });
+
+  it("submits a fixed secret-free Daytona intent and ignores capability-shaped extras", async () => {
+    let call;
+    const client = TaskRunClient.fromEnv(serveEnv, {
+      fetch: async (url, init = {}) => {
+        call = { url, headers: init.headers, body: JSON.parse(init.body) };
+        return json({
+          schemaVersion: "daytona-task-run-execution.v1",
+          status: "completed",
+          exitCode: 0,
+          usage: {},
+          sandbox: { provider: "daytona", id: "sandbox-opaque" },
+        });
+      },
+    });
+    const result = await client.daytona.execute({
+      repositoryUrl: "https://github.com/octocat/Hello-World.git",
+      taskPrompt: "Make a focused change.",
+      backend: "codex",
+      delivery: { openPullRequest: false, credentials: "credential-sentinel" },
+      credentials: "credential-sentinel",
+      env: { DAYTONA_API_KEY: "credential-sentinel" },
+    });
+
+    assert.equal(new URL(call.url).pathname, "/api/workspaces/TEST/task-run/daytona-execute");
+    assert.deepEqual(call.body, {
+      schemaVersion: "daytona-task-run-execution.v1",
+      repositoryUrl: "https://github.com/octocat/Hello-World.git",
+      taskPrompt: "Make a focused change.",
+      backend: "codex",
+      delivery: { openPullRequest: false },
+    });
+    assert.equal(JSON.stringify(call).includes("credential-sentinel"), false);
+    assert.equal(result.sandbox.id, "sandbox-opaque");
   });
 
   it("preserves int64 fencing tokens exactly in serve transport", async () => {
@@ -139,9 +177,6 @@ describe("TaskRunClient serve transport", () => {
           taskRun: { taskRunId: "task-run-1", taskId: "TEST-1", status: "running" },
         });
       }
-      if (path.endsWith("/task-run/runtime-credential")) {
-        return json({ provider: call.json.provider, value: `${call.json.provider}-secret` });
-      }
       if (path.endsWith("/task-run/heartbeat")) {
         return json({ taskRunId: "task-run-1", status: "running" });
       }
@@ -172,7 +207,6 @@ describe("TaskRunClient serve transport", () => {
     const client = TaskRunClient.fromEnv(serveEnv, { fetch });
 
     const task = await client.getTask();
-    const credential = await client.runtimeCredentials.get({ provider: "daytona" });
     await client.heartbeat({ runtimeMetadata: { phase: "starting" } });
     const logTimestamp = "2026-07-16T20:30:00.000Z";
     await client.logs.append({ requestId: "task-run-log-1", stream: "stdout", text: "starting\n", timestamp: logTimestamp });
@@ -194,7 +228,6 @@ describe("TaskRunClient serve transport", () => {
 
     assert.equal(task.id, "TEST-1");
     assert.equal(task.taskRun.taskRunId, "task-run-1");
-    assert.equal(credential.value, "daytona-secret");
     assert.equal(artifact.id, "artifact-1");
     assert.equal(artifact.artifact.durableStatus, "finalized");
     assert.equal(listed.artifacts[0].id, "artifact-1");
@@ -202,7 +235,6 @@ describe("TaskRunClient serve transport", () => {
 
     assert.deepEqual(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`), [
       "POST /api/workspaces/TEST/task-run/task-get",
-      "POST /api/workspaces/TEST/task-run/runtime-credential",
       "POST /api/workspaces/TEST/task-run/heartbeat",
       "POST /api/workspaces/TEST/task-run/log-append",
       "POST /api/workspaces/TEST/task-run/artifact-declare",
@@ -226,17 +258,17 @@ describe("TaskRunClient serve transport", () => {
       assert.equal("X-Actor" in call.headers, false);
     }
     // Fenced identity travels in headers, not bodies, on the serve wire.
-    assert.equal(calls[2].json.node_id, undefined);
-    assert.equal(calls[2].json.lease_id, undefined);
-    assert.equal(calls[2].json.fencing_token, undefined);
-    assert.equal(calls[3].json.requestId, "task-run-log-1");
-    assert.equal(calls[3].json.timestamp, logTimestamp);
-    assert.equal(calls[4].json.metadata.idempotency_key, "artifact-key");
-    assert.equal(calls[5].headers["Content-Type"], "text/x-diff");
-    assert.deepEqual(calls[8].json.requiredArtifactIds, ["artifact-1"]);
-    assert.equal(calls[8].json.requireArtifacts, true);
-    assert.equal(calls[8].json.closeTask, true);
-    assert.equal(calls[8].json.closeReason, "done");
+    assert.equal(calls[1].json.node_id, undefined);
+    assert.equal(calls[1].json.lease_id, undefined);
+    assert.equal(calls[1].json.fencing_token, undefined);
+    assert.equal(calls[2].json.requestId, "task-run-log-1");
+    assert.equal(calls[2].json.timestamp, logTimestamp);
+    assert.equal(calls[3].json.metadata.idempotency_key, "artifact-key");
+    assert.equal(calls[4].headers["Content-Type"], "text/x-diff");
+    assert.deepEqual(calls[7].json.requiredArtifactIds, ["artifact-1"]);
+    assert.equal(calls[7].json.requireArtifacts, true);
+    assert.equal(calls[7].json.closeTask, true);
+    assert.equal(calls[7].json.closeReason, "done");
   });
 
   it("surfaces serve structured error envelopes", async () => {

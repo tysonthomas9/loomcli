@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 // Workspace-global builtin task-runner resolution (GAP A).
@@ -21,8 +20,8 @@ import (
 // not declare a runner (ErrRunnerNotDeclared), the runner name is resolved
 // against the workspace's BUILTIN task-runner registry instead — a runner is
 // globally resolvable iff it is declared by the ACTIVE version of a TRUSTED
-// (domain.DriverTrustTrusted) driver whose spec ships in internal/workflows
-// (the builtins).
+// (domain.DriverTrustTrusted) driver whose spec ships through the managed
+// workflow distribution catalog (the builtins).
 //
 // SECURITY REASONING. Allowing an untrusted custom driver to dispatch the
 // trusted local-task-runner is the intended behavior, and it is safe because
@@ -45,12 +44,11 @@ import (
 //     export its own runner to others (double-checked here in resolveGlobalRunner
 //     and again in the workflows-side resolver).
 //
-// The catalog of which builtins declare which runners lives in internal/workflows,
-// which imports internal/driver (not the other way round). The resolver is
-// therefore injected via SetGlobalRunnerResolver from an init() in
-// internal/workflows; when unset (e.g. an internal/driver unit test that does not
-// import workflows), the fallback is disabled and resolution stays exactly as
-// before — fail closed.
+// The application workflow-authoring coordinator owns the catalog lookup
+// behind driver-neutral ports and DTOs. Serve composition adapts its result to
+// this package and injects the resolver via SetGlobalRunnerResolver; when
+// unset (for example, in an isolated internal/driver unit test), the fallback
+// is disabled and resolution stays exactly as before — fail closed.
 
 // GlobalRunnerResolution is a resolved workspace-global runner: the trusted
 // builtin driver + active version that OWNS the runner, and the declared spec.
@@ -61,27 +59,27 @@ type GlobalRunnerResolution struct {
 }
 
 // GlobalRunnerResolver resolves a task-runner name against the workspace's
-// trusted builtin registry. Implemented and registered by internal/workflows.
-// It returns domain.ErrNotFound when no trusted builtin declares the runner.
-type GlobalRunnerResolver func(ctx context.Context, s store.Store, ws, runnerName string) (*GlobalRunnerResolution, error)
+// trusted builtin registry. Serve composition adapts the workflow-authoring
+// application result to this runtime type. It returns domain.ErrNotFound when
+// no trusted builtin declares the runner.
+type GlobalRunnerResolver func(ctx context.Context, ws, runnerName string) (*GlobalRunnerResolution, error)
 
 // globalRunnerResolver is the process-wide resolver, injected once at startup
-// by internal/workflows. Nil disables the global fallback (fail closed).
+// by the workflow-authoring coordinator. Nil disables the global fallback.
 var globalRunnerResolver GlobalRunnerResolver
 
 // SetGlobalRunnerResolver registers the workspace-global builtin runner
-// resolver. internal/workflows calls this from an init() so any binary that
-// links the builtin catalog (the serve process) gains the fallback, while
-// internal/driver unit tests that do not import workflows keep the strict,
-// caller-manifest-only behavior.
+// resolver. The serve composition root calls this after Workflow Catalog and
+// workflow authoring are assembled, while isolated driver unit tests keep
+// strict caller-manifest-only behavior.
 func SetGlobalRunnerResolver(resolver GlobalRunnerResolver) {
 	globalRunnerResolver = resolver
 }
 
-// DeclaredRunnerSpec exposes resolveDriverRunner so the workflows-side resolver
-// can look up a runner in a builtin version's manifest without duplicating the
-// decode/guard logic. It returns ErrRunnerNotDeclared (wrapped) when the version
-// does not declare the runner.
+// DeclaredRunnerSpec exposes resolveDriverRunner to the workflow-distribution
+// adapter so it can implement the application port without duplicating the
+// decode/guard logic. It returns ErrRunnerNotDeclared (wrapped) when the
+// version does not declare the runner.
 func DeclaredRunnerSpec(version *domain.DriverVersion, runnerName string) (DriverRunnerSpec, error) {
 	return resolveDriverRunner(version, runnerName)
 }
@@ -92,12 +90,12 @@ func DeclaredRunnerSpec(version *domain.DriverVersion, runnerName string) (Drive
 // resolvable. Returns an ErrRunnerNotDeclared-classed error when no eligible
 // trusted builtin owns the runner (so the caller preserves the original
 // not-declared error and fails exactly as before).
-func resolveGlobalRunner(ctx context.Context, s store.Store, ws, runnerName string) (*GlobalRunnerResolution, error) {
+func resolveGlobalRunner(ctx context.Context, ws, runnerName string) (*GlobalRunnerResolution, error) {
 	resolver := globalRunnerResolver
 	if resolver == nil {
 		return nil, fmt.Errorf("no global runner resolver registered for %q: %w", runnerName, ErrRunnerNotDeclared)
 	}
-	res, err := resolver(ctx, s, ws, runnerName)
+	res, err := resolver(ctx, ws, runnerName)
 	if err != nil {
 		return nil, err
 	}

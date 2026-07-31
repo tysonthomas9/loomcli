@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/serve/automationcomposition"
 	"github.com/tysonthomas9/loomcli/internal/app/systemeventing"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -18,6 +19,32 @@ import (
 
 type runOutcomeRuntimeTestExecution struct {
 	execution.DriverRunAPI
+}
+
+type runOutcomeRuntimeAuthorityProviderFunc func(
+	context.Context,
+	systemeventing.VerifiedSource,
+) (authority.SystemAuthority, error)
+
+func (function runOutcomeRuntimeAuthorityProviderFunc) AuthorityForVerifiedSource(
+	ctx context.Context,
+	source systemeventing.VerifiedSource,
+) (authority.SystemAuthority, error) {
+	return function(ctx, source)
+}
+
+type runOutcomeRuntimeAdmissionFunc func(
+	context.Context,
+	automation.EventAuthority,
+	automation.AdmitEventCommand,
+) (*automation.AdmissionResult, error)
+
+func (function runOutcomeRuntimeAdmissionFunc) AdmitEvent(
+	ctx context.Context,
+	eventAuthority automation.EventAuthority,
+	command automation.AdmitEventCommand,
+) (*automation.AdmissionResult, error) {
+	return function(ctx, eventAuthority, command)
 }
 
 func (runOutcomeRuntimeTestExecution) RecoverTerminalDriverRunWork(
@@ -68,7 +95,8 @@ func TestNewRunOutcomeRuntimeRegistrationDoesNotRequireAutomationPublisher(t *te
 	if registration.Component == nil || string(registration.Component.ID()) != systemeventing.DriverRunOutcomeComponentID {
 		t.Fatalf("registration component = %#v", registration.Component)
 	}
-	if !registration.Policy.Immediate || registration.Policy.Cadence != runOutcomeReconcileCadence {
+	if !registration.Policy.Immediate ||
+		registration.Policy.Cadence != automationcomposition.RunOutcomeReconcileCadence {
 		t.Fatalf("registration policy = %+v", registration.Policy)
 	}
 }
@@ -114,10 +142,10 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 
 	var got automation.AdmitEventCommand
 	workflow, err := systemeventing.New(
-		runOutcomeAuthorityProviderFunc(func(context.Context, systemeventing.VerifiedSource) (authority.SystemAuthority, error) {
+		runOutcomeRuntimeAuthorityProviderFunc(func(context.Context, systemeventing.VerifiedSource) (authority.SystemAuthority, error) {
 			return authority.SystemAuthority{}, nil
 		}),
-		runOutcomeAdmissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
+		runOutcomeRuntimeAdmissionFunc(func(_ context.Context, _ automation.EventAuthority, command automation.AdmitEventCommand) (*automation.AdmissionResult, error) {
 			got = command
 			return &automation.AdmissionResult{}, nil
 		}),
@@ -129,7 +157,7 @@ func TestRunOutcomeRuntimePublishesOpaqueRunIDThroughAutomationAdmission(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	publisher, err := newAutomationDriverRunOutcomePublisher(emitter)
+	publisher, err := automationcomposition.NewDriverRunOutcomePublisher(emitter)
 	if err != nil {
 		t.Fatal(err)
 	}

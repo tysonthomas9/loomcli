@@ -75,6 +75,166 @@ func TestWorkflowCatalogTransportReusesClientSurface(t *testing.T) {
 	}
 }
 
+func TestWorkflowCatalogTransportUsesExactAtomicAuthoringRoutesAndDelegatedActor(t *testing.T) {
+	baseInput := WorkflowCatalogAuthorVersionInput{
+		WorkspaceKey: "TEST/one", DriverID: "driver/one", DelegatedActor: "operator:alice",
+		RequestID: "request-1", ExpectedRevision: 7,
+		DriverName: "Driver one", VersionID: "driver-one-v-abc",
+		SourceRef:    "api://workflows/driver-one/versions/source",
+		SourceDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BundleRef:    ".loom/drivers/driver-one/driver-one-v-abc",
+		BundleDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Runtime:      "flue-node", Manifest: map[string]string{"entrypoint": "run"},
+		BuildDiagnostics: "built",
+	}
+	for _, test := range []struct {
+		name       string
+		pathSuffix string
+		managed    bool
+		activate   bool
+	}{
+		{name: "operator", pathSuffix: "author"},
+		{name: "managed", pathSuffix: "author-managed", managed: true, activate: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				wantPath := "/api/v1/TEST%2Fone/drivers/driver%2Fone/versions/" + test.pathSuffix
+				if r.Method != http.MethodPost || r.URL.EscapedPath() != wantPath {
+					t.Errorf("request = %s %s, want POST %s", r.Method, r.URL.EscapedPath(), wantPath)
+				}
+				if got := r.Header.Get(FleetDelegatedActorHeader); got != baseInput.DelegatedActor {
+					t.Errorf("%s = %q, want %q", FleetDelegatedActorHeader, got, baseInput.DelegatedActor)
+				}
+				if got := r.Header.Get("X-Actor"); got != "loom-service" {
+					t.Errorf("service X-Actor = %q, want loom-service", got)
+				}
+				var body map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode authoring body: %v", err)
+				}
+				wantKeys := []string{
+					"request_id", "expected_revision", "driver_name", "version_id",
+					"source_ref", "source_digest", "bundle_ref", "bundle_digest",
+					"runtime", "manifest", "build_diagnostics",
+				}
+				if test.managed {
+					wantKeys = append(wantKeys, "activate")
+				}
+				if len(body) != len(wantKeys) {
+					t.Errorf("body keys = %v, want exactly %v", body, wantKeys)
+				}
+				for _, key := range wantKeys {
+					if _, ok := body[key]; !ok {
+						t.Errorf("body missing %q: %v", key, body)
+					}
+				}
+				for _, forbidden := range []string{
+					"workspace_key", "driver_id", "delegated_actor", "managed", "created_by",
+					"trust_level", "owner_type", "status", "active_version_id",
+				} {
+					if _, ok := body[forbidden]; ok {
+						t.Errorf("body exposed server/path-owned field %q: %v", forbidden, body)
+					}
+				}
+				wantValues := map[string]any{
+					"request_id": baseInput.RequestID, "expected_revision": baseInput.ExpectedRevision,
+					"driver_name": baseInput.DriverName, "version_id": baseInput.VersionID,
+					"source_ref": baseInput.SourceRef, "source_digest": baseInput.SourceDigest,
+					"bundle_ref": baseInput.BundleRef, "bundle_digest": baseInput.BundleDigest,
+					"runtime": baseInput.Runtime, "manifest": baseInput.Manifest,
+					"build_diagnostics": baseInput.BuildDiagnostics,
+				}
+				if test.managed {
+					wantValues["activate"] = test.activate
+				}
+				for key, want := range wantValues {
+					wantJSON, err := json.Marshal(want)
+					if err != nil {
+						t.Fatalf("marshal expected %s: %v", key, err)
+					}
+					if got := string(body[key]); got != string(wantJSON) {
+						t.Errorf("body[%q] = %s, want %s", key, got, wantJSON)
+					}
+				}
+				var activate bool
+				if raw, ok := body["activate"]; ok {
+					if err := json.Unmarshal(raw, &activate); err != nil {
+						t.Errorf("decode activate: %v", err)
+					}
+				}
+				if activate != test.activate {
+					t.Errorf("activate = %v, want %v", activate, test.activate)
+				}
+				_ = json.NewEncoder(w).Encode(WorkflowCatalogAuthorVersionResult{
+					Driver: &domain.Driver{
+						WorkspaceKey: baseInput.WorkspaceKey, DriverID: baseInput.DriverID, Revision: 8,
+					},
+					Version: &domain.DriverVersion{
+						WorkspaceKey: baseInput.WorkspaceKey, DriverID: baseInput.DriverID,
+						VersionID: baseInput.VersionID,
+					},
+					CreatedDriver: true, CreatedVersion: true, Activated: test.activate,
+					Replayed: true, CommittedRevision: 8,
+					SemanticImpact: "workflow_catalog.version_authored.v1",
+				})
+			}))
+			defer server.Close()
+			client, err := New(Config{BaseURL: server.URL, Actor: "loom-service"})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			var result *WorkflowCatalogAuthorVersionResult
+			if test.managed {
+				result, err = client.WorkflowCatalog().AuthorManagedDriverVersion(
+					context.Background(),
+					WorkflowCatalogAuthorManagedVersionInput{
+						WorkflowCatalogAuthorVersionInput: baseInput,
+						Activate:                          test.activate,
+					},
+				)
+			} else {
+				result, err = client.WorkflowCatalog().AuthorDriverVersion(context.Background(), baseInput)
+			}
+			if err != nil {
+				t.Fatalf("author version: %v", err)
+			}
+			if result == nil || !result.CreatedDriver || !result.CreatedVersion ||
+				!result.Replayed || result.Activated != test.activate ||
+				result.CommittedRevision != 8 ||
+				result.SemanticImpact != "workflow_catalog.version_authored.v1" {
+				t.Fatalf("result = %+v", result)
+			}
+		})
+	}
+}
+
+func TestWorkflowCatalogAuthoringRejectsInvalidDelegatedActorAndRevisionBeforeHTTP(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_ = json.NewEncoder(w).Encode(WorkflowCatalogAuthorVersionResult{})
+	}))
+	defer server.Close()
+	client, err := New(Config{BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := WorkflowCatalogAuthorVersionInput{
+		WorkspaceKey: "TEST", DriverID: "driver", DelegatedActor: " operator ",
+	}
+	if _, err := client.WorkflowCatalog().AuthorDriverVersion(context.Background(), input); !errors.Is(err, ErrWorkflowCatalogInvalid) {
+		t.Fatalf("invalid actor err = %v, want ErrWorkflowCatalogInvalid", err)
+	}
+	input.DelegatedActor = "operator"
+	input.ExpectedRevision = uint64(math.MaxInt64)
+	if _, err := client.WorkflowCatalog().AuthorDriverVersion(context.Background(), input); !errors.Is(err, ErrWorkflowCatalogInvalid) {
+		t.Fatalf("invalid revision err = %v, want ErrWorkflowCatalogInvalid", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("invalid authoring requests issued %d HTTP calls", got)
+	}
+}
+
 func TestWorkflowCatalogTransportRejectsUnadvanceableRevisionBeforeHTTP(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -127,6 +287,7 @@ func TestWorkflowCatalogTransportPreservesMachineReadableFailures(t *testing.T) 
 		want   error
 	}{
 		{code: "revision_conflict", status: http.StatusConflict, want: ErrWorkflowCatalogRevisionConflict},
+		{code: "workflow_catalog_authoring_conflict", status: http.StatusConflict, want: ErrWorkflowCatalogAuthoringConflict},
 		{code: "workflow_catalog_version_ownership", status: http.StatusBadRequest, want: ErrWorkflowCatalogVersionOwnership},
 		{code: "workflow_catalog_version_not_validated", status: http.StatusUnprocessableEntity, want: ErrWorkflowCatalogVersionNotValidated},
 		{code: "workflow_catalog_version_not_approved", status: http.StatusUnprocessableEntity, want: ErrWorkflowCatalogVersionNotApproved},
@@ -141,7 +302,13 @@ func TestWorkflowCatalogTransportPreservesMachineReadableFailures(t *testing.T) 
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
-			_, err = client.WorkflowCatalog().ApproveVersion(context.Background(), "TEST", "driver", "version", 1)
+			if test.code == "workflow_catalog_authoring_conflict" {
+				_, err = client.WorkflowCatalog().AuthorDriverVersion(context.Background(), WorkflowCatalogAuthorVersionInput{
+					WorkspaceKey: "TEST", DriverID: "driver", DelegatedActor: "operator",
+				})
+			} else {
+				_, err = client.WorkflowCatalog().ApproveVersion(context.Background(), "TEST", "driver", "version", 1)
+			}
 			if !errors.Is(err, test.want) {
 				t.Fatalf("error = %v, want errors.Is %v", err, test.want)
 			}

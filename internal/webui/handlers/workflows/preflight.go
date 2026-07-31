@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/runtimepreflight"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 // preflightRunnerForRun runs fail-closed checks before a workflow run is
@@ -21,7 +21,7 @@ import (
 // workflows. Returns an actionable error string when the local runner cannot
 // execute.
 func (m *Module) preflightRunnerForRun(ctx context.Context, ws, workflowName string, payload json.RawMessage) error {
-	if strings.TrimSpace(workflowName) != workflowdefs.BuiltinEpicRunnerWorkflowName {
+	if strings.TrimSpace(workflowName) != workflowcatalog.BuiltinEpicRunnerWorkflowName {
 		return nil
 	}
 	if !runnerIsLocal(payload) {

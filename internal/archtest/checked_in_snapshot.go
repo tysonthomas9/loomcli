@@ -5,7 +5,16 @@ import (
 	"slices"
 )
 
-var checkedInModuleRoots = []string{"artifacts", "automation", "execution", "workflowcatalog"}
+var checkedInModuleRoots = []string{
+	"agents",
+	"artifacts",
+	"automation",
+	"connectors",
+	"execution",
+	"interaction",
+	"sourcecontrol",
+	"workflowcatalog",
+}
 
 // checkedInSnapshotViolations keeps the current migration snapshot exact while
 // the ordinary ratchets prevent new coupling. Keeping this validation in the
@@ -19,16 +28,17 @@ func checkedInSnapshotViolations(report Report) []string {
 		}
 	}
 
-	checkCount("composite Store files", len(report.CompositeStoreFiles), 82)
-	checkCount("outside-composition Store files", len(report.CompositeStoreOutside), 71)
-	checkCount("legacy handler imports", len(report.LegacyHandlerImports), 90)
+	checkCount("composite Store files", len(report.CompositeStoreFiles), 78)
+	checkCount("outside-composition Store files", len(report.CompositeStoreOutside), 66)
+	checkCount("legacy handler imports", len(report.LegacyHandlerImports), 87)
 	if !slices.Equal(report.ModuleRoots, checkedInModuleRoots) {
 		violations = append(violations, fmt.Sprintf("checked-in architecture snapshot module roots = %v, want %v", report.ModuleRoots, checkedInModuleRoots))
 	}
 	checkCount("pending decisions", len(report.PendingDecisions), 0)
 	checkCount("enforced analysis profiles", report.AnalysisProfilesEnforced, 11)
-	checkCount("mutation commands", report.MutationCommands, 61)
-	checkCount("runtime components", report.RuntimeComponents, 86)
+	checkCount("mutation commands", report.MutationCommands, 101)
+	checkCount("direct persistence-write rows", report.DirectPersistenceWrites, 255)
+	checkCount("runtime components", report.RuntimeComponents, 88)
 	checkCount("runtime goroutine launches", report.RuntimeGoroutineLaunches, 105)
 	checkCount("performance metrics", report.PerformanceMetrics, 6)
 	checkCount("measured performance metrics", report.PerformanceMetricsMeasured, 6)

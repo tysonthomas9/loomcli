@@ -21,6 +21,7 @@ var (
 	ErrTransportVersionOwnership    = errors.New("workflow catalog fleetdb transport: version ownership mismatch")
 	ErrTransportVersionNotValidated = errors.New("workflow catalog fleetdb transport: version not validated")
 	ErrTransportVersionNotApproved  = errors.New("workflow catalog fleetdb transport: version not approved")
+	ErrTransportAuthoringConflict   = errors.New("workflow catalog fleetdb transport: authoring conflict")
 )
 
 // TransportLifecycleResult is the narrow adapter-owned representation of one
@@ -47,16 +48,39 @@ type Transport interface {
 	ActivateVersion(ctx context.Context, workspace, driverID, versionID string, expectedRevision uint64) (*TransportLifecycleResult, error)
 }
 
+// TransportAuthoringResult is the narrow response from FleetDB's atomic
+// authoring command.
+type TransportAuthoringResult struct {
+	Driver            *workflowcatalog.Driver
+	Version           *workflowcatalog.DriverVersion
+	CreatedDriver     bool
+	CreatedVersion    bool
+	ReusedVersion     bool
+	Activated         bool
+	Replayed          bool
+	CommittedRevision uint64
+	SemanticImpact    string
+}
+
+// AuthoringTransport is separate from Transport so lifecycle-only FleetDB
+// deployments remain constructible while the paired Phase 5 route rolls out.
+// Production must use NewWithAuthoring before exposing VersionAuthoringAPI.
+type AuthoringTransport interface {
+	AuthorVersion(context.Context, workflowcatalog.AuthoringMutation) (*TransportAuthoringResult, error)
+}
+
 // Adapter implements both catalog-owned persistence ports over one injected
 // transport. The transport is obtained from the composition root's existing
 // FleetDB Client and must not be constructed here.
 type Adapter struct {
 	transport Transport
+	authoring AuthoringTransport
 }
 
 var (
 	_ workflowcatalog.Reader                = (*Adapter)(nil)
 	_ workflowcatalog.VersionLifecycleStore = (*Adapter)(nil)
+	_ workflowcatalog.AuthoringStore        = (*Adapter)(nil)
 )
 
 // New accepts the narrow adapter-owned transport supplied by the composition
@@ -66,6 +90,19 @@ func New(transport Transport) (*Adapter, error) {
 		return nil, fmt.Errorf("workflow catalog fleetdb adapter: nil transport: %w", workflowcatalog.ErrUnavailable)
 	}
 	return &Adapter{transport: transport}, nil
+}
+
+// NewWithAuthoring composes the complete Phase 5 persistence adapter.
+func NewWithAuthoring(transport Transport, authoring AuthoringTransport) (*Adapter, error) {
+	adapter, err := New(transport)
+	if err != nil {
+		return nil, err
+	}
+	if authoring == nil {
+		return nil, fmt.Errorf("workflow catalog fleetdb adapter: nil authoring transport: %w", workflowcatalog.ErrUnavailable)
+	}
+	adapter.authoring = authoring
+	return adapter, nil
 }
 
 func (a *Adapter) GetDriver(ctx context.Context, workspace, driverID string) (*workflowcatalog.Driver, error) {
@@ -108,6 +145,26 @@ func (a *Adapter) ActivateVersion(ctx context.Context, mutation workflowcatalog.
 	return lifecycleResult("activate version", result, err)
 }
 
+func (a *Adapter) AuthorVersion(ctx context.Context, mutation workflowcatalog.AuthoringMutation) (*workflowcatalog.AuthoringResult, error) {
+	if a == nil || a.authoring == nil {
+		return nil, workflowcatalog.ErrUnavailable
+	}
+	result, err := a.authoring.AuthorVersion(ctx, mutation)
+	if err != nil {
+		return nil, mapError("author version", err)
+	}
+	if result == nil {
+		return nil, fmt.Errorf("author version: empty FleetDB response: %w", workflowcatalog.ErrInvalidPersistedState)
+	}
+	return &workflowcatalog.AuthoringResult{
+		Driver: result.Driver, Version: result.Version,
+		CreatedDriver: result.CreatedDriver, CreatedVersion: result.CreatedVersion,
+		ReusedVersion: result.ReusedVersion, Activated: result.Activated,
+		Replayed: result.Replayed, CommittedRevision: result.CommittedRevision,
+		SemanticImpact: result.SemanticImpact,
+	}, nil
+}
+
 func lifecycleResult(operation string, result *TransportLifecycleResult, err error) (*workflowcatalog.LifecycleResult, error) {
 	if err != nil {
 		return nil, mapError(operation, err)
@@ -140,6 +197,8 @@ func mapError(operation string, err error) error {
 		mapped = workflowcatalog.ErrVersionNotValidated
 	case errors.Is(err, ErrTransportVersionNotApproved):
 		mapped = workflowcatalog.ErrVersionNotApproved
+	case errors.Is(err, ErrTransportAuthoringConflict):
+		mapped = workflowcatalog.ErrAuthoringConflict
 	case errors.Is(err, ErrTransportInvalid):
 		mapped = workflowcatalog.ErrInvalid
 	default:

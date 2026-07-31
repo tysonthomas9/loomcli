@@ -16,25 +16,6 @@ func ApprovedVersionMetadataKey(versionID string) string {
 	return ApprovedVersionMetadataPrefix + strings.TrimSpace(versionID)
 }
 
-func ActivateDriverVersion(ctx context.Context, drivers store.DriverStore, versions store.DriverVersionStore, ws, driverID, versionID string) (*domain.Driver, *domain.DriverVersion, error) {
-	driver, version, err := loadDriverVersionForOperatorAction(ctx, drivers, versions, ws, driverID, versionID)
-	if err != nil {
-		return nil, nil, err
-	}
-	active := version.VersionID
-	status := domain.DriverStatusActive
-	metadata := activationMetadata(driver.Metadata, version.Manifest)
-	updated, err := drivers.Update(ctx, ws, driver.DriverID, store.DriverUpdate{
-		ActiveVersionID: &active,
-		Status:          &status,
-		Metadata:        &metadata,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("activate driver version: %w", err)
-	}
-	return updated, version, nil
-}
-
 func DriverVersionApproved(driver *domain.Driver, version *domain.DriverVersion) bool {
 	if driver == nil || version == nil {
 		return false

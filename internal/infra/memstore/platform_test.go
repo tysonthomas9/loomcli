@@ -7,8 +7,89 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+func TestDriverGenericLifecycleFieldsRetired(t *testing.T) {
+	ctx := t.Context()
+	s := New()
+	approvalKey := workflowcatalog.ApprovedVersionMetadataKey("version-1")
+
+	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: "forged", Name: "forged",
+		Metadata: map[string]string{approvalKey: "sha256:source"},
+	}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("generic create approval metadata err = %v, want ErrInvalid", err)
+	}
+	if _, err := s.Drivers().Create(ctx, store.DriverCreate{
+		WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver", Status: domain.DriverStatusDraft,
+		TrustLevel: domain.DriverTrustUntrusted, Metadata: map[string]string{"team": "runtime"},
+	}); err != nil {
+		t.Fatalf("Create driver: %v", err)
+	}
+	if _, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
+		WorkspaceKey: "WS", DriverID: "driver-1", VersionID: "version-1", Version: 1,
+		SourceDigest: "sha256:source", BundleDigest: "sha256:bundle",
+		ValidationStatus: domain.DriverVersionValidationPassed,
+	}); err != nil {
+		t.Fatalf("Create version: %v", err)
+	}
+
+	active := domain.DriverStatusActive
+	renamed := "must-not-partially-apply"
+	if _, err := s.Drivers().Update(ctx, "WS", "driver-1", store.DriverUpdate{
+		Name: &renamed, Status: &active,
+	}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("generic active status err = %v, want ErrInvalid", err)
+	}
+	driver, err := s.Drivers().Get(ctx, "WS", "driver-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if driver.Name != "driver" || driver.Status != domain.DriverStatusDraft || driver.ActiveVersionID != "" {
+		t.Fatalf("rejected activation partially mutated driver: %+v", driver)
+	}
+
+	forged := map[string]string{"team": "runtime", approvalKey: "forged"}
+	if _, err := s.Drivers().Update(ctx, "WS", "driver-1", store.DriverUpdate{
+		Metadata: &forged,
+	}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("generic approval metadata err = %v, want ErrInvalid", err)
+	}
+	if _, err := s.ApproveDriverVersionForTest(ctx, "WS", "driver-1", "version-1"); err != nil {
+		t.Fatalf("typed approve: %v", err)
+	}
+	if _, err := s.ActivateDriverVersionForTest(ctx, "WS", "driver-1", "version-1"); err != nil {
+		t.Fatalf("typed activate: %v", err)
+	}
+
+	replacement := map[string]string{"team": "catalog"}
+	disabled := domain.DriverStatusDisabled
+	trusted := domain.DriverTrustTrusted
+	driver, err = s.Drivers().Update(ctx, "WS", "driver-1", store.DriverUpdate{
+		Status: &disabled, TrustLevel: &trusted, Metadata: &replacement,
+	})
+	if err != nil {
+		t.Fatalf("legitimate generic administration: %v", err)
+	}
+	if driver.Status != disabled || driver.TrustLevel != trusted ||
+		driver.Metadata["team"] != "catalog" ||
+		driver.Metadata[approvalKey] != "sha256:source" ||
+		driver.ActiveVersionID != "version-1" {
+		t.Fatalf("generic administration lost lifecycle state: %+v", driver)
+	}
+	if _, err := s.UnapproveDriverVersionForTest(ctx, "WS", "driver-1", "version-1"); err != nil {
+		t.Fatalf("typed unapprove: %v", err)
+	}
+	driver, err = s.Drivers().Get(ctx, "WS", "driver-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := driver.Metadata[approvalKey]; present {
+		t.Fatalf("typed unapprove left lifecycle marker: %+v", driver.Metadata)
+	}
+}
 
 func TestPlatformRegisteredEpicRunViaTriggerBinding(t *testing.T) {
 	ctx := t.Context()

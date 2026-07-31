@@ -22,10 +22,12 @@ import (
 	"testing"
 	"time"
 
+	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	workflowauthoring "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/netutil"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -560,18 +562,70 @@ func (e *githubWebhookE2E) registerLiveGitHubDriver(live liveGitHubPR) *domain.T
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	registered, err := driverpkg.RegisterFlueDriver(ctx, e.fleetClient, driverpkg.RegisterFlueOptions{
-		WorkspaceKey: e.workspace,
-		WorkDir:      e.workDir,
-		DistPath:     "dist",
-		DriverName:   "github-pr-review",
-		DriverID:     "github-pr-review",
-		WorkflowName: "github-pr-review",
-		SourceRef:    "github-live-e2e://" + live.Repo + "#" + strconv.Itoa(live.Number),
-		SourceDigest: "sha256:live-github-e2e-" + live.ID,
-		CreatedBy:    e.actor,
-		Activate:     true,
+	catalog, err := appserve.NewWorkflowCatalogModule(appserve.WorkflowCatalogConfig{
+		Enabled:              true,
+		FleetDBClient:        e.fleetClient,
+		WorkspaceFromContext: func(context.Context) string { return e.workspace },
+		BuiltinWorkflow:      workflowcatalog.IsBuiltinWorkflowName,
 	})
+	if err != nil {
+		e.t.Fatalf("compose live GitHub Workflow Catalog: %v", err)
+	}
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		"http://loom.local/api/workflows/native",
+		nil,
+	)
+	if err != nil {
+		e.t.Fatalf("create live GitHub authoring request: %v", err)
+	}
+	author, err := catalog.OperatorAuthorityResolver().ResolveOperatorAuthority(
+		request,
+		e.workspace,
+		workflowcatalog.ActionAuthorVersion,
+	)
+	if err != nil {
+		e.t.Fatalf("authorize live GitHub driver authoring: %v", err)
+	}
+	approve, err := catalog.OperatorAuthorityResolver().ResolveOperatorAuthority(
+		request,
+		e.workspace,
+		workflowcatalog.ActionApproveVersion,
+	)
+	if err != nil {
+		e.t.Fatalf("authorize live GitHub driver approval: %v", err)
+	}
+	activate, err := catalog.OperatorAuthorityResolver().ResolveOperatorAuthority(
+		request,
+		e.workspace,
+		workflowcatalog.ActionActivateVersion,
+	)
+	if err != nil {
+		e.t.Fatalf("authorize live GitHub driver activation: %v", err)
+	}
+	registered, err := workflowauthoring.AuthorNativeFlueDriver(
+		ctx,
+		catalog.CatalogAPI(),
+		catalog.VersionAuthoringAPI(),
+		workflowauthoring.NativeAuthoringAuthorities{
+			Author:   author,
+			Approve:  &approve,
+			Activate: &activate,
+		},
+		driverpkg.RegisterFlueOptions{
+			WorkspaceKey: e.workspace,
+			WorkDir:      e.workDir,
+			DistPath:     "dist",
+			DriverName:   "github-pr-review",
+			DriverID:     "github-pr-review",
+			WorkflowName: "github-pr-review",
+			SourceRef:    "github-live-e2e://" + live.Repo + "#" + strconv.Itoa(live.Number),
+			CreatedBy:    e.actor,
+			Activate:     true,
+			Trust:        domain.DriverTrustTrusted,
+		},
+	)
 	if err != nil {
 		e.t.Fatalf("register live GitHub driver: %v", err)
 	}

@@ -75,8 +75,8 @@ func TestServer_BuildModules_StoreBacked(t *testing.T) {
 
 	app.buildModules()
 
-	if got := len(app.wsModules); got != 16 {
-		t.Fatalf("len(wsModules) = %d, want 16", got)
+	if got := len(app.wsModules); got != 18 {
+		t.Fatalf("len(wsModules) = %d, want 18", got)
 	}
 	wantTypes := []string{
 		"*handlermux.WorkspaceOpsModule",
@@ -84,6 +84,8 @@ func TestServer_BuildModules_StoreBacked(t *testing.T) {
 		"*issues.SessionModule",
 		"*log.Module",
 		"*agents.Module",
+		"*agentsmanagement.Module",
+		"*interactionmanagement.Module",
 		"*onboarding.Module",
 		"*workflows.Module",
 		"*executionmanagement.Module",

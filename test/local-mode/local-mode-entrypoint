@@ -371,8 +371,32 @@ register_agents() {
 
   loom agentdef remove "$PLAN_AGENT" >/dev/null 2>&1 || true
   loom agentdef remove "$CODE_AGENT" >/dev/null 2>&1 || true
-  loom agentdef add "$PLAN_AGENT" --role plan --auto --backend "$AGENT_BACKEND" --repos source-repo
-  loom agentdef add "$CODE_AGENT" --role task --auto --backend "$AGENT_BACKEND" --repos source-repo
+
+  # Behavior defaults belong to Role. Repository/backend scheduling scope
+  # belongs to Execution's WorkerProfile; Agent identity stores its profile
+  # reference rather than duplicating either capability's policy.
+  loom role set plan backend "$AGENT_BACKEND" >/dev/null
+  loom role set task backend "$AGENT_BACKEND" >/dev/null
+  ensure_local_worker_profile "$PLAN_AGENT" plan
+  ensure_local_worker_profile "$CODE_AGENT" task
+  loom agentdef add "$PLAN_AGENT" --role plan --profile "$PLAN_AGENT" --auto
+  loom agentdef add "$CODE_AGENT" --role task --profile "$CODE_AGENT" --auto
+}
+
+ensure_local_worker_profile() {
+  profile="$1"
+  role="$2"
+  if loom worker profile show "$profile" >/dev/null 2>&1; then
+    loom worker profile set "$profile" role "$role" >/dev/null
+    loom worker profile set "$profile" backend "$AGENT_BACKEND" >/dev/null
+    loom worker profile set "$profile" repos source-repo >/dev/null
+    loom worker profile set "$profile" enabled true >/dev/null
+    return
+  fi
+  loom worker profile add "$profile" \
+    --role "$role" \
+    --backend "$AGENT_BACKEND" \
+    --repo source-repo
 }
 
 prepare_codex_credentials() {
@@ -423,22 +447,6 @@ prepare_claude_credentials() {
     return 1
   fi
   claude --version || true
-}
-
-prepare_daytona_credentials() {
-  # When the daemon leaf is routed to the Daytona runner, the runner resolves its
-  # API key via loom's runtime-credential API (LOOM_FLEET_DB_URL) or a credential
-  # file. Write the host-provided DAYTONA_API_KEY to a file and point the runner at
-  # it; the daemon subprocess inherits DAYTONA_CREDENTIAL_FILE from this shell.
-  if [ -z "${DAYTONA_API_KEY:-}" ]; then
-    return 0
-  fi
-  key_file="${LOOM_CONFIG_DIR:-/root/.loom}/daytona-key"
-  mkdir -p "$(dirname "$key_file")"
-  printf '%s' "$DAYTONA_API_KEY" > "$key_file"
-  chmod 600 "$key_file"
-  export DAYTONA_CREDENTIAL_FILE="$key_file"
-  echo "[local-mode] daytona credential file staged at ${key_file}"
 }
 
 issues_api() {
@@ -932,7 +940,6 @@ git config --global --add safe.directory "*" >/dev/null 2>&1 || true
 wait_for_url "${LOOM_FLEET_DB_URL:-http://fleet-db:8080}/healthz" "fleet-db"
 prepare_codex_credentials
 prepare_claude_credentials
-prepare_daytona_credentials
 create_source_repo
 create_workspace
 if plane_is_ts; then

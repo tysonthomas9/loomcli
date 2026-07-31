@@ -89,7 +89,7 @@ func TestBridgeCreateContentArtifactUsesArtifactsOwnerLifecycle(t *testing.T) {
 	req := hostBridgeTaskExecRequest()
 
 	artifact, err := executor.createContentArtifact(
-		ctx, req, "session-1", "logs-task-run-1", "logs", "runner logs", "text/plain", []byte("hello"),
+		ctx, req, "logs-task-run-1", "logs", "runner logs", "text/plain", []byte("hello"),
 	)
 	if err != nil {
 		t.Fatalf("createContentArtifact: %v", err)
@@ -110,7 +110,7 @@ func TestBridgeCreateContentArtifactUsesArtifactsOwnerLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get persisted artifact: %v", err)
 	}
-	if persisted.OwnerID != req.TaskRunID || persisted.SessionID != "session-1" {
+	if persisted.OwnerID != req.TaskRunID || persisted.SessionID != "" {
 		t.Fatalf("persisted ownership = %#v", persisted)
 	}
 }
@@ -120,7 +120,7 @@ func TestBridgeArtifactMutationFailsClosedWithoutCapability(t *testing.T) {
 	executor := HostBridgeTaskExecutor{Store: st}
 	req := hostBridgeTaskExecRequest()
 	_, err := executor.createContentArtifact(
-		context.Background(), req, "session-1", "logs-task-run-1", "logs", "runner logs", "text/plain", []byte("hello"),
+		context.Background(), req, "logs-task-run-1", "logs", "runner logs", "text/plain", []byte("hello"),
 	)
 	if !errors.Is(err, artifactsmodule.ErrUnavailable) {
 		t.Fatalf("createContentArtifact error = %v, want Artifacts unavailable", err)
@@ -139,7 +139,7 @@ func TestBridgeCreateContentArtifactRejectsUnfencedOwnerBeforePersistence(t *tes
 	req.FencingToken = 0
 
 	_, err := executor.createContentArtifact(
-		ctx, req, "session-1", "logs-task-run-1", "logs", "runner logs", "text/plain", []byte("hello"),
+		ctx, req, "logs-task-run-1", "logs", "runner logs", "text/plain", []byte("hello"),
 	)
 	if !errors.Is(err, authority.ErrInvalidScope) {
 		t.Fatalf("createContentArtifact error = %v, want authority.ErrInvalidScope", err)

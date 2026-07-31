@@ -1,6 +1,6 @@
 schema_version: 1
 status: approved
-completed_phase: 4
+completed_phase: 5
 decision_dependencies:
   - MM-1
   - MM-2
@@ -39,7 +39,7 @@ capabilities:
     status: planned
   - name: agents
     root: agents
-    status: planned
+    status: active
   - name: workflowcatalog
     root: workflowcatalog
     status: active
@@ -51,13 +51,13 @@ capabilities:
     status: active
   - name: interaction
     root: interaction
-    status: planned
+    status: active
   - name: sourcecontrol
     root: sourcecontrol
-    status: planned
+    status: active
   - name: connectors
     root: connectors
-    status: planned
+    status: active
   - name: artifacts
     root: artifacts
     status: active
@@ -70,13 +70,13 @@ aggregate_ownership:
     cross_capability_rule: Combines immutable DTOs and never owns or mutates a product aggregate.
   - record: Agent, Role, desired state, AgentOwnershipLease
     owner: agents
-    cross_capability_rule: Other capabilities retain IDs or immutable projections only.
+    cross_capability_rule: Other capabilities retain IDs or immutable projections only. Agent enable, disable, and delete use the Agents-owned FleetDB atomic lifecycle command to converge the Agent with Automation-owned managed bindings and Connectors-owned binding grants without transferring aggregate ownership or exposing partial authority.
   - record: AgentCommand
     owner: interaction
     cross_capability_rule: Transitional only and removed after lead and session daemon dependencies retire.
   - record: AgentSession, TerminalSession, AgentLease, inbox, lead-delivery Outbox
     owner: interaction
-    cross_capability_rule: Session records remain distinct from batch execution; NodeID is an opaque reference.
+    cross_capability_rule: Session records remain distinct from batch execution; NodeID is an opaque reference. Non-Interaction delivery callers receive only an InboxEnqueuer whose registered serve-interaction-inbox-delivery component derives one exact system authority per enqueue and never exposes the issuer.
   - record: Artifact
     owner: artifacts
     cross_capability_rule: Producers request create and finalize and retain durable references.
@@ -144,34 +144,6 @@ legacy_paths:
     owner: frontend-and-http-lane
     removal_issue: MM-LEGACY-SVCIMPL
     expires_after_phase: 7
-  - path: internal/workflows
-    owner: workflow-distribution-lane
-    removal_issue: MM-LEGACY-WORKFLOWS
-    expires_after_phase: 5
-    extension:
-      reviewed_by: phase-3-architecture-review
-      reviewed_at: 2026-07-16
-      rationale: Phase 3 moved Automation callers through its module API without rewriting the mixed builtin-source, authoring, registration, and trusted runner-resolution package. Removing this path now would conflate the behavior-preserving Automation slice with Workflow Catalog authoring and Phase 4 Execution ownership work.
-      replacement_apis:
-        - internal/modules/execution
-        - internal/modules/workflowcatalog
-      remaining_call_sites:
-        - internal/cli/agent/tsruntime/tsruntime.go
-        - internal/cli/epic/run.go
-        - internal/cli/serve/serveadapter/workflow_catalog.go
-        - internal/cli/serve/workspacemgr/agent_identity_migration.go
-        - internal/cli/serve/workspacemgr/agent_identity_migration_test.go
-        - internal/cli/workflow/management_client_test.go
-        - internal/cli/workflow/workflow_cmd.go
-        - internal/cli/workflow/workflow_cmd_test.go
-        - internal/cli/workflow/workflow_digest_test.go
-        - internal/webui/handlers/agents/record_handlers.go
-        - internal/webui/handlers/agents/record_handlers_driver_test.go
-        - internal/webui/handlers/agents/record_handlers_test.go
-        - internal/webui/handlers/workflows/builtins.go
-        - internal/webui/handlers/workflows/module.go
-        - internal/webui/handlers/workflows/module_test.go
-        - internal/webui/handlers/workflows/preflight.go
 edges:
   - from: sourcecontrol
     to: workspace

@@ -65,6 +65,21 @@ func TestPhase4FoundationCapabilitiesIncludesWorkItemProfiles(t *testing.T) {
 	}
 }
 
+func TestPhase5FoundationCapabilitiesAreExact(t *testing.T) {
+	t.Parallel()
+
+	want := []string{
+		AgentsServiceCommandsCapability,
+		AgentsLifecycleCommandsCapability,
+		AgentsOwnershipLeaseCommandsCapability,
+		InteractionSessionCommandsCapability,
+		RepositoriesAdmissionCapability,
+	}
+	if got := Phase5FoundationCapabilities(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Phase5FoundationCapabilities = %q, want %q", got, want)
+	}
+}
+
 func TestRequireCapabilitiesAcceptsNormalizedAdvertisedKeys(t *testing.T) {
 	t.Parallel()
 

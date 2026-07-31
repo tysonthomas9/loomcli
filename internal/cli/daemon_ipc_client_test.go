@@ -410,8 +410,7 @@ func TestAgentIPCClient_Release_Success(t *testing.T) {
 
 	client := NewAgentIPCClient(socketPath, "falcon")
 	client.SessionID = "sess-1"
-	client.LeaseID = "lease-1"
-	client.LeaseToken = "token-1"
+	client.AuthToken = "token-1"
 	if err := client.Release("abc-123"); err != nil {
 		t.Fatalf("Release() error = %v", err)
 	}
@@ -422,10 +421,10 @@ func TestAgentIPCClient_Release_Success(t *testing.T) {
 	if capturedReq.IssueID != "abc-123" {
 		t.Errorf("IssueID = %q, want %q", capturedReq.IssueID, "abc-123")
 	}
-	// Release must carry the lease-fence fields so the daemon can validate it.
-	if capturedReq.SessionID != "sess-1" || capturedReq.LeaseID != "lease-1" || capturedReq.LeaseToken != "token-1" {
-		t.Errorf("lease fields = session %q lease %q token %q, want sess-1/lease-1/token-1",
-			capturedReq.SessionID, capturedReq.LeaseID, capturedReq.LeaseToken)
+	// Release must carry the process-local session credential so the daemon can validate it.
+	if capturedReq.SessionID != "sess-1" || capturedReq.AuthToken != "token-1" {
+		t.Errorf("IPC fields = session %q token %q, want sess-1/token-1",
+			capturedReq.SessionID, capturedReq.AuthToken)
 	}
 }
 

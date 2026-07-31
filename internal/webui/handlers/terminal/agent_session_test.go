@@ -1243,7 +1243,22 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgen
 		t.Fatalf("seed tab: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-live")
+	type ensureResult struct {
+		meta *tabmeta.TabMetadata
+		err  error
+	}
+	resultChannel := make(chan ensureResult, 1)
+	go func() {
+		meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-live")
+		resultChannel <- ensureResult{meta: meta, err: err}
+	}()
+	var result ensureResult
+	select {
+	case result = <-resultChannel:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stale-tab replacement deadlocked on the agent lifecycle boundary")
+	}
+	meta, err := result.meta, result.err
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}

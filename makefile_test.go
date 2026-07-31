@@ -256,7 +256,7 @@ func TestMakefileLocalModeWorkflowOverlayRunsToolchainPreflight(t *testing.T) {
 		"FLUE_SRC=/tmp/fake-flue",
 		"local-mode-up",
 	)
-	preflight := strings.Index(out, "node_modules/.pnpm/node_modules/@daytona/sdk/package.json")
+	preflight := strings.Index(out, "@rolldown/binding-")
 	compose := strings.Index(out, "fake-compose")
 	if preflight < 0 {
 		t.Fatalf("workflow-build overlay did not add the toolchain preflight:\n%s", out)
@@ -282,43 +282,21 @@ func TestMakefileLocalModeWorkflowBuildCheckFailsBeforeCompose(t *testing.T) {
 	}
 }
 
-func TestMakefileLocalModeWorkflowBuildCheckRequiresDaytonaSDK(t *testing.T) {
+func TestMakefileLocalModeDaytonaBuildCheckRequiresDaytonaSDK(t *testing.T) {
 	t.Parallel()
 
 	flueRoot := t.TempDir()
-	for _, rel := range []string{
-		"packages/cli/bin/flue.mjs",
-		"packages/cli/dist/flue.js",
-		"packages/runtime/package.json",
-		"packages/runtime/dist/node/index.mjs",
-		"packages/runtime/node_modules/@hono/node-server/package.json",
-		"packages/runtime/node_modules/hono/package.json",
-	} {
-		path := filepath.Join(flueRoot, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	cmd := exec.Command( //nolint:norawexec -- exercises the Make preflight boundary
-		"make", "-s",
+	out := runMake(t,
+		"-n",
 		"FLUE_SRC="+flueRoot,
-		"local-mode-workflow-build-check",
+		"local-mode-daytona-build-check",
 	)
-	cmd.Dir = repoRoot(t)
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("Flue checkout without @daytona/sdk unexpectedly passed preflight:\n%s", out)
-	}
 	for _, want := range []string{
 		"node_modules/.pnpm/node_modules/@daytona/sdk/package.json",
-		"Built-in workflow sources require the Flue CLI/runtime plus @daytona/sdk",
-		"--filter hello-world...",
+		"Daytona SDK is missing from the pinned Flue checkout",
+		"Run pnpm install in that checkout before starting the Daytona profile",
 	} {
-		if !strings.Contains(string(out), want) {
+		if !strings.Contains(out, want) {
 			t.Fatalf("workflow build preflight output missing %q:\n%s", want, out)
 		}
 	}

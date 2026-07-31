@@ -30,13 +30,14 @@ type Service struct {
 }
 
 var (
-	_ BindingCommands        = (*Service)(nil)
-	_ ManagedBindingCommands = (*Service)(nil)
-	_ BindingQueries         = (*Service)(nil)
-	_ EventQueries           = (*Service)(nil)
-	_ DeliveryQueries        = (*Service)(nil)
-	_ EventAdmission         = (*Service)(nil)
-	_ ManualDispatch         = (*Service)(nil)
+	_ BindingCommands             = (*Service)(nil)
+	_ ManagedBindingCommands      = (*Service)(nil)
+	_ ProvisioningBindingCommands = (*Service)(nil)
+	_ BindingQueries              = (*Service)(nil)
+	_ EventQueries                = (*Service)(nil)
+	_ DeliveryQueries             = (*Service)(nil)
+	_ EventAdmission              = (*Service)(nil)
+	_ ManualDispatch              = (*Service)(nil)
 )
 
 type Option func(*Service)

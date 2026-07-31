@@ -261,7 +261,7 @@ func TestControlServer_StopAlreadyStopped(t *testing.T) {
 	}
 }
 
-func TestControlServer_StopConvergesDurableDrainingState(t *testing.T) {
+func TestControlServer_StopLeavesLegacyRuntimeProjectionToItsOwner(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "Workspace"}); err != nil {
@@ -289,8 +289,16 @@ func TestControlServer_StopConvergesDurableDrainingState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get stopped agent: %v", err)
 	}
-	if agent.State != domain.AgentStateStopped || agent.DesiredState != domain.AgentDesiredStopped {
-		t.Fatalf("durable agent = %s/%s, want stopped/stopped", agent.State, agent.DesiredState)
+	if agent.State != domain.AgentStateIdle || agent.DesiredState != domain.AgentDesiredDraining {
+		t.Fatalf(
+			"durable agent = %s/%s, want runtime-owned idle and unchanged compatibility intent draining",
+			agent.State,
+			agent.DesiredState,
+		)
+	}
+	entry, ok := d.findAgentEntry("alpha")
+	if !ok || entry.DesiredState != domain.AgentDesiredStopped {
+		t.Fatalf("daemon config agent = %#v, %v; want desired stopped", entry, ok)
 	}
 }
 
@@ -335,15 +343,14 @@ func TestControlServer_EphemeralStartRejectsTerminalAttempt(t *testing.T) {
 	d.sup.WorkspaceID = "WS"
 	defer d.sup.ShutdownOnce.Do(func() { close(d.sup.Shutdown) })
 
-	if _, err := d.store.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "sess-worker-1",
-		AgentID:      "worker",
-		Kind:         domain.AgentSessionKindTask,
-		TaskID:       "TASK-1",
-		Status:       domain.AgentSessionCompleted,
+	if _, err := d.store.TaskRuns().Create(t.Context(), store.TaskRunCreate{
+		WorkspaceKey:    "WS",
+		TaskRunID:       "task-run-worker-1",
+		TaskID:          "TASK-1",
+		WorkerProfileID: "worker",
+		Status:          domain.TaskRunCompleted,
 	}); err != nil {
-		t.Fatalf("create session: %v", err)
+		t.Fatalf("create task run: %v", err)
 	}
 
 	resp := d.handleAgentControlStart("worker", "TASK-1")

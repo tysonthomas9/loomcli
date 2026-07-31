@@ -1,7 +1,6 @@
 package driver
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 const (
@@ -72,12 +70,88 @@ type RegisterFlueResult struct {
 	Activated      bool                  `json:"activated"`
 }
 
-// RegistrationCatalog is the complete persistence surface needed to register,
-// reuse, and activate a Driver version. Keeping this narrow prevents workflow
-// materialization from inheriting the process-wide composite store.Store.
-type RegistrationCatalog interface {
-	Drivers() store.DriverStore
-	DriverVersions() store.DriverVersionStore
+// StagedFlueRegistration is the persistence-free output of preparing one
+// native Flue bundle. CatalogManifest deliberately excludes trust_level:
+// Workflow Catalog selects trust from its typed operator/system authority
+// lane, while the on-disk manifest is stamped with the matching server-selected
+// trust so the runtime bundle and durable version remain content-identical.
+//
+// Promote must succeed before submitting the immutable metadata through
+// Workflow Catalog. A promoted bundle may remain as an idempotent orphan when
+// the durable command fails; retrying the same content safely replaces it.
+type StagedFlueRegistration struct {
+	DriverName       string
+	DriverID         string
+	VersionID        string
+	SourceRef        string
+	SourceDigest     string
+	BundleRef        string
+	BundleDigest     string
+	Runtime          string
+	CatalogManifest  map[string]string
+	BuildDiagnostics string
+	Bundle           *Bundle
+
+	staged *stagedFlueBundle
+}
+
+// StageFlueDriverBundle validates and content-addresses a built distribution
+// without reading or mutating Driver/DriverVersion persistence.
+func StageFlueDriverBundle(opts RegisterFlueOptions) (*StagedFlueRegistration, error) {
+	if strings.TrimSpace(opts.WorkspaceKey) == "" {
+		return nil, fmt.Errorf("workspace key required: %w", domain.ErrInvalid)
+	}
+	reg, err := resolveFlueRegistrationInput(opts)
+	if err != nil {
+		return nil, err
+	}
+	staged, err := stageFlueBundle(reg)
+	if err != nil {
+		if staged != nil {
+			_ = os.RemoveAll(staged.tmpRoot)
+		}
+		return nil, err
+	}
+	catalogManifest := cloneStringMap(staged.manifest)
+	delete(catalogManifest, ManifestTrustLevelKey)
+	return &StagedFlueRegistration{
+		DriverName: reg.driverName, DriverID: reg.driverID, VersionID: staged.versionID,
+		SourceRef: reg.sourceRef, SourceDigest: reg.sourceDigest,
+		BundleRef: staged.bundleRef, BundleDigest: staged.bundleDigest,
+		Runtime: RuntimeFlueNode, CatalogManifest: catalogManifest,
+		BuildDiagnostics: opts.BuildDiagnostics,
+		Bundle: &Bundle{
+			Root: staged.finalRoot, BundleRef: staged.bundleRef,
+			SourceRef: reg.sourceRef, SourceDigest: reg.sourceDigest,
+			BundleDigest: staged.bundleDigest, Manifest: cloneStringMap(staged.manifest),
+		},
+		staged: staged,
+	}, nil
+}
+
+// Promote makes the staged content available at its durable relative
+// BundleRef. It is idempotent for a successfully promoted instance.
+func (staged *StagedFlueRegistration) Promote() error {
+	if staged == nil || staged.staged == nil {
+		return fmt.Errorf("staged Flue registration is required: %w", domain.ErrInvalid)
+	}
+	if staged.staged.tmpRoot == "" {
+		return nil
+	}
+	if err := promoteFlueBundle(staged.staged.tmpRoot, staged.staged.finalRoot); err != nil {
+		return err
+	}
+	staged.staged.tmpRoot = ""
+	return nil
+}
+
+// Cleanup removes only an unpromoted temporary bundle.
+func (staged *StagedFlueRegistration) Cleanup() {
+	if staged == nil || staged.staged == nil || staged.staged.tmpRoot == "" {
+		return
+	}
+	_ = os.RemoveAll(staged.staged.tmpRoot)
+	staged.staged.tmpRoot = ""
 }
 
 type DriverRunnerSpec struct {
@@ -276,57 +350,6 @@ func inferNodeModuleRunnerName(path string) string {
 	return strings.TrimSpace(name)
 }
 
-func RegisterFlueDriver(ctx context.Context, s RegistrationCatalog, opts RegisterFlueOptions) (*RegisterFlueResult, error) {
-	if s == nil {
-		return nil, fmt.Errorf("store required: %w", domain.ErrInvalid)
-	}
-	if strings.TrimSpace(opts.WorkspaceKey) == "" {
-		return nil, fmt.Errorf("workspace key required: %w", domain.ErrInvalid)
-	}
-	reg, err := resolveFlueRegistrationInput(opts)
-	if err != nil {
-		return nil, err
-	}
-
-	result := &RegisterFlueResult{}
-	driver, createdDriver, err := ensureRegisteredDriver(ctx, s, opts.WorkspaceKey, reg.driverID, reg.driverName, reg.sourceRef, registrationTrust(opts.Trust))
-	if err != nil {
-		return nil, err
-	}
-	result.Driver = driver
-	result.CreatedDriver = createdDriver
-
-	staged, err := stageFlueBundle(reg)
-	cleanupTmp := staged != nil
-	defer func() {
-		if cleanupTmp {
-			_ = os.RemoveAll(staged.tmpRoot)
-		}
-	}()
-	if err != nil {
-		return result, err
-	}
-
-	if existing, err := s.DriverVersions().Get(ctx, opts.WorkspaceKey, staged.versionID); err == nil {
-		return result, reuseRegisteredFlueVersion(ctx, s, opts, result, existing, reg.driverID, staged)
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		return result, fmt.Errorf("get driver version: %w", err)
-	}
-
-	nextVersion, err := nextDriverVersion(ctx, s, opts.WorkspaceKey, reg.driverID)
-	if err != nil {
-		return result, err
-	}
-	if err := promoteFlueBundle(staged.tmpRoot, staged.finalRoot); err != nil {
-		return result, err
-	}
-	cleanupTmp = false
-	if err := persistRegisteredFlueVersion(ctx, s, opts, reg, staged, result, nextVersion); err != nil {
-		return result, err
-	}
-	return result, nil
-}
-
 type flueRegistrationInput struct {
 	absWorkDir   string
 	absDist      string
@@ -360,6 +383,9 @@ func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationIn
 	if driverID == "" {
 		return nil, fmt.Errorf("driver name %q does not contain a usable id: %w", driverName, domain.ErrInvalid)
 	}
+	if err := validateFlueDriverID(driverID); err != nil {
+		return nil, err
+	}
 	workflowName := firstNonEmpty(opts.WorkflowName, externalManifest["workflow_name"], driverID)
 	if workflowName == "" {
 		return nil, fmt.Errorf("workflow name required: %w", domain.ErrInvalid)
@@ -380,6 +406,20 @@ func resolveFlueRegistrationInput(opts RegisterFlueOptions) (*flueRegistrationIn
 		runnerSpecs:  runnerSpecs,
 		trust:        registrationTrust(opts.Trust),
 	}, nil
+}
+
+// validateFlueDriverID keeps the durable identity a single filesystem path
+// segment before stageFlueBundle derives BundleRef and finalRoot from it.
+// Workflow Catalog validates the durable identifier again at its boundary,
+// but that happens after promotion and therefore cannot protect local disk.
+func validateFlueDriverID(driverID string) error {
+	if driverID == "" || driverID != strings.TrimSpace(driverID) ||
+		driverID == "." || driverID == ".." ||
+		strings.ContainsAny(driverID, `/\:`) ||
+		strings.ContainsRune(driverID, '\x00') {
+		return fmt.Errorf("driver id %q must be a canonical path segment: %w", driverID, domain.ErrInvalid)
+	}
+	return nil
 }
 
 func resolveFlueDistPath(workDir, distPath string) (string, string, error) {
@@ -474,27 +514,6 @@ func writeFlueBundleManifest(tmpRoot string, manifest map[string]string) ([]byte
 	return manifestBytes, nil
 }
 
-func reuseRegisteredFlueVersion(ctx context.Context, s RegistrationCatalog, opts RegisterFlueOptions, result *RegisterFlueResult, existing *domain.DriverVersion, driverID string, staged *stagedFlueBundle) error {
-	result.Version = existing
-	result.ReusedVersion = true
-	if existing.DriverID != driverID || existing.BundleDigest != staged.bundleDigest {
-		return fmt.Errorf("driver version %q already exists with different content: %w", staged.versionID, domain.ErrAlreadyExists)
-	}
-	if registeredBundleMissing(staged.finalRoot) {
-		if err := promoteFlueBundle(staged.tmpRoot, staged.finalRoot); err != nil {
-			return err
-		}
-		staged.tmpRoot = ""
-	}
-	if opts.Activate && result.Driver.ActiveVersionID != existing.VersionID {
-		if err := activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, driverID, existing.VersionID, staged.manifest); err != nil {
-			return err
-		}
-	}
-	result.Bundle = &Bundle{Root: staged.finalRoot, BundleRef: existing.BundleRef, SourceRef: existing.SourceRef, SourceDigest: existing.SourceDigest, BundleDigest: existing.BundleDigest, Manifest: existing.Manifest}
-	return nil
-}
-
 func registeredBundleMissing(root string) bool {
 	for _, rel := range []string{"manifest.json", filepath.Join("dist", "server.mjs")} {
 		info, err := os.Stat(filepath.Join(root, rel))
@@ -521,34 +540,6 @@ func promoteFlueBundle(tmpRoot, finalRoot string) error {
 	return nil
 }
 
-func persistRegisteredFlueVersion(ctx context.Context, s RegistrationCatalog, opts RegisterFlueOptions, reg *flueRegistrationInput, staged *stagedFlueBundle, result *RegisterFlueResult, nextVersion int) error {
-	version, err := s.DriverVersions().Create(ctx, store.DriverVersionCreate{
-		WorkspaceKey:     opts.WorkspaceKey,
-		VersionID:        staged.versionID,
-		DriverID:         reg.driverID,
-		Version:          nextVersion,
-		SourceRef:        reg.sourceRef,
-		SourceDigest:     reg.sourceDigest,
-		BundleRef:        staged.bundleRef,
-		BundleDigest:     staged.bundleDigest,
-		Runtime:          RuntimeFlueNode,
-		Manifest:         staged.manifest,
-		BuildDiagnostics: opts.BuildDiagnostics,
-		ValidationStatus: domain.DriverVersionValidationPassed,
-		CreatedBy:        opts.CreatedBy,
-	})
-	if err != nil {
-		return fmt.Errorf("create native Flue driver version: %w", err)
-	}
-	result.Version = version
-	result.CreatedVersion = true
-	result.Bundle = &Bundle{Root: staged.finalRoot, BundleRef: staged.bundleRef, SourceRef: reg.sourceRef, SourceDigest: reg.sourceDigest, BundleDigest: staged.bundleDigest, Manifest: staged.manifest}
-	if opts.Activate {
-		return activateRegisteredDriver(ctx, s, result, opts.WorkspaceKey, reg.driverID, staged.versionID, staged.manifest)
-	}
-	return nil
-}
-
 // registrationTrust resolves the trust level a registration stamps: empty
 // means the operator/source-tree default (trusted). See
 // RegisterFlueOptions.Trust for the contract.
@@ -557,79 +548,6 @@ func registrationTrust(trust domain.DriverTrustLevel) domain.DriverTrustLevel {
 		return domain.DriverTrustTrusted
 	}
 	return trust
-}
-
-func ensureRegisteredDriver(ctx context.Context, s RegistrationCatalog, ws, driverID, driverName, sourceRef string, trust domain.DriverTrustLevel) (*domain.Driver, bool, error) {
-	driver, err := s.Drivers().Get(ctx, ws, driverID)
-	if err == nil {
-		return demoteReregisteredDriver(ctx, s, driver, trust)
-	}
-	if !errors.Is(err, domain.ErrNotFound) {
-		return nil, false, fmt.Errorf("get driver: %w", err)
-	}
-	driver, err = s.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey: ws,
-		DriverID:     driverID,
-		Name:         driverName,
-		OwnerType:    domain.DriverOwnerUser,
-		Description:  "Native Flue driver registered from " + sourceRef,
-		Status:       domain.DriverStatusDraft,
-		TrustLevel:   trust,
-		Metadata: map[string]string{
-			"source_ref":    sourceRef,
-			"runtime":       RuntimeFlueNode,
-			"entrypoint":    EntrypointRun,
-			"artifact_kind": NativeFlueArtifactKind,
-		},
-	})
-	if err != nil {
-		return nil, false, fmt.Errorf("create driver: %w", err)
-	}
-	return driver, true, nil
-}
-
-// demoteReregisteredDriver enforces no-self-elevation on re-registration of
-// an existing driver: an untrusted submission onto a trusted driver demotes
-// the row (its newest content is untrusted), while a trusted registration
-// never elevates an untrusted driver — elevation is an explicit ops action
-// (driver update), not a registration side effect.
-func demoteReregisteredDriver(ctx context.Context, s RegistrationCatalog, driver *domain.Driver, trust domain.DriverTrustLevel) (*domain.Driver, bool, error) {
-	if trust.Trusted() || !driver.TrustLevel.Trusted() {
-		return driver, false, nil
-	}
-	demoted := domain.DriverTrustUntrusted
-	updated, err := s.Drivers().Update(ctx, driver.WorkspaceKey, driver.DriverID, store.DriverUpdate{TrustLevel: &demoted})
-	if err != nil {
-		return nil, false, fmt.Errorf("demote re-registered driver trust: %w", err)
-	}
-	return updated, false, nil
-}
-
-func activateRegisteredDriver(ctx context.Context, s RegistrationCatalog, result *RegisterFlueResult, ws, driverID, versionID string, _ map[string]string) error {
-	driver, version, err := ActivateDriverVersion(ctx, s.Drivers(), s.DriverVersions(), ws, driverID, versionID)
-	if err != nil {
-		return fmt.Errorf("activate native Flue driver version: %w", err)
-	}
-	result.Driver = driver
-	if result.Version == nil {
-		result.Version = version
-	}
-	result.Activated = true
-	return nil
-}
-
-func nextDriverVersion(ctx context.Context, s RegistrationCatalog, ws, driverID string) (int, error) {
-	versions, err := s.DriverVersions().List(ctx, ws, store.DriverVersionFilter{DriverID: driverID})
-	if err != nil {
-		return 0, fmt.Errorf("list driver versions: %w", err)
-	}
-	maxVersion := 0
-	for _, version := range versions {
-		if version != nil && version.DriverID == driverID && version.Version > maxVersion {
-			maxVersion = version.Version
-		}
-	}
-	return maxVersion + 1, nil
 }
 
 func nativeFlueManifest(driverID, driverName, workflowName, sourceRef, sourceDigest, artifactDigest string, external map[string]string, runnerSpecs []DriverRunnerSpec) map[string]string {

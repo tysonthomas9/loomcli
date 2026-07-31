@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -142,6 +143,65 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	}
 	r.UpdatedAt = time.Now().UTC()
 	return cloneRole(r), nil
+}
+
+// SetPromptFileIfEmpty atomically performs the one monotonic Role repair used
+// by the Agents compatibility adapter. An exact replay is successful without
+// another write; a different non-empty value is a conflict and is never
+// overwritten.
+func (s *roleStore) SetPromptFileIfEmpty(
+	_ context.Context,
+	ws, name, promptFile string,
+) (*agents.Role, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.items[ws][name]
+	if !ok {
+		return nil, false, fmt.Errorf("role %q in workspace %q: %w", name, ws, domain.ErrNotFound)
+	}
+	switch r.PromptFile {
+	case promptFile:
+		return roleToAgents(r), false, nil
+	case "":
+		r.PromptFile = promptFile
+		r.UpdatedAt = time.Now().UTC()
+		return roleToAgents(r), true, nil
+	default:
+		return nil, false, fmt.Errorf(
+			"role %q in workspace %q prompt file already set: %w",
+			name,
+			ws,
+			domain.ErrConflict,
+		)
+	}
+}
+
+func roleToAgents(r *domain.Role) *agents.Role {
+	if r == nil {
+		return nil
+	}
+	return &agents.Role{
+		WorkspaceKey:   r.WorkspaceKey,
+		Name:           r.Name,
+		Kind:           string(r.Kind),
+		Description:    r.Description,
+		Prompt:         r.Prompt,
+		PromptFile:     r.PromptFile,
+		Model:          r.Model,
+		TaskFilter:     r.TaskFilter,
+		Backend:        r.Backend,
+		Effort:         r.Effort,
+		PathPatterns:   append([]string(nil), r.PathPatterns...),
+		Skills:         append([]string(nil), r.Skills...),
+		MaxPriority:    clonePtr(r.MaxPriority),
+		MaxConcurrency: clonePtr(r.MaxConcurrency),
+		ReadOnly:       r.ReadOnly,
+		AllowedTools:   append([]string(nil), r.AllowedTools...),
+		DeniedTools:    append([]string(nil), r.DeniedTools...),
+		MaxBudgetUSD:   clonePtr(r.MaxBudgetUSD),
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
+	}
 }
 
 func (s *roleStore) Delete(_ context.Context, ws, name string) error {

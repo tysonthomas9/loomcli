@@ -8,6 +8,7 @@
 import {
   ArtifactHandle,
   CompleteRunResponse,
+  DaytonaProviderResult,
   DriverApiError,
   DriverApiErrorCode,
   LoomAwaitEventResult,
@@ -200,6 +201,19 @@ export async function exerciseRunnerSurface(): Promise<void> {
   await runner.heartbeat({ runtimeMetadata: { step: "build" } });
   await runner.appendLog({ requestId: "log-1", text: "line", stream: "stdout", timestamp: new Date() });
   await runner.logs.append({ request_id: "log-2", text: "line", timestamp: "2026-07-16T20:31:00Z" });
+  const daytona: DaytonaProviderResult = await runner.daytona.execute({
+    repositoryUrl: "https://github.com/octocat/Hello-World.git",
+    taskPrompt: "Make a focused change.",
+    backend: "codex",
+    delivery: { openPullRequest: false },
+  });
+  expectType<"daytona">(daytona.sandbox.provider);
+  // @ts-expect-error Daytona intent cannot carry provider credentials
+  await runner.daytona.execute({ repositoryUrl: "https://github.com/o/r", taskPrompt: "x", backend: "codex", delivery: { openPullRequest: false }, credentials: "secret" });
+  // @ts-expect-error task runners cannot retrieve plaintext provider credentials
+  await runner.getRuntimeCredential({ provider: "github" });
+  // @ts-expect-error no credential-returning namespace is exposed
+  await runner.runtimeCredentials.get({ provider: "daytona" });
   // @ts-expect-error append replay identity is required
   await runner.logs.append({ text: "line", timestamp: new Date() });
   // @ts-expect-error immutable append timestamp is required

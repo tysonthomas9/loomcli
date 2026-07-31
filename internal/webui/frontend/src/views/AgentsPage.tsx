@@ -309,7 +309,24 @@ function AgentsPageInner(): JSX.Element {
     !bindingsInitialized;
 
   // Inline task-detail selection, restored per agent from scoped storage.
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const selectedTaskScope = `${workspaceId}\u0000${agentName ?? ""}`;
+  const [selectedTaskSelection, setSelectedTaskSelection] = useState<{
+    scope: string;
+    taskId: string | null;
+  }>({ scope: "", taskId: null });
+  // Key the selection to the route synchronously. Effects restore the saved
+  // value after navigation, but the previous agent's task must not render or
+  // trigger a fetch during that intervening commit.
+  const selectedTaskId =
+    selectedTaskSelection.scope === selectedTaskScope
+      ? selectedTaskSelection.taskId
+      : null;
+  const setSelectedTaskId = useCallback(
+    (taskId: string | null) => {
+      setSelectedTaskSelection({ scope: selectedTaskScope, taskId });
+    },
+    [selectedTaskScope],
+  );
   const [showAgentConfig, setShowAgentConfig] = useState(false);
   const [pendingTerminalInput, setPendingTerminalInput] = useState<
     TerminalInputRequest | undefined
@@ -336,7 +353,7 @@ function AgentsPageInner(): JSX.Element {
     }
     const saved = loadAgentWorkPanelView(workspaceId, agentName);
     setSelectedTaskId(saved.selectedTaskId ?? null);
-  }, [agentName, workspaceId, clearIssue]);
+  }, [agentName, workspaceId, clearIssue, setSelectedTaskId]);
   useEffect(() => {
     if (!selectedTaskId) return;
     void fetchIssue(selectedTaskId);
@@ -458,14 +475,14 @@ function AgentsPageInner(): JSX.Element {
     setSelectedTaskId(null);
     clearIssue();
     persistSelectedTaskId(null);
-  }, [clearIssue, persistSelectedTaskId]);
+  }, [clearIssue, persistSelectedTaskId, setSelectedTaskId]);
 
   const handleInlineTaskNavigate = useCallback(
     (issue: Issue) => {
       setSelectedTaskId(issue.id);
       persistSelectedTaskId(issue.id);
     },
-    [persistSelectedTaskId],
+    [persistSelectedTaskId, setSelectedTaskId],
   );
 
   const handleTaskClick = useCallback(
@@ -473,7 +490,7 @@ function AgentsPageInner(): JSX.Element {
       setSelectedTaskId(task.id);
       persistSelectedTaskId(task.id);
     },
-    [persistSelectedTaskId],
+    [persistSelectedTaskId, setSelectedTaskId],
   );
 
   const handleTaskIdClick = useCallback(
@@ -483,7 +500,7 @@ function AgentsPageInner(): JSX.Element {
       setSelectedTaskId(normalized);
       persistSelectedTaskId(normalized);
     },
-    [persistSelectedTaskId],
+    [persistSelectedTaskId, setSelectedTaskId],
   );
 
   const handleBindingDeleted = useCallback(() => {

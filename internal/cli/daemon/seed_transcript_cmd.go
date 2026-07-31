@@ -2,16 +2,19 @@ package daemon
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
+	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -68,21 +71,59 @@ func runDaemonSeedTranscript(_ *cobra.Command, _ []string) error {
 			ws = active
 		}
 
-		// 1) The agent session the non-owning serve node will resolve. task_id is set
-		//    on both the column and the metadata so the transcript route's ownership
-		//    check matches either way.
-		if _, cerr := h.Store.AgentSessions().Create(ctx, store.AgentSessionCreate{
-			WorkspaceKey: ws,
-			SessionID:    seedTranscriptSession,
-			AgentID:      "distributed-smoke-seed",
-			TaskID:       seedTranscriptTask,
-			Status:       domain.AgentSessionCompleted,
-			Metadata:     map[string]string{"task_id": seedTranscriptTask, "backend": seedTranscriptBackend},
-		}); cerr != nil && !errors.Is(cerr, domain.ErrAlreadyExists) {
-			return fmt.Errorf("create agent session: %w", cerr)
+		capability, cerr := appserve.NewInteractionCapabilityWithFleetDB(
+			appserve.InteractionConfig{WorkspaceKey: ws},
+			h.FleetDBClient(),
+		)
+		if cerr != nil {
+			return fmt.Errorf("compose Interaction transcript seed: %w", cerr)
+		}
+		request, rerr := http.NewRequestWithContext(ctx, http.MethodPost, "http://localhost/", nil)
+		if rerr != nil {
+			return fmt.Errorf("create Interaction authority request: %w", rerr)
+		}
+		operator, aerr := capability.OperatorAuthorityResolver().ResolveOperatorAuthority(
+			request,
+			ws,
+			interaction.ActionStartSession,
+		)
+		if aerr != nil {
+			return fmt.Errorf("authorize Interaction transcript seed: %w", aerr)
+		}
+		start, serr := capability.InteractionAPI().StartSession(
+			ctx,
+			operator,
+			interaction.StartSessionCommand{
+				WorkspaceKey: ws,
+				SessionID:    seedTranscriptSession,
+				AgentID:      "distributed-smoke-seed",
+				NodeID:       "distributed-smoke-seed-" + uuid.NewString(),
+				Kind:         interaction.SessionKindTask,
+				TaskID:       seedTranscriptTask,
+				Phase:        "seeding_transcript",
+				Attempt:      1,
+				LeaseID:      "distributed-smoke-lease-" + uuid.NewString(),
+				LeaseTTL:     5 * time.Minute,
+				Metadata: map[string]string{
+					"task_id": seedTranscriptTask,
+					"backend": seedTranscriptBackend,
+				},
+			},
+		)
+		if serr != nil {
+			return fmt.Errorf("start Interaction transcript seed: %w", serr)
+		}
+		rawToken := start.Token.Bytes()
+		start.Token.Close()
+		defer clear(rawToken)
+		if start.Session == nil || start.Lease == nil || len(rawToken) == 0 {
+			return fmt.Errorf(
+				"interaction transcript seed omitted session authority material: %w",
+				interaction.ErrInvalidPersistedState,
+			)
 		}
 
-		// 2) The transcript artifact — the daemon finalize's exact upload path.
+		// The transcript artifact uses the daemon finalize's exact upload path.
 		finalized, uerr := store.UploadContentArtifact(ctx, h.Store.Artifacts(), store.ArtifactCreate{
 			WorkspaceKey:  ws,
 			ArtifactID:    "transcript-" + seedTranscriptSession,
@@ -98,18 +139,78 @@ func runDaemonSeedTranscript(_ *cobra.Command, _ []string) error {
 			Metadata:      map[string]string{"runtime": "distributed-smoke-seed"},
 		}, data)
 		if uerr != nil {
+			if ferr := finishSeedTranscriptSession(
+				ctx, capability, start, rawToken,
+				interaction.SessionFailed, "transcript_upload_failed", "",
+			); ferr != nil {
+				return fmt.Errorf(
+					"upload transcript artifact: %w; finish failed seed session: %v",
+					uerr,
+					ferr,
+				)
+			}
 			return fmt.Errorf("upload transcript artifact: %w", uerr)
 		}
 
-		// 3) Point the session at the artifact — the cross-node read key.
+		// Finish atomically links the transcript and releases the exact lease
+		// generation. The test helper never writes AgentSession/AgentLease
+		// stores independently.
 		ref := "artifact://" + finalized.ArtifactID
-		meta := map[string]string{"task_id": seedTranscriptTask, "backend": seedTranscriptBackend, "transcript_ref": ref}
-		if _, perr := h.Store.AgentSessions().Update(ctx, ws, seedTranscriptSession, store.AgentSessionUpdate{Metadata: &meta}); perr != nil {
-			return fmt.Errorf("set transcript_ref: %w", perr)
+		if ferr := finishSeedTranscriptSession(
+			ctx, capability, start, rawToken,
+			interaction.SessionCompleted, "", ref,
+		); ferr != nil {
+			return fmt.Errorf("finish Interaction transcript seed: %w", ferr)
 		}
 		fmt.Printf("seeded transcript: ws=%s session=%s task=%s ref=%s bytes=%d\n", ws, seedTranscriptSession, seedTranscriptTask, ref, len(data))
 		return nil
 	})
+}
+
+func finishSeedTranscriptSession(
+	ctx context.Context,
+	capability *appserve.InteractionCapability,
+	start interaction.SessionStart,
+	rawToken []byte,
+	status interaction.SessionStatus,
+	errorClass,
+	transcriptRef string,
+) error {
+	if capability == nil || start.Session == nil || start.Lease == nil || len(rawToken) == 0 {
+		return interaction.ErrInvalidPersistedState
+	}
+	token := interaction.NewLeaseToken(rawToken)
+	auth, err := capability.SessionAuthorityResolver().ResolveSessionAuthority(
+		ctx,
+		interaction.ActionFinishSession,
+		interaction.SessionAuthorityProof{
+			WorkspaceKey: start.Session.WorkspaceKey,
+			SessionID:    start.Session.SessionID,
+			AgentID:      start.Session.AgentID,
+			TerminalID:   start.Session.TerminalID,
+			NodeID:       start.Lease.NodeID,
+			LeaseID:      start.Lease.LeaseID,
+			FencingToken: start.Lease.FencingToken,
+			Token:        token,
+		},
+	)
+	token.Close()
+	if err != nil {
+		return err
+	}
+	defer auth.SessionOwner().CloseLeaseCredential()
+	_, err = capability.InteractionAPI().FinishSession(
+		ctx,
+		auth,
+		interaction.FinishSessionCommand{
+			WorkspaceKey:         start.Session.WorkspaceKey,
+			SessionID:            start.Session.SessionID,
+			Status:               status,
+			ErrorClass:           errorClass,
+			TranscriptArtifactID: transcriptRef,
+		},
+	)
+	return err
 }
 
 func readSeedTranscriptContent(path string) ([]byte, error) {

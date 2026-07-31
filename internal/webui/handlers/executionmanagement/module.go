@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 const maxWorkerProfileRequestBytes = 1 << 20
@@ -42,9 +43,8 @@ func (module *Module) Register(mux *http.ServeMux) {
 }
 
 func (module *Module) createWorkerProfile(w http.ResponseWriter, request *http.Request) {
-	workspace := strings.TrimSpace(request.PathValue("ws"))
-	if workspace == "" {
-		writeError(w, http.StatusBadRequest, "invalid", "workspace is required")
+	workspace, ok := canonicalWorkspace(w, request)
+	if !ok {
 		return
 	}
 	var command execution.CreateWorkerProfileCommand
@@ -71,10 +71,13 @@ func (module *Module) createWorkerProfile(w http.ResponseWriter, request *http.R
 }
 
 func (module *Module) updateWorkerProfile(w http.ResponseWriter, request *http.Request) {
-	workspace := strings.TrimSpace(request.PathValue("ws"))
+	workspace, ok := canonicalWorkspace(w, request)
+	if !ok {
+		return
+	}
 	profileID := strings.TrimSpace(request.PathValue("profileId"))
-	if workspace == "" || profileID == "" {
-		writeError(w, http.StatusBadRequest, "invalid", "workspace and profile id are required")
+	if profileID == "" {
+		writeError(w, http.StatusBadRequest, "invalid", "profile id is required")
 		return
 	}
 	var patch execution.WorkerProfilePatch
@@ -101,10 +104,13 @@ func (module *Module) updateWorkerProfile(w http.ResponseWriter, request *http.R
 }
 
 func (module *Module) deleteWorkerProfile(w http.ResponseWriter, request *http.Request) {
-	workspace := strings.TrimSpace(request.PathValue("ws"))
+	workspace, ok := canonicalWorkspace(w, request)
+	if !ok {
+		return
+	}
 	profileID := strings.TrimSpace(request.PathValue("profileId"))
-	if workspace == "" || profileID == "" {
-		writeError(w, http.StatusBadRequest, "invalid", "workspace and profile id are required")
+	if profileID == "" {
+		writeError(w, http.StatusBadRequest, "invalid", "profile id is required")
 		return
 	}
 	if err := requireEmptyBody(w, request); err != nil {
@@ -126,6 +132,19 @@ func (module *Module) deleteWorkerProfile(w http.ResponseWriter, request *http.R
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func canonicalWorkspace(w http.ResponseWriter, request *http.Request) (string, bool) {
+	if request == nil {
+		writeError(w, http.StatusBadRequest, "invalid", "canonical workspace is required")
+		return "", false
+	}
+	workspace := strings.TrimSpace(middleware.WorkspaceFromContext(request.Context()))
+	if workspace == "" {
+		writeError(w, http.StatusBadRequest, "invalid", "canonical workspace is required")
+		return "", false
+	}
+	return workspace, true
 }
 
 func (module *Module) resolveOperator(w http.ResponseWriter, request *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, bool) {

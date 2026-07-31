@@ -69,6 +69,18 @@ func (o *failListAfterCreateBindingOperations) CreateManagedBinding(
 	return created, err
 }
 
+func (o *failListAfterCreateBindingOperations) EnsureManagedBinding(
+	ctx context.Context,
+	auth authority.SystemAuthority,
+	command automation.EnsureManagedBindingCommand,
+) (*automation.Binding, error) {
+	created, err := o.BindingOperations.EnsureManagedBinding(ctx, auth, command)
+	if err == nil {
+		o.created = true
+	}
+	return created, err
+}
+
 func (o *failListAfterCreateBindingOperations) ListBindings(
 	ctx context.Context,
 	workspace string,
@@ -109,12 +121,16 @@ func TestPromptAgentCreatePostCommitReadFailureReturnsCommittedSuccess(t *testin
 			default:
 				t.Fatalf("unknown failure stage %q", tt.failStage)
 			}
+			provisioning := newTestAgentProvisioning(st, bindings)
 
 			mux := http.NewServeMux()
 			New(Config{
-				Store:             st,
-				Bindings:          bindings,
-				OperatorAuthority: testOperatorAuthorityResolver{},
+				Store:                 st,
+				Bindings:              bindings,
+				OperatorAuthority:     testOperatorAuthorityResolver{},
+				Provisioning:          provisioning,
+				ProvisioningAuthority: provisioning,
+				PrepareWorkflowTarget: testWorkflowTargetPreparation(st),
 				WorkspaceFromContext: func(context.Context) string {
 					return agentRecordTestWS
 				},

@@ -50,6 +50,12 @@ tags:
     description: Worker pool profile definitions used for task placement
   - name: Agent Services
     description: Long-running desired agent services and lifecycle state
+  - name: Agent Provisioning
+    description: Durable Role, Agent, Binding, and Grant provisioning intent and recovery progress
+  - name: Repository Admissions
+    description: Durable Workspace-owned repository batch admission and recovery
+  - name: Interaction
+    description: Atomic session, terminal, inbox, recovery, and activity commands
   - name: Trigger Bindings
     description: Registered trigger bindings for platform routes and events
   - name: Trigger Events
@@ -744,8 +750,6 @@ paths:
                 $ref: "#/components/schemas/Issue"
         "400":
           $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
         "413":
@@ -2466,7 +2470,7 @@ paths:
     patch:
       tags: [Drivers]
       summary: Update a driver
-      description: Updates generic driver fields. Lifecycle-sensitive fields remain available only as a deprecated old-Loom compatibility lane and require workflow_catalog.version_lifecycle permission; new clients must use the Workflow Catalog intent operations.
+      description: Updates generic driver fields. active_version_id and active status are rejected; callers must use the typed approve, unapprove, and activate operations for lifecycle changes.
       operationId: updateDriver
       requestBody:
         required: true
@@ -2569,6 +2573,96 @@ paths:
         "409": { $ref: "#/components/responses/WorkflowCatalogLifecycleConflict" }
         "413": { $ref: "#/components/responses/BodyTooLarge" }
         "422": { $ref: "#/components/responses/WorkflowCatalogLifecyclePreconditionFailed" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/drivers/{driver_id}/versions/author:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverID"
+      - name: X-Fleet-Delegated-Actor
+        in: header
+        required: true
+        description: Admitted operator audit subject delegated by the authenticated Fleet service.
+        schema: { type: string, minLength: 1, maxLength: 256 }
+    post:
+      tags: [Workflow Catalog]
+      summary: Atomically author an untrusted inactive driver version
+      operationId: authorDriverVersion
+      description: |
+        Service-only operator lane. FleetDB atomically creates or reuses the
+        Driver, creates or exactly reuses one immutable version, allocates its
+        positive per-Driver sequence, demotes legacy Driver trust, advances the
+        Driver revision, and persists lost-response replay. Trust, activation,
+        validation status, sequence, timestamps, and audit actor are not body
+        controlled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverVersionAuthoringRequest"
+      responses:
+        "200":
+          description: Newly committed or replayed atomic authoring outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverVersionAuthoringResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Driver revision conflict or divergent authoring replay/version identity (`workflow_catalog_authoring_conflict`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/drivers/{driver_id}/versions/author-managed:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/DriverID"
+      - name: X-Fleet-Delegated-Actor
+        in: header
+        required: true
+        description: Admitted system audit subject delegated by the authenticated Fleet service.
+        schema: { type: string, minLength: 1, maxLength: 256 }
+    post:
+      tags: [Workflow Catalog]
+      summary: Atomically author a trusted Loom-managed driver version
+      operationId: authorManagedDriverVersion
+      description: |
+        Service-only managed lane. It applies the same atomic immutable
+        authoring and replay contract as authorDriverVersion, server-stamps
+        trusted provenance, and may approve and activate the version in the
+        same Driver aggregate commit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverVersionManagedAuthoringRequest"
+      responses:
+        "200":
+          description: Newly committed or replayed atomic managed-authoring outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverVersionAuthoringResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Driver revision conflict or divergent authoring replay/version identity (`workflow_catalog_authoring_conflict`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /api/v1/{workspace}/drivers/{driver_id}/versions/{version_id}/unapprove:
@@ -2787,7 +2881,14 @@ paths:
     post:
       tags: [Agent Services]
       summary: Create an agent service
+      description: >-
+        The persisted created_by actor comes from the authenticated Fleet
+        actor. An API-key or Unix-socket service caller may instead provide
+        X-Fleet-Delegated-Actor as its trusted audit subject; bearer callers
+        cannot delegate.
       operationId: createAgentService
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
       requestBody:
         required: true
         content:
@@ -2860,14 +2961,20 @@ paths:
           $ref: "#/components/responses/NotFound"
     patch:
       tags: [Agent Services]
-      summary: Update an agent service
-      operationId: updateAgentService
+      summary: Update AgentService identity fields with revision CAS
+      description: >-
+        Desired state is deliberately absent. Use one of the explicit
+        desired-state commands for intent changes. X-Fleet-Delegated-Actor is
+        an audit-only subject accepted only from a trusted service caller.
+      operationId: updateAgentServiceIdentity
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateAgentServiceRequest"
+              $ref: "#/components/schemas/UpdateAgentServiceIdentityRequest"
       responses:
         "200":
           description: Agent service updated
@@ -2881,17 +2988,155 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
-    delete:
+
+  /api/v1/{workspace}/agent-services/{service_id}/archive:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/ServiceID"
+    post:
       tags: [Agent Services]
-      summary: Archive an agent service
-      operationId: deleteAgentService
+      summary: Archive an agent service with revision CAS
+      operationId: archiveAgentService
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArchiveAgentServiceRequest"
       responses:
-        "204":
-          description: Agent service archived by setting deleted_at
+        "200":
+          description: Archived agent service
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentService"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+
+  /api/v1/{workspace}/agent-services/{service_id}/desired-state:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/ServiceID"
+    post:
+      tags: [Agent Services]
+      summary: Change desired state with operator authority and exact CAS
+      operationId: setAgentServiceDesiredState
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetAgentServiceDesiredStateRequest"
+      responses:
+        "200":
+          description: Agent service with committed desired state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentService"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/{workspace}/agent-services/{service_id}/lifecycle:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/ServiceID"
+    post:
+      tags: [Agent Services]
+      summary: Atomically converge an Agent and all owned authority
+      description: >-
+        One revision-CAS and replay-safe Fleet command. expected_updated_at is
+        the first-attempt precondition, not receipt identity. Reusing the same
+        idempotency_key for the same workspace, Agent, action, and admitted
+        audit actor returns the exact committed receipt even when the supplied
+        expected_updated_at has advanced; a later lifecycle generation must
+        use a new key. A receipt miss requires expected_generation_id to match
+        the current server-stamped Agent incarnation before the revision check
+        or mutation. A receipt hit verifies both its recorded Agent generation
+        and the current live or archived Agent record. Enable and disable
+        change every AgentService-owned TriggerBinding together with desired
+        state. Delete stops the Agent,
+        revokes all binding-scoped active ConnectorGrants, removes every owned
+        binding, and archives the Agent in the same durable commit. No
+        sequential compatibility fallback is permitted.
+      operationId: applyAgentServiceLifecycle
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyAgentServiceLifecycleRequest"
+      responses:
+        "200":
+          description: Exact committed or replayed lifecycle receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentServiceLifecycleResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/{workspace}/agent-services/{service_id}/desired-state/owned:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/ServiceID"
+      - name: X-Agent-Ownership-Lease-Token
+        in: header
+        required: true
+        schema: { type: string, minLength: 1 }
+        description: Raw lease bearer used only for the atomic comparison; never persisted or returned.
+    post:
+      tags: [Agent Services]
+      summary: Change desired state under one exact AgentOwnershipLease generation
+      description: >-
+        Service-only atomic command. Fleet validates the agent revision and
+        expected state together with lease id, token, owner, provider, node,
+        fencing token, and idempotency key in the same durable operation. When
+        X-Fleet-Delegated-Actor is present it must equal owner_id.
+      operationId: setAgentServiceDesiredStateOwned
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetAgentServiceDesiredStateOwnedRequest"
+      responses:
+        "200":
+          description: Agent service with committed or replayed desired state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentService"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "410":
+          description: Exact lease generation exists but is no longer live
 
   /api/v1/{workspace}/trigger-bindings:
     parameters:
@@ -6893,7 +7138,12 @@ paths:
       - $ref: "#/components/parameters/Workspace"
     post:
       tags: [ControlPlane]
-      summary: Create an agent session
+      summary: Retired legacy agent-session create
+      description: >-
+        Retired without mutation. Use POST
+        /api/v1/{workspace}/interaction/sessions, which atomically creates the
+        AgentSession and its first owner-fenced AgentLease.
+      deprecated: true
       operationId: createAgentSession
       requestBody:
         required: true
@@ -6902,16 +7152,8 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateAgentSessionRequest"
       responses:
-        "201":
-          description: Agent session created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentSession"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "409":
-          $ref: "#/components/responses/Conflict"
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
     get:
       tags: [ControlPlane]
       summary: List agent sessions
@@ -6962,7 +7204,12 @@ paths:
           $ref: "#/components/responses/NotFound"
     patch:
       tags: [ControlPlane]
-      summary: Update an agent session
+      summary: Retired legacy agent-session update
+      description: >-
+        Retired without mutation. Use PATCH
+        /api/v1/{workspace}/interaction/sessions/{session_id} with the exact
+        current owner-fence proof.
+      deprecated: true
       operationId: updateAgentSession
       requestBody:
         required: true
@@ -6971,14 +7218,8 @@ paths:
             schema:
               $ref: "#/components/schemas/UpdateAgentSessionRequest"
       responses:
-        "200":
-          description: Agent session updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentSession"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
 
   /api/v1/{workspace}/agent-sessions/{session_id}/heartbeat:
     parameters:
@@ -6986,24 +7227,28 @@ paths:
       - $ref: "#/components/parameters/AgentSessionID"
     post:
       tags: [ControlPlane]
-      summary: Heartbeat an agent session
+      summary: Retired legacy agent-session heartbeat
+      description: >-
+        Retired without mutation. Use POST
+        /api/v1/{workspace}/interaction/sessions/{session_id}/heartbeat, which
+        renews the session and current lease under one owner fence.
+      deprecated: true
       operationId: heartbeatAgentSession
       responses:
-        "200":
-          description: Agent session heartbeat accepted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentSession"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
 
   /api/v1/{workspace}/terminal-sessions:
     parameters:
       - $ref: "#/components/parameters/Workspace"
     post:
       tags: [ControlPlane]
-      summary: Create terminal session metadata
+      summary: Retired legacy terminal-session create
+      description: >-
+        Retired without mutation. Use POST
+        /api/v1/{workspace}/interaction/terminals with the exact current
+        AgentSession owner-fence proof.
+      deprecated: true
       operationId: createTerminalSession
       requestBody:
         required: true
@@ -7012,12 +7257,8 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateTerminalSessionRequest"
       responses:
-        "201":
-          description: Terminal session created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TerminalSession"
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
     get:
       tags: [ControlPlane]
       summary: List terminal session metadata
@@ -7039,7 +7280,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [open, closed, lost]
+            enum: [open, closed, lost, starting, running, exited, failed]
         - name: limit
           in: query
           schema:
@@ -7070,7 +7311,12 @@ paths:
                 $ref: "#/components/schemas/TerminalSession"
     patch:
       tags: [ControlPlane]
-      summary: Update terminal session metadata
+      summary: Retired legacy terminal-session update
+      description: >-
+        Retired without mutation. Use PATCH
+        /api/v1/{workspace}/interaction/terminals/{terminal_id} with the exact
+        current AgentSession owner-fence proof.
+      deprecated: true
       operationId: updateTerminalSession
       requestBody:
         required: true
@@ -7079,12 +7325,8 @@ paths:
             schema:
               $ref: "#/components/schemas/UpdateTerminalSessionRequest"
       responses:
-        "200":
-          description: Terminal session updated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/TerminalSession"
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
 
   /api/v1/{workspace}/artifacts:
     parameters:
@@ -7575,7 +7817,13 @@ paths:
       - $ref: "#/components/parameters/AgentSessionID"
     post:
       tags: [ControlPlane]
-      summary: Acquire an agent lease for a session
+      summary: Retired legacy agent-lease create
+      description: >-
+        Retired without mutation. Use POST
+        /api/v1/{workspace}/interaction/sessions, which atomically starts the
+        AgentSession with its first current owner-fenced AgentLease and returns
+        the raw lease credential exactly once.
+      deprecated: true
       operationId: createAgentLease
       requestBody:
         required: false
@@ -7584,12 +7832,8 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateAgentLeaseRequest"
       responses:
-        "201":
-          description: Lease acquired
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentLease"
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
 
   /api/v1/{workspace}/agent-leases:
     parameters:
@@ -7652,7 +7896,12 @@ paths:
         schema: { type: string }
     post:
       tags: [ControlPlane]
-      summary: Renew an agent lease
+      summary: Retired legacy agent-lease heartbeat
+      description: >-
+        Retired without mutation. Use POST
+        /api/v1/{workspace}/interaction/sessions/{session_id}/heartbeat, which
+        validates the exact current generation before renewing the lease.
+      deprecated: true
       operationId: heartbeatAgentLease
       parameters:
         - name: ttl_seconds
@@ -7661,18 +7910,8 @@ paths:
             type: integer
             minimum: 1
       responses:
-        "200":
-          description: Lease renewed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentLease"
-        "403":
-          description: Caller is not the lease owner
-        "404":
-          $ref: "#/components/responses/NotFound"
         "410":
-          $ref: "#/components/responses/Gone"
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
 
   /api/v1/{workspace}/agent-leases/{lease_id}/release:
     parameters:
@@ -7684,15 +7923,692 @@ paths:
         schema: { type: string }
     post:
       tags: [ControlPlane]
-      summary: Release an agent lease
+      summary: Retired legacy agent-lease release
+      description: >-
+        Retired without mutation. Use POST
+        /api/v1/{workspace}/interaction/sessions/{session_id}/finish, which
+        applies the terminal session transition and releases its exact current
+        lease atomically.
+      deprecated: true
       operationId: releaseAgentLease
       responses:
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
+
+  /api/v1/{workspace}/agent-session-authority/validate:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: X-Agent-Lease-Token
+        in: header
+        required: true
+        description: Raw session lease token returned once at lease creation.
+        schema: { type: string }
+    post:
+      tags: [ControlPlane]
+      summary: Validate an exact live session authority generation
+      description: |
+        Service-authenticated admission endpoint for Interaction children.
+        Validation is scoped to the path workspace and requires an exact match
+        on session, agent, node, lease, token hash, and fencing token. Released,
+        expired, stale-fence, wrong-workspace, and cross-session proofs fail
+        closed with the same forbidden response.
+      operationId: validateAgentSessionAuthority
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateAgentSessionAuthorityRequest"
+      responses:
         "200":
-          description: Lease released
+          description: Exact live session authority validated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AgentLease"
+                $ref: "#/components/schemas/ValidateAgentSessionAuthorityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/{workspace}/interaction/sessions:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Interaction]
+      summary: Start an Interaction session and acquire its first lease
+      description: |
+        API-key or Unix-socket service actor command. Atomically creates the
+        AgentSession and its first live AgentLease. The raw lease token is
+        generated by FleetDB, returned exactly once, and only its SHA-256 hash
+        is persisted. Human bearer and developer API-key callers fail closed.
+      operationId: startInteractionSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionStartSessionRequest"
+      responses:
+        "201":
+          description: Session and initial lease committed atomically
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionStartSessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/sessions/recoverable:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    get:
+      tags: [Interaction]
+      summary: List live sessions whose leases no longer prove ownership
+      description: >-
+        API-key or Unix-socket service actor recovery query. A session is only
+        returned when it is non-terminal and no exact live lease remains at
+        FleetDB's server-owned observation time.
+      operationId: listRecoverableInteractionSessions
+      responses:
+        "200":
+          description: Recoverable sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionRecoverableSessionsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/sessions/{session_id}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/AgentSessionID"
+    get:
+      tags: [Interaction]
+      summary: Get an Interaction session
+      description: API-key or Unix-socket service actor query.
+      operationId: getInteractionSession
+      responses:
+        "200":
+          description: Agent session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      tags: [Interaction]
+      summary: Patch live Interaction runtime context
+      description: |
+        API-key or Unix-socket service actor command. Applies bounded metadata
+        upserts/removals, phase, and transcript-artifact linkage only after
+        validating the exact current live session lease generation. FleetDB's
+        receipt time owns updated_at; caller timestamps and generic session
+        identity, placement, status, and outcome fields are not accepted.
+        Replaying an already-applied patch is an idempotent no-op.
+      operationId: patchInteractionSession
+      parameters:
+        - $ref: "#/components/parameters/InteractionAgentLeaseToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionPatchSessionRequest"
+      responses:
+        "200":
+          description: Current session runtime context and owner lease
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionSessionMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/sessions/{session_id}/heartbeat:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/AgentSessionID"
+      - $ref: "#/components/parameters/InteractionAgentLeaseToken"
+    post:
+      tags: [Interaction]
+      summary: Heartbeat a session and renew its lease atomically
+      description: |
+        API-key or Unix-socket service actor command. The session heartbeat and
+        exact owner lease renewal commit in one transaction. Wrong workspace,
+        session, agent, node, lease, raw token, fence, expired lease, or
+        released lease proofs all fail closed.
+      operationId: heartbeatInteractionSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionHeartbeatSessionRequest"
+      responses:
+        "200":
+          description: Session heartbeat and lease renewal committed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionSessionMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/sessions/{session_id}/recover-start:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/AgentSessionID"
+    post:
+      tags: [Interaction]
+      summary: Recover an exact acknowledged-but-response-lost session start
+      description: |
+        API-key or Unix-socket service actor command. For one exact session
+        that is still starting and has no terminal, atomically releases the
+        expected current lease generation and creates a higher-fence
+        replacement. The original start definition must match exactly and the
+        replacement lease ID must be absent. FleetDB generates a new raw token,
+        returns it only in this response, and persists only its SHA-256 hash.
+        A replay cannot recover the raw token and must use a fresh replacement
+        lease ID against the newly observed exact generation.
+      operationId: recoverInteractionSessionStart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionRecoverSessionStartRequest"
+      responses:
+        "200":
+          description: Starting session credential replaced atomically
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionStartSessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/sessions/{session_id}/finish:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/AgentSessionID"
+      - $ref: "#/components/parameters/InteractionAgentLeaseToken"
+    post:
+      tags: [Interaction]
+      summary: Finish a session lifecycle atomically
+      description: |
+        API-key or Unix-socket service actor command. The AgentSession outcome
+        and release of the exact owner lease commit in one transaction. For an
+        interactive session, the exact bound TerminalSession is terminalized in
+        that same transaction and is returned in terminal. A retry after the
+        retired sequential terminal-first flow repairs the remaining live
+        AgentSession and active lease without replacing terminal evidence.
+      operationId: finishInteractionSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionFinishSessionRequest"
+      responses:
+        "200":
+          description: Session, optional interactive terminal, and lease committed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionSessionMutationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/sessions/{session_id}/force-interrupt:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/AgentSessionID"
+    post:
+      tags: [Interaction]
+      summary: Force-interrupt an exact server-owned interactive terminal lifecycle
+      description: |
+        API-key or Unix-socket service actor command used by the Loom server
+        before killing a process-local PTY. FleetDB atomically validates the
+        exact workspace, agent, session, terminal, current lease generation,
+        terminal stream reference, and server-owned terminal_tab metadata,
+        then converges any nonterminal pieces to an interrupted session, exited
+        terminal, and released lease. Existing completed, failed, cancelled, or
+        interrupted session outcomes and existing exited or failed terminal
+        outcomes are preserved while a partially committed exact triple is
+        repaired. A fully terminalized exact triple is returned unchanged. No
+        raw session credential is accepted or retained.
+      operationId: forceInterruptInteractionSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionForceInterruptSessionRequest"
+      responses:
+        "200":
+          description: Exact interactive lifecycle converged atomically
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionForceInterruptSessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/sessions/{session_id}/interrupt-if-lease-missing:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/AgentSessionID"
+    post:
+      tags: [Interaction]
+      summary: Interrupt a non-terminal session only when no live lease remains
+      description: |
+        API-key or Unix-socket service actor recovery command. The live-lease
+        absence check and conditional interrupted transition are one atomic
+        operation; a concurrently renewed or acquired lease prevents the
+        transition. FleetDB's server clock is authoritative.
+      operationId: interruptInteractionSessionIfLeaseMissing
+      responses:
+        "200":
+          description: Current session plus whether this call changed it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionInterruptSessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/terminals:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/InteractionAgentLeaseToken"
+    post:
+      tags: [Interaction]
+      summary: Create an owner-fenced terminal
+      description: |
+        API-key or Unix-socket service actor command. Exact live session
+        authority is validated in the same transaction that creates the
+        terminal; the caller cannot mint terminal ownership independently.
+      operationId: createInteractionTerminal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionCreateTerminalRequest"
+      responses:
+        "201":
+          description: Terminal created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/terminals/{terminal_id}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/TerminalID"
+    get:
+      tags: [Interaction]
+      summary: Get an Interaction terminal
+      description: API-key or Unix-socket service actor query.
+      operationId: getInteractionTerminal
+      responses:
+        "200":
+          description: Terminal session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      tags: [Interaction]
+      summary: Update an owner-fenced terminal
+      description: |
+        API-key or Unix-socket service actor command. Exact live authority for
+        the terminal's owning session is validated in the same transaction as
+        the terminal transition.
+      operationId: updateInteractionTerminal
+      parameters:
+        - $ref: "#/components/parameters/InteractionAgentLeaseToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionUpdateTerminalRequest"
+      responses:
+        "200":
+          description: Terminal updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/inbox:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Interaction]
+      summary: Enqueue an Interaction inbox message
+      description: API-key or Unix-socket service actor command.
+      operationId: enqueueInteractionInboxMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionEnqueueInboxRequest"
+      responses:
+        "201":
+          description: Inbox message enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentInboxMessage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/inbox/claim-next:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/InteractionAgentLeaseToken"
+    post:
+      tags: [Interaction]
+      summary: Claim the next inbox message as a live session owner
+      description: |
+        API-key or Unix-socket service actor command. Exact live session
+        authority is validated in the same transaction as the claim. The
+        target agent is derived from the authority proof rather than accepted
+        as independently mintable claim authority.
+      operationId: claimInteractionInboxMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionClaimInboxRequest"
+      responses:
+        "200":
+          description: Claimed inbox message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentInboxMessage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/inbox/{inbox_message_id}/complete:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/AgentInboxMessageID"
+      - $ref: "#/components/parameters/InteractionAgentLeaseToken"
+    post:
+      tags: [Interaction]
+      summary: Complete or requeue a claimed inbox message as its live session owner
+      description: |
+        API-key or Unix-socket service actor command. Exact live session
+        authority and the message's current claim ownership are validated in
+        the same transaction as terminal delivery, failure, or retry requeue.
+        The claimed attempt is required so a delayed completion cannot clear a
+        later claim. Replaying an identical outcome for the same attempt is
+        idempotent.
+      operationId: completeInteractionInboxMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InteractionCompleteInboxRequest"
+      responses:
+        "200":
+          description: Inbox message completed or requeued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentInboxMessage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/activity/sessions:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    get:
+      tags: [Interaction]
+      summary: List an agent's interactive session activity
+      description: API-key or Unix-socket service actor query.
+      operationId: listInteractionSessionActivity
+      parameters:
+        - name: agent_id
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: Session activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionActivityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/activity:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    get:
+      tags: [Interaction]
+      summary: List an agent's combined interactive and batch activity
+      description: >-
+        API-key or Unix-socket service actor query. AgentSession and batch-run
+        persistence remain distinct; FleetDB merges both projections by
+        started_at before applying the global limit.
+      operationId: listInteractionActivity
+      parameters:
+        - name: agent_id
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: Combined activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionActivityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/interaction/activity/execution:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    get:
+      tags: [Interaction]
+      summary: List an agent's batch execution activity
+      description: API-key or Unix-socket service actor query.
+      operationId: listInteractionExecutionActivity
+      parameters:
+        - name: agent_id
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: Batch execution activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InteractionActivityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/{workspace}/leases/acquire:
     parameters:
@@ -7889,11 +8805,18 @@ paths:
         schema: { type: string }
     post:
       tags: [ControlPlane]
-      summary: Acquire an agent ownership lease (upsert-with-guard)
+      summary: Acquire an agent ownership lease through the owner-fenced service command
       description: |
-        Idempotent for the same `owner_id`: bumps the fencing token and refreshes the TTL.
+        API-key or Unix-socket service actor only. The authenticated actor, or
+        its trusted X-Fleet-Delegated-Actor subject, must equal owner_id.
+        A same-owner acquire intentionally creates a replacement generation:
+        it bumps the fencing token and rotates the raw token.
         Returns 409 `already_claimed` if a live lease is held by a different owner.
+        FleetDB persists only the SHA-256 token hash; the raw token is returned
+        exactly once in this response envelope.
       operationId: acquireAgentOwnershipLease
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
       requestBody:
         required: true
         content:
@@ -7906,9 +8829,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AgentOwnershipLease"
+                $ref: "#/components/schemas/AcquireAgentOwnershipLeaseResponse"
         "409":
           description: Live lease held by a different owner
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /api/v1/{workspace}/agent-ownership-leases/{agent_id}/heartbeat:
     parameters:
@@ -7923,14 +8848,21 @@ paths:
         schema: { type: string }
     post:
       tags: [ControlPlane]
-      summary: Renew an agent ownership lease
+      summary: Renew one exact agent ownership generation
+      description: >-
+        Service actor only. Fleet atomically checks agent_id, lease_id, raw
+        token hash, owner_id, runtime_provider, node_id, and fencing_token
+        before extending the TTL. The authenticated or trusted delegated audit
+        subject must equal owner_id.
       operationId: heartbeatAgentOwnershipLease
       parameters:
-        - name: ttl_seconds
-          in: query
-          schema:
-            type: integer
-            minimum: 1
+        - $ref: "#/components/parameters/FleetDelegatedActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenewAgentOwnershipLeaseOwnedRequest"
       responses:
         "200":
           description: Lease renewed
@@ -7958,12 +8890,21 @@ paths:
         schema: { type: string }
     post:
       tags: [ControlPlane]
-      summary: Release an agent ownership lease
+      summary: Release one exact agent ownership generation
       operationId: releaseAgentOwnershipLease
       description: |
-        Releases only the generation identified by the raw token. Every
-        successful Acquire, including a same-owner replacement, rotates that
-        token so delayed Renew or Release calls from an older generation fail.
+        Service actor only. Fleet atomically checks agent_id, lease_id, raw
+        token hash, owner_id, runtime_provider, node_id, and fencing_token.
+        Every successful Acquire, including a same-owner replacement, rotates
+        the token and fence so delayed calls from an older generation fail.
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentOwnershipLeaseProofRequest"
       responses:
         "200":
           description: Lease released
@@ -7973,6 +8914,644 @@ paths:
                 $ref: "#/components/schemas/AgentOwnershipLease"
         "403":
           description: Caller is not the lease owner
+
+  /api/v1/admin/workspace-repository-admissions:
+    post:
+      tags: [Repository Admissions]
+      summary: Atomically create a Workspace and begin repository admission
+      operationId: createWorkspaceWithRepositoryAdmission
+      description: |
+        API-key or Unix-socket service actor only, with a global
+        `repository_admission.manage` role. Atomically creates an empty
+        Workspace, appends its workspace.create event, reserves the complete
+        token-free repository batch, and persists the Begin process plus a
+        global operation receipt. The receipt survives Workspace deletion so a
+        replay cannot adopt a same-key replacement incarnation. No Repo,
+        repository mapping, or dispatch readiness is visible before Commit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRepositoryAdmissionRequest"
+      responses:
+        "200":
+          description: Original or newly committed atomic Workspace and admission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateWorkspaceRepositoryAdmissionResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/repository-admissions:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Repository Admissions]
+      summary: Begin a repository admission against an existing Workspace
+      operationId: beginRepositoryAdmission
+      description: |
+        API-key or Unix-socket service actor only. Durably reserves the complete
+        canonical, token-free repository batch before any filesystem work.
+        Reordered semantically identical requests converge; reuse of an
+        operation ID or repository reservation for divergent intent returns
+        409. This route never grants Workspace lifecycle-finalization authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BeginRepositoryAdmissionRequest"
+      responses:
+        "200":
+          description: Original or newly durable repository admission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepositoryAdmission"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/repository-admissions/recoverable:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    get:
+      tags: [Repository Admissions]
+      summary: List repository admissions eligible for recovery
+      operationId: listRecoverableRepositoryAdmissions
+      description: |
+        API-key or Unix-socket service actor only. Returns pending and
+        retryable_failed admissions in stable creation order. Terminal
+        admissions are excluded.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        "200":
+          description: Recoverable repository admissions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRecoverableRepositoryAdmissionsResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/repository-admissions/operations/{operation_id}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: operation_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 200 }
+    get:
+      tags: [Repository Admissions]
+      summary: Get redacted repository admission status by operation
+      operationId: getRepositoryAdmissionByOperation
+      description: |
+        API-key or Unix-socket service actor only. Returns durable restart
+        discovery state without owner_id or owner_generation_id; mutation
+        authority is never disclosed by operation lookup.
+      responses:
+        "200":
+          description: Redacted operation status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepositoryAdmissionOperationStatus"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/repository-admissions/{admission_id}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/RepositoryAdmissionID"
+    get:
+      tags: [Repository Admissions]
+      summary: Get one exact repository admission
+      operationId: getRepositoryAdmission
+      description: API-key or Unix-socket service actor only.
+      responses:
+        "200":
+          description: Durable repository admission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepositoryAdmission"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/repository-admissions/{admission_id}/renew:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/RepositoryAdmissionID"
+    post:
+      tags: [Repository Admissions]
+      summary: Renew the exact repository admission owner generation
+      operationId: renewRepositoryAdmission
+      description: API-key or Unix-socket service actor only. All owner, generation, fingerprint, and version fences must match and the existing lease must still be live.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenewRepositoryAdmissionRequest"
+      responses:
+        "200":
+          description: Renewed admission
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RepositoryAdmission" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/repository-admissions/{admission_id}/claim-recovery:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/RepositoryAdmissionID"
+    post:
+      tags: [Repository Admissions]
+      summary: Claim recovery with a new owner generation
+      operationId: claimRepositoryAdmissionRecovery
+      description: |
+        API-key or Unix-socket service actor only. CASes the current version and
+        immutable fingerprint, verifies recovery eligibility, and mints a new
+        private owner generation. The old generation is not accepted as input.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaimRepositoryAdmissionRecoveryRequest"
+      responses:
+        "200":
+          description: Recovery ownership claimed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RepositoryAdmission" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/repository-admissions/{admission_id}/commit:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/RepositoryAdmissionID"
+    post:
+      tags: [Repository Admissions]
+      summary: Atomically publish a complete repository batch
+      operationId: commitRepositoryAdmission
+      description: |
+        API-key or Unix-socket service actor only. Atomically publishes every
+        Repo, mapping, audit event, repository cardinality repair, and admission
+        receipt. A failure leaves the whole batch unpublished. An admission
+        created with the global atomic Workspace route must also supply
+        workspace_finalization with state=ready and the first canonical Repo's
+        resolved default branch; FleetDB finalizes that exact Workspace
+        incarnation in the same commit. Existing-Workspace admissions must omit
+        workspace_finalization. Exact response-loss retries return the original
+        event IDs and receipt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommitRepositoryAdmissionRequest"
+      responses:
+        "200":
+          description: Original or newly committed admission receipt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RepositoryAdmission" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/repository-admissions/{admission_id}/fail:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/RepositoryAdmissionID"
+    post:
+      tags: [Repository Admissions]
+      summary: Record a repository admission failure
+      operationId: failRepositoryAdmission
+      description: |
+        API-key or Unix-socket service actor only. Retryable failure remains
+        recoverable and retains reservations. Permanent failure releases only
+        FleetDB reservations, never checkout files. For an atomic-created
+        Workspace, permanent failure also sets that exact incarnation to
+        state=error with the safe error_class in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FailRepositoryAdmissionRequest"
+      responses:
+        "200":
+          description: Failed admission
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RepositoryAdmission" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/repository-admissions/{admission_id}/abort:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/RepositoryAdmissionID"
+    post:
+      tags: [Repository Admissions]
+      summary: Abort a repository admission
+      operationId: abortRepositoryAdmission
+      description: |
+        API-key or Unix-socket service actor only. Releases only FleetDB
+        reservations, never checkout files. For an atomic-created Workspace,
+        abort also sets that exact incarnation to state=error with the safe
+        reason_class in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AbortRepositoryAdmissionRequest"
+      responses:
+        "200":
+          description: Aborted admission
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RepositoryAdmission" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "413": { $ref: "#/components/responses/BodyTooLarge" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/agent-provisioning:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    post:
+      tags: [Agent Provisioning]
+      summary: Begin an idempotent AgentProvisioning intent
+      operationId: beginAgentProvisioning
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
+      description: |
+        Begins the durable Role, Agent, Binding, and Grant process-manager
+        intent. The authenticated API-key or Unix-socket service actor may
+        delegate the
+        admitted operator audit subject through `X-Fleet-Delegated-Actor`;
+        ordinary bearer identities cannot delegate. The request body cannot
+        supply requester identity, timestamps, unused-Role policy, version,
+        progress, or spec_fingerprint. FleetDB canonicalizes set-like fields
+        and computes the immutable
+        `sha256:<64 lowercase hex>` fingerprint. Replaying the same semantic
+        intent in the same Workspace incarnation returns the original
+        server-minted provisioning generation; reusing the provisioning ID
+        for a divergent intent returns 409. Workspace deletion destroys that
+        generation, and same-key Workspace recreation always mints a new one.
+        A Begin request has no prior admission proof: it is scoped to whichever
+        live Workspace exists when FleetDB commits it. Consequently, replaying
+        a pre-delete Begin body after destructive same-key recreation is a new
+        admission and receives a new generation; only commands that echo a
+        previously issued generation are deletion-fenced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BeginAgentProvisioningRequest"
+      responses:
+        "200":
+          description: Original or newly durable provisioning generation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentProvisioningRecord"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The live Workspace does not exist or is being deleted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/agent-provisioning/pending:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+    get:
+      tags: [Agent Provisioning]
+      summary: List AgentProvisioning records pending recovery
+      operationId: listPendingAgentProvisioning
+      description: |
+        Returns pending, running, and retryable_failed process-manager
+        generations in stable creation order. Completed and permanent_failed
+        generations are terminal and excluded. Requires an authenticated
+        API-key or Unix-socket service actor.
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        "200":
+          description: Provisioning records eligible for recovery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListPendingAgentProvisioningResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/agent-provisioning/{provisioning_id}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: provisioning_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    get:
+      tags: [Agent Provisioning]
+      summary: Get one AgentProvisioning record
+      operationId: getAgentProvisioning
+      description: Requires an authenticated API-key or Unix-socket service actor.
+      responses:
+        "200":
+          description: Durable provisioning intent and current progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentProvisioningRecord"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/agent-provisioning/{provisioning_id}/progress:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: provisioning_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+    post:
+      tags: [Agent Provisioning]
+      summary: Advance AgentProvisioning recovery progress
+      operationId: saveAgentProvisioningProgress
+      description: |
+        Advances only mutable progress through a version-CAS. Immutable intent,
+        requester, policy, timestamps, and fingerprint cannot be supplied.
+        The caller must echo the read-only provisioning generation returned by
+        Begin/Get so a delayed version request cannot adopt a same-ID
+        replacement after Workspace delete/recreate. FleetDB owns updated_at
+        and completed_at and rejects progress after completed or
+        permanent_failed.
+        Requires an authenticated API-key or Unix-socket service actor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveAgentProvisioningProgressRequest"
+      responses:
+        "200":
+          description: Next committed progress generation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentProvisioningRecord"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/{workspace}/agent-provisioning/{provisioning_id}/ensure-role:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: provisioning_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [Agent Provisioning]
+      summary: Ensure the provisioning intent's exact Role
+      operationId: ensureAgentProvisioningRole
+      description: |
+        Typed Role-owner command. FleetDB derives the complete Role exclusively
+        from the immutable provisioning Spec and atomically validates the live
+        Workspace incarnation, provisioning generation, and non-terminal
+        process state in the same transaction as exact create-or-reuse.
+        Requires an authenticated API-key or Unix-socket service actor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentProvisioningStepGuardRequest"
+      responses:
+        "200":
+          description: Exact created or reused Role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Role"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/agent-provisioning/{provisioning_id}/ensure-agent-service:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: provisioning_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [Agent Provisioning]
+      summary: Ensure the provisioning intent's exact AgentService
+      operationId: ensureAgentProvisioningAgentService
+      description: |
+        Typed AgentService-owner command. FleetDB derives the complete
+        AgentService exclusively from the immutable provisioning Spec and
+        atomically validates the live Workspace incarnation, provisioning
+        generation, and non-terminal process state in the same transaction as
+        exact create-or-reuse. Requires an authenticated
+        API-key or Unix-socket service actor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentProvisioningStepGuardRequest"
+      responses:
+        "200":
+          description: Exact created or reused AgentService
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentService"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/agent-provisioning/{provisioning_id}/ensure-trigger-binding:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: provisioning_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [Agent Provisioning]
+      summary: Ensure the provisioning intent's exact TriggerBinding
+      operationId: ensureAgentProvisioningTriggerBinding
+      description: |
+        Typed Automation-owner command. FleetDB derives the complete
+        TriggerBinding exclusively from the immutable provisioning Spec and
+        atomically validates the live Workspace incarnation, provisioning
+        generation, and non-terminal process state in the same transaction as
+        exact create-or-reuse. Requires an authenticated
+        API-key or Unix-socket service actor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentProvisioningStepGuardRequest"
+      responses:
+        "200":
+          description: Exact created or reused TriggerBinding
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TriggerBinding"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /api/v1/{workspace}/agent-provisioning/{provisioning_id}/ensure-connector-grant/{grant_id}:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - name: provisioning_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+      - name: grant_id
+        in: path
+        required: true
+        schema: { type: string, minLength: 1 }
+    post:
+      tags: [Agent Provisioning]
+      summary: Ensure one exact ConnectorGrant from the provisioning intent
+      operationId: ensureAgentProvisioningConnectorGrant
+      description: |
+        Typed Connectors-owner command. FleetDB selects grant_id from the
+        immutable provisioning Spec and atomically validates the live Workspace
+        incarnation, provisioning generation, and non-terminal process state
+        in the same transaction as exact create-or-reuse. Requires an
+        authenticated API-key or Unix-socket service actor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentProvisioningStepGuardRequest"
+      responses:
+        "200":
+          description: Exact created or reused ConnectorGrant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectorGrant"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /api/v1/{workspace}/agent-commands:
     parameters:
@@ -8061,11 +9640,11 @@ paths:
           command types always require proof. When a live lease exists, clients
           must send its exact lease ID, request-only token, and fencing token.
           During the Fleet-first rolling upgrade only, an omitted body is
-          accepted as a deprecated authenticated legacy request. FleetDB
-          infers and atomically revalidates an exact live lease generation. If
-          no lease is live, FleetDB persists an unmintable temporary claimant
+          accepted as a deprecated authenticated legacy request only when no
+          lease is live. FleetDB persists an unmintable temporary claimant
           marker that the first real ownership Acquire atomically upgrades to
-          its stable owner, node, lease ID, and fence.
+          its stable owner, node, lease ID, and fence. A live lease is rejected
+          because hash-only storage cannot recover its raw holder proof.
         content:
           application/json:
             schema:
@@ -8097,12 +9676,11 @@ paths:
           only for Stop; successful Start/Restart/Yield and Running always
           require proof, and unknown targeted types always require proof.
           Legacy requests without claimant fields are deprecated and accepted
-          only through the authenticated rolling-upgrade bridge. FleetDB
-          infers and atomically revalidates the exact durable ownership
-          generation, or requires X-Actor to match its server-reserved
-          proofless marker. A legacy Failed/Canceled result may terminally
-          converge after that exact generation was released; this exception
-          never permits Running or Succeeded Start/Restart/Yield.
+          only for a command carrying FleetDB's server-reserved proofless
+          marker. A command already bound to a durable ownership generation
+          must use the modern request and present the raw token; hash-only
+          storage cannot recover that proof. The proofless exception never
+          permits Running or Succeeded Start/Restart/Yield.
         content:
           application/json:
             schema:
@@ -8122,7 +9700,12 @@ paths:
       - $ref: "#/components/parameters/Workspace"
     post:
       tags: [ControlPlane]
-      summary: Create an agent inbox message
+      summary: Retired legacy agent-inbox enqueue
+      description: >-
+        Retired without mutation. Use POST
+        /api/v1/{workspace}/interaction/inbox through the canonical Interaction
+        command authority.
+      deprecated: true
       operationId: createAgentInboxMessage
       requestBody:
         required: true
@@ -8131,12 +9714,8 @@ paths:
             schema:
               $ref: "#/components/schemas/CreateAgentInboxMessageRequest"
       responses:
-        "201":
-          description: Inbox message created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentInboxMessage"
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
     get:
       tags: [ControlPlane]
       summary: List agent inbox messages
@@ -8188,7 +9767,12 @@ paths:
       - $ref: "#/components/parameters/Workspace"
     post:
       tags: [ControlPlane]
-      summary: Claim the next queued agent inbox message
+      summary: Retired legacy agent-inbox claim
+      description: >-
+        Retired without mutation. Use POST
+        /api/v1/{workspace}/interaction/inbox/claim-next with the exact current
+        AgentSession owner-fence proof.
+      deprecated: true
       operationId: claimNextAgentInboxMessage
       requestBody:
         required: true
@@ -8197,12 +9781,8 @@ paths:
             schema:
               $ref: "#/components/schemas/ClaimAgentInboxMessageRequest"
       responses:
-        "200":
-          description: Inbox message claimed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentInboxMessage"
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
 
   /api/v1/{workspace}/agent-inbox-messages/{inbox_message_id}:
     parameters:
@@ -8226,7 +9806,12 @@ paths:
       - $ref: "#/components/parameters/AgentInboxMessageID"
     post:
       tags: [ControlPlane]
-      summary: Complete a claimed agent inbox message
+      summary: Retired legacy agent-inbox completion
+      description: >-
+        Retired without mutation. Use POST
+        /api/v1/{workspace}/interaction/inbox/{inbox_message_id}/complete with
+        the exact current AgentSession owner-fence proof and claim attempt.
+      deprecated: true
       operationId: completeAgentInboxMessage
       requestBody:
         required: true
@@ -8235,12 +9820,8 @@ paths:
             schema:
               $ref: "#/components/schemas/CompleteAgentInboxMessageRequest"
       responses:
-        "200":
-          description: Inbox message completed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentInboxMessage"
+        "410":
+          $ref: "#/components/responses/LegacyInteractionWriteRetired"
 
   # ---------------------------------------------------------------------------
   # Roles (workspace-scoped persona definitions)
@@ -8301,26 +9882,87 @@ paths:
           $ref: "#/components/responses/NotFound"
     patch:
       tags: [Roles]
-      summary: Update a Role
+      summary: Retired legacy Role update
+      deprecated: true
+      description: >-
+        Retired for every admitted or auth-disabled caller mode because this
+        event/projector bridge cannot provide revision CAS. Use PATCH
+        /roles/{name}/definition with expected_updated_at.
       operationId: updateRole
+      responses:
+        "410":
+          $ref: "#/components/responses/LegacyRoleMutationRetired"
+    delete:
+      tags: [Roles]
+      summary: Retired legacy Role delete
+      deprecated: true
+      description: >-
+        Retired for every admitted or auth-disabled caller mode because this
+        event/projector bridge cannot atomically fence active AgentService
+        references. Use POST /roles/{name}/delete with expected_updated_at.
+      operationId: deleteRole
+      responses:
+        "410":
+          $ref: "#/components/responses/LegacyRoleMutationRetired"
+
+  /api/v1/{workspace}/roles/{name}/definition:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/EntityName"
+    patch:
+      tags: [Roles]
+      summary: Update a Role definition with revision CAS
+      description: >-
+        Atomically validates the exact Role updated_at revision and applies the
+        bounded definition patch. X-Fleet-Delegated-Actor is an audit-only
+        subject accepted only from a trusted service caller.
+      operationId: updateRoleDefinitionCAS
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateRoleRequest"
+              $ref: "#/components/schemas/UpdateRoleCASRequest"
       responses:
-        "204":
-          description: Role updated
+        "200":
+          description: Updated Role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Role"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
-    delete:
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/{workspace}/roles/{name}/delete:
+    parameters:
+      - $ref: "#/components/parameters/Workspace"
+      - $ref: "#/components/parameters/EntityName"
+    post:
       tags: [Roles]
-      summary: Delete a Role
-      operationId: deleteRole
+      summary: Delete an unreferenced Role with revision CAS
+      description: >-
+        Atomically validates the exact Role updated_at revision, rejects active
+        AgentService references, and deletes that Role generation.
+      operationId: deleteRoleCAS
+      parameters:
+        - $ref: "#/components/parameters/FleetDelegatedActor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteRoleCASRequest"
       responses:
         "204":
           description: Role deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -8467,6 +10109,15 @@ components:
         maxLength: 32
         example: FLEET
 
+    RepositoryAdmissionID:
+      name: admission_id
+      in: path
+      required: true
+      description: FleetDB-minted opaque repository admission identifier.
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{32}$"
+
     IssueID:
       name: id
       in: path
@@ -8485,6 +10136,19 @@ components:
         type: string
         example: alice
 
+    FleetDelegatedActor:
+      name: X-Fleet-Delegated-Actor
+      in: header
+      required: false
+      description: >-
+        Trusted audit-subject delegation for API-key or Unix-socket service
+        callers only. It never replaces the Fleet authentication identity or
+        grants permissions. Bearer and legacy X-Actor callers must omit it.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+
     XLeaseToken:
       name: X-Lease-Token
       in: header
@@ -8492,6 +10156,19 @@ components:
       description: >-
         Raw owner lease credential. The server hashes it at the API boundary;
         it is never persisted in plaintext or returned in a response.
+      schema:
+        type: string
+        minLength: 1
+
+    InteractionAgentLeaseToken:
+      name: X-Agent-Lease-Token
+      in: header
+      required: true
+      description: >-
+        Raw opaque credential returned exactly once by the Interaction session
+        start command. FleetDB hashes it at the API boundary; neither the raw
+        value nor its hash appears in public session, lease, terminal, inbox,
+        activity, transcript, or error representations.
       schema:
         type: string
         minLength: 1
@@ -8978,6 +10655,15 @@ components:
             type: string
             pattern: "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
           example: ["tysonthomas9/fleet-db"]
+        state:
+          type: string
+          description: Workspace lifecycle state used by local onboarding.
+        error_message:
+          type: string
+          description: Visible lifecycle failure reason when state is error.
+        default_branch:
+          type: string
+          description: Default branch Loom should use for worktrees.
         design_format:
           type: string
           enum: ["", markdown, html]
@@ -9323,6 +11009,9 @@ components:
           items:
             type: string
             pattern: "^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$"
+        state: { type: string }
+        error_message: { type: string }
+        default_branch: { type: string }
         design_format:
           type: string
           enum: ["", markdown, html]
@@ -9341,6 +11030,9 @@ components:
           type: array
           items:
             type: string
+        state: { type: string }
+        error_message: { type: string }
+        default_branch: { type: string }
         design_format:
           type: string
           enum: ["", markdown, html]
@@ -9751,9 +11443,38 @@ components:
 
     ErrorResponse:
       type: object
+      additionalProperties: false
       required: [error]
       properties:
         error:
+          $ref: "#/components/schemas/APIError"
+
+    APIError:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
+        meta:
+          type: object
+          additionalProperties:
+            type: string
+
+    FieldError:
+      type: object
+      additionalProperties: false
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
           type: string
 
     # --- Agent platform driver schemas ---
@@ -9860,7 +11581,9 @@ components:
           pattern: '^(?!.*:)\S(?:.*\S)?$'
           description: Exact identity; leading and trailing whitespace and the reserved colon delimiter are rejected.
         revision: { type: integer, format: int64, minimum: 1 }
-        name: { type: string }
+        name:
+          type: string
+          description: Defaults durably to route_key, then binding_id.
         owner_type:
           $ref: "#/components/schemas/DriverOwnerType"
         owner_ref: { type: string }
@@ -9885,6 +11608,7 @@ components:
 
     CreateDriverRequest:
       type: object
+      additionalProperties: false
       required: [driver_id, name]
       properties:
         driver_id:
@@ -9912,20 +11636,17 @@ components:
 
     UpdateDriverRequest:
       type: object
+      additionalProperties: false
       properties:
         name: { type: string }
         owner_type:
           $ref: "#/components/schemas/DriverOwnerType"
         owner_ref: { type: string }
         description: { type: string }
-        active_version_id:
-          type: string
-          deprecated: true
-          description: Deprecated old-Loom activation field. The exact identifier must not contain leading or trailing whitespace. Accepted only in the combined active_version_id, active status, and metadata patch; requires workflow_catalog.version_lifecycle permission, same-driver version ownership, and passed validation. This compatibility path never implicitly approves an untrusted version. New clients must use the activate operation.
         status:
           allOf:
             - $ref: "#/components/schemas/DriverStatus"
-          description: Lifecycle-sensitive updates require workflow_catalog.version_lifecycle permission; new clients should use Workflow Catalog intent operations.
+          description: Active status is rejected; use the typed activate operation. Other status changes require workflow_catalog.version_lifecycle permission.
         trust_level:
           allOf:
             - $ref: "#/components/schemas/DriverTrustLevel"
@@ -9933,7 +11654,7 @@ components:
         metadata:
           allOf:
             - $ref: "#/components/schemas/StringMap"
-          description: Ordinary replacement preserves existing approved_version lifecycle markers for callers without lifecycle permission. Adding, changing, or removing those markers is a deprecated old-Loom compatibility operation requiring workflow_catalog.version_lifecycle permission.
+          description: Ordinary replacement preserves existing approved_version lifecycle markers. Adding or changing those markers is rejected, while omitted markers are preserved; use the typed approve and unapprove operations.
 
     ListDriversResponse:
       type: object
@@ -10022,7 +11743,7 @@ components:
         capabilities:
           type: array
           items: { type: string }
-          example: [agents.lifecycle_command_fencing.v1, agents.lifecycle_command_ownership_fencing.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_review_work_item_handoff.v2, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, work_items.repository_requirement.v1, workflow_catalog.version_lifecycle.v1]
+          example: [agents.agent_service_commands.v1, agents.lifecycle_command_fencing.v1, agents.lifecycle_command_ownership_fencing.v1, agents.ownership_lease_commands.v1, agents.provisioning_progress.v1, artifacts.owner_fenced_lifecycle.v1, automation.trigger_admission.v1, execution.await_atomic_resume.v1, execution.driver_run_child_cascade.v1, execution.driver_run_child_start.v1, execution.driver_run_lease_fencing.v1, execution.driver_run_review_work_item_handoff.v1, execution.driver_run_review_work_item_handoff.v2, execution.driver_run_work_item_claim.v1, execution.driver_step_terminal_repair.v1, execution.issue_claim_next_task_run_start.v1, execution.issue_claim_task_run_start.v1, execution.task_run_lease_fencing.v1, execution.task_run_log_idempotency.v1, execution.task_run_request.v1, execution.task_run_requeue.v1, execution.task_run_retry_exhaustion.v1, execution.task_run_terminal_convergence.v1, execution.task_run_work_item_design.v1, execution.terminal_driver_run_work_recovery.v1, execution.terminal_driver_run_work_recovery_queue.v1, interaction.session_commands.v1, work_items.repository_requirement.v1, workflow_catalog.version_authoring.v1, workflow_catalog.version_lifecycle.v1]
 
     AutomationErrorResponse:
       type: object
@@ -10074,6 +11795,127 @@ components:
           format: int64
           minimum: 1
           maximum: 9223372036854775806
+
+    DriverVersionAuthoringRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - request_id
+        - expected_revision
+        - driver_name
+        - version_id
+        - source_ref
+        - source_digest
+        - bundle_ref
+        - bundle_digest
+        - runtime
+      properties:
+        request_id: { type: string, minLength: 1, maxLength: 256 }
+        expected_revision:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9223372036854775806
+        driver_name: { type: string, minLength: 1 }
+        version_id:
+          type: string
+          minLength: 1
+          pattern: '^\S(?:.*\S)?$'
+        source_ref: { type: string, minLength: 1 }
+        source_digest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+        bundle_ref:
+          type: string
+          minLength: 1
+          description: Canonical contained relative bundle reference.
+        bundle_digest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+        runtime: { type: string, minLength: 1 }
+        manifest:
+          allOf:
+            - $ref: "#/components/schemas/StringMap"
+          description: Caller manifest; trust_level and approved_version-prefixed keys are rejected and server-owned.
+        build_diagnostics: { type: string }
+
+    DriverVersionManagedAuthoringRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - request_id
+        - expected_revision
+        - driver_name
+        - version_id
+        - source_ref
+        - source_digest
+        - bundle_ref
+        - bundle_digest
+        - runtime
+        - activate
+      properties:
+        request_id: { type: string, minLength: 1, maxLength: 256 }
+        expected_revision:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9223372036854775806
+        driver_name: { type: string, minLength: 1 }
+        version_id:
+          type: string
+          minLength: 1
+          pattern: '^\S(?:.*\S)?$'
+        source_ref: { type: string, minLength: 1 }
+        source_digest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+        bundle_ref:
+          type: string
+          minLength: 1
+          description: Canonical contained relative bundle reference.
+        bundle_digest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+        runtime: { type: string, minLength: 1 }
+        manifest:
+          allOf:
+            - $ref: "#/components/schemas/StringMap"
+          description: Caller manifest; trust_level and approved_version-prefixed keys are rejected and server-owned.
+        build_diagnostics: { type: string }
+        activate:
+          type: boolean
+          description: System-owned managed activation intent.
+
+    DriverVersionAuthoringResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - driver
+        - version
+        - created_driver
+        - created_version
+        - reused_version
+        - activated
+        - replayed
+        - committed_revision
+        - semantic_impact
+      properties:
+        driver:
+          $ref: "#/components/schemas/Driver"
+        version:
+          $ref: "#/components/schemas/DriverVersion"
+        created_driver: { type: boolean }
+        created_version: { type: boolean }
+        reused_version: { type: boolean }
+        activated: { type: boolean }
+        replayed: { type: boolean }
+        committed_revision:
+          type: integer
+          format: int64
+          minimum: 1
+        semantic_impact:
+          type: string
+          enum: [workflow_catalog.version_authored.v1]
 
     DriverVersionLifecycleResponse:
       type: object
@@ -10282,6 +12124,7 @@ components:
       required:
         - workspace_key
         - service_id
+        - generation_id
         - name
         - kind
         - desired_state
@@ -10291,6 +12134,12 @@ components:
       properties:
         workspace_key: { type: string }
         service_id: { type: string }
+        generation_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+          description: >-
+            Opaque immutable Agent incarnation stamped by FleetDB. It is
+            returned on reads but is never accepted by Agent create.
         name: { type: string }
         kind:
           $ref: "#/components/schemas/AgentServiceKind"
@@ -10321,6 +12170,9 @@ components:
         metadata:
           $ref: "#/components/schemas/StringMap"
         created_by: { type: string }
+        updated_by: { type: string }
+        archived_by: { type: string }
+        desired_state_changed_by: { type: string }
         deleted_at:
           type: string
           format: date-time
@@ -10330,6 +12182,7 @@ components:
 
     CreateAgentServiceRequest:
       type: object
+      additionalProperties: false
       required: [service_id, kind]
       oneOf:
         - required: [role_name]
@@ -10372,40 +12225,150 @@ components:
         budget_policy: { type: string }
         state_ref: { type: string }
         metadata:
-          $ref: "#/components/schemas/StringMap"
+          allOf:
+            - $ref: "#/components/schemas/StringMap"
+          description: Validated non-secret Agent identity metadata.
 
-    UpdateAgentServiceRequest:
+    AgentServiceIdentityPatch:
       type: object
+      additionalProperties: false
+      minProperties: 1
       properties:
         name: { type: string }
         kind:
           $ref: "#/components/schemas/AgentServiceKind"
-        desired_state:
-          $ref: "#/components/schemas/AgentServiceDesiredState"
         role_name: { type: string }
         driver_id: { type: string }
         driver_version_id: { type: string }
-        profile_name: { type: string }
-        schedule_id: { type: string }
-        event_sources:
-          type: array
-          items: { type: string }
-        trigger_refs:
-          type: array
-          items: { type: string }
         placement_policy: { type: string }
         max_instances:
           type: integer
           minimum: 1
-        lease_id: { type: string }
         restart_policy: { type: string }
-        permissions:
-          type: array
-          items: { type: string }
         budget_policy: { type: string }
-        state_ref: { type: string }
         metadata:
           $ref: "#/components/schemas/StringMap"
+
+    UpdateAgentServiceIdentityRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_updated_at, patch]
+      properties:
+        expected_updated_at:
+          type: string
+          format: date-time
+        patch:
+          $ref: "#/components/schemas/AgentServiceIdentityPatch"
+
+    ArchiveAgentServiceRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_updated_at]
+      properties:
+        expected_updated_at:
+          type: string
+          format: date-time
+
+    SetAgentServiceDesiredStateRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_state, desired_state, expected_updated_at]
+      properties:
+        expected_state:
+          $ref: "#/components/schemas/AgentServiceDesiredState"
+        desired_state:
+          $ref: "#/components/schemas/AgentServiceDesiredState"
+        expected_updated_at:
+          type: string
+          format: date-time
+
+    AgentServiceLifecycleAction:
+      type: string
+      enum: [enable, disable, delete]
+
+    ApplyAgentServiceLifecycleRequest:
+      type: object
+      additionalProperties: false
+      required: [action, expected_updated_at, idempotency_key]
+      properties:
+        action:
+          $ref: "#/components/schemas/AgentServiceLifecycleAction"
+        expected_updated_at:
+          type: string
+          format: date-time
+          description: >-
+            Optimistic revision precondition for the first attempt. Once the
+            idempotency receipt exists, this value is excluded from receipt
+            identity so recovery may submit the now-current revision.
+        expected_generation_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+          description: >-
+            Immutable Agent incarnation observed before the first attempt.
+            Required for every receipt-miss mutation. It may be omitted only
+            by a delete recovery after public reads return not found; FleetDB
+            then succeeds only when an exact receipt already exists and its
+            generation still matches the archived Agent record.
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: >-
+            Stable identity for one lifecycle generation. Reuse only to recover
+            that exact workspace, Agent, action, and audit-actor operation; use
+            a new key for a later enable, disable, or delete intent.
+
+    AgentServiceLifecycleResult:
+      type: object
+      additionalProperties: false
+      required:
+        [workspace_key, service_id, idempotency_key, action, agent, committed_at]
+      properties:
+        workspace_key: { type: string }
+        service_id: { type: string }
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
+        action:
+          $ref: "#/components/schemas/AgentServiceLifecycleAction"
+        agent:
+          $ref: "#/components/schemas/AgentService"
+        binding_ids:
+          type: array
+          items: { type: string }
+        grant_ids:
+          type: array
+          items: { type: string }
+        committed_at:
+          type: string
+          format: date-time
+
+    SetAgentServiceDesiredStateOwnedRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [lease_id, owner_id, runtime_provider, node_id, fencing_token,
+         expected_state, desired_state, expected_updated_at, idempotency_key]
+      properties:
+        lease_id: { type: string, minLength: 1 }
+        owner_id: { type: string, minLength: 1 }
+        runtime_provider:
+          type: string
+          enum: [local, e2b, kubernetes, ci, other]
+        node_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        expected_state:
+          $ref: "#/components/schemas/AgentServiceDesiredState"
+        desired_state:
+          $ref: "#/components/schemas/AgentServiceDesiredState"
+        expected_updated_at:
+          type: string
+          format: date-time
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 128
 
     ListAgentServicesResponse:
       type: object
@@ -10621,7 +12584,9 @@ components:
         source_kind: { type: string }
         source_ref: { type: string }
         source_config_ref: { type: string }
-        route_key: { type: string }
+        route_key:
+          type: string
+          description: Defaults durably to internal:<binding_id> or cron:<binding_id> for those source kinds.
         method: { type: string }
         path_template: { type: string }
         topic: { type: string }
@@ -13589,11 +15554,11 @@ components:
 
     AgentSessionStatus:
       type: string
-      enum: [queued, leased, starting, running, idle, yielded, completed, failed, cancelled, expired]
+      enum: [queued, leased, starting, running, idle, yielded, completed, failed, cancelled, expired, interrupted]
 
     AgentSessionKind:
       type: string
-      enum: [task, orchestration, terminal, maintenance, ad_hoc]
+      enum: [task, orchestration, terminal, maintenance, ad_hoc, interactive, review]
 
     AgentSessionMetadata:
       type: object
@@ -13635,6 +15600,16 @@ components:
         parent_session_id:  { type: string }
         status:
           $ref: "#/components/schemas/AgentSessionStatus"
+        current_lease_id:
+          type: string
+          readOnly: true
+          description: Current non-secret lease generation identifier.
+        current_lease_fencing_token:
+          type: integer
+          format: int64
+          minimum: 1
+          readOnly: true
+          description: Current non-secret monotonic lease generation fence.
         phase:              { type: string }
         attempt:
           type: integer
@@ -13730,7 +15705,7 @@ components:
         kind:              { type: string }
         status:
           type: string
-          enum: [open, closed, lost]
+          enum: [open, closed, lost, starting, running, exited, failed]
         pty_provider:      { type: string }
         stream_ref:
           type: string
@@ -13766,7 +15741,7 @@ components:
         kind:              { type: string }
         status:
           type: string
-          enum: [open, closed, lost]
+          enum: [open, closed, lost, starting, running, exited, failed]
         pty_provider:      { type: string }
         stream_ref:        { type: string }
         transcript_ref:    { type: string }
@@ -13788,7 +15763,7 @@ components:
         kind:              { type: string }
         status:
           type: string
-          enum: [open, closed, lost]
+          enum: [open, closed, lost, starting, running, exited, failed]
         pty_provider:      { type: string }
         stream_ref:        { type: string }
         transcript_ref:    { type: string }
@@ -14053,18 +16028,758 @@ components:
         receipt: { $ref: "#/components/schemas/ArtifactCommandReceipt" }
         replayed: { type: boolean }
 
+    RepositoryAdmissionState:
+      type: string
+      enum:
+        - pending
+        - retryable_failed
+        - permanent_failed
+        - aborted
+        - committed
+      description: |
+        pending and retryable_failed are recoverable. permanent_failed,
+        aborted, and committed are terminal.
+
+    RepositoryAdmissionRepoSpec:
+      type: object
+      additionalProperties: false
+      required: [name, remote_url]
+      description: |
+        Canonical token-free final Repo intent. FleetDB rejects URL userinfo,
+        passwords, queries, fragments, unsupported schemes, and ambiguous SCP
+        users before persistence. An omitted remote defaults to origin.
+      properties:
+        name:
+          type: string
+          pattern: "^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$"
+        remote_url:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        remote:
+          type: string
+          maxLength: 100
+        default_branch:
+          type: string
+          maxLength: 200
+        groups:
+          type: array
+          items:
+            type: string
+            pattern: "^[a-z0-9]([a-z0-9-]{0,48}[a-z0-9])?$"
+        source_repo_id:
+          type: string
+          pattern: "^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$"
+
+    RepositoryAdmissionSpec:
+      type: object
+      additionalProperties: false
+      required: [workspace_key, operation_id, repositories]
+      properties:
+        workspace_key:
+          type: string
+          pattern: "^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$"
+        operation_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        repositories:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/RepositoryAdmissionRepoSpec"
+
+    RepositoryAdmissionWorkspaceFinalization:
+      type: object
+      additionalProperties: false
+      required: [state, default_branch]
+      properties:
+        state:
+          type: string
+          enum: [ready]
+        default_branch:
+          type: string
+          minLength: 1
+          maxLength: 200
+
+    RepositoryAdmissionRepoReceipt:
+      type: object
+      additionalProperties: false
+      required: [repository, event_id]
+      properties:
+        repository:
+          $ref: "#/components/schemas/Repo"
+        event_id:
+          type: string
+          minLength: 1
+
+    RepositoryAdmissionReceipt:
+      type: object
+      additionalProperties: false
+      required:
+        - admission_id
+        - spec_fingerprint
+        - repositories
+        - committed_at
+      properties:
+        admission_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+        spec_fingerprint:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        repositories:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/RepositoryAdmissionRepoReceipt"
+        workspace_finalization:
+          $ref: "#/components/schemas/RepositoryAdmissionWorkspaceFinalization"
+        committed_at:
+          type: string
+          format: date-time
+
+    RepositoryAdmission:
+      type: object
+      additionalProperties: false
+      required:
+        - admission_id
+        - workspace_key
+        - operation_id
+        - owner_id
+        - owner_generation_id
+        - owner_lease_expires_at
+        - spec_fingerprint
+        - spec
+        - state
+        - version
+        - created_at
+        - updated_at
+      description: |
+        Durable secret-free process record. Workspace incarnation and whether
+        the admission owns atomic-create lifecycle finalization are private
+        FleetDB authority and never appear in public JSON.
+      properties:
+        admission_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+          readOnly: true
+        workspace_key:
+          type: string
+          pattern: "^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$"
+        operation_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        owner_id:
+          type: string
+          minLength: 1
+          maxLength: 200
+        owner_generation_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+          readOnly: true
+        owner_lease_expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+        spec_fingerprint:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+          readOnly: true
+        spec:
+          $ref: "#/components/schemas/RepositoryAdmissionSpec"
+        state:
+          $ref: "#/components/schemas/RepositoryAdmissionState"
+        last_error_class:
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,99}$"
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        terminal_at:
+          type: string
+          format: date-time
+          readOnly: true
+        receipt:
+          $ref: "#/components/schemas/RepositoryAdmissionReceipt"
+
+    RepositoryAdmissionOperationStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - admission_id
+        - workspace_key
+        - operation_id
+        - owner_lease_expires_at
+        - spec_fingerprint
+        - spec
+        - state
+        - version
+        - created_at
+        - updated_at
+      description: |
+        Redacted operation replay status. owner_id and owner_generation_id are
+        deliberately absent so lookup cannot disclose mutation authority.
+      properties:
+        admission_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+        workspace_key:
+          type: string
+          pattern: "^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$"
+        operation_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_lease_expires_at: { type: string, format: date-time }
+        spec_fingerprint:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        spec:
+          $ref: "#/components/schemas/RepositoryAdmissionSpec"
+        state:
+          $ref: "#/components/schemas/RepositoryAdmissionState"
+        last_error_class:
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,99}$"
+        version: { type: integer, format: int64, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        terminal_at: { type: string, format: date-time }
+        receipt:
+          $ref: "#/components/schemas/RepositoryAdmissionReceipt"
+
+    BeginRepositoryAdmissionRequest:
+      type: object
+      additionalProperties: false
+      required: [operation_id, owner_id, repositories]
+      properties:
+        operation_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_lease_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1800
+          description: Omit for the server default of 600 seconds.
+        repositories:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/RepositoryAdmissionRepoSpec"
+
+    RepositoryAdmissionWorkspaceCreateInput:
+      type: object
+      additionalProperties: false
+      required: [key, name]
+      properties:
+        key:
+          type: string
+          pattern: "^[A-Z]([A-Z0-9-]{0,30}[A-Z0-9])?$"
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string }
+        repos:
+          type: array
+          maxItems: 0
+          description: Must be absent or empty; repositories belong to the admission batch.
+          items: { type: string }
+        state: { type: string }
+        error_message: { type: string }
+        default_branch: { type: string, maxLength: 200 }
+        design_format:
+          type: string
+          enum: ["", markdown, html]
+
+    CreateWorkspaceRepositoryAdmissionRequest:
+      type: object
+      additionalProperties: false
+      required: [workspace, operation_id, owner_id, repositories]
+      properties:
+        workspace:
+          $ref: "#/components/schemas/RepositoryAdmissionWorkspaceCreateInput"
+        operation_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_lease_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1800
+          description: Omit for the server default of 600 seconds.
+        repositories:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/RepositoryAdmissionRepoSpec"
+
+    CreateWorkspaceRepositoryAdmissionResponse:
+      type: object
+      additionalProperties: false
+      required: [workspace, admission, workspace_event_id]
+      properties:
+        workspace:
+          $ref: "#/components/schemas/Workspace"
+        admission:
+          $ref: "#/components/schemas/RepositoryAdmission"
+        workspace_event_id:
+          type: string
+          minLength: 1
+
+    RepositoryAdmissionGuardProperties:
+      type: object
+      additionalProperties: false
+      required:
+        - owner_id
+        - owner_generation_id
+        - spec_fingerprint
+        - expected_version
+      properties:
+        owner_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_generation_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+        spec_fingerprint:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        expected_version:
+          type: integer
+          format: int64
+          minimum: 1
+
+    RenewRepositoryAdmissionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - owner_id
+        - owner_generation_id
+        - spec_fingerprint
+        - expected_version
+        - lease_seconds
+      properties:
+        owner_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_generation_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+        spec_fingerprint:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        expected_version: { type: integer, format: int64, minimum: 1 }
+        lease_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1800
+
+    ClaimRepositoryAdmissionRecoveryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - expected_spec_fingerprint
+        - expected_version
+        - new_owner_id
+        - lease_seconds
+      properties:
+        expected_spec_fingerprint:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        expected_version: { type: integer, format: int64, minimum: 1 }
+        new_owner_id: { type: string, minLength: 1, maxLength: 200 }
+        lease_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1800
+
+    RepositoryAdmissionResolvedBranch:
+      type: object
+      additionalProperties: false
+      required: [name, default_branch]
+      properties:
+        name:
+          type: string
+          pattern: "^[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?$"
+        default_branch: { type: string, minLength: 1, maxLength: 200 }
+
+    CommitRepositoryAdmissionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - owner_id
+        - owner_generation_id
+        - spec_fingerprint
+        - expected_version
+        - resolved_default_branches
+      properties:
+        owner_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_generation_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+        spec_fingerprint:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        expected_version: { type: integer, format: int64, minimum: 1 }
+        resolved_default_branches:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: "#/components/schemas/RepositoryAdmissionResolvedBranch"
+        workspace_finalization:
+          $ref: "#/components/schemas/RepositoryAdmissionWorkspaceFinalization"
+
+    FailRepositoryAdmissionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - owner_id
+        - owner_generation_id
+        - spec_fingerprint
+        - expected_version
+        - error_class
+        - retryable
+      properties:
+        owner_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_generation_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+        spec_fingerprint:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        expected_version: { type: integer, format: int64, minimum: 1 }
+        error_class:
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,99}$"
+        retryable: { type: boolean }
+
+    AbortRepositoryAdmissionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - owner_id
+        - owner_generation_id
+        - spec_fingerprint
+        - expected_version
+        - reason_class
+      properties:
+        owner_id: { type: string, minLength: 1, maxLength: 200 }
+        owner_generation_id:
+          type: string
+          pattern: "^[0-9a-f]{32}$"
+        spec_fingerprint:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+        expected_version: { type: integer, format: int64, minimum: 1 }
+        reason_class:
+          type: string
+          pattern: "^[a-z][a-z0-9_]{0,99}$"
+
+    ListRecoverableRepositoryAdmissionsResponse:
+      type: object
+      additionalProperties: false
+      required: [repository_admissions, count]
+      properties:
+        repository_admissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RepositoryAdmission"
+        count:
+          type: integer
+          minimum: 0
+
+    AgentProvisioningState:
+      type: string
+      enum: [pending, running, retryable_failed, permanent_failed, completed]
+      description: |
+        permanent_failed and completed are terminal. Only pending, running,
+        and retryable_failed are eligible for recovery.
+
+    AgentProvisioningStep:
+      type: string
+      enum: [role, agent, binding, grant]
+
+    AgentProvisioningUnusedRolePolicy:
+      type: string
+      enum: [retain]
+      description: |
+        Explicit recovery policy for a Role independently committed before a
+        later provisioning failure. The only supported policy retains it for
+        retry or operator cleanup.
+
+    AgentProvisioningRoleSpec:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        kind: { type: string }
+        description: { type: string }
+        prompt: { type: string }
+        prompt_file: { type: string }
+        model: { type: string }
+        task_filter: { type: string }
+        backend: { type: string }
+        effort: { type: string }
+        path_patterns:
+          type: array
+          items: { type: string }
+        skills:
+          type: array
+          items: { type: string }
+        max_priority: { type: integer, minimum: 0 }
+        max_concurrency: { type: integer, minimum: 1 }
+        read_only: { type: boolean }
+        allowed_tools:
+          type: array
+          items: { type: string }
+        denied_tools:
+          type: array
+          items: { type: string }
+        max_budget_usd: { type: number, format: double, minimum: 0 }
+
+    AgentProvisioningAgentSpec:
+      type: object
+      additionalProperties: false
+      required: [agent_id, name, kind, desired_state, role_name]
+      description: |
+        Secret-free durable Agent intent. Metadata keys shaped like credential,
+        token, password, secret, API key, or private key are rejected.
+      properties:
+        agent_id: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        kind:
+          $ref: "#/components/schemas/AgentServiceKind"
+        desired_state:
+          $ref: "#/components/schemas/AgentServiceDesiredState"
+        role_name: { type: string, minLength: 1 }
+        budget_policy: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+
+    AgentProvisioningBindingSpec:
+      type: object
+      additionalProperties: false
+      required: [binding_id, source_kind, driver_id, driver_version_id, entrypoint]
+      properties:
+        binding_id: { type: string, minLength: 1 }
+        name: { type: string }
+        source_kind: { type: string, minLength: 1 }
+        source_config_ref: { type: string }
+        route_key: { type: string }
+        event_patterns:
+          type: array
+          items: { type: string }
+        driver_id: { type: string, minLength: 1 }
+        driver_version_id: { type: string, minLength: 1 }
+        entrypoint: { type: string, minLength: 1 }
+        concurrency_policy:
+          $ref: "#/components/schemas/TriggerBindingConcurrencyPolicy"
+        schedule: { type: string }
+        schedule_zone: { type: string }
+        enabled: { type: boolean }
+
+    AgentProvisioningGrantSpec:
+      type: object
+      additionalProperties: false
+      required: [grant_id, connector_id, action, resource_pattern]
+      properties:
+        grant_id: { type: string, minLength: 1 }
+        connector_id: { type: string, minLength: 1 }
+        action: { type: string, minLength: 1 }
+        resource_pattern:
+          type: string
+          minLength: 1
+          description: Explicit resource scope copied into the durable ConnectorGrant.
+
+    BeginAgentProvisioningRequest:
+      type: object
+      additionalProperties: false
+      required: [provisioning_id, role, agent, binding]
+      description: |
+        Immutable secret-free provisioning intent. requested_by and
+        spec_fingerprint, provisioning generation, and Workspace incarnation
+        are server-owned and are deliberately absent.
+      properties:
+        provisioning_id: { type: string, minLength: 1 }
+        role:
+          $ref: "#/components/schemas/AgentProvisioningRoleSpec"
+        agent:
+          $ref: "#/components/schemas/AgentProvisioningAgentSpec"
+        binding:
+          $ref: "#/components/schemas/AgentProvisioningBindingSpec"
+        grants:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentProvisioningGrantSpec"
+
+    AgentProvisioningSpec:
+      type: object
+      additionalProperties: false
+      required: [provisioning_id, workspace_key, requested_by, role, agent, binding]
+      description: Server-attributed, canonical, secret-free immutable intent.
+      properties:
+        provisioning_id: { type: string, minLength: 1 }
+        workspace_key: { type: string, minLength: 1 }
+        requested_by:
+          type: string
+          minLength: 1
+          readOnly: true
+        role:
+          $ref: "#/components/schemas/AgentProvisioningRoleSpec"
+        agent:
+          $ref: "#/components/schemas/AgentProvisioningAgentSpec"
+        binding:
+          $ref: "#/components/schemas/AgentProvisioningBindingSpec"
+        grants:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentProvisioningGrantSpec"
+
+    AgentProvisioningRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - provisioning_id
+        - provisioning_generation_id
+        - workspace_key
+        - requested_by
+        - spec_fingerprint
+        - spec
+        - state
+        - unused_role_policy
+        - version
+        - created_at
+        - updated_at
+      properties:
+        provisioning_id: { type: string, minLength: 1 }
+        provisioning_generation_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+          readOnly: true
+          description: |
+            Opaque immutable process generation stamped by FleetDB. Echo it as
+            expected_provisioning_generation_id when advancing progress.
+        workspace_key: { type: string, minLength: 1 }
+        requested_by:
+          type: string
+          minLength: 1
+          readOnly: true
+        spec_fingerprint:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+          readOnly: true
+          description: FleetDB-computed canonical immutable-intent fingerprint.
+        spec:
+          $ref: "#/components/schemas/AgentProvisioningSpec"
+        state:
+          $ref: "#/components/schemas/AgentProvisioningState"
+        completed_steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentProvisioningStep"
+        completed_grants:
+          type: array
+          items: { type: string }
+        unused_role_policy:
+          $ref: "#/components/schemas/AgentProvisioningUnusedRolePolicy"
+        last_error_class: { type: string }
+        version:
+          type: integer
+          format: int64
+          minimum: 1
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+
+    AgentProvisioningStepGuardRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_provisioning_generation_id]
+      description: |
+        Opaque comparison fence only. The owner mutation is derived entirely
+        from the durable immutable AgentProvisioning Spec; no target entity
+        fields or Workspace incarnation can be supplied.
+      properties:
+        expected_provisioning_generation_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+
+    SaveAgentProvisioningProgressRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - expected_provisioning_generation_id
+        - expected_version
+        - state
+      description: |
+        Mutable progress only. The immutable intent and all server-owned
+        identity, fingerprint, policy, version, and timestamp fields are
+        absent. expected_provisioning_generation_id is a comparison
+        precondition, not caller-minted identity.
+      properties:
+        expected_provisioning_generation_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+        expected_version:
+          type: integer
+          format: int64
+          minimum: 1
+        state:
+          $ref: "#/components/schemas/AgentProvisioningState"
+        completed_steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentProvisioningStep"
+        completed_grants:
+          type: array
+          items: { type: string }
+        last_error_class: { type: string }
+
+    ListPendingAgentProvisioningResponse:
+      type: object
+      additionalProperties: false
+      required: [agent_provisioning, count]
+      properties:
+        agent_provisioning:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentProvisioningRecord"
+        count:
+          type: integer
+          minimum: 0
+
     AgentLease:
       type: object
-      required: [workspace_key, lease_id, session_id, token, fencing_token, status, expires_at, last_heartbeat, created_at, updated_at]
+      description: Public session lease metadata. Raw tokens and token hashes are never included.
+      required: [workspace_key, lease_id, session_id, fencing_token, status, expires_at, last_heartbeat, created_at, updated_at]
       properties:
         workspace_key:  { type: string }
         lease_id:       { type: string }
         session_id:     { type: string }
         agent_id:       { type: string }
         node_id:        { type: string }
-        token:
-          type: string
-          description: Opaque bearer token returned only to the lease holder.
         fencing_token:
           type: integer
           format: int64
@@ -14086,6 +16801,376 @@ components:
         ttl_seconds:
           type: integer
           minimum: 1
+
+    CreateAgentLeaseResponse:
+      type: object
+      required: [lease, token]
+      properties:
+        lease:
+          $ref: "#/components/schemas/AgentLease"
+        token:
+          type: string
+          description: Raw opaque token returned exactly once to the lease holder.
+
+    ValidateAgentSessionAuthorityRequest:
+      type: object
+      additionalProperties: false
+      required: [session_id, agent_id, node_id, lease_id, fencing_token]
+      properties:
+        session_id: { type: string, minLength: 1 }
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token:
+          type: integer
+          format: int64
+          minimum: 1
+
+    ValidateAgentSessionAuthorityResponse:
+      type: object
+      required: [lease]
+      properties:
+        lease:
+          $ref: "#/components/schemas/AgentLease"
+
+    InteractionStartSessionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [session_id, agent_id, node_id, kind, lease_id, lease_ttl_seconds]
+      properties:
+        session_id: { type: string, minLength: 1 }
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        kind:
+          type: string
+          enum: [task, orchestration, terminal, maintenance, ad_hoc, interactive, review]
+        task_id: { type: string }
+        terminal_id: { type: string }
+        parent_session_id: { type: string }
+        phase: { type: string }
+        attempt: { type: integer, minimum: 0 }
+        lease_id: { type: string, minLength: 1 }
+        lease_ttl_seconds: { type: integer, format: int64, minimum: 1, maximum: 86400 }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+
+    InteractionStartSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [session, lease, token]
+      properties:
+        session:
+          $ref: "#/components/schemas/AgentSession"
+        lease:
+          $ref: "#/components/schemas/AgentLease"
+        token:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: "^[0-9a-f]{64}$"
+          description: >-
+            Raw opaque credential returned exactly once. Only its SHA-256 hash
+            is persisted and neither raw nor hashed credential is public.
+
+    InteractionRecoverSessionStartRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - agent_id
+        - node_id
+        - kind
+        - expected_lease_id
+        - expected_lease_fencing_token
+        - replacement_lease_id
+        - replacement_lease_ttl_seconds
+      properties:
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        kind:
+          type: string
+          enum: [task, orchestration, terminal, maintenance, ad_hoc, interactive, review]
+        task_id: { type: string }
+        terminal_id: { type: string }
+        parent_session_id: { type: string }
+        phase: { type: string }
+        attempt: { type: integer, minimum: 0 }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+        expected_lease_id: { type: string, minLength: 1 }
+        expected_lease_fencing_token:
+          type: integer
+          format: int64
+          minimum: 1
+        replacement_lease_id: { type: string, minLength: 1 }
+        replacement_lease_ttl_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 86400
+
+    InteractionHeartbeatSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [agent_id, node_id, lease_id, fencing_token, lease_ttl_seconds]
+      properties:
+        session_id:
+          type: string
+          minLength: 1
+          description: If present, must equal the route session_id.
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        phase: { type: string }
+        lease_ttl_seconds: { type: integer, format: int64, minimum: 1, maximum: 86400 }
+
+    InteractionPatchSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [agent_id, node_id, lease_id, fencing_token]
+      anyOf:
+        - required: [phase]
+        - required: [metadata_upserts]
+        - required: [metadata_removals]
+        - required: [transcript_artifact_id]
+      properties:
+        session_id:
+          type: string
+          minLength: 1
+          description: If present, must equal the route session_id.
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        phase:
+          type: string
+          maxLength: 256
+        metadata_upserts:
+          type: object
+          minProperties: 1
+          maxProperties: 64
+          propertyNames:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._-]+$"
+          additionalProperties:
+            type: string
+            maxLength: 1024
+        metadata_removals:
+          type: array
+          minItems: 1
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: "^[A-Za-z0-9._-]+$"
+        transcript_artifact_id:
+          type: string
+          maxLength: 1024
+          description: Empty string removes the current transcript linkage.
+
+    InteractionFinishSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [agent_id, node_id, lease_id, fencing_token, status]
+      properties:
+        session_id:
+          type: string
+          minLength: 1
+          description: If present, must equal the route session_id.
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        status:
+          type: string
+          enum: [completed, failed, cancelled, interrupted]
+        summary: { type: string }
+        error_class: { type: string }
+        exit_code: { type: integer, nullable: true }
+        transcript_artifact_id: { type: string }
+
+    InteractionSessionMutationResponse:
+      type: object
+      additionalProperties: false
+      required: [session, lease]
+      properties:
+        session:
+          $ref: "#/components/schemas/AgentSession"
+        terminal:
+          description: Exact terminal terminalized by an interactive finish; omitted for non-interactive sessions.
+          allOf:
+            - $ref: "#/components/schemas/TerminalSession"
+        lease:
+          $ref: "#/components/schemas/AgentLease"
+
+    InteractionForceInterruptSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [agent_id, terminal_id, expected_lease_id, expected_lease_fencing_token, stream_ref, terminal_tab]
+      properties:
+        agent_id: { type: string, minLength: 1 }
+        terminal_id: { type: string, minLength: 1 }
+        expected_lease_id: { type: string, minLength: 1 }
+        expected_lease_fencing_token: { type: integer, format: int64, minimum: 1 }
+        stream_ref: { type: string, minLength: 1 }
+        terminal_tab: { type: string, minLength: 1 }
+        reason: { type: string }
+
+    InteractionForceInterruptSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [session, terminal, lease, changed]
+      properties:
+        session:
+          $ref: "#/components/schemas/AgentSession"
+        terminal:
+          $ref: "#/components/schemas/TerminalSession"
+        lease:
+          $ref: "#/components/schemas/AgentLease"
+        changed: { type: boolean }
+
+    InteractionRecoverableSessionsResponse:
+      type: object
+      additionalProperties: false
+      required: [agent_sessions, count]
+      properties:
+        agent_sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentSession"
+        count: { type: integer, minimum: 0 }
+
+    InteractionInterruptSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [session, changed]
+      properties:
+        session:
+          $ref: "#/components/schemas/AgentSession"
+        changed: { type: boolean }
+
+    InteractionCreateTerminalRequest:
+      type: object
+      additionalProperties: false
+      required: [terminal_id, session_id, agent_id, node_id, lease_id, fencing_token]
+      properties:
+        terminal_id: { type: string, minLength: 1 }
+        session_id: { type: string, minLength: 1 }
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        task_id: { type: string }
+        title: { type: string }
+        kind: { type: string }
+        pty_provider: { type: string }
+        stream_ref: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+
+    InteractionUpdateTerminalRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [session_id, agent_id, node_id, lease_id, fencing_token, status]
+      properties:
+        session_id: { type: string, minLength: 1 }
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        status:
+          type: string
+          enum: [starting, running, exited, failed]
+        stream_ref: { type: string }
+        transcript_artifact_id: { type: string }
+        attached_clients: { type: integer, minimum: 0 }
+
+    InteractionEnqueueInboxRequest:
+      type: object
+      additionalProperties: false
+      required: [message_id, target_agent_id, body]
+      properties:
+        message_id: { type: string, minLength: 1 }
+        target_agent_id: { type: string, minLength: 1 }
+        session_id: { type: string }
+        body: { type: string, minLength: 1 }
+        source_kind: { type: string }
+        source_ref: { type: string }
+        driver_run_id: { type: string }
+        task_run_id: { type: string }
+        trigger_event_id: { type: string }
+        trigger_delivery_id: { type: string }
+        dedupe_key: { type: string }
+
+    InteractionClaimInboxRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [session_id, agent_id, node_id, lease_id, fencing_token, lease_ttl_seconds]
+      properties:
+        session_id: { type: string, minLength: 1 }
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        lease_ttl_seconds: { type: integer, format: int64, minimum: 1, maximum: 86400 }
+
+    InteractionCompleteInboxRequest:
+      type: object
+      additionalProperties: false
+      required: [session_id, agent_id, node_id, lease_id, fencing_token, attempt, status]
+      properties:
+        session_id: { type: string, minLength: 1 }
+        agent_id: { type: string, minLength: 1 }
+        node_id: { type: string, minLength: 1 }
+        lease_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        attempt:
+          type: integer
+          minimum: 1
+          description: Claim attempt returned by the claim-next command.
+        status:
+          type: string
+          enum: [queued, delivered, failed]
+        delivered_thread_id: { type: string }
+        error_class: { type: string }
+
+    InteractionActivity:
+      type: object
+      additionalProperties: false
+      required: [workspace_key, agent_id, kind, source_id, status, started_at]
+      properties:
+        workspace_key: { type: string }
+        agent_id: { type: string }
+        kind:
+          type: string
+          enum: [agent_session, batch_run]
+        source_id: { type: string }
+        task_id: { type: string }
+        status: { type: string }
+        summary: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+
+    InteractionActivityResponse:
+      type: object
+      additionalProperties: false
+      required: [activity, count]
+      properties:
+        activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/InteractionActivity"
+        count: { type: integer, minimum: 0 }
 
     ListAgentLeasesResponse:
       type: object
@@ -14165,7 +17250,8 @@ components:
 
     AgentOwnershipLease:
       type: object
-      required: [workspace_key, agent_id, lease_id, owner_id, token, fencing_token, status, expires_at, last_heartbeat, created_at, updated_at]
+      description: Public agent ownership metadata. Raw tokens and token hashes are never included.
+      required: [workspace_key, agent_id, lease_id, owner_id, fencing_token, status, expires_at, last_heartbeat, created_at, updated_at]
       properties:
         workspace_key:    { type: string }
         agent_id:         { type: string }
@@ -14173,9 +17259,6 @@ components:
         owner_id:         { type: string }
         runtime_provider: { type: string }
         node_id:          { type: string }
-        token:
-          type: string
-          description: Opaque bearer token returned only to the lease holder.
         fencing_token:
           type: integer
           format: int64
@@ -14190,15 +17273,57 @@ components:
 
     AcquireAgentOwnershipLeaseRequest:
       type: object
-      required: [owner_id]
+      additionalProperties: false
+      required: [owner_id, runtime_provider, node_id]
       properties:
-        lease_id:         { type: string }
-        owner_id:         { type: string }
-        runtime_provider: { type: string }
-        node_id:          { type: string }
+        lease_id:         { type: string, minLength: 1 }
+        owner_id:         { type: string, minLength: 1 }
+        runtime_provider:
+          type: string
+          enum: [local, e2b, kubernetes, ci, other]
+        node_id:          { type: string, minLength: 1 }
         ttl_seconds:
           type: integer
           minimum: 1
+
+    AgentOwnershipLeaseProofRequest:
+      type: object
+      additionalProperties: false
+      required: [lease_id, owner_id, runtime_provider, node_id, fencing_token]
+      properties:
+        lease_id: { type: string, minLength: 1 }
+        owner_id: { type: string, minLength: 1 }
+        runtime_provider:
+          type: string
+          enum: [local, e2b, kubernetes, ci, other]
+        node_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+
+    RenewAgentOwnershipLeaseOwnedRequest:
+      type: object
+      additionalProperties: false
+      required: [lease_id, owner_id, runtime_provider, node_id, fencing_token]
+      properties:
+        lease_id: { type: string, minLength: 1 }
+        owner_id: { type: string, minLength: 1 }
+        runtime_provider:
+          type: string
+          enum: [local, e2b, kubernetes, ci, other]
+        node_id: { type: string, minLength: 1 }
+        fencing_token: { type: integer, format: int64, minimum: 1 }
+        ttl_seconds:
+          type: integer
+          minimum: 1
+
+    AcquireAgentOwnershipLeaseResponse:
+      type: object
+      required: [lease, token]
+      properties:
+        lease:
+          $ref: "#/components/schemas/AgentOwnershipLease"
+        token:
+          type: string
+          description: Raw opaque token returned exactly once to the lease holder.
 
     ListAgentOwnershipLeasesResponse:
       type: object
@@ -14347,13 +17472,13 @@ components:
       deprecated: true
       description: |
         Fleet-first rolling-upgrade bridge for the previous Loom client.
-        For a proof-backed command FleetDB infers and atomically revalidates
-        the exact current ownership generation; X-Actor is the authenticated
-        service caller, not the daemon node or stable owner. For a still-
-        proofless command, X-Actor must match FleetDB's server-reserved marker.
-        Failed/Canceled may converge after the exact inferred generation was
-        released, but Running and Succeeded Start/Restart/Yield remain
-        forbidden. New clients must use CompleteAgentCommandRequest.
+        It is accepted only for a still-proofless command when X-Actor matches
+        FleetDB's server-reserved marker. A command bound to any durable
+        ownership generation is rejected because FleetDB stores only its token
+        hash and cannot reconstruct the raw holder proof. Failed/Canceled may
+        converge through the proofless bridge, but Running and Succeeded
+        Start/Restart/Yield remain forbidden. New clients must use
+        CompleteAgentCommandRequest.
       properties:
         status:
           type: string
@@ -14559,6 +17684,26 @@ components:
         max_budget_usd:       { type: number }
         clear_max_budget_usd: { type: boolean }
 
+    UpdateRoleCASRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_updated_at, patch]
+      properties:
+        expected_updated_at:
+          type: string
+          format: date-time
+        patch:
+          $ref: "#/components/schemas/UpdateRoleRequest"
+
+    DeleteRoleCASRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_updated_at]
+      properties:
+        expected_updated_at:
+          type: string
+          format: date-time
+
     ListRolesResponse:
       type: object
       required: [roles, count]
@@ -14696,6 +17841,38 @@ components:
 
     Forbidden:
       description: Caller is not allowed to mutate this resource
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    LegacyInteractionWriteRetired:
+      description: >-
+        The unfenced legacy Interaction mutation endpoint is permanently
+        retired. Use the corresponding /interaction command route.
+      headers:
+        Deprecation:
+          description: Signals that this legacy operation is retired.
+          schema: { type: string, enum: ["true"] }
+        Link:
+          description: Relative link to the Interaction migration boundary.
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    LegacyRoleMutationRetired:
+      description: >-
+        The non-atomic legacy Role mutation is retired for every admitted or
+        auth-disabled caller mode. Use the exact-revision Role command.
+      headers:
+        Deprecation:
+          description: Signals that the legacy operation is retired.
+          schema: { type: string, enum: ["true"] }
+        Link:
+          description: Relative link to the exact revision successor command.
+          schema: { type: string }
       content:
         application/json:
           schema:

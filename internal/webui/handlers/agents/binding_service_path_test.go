@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
@@ -22,6 +23,36 @@ type agentServiceCASBindingStore struct {
 	managedReplace int
 	managedDelete  int
 	replaceErr     error
+}
+
+type agentServiceCASLifecycleAPI struct {
+	*testAgentRecordAPI
+	bindings *agentServiceCASBindingStore
+	calls    int
+}
+
+func (api *agentServiceCASLifecycleAPI) ApplyLifecycle(
+	ctx context.Context,
+	auth authority.OperatorAuthority,
+	command agentsmodule.ApplyLifecycleCommand,
+) (*agentsmodule.LifecycleResult, error) {
+	result, err := api.testAgentRecordAPI.ApplyLifecycle(ctx, auth, command)
+	if err != nil {
+		return nil, err
+	}
+	api.calls++
+	if command.Action != agentsmodule.LifecycleDelete {
+		return result, nil
+	}
+	result.BindingIDs = result.BindingIDs[:0]
+	for bindingID, binding := range api.bindings.bindings {
+		if binding.TargetAgentServiceID != command.AgentID {
+			continue
+		}
+		result.BindingIDs = append(result.BindingIDs, bindingID)
+		delete(api.bindings.bindings, bindingID)
+	}
+	return result, nil
 }
 
 func newAgentServiceCASBindingStore() *agentServiceCASBindingStore {
@@ -113,6 +144,12 @@ func cloneAgentServiceTestBinding(binding *automation.Binding) *automation.Bindi
 type countingAgentServiceStore struct {
 	store.AgentServiceStore
 	updates int
+	deletes int
+}
+
+func (s *countingAgentServiceStore) Delete(ctx context.Context, workspaceKey, serviceID string) error {
+	s.deletes++
+	return s.AgentServiceStore.Delete(ctx, workspaceKey, serviceID)
 }
 
 func (s *countingAgentServiceStore) Update(
@@ -168,6 +205,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 		authority.OperatorOnly(automation.ActionUpdateManagedBinding),
 		authority.OperatorOnly(automation.ActionDisableManagedBinding),
 		authority.OperatorOnly(automation.ActionDeleteManagedBinding),
+		authority.Allow(automation.ActionEnsureManagedBinding, authority.ClassSystem),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -193,10 +231,42 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 		}
 		return issuer.IssueOperator(principal, workspace, action)
 	})
+	provisioningPrincipal, err := issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject: "agent-provisioning-test", Class: authority.ClassSystem,
+		Workspace: agentRecordTestWS,
+		Actions:   []authority.Action{automation.ActionEnsureManagedBinding},
+		ExpiresAt: now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provisioningBindingAuthority, err := issuer.IssueSystem(
+		provisioningPrincipal,
+		agentRecordTestWS,
+		automation.ActionEnsureManagedBinding,
+		"handler provisioning test",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provisioning := newTestAgentProvisioningWithBindingAuthority(
+		countingStore,
+		bindings,
+		provisioningBindingAuthority,
+	)
+	lifecycle := &agentServiceCASLifecycleAPI{
+		testAgentRecordAPI: &testAgentRecordAPI{store: st},
+		bindings:           persistence,
+	}
 	module := New(Config{
 		Store: countingStore, Bindings: bindings, OperatorAuthority: resolver,
-		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS },
-		BindingGrants:        testBindingGrantCompatibility{grants: st.ConnectorGrants()},
+		AgentRecords:          lifecycle,
+		AgentRecordAuthority:  resolver,
+		Provisioning:          provisioning,
+		ProvisioningAuthority: provisioning,
+		PrepareWorkflowTarget: testWorkflowTargetPreparation(countingStore),
+		WorkspaceFromContext:  func(context.Context) string { return agentRecordTestWS },
+		BindingGrants:         testBindingGrantCompatibility{grants: st.ConnectorGrants()},
 	})
 	mux := http.NewServeMux()
 	module.Register(mux)
@@ -255,7 +325,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 	if patched.Code != http.StatusOK {
 		t.Fatalf("name patch status = %d; body=%s", patched.Code, patched.Body.String())
 	}
-	if countingServices.updates != 1 || persistence.managedReplace != 0 {
+	if countingServices.updates != 0 || persistence.managedReplace != 0 {
 		t.Fatalf("name patch updates=%d replacements=%d", countingServices.updates, persistence.managedReplace)
 	}
 	var patchedDTO agentRecordDTO
@@ -269,7 +339,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 	if mixed.Code != http.StatusBadRequest {
 		t.Fatalf("mixed patch status = %d; body=%s", mixed.Code, mixed.Body.String())
 	}
-	if countingServices.updates != 1 || persistence.managedReplace != 0 {
+	if countingServices.updates != 0 || persistence.managedReplace != 0 {
 		t.Fatalf("mixed patch updates=%d replacements=%d", countingServices.updates, persistence.managedReplace)
 	}
 
@@ -279,7 +349,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 	if failedSchedule.Code != http.StatusServiceUnavailable {
 		t.Fatalf("failed schedule status = %d; body=%s", failedSchedule.Code, failedSchedule.Body.String())
 	}
-	if countingServices.updates != 1 || persistence.managedReplace != 0 ||
+	if countingServices.updates != 0 || persistence.managedReplace != 0 ||
 		persistence.bindings[createdDTO.ID+"-1"].Schedule != "*/10 * * * *" {
 		t.Fatalf("failed schedule updates=%d replacements=%d binding=%+v",
 			countingServices.updates, persistence.managedReplace, persistence.bindings[createdDTO.ID+"-1"])
@@ -291,7 +361,7 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 	if scheduled.Code != http.StatusOK {
 		t.Fatalf("schedule patch status = %d; body=%s", scheduled.Code, scheduled.Body.String())
 	}
-	if countingServices.updates != 1 || persistence.managedReplace != 1 ||
+	if countingServices.updates != 0 || persistence.managedReplace != 1 ||
 		persistence.bindings[createdDTO.ID+"-1"].Schedule != "0 9 * * *" ||
 		persistence.bindings[createdDTO.ID+"-1"].ScheduleTimezone != "America/Los_Angeles" {
 		t.Fatalf("schedule updates=%d replacements=%d binding=%+v",
@@ -301,8 +371,16 @@ func TestAgentServiceHandlerUsesManagedCoreCASForCreateUpdateAndDelete(t *testin
 	if deleted.Code != http.StatusOK {
 		t.Fatalf("delete status = %d; body=%s", deleted.Code, deleted.Body.String())
 	}
-	if persistence.managedReplace != 2 || persistence.managedDelete != 1 || len(persistence.bindings) != 0 || persistence.ordinaryCreate != 0 {
+	if persistence.managedReplace != 1 || persistence.managedDelete != 0 || len(persistence.bindings) != 0 ||
+		persistence.ordinaryCreate != 0 || lifecycle.calls != 1 {
 		t.Fatalf("lifecycle managed create/replace/delete=%d/%d/%d ordinary=%d remaining=%d",
 			persistence.managedCreate, persistence.managedReplace, persistence.managedDelete, persistence.ordinaryCreate, len(persistence.bindings))
+	}
+	if countingServices.updates != 0 || countingServices.deletes != 0 {
+		t.Fatalf(
+			"unified handler used legacy AgentService mutations: updates=%d deletes=%d",
+			countingServices.updates,
+			countingServices.deletes,
+		)
 	}
 }

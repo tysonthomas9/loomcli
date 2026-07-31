@@ -9,14 +9,8 @@ import (
 	"syscall"
 )
 
-func requireGitCredentialProcessIsolation() error {
-	return nil
-}
-
-// configureGitNetworkCancellation keeps git and its transport/credential
-// helper descendants in one process group. On context cancellation, killing
-// the group prevents a child from retaining the ephemeral credential
-// environment after the git leader exits.
+// configureGitNetworkCancellation keeps Git and its transport descendants in
+// one process group so cancellation terminates the complete anonymous read.
 func configureGitNetworkCancellation(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {

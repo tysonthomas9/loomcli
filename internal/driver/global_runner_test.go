@@ -36,7 +36,7 @@ func trustedBuiltinRunnerOwner(t *testing.T, trust domain.DriverTrustLevel) (*do
 // registerUntrustedCaller seeds an UNTRUSTED custom driver + version that does
 // NOT declare local-task-runner, plus returns a running parent DriverRun pinned
 // to it — the caller a global-fallback must resolve on behalf of.
-func registerUntrustedCaller(t *testing.T, st store.Store) *domain.DriverRun {
+func registerUntrustedCaller(t *testing.T, st *memstore.Store) *domain.DriverRun {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
@@ -49,14 +49,20 @@ func registerUntrustedCaller(t *testing.T, st store.Store) *domain.DriverRun {
 	if _, err := st.DriverVersions().Create(ctx, store.DriverVersionCreate{
 		WorkspaceKey: "WS", VersionID: "custom-agent-v1", DriverID: "custom-agent", Version: 1,
 		SourceDigest: "sha256:custom", BundleDigest: "sha256:custom",
-		Runtime:  RuntimeFlueNode,
-		Manifest: map[string]string{ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)}, // declares no runners
+		Runtime:          RuntimeFlueNode,
+		Manifest:         map[string]string{ManifestTrustLevelKey: string(domain.DriverTrustUntrusted)}, // declares no runners
+		ValidationStatus: domain.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create caller version: %v", err)
 	}
-	activeVersion := "custom-agent-v1"
-	if _, err := st.Drivers().Update(ctx, "WS", "custom-agent", store.DriverUpdate{ActiveVersionID: &activeVersion}); err != nil {
+	if _, err := st.ApproveDriverVersionForTest(ctx, "WS", "custom-agent", "custom-agent-v1"); err != nil {
+		t.Fatalf("approve caller version: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, "WS", "custom-agent", "custom-agent-v1"); err != nil {
 		t.Fatalf("activate caller version: %v", err)
+	}
+	if _, err := st.UnapproveDriverVersionForTest(ctx, "WS", "custom-agent", "custom-agent-v1"); err != nil {
+		t.Fatalf("restore caller version to active-untrusted: %v", err)
 	}
 	return &domain.DriverRun{RunID: "run-1", DriverID: "custom-agent", DriverVersionID: "custom-agent-v1", Status: domain.DriverRunRunning}
 }
@@ -70,7 +76,7 @@ func TestResolveTaskRunRequestRunnerGlobalFallbackUsesBuiltinOwner(t *testing.T)
 	parent := registerUntrustedCaller(t, st)
 	builtinDriver, builtinVersion := trustedBuiltinRunnerOwner(t, domain.DriverTrustTrusted)
 
-	restore := swapGlobalRunnerResolver(func(_ context.Context, _ store.Store, _, runnerName string) (*GlobalRunnerResolution, error) {
+	restore := swapGlobalRunnerResolver(func(_ context.Context, _, runnerName string) (*GlobalRunnerResolution, error) {
 		if runnerName != "local-task-runner" {
 			return nil, domain.ErrNotFound
 		}
@@ -101,7 +107,7 @@ func TestResolveTaskRunRequestRunnerGlobalFallbackUsesBuiltinOwner(t *testing.T)
 func TestResolveTaskRunRequestRunnerUnknownRunnerSameError(t *testing.T) {
 	st := memstore.New()
 	parent := registerUntrustedCaller(t, st)
-	restore := swapGlobalRunnerResolver(func(_ context.Context, _ store.Store, _, _ string) (*GlobalRunnerResolution, error) {
+	restore := swapGlobalRunnerResolver(func(_ context.Context, _, _ string) (*GlobalRunnerResolution, error) {
 		return nil, domain.ErrNotFound
 	})
 	defer restore()
@@ -123,7 +129,7 @@ func TestResolveTaskRunRequestRunnerUntrustedOwnerNotResolvable(t *testing.T) {
 	parent := registerUntrustedCaller(t, st)
 	untrustedDriver, untrustedVersion := trustedBuiltinRunnerOwner(t, domain.DriverTrustUntrusted)
 
-	restore := swapGlobalRunnerResolver(func(_ context.Context, _ store.Store, _, runnerName string) (*GlobalRunnerResolution, error) {
+	restore := swapGlobalRunnerResolver(func(_ context.Context, _, runnerName string) (*GlobalRunnerResolution, error) {
 		return &GlobalRunnerResolution{Driver: untrustedDriver, Version: untrustedVersion, Spec: DriverRunnerSpec{Name: runnerName, Kind: RunnerKindFlueWorkflow, Entrypoint: runnerName}}, nil
 	})
 	defer restore()

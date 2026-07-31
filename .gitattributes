@@ -3,4 +3,4 @@
 .beads/issues.jsonl merge=beads
 
 # Generated Flue bundles are embedded runtime artifacts, not source.
-internal/workflows/builtin-dist/** -diff
+internal/infra/workflowdistribution/builtin-dist/** -diff

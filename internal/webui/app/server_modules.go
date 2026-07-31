@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlermux"
@@ -76,19 +77,23 @@ func (app *Server) buildModules() {
 func (app *Server) buildTerminalModules() {
 	if app.termSvc != nil {
 		app.wsModules = append(app.wsModules,
-			modbuilder.NewTerminalModules(modbuilder.TerminalModuleDeps{
-				TermSvc:         app.termSvc,
-				AgentSvc:        app.agentSvc,
-				PTYMgr:          app.ptyMgr,
-				AgentTmuxMgr:    app.agentTmuxMgr,
-				TermAuth:        app.termAuth,
-				CORSOrigins:     app.corsConfig.AllowedOrigins,
-				SelfURL:         fmt.Sprintf("http://localhost:%d", app.actualPort),
-				Store:           app.config.Store,
-				TabMetaStore:    app.tabMetaStore,
-				Hub:             app.hub,
-				ServerStartedAt: app.startedAt,
-			})...)
+			capabilitycomposition.NewTerminalModules(
+				app.config.AgentsCapability,
+				app.config.InteractionCapability,
+				modbuilder.TerminalModuleDeps{
+					TermSvc:         app.termSvc,
+					AgentSvc:        app.agentSvc,
+					PTYMgr:          app.ptyMgr,
+					AgentTmuxMgr:    app.agentTmuxMgr,
+					TermAuth:        app.termAuth,
+					CORSOrigins:     app.corsConfig.AllowedOrigins,
+					SelfURL:         fmt.Sprintf("http://localhost:%d", app.actualPort),
+					Store:           app.config.Store,
+					TabMetaStore:    app.tabMetaStore,
+					Hub:             app.hub,
+					ServerStartedAt: app.startedAt,
+				},
+			)...)
 	}
 
 	if app.issueTabStore != nil {
@@ -130,42 +135,41 @@ func (app *Server) buildInfraModules() {
 
 func (app *Server) buildStoreBackedInfraModules() {
 	app.connectorDispatcher = app.buildConnectorDispatcher()
-	unifiedDeps := modbuilder.UnifiedAgentModuleDeps{
+	unifiedDeps := app.unifiedAgentModuleDeps()
+	app.wsModules = append(app.wsModules, modbuilder.NewUnifiedAgentModules(unifiedDeps)...)
+	app.buildPRReviewModule()
+}
+
+func (app *Server) unifiedAgentModuleDeps() modbuilder.UnifiedAgentModuleDeps {
+	deps := modbuilder.UnifiedAgentModuleDeps{
 		Store: app.config.Store, AgentSvc: app.agentSvc, IssueSvc: app.issueSvc, Hub: app.hub,
 		FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
 		ExecutionIssueBackends: app.config.ExecutionIssueBackends,
 		DriverAPIToken:         app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,
+		DaytonaProvider:  app.config.DaytonaProvider,
 		LocalSettingsDir: app.config.LocalSettingsDir, Dispatcher: app.connectorDispatcher,
-		WorkflowCatalog: app.config.WorkflowCatalogAPI,
+		WorkflowCatalog:           app.config.WorkflowCatalogAPI,
+		WorkflowCatalogAuthoring:  app.config.WorkflowCatalogAuthoring,
+		WorkflowCatalogOperator:   app.config.WorkflowCatalogOperator,
+		WorkflowTargetPreparation: app.config.WorkflowTargetPreparation,
+		SourceControl:             app.config.SourceControl,
 	}
 	if transcripts, ok := app.sessSvc.(service.AgentSessionTranscriptService); ok {
-		unifiedDeps.AgentSessionTranscripts = transcripts
+		deps.AgentSessionTranscripts = transcripts
 	}
 	if capability := app.config.ArtifactsCapability; capability != nil {
-		unifiedDeps.Artifacts = capability.ArtifactsAPI()
+		deps.Artifacts = capability.ArtifactsAPI()
 	}
-	if capability := app.config.AutomationCapability; capability != nil {
-		unifiedDeps.AutomationBindings = capability.BindingOperations()
-		unifiedDeps.WorkflowBinding = capability.WorkflowBinding()
-		unifiedDeps.AutomationAudit = capability.AuditQueries()
-		unifiedDeps.AutomationWebhook = capability.WebhookWorkflow()
-		unifiedDeps.AutomationEventing = capability.WorkflowEventing()
-		unifiedDeps.AutomationOperator = capability.OperatorAuthorityResolver()
-	}
-	if capability := app.config.ExecutionCapability; capability != nil {
-		unifiedDeps.ExecutionTaskRuns = capability.TaskRunAPI()
-		unifiedDeps.ExecutionTaskRunRequests = capability.TaskRunRequestAPI()
-		unifiedDeps.ExecutionTaskRunRecovery = capability.TaskRunRecoveryAPI()
-		unifiedDeps.ExecutionTaskRunAuthorities = capability.TaskRunAuthorityResolver()
-		unifiedDeps.ExecutionWorkerProfiles = capability.WorkerProfileAPI()
-		unifiedDeps.ExecutionDriverRuns = capability.DriverRunAPI()
-		unifiedDeps.ExecutionDriverRunAuthorities = capability.DriverRunAuthorityResolver()
-		unifiedDeps.ExecutionSystemAuthorities = capability.SystemAuthorityResolver()
-		unifiedDeps.ExecutionOperator = capability.OperatorAuthorityResolver()
-	}
-	app.wsModules = append(app.wsModules, modbuilder.NewUnifiedAgentModules(unifiedDeps)...)
-	prReviewModule := modbuilder.NewPRReviewModule(
-		app.config.Store, app.connectorDispatcher, app.agentSvc, app.termSvc, app.config.LocalSettingsDir,
+	capabilitycomposition.PopulateUnifiedAgentCapabilityDeps(app.config, &deps)
+	return deps
+}
+
+func (app *Server) buildPRReviewModule() {
+	prReviewModule := capabilitycomposition.NewPRReviewModule(
+		app.config,
+		app.connectorDispatcher,
+		app.agentSvc,
+		app.termSvc,
 	)
 	app.prReviewCredentialSeeds = prReviewModule
 	app.wsModules = append(app.wsModules, prReviewModule)

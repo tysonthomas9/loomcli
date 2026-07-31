@@ -38,12 +38,8 @@ type TaskWorkflowRunReader interface {
 	ListTaskWorkflowRuns(context.Context, TaskWorkflowRunQuery) (TaskWorkflowRunResult, error)
 }
 
-type agentSessionListPort interface {
-	List(context.Context, string, store.AgentSessionFilter) ([]*domain.AgentSession, error)
-}
-
-type taskRunGetPort interface {
-	Get(context.Context, string, string) (*domain.TaskRun, error)
+type taskRunListPort interface {
+	List(context.Context, string, store.TaskRunFilter) ([]*domain.TaskRun, error)
 }
 
 type triggerEventListPort interface {
@@ -59,40 +55,37 @@ type driverRunGetPort interface {
 }
 
 type taskWorkflowRunReader struct {
-	agentSessions agentSessionListPort
-	taskRuns      taskRunGetPort
-	events        triggerEventListPort
-	deliveries    triggerDeliveryListPort
-	driverRuns    driverRunGetPort
+	taskRuns   taskRunListPort
+	events     triggerEventListPort
+	deliveries triggerDeliveryListPort
+	driverRuns driverRunGetPort
 }
 
 // NewTaskWorkflowRunReader constructs the projection from exact-purpose,
 // read-only persistence ports. Composition passes individual stores rather
 // than the process-wide composite Store.
 func NewTaskWorkflowRunReader(
-	agentSessions agentSessionListPort,
-	taskRuns taskRunGetPort,
+	taskRuns taskRunListPort,
 	events triggerEventListPort,
 	deliveries triggerDeliveryListPort,
 	driverRuns driverRunGetPort,
 ) TaskWorkflowRunReader {
-	if agentSessions == nil || taskRuns == nil || events == nil || deliveries == nil || driverRuns == nil {
+	if taskRuns == nil || events == nil || deliveries == nil || driverRuns == nil {
 		return nil
 	}
 	return &taskWorkflowRunReader{
-		agentSessions: agentSessions,
-		taskRuns:      taskRuns,
-		events:        events,
-		deliveries:    deliveries,
-		driverRuns:    driverRuns,
+		taskRuns:   taskRuns,
+		events:     events,
+		deliveries: deliveries,
+		driverRuns: driverRuns,
 	}
 }
 
 // ListTaskWorkflowRuns returns trigger-admitted DriverRuns for exactly one
-// issue that are not already represented by an AgentSession row for that
-// issue. A TaskRun alone is not enough: the existing session audit API is
-// AgentSession-backed, and a queued or stuck TaskRun may not have created its
-// session yet.
+// issue that are not already represented by an Execution-owned TaskRun for
+// that issue. TaskRun is the durable batch-attempt projection exposed by the
+// task session audit API; Interaction AgentSession rows are deliberately not
+// consulted here.
 //
 // The association is entirely structural and immutable:
 //
@@ -105,7 +98,7 @@ func (reader *taskWorkflowRunReader) ListTaskWorkflowRuns(
 ) (TaskWorkflowRunResult, error) {
 	workspace := strings.TrimSpace(query.WorkspaceKey)
 	taskID := strings.TrimSpace(query.TaskID)
-	if reader == nil || reader.agentSessions == nil || reader.taskRuns == nil ||
+	if reader == nil || reader.taskRuns == nil ||
 		reader.events == nil || reader.deliveries == nil || reader.driverRuns == nil {
 		return TaskWorkflowRunResult{}, ErrTaskWorkflowRunsUnavailable
 	}
@@ -198,34 +191,16 @@ func (reader *taskWorkflowRunReader) representedDriverRunIDs(
 	ctx context.Context,
 	workspace, taskID string,
 ) (map[string]struct{}, error) {
-	agentSessions, err := reader.agentSessions.List(ctx, workspace, store.AgentSessionFilter{TaskID: taskID})
+	taskRuns, err := reader.taskRuns.List(ctx, workspace, store.TaskRunFilter{TaskID: taskID})
 	if err != nil {
 		return nil, err
 	}
-	represented := make(map[string]struct{}, len(agentSessions))
-	legacyTaskRunIDs := make(map[string]struct{})
-	for _, session := range agentSessions {
-		if session == nil || session.WorkspaceKey != workspace || session.TaskID != taskID || session.Metadata == nil {
+	represented := make(map[string]struct{}, len(taskRuns))
+	for _, taskRun := range taskRuns {
+		if taskRun == nil || taskRun.WorkspaceKey != workspace || taskRun.TaskID != taskID {
 			continue
 		}
-		if driverRunID := strings.TrimSpace(session.Metadata["driver_run_id"]); driverRunID != "" {
-			represented[driverRunID] = struct{}{}
-			continue
-		}
-		if taskRunID := strings.TrimSpace(session.Metadata["task_run_id"]); taskRunID != "" {
-			legacyTaskRunIDs[taskRunID] = struct{}{}
-		}
-	}
-	for taskRunID := range legacyTaskRunIDs {
-		taskRun, getErr := reader.taskRuns.Get(ctx, workspace, taskRunID)
-		if getErr != nil {
-			if errors.Is(getErr, domain.ErrNotFound) {
-				continue
-			}
-			return nil, getErr
-		}
-		if taskRun == nil || taskRun.WorkspaceKey != workspace || taskRun.TaskID != taskID ||
-			taskRun.TaskRunID != taskRunID || strings.TrimSpace(taskRun.DriverRunID) == "" {
+		if strings.TrimSpace(taskRun.DriverRunID) == "" {
 			continue
 		}
 		represented[taskRun.DriverRunID] = struct{}{}

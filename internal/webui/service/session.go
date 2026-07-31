@@ -8,6 +8,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/sessionhistory"
 )
 
+// TranscriptEvents is the canonical transcript shape exposed by WebUI session
+// read ports. Keeping the transport-facing alias at the service boundary
+// prevents handlers from depending directly on transcript persistence.
+type TranscriptEvents = []transcript.Event
+
 // SessionService defines business logic for session audit trail operations.
 // Handlers call this interface and map returned errors to HTTP responses.
 type SessionService interface {
@@ -20,11 +25,11 @@ type SessionService interface {
 	// GetSessionTranscript returns the canonical backend-agnostic event stream
 	// for a session, parsed from the captured native JSONL transcript. Enforces
 	// task ownership.
-	GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error)
+	GetSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) (TranscriptEvents, error)
 
 	// GetSessionSubagentTranscript returns events for a single captured
 	// subagent transcript within a session. Enforces task ownership.
-	GetSessionSubagentTranscript(ctx context.Context, wsID, taskID, sessionID, subagentID string) ([]transcript.Event, error)
+	GetSessionSubagentTranscript(ctx context.Context, wsID, taskID, sessionID, subagentID string) (TranscriptEvents, error)
 
 	// ListSessionSubagents returns the IDs of subagents captured for a session,
 	// in the order PostToolUse recorded them (filename sort).
@@ -45,7 +50,7 @@ type SessionService interface {
 // so their transcript authorization is the {workspace, agent, session}
 // relationship recorded by AgentSession.
 type AgentSessionTranscriptService interface {
-	GetAgentSessionTranscript(ctx context.Context, wsID, agentID, sessionID string) ([]transcript.Event, error)
+	GetAgentSessionTranscript(ctx context.Context, wsID, agentID, sessionID string) (TranscriptEvents, error)
 }
 
 // SessionListItem extends a session record with computed UI fields.

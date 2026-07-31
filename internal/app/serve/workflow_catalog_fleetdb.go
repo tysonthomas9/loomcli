@@ -18,8 +18,9 @@ type workflowCatalogFleetDBTransport struct {
 }
 
 var _ catalogfleetdb.Transport = (*workflowCatalogFleetDBTransport)(nil)
+var _ catalogfleetdb.AuthoringTransport = (*workflowCatalogFleetDBTransport)(nil)
 
-func newWorkflowCatalogFleetDBTransport(client *infrafleetdb.Client) catalogfleetdb.Transport {
+func newWorkflowCatalogFleetDBTransport(client *infrafleetdb.Client) *workflowCatalogFleetDBTransport {
 	if client == nil {
 		return nil
 	}
@@ -66,6 +67,38 @@ func (t *workflowCatalogFleetDBTransport) ActivateVersion(ctx context.Context, w
 	return translateWorkflowCatalogFleetDBResult(result, err)
 }
 
+func (t *workflowCatalogFleetDBTransport) AuthorVersion(
+	ctx context.Context,
+	mutation workflowcatalog.AuthoringMutation,
+) (*catalogfleetdb.TransportAuthoringResult, error) {
+	input := infrafleetdb.WorkflowCatalogAuthorVersionInput{
+		WorkspaceKey: mutation.WorkspaceKey, DriverID: mutation.DriverID,
+		DelegatedActor: mutation.AuditActor,
+		RequestID:      mutation.RequestID, ExpectedRevision: mutation.ExpectedRevision,
+		DriverName: mutation.DriverName, VersionID: mutation.VersionID,
+		SourceRef: mutation.SourceRef, SourceDigest: mutation.SourceDigest,
+		BundleRef: mutation.BundleRef, BundleDigest: mutation.BundleDigest,
+		Runtime: mutation.Runtime, Manifest: cloneWorkflowCatalogBridgeMap(mutation.Manifest),
+		BuildDiagnostics: mutation.BuildDiagnostics,
+	}
+	var (
+		result *infrafleetdb.WorkflowCatalogAuthorVersionResult
+		err    error
+	)
+	if mutation.Managed {
+		result, err = t.transport.AuthorManagedDriverVersion(
+			ctx,
+			infrafleetdb.WorkflowCatalogAuthorManagedVersionInput{
+				WorkflowCatalogAuthorVersionInput: input,
+				Activate:                          mutation.Activate,
+			},
+		)
+	} else {
+		result, err = t.transport.AuthorDriverVersion(ctx, input)
+	}
+	return translateWorkflowCatalogFleetDBAuthoringResult(result, err)
+}
+
 func translateWorkflowCatalogFleetDBResult(result *infrafleetdb.WorkflowCatalogLifecycleResult, err error) (*catalogfleetdb.TransportLifecycleResult, error) {
 	if err != nil {
 		return nil, translateWorkflowCatalogFleetDBError(err)
@@ -79,6 +112,25 @@ func translateWorkflowCatalogFleetDBResult(result *infrafleetdb.WorkflowCatalogL
 		Replayed:          result.Replayed,
 		CommittedRevision: result.CommittedRevision,
 		SemanticImpact:    result.SemanticImpact,
+	}, nil
+}
+
+func translateWorkflowCatalogFleetDBAuthoringResult(
+	result *infrafleetdb.WorkflowCatalogAuthorVersionResult,
+	err error,
+) (*catalogfleetdb.TransportAuthoringResult, error) {
+	if err != nil {
+		return nil, translateWorkflowCatalogFleetDBError(err)
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return &catalogfleetdb.TransportAuthoringResult{
+		Driver: result.Driver, Version: result.Version,
+		CreatedDriver: result.CreatedDriver, CreatedVersion: result.CreatedVersion,
+		ReusedVersion: result.ReusedVersion, Activated: result.Activated,
+		Replayed: result.Replayed, CommittedRevision: result.CommittedRevision,
+		SemanticImpact: result.SemanticImpact,
 	}, nil
 }
 
@@ -98,10 +150,23 @@ func translateWorkflowCatalogFleetDBError(err error) error {
 		translated = catalogfleetdb.ErrTransportVersionNotValidated
 	case errors.Is(err, infrafleetdb.ErrWorkflowCatalogVersionNotApproved):
 		translated = catalogfleetdb.ErrTransportVersionNotApproved
+	case errors.Is(err, infrafleetdb.ErrWorkflowCatalogAuthoringConflict):
+		translated = catalogfleetdb.ErrTransportAuthoringConflict
 	case errors.Is(err, infrafleetdb.ErrWorkflowCatalogInvalid):
 		translated = catalogfleetdb.ErrTransportInvalid
 	default:
 		return err
 	}
 	return errors.Join(translated, err)
+}
+
+func cloneWorkflowCatalogBridgeMap(value map[string]string) map[string]string {
+	if value == nil {
+		return nil
+	}
+	out := make(map[string]string, len(value))
+	for key, item := range value {
+		out[key] = item
+	}
+	return out
 }

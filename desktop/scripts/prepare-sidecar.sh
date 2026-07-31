@@ -11,7 +11,7 @@ WEBUI_DIST_DIR="${WEBUI_FRONTEND_DIR}/dist"
 WEBUI_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/webui"
 LICENSE_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/licenses"
 RUNTIME_RESOURCE_DIR="${DESKTOP_DIR}/src-tauri/resources/runtime"
-PACKAGED_BUILTIN_ROOT="${REPO_ROOT}/internal/workflows/builtin-dist"
+PACKAGED_BUILTIN_ROOT="${REPO_ROOT}/internal/infra/workflowdistribution/builtin-dist"
 PACKAGED_BUILTIN_WORKFLOWS=(
   "prompt-agent"
   "epic-runner"

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -61,14 +62,17 @@ func classifyStoreError(op string, err error) error {
 		return nil
 	}
 	switch {
-	case errors.Is(err, domain.ErrNotFound):
+	case errors.Is(err, domain.ErrNotFound), errors.Is(err, agents.ErrNotFound):
 		return service.ErrNotFound(op + ": " + err.Error())
-	case errors.Is(err, domain.ErrAlreadyExists):
+	case errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, agents.ErrAlreadyExists):
 		return service.ErrConflict(op + ": " + err.Error())
-	case errors.Is(err, domain.ErrInvalid):
+	case errors.Is(err, domain.ErrInvalid), errors.Is(err, agents.ErrInvalid):
 		return service.ErrValidation(op + ": " + err.Error())
-	case errors.Is(err, domain.ErrConflict):
+	case errors.Is(err, domain.ErrConflict), errors.Is(err, agents.ErrConflict),
+		errors.Is(err, agents.ErrInvalidTransition):
 		return service.ErrConflict(op + ": " + err.Error())
+	case errors.Is(err, agents.ErrUnavailable):
+		return service.ErrUnavailable(op + ": " + err.Error())
 	default:
 		return service.ErrInternal(op, err)
 	}

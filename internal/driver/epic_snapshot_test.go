@@ -41,12 +41,11 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 		t.Fatalf("Create workspace: %v", err)
 	}
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey:    "WS",
-		DriverID:        "driver-1",
-		Name:            "driver-1",
-		OwnerType:       domain.DriverOwnerSystem,
-		ActiveVersionID: "version-1",
-		Status:          domain.DriverStatusActive,
+		WorkspaceKey: "WS",
+		DriverID:     "driver-1",
+		Name:         "driver-1",
+		OwnerType:    domain.DriverOwnerSystem,
+		Status:       domain.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("Create driver: %v", err)
 	}
@@ -61,6 +60,12 @@ func TestListActiveTaskRunsReturnsQueuedAndRunningOnly(t *testing.T) {
 		ValidationStatus: domain.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("Create driver version: %v", err)
+	}
+	if _, err := st.ApproveDriverVersionForTest(ctx, "WS", "driver-1", "version-1"); err != nil {
+		t.Fatalf("Approve driver version: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, "WS", "driver-1", "version-1"); err != nil {
+		t.Fatalf("Activate driver version: %v", err)
 	}
 	if _, err := st.DriverRuns().Create(ctx, store.DriverRunCreate{
 		WorkspaceKey:    "WS",

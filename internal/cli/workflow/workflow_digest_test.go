@@ -14,7 +14,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tysonthomas9/loomcli/internal/workflows"
+	workflows "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution"
 )
 
 func runDigestCommand(t *testing.T, args []string) string {
@@ -26,6 +26,15 @@ func runDigestCommand(t *testing.T, args []string) string {
 		t.Fatalf("runWorkflowDigest(%v): %v", args, err)
 	}
 	return strings.TrimSpace(out.String())
+}
+
+func mustWorkflowSourceDigest(t testing.TB, files map[string]string) string {
+	t.Helper()
+	digest, err := workflows.SourceDigest(files)
+	if err != nil {
+		t.Fatalf("SourceDigest: %v", err)
+	}
+	return digest
 }
 
 // TestWorkflowDigestMatchesEmbeddedSelfHealDigest is the golden parity test
@@ -42,7 +51,7 @@ func TestWorkflowDigestMatchesEmbeddedSelfHealDigest(t *testing.T) {
 		if !ok {
 			t.Fatalf("builtin %q missing", name)
 		}
-		want := workflows.SourceDigest(spec.Files)
+		want := mustWorkflowSourceDigest(t, spec.Files)
 		got := runDigestCommand(t, []string{name})
 		if got != want {
 			t.Fatalf("register-path digest for %q = %s, embedded self-heal digest = %s; recipes diverged", name, got, want)
@@ -92,7 +101,7 @@ func TestWorkflowDigestJSONOutput(t *testing.T) {
 		t.Fatalf("decode --json output %q: %v", raw, err)
 	}
 	spec, _ := workflows.BuiltinWorkflow(workflows.BuiltinEpicRunnerWorkflowName)
-	if payload.Workflow != workflows.BuiltinEpicRunnerWorkflowName || payload.SourceDigest != workflows.SourceDigest(spec.Files) {
+	if payload.Workflow != workflows.BuiltinEpicRunnerWorkflowName || payload.SourceDigest != mustWorkflowSourceDigest(t, spec.Files) {
 		t.Fatalf("unexpected --json payload: %+v", payload)
 	}
 }
@@ -136,7 +145,7 @@ func TestWorkflowDigestFileOverridesMatchEmbedded(t *testing.T) {
 	workflowDigestFiles = stageSpecFiles(t, spec)
 	t.Cleanup(func() { workflowDigestFiles = nil })
 	got := runDigestCommand(t, []string{workflows.BuiltinEpicRunnerWorkflowName})
-	if want := workflows.SourceDigest(spec.Files); got != want {
+	if want := mustWorkflowSourceDigest(t, spec.Files); got != want {
 		t.Fatalf("staged digest = %s, embedded = %s; identical bytes must produce identical digests", got, want)
 	}
 }
@@ -159,7 +168,7 @@ func TestWorkflowDigestFileOverridesAttestStagedBytes(t *testing.T) {
 	workflowDigestFiles = pairs
 	t.Cleanup(func() { workflowDigestFiles = nil })
 	got := runDigestCommand(t, []string{workflows.BuiltinEpicRunnerWorkflowName})
-	if want := workflows.SourceDigest(spec.Files); got == want {
+	if want := mustWorkflowSourceDigest(t, spec.Files); got == want {
 		t.Fatalf("staged digest equals embedded digest %s despite modified content; digest must attest staged bytes", want)
 	}
 }

@@ -194,8 +194,7 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	if ap.Session != nil {
 		sessionID = ap.Session.SessionID()
 	}
-	leaseID := ap.AgentLeaseID
-	leaseToken := ap.AgentLeaseToken
+	ipcAuthToken := ap.AgentIPCAuthToken
 	parentSessionID := ap.ParentSessionID
 	ownershipLeaseID := ap.OwnershipLeaseID
 	ownershipFencingToken := ap.OwnershipFencingToken
@@ -206,11 +205,8 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 			fmt.Sprintf("LOOM_WORKSPACE_RUNTIME_DIR=%s", cli.GetWorkspaceRuntimeDir()),
 		)
 	}
-	if leaseID != "" && leaseToken != "" {
-		env = append(env,
-			fmt.Sprintf("LOOM_AGENT_LEASE_ID=%s", leaseID),
-			fmt.Sprintf("LOOM_AGENT_LEASE_TOKEN=%s", leaseToken),
-		)
+	if ipcAuthToken != "" {
+		env = append(env, fmt.Sprintf("LOOM_AGENT_IPC_AUTH_TOKEN=%s", ipcAuthToken))
 	}
 	if parentSessionID != "" {
 		env = append(env, fmt.Sprintf("LOOM_ORCHESTRATOR_SESSION_ID=%s", parentSessionID))
@@ -230,10 +226,9 @@ func appendSessionEnv(env []string, ap *AgentProcess) []string {
 	return env
 }
 
-// spawnAgent starts the subprocess for an agent. The whole sequence
-// (buildCommand → cmd.Start → first control-plane heartbeat) is wrapped in a
-// daemon.supervisor.spawn span so failures classify cleanly as either a
-// build/start failure or a heartbeat failure.
+// spawnAgent starts the subprocess for an agent. The whole buildCommand →
+// cmd.Start sequence is wrapped in a daemon.supervisor.spawn span so
+// build/start failures classify cleanly.
 //
 //nolint:funlen // Linear orchestration: gate → build → start → record. Each step is short; extracting would fragment the lifecycle.
 func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
@@ -286,7 +281,6 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 	if evt, err := events.NewEvent(events.AgentStarted, worktree, role, epicID, events.AgentStartedData{PID: pid}); err == nil {
 		s.EmitEvent(evt)
 	}
-	s.markControlPlaneAgentSessionRunning(ap)
 
 	return nil
 }

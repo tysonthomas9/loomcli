@@ -245,6 +245,25 @@ type ArtifactContentReader interface {
 // an internal error.
 var ErrArtifactContentUnavailable = errors.New("artifact content temporarily unavailable")
 
+// ErrControlPlaneUnavailable identifies a retryable failure to reach or serve
+// the durable control plane. Infrastructure adapters wrap this sentinel while
+// preserving their concrete transport error so service layers can return 503
+// without importing a FleetDB implementation or exposing transport details.
+//
+// Deprecated: use domain.ErrUnavailable at capability and transport
+// boundaries. This alias preserves errors.Is compatibility for legacy Store
+// consumers without making upper layers import persistence contracts.
+var ErrControlPlaneUnavailable = domain.ErrUnavailable
+
+// ErrControlPlaneRateLimited is the narrower retryable admission failure.
+// Services preserve it as 429 so clients can apply bounded backoff rather than
+// presenting a durable transcript or session failure.
+//
+// Deprecated: use domain.ErrRateLimited at capability and transport
+// boundaries. This alias preserves errors.Is compatibility for legacy Store
+// consumers without making upper layers import persistence contracts.
+var ErrControlPlaneRateLimited = domain.ErrRateLimited
+
 type AgentLeaseCreate struct {
 	WorkspaceKey string
 	SessionID    string

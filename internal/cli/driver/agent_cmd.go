@@ -7,12 +7,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/epicrunner"
-	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/infra/interactionchat"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -204,39 +206,34 @@ func runDriverAgentOrchestrationSession(_ *cobra.Command, _ []string) error {
 	})
 }
 
-func runDriverUpdateAgentParent(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		ws, _, err := resolveRunningDriverRun(ctx, h, driverUpdateAgentParentWorkspaceKey, driverUpdateAgentParentDriverRunID, driverUpdateAgentParentNodeID, driverUpdateAgentParentLeaseID, driverUpdateAgentParentFence)
-		if err != nil {
-			return err
-		}
-		agentName := strings.TrimSpace(driverUpdateAgentParentName)
-		parentID := strings.TrimSpace(driverUpdateAgentParentParent)
-		if agentName == "" || parentID == "" {
-			return fmt.Errorf("agent and parent required: %w", domain.ErrInvalid)
-		}
-		unlock, err := epicrunner.AcquireBindLock(ws, agentName)
-		if err != nil {
-			return fmt.Errorf("acquire agent parent lock: %w", err)
-		}
-		defer unlock()
-		current, err := h.Store.Agents().Get(ctx, ws, agentName)
-		if err != nil {
-			return fmt.Errorf("get agent: %w", err)
-		}
-		if current.Parent != strings.TrimSpace(driverUpdateAgentParentExpectParent) {
-			return fmt.Errorf("agent %q parent changed from %q to %q: %w", agentName, strings.TrimSpace(driverUpdateAgentParentExpectParent), current.Parent, domain.ErrConflict)
-		}
-		updated, err := h.Store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{Parent: &parentID})
-		if err != nil {
-			return fmt.Errorf("update agent parent: %w", err)
-		}
-		if driverUpdateAgentParentJSON {
-			return cmdstore.WriteJSON(updated)
-		}
-		fmt.Printf("Updated agent %s parent to %s\n", agentName, parentID)
-		return nil
+func runDriverUpdateAgentParent(cmd *cobra.Command, _ []string) error {
+	agentName := strings.TrimSpace(driverUpdateAgentParentName)
+	parentID := strings.TrimSpace(driverUpdateAgentParentParent)
+	if agentName == "" || parentID == "" {
+		return fmt.Errorf("agent and parent required: %w", domain.ErrInvalid)
+	}
+	client, err := newDriverRuntimeClient(driverRuntimeClientOptions{
+		WorkspaceKey: driverUpdateAgentParentWorkspaceKey,
+		DriverRunID:  driverUpdateAgentParentDriverRunID,
+		NodeID:       driverUpdateAgentParentNodeID,
+		LeaseID:      driverUpdateAgentParentLeaseID,
+		FencingToken: driverUpdateAgentParentFence,
 	})
+	if err != nil {
+		return err
+	}
+	var updated domain.Agent
+	if err := client.call(cmd.Context(), "update-agent-parent", map[string]string{
+		"agent": agentName, "parent": parentID,
+		"expectParent": strings.TrimSpace(driverUpdateAgentParentExpectParent),
+	}, &updated); err != nil {
+		return err
+	}
+	if driverUpdateAgentParentJSON {
+		return cmdstore.WriteJSON(&updated)
+	}
+	fmt.Printf("Updated agent %s parent to %s\n", agentName, parentID)
+	return nil
 }
 
 func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
@@ -249,11 +246,19 @@ func runDriverDeliverLeadAssignment(_ *cobra.Command, _ []string) error {
 		if leadName == "" {
 			return fmt.Errorf("agent required: %w", domain.ErrInvalid)
 		}
-		delivery, err := leadcontrol.DeliverCurrentAssignment(ctx, h.Store, ws, leadName)
+		chat, err := buildDriverInteractionChat(h, ws)
+		if err != nil {
+			return err
+		}
+		result, err := driverpkg.DeliverLeadAssignmentForDriver(
+			ctx,
+			chat,
+			ws,
+			leadName,
+		)
 		if err != nil {
 			return fmt.Errorf("deliver lead assignment: %w", err)
 		}
-		result := newLeadDeliveryResult(leadName, delivery)
 		if driverDeliverLeadJSON {
 			return cmdstore.WriteJSON(result)
 		}
@@ -277,7 +282,13 @@ func runDriverDeliverAgentMessage(_ *cobra.Command, _ []string) error {
 		if agentName == "" || message == "" {
 			return fmt.Errorf("agent and message required: %w", domain.ErrInvalid)
 		}
-		result, err := deliverAgentMessageForDriver(ctx, h.Store, ws, parent.RunID, agentName, message)
+		chat, err := buildDriverInteractionChat(h, ws)
+		if err != nil {
+			return err
+		}
+		result, err := deliverAgentMessageForDriver(
+			ctx, chat, ws, parent.RunID, agentName, message,
+		)
 		if err != nil {
 			return fmt.Errorf("deliver agent message: %w", err)
 		}
@@ -295,10 +306,64 @@ func runDriverDeliverAgentMessage(_ *cobra.Command, _ []string) error {
 
 type agentMessageDeliveryResult = driverpkg.AgentMessageDeliveryResult
 
-func deliverAgentMessageForDriver(ctx context.Context, st store.Store, workspace, driverRunID, agentName, message string) (agentMessageDeliveryResult, error) {
-	return driverpkg.DeliverAgentMessageForDriver(ctx, st, workspace, driverRunID, agentName, message)
+func deliverAgentMessageForDriver(
+	ctx context.Context,
+	chat interaction.ChatMessenger,
+	workspace, driverRunID, agentName, message string,
+) (agentMessageDeliveryResult, error) {
+	return driverpkg.DeliverAgentMessageForDriver(
+		ctx, chat, workspace, driverRunID, agentName, message,
+	)
 }
 
-func newLeadDeliveryResult(agentName string, delivery *leadcontrol.DeliveryResult) agentMessageDeliveryResult {
-	return driverpkg.NewAgentMessageDeliveryResult(agentName, delivery)
+//nolint:funlen // The adapter deliberately maps the complete driver chat contract and its fail-closed capability checks in one constructor.
+func buildDriverInteractionChat(
+	handle *bootstrap.StoreHandle,
+	workspace string,
+) (interaction.ChatMessenger, error) {
+	if handle == nil || handle.FleetDBClient() == nil {
+		return nil, fmt.Errorf("compose Interaction chat: FleetDB client is unavailable")
+	}
+	capability, err := appserve.NewInteractionCapabilityWithFleetDB(
+		appserve.InteractionConfig{WorkspaceKey: strings.TrimSpace(workspace)},
+		handle.FleetDBClient(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("compose Interaction chat: %w", err)
+	}
+	if capability == nil || capability.InboxEnqueuer() == nil {
+		return nil, fmt.Errorf(
+			"compose Interaction chat: inbox command port is unavailable",
+		)
+	}
+	agentsCapability, err := appserve.NewAgentsCapability(
+		appserve.AgentsConfig{
+			FleetDBClient: handle.FleetDBClient(),
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("compose Interaction chat Agents queries: %w", err)
+	}
+	if agentsCapability == nil || agentsCapability.AgentsAPI() == nil {
+		return nil, fmt.Errorf(
+			"compose Interaction chat: Agents queries are unavailable",
+		)
+	}
+	runtime, err := interactionchat.New(
+		backends.LegacyInteractionChatDependencies(handle.Store),
+		capability.InboxEnqueuer(),
+		agentsCapability.AgentsAPI(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := appserve.ComposeInteractionChat(capability, runtime); err != nil {
+		return nil, err
+	}
+	if capability.ChatMessenger() == nil {
+		return nil, fmt.Errorf(
+			"compose Interaction chat: messenger is unavailable",
+		)
+	}
+	return capability.ChatMessenger(), nil
 }

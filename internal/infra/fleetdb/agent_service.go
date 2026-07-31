@@ -153,6 +153,15 @@ func (s *agentServiceStore) Update(ctx context.Context, ws, serviceID string, pa
 }
 
 func (s *agentServiceStore) Delete(ctx context.Context, ws, serviceID string) error {
-	path := "/api/v1/" + pathEscape(ws) + "/agent-services/" + pathEscape(serviceID)
-	return s.client.do(ctx, "DELETE", path, nil, nil)
+	current, err := s.Get(ctx, ws, serviceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.client.agentManagement.ArchiveAgentService(ctx, AgentServiceArchiveInput{
+		WorkspaceKey:      ws,
+		ServiceID:         serviceID,
+		ExpectedUpdatedAt: current.UpdatedAt,
+		DelegatedActor:    s.client.delegatedActor(),
+	})
+	return err
 }

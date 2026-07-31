@@ -52,14 +52,14 @@ fi
 # Flue pin enforcement. The image bakes ../flue (rsync'd to flue-src below) AND the
 # prebuilt epic-runner bundle, which the runner resolves @flue/runtime against at
 # runtime — so the two MUST agree. The bundle is reproducible only from the flue
-# commit recorded in internal/workflows/builtin-dist/FLUE_COMMIT (enforced by
+# commit recorded in internal/infra/workflowdistribution/FLUE_COMMIT (enforced by
 # scripts/rebuild-builtin-bundle.sh). rebuild-builtin-bundle.sh guarded its own path;
 # this guards the image build. Without it, a `git pull` in ../flue silently bakes a
 # drifted flue whose renamed APIs break the bundled runner at runtime (this is exactly
 # how configureProvider->registerProvider and ctx.init->initializeRootHarness slipped
 # through on 2026-06-25). To advance intentionally: run scripts/rebuild-builtin-bundle.sh,
 # commit the new bundle + bumped FLUE_COMMIT, then build with ALLOW_FLUE_PIN_DRIFT=1.
-FLUE_PIN_FILE="$LOOMCLI_REPO/internal/workflows/builtin-dist/FLUE_COMMIT"
+FLUE_PIN_FILE="$LOOMCLI_REPO/internal/infra/workflowdistribution/FLUE_COMMIT"
 if [[ -f "$FLUE_PIN_FILE" && "${ALLOW_FLUE_PIN_DRIFT:-}" != "1" ]]; then
   FLUE_PINNED="$(tr -d '[:space:]' < "$FLUE_PIN_FILE")"
   FLUE_HEAD="$(git -C "$FLUE_REPO" rev-parse HEAD 2>/dev/null || true)"

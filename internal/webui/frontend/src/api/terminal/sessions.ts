@@ -86,11 +86,19 @@ export async function getSessionTranscript(
   sessionId: string,
   options: TranscriptFetchOptions = {},
 ): Promise<TranscriptEntry[]> {
+  const pathTaskId = requiredPathID(taskId, "taskId");
+  const pathSessionId = requiredPathID(sessionId, "sessionId");
   try {
     const { data, error, response } = await api.GET(
       "/api/workspaces/{ws}/tasks/{taskId}/sessions/{sessionId}/transcript",
       {
-        params: { path: { ws: workspaceId, taskId, sessionId } },
+        params: {
+          path: {
+            ws: workspaceId,
+            taskId: pathTaskId,
+            sessionId: pathSessionId,
+          },
+        },
       },
     );
     if (error) throw apiErrorFromResponse(error, response);
@@ -120,11 +128,13 @@ export async function getAgentSessionTranscript(
   sessionId: string,
   options: TranscriptFetchOptions = {},
 ): Promise<TranscriptEntry[]> {
+  const pathAgentId = requiredPathID(agentId, "agentId");
+  const pathSessionId = requiredPathID(sessionId, "sessionId");
   try {
     const response = await get<TranscriptResponse>(
       wsUrl(
         workspaceId,
-        `/agents/${encodeURIComponent(agentId)}/sessions/${encodeURIComponent(sessionId)}/transcript`,
+        `/agents/${encodeURIComponent(pathAgentId)}/sessions/${encodeURIComponent(pathSessionId)}/transcript`,
       ),
     );
     return response.data?.entries ?? [];
@@ -138,6 +148,14 @@ export async function getAgentSessionTranscript(
     }
     throw err;
   }
+}
+
+function requiredPathID(value: string, name: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`${name} is required to fetch a session transcript`);
+  }
+  return normalized;
 }
 
 /**

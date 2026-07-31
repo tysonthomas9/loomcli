@@ -8,9 +8,9 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
 type pullRequestsData struct {
@@ -24,7 +24,11 @@ const (
 )
 
 func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
-	ws := r.PathValue("ws")
+	ws := canonicalWorkspaceFromRequest(r)
+	if ws == "" {
+		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "canonical workspace is required", false)
+		return
+	}
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
 	if state == "" {
 		state = "all"
@@ -47,13 +51,13 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := storeadapter.BuildWorkspaceDataForKey(r.Context(), m.store, ws)
-	if err != nil || data == nil || len(data.Repos) == 0 {
+	repos, err := m.workspaceRepos(r.Context(), ws)
+	if err != nil || len(repos) == 0 {
 		m.ghListFallback(w, r.Context(), ws, state)
 		return
 	}
 
-	prs, warnings, attempted, failed := m.connectorListPullRequests(r, ws, state, data.Repos)
+	prs, warnings, attempted, failed := m.connectorListPullRequests(r, ws, state, repos)
 
 	// Fall back to gh when the connector learned nothing: either no repo was
 	// parseable or every repo errored.
@@ -76,7 +80,7 @@ func (m *Module) listPullRequests(w http.ResponseWriter, r *http.Request) {
 // repo, accumulating per-repo warnings instead of failing the whole list.
 // attempted/failed let the caller distinguish "no repo was eligible" from
 // "the connector tried and failed everywhere".
-func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []ops.WorkspaceRepo) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
+func (m *Module) connectorListPullRequests(r *http.Request, ws, state string, repos []*domain.Repo) (prs []ops.GitPullRequest, warnings []string, attempted, failed int) {
 	prs = []ops.GitPullRequest{}
 	for _, workspaceRepo := range repos {
 		owner, repo, ok := parseGitHubOwnerRepo(workspaceRepo.RemoteURL)

@@ -15,8 +15,9 @@ package fleetdb
 //     template statically would need real data-flow analysis, which is
 //     disproportionate for ~130 routes that change rarely.
 //  2. The table cannot silently rot: TestFleetDBClientCallSiteCount counts
-//     the package's service-client and direct Client do/doWithHeaders/
-//     doWithHeadersStatus/doRaw/doBytes call sites and
+//     the root package plus capability child packages for service-client and
+//     direct Client do/doWithHeaders/doWithHeadersStatus/doRaw/doBytes call
+//     sites and extracted Requester Do/DoWithHeaders call sites, and
 //     fails when the count drifts from expectedClientCallSites, forcing the
 //     editor of the client to revisit the table.
 //  3. The spec snapshot (testdata/fleetdb-openapi.yaml) cannot silently rot:
@@ -52,10 +53,10 @@ const (
 
 // expectedClientCallSites pins the number of service-client and direct Client
 // do/doWithHeaders/doWithHeadersStatus/doRaw/doBytes call sites in this
-// package's non-test sources.
+// package tree's non-test sources.
 // When you add/remove/move a client call, update clientRoutes below FIRST, then
 // bump this constant.
-const expectedClientCallSites = 206
+const expectedClientCallSites = 250
 
 // clientRoute is one method+path template the client issues. Path params are
 // written as {} (already normalized).
@@ -84,12 +85,27 @@ var clientRoutes = []clientRoute{
 	{"PATCH", "/api/v1/{}/repos/{}"},
 	{"DELETE", "/api/v1/{}/repos/{}"},
 
+	// repository_admission.go — durable, incarnation-fenced Workspace/Repo
+	// admission and exact-owner recovery.
+	{"POST", "/api/v1/admin/workspace-repository-admissions"},
+	{"POST", "/api/v1/{}/repository-admissions"},
+	{"GET", "/api/v1/{}/repository-admissions/recoverable"},
+	{"GET", "/api/v1/{}/repository-admissions/operations/{}"},
+	{"GET", "/api/v1/{}/repository-admissions/{}"},
+	{"POST", "/api/v1/{}/repository-admissions/{}/renew"},
+	{"POST", "/api/v1/{}/repository-admissions/{}/claim-recovery"},
+	{"POST", "/api/v1/{}/repository-admissions/{}/commit"},
+	{"POST", "/api/v1/{}/repository-admissions/{}/fail"},
+	{"POST", "/api/v1/{}/repository-admissions/{}/abort"},
+
 	// role.go
 	{"POST", "/api/v1/{}/roles"},
 	{"GET", "/api/v1/{}/roles/{}"},
 	{"GET", "/api/v1/{}/roles"},
 	{"PATCH", "/api/v1/{}/roles/{}"},
 	{"DELETE", "/api/v1/{}/roles/{}"},
+	{"PATCH", "/api/v1/{}/roles/{}/definition"},
+	{"POST", "/api/v1/{}/roles/{}/delete"},
 
 	// agent.go
 	{"POST", "/api/v1/{}/agents"},
@@ -114,7 +130,16 @@ var clientRoutes = []clientRoute{
 	{"GET", "/api/v1/{}/agent-services/{}"},
 	{"GET", "/api/v1/{}/agent-services"},
 	{"PATCH", "/api/v1/{}/agent-services/{}"},
-	{"DELETE", "/api/v1/{}/agent-services/{}"},
+	{"POST", "/api/v1/{}/agent-services/{}/archive"},
+	{"POST", "/api/v1/{}/agent-services/{}/desired-state"},
+	{"POST", "/api/v1/{}/agent-services/{}/desired-state/owned"},
+	{"POST", "/api/v1/{}/agent-services/{}/lifecycle"},
+
+	// agent_provisioning.go
+	{"POST", "/api/v1/{}/agent-provisioning"},
+	{"GET", "/api/v1/{}/agent-provisioning/{}"},
+	{"GET", "/api/v1/{}/agent-provisioning/pending"},
+	{"POST", "/api/v1/{}/agent-provisioning/{}/progress"},
 
 	// connector.go
 	{"POST", "/api/v1/{}/connectors"},
@@ -165,6 +190,28 @@ var clientRoutes = []clientRoute{
 	{"GET", "/api/v1/{}/agent-leases"},
 	{"POST", "/api/v1/{}/agent-leases/{}/heartbeat"},
 	{"POST", "/api/v1/{}/agent-leases/{}/release"},
+	// interaction.go — raw session credential validation.
+	{"POST", "/api/v1/{}/agent-session-authority/validate"},
+	// interaction_commands.go — atomic Interaction lifecycle, terminal,
+	// inbox, recovery, and combined activity operations.
+	{"POST", "/api/v1/{}/interaction/sessions"},
+	{"GET", "/api/v1/{}/interaction/sessions/{}"},
+	{"PATCH", "/api/v1/{}/interaction/sessions/{}"},
+	{"GET", "/api/v1/{}/interaction/sessions/recoverable"},
+	{"POST", "/api/v1/{}/interaction/sessions/{}/recover-start"},
+	{"POST", "/api/v1/{}/interaction/sessions/{}/heartbeat"},
+	{"POST", "/api/v1/{}/interaction/sessions/{}/finish"},
+	{"POST", "/api/v1/{}/interaction/sessions/{}/force-interrupt"},
+	{"POST", "/api/v1/{}/interaction/sessions/{}/interrupt-if-lease-missing"},
+	{"POST", "/api/v1/{}/interaction/terminals"},
+	{"GET", "/api/v1/{}/interaction/terminals/{}"},
+	{"PATCH", "/api/v1/{}/interaction/terminals/{}"},
+	{"POST", "/api/v1/{}/interaction/inbox"},
+	{"POST", "/api/v1/{}/interaction/inbox/claim-next"},
+	{"POST", "/api/v1/{}/interaction/inbox/{}/complete"},
+	{"GET", "/api/v1/{}/interaction/activity"},
+	{"GET", "/api/v1/{}/interaction/activity/sessions"},
+	{"GET", "/api/v1/{}/interaction/activity/execution"},
 	{"POST", "/api/v1/{}/agent-ownership-leases/{}/acquire"},
 	{"GET", "/api/v1/{}/agent-ownership-leases/{}"},
 	{"GET", "/api/v1/{}/agent-ownership-leases"},
@@ -199,6 +246,8 @@ var clientRoutes = []clientRoute{
 	{"POST", "/api/v1/{}/drivers/{}/versions/{}/approve"},
 	{"POST", "/api/v1/{}/drivers/{}/versions/{}/unapprove"},
 	{"POST", "/api/v1/{}/drivers/{}/versions/{}/activate"},
+	{"POST", "/api/v1/{}/drivers/{}/versions/author"},
+	{"POST", "/api/v1/{}/drivers/{}/versions/author-managed"},
 
 	// driver_run_outcome.go — durable terminal-outcome reconciliation.
 	{"POST", "/api/v1/{}/driver-run-outcomes/claim"},
@@ -404,30 +453,44 @@ func TestFleetDBSpecSnapshotFresh(t *testing.T) {
 }
 
 // TestFleetDBClientCallSiteCount is the tripwire that keeps clientRoutes
-// honest: it counts both service-client calls (s.client.do) and direct Client
-// receiver calls (c.do) in this package's non-test sources. client.go is
-// excluded from the direct-receiver expression because Client.do delegates to
-// Client.doWithHeaders there; that internal transport hop is not an API route.
+// honest: it counts root-package service-client calls (s.client.do), direct
+// Client receiver calls (c.do), and extracted capability Requester calls
+// (s.client.Do) in this package tree's non-test sources. client.go is excluded
+// because Client.do delegates to Client.doWithHeaders and capabilityRequester
+// delegates back into Client; those internal transport hops are not API routes.
 // A count drift therefore forces the route table to be revisited.
 func TestFleetDBClientCallSiteCount(t *testing.T) {
-	files, err := filepath.Glob("*.go")
+	files := make([]string, 0, expectedClientCallSites)
+	err := filepath.WalkDir(".", func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" ||
+			strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("glob package sources: %v", err)
+		t.Fatalf("walk package sources: %v", err)
 	}
-	serviceCallRe := regexp.MustCompile(`\.client\.(do|doWithHeaders|doWithHeadersStatus|doRaw|doBytes)\(ctx`)
-	directClientCallRe := regexp.MustCompile(`\bc\.(do|doWithHeaders|doWithHeadersStatus|doRaw|doBytes)\(ctx`)
+	// Accept gofmt's single-line and multiline call forms. Requiring `(ctx`
+	// here silently omitted every call whose context argument started on the
+	// next line, including the repository-admission transport.
+	serviceCallRe := regexp.MustCompile(`(?s)\.client\.(do|doWithHeaders|doWithHeadersStatus|doRaw|doBytes)\(\s*ctx`)
+	directClientCallRe := regexp.MustCompile(`(?s)\bc\.(do|doWithHeaders|doWithHeadersStatus|doRaw|doBytes)\(\s*ctx`)
+	capabilityCallRe := regexp.MustCompile(`(?s)\.client\.(Do|DoWithHeaders)\(\s*ctx`)
 	total := 0
 	perFile := make([]string, 0, len(files))
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
 		src, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		n := len(serviceCallRe.FindAll(src, -1))
-		if f != "client.go" {
+		n := len(capabilityCallRe.FindAll(src, -1))
+		if filepath.Clean(f) != "client.go" {
+			n += len(serviceCallRe.FindAll(src, -1))
 			n += len(directClientCallRe.FindAll(src, -1))
 		}
 		if n > 0 {

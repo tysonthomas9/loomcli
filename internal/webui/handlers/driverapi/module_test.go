@@ -14,12 +14,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
+	"github.com/tysonthomas9/loomcli/internal/infra/agentscompatstore"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -162,7 +165,7 @@ func (f *fakeIssueBackend) SetIssueRepository(_ context.Context, id, repo string
 
 type testHarness struct {
 	server      *httptest.Server
-	store       store.Store
+	store       *memstore.Store
 	module      *Module
 	backend     *fakeIssueBackend
 	runID       string
@@ -651,6 +654,27 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 	if err != nil {
 		t.Fatalf("new test Execution capability: %v", err)
 	}
+	agentsIssuer := authority.NewIssuer()
+	agentsAdmission, err := agentsIssuer.NewAdmission(agents.OperationRules()...)
+	if err != nil {
+		t.Fatalf("new test Agents admission: %v", err)
+	}
+	compatibilityPersistence, err := agentscompatstore.New(
+		st.Roles(),
+		st.AgentServices(),
+		st.Agents(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compatibility, err := agentscompat.NewAPI(compatibilityPersistence, agentsAdmission)
+	if err != nil {
+		t.Fatalf("new test Agents compatibility API: %v", err)
+	}
+	parentBindings, err := agentscompat.NewParentBindingCommands(compatibility, agentsIssuer)
+	if err != nil {
+		t.Fatalf("new test Agents parent binding workflow: %v", err)
+	}
 	module := NewModule(Config{
 		Store:                st,
 		APIToken:             apiToken,
@@ -658,6 +682,7 @@ func newTestHarness(t *testing.T, apiToken string) *testHarness {
 		WorkflowEventing:     eventWorkflow,
 		Execution:            testDriverRunExecution{DriverRunAPI: executionCapability.DriverRunAPI(), store: st, issues: fake},
 		ExecutionAuthorities: executionCapability.DriverRunAuthorityResolver(),
+		AgentParentBindings:  parentBindings,
 		TaskRunRequests:      executionCapability.TaskRunRequestAPI(),
 		TaskRunRecovery:      executionCapability.TaskRunRecoveryAPI(),
 		TaskRuns:             executionCapability.TaskRunAPI(),
@@ -754,6 +779,57 @@ func TestVerifyRunOpProvesOwnerThroughExecution(t *testing.T) {
 	resp, decoded = h.do(t, opRequest{op: "verify-run", headers: wrongOwner})
 	if resp.StatusCode != http.StatusForbidden || errorCode(t, decoded) != "not_owner" {
 		t.Fatalf("wrong-owner status/body = %d/%v, want 403 not_owner", resp.StatusCode, decoded)
+	}
+}
+
+func TestUpdateAgentParentUsesVerifiedDriverRunGeneration(t *testing.T) {
+	h := newTestHarness(t, "")
+	for _, name := range []string{"child", "wrong-generation-child"} {
+		if _, err := h.store.Agents().Create(t.Context(), store.AgentCreate{
+			WorkspaceKey: "WS",
+			Name:         name,
+			RoleName:     "task",
+		}); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+	}
+
+	response, decoded := h.do(t, opRequest{
+		op: "update-agent-parent",
+		body: map[string]string{
+			"agent": "child", "parent": h.runID, "expectParent": "",
+		},
+		headers: h.ownerHeaders(),
+	})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("update parent status/body = %d/%v, want 200", response.StatusCode, decoded)
+	}
+	child, err := h.store.Agents().Get(t.Context(), "WS", "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Parent != h.runID {
+		t.Fatalf("child parent = %q, want %q", child.Parent, h.runID)
+	}
+
+	staleHeaders := h.ownerHeaders()
+	staleHeaders[HeaderDriverFencingToken] = fmt.Sprint(h.fence + 1)
+	response, decoded = h.do(t, opRequest{
+		op: "update-agent-parent",
+		body: map[string]string{
+			"agent": "wrong-generation-child", "parent": h.runID, "expectParent": "",
+		},
+		headers: staleHeaders,
+	})
+	if response.StatusCode != http.StatusForbidden || errorCode(t, decoded) != "not_owner" {
+		t.Fatalf("stale generation status/body = %d/%v, want 403 not_owner", response.StatusCode, decoded)
+	}
+	unchanged, err := h.store.Agents().Get(t.Context(), "WS", "wrong-generation-child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Parent != "" {
+		t.Fatalf("stale generation changed parent to %q", unchanged.Parent)
 	}
 }
 

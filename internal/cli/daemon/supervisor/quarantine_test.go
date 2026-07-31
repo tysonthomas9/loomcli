@@ -121,7 +121,7 @@ func TestRecordTaskExit_IncrementsOnEligibleKillWithTask(t *testing.T) {
 	s := newQuarantineSupervisor(nil)
 	ap := newKilledAgent(t, "falcon", "T-1", timeoutOutcome())
 	ap.StopReason = StopReasonWatchdog
-	ap.AgentSessionID = "fleet-sess-1"
+	ap.AgentSessionID = "local-sess-1"
 
 	s.recordTaskExitForQuarantine(ap, 137)
 
@@ -139,8 +139,8 @@ func TestRecordTaskExit_IncrementsOnEligibleKillWithTask(t *testing.T) {
 	if ev.Agent != "falcon" || ev.StopReason != "watchdog" || ev.ErrClass != "Timeout" || ev.ExitCode != 137 {
 		t.Errorf("killEvent = %+v, want falcon/watchdog/Timeout/137", ev)
 	}
-	if ev.FleetSessionID != "fleet-sess-1" {
-		t.Errorf("FleetSessionID = %q, want fleet-sess-1 (captured before finalize clears it)", ev.FleetSessionID)
+	if ev.LocalSessionID != "local-sess-1" {
+		t.Errorf("LocalSessionID = %q, want local-sess-1 (captured before finalize clears it)", ev.LocalSessionID)
 	}
 	if ev.ClaudeSessionID != "claude-T-1" || ev.RunID != "run-T-1" {
 		t.Errorf("lock identifiers = %q/%q, want claude-T-1/run-T-1", ev.ClaudeSessionID, ev.RunID)
@@ -591,7 +591,7 @@ func TestSweep_PostsKillTimelineComment(t *testing.T) {
 	s := newQuarantineSupervisor(mock)
 	ap := newKilledAgent(t, "falcon", "T-23", timeoutOutcome())
 	ap.StopReason = StopReasonWatchdog
-	ap.AgentSessionID = "fleet-sess-9"
+	ap.AgentSessionID = "local-sess-9"
 
 	killNTimes(s, ap, 3)
 	s.sweepQuarantineDue(ap)
@@ -614,7 +614,7 @@ func TestSweep_PostsKillTimelineComment(t *testing.T) {
 	for _, want := range []string{
 		"Task quarantined by loom daemon",
 		"| 1 |", "| 3 |", // timeline rows
-		"watchdog", "Timeout", "fleet-se", "claude-T",
+		"watchdog", "Timeout", "local-se", "claude-T",
 		"loom data update T-23 --status open",
 		quarantineLabel,
 	} {
@@ -839,7 +839,7 @@ func TestSweep_ConcurrentSweepsWriteOnce(t *testing.T) {
 
 func TestFormatKillTimeline_RendersASCIIMarkdownTable(t *testing.T) {
 	kills := []killEvent{
-		{At: time.Date(2026, 6, 5, 14, 2, 11, 0, time.UTC), Agent: "web-extractor-a", StopReason: "watchdog", ErrClass: "Timeout", ExitCode: 137, FleetSessionID: "sess-abc123def", ClaudeSessionID: "9f3e4a5b-1111"},
+		{At: time.Date(2026, 6, 5, 14, 2, 11, 0, time.UTC), Agent: "web-extractor-a", StopReason: "watchdog", ErrClass: "Timeout", ExitCode: 137, LocalSessionID: "sess-abc123def", ClaudeSessionID: "9f3e4a5b-1111"},
 		{At: time.Date(2026, 6, 5, 14, 40, 0, 0, time.UTC), Agent: "web-extractor-b", StopReason: "", ErrClass: "Unknown", ExitCode: -1},
 	}
 	text := formatKillTimeline("WEB-49", 3, 2, kills)

@@ -22,8 +22,10 @@
 package terminal
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
@@ -34,6 +36,7 @@ import (
 
 	"github.com/creack/pty"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
@@ -55,6 +58,11 @@ const (
 	defaultGracePeriod = 0
 	defaultIdleTimeout = 0
 	defaultReaperTick  = 60 * time.Second
+	beforeKillTimeout  = 5 * time.Second
+
+	beforeKillRetryAttempts = 6
+	beforeKillRetryBase     = 100 * time.Millisecond
+	beforeKillRetryMax      = time.Second
 )
 
 // termEnv is the TERM environment value injected for every PTY-backed
@@ -64,8 +72,9 @@ const termEnv = "TERM=xterm-256color"
 const workspaceEnvPrefix = "LOOM_WORKSPACE="
 
 func terminalSpawnEnv(base []string) []string {
-	env := make([]string, 0, len(base)+1)
-	for _, entry := range base {
+	filtered := interaction.FilterChildBaseEnv(base)
+	env := make([]string, 0, len(filtered)+1)
+	for _, entry := range filtered {
 		switch {
 		case strings.HasPrefix(entry, "COLUMNS="),
 			strings.HasPrefix(entry, "LINES="),
@@ -98,6 +107,9 @@ func overlayTerminalEnv(base []string, extra map[string]string) []string {
 	}
 	blocked := make(map[string]struct{}, len(extra))
 	for key := range extra {
+		if !interaction.ChildLaunchEnvAllowed(key) {
+			continue
+		}
 		blocked[key] = struct{}{}
 	}
 	env := make([]string, 0, len(base)+len(extra))
@@ -112,6 +124,9 @@ func overlayTerminalEnv(base []string, extra map[string]string) []string {
 	}
 	keys := make([]string, 0, len(extra))
 	for key := range extra {
+		if !interaction.ChildLaunchEnvAllowed(key) {
+			continue
+		}
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
@@ -128,6 +143,11 @@ type SessionKey struct {
 	Name      string
 }
 
+// BeforeKillFunc converges durable lifecycle state before manager ownership of
+// a live PTY ends. Natural child exit is different: local process state is
+// removed immediately and durable convergence is retried asynchronously.
+type BeforeKillFunc func(context.Context, SessionKey, string) error
+
 // String returns a debug-friendly identifier.
 func (k SessionKey) String() string {
 	if k.Workspace == "" {
@@ -141,6 +161,10 @@ type PTYManager struct {
 	mu       sync.Mutex
 	sessions map[SessionKey]*ptySession
 	ended    map[SessionKey]string
+	// converged records ended tombstones whose durable Interaction lifecycle
+	// hook completed. Natural exits create an ended tombstone first and only
+	// mark it converged after the synchronous attempt or a retry succeeds.
+	converged map[SessionKey]bool
 
 	shell string   // absolute path to the login shell (e.g. /bin/bash)
 	argv  []string // default args when a session's argv is nil
@@ -152,6 +176,7 @@ type PTYManager struct {
 
 	gracePeriod time.Duration
 	idleTimeout time.Duration
+	beforeKill  BeforeKillFunc
 
 	reaperStop chan struct{}
 	reaperWG   sync.WaitGroup
@@ -196,6 +221,7 @@ func NewPTYManager(command string, maxSessions int, cwd string) *PTYManager {
 	m := &PTYManager{
 		sessions:    make(map[SessionKey]*ptySession),
 		ended:       make(map[SessionKey]string),
+		converged:   make(map[SessionKey]bool),
 		shell:       shell,
 		argv:        argv,
 		env:         env,
@@ -223,6 +249,14 @@ func (m *PTYManager) SetGracePeriod(d time.Duration) {
 func (m *PTYManager) SetIdleTimeout(d time.Duration) {
 	m.mu.Lock()
 	m.idleTimeout = d
+	m.mu.Unlock()
+}
+
+// SetBeforeKill installs the server-owned lifecycle hook used by every
+// destructive PTY path: explicit Kill, detach grace, idle reap, and Shutdown.
+func (m *PTYManager) SetBeforeKill(hook BeforeKillFunc) {
+	m.mu.Lock()
+	m.beforeKill = hook
 	m.mu.Unlock()
 }
 
@@ -270,6 +304,7 @@ func (m *PTYManager) AttachSession(key SessionKey, cols, rows uint16, launch *ta
 			}
 			m.sessions[key] = newSess
 			delete(m.ended, key)
+			delete(m.converged, key)
 			sess = newSess
 		}
 		m.mu.Unlock()
@@ -367,12 +402,26 @@ func (m *PTYManager) spawnSession(key SessionKey, cols, rows uint16, launch *tab
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
 	if err != nil {
+		clearTerminalCommandEnvironment(cmd, env)
 		return nil, fmt.Errorf("pty.StartWithSize: %w", err)
 	}
+	// exec.Cmd retains Env after Start. The child has already received its own
+	// copy, so discard the parent-side launch envelope immediately. This is
+	// especially important for the one-use Interaction session credential.
+	clearTerminalCommandEnvironment(cmd, env)
 
 	sess := newPtySession(key, ptmx, cmd)
 	go sess.drain(m)
 	return sess, nil
+}
+
+func clearTerminalCommandEnvironment(cmd *exec.Cmd, env []string) {
+	for index := range env {
+		env[index] = ""
+	}
+	if cmd != nil {
+		cmd.Env = nil
+	}
 }
 
 // Detach releases the connID attached to key and arms the grace timer if
@@ -387,7 +436,23 @@ func (m *PTYManager) Detach(key SessionKey, connID string) {
 		return
 	}
 	if sess.detach(connID) && grace > 0 {
-		sess.armKillTimer(grace, func() { _ = m.killSession(key, ExitReasonKilled) })
+		attempt := 0
+		var convergeAndKill func()
+		convergeAndKill = func() {
+			if err := m.killSession(key, ExitReasonKilled); err != nil {
+				slog.Warn("terminal detach grace could not converge lifecycle before PTY kill",
+					"session", key.String(), "err", err)
+				attempt++
+				m.mu.Lock()
+				current := m.sessions[key]
+				m.mu.Unlock()
+				if current == sess && attempt < beforeKillRetryAttempts && !sess.attached() {
+					retryAfter := beforeKillRetryDelay(attempt)
+					sess.armKillTimer(retryAfter, convergeAndKill)
+				}
+			}
+		}
+		sess.armKillTimer(grace, convergeAndKill)
 	}
 }
 
@@ -399,17 +464,105 @@ func (m *PTYManager) Kill(key SessionKey) error {
 func (m *PTYManager) killSession(key SessionKey, reason string) error {
 	m.mu.Lock()
 	sess, ok := m.sessions[key]
-	if ok {
-		delete(m.sessions, key)
-		if reason != "" {
-			m.ended[key] = reason
-		}
-	}
+	hook := m.beforeKill
+	_, ended := m.ended[key]
+	durableConverged := m.converged[key]
 	m.mu.Unlock()
-	if !ok {
+
+	// A same-key tombstone proves this manager already completed local
+	// teardown. Do not let a later defense-in-depth Kill turn that committed
+	// success into an availability error by re-running the durable hook.
+	if !ok && ended && durableConverged {
 		return nil
 	}
+	if reason != ExitReasonExited && hook != nil {
+		if err := invokeBeforeKill(hook, key, reason); err != nil {
+			return err
+		}
+	}
+	if !ok {
+		if ended {
+			m.markDurableConverged(key)
+		}
+		return nil
+	}
+
+	m.mu.Lock()
+	current, ok := m.sessions[key]
+	if !ok || current != sess {
+		m.mu.Unlock()
+		return nil
+	}
+	delete(m.sessions, key)
+	if reason != "" {
+		m.ended[key] = reason
+		m.converged[key] = reason != ExitReasonExited
+	}
+	m.mu.Unlock()
 	return sess.close(reason)
+}
+
+func invokeBeforeKill(hook BeforeKillFunc, key SessionKey, reason string) error {
+	if hook == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), beforeKillTimeout)
+	err := hook(ctx, key, reason)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("converge terminal lifecycle before PTY %s: %w", reason, err)
+	}
+	return nil
+}
+
+func beforeKillRetryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := beforeKillRetryBase
+	for index := 1; index < attempt && delay < beforeKillRetryMax; index++ {
+		delay *= 2
+	}
+	if delay > beforeKillRetryMax {
+		return beforeKillRetryMax
+	}
+	return delay
+}
+
+func (m *PTYManager) retryDurableConvergence(
+	key SessionKey,
+	reason string,
+	attempt int,
+) {
+	if attempt >= beforeKillRetryAttempts {
+		slog.Error("terminal lifecycle convergence retries exhausted",
+			"session", key.String(), "reason", reason, "attempts", attempt)
+		return
+	}
+	time.AfterFunc(beforeKillRetryDelay(attempt), func() {
+		m.mu.Lock()
+		hook := m.beforeKill
+		m.mu.Unlock()
+		if hook == nil {
+			return
+		}
+		if err := invokeBeforeKill(hook, key, reason); err != nil {
+			slog.Warn("terminal lifecycle convergence retry failed",
+				"session", key.String(), "reason", reason,
+				"attempt", attempt, "err", err)
+			m.retryDurableConvergence(key, reason, attempt+1)
+			return
+		}
+		m.markDurableConverged(key)
+	})
+}
+
+func (m *PTYManager) markDurableConverged(key SessionKey) {
+	m.mu.Lock()
+	if _, ended := m.ended[key]; ended {
+		m.converged[key] = true
+	}
+	m.mu.Unlock()
 }
 
 // SessionCount returns the number of live sessions, including detached ones
@@ -484,31 +637,31 @@ func (m *PTYManager) IdleTimeout() time.Duration {
 // repeat Shutdown calls are no-ops.
 func (m *PTYManager) Shutdown() error {
 	m.mu.Lock()
-	if m.closed {
-		m.mu.Unlock()
-		return nil
+	first := !m.closed
+	if first {
+		m.closed = true
 	}
-	m.closed = true
 	m.mu.Unlock()
 
-	close(m.reaperStop)
-	m.reaperWG.Wait()
+	if first {
+		close(m.reaperStop)
+		m.reaperWG.Wait()
+	}
 
 	m.mu.Lock()
-	sessions := m.sessions
-	m.sessions = make(map[SessionKey]*ptySession)
-	for key := range sessions {
-		m.ended[key] = ExitReasonShutdown
+	keys := make([]SessionKey, 0, len(m.sessions))
+	for key := range m.sessions {
+		keys = append(keys, key)
 	}
 	m.mu.Unlock()
 
-	var firstErr error
-	for _, s := range sessions {
-		if err := s.close(ExitReasonShutdown); err != nil && firstErr == nil {
-			firstErr = err
+	var errs []error
+	for _, key := range keys {
+		if err := m.killSession(key, ExitReasonShutdown); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return firstErr
+	return errors.Join(errs...)
 }
 
 func (m *PTYManager) reapLoop() {
@@ -555,12 +708,35 @@ func (m *PTYManager) reapIdle() {
 		}
 	}
 	for _, key := range victims {
-		_ = m.killSession(key, ExitReasonKilled)
+		if err := m.killSession(key, ExitReasonKilled); err != nil {
+			slog.Warn("terminal idle reaper could not converge lifecycle before PTY kill",
+				"session", key.String(), "err", err)
+		}
 	}
 }
 
 // onSessionExited is invoked by a session's drain goroutine when the child
 // process exits on its own (PTY EOF). Cleans up manager-side state.
 func (m *PTYManager) onSessionExited(key SessionKey) {
-	_ = m.killSession(key, ExitReasonExited)
+	// The child is already dead. Always remove process-local state first so
+	// attachments close and SessionCount/HasSession remain truthful even when
+	// FleetDB is temporarily unavailable. Canonical tab metadata remains
+	// durable outside the PTY manager and drives the bounded repair below.
+	if err := m.killSession(key, ExitReasonExited); err != nil {
+		slog.Warn("terminal natural exit local cleanup failed",
+			"session", key.String(), "err", err)
+	}
+	m.mu.Lock()
+	hook := m.beforeKill
+	m.mu.Unlock()
+	if hook == nil {
+		return
+	}
+	if err := invokeBeforeKill(hook, key, ExitReasonExited); err != nil {
+		slog.Warn("terminal natural exit could not converge durable lifecycle",
+			"session", key.String(), "err", err)
+		m.retryDurableConvergence(key, ExitReasonExited, 1)
+		return
+	}
+	m.markDurableConverged(key)
 }

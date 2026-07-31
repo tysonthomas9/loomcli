@@ -291,6 +291,9 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	if cfg.WorkspaceCreateFn == nil {
 		t.Fatal("WorkspaceCreateFn was nil")
 	}
+	if cfg.WorkspaceAddReposFn == nil {
+		t.Fatal("WorkspaceAddReposFn was nil")
+	}
 	if cfg.DaemonConfigFn == nil {
 		t.Fatal("DaemonConfigFn was nil")
 	}

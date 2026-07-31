@@ -9,10 +9,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules/routecontracts"
 	"github.com/tysonthomas9/loomcli/internal/webui/agentmodules/supportroutes"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agents"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsmanagement"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/connectors"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/executionmanagement"
+	"github.com/tysonthomas9/loomcli/internal/webui/handlers/interactionmanagement"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/taskrunapi"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/workflows"
@@ -22,6 +24,8 @@ import (
 
 // New preserves the established route registration order while grouping the
 // concrete HTTP adapters behind one workspace composition seam.
+//
+//nolint:funlen // This ordered composition table keeps route precedence and one-pass dependency wiring auditable together.
 func New(deps routecontracts.Deps, automationModules automationroutes.Modules) []interface{ Register(*http.ServeMux) } {
 	onboardingModule := supportroutes.New(deps.IssueSvc, deps.AgentSvc)
 	taskWorkflowRuns := newTaskWorkflowRunReader(deps)
@@ -29,41 +33,59 @@ func New(deps routecontracts.Deps, automationModules automationroutes.Modules) [
 	return []interface{ Register(*http.ServeMux) }{
 		agents.New(agents.Config{
 			AgentService: deps.AgentSvc, SessionTranscripts: deps.AgentSessionTranscripts,
+			AgentRecords: deps.Agents, AgentRecordAuthority: deps.AgentsOperator,
 			Store: deps.Store, Hub: deps.Hub,
 			Bindings: deps.AutomationBindings, OperatorAuthority: deps.AutomationOperator,
-			WorkspaceFromContext: automationModules.WorkspaceFromContext,
-			BindingGrants:        automationModules.BindingGrants,
+			Provisioning: deps.AgentProvisioning, ProvisioningAuthority: deps.AgentProvisioningOperator,
+			PrepareWorkflowTarget: deps.WorkflowTargetPreparation,
+			WorkspaceFromContext:  automationModules.WorkspaceFromContext,
+			BindingGrants:         automationModules.BindingGrants,
+		}),
+		agentsmanagement.New(agentsmanagement.Config{
+			Agents: deps.Agents, Authority: deps.AgentsOperator,
+		}),
+		interactionmanagement.New(interactionmanagement.Config{
+			Interaction: deps.Interaction, Authority: deps.InteractionOperator,
+			SessionAuthorities: deps.InteractionSessionAuthorities,
 		}),
 		onboardingModule,
 		workflows.NewModule(workflows.Config{
-			Store: deps.Store, Catalog: deps.WorkflowCatalog,
-			Execution: deps.ExecutionDriverRuns, OperatorAuthority: deps.ExecutionOperator,
+			Store: deps.Store, Catalog: deps.WorkflowCatalog, Authoring: deps.WorkflowCatalogAuthoring,
+			CatalogOperatorAuthority: deps.WorkflowCatalogOperator,
+			PrepareWorkflowTarget:    deps.WorkflowTargetPreparation,
+			Execution:                deps.ExecutionDriverRuns, OperatorAuthority: deps.ExecutionOperator,
 			TaskWorkflowRuns: taskWorkflowRuns,
 		}),
 		executionmanagement.New(executionmanagement.Config{
 			WorkerProfiles: deps.ExecutionWorkerProfiles, Authority: deps.ExecutionOperator,
 		}),
 		automationModules.Webhooks,
-		roles.NewModule(deps.Store),
+		roles.NewModule(roles.Config{
+			Store: deps.Store, Roles: deps.Agents, Authority: deps.AgentsOperator,
+		}),
 		automationModules.TriggerBindings,
 		connectors.NewModule(deps.Store, deps.LocalSettingsDir, deps.AutomationOperator),
 		approvals.New(approvals.Config{Store: deps.Store, Awaits: automationModules.EventAwaits}),
 		taskrunapi.NewModule(taskrunapi.Config{
-			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL, LocalSettingsDir: deps.LocalSettingsDir,
+			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL,
 			IssueBackends: deps.ExecutionIssueBackends,
 			Execution:     deps.ExecutionTaskRuns, Authorities: deps.ExecutionTaskRunAuthorities, Artifacts: deps.Artifacts,
+			DaytonaProvider: deps.DaytonaProvider,
 		}),
 		driverapi.NewModule(driverapi.Config{
 			Store: deps.Store, FleetBaseURL: deps.FleetBaseURL, APIBaseURL: deps.DriverAPIBaseURL,
 			IssueBackends: deps.ExecutionIssueBackends,
 			APIToken:      deps.DriverAPIToken, RunTokenKey: deps.DriverRunTokenKey,
 			LocalSettingsDir: deps.LocalSettingsDir, LocalRepoPath: storeadapter.ResolveRepoPath,
+			SourceControl:    deps.SourceControl,
 			Dispatcher:       deps.Dispatcher,
 			WorkflowEventing: deps.AutomationEventing, EventAwaits: automationModules.EventAwaits,
 			Execution: deps.ExecutionDriverRuns, ExecutionAuthorities: deps.ExecutionDriverRunAuthorities,
-			TaskRunRequests: deps.ExecutionTaskRunRequests, TaskRunRecovery: deps.ExecutionTaskRunRecovery,
+			AgentParentBindings: deps.AgentParentBindings,
+			TaskRunRequests:     deps.ExecutionTaskRunRequests, TaskRunRecovery: deps.ExecutionTaskRunRecovery,
 			TaskRuns: deps.ExecutionTaskRuns, TaskRunAuthorities: deps.ExecutionTaskRunAuthorities,
 			WorkflowCatalog: deps.WorkflowCatalog, Artifacts: deps.Artifacts,
+			InteractionChat: deps.InteractionChat,
 		}),
 	}
 }
@@ -73,7 +95,6 @@ func newTaskWorkflowRunReader(deps routecontracts.Deps) readprojection.TaskWorkf
 		return nil
 	}
 	return readprojection.NewTaskWorkflowRunReader(
-		deps.Store.AgentSessions(),
 		deps.Store.TaskRuns(),
 		deps.Store.TriggerEvents(),
 		deps.Store.TriggerDeliveries(),

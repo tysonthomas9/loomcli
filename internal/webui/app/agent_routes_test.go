@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
+	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/infra/agentscompatstore"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
@@ -109,12 +116,19 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	}
 
 	gitOps := &mockGitOps{}
+	agentsCapability := newAgentRouteAgentsCapability(t, st)
 	app := &Server{
 		multiPool: daemon.NewMultiPool(middleware.WorkspaceFromContext, 1),
 		config: webui.ServerConfig{
 			Store: st, GitOps: gitOps, AutomationCapability: newAgentRouteAutomationCapability(st),
+			AgentsCapability: agentsCapability,
 		},
-		agentSvc: svcimpl.NewAgentService(gitOps, nil, nil, st),
+		agentSvc: svcimpl.NewAgentServiceWithCompatibility(
+			gitOps, nil, nil, st, nil,
+			agentsCapability.compatibility,
+			agentsCapability.managed,
+			agentsCapability.retirements,
+		),
 		wsExistsFn: func(id string) bool {
 			return id == "PARITY"
 		},
@@ -159,7 +173,7 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 		t.Fatalf("agent worktree was not created: %v", err)
 	}
 
-	body = bytes.NewBufferString(`{"state":"active"}`)
+	body = bytes.NewBufferString(`{"desired_state":"running"}`)
 	req = httptest.NewRequest(http.MethodPatch, "/api/workspaces/PARITY/agents/worker-one", body)
 	rr = httptest.NewRecorder()
 	app.mux.ServeHTTP(rr, req)
@@ -182,7 +196,7 @@ func TestFleetDBAgentRoutesUseStoreInsteadOfDaemonControl(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
 		t.Fatalf("list after stop JSON: %v", err)
 	}
-	if got := list.Data[0]; got.State != "active" || got.DesiredState != "" {
+	if got := list.Data[0]; got.State != "idle" || got.DesiredState != "running" {
 		t.Fatalf("request-side lifecycle path mutated the durable agent projection: %+v", got)
 	}
 
@@ -225,13 +239,20 @@ func TestFleetDBAgentRoutesBroadcastMonitorRefresh(t *testing.T) {
 	t.Cleanup(hub.Stop)
 
 	gitOps := &mockGitOps{}
+	agentsCapability := newAgentRouteAgentsCapability(t, st)
 	app := &Server{
 		multiPool: daemon.NewMultiPool(middleware.WorkspaceFromContext, 1),
 		config: webui.ServerConfig{
 			Store: st, GitOps: gitOps, AutomationCapability: newAgentRouteAutomationCapability(st),
+			AgentsCapability: agentsCapability,
 		},
-		agentSvc: svcimpl.NewAgentService(gitOps, nil, nil, st),
-		hub:      hub,
+		agentSvc: svcimpl.NewAgentServiceWithCompatibility(
+			gitOps, nil, nil, st, nil,
+			agentsCapability.compatibility,
+			agentsCapability.managed,
+			agentsCapability.retirements,
+		),
+		hub: hub,
 		wsExistsFn: func(id string) bool {
 			return id == "PARITY"
 		},
@@ -245,7 +266,7 @@ func TestFleetDBAgentRoutesBroadcastMonitorRefresh(t *testing.T) {
 	serveAgentRequest(t, app, http.MethodPost, "/api/workspaces/PARITY/agents", `{"name":"worker-one","role_name":"builder","auto":true,"backend":"claude"}`, http.StatusCreated)
 	expectAgentRefresh(t, client.Send(), "PARITY", "worker-one")
 
-	serveAgentRequest(t, app, http.MethodPatch, "/api/workspaces/PARITY/agents/worker-one", `{"state":"active"}`, http.StatusOK)
+	serveAgentRequest(t, app, http.MethodPatch, "/api/workspaces/PARITY/agents/worker-one", `{"desired_state":"running"}`, http.StatusOK)
 	expectAgentRefresh(t, client.Send(), "PARITY", "worker-one")
 
 	serveAgentRequest(t, app, http.MethodPost, "/api/workspaces/PARITY/agents/worker-one/stop", "", http.StatusAccepted)
@@ -253,6 +274,122 @@ func TestFleetDBAgentRoutesBroadcastMonitorRefresh(t *testing.T) {
 
 	serveAgentRequest(t, app, http.MethodDelete, "/api/workspaces/PARITY/agents/worker-one", "", http.StatusOK)
 	expectAgentRefresh(t, client.Send(), "PARITY", "worker-one")
+}
+
+type agentRouteIdentityAPI struct {
+	agentsmodule.API
+}
+
+func (agentRouteIdentityAPI) GetAgent(
+	context.Context,
+	string,
+	string,
+) (*agentsmodule.Agent, error) {
+	return nil, agentsmodule.ErrNotFound
+}
+
+func (agentRouteIdentityAPI) ListAgents(
+	context.Context,
+	string,
+	agentsmodule.AgentFilter,
+) ([]*agentsmodule.Agent, error) {
+	return []*agentsmodule.Agent{}, nil
+}
+
+type agentRouteAgentsCapability struct {
+	api           agentsmodule.API
+	compatibility agentsmodule.CompatibilityAPI
+	managed       agentscompat.ManagedCommands
+	parentBinding agentscompat.ParentBindingCommands
+	retirements   agentscompat.ManagedRetirements
+	issuer        *authority.Issuer
+}
+
+func newAgentRouteAgentsCapability(t *testing.T, st store.Store) *agentRouteAgentsCapability {
+	t.Helper()
+	issuer := authority.NewIssuer()
+	admission, err := issuer.NewAdmission(agentsmodule.OperationRules()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compatibilityPersistence, err := agentscompatstore.New(
+		st.Roles(),
+		st.AgentServices(),
+		st.Agents(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compatibility, err := agentscompat.NewAPI(compatibilityPersistence, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	managed, err := agentscompat.NewManagedCommandsWithIssuer(compatibility, issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentBinding, err := agentscompat.NewParentBindingCommands(compatibility, issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retirements, err := agentscompat.NewManagedRetirements(compatibility, issuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &agentRouteAgentsCapability{
+		api:           agentRouteIdentityAPI{},
+		compatibility: compatibility,
+		managed:       managed,
+		parentBinding: parentBinding,
+		retirements:   retirements,
+		issuer:        issuer,
+	}
+}
+
+func (capability *agentRouteAgentsCapability) AgentsAPI() agentsmodule.API {
+	return capability.api
+}
+
+func (capability *agentRouteAgentsCapability) CompatibilityAPI() agentsmodule.CompatibilityAPI {
+	return capability.compatibility
+}
+
+func (capability *agentRouteAgentsCapability) ManagedCompatibility() agentscompat.ManagedCommands {
+	return capability.managed
+}
+
+func (capability *agentRouteAgentsCapability) ParentBindingCommands() agentscompat.ParentBindingCommands {
+	return capability.parentBinding
+}
+
+func (capability *agentRouteAgentsCapability) ManagedRetirements() agentscompat.ManagedRetirements {
+	return capability.retirements
+}
+
+func (capability *agentRouteAgentsCapability) OperatorAuthorityResolver() workflowcataloghttp.OperatorAuthorityResolver {
+	return capability
+}
+
+func (capability *agentRouteAgentsCapability) ResolveOperatorAuthority(
+	_ *http.Request,
+	workspace string,
+	action authority.Action,
+) (authority.OperatorAuthority, error) {
+	principal, err := capability.issuer.DeriveVerifiedPrincipal(authority.PrincipalClaims{
+		Subject:   "agent-route-test",
+		Class:     authority.ClassOperator,
+		Workspace: workspace,
+		Actions:   []authority.Action{action},
+		ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		return authority.OperatorAuthority{}, err
+	}
+	return capability.issuer.IssueOperator(principal, workspace, action)
+}
+
+func (*agentRouteAgentsCapability) PRReviewerProvisioning() prreviewer.Commands {
+	return nil
 }
 
 func serveAgentRequest(t *testing.T, app *Server, method, target, body string, wantStatus int) {

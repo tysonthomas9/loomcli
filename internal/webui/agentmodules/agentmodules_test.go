@@ -32,6 +32,11 @@ func TestProductionCompositionUsesAutomationAwareAgentsConstructor(t *testing.T)
 		"agents.New(agents.Config{", "Bindings: deps.AutomationBindings",
 		"SessionTranscripts: deps.AgentSessionTranscripts",
 		"OperatorAuthority: deps.AutomationOperator", "automationModules.BindingGrants",
+		"Provisioning: deps.AgentProvisioning",
+		"ProvisioningAuthority: deps.AgentProvisioningOperator",
+		"interactionmanagement.New(interactionmanagement.Config{",
+		"Interaction: deps.Interaction",
+		"Authority: deps.InteractionOperator",
 		"CreateWorkflow: deps.Capabilities.WorkflowBinding",
 	} {
 		if !strings.Contains(text, required) {
@@ -48,6 +53,8 @@ func TestNewPreservesRegistrationOrder(t *testing.T) {
 	}
 	want := []string{
 		"*agents.Module",
+		"*agentsmanagement.Module",
+		"*interactionmanagement.Module",
 		"*onboarding.Module",
 		"*workflows.Module",
 		"*executionmanagement.Module",

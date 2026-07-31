@@ -90,39 +90,95 @@ func TestSessionServiceListTaskSessionsUsesControlPlane(t *testing.T) {
 	}
 }
 
-func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing.T) {
+func TestSessionServiceExecutionTaskRunOwnsBatchHistoryAndTranscript(t *testing.T) {
 	ctx := t.Context()
 	st := memstore.New()
+	runtimeDir := t.TempDir()
 	transcriptBody := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"done"}` + "\n")
-	createFinalizedArtifact(t, st, "transcript-task-run-1", "flue-task-run-1", "TASK-FLUE-1", "task-run-1", "transcript", "application/x-ndjson", transcriptBody)
+	patchBody := []byte("diff --git a/file.txt b/file.txt\n+done\n")
+	createFinalizedArtifact(t, st, "transcript-task-run-1", "", "TASK-FLUE-1", "task-run-1", "transcript", "application/x-ndjson", transcriptBody)
+	createFinalizedArtifact(t, st, "patch-task-run-1", "", "TASK-FLUE-1", "task-run-1", "patch", "text/x-diff", patchBody)
+	run := createRunningExecutionTaskRun(t, st, "task-run-1", "TASK-FLUE-1", map[string]string{
+		"runtime": "flue",
+	})
+	run = finishExecutionTaskRun(t, st, run, map[string]string{
+		"runtime":           "flue",
+		"transcript_ref":    "artifact://transcript-task-run-1",
+		"patch_artifact_id": "patch-task-run-1",
+		"scheduler_attempt": "2",
+		"runtime_strategy":  "local-cli-codex",
+		"delivery":          "patch_back",
+		"patch_back_status": "applied",
+		"files_changed":     "1",
+		"lines_added":       "1",
+		"files_touched":     "file.txt",
+	})
+
+	// Historical stacks may still contain the old Interaction shadow. Its
+	// conflicting lifecycle must not duplicate or override the TaskRun row.
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey:    "WS",
-		SessionID:       "flue-task-run-1",
-		AgentID:         "flue-task-agent",
-		Kind:            domain.AgentSessionKindTask,
-		TaskID:          "TASK-FLUE-1",
-		ParentSessionID: "lead-session-1",
-		Status:          domain.AgentSessionCompleted,
-		Phase:           "implementation",
-		Metadata: map[string]string{
-			"runtime":        "flue",
-			"task_run_id":    "task-run-1",
-			"driver_run_id":  "driver-run-1",
-			"flue_session":   "flue-task-run-1",
-			"flue_harness":   "task-agent",
-			"transcript_ref": "artifact://transcript-task-run-1",
-		},
+		WorkspaceKey: "WS", SessionID: "flue-task-run-1", AgentID: "shadow-worker",
+		Kind: domain.AgentSessionKindTask, TaskID: "TASK-FLUE-1", Status: domain.AgentSessionRunning,
+		Metadata: map[string]string{"task_run_id": "task-run-1"},
 	}); err != nil {
-		t.Fatalf("create flue control-plane session: %v", err)
+		t.Fatalf("create historical shadow session: %v", err)
 	}
 
-	svc := NewSessionService(st, nil)
+	// A stale local session may also reuse the former Flue shadow ID. It must
+	// never override the canonical TaskRun lifecycle, transcript, or patch.
+	localStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("create local session store: %v", err)
+	}
+	if err := os.MkdirAll(localStore.SessionDir("flue-task-run-1"), 0o700); err != nil {
+		t.Fatalf("create local collision directory: %v", err)
+	}
+	if err := localStore.SaveMetadata("flue-task-run-1", &sessions.SessionMetadata{
+		SessionRecord: sessions.SessionRecord{
+			SchemaVersion:    sessions.CurrentSchemaVersion,
+			SessionID:        "flue-task-run-1",
+			TaskID:           "TASK-FLUE-1",
+			AgentName:        "wrong-local-worker",
+			Backend:          "flue",
+			Status:           sessions.StatusRunning,
+			StartedAt:        time.Now().UTC(),
+			TranscriptFormat: sessions.TranscriptFormatCanonical,
+		},
+	}); err != nil {
+		t.Fatalf("write local collision metadata: %v", err)
+	}
+	localTranscript := []byte(`{"seq":1,"timestamp":"2026-06-09T12:00:00Z","role":"assistant","type":"text","text":"wrong local transcript"}` + "\n")
+	if err := os.WriteFile(localStore.NativeTranscriptPath("flue-task-run-1"), localTranscript, 0o600); err != nil {
+		t.Fatalf("write local collision transcript: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localStore.SessionDir("flue-task-run-1"), "diff.patch"), []byte("wrong local diff\n"), 0o600); err != nil {
+		t.Fatalf("write local collision diff: %v", err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(st, nil, runtimeDir)
 	items, err := svc.ListTaskSessions(ctx, "WS", "TASK-FLUE-1")
 	if err != nil {
 		t.Fatalf("ListTaskSessions: %v", err)
 	}
-	if len(items) != 1 || !items[0].HasTranscript || items[0].Backend != "flue" {
-		t.Fatalf("items = %+v, want flue session with transcript", items)
+	if len(items) != 1 {
+		t.Fatalf("items = %+v, want exactly one Execution-backed attempt", items)
+	}
+	item := items[0]
+	if item.SessionID != "flue-task-run-1" || item.AgentName != run.WorkerProfileID ||
+		item.Status != sessions.StatusCompleted || item.IsActive ||
+		!item.HasTranscript || !item.HasDiff || item.Backend != "flue" ||
+		item.AttemptNum != 2 || item.InputTokens != 11 || item.OutputTokens != 17 ||
+		item.RuntimeStrategy != "local-cli-codex" || item.DeliveryMode != "patch_back" ||
+		item.PatchBackStatus != "applied" || item.FilesChanged != 1 {
+		t.Fatalf("execution-backed item = %+v", item)
+	}
+	detail, err := svc.GetSession(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if detail.SessionID != "flue-task-run-1" || detail.AgentName != run.WorkerProfileID ||
+		detail.Status != sessions.StatusCompleted || detail.IsActive {
+		t.Fatalf("execution-backed detail = %+v", detail)
 	}
 	events, err := svc.GetSessionTranscript(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
 	if err != nil {
@@ -131,6 +187,89 @@ func TestSessionServiceCloudControlPlaneTranscriptArtifactReadContent(t *testing
 	if len(events) != 1 || events[0].Role != "assistant" || events[0].Text != "done" {
 		t.Fatalf("events = %+v, want assistant transcript", events)
 	}
+	diff, err := svc.GetSessionDiff(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
+	if err != nil {
+		t.Fatalf("GetSessionDiff: %v", err)
+	}
+	if diff != string(patchBody) {
+		t.Fatalf("diff = %q, want %q", diff, patchBody)
+	}
+}
+
+func TestSessionRecordFromTaskRunMapsExecutionLifecycle(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     domain.TaskRunStatus
+		wantStatus sessions.SessionStatus
+		wantActive bool
+		wantExit   int
+	}{
+		{name: "queued", status: domain.TaskRunQueued, wantStatus: sessions.StatusRunning, wantActive: true},
+		{name: "running", status: domain.TaskRunRunning, wantStatus: sessions.StatusRunning, wantActive: true},
+		{name: "completed", status: domain.TaskRunCompleted, wantStatus: sessions.StatusCompleted},
+		{name: "failed", status: domain.TaskRunFailed, wantStatus: sessions.StatusFailed, wantExit: 1},
+		{name: "cancelled", status: domain.TaskRunCancelled, wantStatus: sessions.StatusAborted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run := &domain.TaskRun{
+				WorkspaceKey: "WS", TaskRunID: "task-run-1", TaskID: "TASK-1",
+				WorkerProfileID: "worker-profile", RunnerKind: "flue-workflow",
+				Status: tt.status, CreatedAt: time.Now().UTC(),
+			}
+			record := sessionRecordFromTaskRun(run)
+			if record.SessionID != "flue-task-run-1" || record.TaskID != "TASK-1" ||
+				record.AgentName != "worker-profile" || record.Status != tt.wantStatus ||
+				record.ExitCode != tt.wantExit || isActiveTaskRun(run.Status) != tt.wantActive {
+				t.Fatalf("mapping = record %+v active=%v", record, isActiveTaskRun(run.Status))
+			}
+		})
+	}
+}
+
+func TestSessionServiceExecutionTaskHistoryDoesNotDependOnInteractionSessionList(t *testing.T) {
+	st := memstore.New()
+	if _, err := st.TaskRuns().Create(t.Context(), store.TaskRunCreate{
+		WorkspaceKey: "WS", TaskRunID: "task-run-independent", TaskID: "TASK-INDEPENDENT",
+		WorkerProfileID: "worker-profile", Runner: "local-task-runner",
+		Status: domain.TaskRunQueued,
+	}); err != nil {
+		t.Fatalf("create task run: %v", err)
+	}
+	wrapped := &interactionListFailureStore{
+		Store: st,
+		sessions: &interactionListFailureAgentSessions{
+			AgentSessionStore: st.AgentSessions(),
+		},
+	}
+	items, err := NewSessionService(wrapped, nil).ListTaskSessions(t.Context(), "WS", "TASK-INDEPENDENT")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(items) != 1 || items[0].SessionID != "task-run-independent" || !items[0].IsActive {
+		t.Fatalf("Execution-backed items = %+v", items)
+	}
+}
+
+type interactionListFailureStore struct {
+	store.Store
+	sessions store.AgentSessionStore
+}
+
+func (s *interactionListFailureStore) AgentSessions() store.AgentSessionStore {
+	return s.sessions
+}
+
+type interactionListFailureAgentSessions struct {
+	store.AgentSessionStore
+}
+
+func (s *interactionListFailureAgentSessions) List(
+	context.Context,
+	string,
+	store.AgentSessionFilter,
+) ([]*domain.AgentSession, error) {
+	return nil, errors.New("interaction session list unavailable")
 }
 
 func TestSessionServiceDaemonSessionOwnedTranscriptArtifactReadContent(t *testing.T) {
@@ -196,21 +335,11 @@ func TestSessionServiceControlPlaneArtifactRefsRequireExactTaskRunOwnership(t *t
 		t, st, "patch-other-run", "other-session", "TASK-FLUE-1",
 		"task-run-other", "patch", "text/x-diff", []byte("diff --git a/a b/a\n"),
 	)
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "flue-task-run-1",
-		AgentID:      "flue-task-agent",
-		Kind:         domain.AgentSessionKindTask,
-		TaskID:       "TASK-FLUE-1",
-		Status:       domain.AgentSessionCompleted,
-		Metadata: map[string]string{
-			"task_run_id":    "task-run-1",
-			"transcript_ref": "file:///etc/passwd",
-			"patch_ref":      "http://127.0.0.1/private",
-		},
-	}); err != nil {
-		t.Fatalf("create task session: %v", err)
-	}
+	run := createRunningExecutionTaskRun(t, st, "task-run-1", "TASK-FLUE-1", map[string]string{
+		"runtime":        "flue",
+		"transcript_ref": "file:///etc/passwd",
+		"patch_ref":      "http://127.0.0.1/private",
+	})
 
 	svc := NewSessionService(st, nil)
 	_, err := svc.GetSessionTranscript(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
@@ -219,14 +348,14 @@ func TestSessionServiceControlPlaneArtifactRefsRequireExactTaskRunOwnership(t *t
 	assertServiceErrorKind(t, err, service.KindNotFound)
 
 	metadata := map[string]string{
-		"task_run_id":       "task-run-1",
 		"transcript_ref":    "artifact://transcript-other-run",
 		"patch_artifact_id": "patch-other-run",
 	}
-	if _, err := st.AgentSessions().Update(ctx, "WS", "flue-task-run-1", store.AgentSessionUpdate{
-		Metadata: &metadata,
+	if _, err := st.TaskRuns().Heartbeat(ctx, "WS", run.TaskRunID, store.TaskRunHeartbeat{
+		NodeID: run.NodeID, LeaseID: run.LeaseID, LeaseToken: "token-" + run.TaskRunID,
+		FencingToken: run.FencingToken, RuntimeMetadata: metadata, HeartbeatAt: time.Now().UTC(),
 	}); err != nil {
-		t.Fatalf("update task session: %v", err)
+		t.Fatalf("update execution task run: %v", err)
 	}
 	_, err = svc.GetSessionTranscript(ctx, "WS", "TASK-FLUE-1", "flue-task-run-1")
 	assertServiceErrorKind(t, err, service.KindNotFound)
@@ -400,6 +529,111 @@ func TestSessionServiceAgentSessionTranscriptUsesAgentOwnership(t *testing.T) {
 
 	_, err = svc.GetAgentSessionTranscript(ctx, "WS", "another-agent", "interactive-1")
 	assertServiceError(t, err, service.KindNotFound, "session not found")
+}
+
+func TestSessionServiceTranscriptPreservesControlPlaneReadFailures(
+	t *testing.T,
+) {
+	tests := []struct {
+		name     string
+		err      error
+		wantKind service.ErrorKind
+	}{
+		{
+			name: "unavailable",
+			err: errors.Join(
+				store.ErrControlPlaneUnavailable,
+				errors.New("connection refused"),
+			),
+			wantKind: service.KindUnavailable,
+		},
+		{
+			name: "rate limited",
+			err: errors.Join(
+				store.ErrControlPlaneRateLimited,
+				errors.New("HTTP 429"),
+			),
+			wantKind: service.KindRateLimited,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base := memstore.New()
+			wrapped := &sessionReadErrorStore{
+				Store: base,
+				sessions: &agentSessionReadErrorStore{
+					AgentSessionStore: base.AgentSessions(),
+					err:               test.err,
+				},
+				taskRuns: &taskRunReadErrorStore{
+					TaskRunStore: base.TaskRuns(),
+					err:          test.err,
+				},
+			}
+			serviceImpl := NewSessionService(wrapped, nil)
+			agentTranscripts, ok := serviceImpl.(service.AgentSessionTranscriptService)
+			if !ok {
+				t.Fatal(
+					"session service does not implement AgentSessionTranscriptService",
+				)
+			}
+			_, err := agentTranscripts.GetAgentSessionTranscript(
+				t.Context(),
+				"WS",
+				"local-review",
+				"interactive-1",
+			)
+			assertServiceErrorKind(t, err, test.wantKind)
+
+			_, err = serviceImpl.GetSessionTranscript(
+				t.Context(),
+				"WS",
+				"TASK-1",
+				"task-run-1",
+			)
+			assertServiceErrorKind(t, err, test.wantKind)
+		})
+	}
+}
+
+type sessionReadErrorStore struct {
+	store.Store
+	sessions store.AgentSessionStore
+	taskRuns store.TaskRunStore
+}
+
+func (wrapped *sessionReadErrorStore) AgentSessions() store.AgentSessionStore {
+	return wrapped.sessions
+}
+
+func (wrapped *sessionReadErrorStore) TaskRuns() store.TaskRunStore {
+	return wrapped.taskRuns
+}
+
+type agentSessionReadErrorStore struct {
+	store.AgentSessionStore
+	err error
+}
+
+func (wrapped *agentSessionReadErrorStore) Get(
+	context.Context,
+	string,
+	string,
+) (*domain.AgentSession, error) {
+	return nil, wrapped.err
+}
+
+type taskRunReadErrorStore struct {
+	store.TaskRunStore
+	err error
+}
+
+func (wrapped *taskRunReadErrorStore) Get(
+	context.Context,
+	string,
+	string,
+) (*domain.TaskRun, error) {
+	return nil, wrapped.err
 }
 
 func TestSessionServiceAgentTranscriptPreservesManagedContentFailureKind(t *testing.T) {
@@ -715,22 +949,8 @@ func TestSessionServiceControlPlaneDiffFallsBackToPatchArtifactByTaskRun(t *test
 	ctx := t.Context()
 	st := memstore.New()
 	patchBody := []byte("diff --git a/fallback.txt b/fallback.txt\n+fallback\n")
-	createFinalizedArtifact(t, st, "patch-task-run-fallback", "flue-task-run-2", "TASK-FLUE-2", "task-run-2", "patch", "text/x-diff", patchBody)
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "flue-task-run-2",
-		AgentID:      "flue-task-agent",
-		Kind:         domain.AgentSessionKindTask,
-		TaskID:       "TASK-FLUE-2",
-		Status:       domain.AgentSessionCompleted,
-		Phase:        "implementation",
-		Metadata: map[string]string{
-			"runtime":     "flue",
-			"task_run_id": "task-run-2",
-		},
-	}); err != nil {
-		t.Fatalf("create flue control-plane session: %v", err)
-	}
+	createFinalizedArtifact(t, st, "patch-task-run-fallback", "", "TASK-FLUE-2", "task-run-2", "patch", "text/x-diff", patchBody)
+	createRunningExecutionTaskRun(t, st, "task-run-2", "TASK-FLUE-2", map[string]string{"runtime": "flue"})
 
 	diff, err := NewSessionService(st, nil).GetSessionDiff(ctx, "WS", "TASK-FLUE-2", "flue-task-run-2")
 	if err != nil {
@@ -855,6 +1075,66 @@ func TestSessionServiceLocalDiffMissingWithoutControlPlaneReturnsDiffNotFound(t 
 
 	_, err = NewSessionServiceWithRuntimeDir(nil, nil, runtimeDir).GetSessionDiff(t.Context(), "WS", "TASK-FLUE-1", sess.SessionID())
 	assertServiceError(t, err, service.KindNotFound, "diff not found")
+}
+
+func createRunningExecutionTaskRun(
+	t *testing.T,
+	st *memstore.Store,
+	taskRunID, taskID string,
+	metadata map[string]string,
+) *domain.TaskRun {
+	t.Helper()
+	run, err := st.TaskRuns().Create(t.Context(), store.TaskRunCreate{
+		WorkspaceKey:    "WS",
+		TaskRunID:       taskRunID,
+		TaskID:          taskID,
+		WorkerProfileID: "worker-profile",
+		Runner:          "local-task-runner",
+		RunnerKind:      "flue-workflow",
+		Status:          domain.TaskRunRunning,
+		NodeID:          "node-1",
+		LeaseID:         "lease-" + taskRunID,
+		LeaseToken:      "token-" + taskRunID,
+		FencingToken:    41,
+		RunnerPlacement: domain.TaskRunPlacement{Provider: "local", RunnerID: "task-worker"},
+		RuntimeMetadata: metadata,
+	})
+	if err != nil {
+		t.Fatalf("create execution task run %q: %v", taskRunID, err)
+	}
+	return run
+}
+
+func finishExecutionTaskRun(
+	t *testing.T,
+	st *memstore.Store,
+	run *domain.TaskRun,
+	metadata map[string]string,
+) *domain.TaskRun {
+	t.Helper()
+	exitCode := 0
+	finishedAt := time.Now().UTC()
+	finished, err := st.TaskRuns().Finish(t.Context(), run.WorkspaceKey, run.TaskRunID, store.TaskRunFinish{
+		NodeID:           run.NodeID,
+		LeaseID:          run.LeaseID,
+		LeaseToken:       "token-" + run.TaskRunID,
+		FencingToken:     run.FencingToken,
+		Status:           domain.TaskRunCompleted,
+		ExitCode:         &exitCode,
+		LogsRef:          "artifact://logs-" + run.TaskRunID,
+		ArtifactsRef:     "artifacts://" + run.TaskRunID,
+		InputTokens:      11,
+		OutputTokens:     17,
+		CacheReadTokens:  5,
+		CacheWriteTokens: 2,
+		EstimatedCostUSD: 0.125,
+		RuntimeMetadata:  metadata,
+		FinishedAt:       finishedAt,
+	})
+	if err != nil {
+		t.Fatalf("finish execution task run %q: %v", run.TaskRunID, err)
+	}
+	return finished
 }
 
 func createFinalizedArtifact(t *testing.T, st *memstore.Store, artifactID, sessionID, taskID, ownerID, artifactType, mimeType string, body []byte) {

@@ -3,7 +3,6 @@ package agents
 import (
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
@@ -14,8 +13,8 @@ type agentSessionTranscriptResponse struct {
 }
 
 type agentSessionTranscriptData struct {
-	SessionID string             `json:"session_id"`
-	Entries   []transcript.Event `json:"entries"`
+	SessionID string                       `json:"session_id"`
+	Entries   agentSessionTranscriptEvents `json:"entries"`
 }
 
 func (m *Module) getAgentSessionTranscript(w http.ResponseWriter, r *http.Request) {
@@ -42,7 +41,7 @@ func (m *Module) getAgentSessionTranscript(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if entries == nil {
-		entries = []transcript.Event{}
+		entries = agentSessionTranscriptEvents{}
 	}
 	handler.WriteJSON(w, http.StatusOK, agentSessionTranscriptResponse{
 		Success: true,

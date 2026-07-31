@@ -31,7 +31,7 @@ func seedStore(t *testing.T, enabled bool) *memstore.Store {
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: testWS, DriverID: "github-pr-review", Name: "github-pr-review",
-		Status: domain.DriverStatusActive, ActiveVersionID: "v1",
+		Status: domain.DriverStatusActive,
 	}); err != nil {
 		t.Fatalf("seed driver: %v", err)
 	}
@@ -41,6 +41,12 @@ func seedStore(t *testing.T, enabled bool) *memstore.Store {
 		ValidationStatus: domain.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("seed version: %v", err)
+	}
+	if _, err := st.ApproveDriverVersionForTest(ctx, testWS, "github-pr-review", "v1"); err != nil {
+		t.Fatalf("approve version: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, testWS, "github-pr-review", "v1"); err != nil {
+		t.Fatalf("activate version: %v", err)
 	}
 	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: testWS, BindingID: "b1", Name: "pr-review", SourceKind: "github",

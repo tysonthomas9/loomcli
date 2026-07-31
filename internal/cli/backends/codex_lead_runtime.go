@@ -11,6 +11,7 @@ import (
 func RunCodexLeadRuntime(
 	ctx context.Context,
 	st store.Store,
+	sessionRuntime leadcontrol.SessionRuntime,
 	workspace string,
 	leadName string,
 	sessionID string,
@@ -19,6 +20,7 @@ func RunCodexLeadRuntime(
 ) error {
 	return leadcontrol.RunCodexLeadRuntime(ctx, leadcontrol.CodexLeadRuntimeConfig{
 		Store:     st,
+		Runtime:   sessionRuntime,
 		Workspace: workspace,
 		LeadName:  leadName,
 		SessionID: sessionID,

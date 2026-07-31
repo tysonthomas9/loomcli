@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -206,21 +207,19 @@ func persistCodexTranscriptRef(
 	target codexTranscriptCaptureTarget,
 	artifactID string,
 ) error {
-	// Re-read before updating so transcript capture does not overwrite metadata
-	// written concurrently by assignment delivery or runtime discovery.
-	session, err := cfg.Store.AgentSessions().Get(ctx, target.workspace, target.sessionID)
-	if err != nil {
-		return fmt.Errorf("reload codex interactive session: %w", err)
+	if cfg.Runtime == nil {
+		return ErrSessionRuntimeUnavailable
 	}
-	metadata := cloneMetadata(session.Metadata)
-	metadata["transcript_ref"] = "artifact://" + artifactID
-	metadata[MetadataCodexThreadID] = target.runtime.ThreadID
-	if _, err := cfg.Store.AgentSessions().Update(
-		ctx,
-		target.workspace,
-		target.sessionID,
-		store.AgentSessionUpdate{Metadata: &metadata},
-	); err != nil {
+	artifactID = strings.TrimSpace(artifactID)
+	if artifactID == "" {
+		return errors.New("persist codex transcript ref: artifact ID is required")
+	}
+	if err := cfg.Runtime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey:         target.workspace,
+		SessionID:            target.sessionID,
+		MetadataUpserts:      map[string]string{MetadataCodexThreadID: target.runtime.ThreadID},
+		TranscriptArtifactID: &artifactID,
+	}); err != nil {
 		return fmt.Errorf("persist codex transcript ref: %w", err)
 	}
 	return nil

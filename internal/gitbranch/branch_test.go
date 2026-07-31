@@ -1,6 +1,8 @@
 package gitbranch
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +93,65 @@ func TestRecoverBranchFallsBackToHEAD(t *testing.T) {
 		t.Fatalf("recovery = %+v, want HEAD %s", recovery, headSHA)
 	}
 	assertLooseRefAbsent(t, repo, "worker")
+}
+
+func TestSelectRecoveryBasePreservesCancellationCause(t *testing.T) {
+	repo := initBranchTestRepo(t)
+	cause := errors.New("repository admission fence lost")
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(cause)
+
+	_, err := selectRecoveryBase(
+		ctx,
+		repo,
+		"worker",
+		"main",
+		Recovery{Branch: "worker", State: StateBroken},
+	)
+	if !errors.Is(err, cause) {
+		t.Fatalf("selectRecoveryBase cancellation = %v, want %v", err, cause)
+	}
+}
+
+func TestCommitExistsPreservesCancellationCause(t *testing.T) {
+	repo := initBranchTestRepo(t)
+	headSHA := gitOutput(t, repo, "rev-parse", "HEAD")
+	cause := errors.New("repository admission fence lost")
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(cause)
+
+	exists, err := commitExists(ctx, repo, headSHA)
+	if exists || !errors.Is(err, cause) {
+		t.Fatalf("commitExists canceled = %t, %v; want false, %v", exists, err, cause)
+	}
+}
+
+func TestRecoverContextCancellationLeavesBrokenRefUntouched(t *testing.T) {
+	repo := initBranchTestRepo(t)
+	corruptBranchRef(t, repo, "worker")
+	cause := errors.New("repository admission fence lost")
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(cause)
+
+	_, err := RecoverContext(
+		ctx,
+		repo,
+		"worker",
+		"main",
+		Recovery{Branch: "worker", State: StateBroken},
+	)
+	if !errors.Is(err, cause) {
+		t.Fatalf("RecoverContext cancellation = %v, want %v", err, cause)
+	}
+	refPath := filepath.Join(
+		branchTestCommonDir(t, repo),
+		"refs",
+		"heads",
+		"worker",
+	)
+	if _, err := os.Lstat(refPath); err != nil {
+		t.Fatalf("canceled recovery mutated broken ref: %v", err)
+	}
 }
 
 func initBranchTestRepo(t *testing.T) string {

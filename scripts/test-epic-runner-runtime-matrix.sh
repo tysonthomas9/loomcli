@@ -3,13 +3,11 @@ set -Eeuo pipefail
 
 # E2E matrix for the built-in epic-runner runtime selector.
 #
-# It registers one epic-runner bundle with three user-authored runners:
+# It registers one epic-runner bundle with two user-authored runners:
 # - regular-local-runner: plain node-module, no Flue import
 # - flue-local-task-runner: Flue harness using @flue/runtime/node local()
-# - flue-daytona-task-runner: Flue harness using an application-owned Daytona sandbox
-#
-# Daytona is live/external and only runs when RUN_DAYTONA=1, or when
-# RUN_DAYTONA=auto and DAYTONA_API_KEY is present.
+# Positive provider-backed Daytona execution is covered only after Loom has a
+# host-owned opaque provider broker; this matrix never admits provider secrets.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_DB_REPO="${FLEET_DB_REPO:-$(cd "$ROOT/../fleet-db" 2>/dev/null && pwd || true)}"
@@ -25,10 +23,6 @@ LOOM_URL="http://127.0.0.1:${LOOM_PORT}"
 # This runtime matrix intentionally runs FleetDB without authorization and
 # does not prove the Workflow Catalog lifecycle capability.
 export LOOM_WORKFLOW_CATALOG_ENABLED=false
-
-RUN_DAYTONA="${RUN_DAYTONA:-auto}"
-DAYTONA_REPO_URL="${DAYTONA_REPO_URL:-https://github.com/tysonthomas9/loom-review-sandbox.git}"
-DAYTONA_SDK_IMPORT="${DAYTONA_SDK_IMPORT:-}"
 
 TMP_ROOT="$(mktemp -d -t loom-epic-runner-runtime-matrix.XXXXXX)"
 BIN_DIR="$TMP_ROOT/bin"
@@ -115,18 +109,6 @@ wait_http() {
   die "timed out waiting for $name at $url"
 }
 
-should_run_daytona() {
-  case "$RUN_DAYTONA" in
-    1 | true | TRUE | yes | YES | on | ON) return 0 ;;
-    0 | false | FALSE | no | NO | off | OFF) return 1 ;;
-    auto)
-      [[ -n "${DAYTONA_API_KEY:-}" ]]
-      return
-      ;;
-    *) die "RUN_DAYTONA must be 1, 0, or auto; got $RUN_DAYTONA" ;;
-  esac
-}
-
 resolve_runtime_imports() {
   [[ -n "$FLUE_REPO" && -d "$FLUE_REPO/packages/runtime" ]] ||
     die "Flue repo not found; set FLUE_REPO=/path/to/flue"
@@ -142,13 +124,6 @@ resolve_runtime_imports() {
   FLUE_RUNTIME_INTERNAL_IMPORT="file://$(realpath "$runtime_internal")"
   export FLUE_RUNTIME_IMPORT FLUE_RUNTIME_NODE_IMPORT FLUE_RUNTIME_INTERNAL_IMPORT
 
-  if [[ -z "$DAYTONA_SDK_IMPORT" ]]; then
-    local daytona_pkg="$FLUE_REPO/node_modules/.pnpm/node_modules/@daytona/sdk"
-    if [[ -f "$daytona_pkg/esm/index.js" ]]; then
-      DAYTONA_SDK_IMPORT="file://$(realpath "$daytona_pkg")/esm/index.js"
-    fi
-  fi
-  export DAYTONA_SDK_IMPORT
 }
 
 check_prerequisites() {
@@ -164,11 +139,6 @@ check_prerequisites() {
 
   resolve_runtime_imports
 
-  if should_run_daytona; then
-    [[ -n "${DAYTONA_API_KEY:-}" ]] || die "DAYTONA_API_KEY is required when RUN_DAYTONA=1"
-    [[ -n "$DAYTONA_SDK_IMPORT" ]] || die "DAYTONA_SDK_IMPORT is required; no local @daytona/sdk install was found"
-    [[ -n "$DAYTONA_REPO_URL" ]] || die "DAYTONA_REPO_URL is required for the Daytona runner"
-  fi
 }
 
 build_binaries() {
@@ -209,8 +179,8 @@ EOF
 # Loom Runtime Matrix Dummy Repo
 
 This repo is intentionally tiny. The epic-runner matrix uses it to verify that
-plain local, Flue local, and Daytona-backed runners can execute against repo
-content without provider-profile routing.
+plain local and Flue local runners can execute against repo content without
+provider-profile routing.
 EOF
   (
     cd "$WORKDIR/dummy-repo"
@@ -219,7 +189,6 @@ EOF
     git -c user.name=Loom -c user.email=loom@example.test commit -m "seed runtime matrix dummy repo" -q
   )
   log_info "local dummy repo: $WORKDIR/dummy-repo"
-  log_info "Daytona repo URL: $DAYTONA_REPO_URL"
 }
 
 copy_loom_sdk() {
@@ -232,7 +201,7 @@ copy_loom_sdk() {
 
 write_epic_workflow() {
   mkdir -p "$DIST_DIR/workflows"
-  cp "$ROOT/internal/workflows/builtin/epic-runner.ts" "$DIST_DIR/workflows/epic-runner.mjs"
+  cp "$ROOT/internal/infra/workflowdistribution/builtin/epic-runner.ts" "$DIST_DIR/workflows/epic-runner.mjs"
 }
 
 write_regular_local_runner() {
@@ -355,205 +324,11 @@ export async function run(ctx) {
 EOF
 }
 
-write_flue_daytona_runner() {
-  cat > "$DIST_DIR/workflows/flue-daytona-task-runner.mjs" <<'EOF'
-function shellQuote(value) {
-  return "'" + String(value).replace(/'/g, "'\\''") + "'";
-}
-
-function stringMetadata(values = {}) {
-  const out = {};
-  for (const [key, value] of Object.entries(values)) {
-    if (value === undefined || value === null) continue;
-    out[key] = typeof value === "string" ? value : String(value);
-  }
-  return out;
-}
-
-async function createContext(id, payload) {
-  const internal = await import(process.env.FLUE_RUNTIME_INTERNAL_IMPORT);
-  return internal.createFlueContext({
-    id,
-    payload,
-    env: process.env,
-    agentConfig: {
-      systemPrompt: "",
-      skills: {},
-      model: undefined,
-      resolveModel: () => undefined,
-    },
-    createDefaultEnv: async () => {
-      throw new Error("Daytona runner requires explicit sandbox");
-    },
-    defaultStore: new internal.InMemorySessionStore(),
-  });
-}
-
-class DaytonaSandboxApi {
-  constructor(sandbox) {
-    this.sandbox = sandbox;
-  }
-  async readFile(filePath) {
-    const buffer = await this.sandbox.fs.downloadFile(filePath);
-    return buffer.toString("utf-8");
-  }
-  async readFileBuffer(filePath) {
-    const buffer = await this.sandbox.fs.downloadFile(filePath);
-    return new Uint8Array(buffer);
-  }
-  async writeFile(filePath, content) {
-    const buffer = typeof content === "string" ? Buffer.from(content, "utf-8") : Buffer.from(content);
-    await this.sandbox.fs.uploadFile(buffer, filePath);
-  }
-  async stat(filePath) {
-    const info = await this.sandbox.fs.getFileDetails(filePath);
-    return {
-      isFile: !info.isDir,
-      isDirectory: info.isDir ?? false,
-      isSymbolicLink: false,
-      size: info.size ?? 0,
-      mtime: info.modTime ? new Date(info.modTime) : new Date(),
-    };
-  }
-  async readdir(filePath) {
-    const entries = await this.sandbox.fs.listFiles(filePath);
-    return entries.map((entry) => entry.name).filter(Boolean);
-  }
-  async exists(filePath) {
-    try {
-      await this.sandbox.fs.getFileDetails(filePath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  async mkdir(filePath, options) {
-    if (options?.recursive) {
-      await this.exec("mkdir -p " + shellQuote(filePath));
-      return;
-    }
-    await this.sandbox.fs.createFolder(filePath, "755");
-  }
-  async rm(filePath, options) {
-    await this.sandbox.fs.deleteFile(filePath, options?.recursive);
-  }
-  async exec(command, options) {
-    const response = await this.sandbox.process.executeCommand(
-      command,
-      options?.cwd,
-      options?.env,
-      options?.timeout,
-    );
-    return {
-      stdout: response.result ?? "",
-      stderr: "",
-      exitCode: response.exitCode ?? 0,
-    };
-  }
-}
-
-function daytonaSandbox(runtime, sandbox) {
-  return {
-    async createSessionEnv() {
-      const sandboxCwd = (await sandbox.getWorkDir()) || "/home/daytona";
-      return runtime.createSandboxSessionEnv(new DaytonaSandboxApi(sandbox), sandboxCwd);
-    },
-  };
-}
-
-export async function run(ctx) {
-  const request = ctx.payload || {};
-  if (!process.env.DAYTONA_API_KEY) {
-    throw new Error("DAYTONA_API_KEY is required");
-  }
-  if (!process.env.DAYTONA_SDK_IMPORT) {
-    throw new Error("DAYTONA_SDK_IMPORT is required");
-  }
-  const repoUrl = process.env.DAYTONA_REPO_URL || "";
-  if (!repoUrl) {
-    throw new Error("DAYTONA_REPO_URL is required");
-  }
-
-  const runtime = await import(process.env.FLUE_RUNTIME_IMPORT);
-  const sdk = await import(process.env.DAYTONA_SDK_IMPORT);
-  const config = { apiKey: process.env.DAYTONA_API_KEY };
-  if (process.env.DAYTONA_API_URL) config.apiUrl = process.env.DAYTONA_API_URL;
-  if (process.env.DAYTONA_TARGET) config.target = process.env.DAYTONA_TARGET;
-  const client = new sdk.Daytona(config);
-  const sandbox = await client.create({
-    labels: {
-      loom: "epic-runner-runtime-matrix",
-      task_run_id: String(request.task_run_id || ""),
-    },
-    autoStopInterval: 15,
-    autoDeleteInterval: 0,
-  });
-
-  let sandboxId = sandbox.id || "";
-  let workDir = "";
-  try {
-    workDir = (await sandbox.getWorkDir()) || "/home/daytona";
-    const flue = await createContext(request.task_run_id || request.task_id || "flue-daytona", request);
-    const agent = runtime.createAgent(() => ({
-      model: false,
-      sandbox: daytonaSandbox(runtime, sandbox),
-    }));
-    const harness = await flue.init(agent, { name: "flue-daytona-runtime-matrix" });
-    const uname = await harness.shell("uname -s");
-    const marker = await harness.shell("printf '%s\\n' FLUE_DAYTONA_RUNTIME_OK > /tmp/loom-runtime-matrix.txt && cat /tmp/loom-runtime-matrix.txt");
-    const clone = await harness.shell("rm -rf /tmp/loom-runtime-matrix-repo && git clone --depth 1 " + shellQuote(repoUrl) + " /tmp/loom-runtime-matrix-repo", { timeout: 120 });
-    const head = await harness.shell("git -C /tmp/loom-runtime-matrix-repo rev-parse --short HEAD");
-    const leaseProbe = await harness.shell("printf '%s' \"$LOOM_TASK_RUN_LEASE_TOKEN\"");
-
-    if (uname.exitCode !== 0 || !uname.stdout.includes("Linux")) {
-      throw new Error("Daytona sandbox uname check failed: " + uname.stdout);
-    }
-    if (marker.stdout.trim() !== "FLUE_DAYTONA_RUNTIME_OK") {
-      throw new Error("Daytona sandbox marker check failed");
-    }
-    if (clone.exitCode !== 0) {
-      throw new Error("Daytona sandbox repo clone failed: " + clone.stdout + clone.stderr);
-    }
-    if (!head.stdout.trim()) {
-      throw new Error("Daytona sandbox repo HEAD check failed");
-    }
-    if (leaseProbe.stdout.trim() !== "") {
-      throw new Error("task-run lease token leaked into Daytona sandbox env");
-    }
-
-    return {
-      status: "completed",
-      exitCode: 0,
-      logsRef: "logs://" + request.task_run_id,
-      runtimeMetadata: stringMetadata({
-        task_runner: "flue-daytona-task-runner",
-        runtime_strategy: "flue-daytona",
-        runner: request.runner || "flue-daytona-task-runner",
-        task_id: request.task_id || "",
-        daytona_sandbox_id: sandboxId,
-        daytona_workdir: workDir,
-        daytona_repo_url: repoUrl,
-        daytona_repo_head: head.stdout.trim(),
-        lease_token_visible_in_sandbox: "false",
-      }),
-    };
-  } finally {
-    try {
-      await sandbox.delete(60);
-    } catch (error) {
-      console.error("warning: failed to delete Daytona sandbox " + sandboxId + ": " + (error?.message || error));
-    }
-  }
-}
-EOF
-}
-
 write_runtime_matrix_server() {
   cat > "$DIST_DIR/server.mjs" <<'EOF'
 const workflowLoaders = {
   "epic-runner": () => import("./workflows/epic-runner.mjs"),
   "flue-local-task-runner": () => import("./workflows/flue-local-task-runner.mjs"),
-  "flue-daytona-task-runner": () => import("./workflows/flue-daytona-task-runner.mjs"),
 };
 
 let completed = false;
@@ -621,7 +396,6 @@ const dist = process.argv[2];
 const runners = [
   { name: "regular-local-runner", kind: "node-module", entrypoint: "dist/runners/regular-local-runner.mjs" },
   { name: "flue-local-task-runner", kind: "flue-workflow", entrypoint: "flue-local-task-runner" },
-  { name: "flue-daytona-task-runner", kind: "flue-workflow", entrypoint: "flue-daytona-task-runner" },
 ];
 fs.writeFileSync(dist + "/loom-driver.json", JSON.stringify({ runners: JSON.stringify(runners) }, null, 2) + "\n");
 EOF
@@ -634,7 +408,6 @@ write_driver_bundle() {
   write_epic_workflow
   write_regular_local_runner
   write_flue_local_runner
-  write_flue_daytona_runner
   write_runtime_matrix_server
   write_driver_manifest
 }
@@ -705,14 +478,7 @@ start_loom_executor() {
     "FLUE_RUNTIME_IMPORT=$FLUE_RUNTIME_IMPORT"
     "FLUE_RUNTIME_NODE_IMPORT=$FLUE_RUNTIME_NODE_IMPORT"
     "FLUE_RUNTIME_INTERNAL_IMPORT=$FLUE_RUNTIME_INTERNAL_IMPORT"
-    "DAYTONA_SDK_IMPORT=$DAYTONA_SDK_IMPORT"
-    "DAYTONA_API_URL=${DAYTONA_API_URL:-}"
-    "DAYTONA_TARGET=${DAYTONA_TARGET:-}"
-    "DAYTONA_REPO_URL=$DAYTONA_REPO_URL"
   )
-  if [[ -n "${DAYTONA_API_KEY:-}" ]]; then
-    runner_cmd+=("DAYTONA_API_KEY=$DAYTONA_API_KEY")
-  fi
   runner_cmd+=("$(command -v node)" "$ROOT/scripts/loom-task-runner-invoker.mjs")
   task_runner_cmd_json="$(node -e 'console.log(JSON.stringify(process.argv.slice(1)))' "${runner_cmd[@]}")"
 
@@ -858,13 +624,6 @@ main() {
 
   run_scenario "regular local" "regular-local-runner" "node-module" "regular-local" "REGULAR_LOCAL_RUNTIME_OK"
   run_scenario "Flue local" "flue-local-task-runner" "flue-workflow" "flue-local" "FLUE_LOCAL_RUNTIME_OK"
-
-  if should_run_daytona; then
-    run_scenario "Flue Daytona" "flue-daytona-task-runner" "flue-workflow" "flue-daytona"
-  else
-    log_step "skipping Flue Daytona scenario"
-    log_info "set RUN_DAYTONA=1 and DAYTONA_API_KEY to run the live Daytona sandbox leg"
-  fi
 
   echo
   echo "epic-runner runtime matrix passed"

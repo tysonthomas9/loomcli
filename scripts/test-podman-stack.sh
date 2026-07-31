@@ -576,7 +576,7 @@ assert_dag_order() {
 # ── workflow fixtures + submission ───────────────────────────────────────────
 
 write_workflow_fixtures() {
-  cp "$ROOT/internal/workflows/builtin/epic-runner.ts" "$TMP_ROOT/epic-runner.ts"
+  cp "$ROOT/internal/infra/workflowdistribution/builtin/epic-runner.ts" "$TMP_ROOT/epic-runner.ts"
 
   # webhook-echo: the Router v2 fan-out target. Reports a token-only env
   # audit in its summary and, when the payload sets connectorProbe, performs

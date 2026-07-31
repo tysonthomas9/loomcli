@@ -50,25 +50,23 @@ func (w workspaceWire) toDomain() *domain.Workspace {
 
 func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*domain.Workspace, error) {
 	body := struct {
-		Key          string `json:"key"`
-		Name         string `json:"name"`
-		Description  string `json:"description,omitempty"`
-		DesignFormat string `json:"design_format,omitempty"`
+		Key           string `json:"key"`
+		Name          string `json:"name"`
+		Description   string `json:"description,omitempty"`
+		DefaultBranch string `json:"default_branch,omitempty"`
+		DesignFormat  string `json:"design_format,omitempty"`
 	}{
-		Key:          in.Key,
-		Name:         in.Name,
-		Description:  in.Description,
-		DesignFormat: in.DesignFormat,
+		Key:           in.Key,
+		Name:          in.Name,
+		Description:   in.Description,
+		DefaultBranch: in.DefaultBranch,
+		DesignFormat:  in.DesignFormat,
 	}
 	var resp workspaceWire
 	if err := s.client.do(ctx, "POST", "/api/v1/admin/workspaces", body, &resp); err != nil {
 		return nil, err
 	}
-	ws := resp.toDomain()
-	if ws.DefaultBranch == "" {
-		ws.DefaultBranch = in.DefaultBranch
-	}
-	return ws, nil
+	return resp.toDomain(), nil
 }
 
 func (s *workspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
@@ -110,18 +108,28 @@ func (s *workspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) 
 }
 
 func (s *workspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
-	// Of this client-side patch shape, fleet-db's admin PATCH persists name
-	// and design_format. Lifecycle/default-branch fields are supported by
-	// in-process stores but are not persisted through fleet-db.
-	if patch.Name == nil && patch.DesignFormat == nil {
+	if patch.Name == nil &&
+		patch.Description == nil &&
+		patch.State == nil &&
+		patch.ErrorMessage == nil &&
+		patch.DefaultBranch == nil &&
+		patch.DesignFormat == nil {
 		return s.Get(ctx, key)
 	}
 	body := struct {
-		Name         *string `json:"name,omitempty"`
-		DesignFormat *string `json:"design_format,omitempty"`
+		Name          *string                `json:"name,omitempty"`
+		Description   *string                `json:"description,omitempty"`
+		State         *domain.WorkspaceState `json:"state,omitempty"`
+		ErrorMessage  *string                `json:"error_message,omitempty"`
+		DefaultBranch *string                `json:"default_branch,omitempty"`
+		DesignFormat  *string                `json:"design_format,omitempty"`
 	}{
-		Name:         patch.Name,
-		DesignFormat: patch.DesignFormat,
+		Name:          patch.Name,
+		Description:   patch.Description,
+		State:         patch.State,
+		ErrorMessage:  patch.ErrorMessage,
+		DefaultBranch: patch.DefaultBranch,
+		DesignFormat:  patch.DesignFormat,
 	}
 	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(key), body, nil); err != nil {
 		return nil, err

@@ -4,10 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE_DIR="${FIXTURE_DIR:-${ROOT_DIR}/scripts/fixtures/slack-src}"
 TASK_RUNNER="${TASK_RUNNER:-${ROOT_DIR}/scripts/loom-task-runner-invoker.mjs}"
-EPIC_RUNNER_SOURCE="${EPIC_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/epic-runner.ts}"
-LOCAL_TASK_RUNNER_SOURCE="${LOCAL_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/local-task-runner.ts}"
-DAYTONA_TASK_RUNNER_SOURCE="${DAYTONA_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/daytona-task-runner.ts}"
-OPENSHELL_TASK_RUNNER_SOURCE="${OPENSHELL_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/workflows/builtin/openshell-task-runner.ts}"
+EPIC_RUNNER_SOURCE="${EPIC_RUNNER_SOURCE:-${ROOT_DIR}/internal/infra/workflowdistribution/builtin/epic-runner.ts}"
+LOCAL_TASK_RUNNER_SOURCE="${LOCAL_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/infra/workflowdistribution/builtin/local-task-runner.ts}"
+DAYTONA_TASK_RUNNER_SOURCE="${DAYTONA_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/infra/workflowdistribution/builtin/daytona-task-runner.ts}"
+OPENSHELL_TASK_RUNNER_SOURCE="${OPENSHELL_TASK_RUNNER_SOURCE:-${ROOT_DIR}/internal/infra/workflowdistribution/builtin/openshell-task-runner.ts}"
 LOOM_SDK_DIR="${LOOM_SDK_DIR:-${ROOT_DIR}/sdk}"
 FLUE_REPO="${FLUE_REPO:-${ROOT_DIR}/../flue}"
 FLUE_NODE_MODULES_DIR="${FLUE_NODE_MODULES_DIR:-${FLUE_REPO}/node_modules}"
@@ -62,49 +62,8 @@ CONTAINER_LOOM_URL="${CONTAINER_LOOM_URL:-http://127.0.0.1:8080}"
 REGISTER_EPIC_RUNNER="${REGISTER_EPIC_RUNNER:-1}"
 LOOM_FLUE_AGENT_MODEL="${LOOM_FLUE_AGENT_MODEL:-openai-codex/gpt-5.3-codex-spark}"
 RUN_DAYTONA="${RUN_DAYTONA:-0}"
-DAYTONA_REPO_URL="${DAYTONA_REPO_URL:-https://github.com/tysonthomas9/webhook-e2e-sandbox.git}"
-DAYTONA_TASK_MODE="${DAYTONA_TASK_MODE:-e2e-smoke}"
-# e2e-smoke and slack-pr-chain are gated DEMO_MODES in daytona-task-runner.ts;
-# this stack exists to run them, so enable them by default (override with 0).
-LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES="${LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES:-1}"
-# Real mode (faithful E2E): an empty DAYTONA_TASK_MODE makes the daytona runner use a genuine
-# implementation prompt instead of a fabricated DEMO_MODE. The `:-e2e-smoke` default above treats
-# an empty string as unset, so the only way to request real mode is this explicit toggle. When set,
-# force the task mode empty and keep demo modes disabled (real mode must not ride the demo flag).
-DAYTONA_REAL_MODE="${DAYTONA_REAL_MODE:-0}"
-case "$DAYTONA_REAL_MODE" in
-  1 | true | TRUE | yes | YES | on | ON)
-    DAYTONA_TASK_MODE=""
-    LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES=0
-    ;;
-esac
-DAYTONA_CREDENTIAL_FILE_HOST="${DAYTONA_CREDENTIAL_FILE_HOST:-}"
-CONTAINER_DAYTONA_SECRET_DIR="${CONTAINER_DAYTONA_SECRET_DIR:-/run/loom-secrets}"
-CONTAINER_DAYTONA_CREDENTIAL_FILE="${CONTAINER_DAYTONA_CREDENTIAL_FILE:-${CONTAINER_DAYTONA_SECRET_DIR}/daytona_api_key}"
-GITHUB_CREDENTIAL_FILE_HOST="${GITHUB_CREDENTIAL_FILE_HOST:-}"
-CONTAINER_GITHUB_CREDENTIAL_FILE="${CONTAINER_GITHUB_CREDENTIAL_FILE:-${CONTAINER_DAYTONA_SECRET_DIR}/github_token}"
-DAYTONA_BASE_BRANCH="${DAYTONA_BASE_BRANCH:-}"
-DAYTONA_PR_BRANCH_PREFIX="${DAYTONA_PR_BRANCH_PREFIX:-}"
-DAYTONA_PR_STACKED="${DAYTONA_PR_STACKED:-1}"
-DAYTONA_SEED_PR_CHAIN="${DAYTONA_SEED_PR_CHAIN:-${RUN_STACKED_PR:-0}}"
-DAYTONA_PR_DRAFT="${DAYTONA_PR_DRAFT:-1}"
-DAYTONA_GIT_AUTHOR_NAME="${DAYTONA_GIT_AUTHOR_NAME:-Loom Daytona Runner}"
-DAYTONA_GIT_AUTHOR_EMAIL="${DAYTONA_GIT_AUTHOR_EMAIL:-loom-daytona@example.test}"
 FLUE_RUNTIME_IMPORT="${FLUE_RUNTIME_IMPORT:-file://${CONTAINER_FLUE_REPO}/packages/runtime/dist/index.mjs}"
 FLUE_RUNTIME_INTERNAL_IMPORT="${FLUE_RUNTIME_INTERNAL_IMPORT:-file://${CONTAINER_FLUE_REPO}/packages/runtime/dist/internal.mjs}"
-DAYTONA_SDK_IMPORT="${DAYTONA_SDK_IMPORT:-file://${CONTAINER_FLUE_REPO}/node_modules/.pnpm/node_modules/@daytona/sdk/esm/index.js}"
-DAYTONA_SECRET_TMP=""
-GITHUB_SECRET_TMP=""
-
-cleanup_host_secret() {
-  if [[ -n "$DAYTONA_SECRET_TMP" ]]; then
-    rm -f "$DAYTONA_SECRET_TMP"
-  fi
-  if [[ -n "$GITHUB_SECRET_TMP" ]]; then
-    rm -f "$GITHUB_SECRET_TMP"
-  fi
-}
-trap cleanup_host_secret EXIT
 
 log() {
   printf '[slack-codex-stack] %s\n' "$*"
@@ -135,78 +94,6 @@ truthy() {
 
 json_array() {
   node -e 'console.log(JSON.stringify(process.argv.slice(1)))' "$@"
-}
-
-resolve_daytona_secret() {
-  if [[ -n "$DAYTONA_CREDENTIAL_FILE_HOST" ]]; then
-    require_path "$DAYTONA_CREDENTIAL_FILE_HOST"
-    return 0
-  fi
-  if [[ -n "${DAYTONA_API_KEY:-}" ]]; then
-    DAYTONA_SECRET_TMP="$(mktemp "${TMPDIR:-/tmp}/loom-daytona-api-key.XXXXXX")"
-    chmod 600 "$DAYTONA_SECRET_TMP"
-    printf '%s' "$DAYTONA_API_KEY" >"$DAYTONA_SECRET_TMP"
-    DAYTONA_CREDENTIAL_FILE_HOST="$DAYTONA_SECRET_TMP"
-    return 0
-  fi
-  if truthy "$RUN_DAYTONA"; then
-    printf 'RUN_DAYTONA=1 requires DAYTONA_API_KEY or DAYTONA_CREDENTIAL_FILE_HOST\n' >&2
-    exit 1
-  fi
-}
-
-requires_github_pr_runtime() {
-  [[ "$DAYTONA_TASK_MODE" == "slack-pr-chain" ]] || truthy "${DAYTONA_OPEN_PR:-0}"
-}
-
-resolve_github_secret() {
-  if [[ -n "$GITHUB_CREDENTIAL_FILE_HOST" ]]; then
-    require_path "$GITHUB_CREDENTIAL_FILE_HOST"
-    return 0
-  fi
-
-  local token=""
-  if [[ -n "${GH_TOKEN:-}" ]]; then
-    token="$GH_TOKEN"
-  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    token="$GITHUB_TOKEN"
-  elif command -v gh >/dev/null 2>&1; then
-    log "reading GitHub credential from 'gh auth token'"
-    token="$(gh auth token 2>/dev/null || true)"
-  fi
-
-  if [[ -n "$token" ]]; then
-    GITHUB_SECRET_TMP="$(mktemp "${TMPDIR:-/tmp}/loom-github-token.XXXXXX")"
-    chmod 600 "$GITHUB_SECRET_TMP"
-    printf '%s' "$token" >"$GITHUB_SECRET_TMP"
-    GITHUB_CREDENTIAL_FILE_HOST="$GITHUB_SECRET_TMP"
-    return 0
-  fi
-
-  if requires_github_pr_runtime; then
-    printf 'DAYTONA_TASK_MODE=slack-pr-chain requires GH_TOKEN, GITHUB_TOKEN, GITHUB_CREDENTIAL_FILE_HOST, or a working `gh auth token`\n' >&2
-    exit 1
-  fi
-}
-
-install_daytona_secret() {
-  if [[ -z "$DAYTONA_CREDENTIAL_FILE_HOST" ]]; then
-    return 0
-  fi
-  log "installing Daytona credential file inside ${CONTAINER} (path only; value is not logged)"
-  podman exec "$CONTAINER" mkdir -p "$CONTAINER_DAYTONA_SECRET_DIR"
-  podman cp "$DAYTONA_CREDENTIAL_FILE_HOST" "${CONTAINER}:${CONTAINER_DAYTONA_CREDENTIAL_FILE}"
-  podman exec "$CONTAINER" chmod 0400 "$CONTAINER_DAYTONA_CREDENTIAL_FILE"
-}
-
-install_github_secret() {
-  if [[ -z "$GITHUB_CREDENTIAL_FILE_HOST" ]]; then
-    return 0
-  fi
-  log "installing GitHub credential file inside ${CONTAINER} (path only; value is not logged)"
-  podman exec "$CONTAINER" mkdir -p "$CONTAINER_DAYTONA_SECRET_DIR"
-  podman cp "$GITHUB_CREDENTIAL_FILE_HOST" "${CONTAINER}:${CONTAINER_GITHUB_CREDENTIAL_FILE}"
-  podman exec "$CONTAINER" chmod 0400 "$CONTAINER_GITHUB_CREDENTIAL_FILE"
 }
 
 install_opencode_auth() {
@@ -242,12 +129,8 @@ require_daytona_runtime() {
   if ! truthy "$RUN_DAYTONA"; then
     return 0
   fi
-  require_path "${CODEX_HOME}/auth.json"
-  require_path "${FLUE_REPO}/packages/runtime/dist/index.mjs"
-  require_path "${FLUE_REPO}/packages/runtime/dist/internal.mjs"
-  require_path "${FLUE_REPO}/node_modules/.pnpm/node_modules/@daytona/sdk/esm/index.js"
-  resolve_daytona_secret
-  resolve_github_secret
+  printf 'RUN_DAYTONA is unavailable: daytona-task-runner fails closed until a host-owned opaque provider broker is configured\n' >&2
+  exit 2
 }
 
 workspace_payload() {
@@ -453,10 +336,6 @@ seed_loom_pr_chain() {
 }
 
 seed_loom() {
-  if truthy "$DAYTONA_SEED_PR_CHAIN" || [[ "$DAYTONA_TASK_MODE" == "slack-pr-chain" ]]; then
-    seed_loom_pr_chain
-    return
-  fi
   seed_loom_default
 }
 
@@ -553,7 +432,6 @@ seed_local_worktree_base() {
   # workspace dir (serve's CWD), which loom initializes as an EMPTY git repo. Seed
   # it with the Slack app so local backends (codex/claude/opencode/cursor) have real
   # code to edit; without this they run against an empty tree and produce no diff.
-  # (The Daytona runner is unaffected — it clones DAYTONA_REPO_URL into its sandbox.)
   #
   # NOTE: this seeding papers over the per-workspace-worktree-provisioning gap
   # (loomcli FINDINGS #3). Set SEED_LOCAL_WORKTREE_BASE=0 for a deployment-faithful
@@ -582,23 +460,16 @@ seed_local_worktree_base() {
     '
 }
 
-stage_daytona_bundle_deps() {
-  # daytona-task-runner.ts has static top-level imports of @daytona/sdk and
-  # @flue/runtime (the bundled fallbacks). The canonical esbuild bundle inlines
-  # them (see scripts/rebuild-builtin-bundle.sh), but write_epic_runner_dist
-  # ships a raw .mjs copy whose node_modules only carries @loom/sdk, so the
-  # static imports fail to resolve at module load. Expose the mounted flue repo's
-  # packages on the runner's upward node_modules resolution path (/root) so the
-  # static imports resolve; the runtime still loads the real code via the
-  # DAYTONA_SDK_IMPORT / FLUE_RUNTIME_IMPORT dynamic imports.
+stage_builtin_bundle_deps() {
+  # Raw .mjs workflow copies need @flue/runtime on Node's upward resolution
+  # path. Provider SDKs are deliberately absent from task-runner resolution.
   if [[ ! -d "$FLUE_REPO" ]]; then
     return 0
   fi
-  log "staging bundle-only deps (@daytona/sdk, @flue/runtime) on the runner resolution path"
+  log "staging @flue/runtime on the runner resolution path"
   podman exec "$CONTAINER" sh -lc '
     set -e
-    mkdir -p /root/node_modules/@daytona /root/node_modules/@flue
-    ln -sfn /opt/flue-workspace/node_modules/.pnpm/node_modules/@daytona/sdk /root/node_modules/@daytona/sdk
+    mkdir -p /root/node_modules/@flue
     ln -sfn /opt/flue-workspace/packages/runtime /root/node_modules/@flue/runtime
   '
 }
@@ -670,23 +541,8 @@ main() {
     env
     "CODEX_HOME=${CONTAINER_CODEX_HOME}"
     "LOOM_CODEX_AUTH_FILE=${CONTAINER_CODEX_HOME}/auth.json"
-    "DAYTONA_CREDENTIAL_FILE=${CONTAINER_DAYTONA_CREDENTIAL_FILE}"
-    "GITHUB_TOKEN_FILE=${CONTAINER_GITHUB_CREDENTIAL_FILE}"
-    "DAYTONA_REPO_URL=${DAYTONA_REPO_URL}"
-    "DAYTONA_TASK_MODE=${DAYTONA_TASK_MODE}"
-    "LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES=${LOOM_DAYTONA_TASK_RUNNER_ENABLE_DEMO_MODES}"
-    "DAYTONA_BASE_BRANCH=${DAYTONA_BASE_BRANCH}"
-    "DAYTONA_PR_BRANCH_PREFIX=${DAYTONA_PR_BRANCH_PREFIX}"
-    "DAYTONA_PR_STACKED=${DAYTONA_PR_STACKED}"
-    "DAYTONA_PR_DRAFT=${DAYTONA_PR_DRAFT}"
-    "DAYTONA_GIT_AUTHOR_NAME=${DAYTONA_GIT_AUTHOR_NAME}"
-    "DAYTONA_GIT_AUTHOR_EMAIL=${DAYTONA_GIT_AUTHOR_EMAIL}"
-    "DAYTONA_API_URL=${DAYTONA_API_URL:-}"
-    "DAYTONA_TARGET=${DAYTONA_TARGET:-}"
-    "KEEP_DAYTONA_SANDBOX=${KEEP_DAYTONA_SANDBOX:-}"
     "FLUE_RUNTIME_IMPORT=${FLUE_RUNTIME_IMPORT}"
     "FLUE_RUNTIME_INTERNAL_IMPORT=${FLUE_RUNTIME_INTERNAL_IMPORT}"
-    "DAYTONA_SDK_IMPORT=${DAYTONA_SDK_IMPORT}"
     # local-task-runner opencode model pin (forwarded to `opencode run --model`).
     "LOOM_OPENCODE_MODEL=${LOOM_OPENCODE_MODEL}"
   )
@@ -747,7 +603,7 @@ main() {
 
   # Server-side workflow-build toolchain (register builtin/custom workflow versions over HTTP):
   # serve resolves @loom/sdk via LOOM_SDK_ROOT, @flue/runtime via FLUE_RUNTIME_ROOT, and the flue
-  # CLI via LOOM_REAL_FLUE_CMD_JSON (internal/workflows/workflows.go). The deploy image bakes these
+  # CLI via LOOM_REAL_FLUE_CMD_JSON (internal/infra/workflowdistribution/catalog_build.go). The deploy image bakes these
   # (Containerfile.loom-serve /opt/loom-sdk); this dev stack forwards them only when the caller
   # stages the toolchain (e.g. aether's unified-agents suite), leaving the default env unchanged.
   [[ -n "${LOOM_SDK_ROOT:-}" ]] && podman_args+=(-e "LOOM_SDK_ROOT=${LOOM_SDK_ROOT}")
@@ -784,13 +640,11 @@ main() {
   podman "${podman_args[@]}" >/dev/null
 
   wait_for_health
-  install_daytona_secret
-  install_github_secret
   install_opencode_auth
   install_cursor_agent
   seed_repo
   seed_loom
-  stage_daytona_bundle_deps
+  stage_builtin_bundle_deps
   seed_local_worktree_base
   register_epic_runner_workflow
 
@@ -798,9 +652,6 @@ main() {
   printf '%s\n' "UI:     ${BASE_URL}/ws/${WORKSPACE_ID}/agents/atlas"
   printf '%s\n' "UI:     ${BASE_URL}/ws/${WORKSPACE_ID}/agents/nova"
   printf '%s\n' "API:    ${BASE_URL}/api/workspaces/${WORKSPACE_ID}/issues"
-  if [[ "$DAYTONA_TASK_MODE" == "slack-pr-chain" ]]; then
-    printf '%s\n' "Run:    podman exec -w ${CONTAINER_DRIVER_WORKDIR} -e LOOM_CONFIG_DIR=/root/.loom-config -e LOOM_WORKSPACE=${WORKSPACE_ID} -e LOOM_FLEET_DB_ACTOR=loom-e2e ${CONTAINER} loom epic run --parent ${WORKSPACE_ID}-1 --runner daytona-task-runner --max-concurrency 2 --detach"
-  fi
   printf '%s\n' "Logs:   podman logs -f ${CONTAINER}"
   printf '%s\n' "Stop:   podman rm -f ${CONTAINER}"
 }

@@ -2,7 +2,6 @@ package leadcontrol
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -10,7 +9,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
 
 // Harness lead runtime metadata keys, persisted on the lead's orchestration
@@ -63,23 +62,24 @@ func HarnessRuntimeMetadataFromSession(session *domain.AgentSession) HarnessRunt
 	}
 }
 
-func UpdateHarnessRuntimeMetadata(ctx context.Context, st store.Store, workspace, sessionID string, runtime HarnessRuntimeMetadata) error {
-	if st == nil || st.AgentSessions() == nil {
-		return nil
+func UpdateHarnessRuntimeMetadata(
+	ctx context.Context,
+	sessionRuntime SessionRuntime,
+	workspace, sessionID string,
+	runtime HarnessRuntimeMetadata,
+) error {
+	if err := requireSessionRuntime(sessionRuntime, workspace, sessionID); err != nil {
+		return err
+	}
+	if sessionRuntime == nil {
+		return nil // explicit standalone mode
 	}
 	workspace = strings.TrimSpace(workspace)
 	sessionID = strings.TrimSpace(sessionID)
 	if workspace == "" || sessionID == "" {
 		return nil
 	}
-	session, err := st.AgentSessions().Get(ctx, workspace, sessionID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	metadata := cloneMetadata(session.Metadata)
+	metadata := map[string]string{}
 	if runtime.Provider != "" {
 		metadata[MetadataRuntimeProvider] = runtime.Provider
 	}
@@ -103,8 +103,16 @@ func UpdateHarnessRuntimeMetadata(ctx context.Context, st store.Store, workspace
 		metadata[MetadataRuntimeStatus] = runtime.Status
 		metadata[MetadataRuntimeStatusUpdated] = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	_, err = st.AgentSessions().Update(ctx, workspace, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
-	return err
+	var phase *string
+	if status := strings.TrimSpace(runtime.Status); status != "" {
+		phase = &status
+	}
+	return sessionRuntime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey:    workspace,
+		SessionID:       sessionID,
+		Phase:           phase,
+		MetadataUpserts: metadata,
+	})
 }
 
 func hasHarnessRuntimeMetadata(metadata map[string]string) bool {

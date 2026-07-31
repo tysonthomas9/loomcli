@@ -81,39 +81,39 @@ type Config struct {
 	// Artifacts is the owner-fenced capability API. Artifact handlers never
 	// fall back to Store.Artifacts; a nil API fails artifact operations closed.
 	Artifacts artifactsmodule.API
+	// DaytonaProvider is the host-owned opaque provider broker. It is reachable
+	// only after this module verifies the exact Daytona TaskRun lease/fence.
+	DaytonaProvider execution.DaytonaProviderBroker
 	// FleetBaseURL is the fleet-db HTTP base URL used to build issue
 	// backends for exact-task reads. TaskRun mutations use Execution ports.
 	FleetBaseURL string
-	// LocalSettingsDir is the app-local data directory containing sealed
-	// runtime credentials configured from Settings.
-	LocalSettingsDir string
 	// IssueBackends overrides the default fleet-db issue backend factory.
 	IssueBackends IssueBackendFactory
 }
 
 // Module serves the workspace-scoped task-run routes.
 type Module struct {
-	store            store.Store
-	execution        execution.TaskRunAPI
-	authorities      execution.TaskRunAuthorityResolver
-	artifacts        artifactsmodule.API
-	issueBackends    IssueBackendFactory
-	localSettingsDir string
-	ops              map[string]opHandler
-	now              func() time.Time
+	store           store.Store
+	execution       execution.TaskRunAPI
+	authorities     execution.TaskRunAuthorityResolver
+	artifacts       artifactsmodule.API
+	daytonaProvider execution.DaytonaProviderBroker
+	issueBackends   IssueBackendFactory
+	ops             map[string]opHandler
+	now             func() time.Time
 }
 
 // NewModule constructs the task-run API module. Nil-safe: with a nil store,
 // Register registers nothing.
 func NewModule(cfg Config) *Module {
 	m := &Module{
-		store:            cfg.Store,
-		execution:        cfg.Execution,
-		authorities:      cfg.Authorities,
-		artifacts:        cfg.Artifacts,
-		issueBackends:    cfg.IssueBackends,
-		localSettingsDir: strings.TrimSpace(cfg.LocalSettingsDir),
-		now:              func() time.Time { return time.Now().UTC() },
+		store:           cfg.Store,
+		execution:       cfg.Execution,
+		authorities:     cfg.Authorities,
+		artifacts:       cfg.Artifacts,
+		daytonaProvider: cfg.DaytonaProvider,
+		issueBackends:   cfg.IssueBackends,
+		now:             func() time.Time { return time.Now().UTC() },
 	}
 	m.ops = map[string]opHandler{
 		"get":                m.get,
@@ -122,7 +122,7 @@ func NewModule(cfg Config) *Module {
 		"heartbeat":          m.heartbeat,
 		"log-append":         m.logAppend,
 		"complete":           m.complete,
-		"runtime-credential": m.runtimeCredential,
+		"daytona-execute":    m.daytonaExecute,
 		"artifact-declare":   m.artifactDeclare,
 		"artifact-get":       m.artifactGet,
 		"artifact-list":      m.artifactList,

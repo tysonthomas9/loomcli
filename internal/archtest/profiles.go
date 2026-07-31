@@ -44,7 +44,13 @@ func analyzeProfiles(root string, matrix AnalysisMatrix, graph CapabilityGraph, 
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			results[i].violations, results[i].err = analyzeProfile(root, profile, graph, genericMechanisms)
+			results[i].err = withRepositoryProfileCache(profile, func(environment []string) error {
+				var err error
+				results[i].violations, err = analyzeProfileWithEnvironment(
+					root, profile, graph, genericMechanisms, environment,
+				)
+				return err
+			})
 		}()
 	}
 	wg.Wait()
@@ -59,16 +65,30 @@ func analyzeProfiles(root string, matrix AnalysisMatrix, graph CapabilityGraph, 
 }
 
 func analyzeProfile(root string, profile AnalysisProfile, graph CapabilityGraph, genericMechanisms []GenericMechanismUse) ([]string, error) {
-	violations, seenPackageErrors, err := analyzeProfileDependencyMetadata(root, profile, graph)
+	return analyzeProfileWithEnvironment(root, profile, graph, genericMechanisms, profileEnvironment(profile))
+}
+
+func analyzeProfileWithEnvironment(
+	root string,
+	profile AnalysisProfile,
+	graph CapabilityGraph,
+	genericMechanisms []GenericMechanismUse,
+	environment []string,
+) ([]string, error) {
+	violations, seenPackageErrors, err := analyzeProfileDependencyMetadata(root, profile, graph, environment)
 	if err != nil {
 		return nil, err
 	}
-	typedViolations, genericMechanismPatterns, err := analyzeProfileTypedRoots(root, profile, graph, seenPackageErrors)
+	typedViolations, genericMechanismPatterns, err := analyzeProfileTypedRoots(
+		root, profile, graph, seenPackageErrors, environment,
+	)
 	if err != nil {
 		return nil, err
 	}
 	violations = append(violations, typedViolations...)
-	genericMechanismViolations, err := analyzeProfileGenericMechanisms(root, profile, genericMechanismPatterns, genericMechanisms, seenPackageErrors)
+	genericMechanismViolations, err := analyzeProfileGenericMechanisms(
+		root, profile, genericMechanismPatterns, genericMechanisms, seenPackageErrors, environment,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -82,8 +102,12 @@ func analyzeProfileTypedRoots(
 	profile AnalysisProfile,
 	graph CapabilityGraph,
 	seenPackageErrors map[string]struct{},
+	environment []string,
 ) ([]string, []string, error) {
-	typedRoots, err := packages.Load(profilePackagesConfig(root, profile, profileTypedRootLoadMode), "./...")
+	typedRoots, err := packages.Load(
+		profilePackagesConfigWithEnvironment(root, profile, profileTypedRootLoadMode, environment),
+		"./...",
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -106,12 +130,13 @@ func analyzeProfileGenericMechanisms(
 	candidatePatterns []string,
 	policies []GenericMechanismUse,
 	seenPackageErrors map[string]struct{},
+	environment []string,
 ) ([]string, error) {
 	if len(candidatePatterns) == 0 {
 		return nil, nil
 	}
 	packagesWithCandidates, err := packages.Load(
-		profilePackagesConfig(root, profile, profileGenericMechanismLoadMode),
+		profilePackagesConfigWithEnvironment(root, profile, profileGenericMechanismLoadMode, environment),
 		candidatePatterns...,
 	)
 	if err != nil {
@@ -139,8 +164,12 @@ func analyzeProfileDependencyMetadata(
 	root string,
 	profile AnalysisProfile,
 	graph CapabilityGraph,
+	environment []string,
 ) ([]string, map[string]struct{}, error) {
-	dependencyRoots, err := packages.Load(profilePackagesConfig(root, profile, profileDependencyLoadMode), "./...")
+	dependencyRoots, err := packages.Load(
+		profilePackagesConfigWithEnvironment(root, profile, profileDependencyLoadMode, environment),
+		"./...",
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -187,10 +216,19 @@ const profileDependencyLoadMode packages.LoadMode = packages.NeedName |
 	packages.NeedDeps
 
 func profilePackagesConfig(root string, profile AnalysisProfile, mode packages.LoadMode) *packages.Config {
+	return profilePackagesConfigWithEnvironment(root, profile, mode, profileEnvironment(profile))
+}
+
+func profilePackagesConfigWithEnvironment(
+	root string,
+	profile AnalysisProfile,
+	mode packages.LoadMode,
+	environment []string,
+) *packages.Config {
 	return &packages.Config{
 		Mode:       mode,
 		Dir:        root,
-		Env:        profileEnvironment(profile),
+		Env:        environment,
 		Tests:      true,
 		BuildFlags: profileBuildFlags(profile),
 	}

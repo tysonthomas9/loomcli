@@ -86,6 +86,53 @@ func TestRegisterFlueDriverStagesNativeArtifactAndActivates(t *testing.T) {
 	}
 }
 
+func TestStageFlueDriverBundleIsPersistenceFreeAndPromotesIdempotently(t *testing.T) {
+	root := t.TempDir()
+	writeFlueDist(t, root, "custom-flow", "staged")
+
+	staged, err := StageFlueDriverBundle(RegisterFlueOptions{
+		WorkspaceKey: "TEST",
+		WorkDir:      root,
+		DistPath:     "dist",
+		DriverName:   "custom-flow",
+		SourceRef:    "file:///tmp/custom-flow#sha256:source",
+		SourceDigest: "sha256:07ba20a2ad84dcc940d3a7adeb55288a8b76f5a5c97aeb12fe783d44567380b5",
+		Trust:        domain.DriverTrustUntrusted,
+	})
+	if err != nil {
+		t.Fatalf("StageFlueDriverBundle: %v", err)
+	}
+	t.Cleanup(staged.Cleanup)
+
+	if staged.DriverID != "custom-flow" || staged.VersionID == "" ||
+		staged.BundleRef == "" || staged.BundleDigest == "" || staged.Runtime != RuntimeFlueNode {
+		t.Fatalf("staged registration = %+v, want content-addressed custom-flow metadata", staged)
+	}
+	if _, ok := staged.CatalogManifest[ManifestTrustLevelKey]; ok {
+		t.Fatalf("catalog manifest = %+v, must not expose trust selection", staged.CatalogManifest)
+	}
+	if got := staged.Bundle.Manifest[ManifestTrustLevelKey]; got != string(domain.DriverTrustUntrusted) {
+		t.Fatalf("bundle trust = %q, want untrusted", got)
+	}
+	if _, err := os.Stat(staged.Bundle.Root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("final bundle exists before Promote, stat err = %v", err)
+	}
+
+	if err := staged.Promote(); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(staged.Bundle.Root, "dist", "server.mjs")); err != nil {
+		t.Fatalf("promoted server.mjs: %v", err)
+	}
+	if err := staged.Promote(); err != nil {
+		t.Fatalf("second Promote: %v", err)
+	}
+	staged.Cleanup()
+	if _, err := os.Stat(filepath.Join(staged.Bundle.Root, "manifest.json")); err != nil {
+		t.Fatalf("Cleanup removed promoted bundle: %v", err)
+	}
+}
+
 func TestRegisterFlueDriverNewDigestCreatesNewVersion(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

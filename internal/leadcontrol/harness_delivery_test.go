@@ -26,7 +26,7 @@ func TestDeliverLeadMessageToHarnessLeadDeliversWhenQuiet(t *testing.T) {
 	installFakeHarnessConversation(t, "lead-session", fake)
 
 	const message = "Task TASK-1 completed under the active epic-runner workflow."
-	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", message)
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("DeliverLeadMessage() error = %v", err)
 	}
@@ -59,7 +59,7 @@ func TestDeliverCurrentAssignmentToHarnessLeadUsesBracketedPaste(t *testing.T) {
 	fake := newFakeHarnessConversation()
 	installFakeHarnessConversation(t, "lead-session", fake)
 
-	result, err := DeliverCurrentAssignment(ctx, st, "WS", "nova")
+	result, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverCurrentAssignment() error = %v", err)
 	}
@@ -89,7 +89,7 @@ func TestHarnessDeliveryRegistryMissStaysPending(t *testing.T) {
 	setHarnessRuntimeMetadata(t, st, RuntimeStatusIdle)
 
 	const message = "Task TASK-1 completed."
-	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", message)
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("DeliverLeadMessage() error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestHarnessDeliveryWaitsForTurnInFlightThenDrains(t *testing.T) {
 	handle.markTurnStarted()
 
 	const message = "Task TASK-1 completed."
-	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", message)
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("DeliverLeadMessage() error = %v", err)
 	}
@@ -130,7 +130,7 @@ func TestHarnessDeliveryWaitsForTurnInFlightThenDrains(t *testing.T) {
 	}
 
 	handle.markTurnDone()
-	result, err = DeliverPendingLeadMessages(ctx, st, "WS", "nova")
+	result, err = deliverPendingLeadMessagesOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverPendingLeadMessages() error = %v", err)
 	}
@@ -151,7 +151,7 @@ func TestHarnessDeliveryQuietGateHoldsRecentOutput(t *testing.T) {
 	fake.setSnapshot(wrapper.Snapshot{LastOutputAt: time.Now()})
 	installFakeHarnessConversation(t, "lead-session", fake)
 
-	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", "Task TASK-1 completed.")
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", "Task TASK-1 completed.")
 	if err != nil {
 		t.Fatalf("DeliverLeadMessage() error = %v", err)
 	}
@@ -175,7 +175,7 @@ func TestHarnessDeliveryFailedSnapshotStaysPending(t *testing.T) {
 	fake.setSnapshot(wrapper.Snapshot{Status: wrapper.StatusBlockedByCost, LastOutputAt: time.Now().Add(-time.Minute)})
 	installFakeHarnessConversation(t, "lead-session", fake)
 
-	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", "Task TASK-1 completed.")
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", "Task TASK-1 completed.")
 	if err != nil {
 		t.Fatalf("DeliverLeadMessage() error = %v", err)
 	}
@@ -203,7 +203,7 @@ func TestHarnessDeliveryUncontrolledSessionUnsupported(t *testing.T) {
 		t.Fatalf("seed metadata: %v", err)
 	}
 
-	result, err := DeliverLeadMessage(ctx, st, "WS", "nova", "Task TASK-1 completed.")
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", "Task TASK-1 completed.")
 	if err != nil {
 		t.Fatalf("DeliverLeadMessage() error = %v", err)
 	}
@@ -364,7 +364,7 @@ func createAssignedLeadSessionWithBackend(t *testing.T, st store.Store, backend 
 
 func setHarnessRuntimeMetadata(t *testing.T, st store.Store, status string) {
 	t.Helper()
-	if err := UpdateHarnessRuntimeMetadata(context.Background(), st, "WS", "lead-session", HarnessRuntimeMetadata{
+	if err := UpdateHarnessRuntimeMetadata(context.Background(), testSessionRuntime(st), "WS", "lead-session", HarnessRuntimeMetadata{
 		Provider:      "claude",
 		HarnessName:   HarnessNameClaudeCode,
 		ChatSessionID: "chat-1",

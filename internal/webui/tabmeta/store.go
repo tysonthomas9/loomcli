@@ -34,23 +34,27 @@ var validSessionName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // its backing shell did not. AttachedClients>1 means the same session is
 // being viewed by multiple WebSocket clients concurrently.
 type TabMetadata struct {
-	SessionName     string      `json:"session_name"`
-	Workspace       string      `json:"workspace,omitempty"`
-	Label           string      `json:"label"`
-	Notes           string      `json:"notes"`
-	SortOrder       int         `json:"sort_order"`
-	Pinned          bool        `json:"pinned"`
-	IssueID         string      `json:"issue_id,omitempty"`
-	Kind            string      `json:"kind,omitempty"`
-	AgentID         string      `json:"agent_id,omitempty"`
-	Role            string      `json:"role,omitempty"`
-	Backend         string      `json:"backend,omitempty"`
-	Writable        bool        `json:"writable,omitempty"`
-	Launch          *LaunchSpec `json:"launch,omitempty"`
-	CreatedAt       time.Time   `json:"created_at"`
-	UpdatedAt       time.Time   `json:"updated_at"`
-	PTYAlive        bool        `json:"pty_alive"`
-	AttachedClients int         `json:"attached_clients"`
+	SessionName                  string      `json:"session_name"`
+	Workspace                    string      `json:"workspace,omitempty"`
+	Label                        string      `json:"label"`
+	Notes                        string      `json:"notes"`
+	SortOrder                    int         `json:"sort_order"`
+	Pinned                       bool        `json:"pinned"`
+	IssueID                      string      `json:"issue_id,omitempty"`
+	Kind                         string      `json:"kind,omitempty"`
+	AgentID                      string      `json:"agent_id,omitempty"`
+	Role                         string      `json:"role,omitempty"`
+	Backend                      string      `json:"backend,omitempty"`
+	InteractionSessionID         string      `json:"interaction_session_id,omitempty"`
+	InteractionTerminalID        string      `json:"interaction_terminal_id,omitempty"`
+	InteractionLeaseID           string      `json:"interaction_lease_id,omitempty"`
+	InteractionLeaseFencingToken int64       `json:"interaction_lease_fencing_token,omitempty"`
+	Writable                     bool        `json:"writable,omitempty"`
+	Launch                       *LaunchSpec `json:"launch,omitempty"`
+	CreatedAt                    time.Time   `json:"created_at"`
+	UpdatedAt                    time.Time   `json:"updated_at"`
+	PTYAlive                     bool        `json:"pty_alive"`
+	AttachedClients              int         `json:"attached_clients"`
 }
 
 // LaunchSpec is the explicit command contract for a terminal session. Agent
@@ -250,18 +254,22 @@ func (s *Store) Set(ctx context.Context, meta *TabMetadata) error {
 		pinnedStr = "true"
 	}
 	fields := map[string]interface{}{
-		"label":      meta.Label,
-		"notes":      meta.Notes,
-		"sort_order": strconv.Itoa(meta.SortOrder),
-		"pinned":     pinnedStr,
-		"issue_id":   meta.IssueID,
-		"kind":       meta.Kind,
-		"agent_id":   meta.AgentID,
-		"role":       meta.Role,
-		"backend":    meta.Backend,
-		"writable":   strconv.FormatBool(meta.Writable),
-		"created_at": meta.CreatedAt.UTC().Format(time.RFC3339),
-		"updated_at": meta.UpdatedAt.UTC().Format(time.RFC3339),
+		"label":                           meta.Label,
+		"notes":                           meta.Notes,
+		"sort_order":                      strconv.Itoa(meta.SortOrder),
+		"pinned":                          pinnedStr,
+		"issue_id":                        meta.IssueID,
+		"kind":                            meta.Kind,
+		"agent_id":                        meta.AgentID,
+		"role":                            meta.Role,
+		"backend":                         meta.Backend,
+		"interaction_session_id":          meta.InteractionSessionID,
+		"interaction_terminal_id":         meta.InteractionTerminalID,
+		"interaction_lease_id":            meta.InteractionLeaseID,
+		"interaction_lease_fencing_token": strconv.FormatInt(meta.InteractionLeaseFencingToken, 10),
+		"writable":                        strconv.FormatBool(meta.Writable),
+		"created_at":                      meta.CreatedAt.UTC().Format(time.RFC3339),
+		"updated_at":                      meta.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 	if meta.Launch != nil {
 		raw, err := json.Marshal(meta.Launch)
@@ -421,15 +429,18 @@ func (s *Store) ListIssueSessionMap(ctx context.Context) (map[string][]string, e
 // parseMetadata converts a Redis hash map to a TabMetadata struct.
 func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabMetadata, error) {
 	meta := &TabMetadata{
-		SessionName: sessionName,
-		Workspace:   workspace,
-		Label:       vals["label"],
-		Notes:       vals["notes"],
-		IssueID:     vals["issue_id"],
-		Kind:        vals["kind"],
-		AgentID:     vals["agent_id"],
-		Role:        vals["role"],
-		Backend:     vals["backend"],
+		SessionName:           sessionName,
+		Workspace:             workspace,
+		Label:                 vals["label"],
+		Notes:                 vals["notes"],
+		IssueID:               vals["issue_id"],
+		Kind:                  vals["kind"],
+		AgentID:               vals["agent_id"],
+		Role:                  vals["role"],
+		Backend:               vals["backend"],
+		InteractionSessionID:  vals["interaction_session_id"],
+		InteractionTerminalID: vals["interaction_terminal_id"],
+		InteractionLeaseID:    vals["interaction_lease_id"],
 	}
 
 	if so, ok := vals["sort_order"]; ok {
@@ -445,6 +456,12 @@ func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabM
 	if writable, ok := vals["writable"]; ok {
 		meta.Writable = writable == "true"
 	}
+	if raw, ok := vals["interaction_lease_fencing_token"]; ok {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err == nil {
+			meta.InteractionLeaseFencingToken = value
+		}
+	}
 	if raw, ok := vals["launch"]; ok && strings.TrimSpace(raw) != "" {
 		var spec LaunchSpec
 		if err := json.Unmarshal([]byte(raw), &spec); err != nil {
@@ -453,6 +470,11 @@ func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabM
 		meta.Launch = &spec
 	}
 
+	parseMetadataTimestamps(meta, vals)
+	return meta, nil
+}
+
+func parseMetadataTimestamps(meta *TabMetadata, vals map[string]string) {
 	if ca, ok := vals["created_at"]; ok {
 		t, err := time.Parse(time.RFC3339, ca)
 		if err == nil {
@@ -466,6 +488,4 @@ func parseMetadata(workspace, sessionName string, vals map[string]string) (*TabM
 			meta.UpdatedAt = t
 		}
 	}
-
-	return meta, nil
 }

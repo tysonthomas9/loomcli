@@ -11,5 +11,6 @@ var (
 	ErrVersionNotValidated   = errors.New("workflow catalog: version validation has not passed")
 	ErrVersionNotApproved    = errors.New("workflow catalog: version is not approved")
 	ErrStaleRevision         = errors.New("workflow catalog: stale driver revision")
+	ErrAuthoringConflict     = errors.New("workflow catalog: authoring intent conflicts with durable state")
 	ErrInvalidPersistedState = errors.New("workflow catalog: invalid persisted state")
 )

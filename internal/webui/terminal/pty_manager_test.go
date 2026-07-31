@@ -2,9 +2,11 @@ package terminal
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -63,6 +65,41 @@ func TestTerminalSpawnEnv_StripsStaleGeometryAndOverridesTERM(t *testing.T) {
 	}
 	if !strings.Contains(joined, termEnv) {
 		t.Fatalf("terminalSpawnEnv() missing %q: %q", termEnv, joined)
+	}
+}
+
+func TestTerminalSpawnEnvFiltersAmbientCredentialsAndOverlayIsExact(t *testing.T) {
+	env := terminalSpawnEnv([]string{
+		"PATH=/usr/bin",
+		"CODEX_HOME=/tmp/codex",
+		"GITHUB_TOKEN=forge-secret",
+		"OPENAI_API_KEY=provider-secret",
+		"LOOM_FLEET_DB_API_KEY=internal-secret",
+		"LOOM_DAEMON_SOCKET=/tmp/daemon.sock",
+	})
+	env = overlayTerminalEnv(env, map[string]string{
+		"LOOM_AGENT_NAME":         "docs",
+		"LOOM_SESSION_ID":         "session-1",
+		"LOOM_SESSION_AUTH_TOKEN": "session-secret",
+		"LOOM_FLEET_DB_API_KEY":   "forged-internal-secret",
+		"LOOM_ARBITRARY":          "not-allowed",
+	})
+	joined := strings.Join(env, "\n")
+	for _, wanted := range []string{
+		"PATH=/usr/bin", "CODEX_HOME=/tmp/codex", "LOOM_AGENT_NAME=docs",
+		"LOOM_SESSION_ID=session-1", "LOOM_SESSION_AUTH_TOKEN=session-secret",
+	} {
+		if !strings.Contains(joined, wanted) {
+			t.Errorf("terminal env missing %q: %q", wanted, joined)
+		}
+	}
+	for _, forbidden := range []string{
+		"forge-secret", "provider-secret", "internal-secret", "forged-internal-secret",
+		"LOOM_DAEMON_SOCKET", "LOOM_ARBITRARY",
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("terminal env kept %q: %q", forbidden, joined)
+		}
 	}
 }
 
@@ -279,6 +316,135 @@ func TestExplicitKillTerminatesImmediately(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Errorf("output channel did not close after Kill")
+	}
+}
+
+func TestExplicitKillFailsClosedUntilBeforeKillLifecycleConverges(t *testing.T) {
+	m := newTestManager(t)
+	key := SessionKey{Workspace: "ws1", Name: "agent-shell"}
+	if _, _, err := m.AttachSession(
+		key,
+		80,
+		24,
+		&LaunchSpec{Argv: []string{"-c", "cat"}},
+	); err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	sentinel := errors.New("durable lifecycle unavailable")
+	var calls int
+	m.SetBeforeKill(func(_ context.Context, got SessionKey, reason string) error {
+		calls++
+		if got != key || reason != ExitReasonKilled {
+			t.Fatalf("before-kill identity = %+v reason=%q", got, reason)
+		}
+		return sentinel
+	})
+	if err := m.Kill(key); !errors.Is(err, sentinel) {
+		t.Fatalf("Kill error = %v, want %v", err, sentinel)
+	}
+	if calls != 1 || !m.HasSession(key) {
+		t.Fatalf("failed lifecycle convergence calls=%d live=%t", calls, m.HasSession(key))
+	}
+
+	m.SetBeforeKill(func(context.Context, SessionKey, string) error {
+		calls++
+		return nil
+	})
+	if err := m.Kill(key); err != nil {
+		t.Fatalf("Kill after convergence: %v", err)
+	}
+	if calls != 2 || m.HasSession(key) {
+		t.Fatalf("successful lifecycle convergence calls=%d live=%t", calls, m.HasSession(key))
+	}
+}
+
+func TestNaturalExitCleansLocalStateAndRetriesDurableConvergence(t *testing.T) {
+	m := newTestManager(t)
+	key := SessionKey{Workspace: "ws1", Name: "short-lived-agent"}
+	sentinel := errors.New("fleet unavailable")
+	converged := make(chan struct{}, 1)
+	var calls int
+	m.SetBeforeKill(func(_ context.Context, got SessionKey, reason string) error {
+		calls++
+		if got != key || reason != ExitReasonExited {
+			t.Fatalf("natural-exit hook identity=%+v reason=%q", got, reason)
+		}
+		if m.HasSession(key) {
+			t.Fatal("natural-exit hook ran before process-local cleanup")
+		}
+		if calls == 1 {
+			return sentinel
+		}
+		converged <- struct{}{}
+		return nil
+	})
+	if _, _, err := m.AttachSession(
+		key,
+		80,
+		24,
+		&LaunchSpec{Argv: []string{"-c", "exit 0"}},
+	); err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	waitUntil(t, func() bool { return !m.HasSession(key) }, time.Second,
+		"natural exit retained dead process-local session")
+	select {
+	case <-converged:
+	case <-time.After(2 * time.Second):
+		t.Fatal("natural-exit durable convergence was not retried")
+	}
+	if calls != 2 || !m.SessionClosed(key) {
+		t.Fatalf("natural-exit calls=%d closed=%t", calls, m.SessionClosed(key))
+	}
+	if err := m.Kill(key); err != nil {
+		t.Fatalf("idempotent kill after natural exit: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("ended tombstone re-ran durable hook: calls=%d", calls)
+	}
+}
+
+func TestExplicitKillCanRepairAfterNaturalExitRetriesExhaust(t *testing.T) {
+	m := newTestManager(t)
+	key := SessionKey{Workspace: "ws1", Name: "retry-exhaustion-agent"}
+	var calls atomic.Int32
+	m.SetBeforeKill(func(context.Context, SessionKey, string) error {
+		calls.Add(1)
+		return errors.New("fleet unavailable")
+	})
+	if _, _, err := m.AttachSession(
+		key,
+		80,
+		24,
+		&LaunchSpec{Argv: []string{"-c", "exit 0"}},
+	); err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	waitUntil(t, func() bool { return !m.HasSession(key) }, time.Second,
+		"natural exit retained dead process-local session")
+	waitUntil(t, func() bool {
+		return calls.Load() == int32(beforeKillRetryAttempts)
+	},
+		4*time.Second, "natural-exit retries did not reach bounded exhaustion")
+
+	m.SetBeforeKill(func(_ context.Context, got SessionKey, reason string) error {
+		calls.Add(1)
+		if got != key || reason != ExitReasonKilled {
+			t.Fatalf("repair identity=%+v reason=%q", got, reason)
+		}
+		return nil
+	})
+	if err := m.Kill(key); err != nil {
+		t.Fatalf("explicit repair after retry exhaustion: %v", err)
+	}
+	if got := calls.Load(); got != int32(beforeKillRetryAttempts+1) {
+		t.Fatalf("repair calls=%d, want %d", got, beforeKillRetryAttempts+1)
+	}
+	if err := m.Kill(key); err != nil {
+		t.Fatalf("idempotent kill after repair: %v", err)
+	}
+	if got := calls.Load(); got != int32(beforeKillRetryAttempts+1) {
+		t.Fatalf("converged tombstone re-ran hook: calls=%d", got)
 	}
 }
 
@@ -533,5 +699,38 @@ func TestShutdown_Idempotent(t *testing.T) {
 	}
 	if err := m.Shutdown(); err != nil {
 		t.Errorf("second Shutdown: %v, want nil", err)
+	}
+}
+
+func TestShutdownRetriesBeforeKillFailureWithoutLosingLiveSession(t *testing.T) {
+	m := NewPTYManager("cat", 0, t.TempDir())
+	key := SessionKey{Workspace: "ws1", Name: "agent-shell"}
+	if _, _, err := m.AttachSession(
+		key,
+		80,
+		24,
+		&LaunchSpec{Argv: []string{"-c", "cat"}},
+	); err != nil {
+		t.Fatalf("AttachSession: %v", err)
+	}
+	sentinel := errors.New("fleet unavailable")
+	m.SetBeforeKill(func(_ context.Context, got SessionKey, reason string) error {
+		if got != key || reason != ExitReasonShutdown {
+			t.Fatalf("shutdown hook identity=%+v reason=%q", got, reason)
+		}
+		return sentinel
+	})
+	if err := m.Shutdown(); !errors.Is(err, sentinel) {
+		t.Fatalf("first Shutdown error = %v, want %v", err, sentinel)
+	}
+	if !m.HasSession(key) {
+		t.Fatal("failed shutdown convergence removed the live PTY")
+	}
+	m.SetBeforeKill(func(context.Context, SessionKey, string) error { return nil })
+	if err := m.Shutdown(); err != nil {
+		t.Fatalf("retry Shutdown: %v", err)
+	}
+	if m.HasSession(key) {
+		t.Fatal("successful shutdown convergence retained the PTY")
 	}
 }

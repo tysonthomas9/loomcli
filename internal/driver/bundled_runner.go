@@ -15,14 +15,35 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/driver/daytonahost"
 	"github.com/tysonthomas9/loomcli/internal/driver/sandbox"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 )
 
-// DaytonaTaskRunnerEntrypoint is the bundled Daytona task runner entrypoint. It
-// provisions a Daytona sandbox, clones the repo, and runs the agent inside it
-// (host-side harness driving the sandbox). Selected for the daemon leaf via
-// LOOM_DAEMON_LEAF_RUNNER=daytona-task-runner.
+// DaytonaTaskRunnerEntrypoint is the provider-blind Daytona task runner. It
+// submits a secret-free intent through the lease-authenticated TaskRun facade;
+// loom serve's host-owned broker alone provisions the sandbox and resolves
+// provider credentials. A standalone daemon leaf cannot invoke that broker.
 const DaytonaTaskRunnerEntrypoint = "daytona-task-runner"
+
+// DaytonaProviderHostOptions is host-only process configuration. Credentials
+// are written to the launcher over stdin and are never placed in argv or env.
+type DaytonaProviderHostOptions = daytonahost.Options
+
+// RunDaytonaProviderHost preserves Driver's public host-adapter facade while
+// delegating the credential-contained provider protocol to its cohesive child
+// package. Driver retains the canonical Node and subprocess-env policies.
+func RunDaytonaProviderHost(
+	ctx context.Context,
+	opts DaytonaProviderHostOptions,
+) (execution.DaytonaProviderResult, error) {
+	inherited := os.Environ()
+	return daytonahost.Run(ctx, opts, daytonahost.Runtime{
+		NodePath:     processNodePath(""),
+		BaseEnv:      scopedSubprocessBaseEnv(inherited),
+		InheritedEnv: inherited,
+	})
+}
 
 // BundledRunnerOptions configures a one-shot, in-place invocation of a bundled
 // builtin task runner (Phase U). Unlike the full HostBridgeTaskExecutor path, it does
@@ -54,11 +75,12 @@ type BundledRunnerOptions struct {
 	Stderr io.Writer
 }
 
-// RunBundledTaskRunner runs a bundled task runner (local-task-runner by default, or the
-// daytona-task-runner via opts.Entrypoint) against an existing worktree and returns its raw
-// result JSON (transcript_entries + top-level usage + patch, etc.). It reuses the same Node
-// launcher the driver host-bridge uses, so the daemon leaf and the driver share ONE
-// execution path.
+// RunBundledTaskRunner runs a bundled task runner (local-task-runner by default)
+// against an existing worktree and returns its raw result JSON
+// (transcript_entries + top-level usage + patch, etc.). A Daytona entrypoint can
+// run only when the invocation already carries a real TaskRun facade and exact
+// lease/fence credentials; the standalone daemon leaf therefore fails closed.
+// The launcher remains shared by the daemon leaf and the driver host bridge.
 func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.RawMessage, error) {
 	if strings.TrimSpace(opts.ServerPath) == "" {
 		return nil, fmt.Errorf("bundled runner: ServerPath is required")
@@ -108,13 +130,13 @@ func RunBundledTaskRunner(ctx context.Context, opts BundledRunnerOptions) (json.
 	return json.RawMessage(append([]byte{}, payload...)), nil
 }
 
-// buildLeafRunnerEnv assembles the environment for the bundled Node launcher: the host
-// environment plus the LOOM_TASK_RUNNER_* wiring the runner reads. The host env is passed
-// through as-is — the daemon supervisor already scrubs it via cli.FilteredEnv
-// (allowlist/blocklist) before spawning this leaf, so this deliberately does NOT re-run the
-// host-bridge's scopedSubprocessBaseEnv filtering.
+// buildLeafRunnerEnv assembles the environment for the bundled Node launcher.
+// Every launch path applies the same trusted-local filter at the final child
+// boundary; callers are not trusted to have inherited a previously scrubbed
+// environment. In particular, forge and control-plane credentials never reach
+// the Node launcher.
 func buildLeafRunnerEnv(opts BundledRunnerOptions, entrypoint, requestJSON string) []string {
-	env := append([]string{}, os.Environ()...)
+	env := localTaskRunnerBaseEnv(os.Environ())
 	env = append(env,
 		"LOOM_TASK_RUNNER_SERVER_PATH="+opts.ServerPath,
 		"LOOM_TASK_RUNNER_BUNDLE_ROOT="+filepath.Dir(opts.ServerPath),

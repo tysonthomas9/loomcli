@@ -14,6 +14,7 @@ import (
 type Service struct {
 	reader    Reader
 	lifecycle VersionLifecycleStore
+	authoring AuthoringStore
 	admission *authority.Admission
 }
 
@@ -23,6 +24,13 @@ var _ API = (*Service)(nil)
 // during the read-seam rollout; all commands fail closed as unavailable.
 func New(reader Reader, lifecycle VersionLifecycleStore, admission *authority.Admission) *Service {
 	return &Service{reader: reader, lifecycle: lifecycle, admission: admission}
+}
+
+// NewWithAuthoring constructs the complete catalog including the Phase 5
+// atomic authoring port. New remains available for read/lifecycle-only
+// profiles and makes authoring fail closed.
+func NewWithAuthoring(reader Reader, lifecycle VersionLifecycleStore, authoring AuthoringStore, admission *authority.Admission) *Service {
+	return &Service{reader: reader, lifecycle: lifecycle, authoring: authoring, admission: admission}
 }
 
 // GetDriver resolves an exact driver ID first, then a driver name for legacy

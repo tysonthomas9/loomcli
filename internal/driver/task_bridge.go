@@ -168,13 +168,6 @@ type bridgeArtifact struct {
 	Metadata           map[string]string `json:"metadata"`
 }
 
-type flueTaskSession struct {
-	SessionID     string
-	Metadata      map[string]string
-	cancel        context.CancelFunc
-	heartbeatDone <-chan struct{}
-}
-
 func (e HostBridgeTaskExecutor) PreflightTaskProvider(ctx context.Context, opts TaskRunRequestOptions) (TaskRunRequestOptions, error) {
 	if !taskProviderIsNoop(opts.ProviderProfile) && strings.TrimSpace(e.APIBaseURL) == "" {
 		return opts, fmt.Errorf("task runner requires the loom serve task-run API URL: %w", domain.ErrInvalid)
@@ -269,23 +262,10 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return LocalTaskExecutor{}.ExecuteTask(ctx, req)
 	}
 
-	session, err := e.startFlueTaskSession(ctx, req)
-	if err != nil {
-		return TaskExecResult{}, err
-	}
-	var runner *bridgeTaskRunnerResult
-	defer func() {
-		if session != nil {
-			if finishErr := e.finishFlueTaskSession(ctx, req, session, result, runner, err); finishErr != nil && err == nil {
-				err = finishErr
-			}
-		}
-	}()
 	runnerResult, err := runBridge()
 	if err != nil {
 		return TaskExecResult{}, err
 	}
-	runner = &runnerResult
 	// Pre-persist validation gate (§4.2): the decoded runner result must be a
 	// non-empty terminal result with a zero exit when completed. An invalid
 	// result fails closed (invalid_task_result, exit 1) and NEVER reaches the
@@ -304,13 +284,13 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 			"worktree_source": "local_workspace_state",
 		})
 	}
-	if artifacts := runner.finalizedArtifacts(); len(artifacts) > 0 {
+	if artifacts := runnerResult.finalizedArtifacts(); len(artifacts) > 0 {
 		result, err = e.registerRunnerArtifacts(ctx, req, artifacts, result)
 		if err != nil {
 			return TaskExecResult{}, err
 		}
 	}
-	result, err = e.persistRunnerOutputArtifacts(ctx, req, session, runnerResult, result)
+	result, err = e.persistRunnerOutputArtifacts(ctx, req, runnerResult, result)
 	if err != nil {
 		return TaskExecResult{}, err
 	}
@@ -760,16 +740,10 @@ func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []
 	if err != nil {
 		return nil
 	}
-	out := make([]string, 0, 2)
+	out := make([]string, 0, 1)
 	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" &&
 		!envHasAny(existing, "LOOM_OPENCODE_MODEL") {
 		out = append(out, "LOOM_OPENCODE_MODEL="+model)
-	}
-	if !envHasAny(existing, "GITHUB_TOKEN", "GH_TOKEN") {
-		token, err := runtimesettings.UnsealRuntimeCredential(dir, settings, runtimesettings.RuntimeCredentialProviderGitHub)
-		if err == nil && strings.TrimSpace(token) != "" {
-			out = append(out, "GITHUB_TOKEN="+strings.TrimSpace(token))
-		}
 	}
 	return out
 }

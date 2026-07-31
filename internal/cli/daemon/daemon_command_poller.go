@@ -433,12 +433,10 @@ func (d *Daemon) handleAgentCommand(cmd *domain.AgentCommand) bool {
 		return false
 	}
 
-	if !d.reassertAgentCommandLifecycle(cmd, resp) {
-		// Projection is part of the command's durable terminal boundary. Leave
-		// the row Acked so a replacement daemon can recover it; completing first
-		// would make a stale Agent projection permanently unpollable.
-		return false
-	}
+	// The local reconciler intent is synchronized before the durable command
+	// becomes terminal. The legacy Agent projection is deliberately untouched;
+	// Execution owns observed runtime state.
+	d.reassertAgentCommandLifecycle(cmd, resp)
 	update := agentCommandTerminalUpdate(resp, recoveryErrorClass)
 	completed := d.completeAgentCommand(cmd, update, &authority)
 	if completed {
@@ -764,65 +762,42 @@ func (d *Daemon) completeAgentCommand(
 	}
 }
 
-// reassertAgentCommandLifecycle closes the queue-first publication race before
-// the command becomes terminal. Success publishes the requested postcondition;
-// failure publishes the runtime state that actually remains. It returns false
-// only when shutdown interrupts projection, leaving the command Acked for a
-// replacement daemon to recover.
-func (d *Daemon) reassertAgentCommandLifecycle(cmd *domain.AgentCommand, resp DaemonControlResponse) bool {
-	state, desired, ok := d.agentCommandLifecycleProjection(cmd, resp)
+// reassertAgentCommandLifecycle synchronizes daemon-local desired intent before
+// the durable command becomes terminal. AgentCommand remains the durable
+// accepted transition; this path never writes the legacy Agent runtime
+// projection.
+func (d *Daemon) reassertAgentCommandLifecycle(cmd *domain.AgentCommand, resp DaemonControlResponse) {
+	desired, ok := d.agentCommandLifecycleProjection(cmd, resp)
 	if !ok {
-		return true
+		return
 	}
-	for {
-		err := d.markAgentLifecycleAccepted(cmd.TargetAgentID, state, desired)
-		if err == nil {
-			return true
-		}
-		if errors.Is(err, domain.ErrNotFound) {
-			slog.Info("agent removed before lifecycle projection converged",
-				"agent", cmd.TargetAgentID,
-				"command_id", cmd.CommandID)
-			return true
-		}
-		slog.Warn("failed to publish completed agent lifecycle; retrying",
-			"agent", cmd.TargetAgentID,
-			"command_id", cmd.CommandID,
-			"err", err)
-		timer := time.NewTimer(agentCommandRetryDelay)
-		select {
-		case <-d.sup.Shutdown:
-			timer.Stop()
-			return false
-		case <-timer.C:
-		}
-	}
+	d.markDaemonAgentIntentAccepted(cmd.TargetAgentID, desired)
 }
 
 func (d *Daemon) agentCommandLifecycleProjection(
 	cmd *domain.AgentCommand,
 	resp DaemonControlResponse,
-) (domain.AgentState, domain.AgentDesiredState, bool) {
+) (domain.AgentDesiredState, bool) {
 	if cmd == nil {
-		return "", "", false
+		return "", false
 	}
 	if resp.Success {
 		switch cmd.Type {
 		case "stop":
-			return domain.AgentStateStopped, domain.AgentDesiredStopped, true
+			return domain.AgentDesiredStopped, true
 		case "start", "restart":
-			return domain.AgentStateActive, domain.AgentDesiredRunning, true
+			return domain.AgentDesiredRunning, true
 		default:
-			return "", "", false
+			return "", false
 		}
 	}
 	switch cmd.Type {
 	case "start", "stop", "restart", "yield":
 		if d.isAgentRunning(cmd.TargetAgentID) {
-			return domain.AgentStateActive, domain.AgentDesiredRunning, true
+			return domain.AgentDesiredRunning, true
 		}
-		return domain.AgentStateStopped, domain.AgentDesiredStopped, true
+		return domain.AgentDesiredStopped, true
 	default:
-		return "", "", false
+		return "", false
 	}
 }

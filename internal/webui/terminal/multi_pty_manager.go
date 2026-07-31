@@ -41,8 +41,9 @@ type wsEntry struct {
 // cwd, giving each workspace its own isolated session cap and a shell that
 // starts inside workspace.Path rather than $HOME.
 type MultiPTYManager struct {
-	mu      sync.RWMutex
-	entries map[string]*wsEntry
+	mu                 sync.RWMutex
+	entries            map[string]*wsEntry
+	retryingDeregister map[string]*wsEntry
 
 	// cmd and maxPerWS are set at construction and never mutated — readable
 	// without holding mu.
@@ -51,6 +52,7 @@ type MultiPTYManager struct {
 
 	gracePeriod time.Duration
 	idleTimeout time.Duration
+	beforeKill  BeforeKillFunc
 
 	closed bool
 }
@@ -61,9 +63,10 @@ type MultiPTYManager struct {
 // PTYManager default.
 func NewMultiPTYManager(cmd string, maxPerWS int) *MultiPTYManager {
 	return &MultiPTYManager{
-		entries:  make(map[string]*wsEntry),
-		cmd:      cmd,
-		maxPerWS: maxPerWS,
+		entries:            make(map[string]*wsEntry),
+		retryingDeregister: make(map[string]*wsEntry),
+		cmd:                cmd,
+		maxPerWS:           maxPerWS,
 	}
 }
 
@@ -78,21 +81,27 @@ func (mm *MultiPTYManager) Register(wsID, path string) error {
 	}
 
 	mm.mu.Lock()
-	defer mm.mu.Unlock()
-
 	if mm.closed {
+		mm.mu.Unlock()
 		return ErrPTYManagerClosed
 	}
-
-	if existing, ok := mm.entries[wsID]; ok {
+	existing := mm.entries[wsID]
+	mm.mu.Unlock()
+	if existing != nil && existing.mgr != nil {
 		slog.Info("replacing existing pty manager for workspace", "workspace", wsID)
-		if existing.mgr != nil {
-			if err := existing.mgr.Shutdown(); err != nil {
-				slog.Warn("shutting down replaced pty manager", "workspace", wsID, "err", err)
-			}
+		if err := existing.mgr.Shutdown(); err != nil {
+			return fmt.Errorf("converge existing workspace terminals before replacement: %w", err)
 		}
 	}
 
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	if mm.closed {
+		return ErrPTYManagerClosed
+	}
+	if mm.entries[wsID] != existing {
+		return fmt.Errorf("workspace %q registration changed concurrently", wsID)
+	}
 	mm.entries[wsID] = &wsEntry{path: path}
 	slog.Info("registered workspace pty manager", "workspace", wsID, "path", path)
 	return nil
@@ -109,24 +118,33 @@ func (mm *MultiPTYManager) EnsureRegistered(wsID, path string) error {
 	}
 
 	mm.mu.Lock()
-	defer mm.mu.Unlock()
+	if mm.closed {
+		mm.mu.Unlock()
+		return ErrPTYManagerClosed
+	}
+	existing := mm.entries[wsID]
+	if existing != nil {
+		if existing.path == path {
+			mm.mu.Unlock()
+			return nil
+		}
+	}
+	mm.mu.Unlock()
+	if existing != nil && existing.mgr != nil {
+		slog.Info("replacing existing pty manager for workspace after path change", "workspace", wsID)
+		if err := existing.mgr.Shutdown(); err != nil {
+			return fmt.Errorf("converge existing workspace terminals before path replacement: %w", err)
+		}
+	}
 
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
 	if mm.closed {
 		return ErrPTYManagerClosed
 	}
-
-	if existing, ok := mm.entries[wsID]; ok {
-		if existing.path == path {
-			return nil
-		}
-		slog.Info("replacing existing pty manager for workspace after path change", "workspace", wsID)
-		if existing.mgr != nil {
-			if err := existing.mgr.Shutdown(); err != nil {
-				slog.Warn("shutting down replaced pty manager", "workspace", wsID, "err", err)
-			}
-		}
+	if mm.entries[wsID] != existing {
+		return fmt.Errorf("workspace %q registration changed concurrently", wsID)
 	}
-
 	mm.entries[wsID] = &wsEntry{path: path}
 	slog.Info("registered workspace pty manager", "workspace", wsID, "path", path)
 	return nil
@@ -155,35 +173,107 @@ func validateWorkspaceRegistration(wsID, path string) error {
 // a managed shutdown or observes ErrWorkspaceNotRegistered on its next
 // managerForWS call.
 func (mm *MultiPTYManager) Deregister(wsID string) {
-	mm.mu.Lock()
-	entry, ok := mm.entries[wsID]
-	if ok {
-		delete(mm.entries, wsID)
-	}
-	mm.mu.Unlock()
-
-	if !ok {
+	mm.mu.RLock()
+	entry := mm.entries[wsID]
+	mm.mu.RUnlock()
+	if entry == nil {
 		return
 	}
 	if entry.mgr != nil {
 		if err := entry.mgr.Shutdown(); err != nil {
-			slog.Warn("shutting down pty manager on deregister", "workspace", wsID, "err", err)
+			slog.Warn("retaining pty manager after lifecycle convergence failed on deregister",
+				"workspace", wsID, "err", err)
+			mm.scheduleDeregisterRetry(wsID, entry, 1)
+			return
 		}
 	}
+	mm.mu.Lock()
+	if mm.entries[wsID] == entry {
+		delete(mm.entries, wsID)
+	}
+	mm.mu.Unlock()
 	slog.Info("deregistered workspace pty manager", "workspace", wsID)
+}
+
+func (mm *MultiPTYManager) scheduleDeregisterRetry(
+	wsID string,
+	entry *wsEntry,
+	attempt int,
+) {
+	mm.mu.Lock()
+	if mm.entries[wsID] != entry {
+		delete(mm.retryingDeregister, wsID)
+		mm.mu.Unlock()
+		return
+	}
+	if current := mm.retryingDeregister[wsID]; current != nil {
+		mm.mu.Unlock()
+		return
+	}
+	mm.retryingDeregister[wsID] = entry
+	mm.mu.Unlock()
+	mm.scheduleDeregisterRetryAttempt(wsID, entry, attempt)
+}
+
+func (mm *MultiPTYManager) scheduleDeregisterRetryAttempt(
+	wsID string,
+	entry *wsEntry,
+	attempt int,
+) {
+	time.AfterFunc(beforeKillRetryDelay(attempt), func() {
+		mm.mu.RLock()
+		current := mm.entries[wsID]
+		mm.mu.RUnlock()
+		if current != entry {
+			mm.clearDeregisterRetry(wsID, entry)
+			return
+		}
+		var err error
+		if entry.mgr != nil {
+			err = entry.mgr.Shutdown()
+		}
+		if err != nil {
+			if attempt < beforeKillRetryAttempts {
+				slog.Warn("workspace PTY deregistration convergence retry failed",
+					"workspace", wsID, "attempt", attempt, "err", err)
+				mm.scheduleDeregisterRetryAttempt(wsID, entry, attempt+1)
+				return
+			}
+			slog.Error("workspace PTY deregistration convergence retries exhausted; manager retained",
+				"workspace", wsID, "attempts", attempt, "err", err)
+			mm.clearDeregisterRetry(wsID, entry)
+			return
+		}
+		mm.mu.Lock()
+		if mm.entries[wsID] == entry {
+			delete(mm.entries, wsID)
+		}
+		if mm.retryingDeregister[wsID] == entry {
+			delete(mm.retryingDeregister, wsID)
+		}
+		mm.mu.Unlock()
+		slog.Info("deregistered workspace pty manager after lifecycle retry",
+			"workspace", wsID, "attempt", attempt)
+	})
+}
+
+func (mm *MultiPTYManager) clearDeregisterRetry(wsID string, entry *wsEntry) {
+	mm.mu.Lock()
+	if mm.retryingDeregister[wsID] == entry {
+		delete(mm.retryingDeregister, wsID)
+	}
+	mm.mu.Unlock()
 }
 
 // Close shuts down every live per-workspace PTYManager and prevents further
 // Register calls. Idempotent: subsequent Close returns nil.
 func (mm *MultiPTYManager) Close() error {
 	mm.mu.Lock()
-	if mm.closed {
-		mm.mu.Unlock()
-		return nil
-	}
 	mm.closed = true
-	entries := mm.entries
-	mm.entries = make(map[string]*wsEntry)
+	entries := make(map[string]*wsEntry, len(mm.entries))
+	for wsID, entry := range mm.entries {
+		entries[wsID] = entry
+	}
 	mm.mu.Unlock()
 
 	var errs []error
@@ -191,8 +281,14 @@ func (mm *MultiPTYManager) Close() error {
 		if entry.mgr != nil {
 			if err := entry.mgr.Shutdown(); err != nil {
 				errs = append(errs, fmt.Errorf("shutting down workspace %q: %w", wsID, err))
+				continue
 			}
 		}
+		mm.mu.Lock()
+		if mm.entries[wsID] == entry {
+			delete(mm.entries, wsID)
+		}
+		mm.mu.Unlock()
 	}
 	return errors.Join(errs...)
 }
@@ -220,6 +316,19 @@ func (mm *MultiPTYManager) SetIdleTimeout(d time.Duration) {
 
 	for _, m := range existing {
 		m.SetIdleTimeout(d)
+	}
+}
+
+// SetBeforeKill installs the lifecycle hook on existing per-workspace
+// managers and on every manager created later.
+func (mm *MultiPTYManager) SetBeforeKill(hook BeforeKillFunc) {
+	mm.mu.Lock()
+	mm.beforeKill = hook
+	existing := mm.snapshotManagersLocked()
+	mm.mu.Unlock()
+
+	for _, m := range existing {
+		m.SetBeforeKill(hook)
 	}
 }
 
@@ -298,6 +407,7 @@ func (mm *MultiPTYManager) managerForWS(wsID string) (*PTYManager, error) {
 	if mm.idleTimeout != 0 {
 		m.SetIdleTimeout(mm.idleTimeout)
 	}
+	m.SetBeforeKill(mm.beforeKill)
 	entry.mgr = m
 	return m, nil
 }
@@ -363,7 +473,10 @@ func (mm *MultiPTYManager) Detach(key SessionKey, connID string) {
 func (mm *MultiPTYManager) Kill(key SessionKey) error {
 	m := mm.existingManagerForWS(key.Workspace)
 	if m == nil {
-		return nil
+		mm.mu.RLock()
+		hook := mm.beforeKill
+		mm.mu.RUnlock()
+		return invokeBeforeKill(hook, key, ExitReasonKilled)
 	}
 	return m.Kill(key)
 }

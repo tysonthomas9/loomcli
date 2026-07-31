@@ -7,18 +7,20 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
-// OrchestrationSessionFor returns the most recent active orchestration
-// session for a lead agent, or (nil, nil) if none exists.
+// OrchestrationSessionFor returns the most recent active interactive session
+// for a lead agent, or (nil, nil) if none exists. Phase 4 and older records
+// used kind=orchestration, so the lookup falls back to that legacy kind only
+// when no active kind=interactive record exists.
 //
 // This is the join that replaces direct reads of
 // domain.Agent.OrchestratorSessionID - the cached field on the agent
 // record was a denormalization of the relationship represented natively
-// by AgentSession{Kind=orchestration, AgentID=<lead-name>}. Reading via
+// by AgentSession{Kind=interactive, AgentID=<lead-name>}. Reading via
 // the join makes AgentSession the single source of truth and avoids the
 // half-deprecation that arose when commit 9aef2ae5 stopped writing the
 // cache field on FleetDB.
 //
-// Returns (nil, nil) when no orchestration session exists for the agent.
+// Returns (nil, nil) when no active session exists for the agent.
 // Returns the most-recently-updated session when multiple match - which
 // shouldn't happen in normal operation but is a defensive choice over
 // returning a random one.
@@ -27,27 +29,24 @@ func OrchestrationSessionFor(ctx context.Context, s Store, workspaceKey, agentID
 	if agentID == "" {
 		return nil, nil
 	}
-	sessions, err := s.AgentSessions().List(ctx, workspaceKey, AgentSessionFilter{
-		AgentID: agentID,
-		Kind:    domain.AgentSessionKindOrchestration,
-		Limit:   8,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(sessions) == 0 {
-		return nil, nil
-	}
-	var best *domain.AgentSession
-	for _, sess := range sessions {
-		if !activeOrchestrationSession(sess) {
-			continue
+
+	for _, kind := range []domain.AgentSessionKind{
+		domain.AgentSessionKindInteractive,
+		domain.AgentSessionKindOrchestration,
+	} {
+		sessions, err := s.AgentSessions().List(ctx, workspaceKey, AgentSessionFilter{
+			AgentID: agentID,
+			Kind:    kind,
+			Limit:   8,
+		})
+		if err != nil {
+			return nil, err
 		}
-		if best == nil || sess.UpdatedAt.After(best.UpdatedAt) {
-			best = sess
+		if best := mostRecentActiveSession(sessions); best != nil {
+			return best, nil
 		}
 	}
-	return best, nil
+	return nil, nil
 }
 
 // OrchestrationSessionIDFor is a convenience wrapper around
@@ -62,7 +61,20 @@ func OrchestrationSessionIDFor(ctx context.Context, s Store, workspaceKey, agent
 	return sess.SessionID, nil
 }
 
-func activeOrchestrationSession(sess *domain.AgentSession) bool {
+func mostRecentActiveSession(sessions []*domain.AgentSession) *domain.AgentSession {
+	var best *domain.AgentSession
+	for _, session := range sessions {
+		if !activeInteractiveSession(session) {
+			continue
+		}
+		if best == nil || session.UpdatedAt.After(best.UpdatedAt) {
+			best = session
+		}
+	}
+	return best
+}
+
+func activeInteractiveSession(sess *domain.AgentSession) bool {
 	if sess == nil || sess.FinishedAt != nil {
 		return false
 	}

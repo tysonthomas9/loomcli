@@ -278,6 +278,8 @@ func isForbiddenModuleDependency(importPath string) bool {
 		modulePath + "/internal/app",
 		modulePath + "/internal/domain",
 		modulePath + "/internal/driver",
+		// Phase 5 physically retired this legacy root. Keep the import
+		// tombstone so a later file cannot silently recreate the facade.
 		modulePath + "/internal/workflows",
 		modulePath + "/internal/store",
 		modulePath + "/internal/webui",

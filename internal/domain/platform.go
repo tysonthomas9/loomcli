@@ -116,6 +116,7 @@ const (
 type AgentService struct {
 	WorkspaceKey    string                   `json:"workspace_key"`
 	ServiceID       string                   `json:"service_id"`
+	GenerationID    string                   `json:"generation_id"`
 	Name            string                   `json:"name"`
 	Kind            AgentServiceKind         `json:"kind"`
 	DesiredState    AgentServiceDesiredState `json:"desired_state"`

@@ -39,6 +39,7 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	createHarnessLeadSession(t, st)
+	sessionRuntime := &storeBackedSessionRuntime{store: st}
 
 	fake := newFakeHarnessConversation()
 	fake.history = []chat.Turn{
@@ -58,6 +59,7 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 	go func() {
 		runtimeErr <- RunHarnessLeadRuntime(ctx, HarnessLeadRuntimeConfig{
 			Store:            st,
+			Runtime:          sessionRuntime,
 			Workspace:        "WS",
 			LeadName:         "nova",
 			SessionID:        "lead-session",
@@ -110,9 +112,12 @@ func TestRunHarnessLeadRuntimeLifecycle(t *testing.T) {
 
 	// The registered handle delivers queued messages in-process.
 	const message = "Task TASK-1 completed."
-	if _, err := DeliverLeadMessage(ctx, st, "WS", "nova", message); err != nil {
+	if _, err := DeliverLeadMessage(ctx, st, "WS", "nova", message, sessionRuntime); err != nil {
 		t.Fatalf("DeliverLeadMessage() error = %v", err)
 	}
+	waitForCondition(t, func() bool {
+		return string(fake.stdinBytes()) == message && len(fake.sentTexts()) == 1
+	}, "session-owned inbox drain did not deliver the message")
 	if got := string(fake.stdinBytes()); got != message {
 		t.Fatalf("staged stdin = %q, want delivered message", got)
 	}
@@ -195,6 +200,7 @@ func TestRunHarnessLeadRuntimeTreatsStoreHistoryAsIncompleteWhenFinalEventIsLost
 	go func() {
 		runtimeErr <- RunHarnessLeadRuntime(t.Context(), HarnessLeadRuntimeConfig{
 			Store:       st,
+			Runtime:     testSessionRuntime(st),
 			Workspace:   "WS",
 			LeadName:    "nova",
 			SessionID:   "lead-session",
@@ -340,6 +346,7 @@ func TestRunHarnessLeadRuntimeUsesValidatedRotatedSessionIDEverywhere(t *testing
 	go func() {
 		runtimeErr <- RunHarnessLeadRuntime(t.Context(), HarnessLeadRuntimeConfig{
 			Store:            st,
+			Runtime:          testSessionRuntime(st),
 			Workspace:        "WS",
 			LeadName:         "nova",
 			SessionID:        "lead-session",
@@ -485,6 +492,7 @@ func TestRunHarnessLeadRuntimePersistsBestEffortTranscriptAfterCloseDrainFailure
 			var out bytes.Buffer
 			err := RunHarnessLeadRuntime(t.Context(), HarnessLeadRuntimeConfig{
 				Store:       st,
+				Runtime:     testSessionRuntime(st),
 				Workspace:   "WS",
 				LeadName:    "nova",
 				SessionID:   "lead-session",
@@ -570,6 +578,7 @@ func TestCaptureHarnessInteractiveTranscriptPersistsEveryControlledBackend(t *te
 			}
 			cfg := HarnessLeadRuntimeConfig{
 				Store:       st,
+				Runtime:     testSessionRuntime(st),
 				Workspace:   "WS",
 				LeadName:    "nova",
 				SessionID:   "lead-session",
@@ -805,6 +814,7 @@ func TestCaptureHarnessInteractiveTranscriptNativeLimitSkipsUnboundedHistory(t *
 
 	cfg := HarnessLeadRuntimeConfig{
 		Store:            st,
+		Runtime:          testSessionRuntime(st),
 		Workspace:        "WS",
 		LeadName:         "nova",
 		SessionID:        "lead-session",
@@ -863,6 +873,7 @@ func TestCaptureHarnessInteractiveTranscriptPersistsTerminalOutputTruncation(t *
 
 	cfg := HarnessLeadRuntimeConfig{
 		Store:       st,
+		Runtime:     testSessionRuntime(st),
 		Workspace:   "WS",
 		LeadName:    "nova",
 		SessionID:   "lead-session",
@@ -903,6 +914,7 @@ func TestCaptureHarnessInteractiveTranscriptMarksRequiredEmptyTerminalFallback(t
 
 	cfg := HarnessLeadRuntimeConfig{
 		Store:       st,
+		Runtime:     testSessionRuntime(st),
 		Workspace:   "WS",
 		LeadName:    "nova",
 		SessionID:   "lead-session",
@@ -963,6 +975,7 @@ func TestCaptureHarnessInteractiveTranscriptMarksHistoryUnavailable(t *testing.T
 
 	cfg := HarnessLeadRuntimeConfig{
 		Store:       st,
+		Runtime:     testSessionRuntime(st),
 		Workspace:   "WS",
 		LeadName:    "nova",
 		SessionID:   "lead-session",

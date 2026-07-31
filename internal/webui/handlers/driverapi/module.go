@@ -30,18 +30,16 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
-	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
-	"github.com/tysonthomas9/loomcli/internal/epicrunner"
-	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
-	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	dependencies "github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
 )
 
@@ -58,64 +56,12 @@ const (
 	HeaderDriverFencingToken = "X-Loom-Driver-Fencing-Token" //nolint:gosec // header name, not a credential
 )
 
-// IssueBackendFactory builds a workspace-scoped fleet-db issue backend acting
+// IssueBackendFactory builds a workspace-scoped FleetDB issue backend acting
 // as the given actor. Overridable in tests.
-type IssueBackendFactory func(ws, actor string) (backend.IssueBackend, error)
+type IssueBackendFactory = dependencies.IssueBackendFactory
 
-// Config wires the module's dependencies.
-type Config struct {
-	Store store.Store
-	// FleetBaseURL is the fleet-db HTTP base URL used to build issue
-	// backends for task claim/release and epic reads.
-	FleetBaseURL string
-	// APIBaseURL is this serve process's own driver/task-run API base URL,
-	// handed to bridge-spawned task runners as LOOM_TASK_RUN_API_URL so they
-	// talk back to serve with their lease token instead of dialing fleet-db.
-	// Task-run preflight fails closed when this is empty.
-	APIBaseURL string
-	// APIToken, when non-empty, must be presented by clients as
-	// "Authorization: Bearer <token>". Requests authenticated by a valid
-	// run-scoped token (RunTokenKey) are exempt: workflow calls are
-	// token-only.
-	APIToken string //nolint:gosec // G117: driver API bearer token intentionally carried by handler config.
-	// RunTokenKey is the HS256 signing key for run-scoped driver tokens
-	// (internal/driver ParseRunToken). Nil disables the run-token auth path;
-	// the legacy header-quad transport is unaffected.
-	RunTokenKey []byte
-	// WorktreePath is the working directory handed to the host-bridge task
-	// executor for exec-task. Defaults to the server's working directory.
-	WorktreePath string
-	// LocalSettingsDir is the desktop-local settings directory exposed only to
-	// bundled local-task-runner executions.
-	LocalSettingsDir string
-	// LocalRepoPath resolves the trusted machine-local checkout recorded for
-	// one workspace repo. It enables local-review diff acquisition without
-	// changing the shared Repo record's canonical remote URL.
-	LocalRepoPath func(workspaceKey, repoName string) string
-	// IssueBackends overrides the default fleet-db issue backend factory.
-	IssueBackends IssueBackendFactory
-	// Dispatcher is the connector egress choke point for connector-dispatch.
-	// Nil means connector egress is unconfigured and fails closed (see
-	// connectors.go).
-	Dispatcher *connector.Dispatcher
-	// WorkflowEventing is the named application workflow behind emit-event.
-	// Nil leaves that mutation inert; there is no legacy InternalSource or
-	// direct Store fallback.
-	WorkflowEventing *workfloweventing.Workflow
-	// EventAwaits preserves the post-admission AW7 notification through a
-	// narrow port while await ownership remains in the legacy trigger package.
-	EventAwaits          WorkflowEventAwaitDispatcher
-	Execution            execution.DriverRunAPI
-	ExecutionAuthorities execution.DriverRunAuthorityResolver
-	TaskRunRequests      execution.TaskRunRequestAPI
-	TaskRunRecovery      execution.TaskRunRecoveryAPI
-	TaskRuns             execution.TaskRunAPI
-	TaskRunAuthorities   execution.TaskRunAuthorityResolver
-	WorkflowCatalog      workflowcatalog.API
-	// Artifacts is injected into the host bridge used by exec-task. There is
-	// no production Store.Artifacts compatibility fallback.
-	Artifacts artifactsmodule.API
-}
+// Config is the stable driver API composition contract.
+type Config = dependencies.Config
 
 // Module serves the workspace-scoped driver-op routes.
 type Module struct {
@@ -125,6 +71,7 @@ type Module struct {
 	apiBaseURL           string
 	worktreePath         string
 	localSettingsDir     string
+	sourceControl        dependencies.SourceControl
 	localRepoPath        func(workspaceKey, repoName string) string
 	issueBackends        IssueBackendFactory
 	dispatcher           *connector.Dispatcher
@@ -132,12 +79,14 @@ type Module struct {
 	eventAwaits          WorkflowEventAwaitDispatcher
 	execution            execution.DriverRunAPI
 	executionAuthorities execution.DriverRunAuthorityResolver
+	agentParentBindings  dependencies.AgentParentBindings
 	taskRunRequests      execution.TaskRunRequestAPI
 	taskRunRecovery      execution.TaskRunRecoveryAPI
 	taskRuns             execution.TaskRunAPI
 	taskRunAuthorities   execution.TaskRunAuthorityResolver
 	workflowCatalog      workflowcatalog.API
-	artifacts            artifactsmodule.API
+	artifacts            dependencies.Artifacts
+	interactionChat      interaction.ChatMessenger
 	ops                  map[string]opHandler
 
 	// Watch stream cadence (see watch.go). Defaults set in NewModule;
@@ -161,6 +110,7 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		apiBaseURL:           strings.TrimSpace(cfg.APIBaseURL),
 		worktreePath:         cfg.WorktreePath,
 		localSettingsDir:     strings.TrimSpace(cfg.LocalSettingsDir),
+		sourceControl:        cfg.SourceControl,
 		localRepoPath:        cfg.LocalRepoPath,
 		issueBackends:        cfg.IssueBackends,
 		dispatcher:           cfg.Dispatcher,
@@ -168,18 +118,32 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		eventAwaits:          cfg.EventAwaits,
 		execution:            cfg.Execution,
 		executionAuthorities: cfg.ExecutionAuthorities,
+		agentParentBindings:  cfg.AgentParentBindings,
 		taskRunRequests:      cfg.TaskRunRequests,
 		taskRunRecovery:      cfg.TaskRunRecovery,
 		taskRuns:             cfg.TaskRuns,
 		taskRunAuthorities:   cfg.TaskRunAuthorities,
 		workflowCatalog:      cfg.WorkflowCatalog,
 		artifacts:            cfg.Artifacts,
+		interactionChat:      cfg.InteractionChat,
 
 		watchPollInterval:      defaultWatchPollInterval,
 		watchHeartbeatInterval: defaultWatchHeartbeatInterval,
 		watchReconcileInterval: defaultWatchReconcileInterval,
 
-		deliverAssignment: driverpkg.DeliverLeadAssignmentForDriver,
+		deliverAssignment: func(
+			ctx context.Context,
+			st store.Store,
+			workspace,
+			leadName string,
+		) (driverpkg.AgentMessageDeliveryResult, error) {
+			return driverpkg.DeliverLeadAssignmentForDriver(
+				ctx,
+				cfg.InteractionChat,
+				workspace,
+				leadName,
+			)
+		},
 	}
 	m.ops = map[string]opHandler{
 		"claim-ready":                     m.claimReady,
@@ -220,26 +184,9 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		}
 	}
 	if m.issueBackends == nil {
-		m.issueBackends = defaultIssueBackends(cfg.FleetBaseURL)
+		m.issueBackends = dependencies.DefaultIssueBackends(cfg.FleetBaseURL)
 	}
 	return m
-}
-
-// defaultIssueBackends builds the production issue-backend factory: a
-// fleet-db client per (workspace, actor) against the configured base URL.
-func defaultIssueBackends(baseURL string) func(ws, actor string) (backend.IssueBackend, error) {
-	return func(ws, actor string) (backend.IssueBackend, error) {
-		issueBackend, err := fleet.New(fleet.Config{
-			BaseURL:     baseURL,
-			WorkspaceID: ws,
-			APIKey:      os.Getenv(bootstrap.EnvFleetDBAPIKey),
-			Actor:       actor,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create fleet-db issue backend: %w", err)
-		}
-		return issueBackend, nil
-	}
 }
 
 func (m *Module) Register(mux *http.ServeMux) {
@@ -258,6 +205,30 @@ func (m *Module) Register(mux *http.ServeMux) {
 	// Composition ops (AW10): same two-segment-path situation.
 	mux.HandleFunc("POST /api/workspaces/{ws}/driver/workflows/start", m.handleWorkflowsStart)
 	mux.HandleFunc("POST /api/workspaces/{ws}/driver/workflows/await", m.handleWorkflowsAwait)
+}
+
+func writeBackendDomainOpError(w http.ResponseWriter, err error) bool {
+	switch {
+	case backend.IsKind(err, backend.KindValidation):
+		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
+	case backend.IsKind(err, backend.KindNotFound):
+		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
+	case backend.IsKind(err, backend.KindConflict):
+		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
+	case backend.IsKind(err, backend.KindNotImplemented):
+		writeOpError(w, http.StatusNotImplemented, "not_implemented", err.Error(), false)
+	case backend.IsKind(err, backend.KindUnavailable):
+		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
+	case backend.IsKind(err, backend.KindTimeout):
+		writeOpError(w, http.StatusGatewayTimeout, "timeout", err.Error(), true)
+	case backend.IsKind(err, backend.KindCanceled):
+		writeOpError(w, 499, "canceled", err.Error(), true)
+	case backend.IsKind(err, backend.KindInternal):
+		writeOpError(w, http.StatusInternalServerError, "internal", err.Error(), false)
+	default:
+		return false
+	}
+	return true
 }
 
 func (m *Module) handleVerifyRun(w http.ResponseWriter, r *http.Request) {
@@ -349,24 +320,35 @@ type opHandler func(ctx context.Context, ws string, id driverIdentity, body []by
 
 // verifyParent proves the caller owns a running parent DriverRun.
 func (m *Module) verifyParent(ctx context.Context, ws string, id driverIdentity) (*domain.DriverRun, error) {
+	run, _, _, err := m.verifyParentWithAuthority(ctx, ws, id)
+	return run, err
+}
+
+func (m *Module) verifyParentWithAuthority(
+	ctx context.Context,
+	ws string,
+	id driverIdentity,
+) (*domain.DriverRun, authority.ExecutionAuthority, execution.Owner, error) {
 	if m.execution == nil || m.executionAuthorities == nil {
-		return nil, fmt.Errorf("execution DriverRun verification capability is unavailable: %w", execution.ErrUnavailable)
+		return nil, authority.ExecutionAuthority{}, execution.Owner{},
+			fmt.Errorf("execution DriverRun verification capability is unavailable: %w", execution.ErrUnavailable)
 	}
 	owner, err := driverRunExecutionOwner(id, id.RunID)
 	if err != nil {
-		return nil, err
+		return nil, authority.ExecutionAuthority{}, execution.Owner{}, err
 	}
 	auth, err := m.executionAuthorities.ResolveDriverRunAuthority(ctx, ws, execution.ActionHeartbeatDriverRun, owner)
 	if err != nil {
-		return nil, err
+		return nil, authority.ExecutionAuthority{}, execution.Owner{}, err
 	}
 	run, err := m.execution.HeartbeatDriverRun(ctx, auth, execution.DriverRunHeartbeatCommand{
 		WorkspaceKey: ws, Owner: owner, At: time.Now().UTC(),
 	})
 	if err != nil {
-		return nil, err
+		return nil, authority.ExecutionAuthority{}, execution.Owner{}, err
 	}
-	return driverpkg.LegacyDriverRunSnapshot(run)
+	legacy, err := driverpkg.LegacyDriverRunSnapshot(run)
+	return legacy, auth, owner, err
 }
 
 func driverRunExecutionOwner(id driverIdentity, runID string) (execution.Owner, error) {
@@ -712,7 +694,8 @@ func (m *Module) updateAgentParent(ctx context.Context, ws string, id driverIden
 	if err != nil {
 		return nil, err
 	}
-	if _, err := m.verifyParent(ctx, ws, id); err != nil {
+	_, executionAuth, owner, err := m.verifyParentWithAuthority(ctx, ws, id)
+	if err != nil {
 		return nil, err
 	}
 	agentName := strings.TrimSpace(params.Agent)
@@ -720,21 +703,28 @@ func (m *Module) updateAgentParent(ctx context.Context, ws string, id driverIden
 	if agentName == "" || parentID == "" {
 		return nil, fmt.Errorf("agent and parent required: %w", domain.ErrInvalid)
 	}
-	unlock, err := epicrunner.AcquireBindLock(ws, agentName)
-	if err != nil {
-		return nil, fmt.Errorf("acquire agent parent lock: %w", err)
+	if m.agentParentBindings == nil {
+		return nil, fmt.Errorf("agents parent binding workflow is unavailable: %w", agents.ErrUnavailable)
 	}
-	defer unlock()
-	current, err := m.store.Agents().Get(ctx, ws, agentName)
+	expectedParent := strings.TrimSpace(params.ExpectParent)
+	updated, err := m.agentParentBindings.BindVerifiedDriverRunParent(
+		ctx,
+		executionAuth,
+		agents.BindSupervisedAssignmentParentCommand{
+			WorkspaceKey:   ws,
+			AgentName:      agentName,
+			ExpectedParent: &expectedParent,
+			Parent:         parentID,
+			Proof: agents.ParentBindingProof{
+				DriverRunID:  owner.ResourceID,
+				NodeID:       owner.NodeID,
+				LeaseID:      owner.LeaseID,
+				FencingToken: owner.FencingToken,
+			},
+		},
+	)
 	if err != nil {
-		return nil, fmt.Errorf("get agent: %w", err)
-	}
-	if current.Parent != strings.TrimSpace(params.ExpectParent) {
-		return nil, fmt.Errorf("agent %q parent changed from %q to %q: %w", agentName, strings.TrimSpace(params.ExpectParent), current.Parent, domain.ErrConflict)
-	}
-	updated, err := m.store.Agents().Update(ctx, ws, agentName, store.AgentUpdate{Parent: &parentID})
-	if err != nil {
-		return nil, fmt.Errorf("update agent parent: %w", err)
+		return nil, err
 	}
 	return updated, nil
 }
@@ -795,7 +785,14 @@ func (m *Module) deliverAgentMessage(ctx context.Context, ws string, id driverId
 	if agentName == "" || message == "" {
 		return nil, fmt.Errorf("agent and message required: %w", domain.ErrInvalid)
 	}
-	result, err := driverpkg.DeliverAgentMessageForDriver(ctx, m.store, ws, parent.RunID, agentName, message)
+	result, err := driverpkg.DeliverAgentMessageForDriver(
+		ctx,
+		m.interactionChat,
+		ws,
+		parent.RunID,
+		agentName,
+		message,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("deliver agent message: %w", err)
 	}
@@ -814,139 +811,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// opError is the structured v2 error envelope. The shape is FROZEN as the
-// SDK v1 contract (sdk/api-surface.v1.json): {code, message, retryable}
-// with an OPTIONAL additive details object for machine-readable context.
-type opError struct {
-	Code      string         `json:"code"`
-	Message   string         `json:"message"`
-	Retryable bool           `json:"retryable"`
-	Details   map[string]any `json:"details,omitempty"`
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
-}
-
-func writeOpError(w http.ResponseWriter, status int, code, message string, retryable bool) {
-	writeOpErrorDetails(w, status, code, message, retryable, nil)
-}
-
-// writeOpErrorDetails writes the envelope with the optional details object;
-// details is additive — clients that predate it ignore the extra key.
-func writeOpErrorDetails(w http.ResponseWriter, status int, code, message string, retryable bool, details map[string]any) {
-	writeJSON(w, status, map[string]any{"error": opError{Code: code, Message: message, Retryable: retryable, Details: details}})
-}
-
-func writeCodedOpError(w http.ResponseWriter, err error) bool {
-	var coded *codedOpError
-	if !errors.As(err, &coded) {
-		return false
-	}
-	writeOpErrorDetails(w, coded.status, coded.code, coded.Error(), coded.retryable, coded.details)
-	return true
-}
-
-func writeSpecializedOpError(w http.ResponseWriter, err error) bool {
-	return writeConnectorOpError(w, err) || writeAwaitOpError(w, err) || writeCodedOpError(w, err)
-}
-
-// writeDomainOpError maps domain sentinel errors onto the structured error
-// envelope. Defaults to a non-retryable internal error: only transient
-// classes (timeouts, cancellation) advertise retryability.
-func writeDomainOpError(w http.ResponseWriter, err error) {
-	if writeSpecializedOpError(w, err) || writeBackendDomainOpError(w, err) ||
-		writeAutomationDomainOpError(w, err) || writeExecutionDomainOpError(w, err) {
-		return
-	}
-	writeBaseDomainOpError(w, err)
-}
-
-func writeBackendDomainOpError(w http.ResponseWriter, err error) bool {
-	switch {
-	case backend.IsKind(err, backend.KindValidation):
-		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
-	case backend.IsKind(err, backend.KindNotFound):
-		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
-	case backend.IsKind(err, backend.KindConflict):
-		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
-	case backend.IsKind(err, backend.KindNotImplemented):
-		writeOpError(w, http.StatusNotImplemented, "not_implemented", err.Error(), false)
-	case backend.IsKind(err, backend.KindUnavailable):
-		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
-	case backend.IsKind(err, backend.KindTimeout):
-		writeOpError(w, http.StatusGatewayTimeout, "timeout", err.Error(), true)
-	case backend.IsKind(err, backend.KindCanceled):
-		writeOpError(w, 499, "canceled", err.Error(), true)
-	case backend.IsKind(err, backend.KindInternal):
-		writeOpError(w, http.StatusInternalServerError, "internal", err.Error(), false)
-	default:
-		return false
-	}
-	return true
-}
-
-func writeAutomationDomainOpError(w http.ResponseWriter, err error) bool {
-	switch {
-	case errors.Is(err, workfloweventing.ErrInvalidRequest), errors.Is(err, automation.ErrInvalid), errors.Is(err, automation.ErrWrongWorkspace):
-		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
-	case errors.Is(err, automation.ErrNotFound), errors.Is(err, automation.ErrNoMatchingBinding), errors.Is(err, automation.ErrParentEventNotFound):
-		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
-	case errors.Is(err, automation.ErrConflict):
-		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
-	case errors.Is(err, workfloweventing.ErrUnavailable), errors.Is(err, automation.ErrUnavailable):
-		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
-	default:
-		return false
-	}
-	return true
-}
-
-func writeExecutionDomainOpError(w http.ResponseWriter, err error) bool {
-	switch {
-	case errors.Is(err, execution.ErrNotFound):
-		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
-	case errors.Is(err, execution.ErrFenceConflict), errors.Is(err, authority.ErrInvalidScope):
-		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
-	case errors.Is(err, execution.ErrUnschedulable):
-		writeOpError(w, http.StatusConflict, "unschedulable", err.Error(), true)
-	case errors.Is(err, execution.ErrInvalidTransition):
-		writeOpError(w, http.StatusConflict, "invalid_transition", err.Error(), false)
-	case errors.Is(err, execution.ErrConflict):
-		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
-	case errors.Is(err, execution.ErrInvalid):
-		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
-	case errors.Is(err, execution.ErrUnavailable):
-		writeOpError(w, http.StatusServiceUnavailable, "unavailable", err.Error(), true)
-	default:
-		return false
-	}
-	return true
-}
-
-func writeBaseDomainOpError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		writeOpError(w, http.StatusNotFound, "not_found", err.Error(), false)
-	case errors.Is(err, domain.ErrNotOwner):
-		writeOpError(w, http.StatusForbidden, "not_owner", err.Error(), false)
-	case errors.Is(err, domain.ErrUnschedulable):
-		writeOpError(w, http.StatusConflict, "unschedulable", err.Error(), true)
-	case errors.Is(err, domain.ErrInvalidTransition):
-		writeOpError(w, http.StatusConflict, "invalid_transition", err.Error(), false)
-	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrAlreadyExists), errors.Is(err, domain.ErrAlreadyClaimed):
-		writeOpError(w, http.StatusConflict, "conflict", err.Error(), false)
-	case errors.Is(err, domain.ErrInvalid):
-		writeOpError(w, http.StatusBadRequest, "invalid", err.Error(), false)
-	case errors.Is(err, context.DeadlineExceeded):
-		writeOpError(w, http.StatusGatewayTimeout, "timeout", err.Error(), true)
-	case errors.Is(err, context.Canceled):
-		writeOpError(w, 499, "canceled", err.Error(), true)
-	default:
-		writeOpError(w, http.StatusInternalServerError, "internal", err.Error(), false)
-	}
 }

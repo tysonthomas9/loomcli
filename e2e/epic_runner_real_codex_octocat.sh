@@ -163,7 +163,8 @@ if loom role show lead >/dev/null 2>&1; then
 else
     loom role add lead --description "Lead orchestration agent" --backend codex
 fi
-loom agentdef add nova --role lead --auto --repos "$REPO_NAME"
+loom worker profile add nova --role lead --backend codex --repo "$REPO_NAME"
+loom agentdef add nova --role lead --profile nova --auto
 
 echo "WORKSPACE=$LOOM_WORKSPACE"
 echo "WORKSPACE_PATH=$WORKSPACE_PATH"

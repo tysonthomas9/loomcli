@@ -815,6 +815,7 @@ func newTestHarness(t *testing.T) *testHarness {
 		authority.OperatorOnly(ActionCreateManagedBinding), authority.OperatorOnly(ActionUpdateManagedBinding),
 		authority.OperatorOnly(ActionEnableManagedBinding), authority.OperatorOnly(ActionDisableManagedBinding),
 		authority.OperatorOnly(ActionDeleteManagedBinding),
+		authority.Allow(ActionEnsureManagedBinding, authority.ClassSystem),
 		authority.Allow(ActionAdmitEvent, authority.ClassWebhook, authority.ClassExecution, authority.ClassSystem),
 		authority.Allow(ActionSweepCron, authority.ClassSystem), authority.Allow(ActionRetryDeliveries, authority.ClassSystem),
 	)

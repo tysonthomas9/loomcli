@@ -606,11 +606,18 @@ var _ store.AgentLeaseStore = (*agentLeaseStore)(nil)
 
 func (s *agentLeaseStore) Create(ctx context.Context, in store.AgentLeaseCreate) (*domain.AgentLease, error) {
 	body := map[string]any{"lease_id": in.LeaseID, "agent_id": in.AgentID, "node_id": in.NodeID, "ttl_seconds": ttlSeconds(in.TTL)}
-	var out domain.AgentLease
-	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-sessions/"+pathEscape(in.SessionID)+"/leases", body, &out); err != nil {
+	var response struct {
+		Lease domain.AgentLease `json:"lease"`
+		Token string            `json:"token"`
+	}
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-sessions/"+pathEscape(in.SessionID)+"/leases", body, &response); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	if err := validateAgentLeaseEnvelope(response.Lease, response.Token, in); err != nil {
+		return nil, err
+	}
+	response.Lease.Token = response.Token
+	return &response.Lease, nil
 }
 
 func (s *agentLeaseStore) Get(ctx context.Context, ws, leaseID string) (*domain.AgentLease, error) {
@@ -683,11 +690,60 @@ func (s *agentOwnershipLeaseStore) Acquire(ctx context.Context, in store.AgentOw
 		"node_id":          in.NodeID,
 		"ttl_seconds":      ttlSeconds(in.TTL),
 	}
-	var out domain.AgentOwnershipLease
-	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-ownership-leases/"+pathEscape(in.AgentID)+"/acquire", body, &out); err != nil {
+	var response struct {
+		Lease domain.AgentOwnershipLease `json:"lease"`
+		Token string                     `json:"token"`
+	}
+	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-ownership-leases/"+pathEscape(in.AgentID)+"/acquire", body, &response); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	if err := validateAgentOwnershipLeaseEnvelope(response.Lease, response.Token, in); err != nil {
+		return nil, err
+	}
+	response.Lease.Token = response.Token
+	return &response.Lease, nil
+}
+
+func validateAgentLeaseEnvelope(lease domain.AgentLease, token string, in store.AgentLeaseCreate) error {
+	switch {
+	case token == "":
+		return errors.New("fleetdb: agent lease create response omitted one-time token")
+	case lease.WorkspaceKey != in.WorkspaceKey:
+		return fmt.Errorf("fleetdb: agent lease create response workspace %q does not match %q", lease.WorkspaceKey, in.WorkspaceKey)
+	case lease.LeaseID != in.LeaseID:
+		return fmt.Errorf("fleetdb: agent lease create response lease %q does not match %q", lease.LeaseID, in.LeaseID)
+	case lease.SessionID != in.SessionID:
+		return fmt.Errorf("fleetdb: agent lease create response session %q does not match %q", lease.SessionID, in.SessionID)
+	case lease.AgentID != in.AgentID:
+		return fmt.Errorf("fleetdb: agent lease create response agent %q does not match %q", lease.AgentID, in.AgentID)
+	case lease.NodeID != in.NodeID:
+		return fmt.Errorf("fleetdb: agent lease create response node %q does not match %q", lease.NodeID, in.NodeID)
+	case lease.FencingToken <= 0:
+		return fmt.Errorf("fleetdb: agent lease create response has invalid fencing token %d", lease.FencingToken)
+	}
+	return nil
+}
+
+func validateAgentOwnershipLeaseEnvelope(lease domain.AgentOwnershipLease, token string, in store.AgentOwnershipLeaseAcquire) error {
+	switch {
+	case token == "":
+		return errors.New("fleetdb: agent ownership lease acquire response omitted one-time token")
+	case lease.WorkspaceKey != in.WorkspaceKey:
+		return fmt.Errorf("fleetdb: agent ownership lease acquire response workspace %q does not match %q", lease.WorkspaceKey, in.WorkspaceKey)
+	case lease.AgentID != in.AgentID:
+		return fmt.Errorf("fleetdb: agent ownership lease acquire response agent %q does not match %q", lease.AgentID, in.AgentID)
+	case lease.LeaseID != in.LeaseID:
+		return fmt.Errorf("fleetdb: agent ownership lease acquire response lease %q does not match %q", lease.LeaseID, in.LeaseID)
+	case lease.OwnerID != in.OwnerID:
+		return fmt.Errorf("fleetdb: agent ownership lease acquire response owner %q does not match %q", lease.OwnerID, in.OwnerID)
+	case lease.RuntimeProvider != in.RuntimeProvider:
+		return fmt.Errorf("fleetdb: agent ownership lease acquire response runtime provider %q does not match %q", lease.RuntimeProvider, in.RuntimeProvider)
+	case lease.NodeID != in.NodeID:
+		return fmt.Errorf("fleetdb: agent ownership lease acquire response node %q does not match %q", lease.NodeID, in.NodeID)
+	case lease.FencingToken <= 0:
+		return fmt.Errorf("fleetdb: agent ownership lease acquire response has invalid fencing token %d", lease.FencingToken)
+	}
+	return nil
 }
 
 func (s *agentOwnershipLeaseStore) Get(ctx context.Context, ws, agentID string) (*domain.AgentOwnershipLease, error) {

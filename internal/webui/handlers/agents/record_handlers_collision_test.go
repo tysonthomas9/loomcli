@@ -9,7 +9,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
 
 func TestUnifiedSupervisedCreateNormalizesAgentRecordCollisionLookup(t *testing.T) {
@@ -27,7 +26,7 @@ func TestUnifiedSupervisedCreateNormalizesAgentRecordCollisionLookup(t *testing.
 	}
 
 	mux := http.NewServeMux()
-	newTestAgentsModule(svcimpl.NewAgentService(nil, nil, nil, st), st, nil, agentRecordTestWS).Register(mux)
+	newTestAgentsModule(newAuthorizedTestAgentService(t, st), st, nil, agentRecordTestWS).Register(mux)
 	rec := doAgentRequest(t, mux, http.MethodPost, "/api/workspaces/WS/agents",
 		`{"name":"AGT-RESERVED","role_name":"task","kind":"supervised","backend":"codex"}`)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already used by an agent record") {

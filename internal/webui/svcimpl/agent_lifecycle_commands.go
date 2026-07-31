@@ -94,12 +94,15 @@ func (s *agentServiceImpl) requestSupervisedAgentLifecycle(
 	commands := s.store.AgentCommands()
 	if commands == nil {
 		updated, err := s.UpdateAgent(ctx, wsKey, name, service.AgentUpdateInput{
-			State:        &in.State,
 			DesiredState: &in.DesiredState,
 		})
 		if err != nil {
 			return nil, err
 		}
+		// Runtime state remains placement-owned even for legacy stores without
+		// a durable command queue. Preserve the settled response contract
+		// without persisting a caller-supplied runtime projection.
+		updated.State = in.State
 		return &service.AgentLifecycleResult{Agent: updated, Status: domain.AgentCommandSucceeded}, nil
 	}
 

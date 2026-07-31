@@ -4,7 +4,7 @@
 // returns an ipcIssueBackend that routes the daemon-supported mutation operations
 // (Update, ClaimIssue, Close, ReleaseClaim) through the AgentIPCClient while reading
 // through the underlying direct backend. Routing every mutation through the daemon
-// keeps them behind the lease fence (see daemon.validateIPCLease) — LOOM-1 added
+// keeps them behind the active-subprocess credential check — LOOM-1 added
 // ReleaseClaim to this set via the IPCOpReleaseClaim operation.
 
 package cli
@@ -68,9 +68,9 @@ func (b *ipcIssueBackend) Close(ctx context.Context, id string, params backend.C
 }
 
 // ReleaseClaim routes through IPC (IPCOpReleaseClaim), so the daemon applies
-// the same lease fence it enforces for Claim/Update/Close before releasing the
-// claim on the agent's behalf. The daemon uses its authenticated AgentName as
-// the release actor. See LOOM-1.
+// the same active-subprocess credential check it enforces for
+// Claim/Update/Close before releasing the claim on the agent's behalf. The
+// daemon uses its authenticated AgentName as the release actor. See LOOM-1.
 func (b *ipcIssueBackend) ReleaseClaim(ctx context.Context, id, actor string) error {
 	return b.ipc.Release(id)
 }
@@ -189,9 +189,8 @@ type AgentIPCRequest struct {
 	Operation      string          `json:"operation"`                  // "claim", "update", "complete", "heartbeat"
 	AgentName      string          `json:"agent_name"`                 // LOOM_AGENT_NAME identity (required)
 	IssueID        string          `json:"issue_id"`                   // target issue (required except for "heartbeat")
-	SessionID      string          `json:"session_id,omitempty"`       // fleet-db AgentSession id
-	LeaseID        string          `json:"lease_id,omitempty"`         // fleet-db AgentLease id
-	LeaseToken     string          `json:"lease_token,omitempty"`      // fleet-db AgentLease token
+	SessionID      string          `json:"session_id,omitempty"`       // supervisor-local transcript session id
+	AuthToken      string          `json:"auth_token,omitempty"`       //nolint:gosec // G117: process-local credential must cross the daemon IPC wire.
 	Args           json.RawMessage `json:"args,omitempty"`             // operation-specific params
 	LastActivityAt time.Time       `json:"last_activity_at,omitempty"` // wrapper.Snapshot.LastOutputAt; carried on every op so the daemon can update per-agent liveness
 }

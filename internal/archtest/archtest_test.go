@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,7 +15,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
@@ -61,17 +64,17 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 82; got != want {
+	if got, want := len(report.CompositeStoreFiles), 78; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
-	if got, want := len(report.CompositeStoreOutside), 71; got != want {
+	if got, want := len(report.CompositeStoreOutside), 66; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 90; got != want {
+	if got, want := len(report.LegacyHandlerImports), 87; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
-	if got, want := report.ModuleRoots, []string{"artifacts", "automation", "execution", "workflowcatalog"}; !slices.Equal(got, want) {
-		t.Fatalf("module roots = %v, want active Phase 4 extractions %v", got, want)
+	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {
+		t.Fatalf("module roots = %v, want active Phase 5 extractions %v", got, want)
 	}
 	if got, want := len(report.PendingDecisions), 0; got != want {
 		t.Fatalf("pending decisions = %d, want %d", got, want)
@@ -79,10 +82,13 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.AnalysisProfilesEnforced, 11; got != want {
 		t.Fatalf("enforced analysis profiles = %d, want %d", got, want)
 	}
-	if got, want := report.MutationCommands, 61; got != want {
+	if got, want := report.MutationCommands, 101; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeComponents, 86; got != want {
+	if got, want := report.DirectPersistenceWrites, 255; got != want {
+		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
+	}
+	if got, want := report.RuntimeComponents, 88; got != want {
 		t.Fatalf("runtime components = %d, want %d", got, want)
 	}
 	if got, want := report.RuntimeGoroutineLaunches, 105; got != want {
@@ -136,7 +142,7 @@ func TestMutationLedgerRequiresEveryMigratedCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	ledger.Commands = ledger.Commands[1:]
-	if err := ledger.Validate(); err == nil || !strings.Contains(err.Error(), "missing required migrated command artifacts.declare") {
+	if err := ledger.Validate(); err == nil || !strings.Contains(err.Error(), "missing required migrated command agentprovisioning.begin") {
 		t.Fatalf("Validate error = %v, want missing-migrated-command rejection", err)
 	}
 }
@@ -158,8 +164,9 @@ func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T)
 	// port contract explicitly forbids claiming product state, and Classifier
 	// only returns an ExitClassification value; neither has a durable command.
 	nonMutationEvidence := map[authority.Action]string{
-		execution.ActionPreflight: "PreflightPort validates readiness without claiming product state",
-		execution.ActionClassify:  "Classifier returns only an ExitClassification value",
+		execution.ActionPreflight:            "PreflightPort validates readiness without claiming product state",
+		execution.ActionClassify:             "Classifier returns only an ExitClassification value",
+		execution.ActionResolveTrustedRunner: "TrustedRunnerResolver returns only a validated catalog projection",
 	}
 	// These original generic API actions remain compatibility scaffolds and are
 	// not wired by the production Phase 4 composition. Their exact composed
@@ -202,6 +209,51 @@ func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T)
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("Execution mutation commands = %v, want exact production action inventory %v", got, want)
+	}
+}
+
+func TestMutationLedgerMatchesProductionInteractionMutationInventory(t *testing.T) {
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := make(map[string]struct{}, len(ledger.Commands))
+	for _, command := range ledger.Commands {
+		commands[command.ID] = struct{}{}
+	}
+	rules := append(interaction.OperationRules(), interaction.ChatOperationRules()...)
+	readOnly := map[authority.Action]struct{}{
+		interaction.ActionReadActivity:     {},
+		interaction.ActionReadConversation: {},
+	}
+	for _, rule := range rules {
+		id := string(rule.Action)
+		if _, ok := readOnly[rule.Action]; ok {
+			if _, ok := commands[id]; ok {
+				t.Fatalf("read-only Interaction action %s must not be a mutation-ledger row", id)
+			}
+			continue
+		}
+		if _, ok := commands[id]; !ok {
+			t.Fatalf("production Interaction mutation %s is missing from the mutation ledger", id)
+		}
+	}
+}
+
+func TestMutationLedgerMatchesProductionAgentsMutationInventory(t *testing.T) {
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := make(map[string]struct{}, len(ledger.Commands))
+	for _, command := range ledger.Commands {
+		commands[command.ID] = struct{}{}
+	}
+	for _, rule := range agents.OperationRules() {
+		id := string(rule.Action)
+		if _, ok := commands[id]; !ok {
+			t.Fatalf("production Agents mutation %s is missing from the mutation ledger", id)
+		}
 	}
 }
 
@@ -354,52 +406,189 @@ func TestPhase4LedgerDistinguishesReceiptsFromStateConvergence(t *testing.T) {
 	}
 }
 
-func TestCheckedInPhase4ArchitectureContracts(t *testing.T) {
+func TestPhase5InteractionLedgerPinsDeliveryAuthorityAndAttemptFencing(t *testing.T) {
+	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commands := make(map[string]MutationCommand, len(ledger.Commands))
+	for _, command := range ledger.Commands {
+		commands[command.ID] = command
+	}
+
+	enqueue := commands["interaction.enqueue-inbox"]
+	if !slices.Equal(enqueue.AcceptedAuthority, []string{"operator", "system"}) ||
+		!strings.Contains(enqueue.RetryRestartBehavior, "fresh system authority") ||
+		!slices.Contains(enqueue.NegativeTests, "wrong_component") {
+		t.Fatalf("Interaction enqueue must pin registered operator/system authority: %+v", enqueue)
+	}
+
+	complete := commands["interaction.complete-inbox"]
+	for label, value := range map[string]string{
+		"boundary":    complete.Boundary,
+		"idempotency": complete.IdempotencyKey,
+		"retry":       complete.RetryRestartBehavior,
+	} {
+		if !strings.Contains(value, "attempt") {
+			t.Fatalf("Interaction complete %s must bind the exact claim attempt: %+v", label, complete)
+		}
+	}
+	if !strings.Contains(complete.RetryRestartBehavior, "queued preserves the attempt") ||
+		!slices.Contains(complete.NegativeTests, "stale_claim") ||
+		!slices.Contains(complete.FaultInjectionTests, "reclaim_completion_race") {
+		t.Fatalf("Interaction queued retry must reject predecessor completion: %+v", complete)
+	}
+
+	patch := commands["interaction.patch-session"]
+	if !slices.Equal(patch.AcceptedAuthority, []string{"session"}) ||
+		!slices.Equal(patch.DurableCommands, []string{"fleetdb.patch_interaction_session.v1"}) ||
+		!slices.Contains(patch.NegativeTests, "forbidden_identity_field") {
+		t.Fatalf("Interaction patch must remain owner-fenced and bounded: %+v", patch)
+	}
+
+	forceInterrupt := commands["interaction.force-interrupt"]
+	for label, value := range map[string]string{
+		"boundary":    forceInterrupt.Boundary,
+		"idempotency": forceInterrupt.IdempotencyKey,
+		"retry":       forceInterrupt.RetryRestartBehavior,
+	} {
+		if !strings.Contains(value, "lease") ||
+			!strings.Contains(value, "fenc") {
+			t.Fatalf("Interaction force-interrupt %s must bind the caller-expected lease generation: %+v", label, forceInterrupt)
+		}
+	}
+	if !slices.Contains(forceInterrupt.NegativeTests, "delayed_prior_lease_generation") {
+		t.Fatalf("Interaction force-interrupt must reject delayed prior-generation teardown: %+v", forceInterrupt)
+	}
+}
+
+func TestCheckedInPhase5ArchitectureContracts(t *testing.T) {
 	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if graph.CompletedPhase != 4 {
-		t.Fatalf("completed phase = %d, want 4", graph.CompletedPhase)
+	if graph.CompletedPhase != 5 {
+		t.Fatalf("completed phase = %d, want 5", graph.CompletedPhase)
 	}
 	statusByCapability := make(map[string]string, len(graph.Capabilities))
 	for _, capability := range graph.Capabilities {
 		statusByCapability[capability.Name] = capability.Status
 	}
-	if statusByCapability["automation"] != "active" || statusByCapability["workflowcatalog"] != "active" ||
-		statusByCapability["execution"] != "active" || statusByCapability["artifacts"] != "active" {
-		t.Fatalf("active capability statuses = automation:%q workflowcatalog:%q execution:%q artifacts:%q",
-			statusByCapability["automation"], statusByCapability["workflowcatalog"], statusByCapability["execution"], statusByCapability["artifacts"])
+	for _, capability := range []string{
+		"agents",
+		"artifacts",
+		"automation",
+		"connectors",
+		"execution",
+		"interaction",
+		"sourcecontrol",
+		"workflowcatalog",
+	} {
+		if statusByCapability[capability] != "active" {
+			t.Fatalf("capability %s status = %q, want active", capability, statusByCapability[capability])
+		}
 	}
 
 	ledger, err := LoadMutationLedger(filepath.Join("testdata", "mutation-ledger.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Commands) != 61 {
-		t.Fatalf("mutation commands = %d, want 61", len(ledger.Commands))
+	if len(ledger.Commands) != 101 {
+		t.Fatalf("mutation commands = %d, want 101", len(ledger.Commands))
 	}
 }
 
-func TestLegacyWorkflowsExtensionMatchesCurrentCallers(t *testing.T) {
+func TestPhase5InteractionOwnershipBlockerRatchet(t *testing.T) {
 	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var legacy LegacyPath
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// These legacy composite-store calls are semantic writes, not persistence
+	// adapters. Target architecture assigns all four aggregates exclusively to
+	// Interaction in Phase 5. AgentCommand is deliberately absent here: its
+	// lead/session/interactive daemon delivery remains transitional until
+	// Phase 6, and is audited separately from session ownership.
+	mutation := regexp.MustCompile(`\.(AgentSessions|TerminalSessions|AgentLeases|AgentInboxMessages)\(\)\.(Create|Update|Heartbeat|Release|ClaimNext|Complete)\(`)
+	counts := map[string]int{}
+	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if strings.HasPrefix(rel, "internal/infra/") ||
+			strings.HasPrefix(rel, "internal/modules/interaction/") ||
+			rel == "internal/cli/cmdstore/store_tracing_control_plane.go" {
+			return nil
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, match := range mutation.FindAllSubmatch(contents, -1) {
+			counts[rel+":"+string(match[1])+"."+string(match[2])]++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observed []string
+	totalBlockers := 0
+	for key, count := range counts {
+		observed = append(observed, key+"="+strconv.Itoa(count))
+		totalBlockers += count
+	}
+	slices.Sort(observed)
+	if len(observed) != 0 {
+		t.Fatalf(
+			"Phase 5 Interaction ownership has %d direct aggregate mutation blockers outside owner adapters: %v",
+			totalBlockers,
+			observed,
+		)
+	}
+	if graph.CompletedPhase != 5 {
+		t.Fatalf("completed_phase = %d after zero direct Interaction aggregate mutation blockers, want 5", graph.CompletedPhase)
+	}
+}
+
+func TestRetiredLegacyWorkflowsPathCannotReturn(t *testing.T) {
+	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, candidate := range graph.LegacyPaths {
 		if candidate.Path == "internal/workflows" {
-			legacy = candidate
-			break
+			t.Fatalf("retired internal/workflows path remains in capability graph: %+v", candidate)
 		}
-	}
-	if legacy.Extension == nil || legacy.ExpiresAfterPhase != 5 {
-		t.Fatalf("internal/workflows extension = %+v, want reviewed Phase 5 expiry", legacy)
 	}
 
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
+	}
+	retiredRoot := filepath.Join(root, "internal", "workflows")
+	if walkErr := filepath.WalkDir(retiredRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			t.Errorf("retired internal/workflows path contains %s", path)
+		}
+		return nil
+	}); walkErr != nil && !os.IsNotExist(walkErr) {
+		t.Fatal(walkErr)
 	}
 	var observed []string
 	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
@@ -414,9 +603,6 @@ func TestLegacyWorkflowsExtensionMatchesCurrentCallers(t *testing.T) {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if strings.HasPrefix(rel, legacy.Path+"/") {
-			return nil
-		}
 		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
 		if err != nil {
 			return err
@@ -437,8 +623,8 @@ func TestLegacyWorkflowsExtensionMatchesCurrentCallers(t *testing.T) {
 		t.Fatal(err)
 	}
 	slices.Sort(observed)
-	if !slices.Equal(observed, legacy.Extension.RemainingCallSites) {
-		t.Fatalf("internal/workflows callers = %v, want reviewed extension list %v", observed, legacy.Extension.RemainingCallSites)
+	if len(observed) != 0 {
+		t.Fatalf("retired internal/workflows callers = %v, want none", observed)
 	}
 }
 

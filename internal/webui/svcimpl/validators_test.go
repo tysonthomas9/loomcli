@@ -1,6 +1,12 @@
 package svcimpl
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
+)
 
 // TestReadAgentNameValidatorAcceptsStorableNames guards the cross-endpoint
 // consistency fix (Codex P2): the read-path validator (validateAgentName, used
@@ -38,5 +44,33 @@ func TestStoredAgentNameValidatorIsCanonical(t *testing.T) {
 		if err := validateStoredAgentName(name); err == nil {
 			t.Errorf("store validator accepted invalid name %q", name)
 		}
+	}
+}
+
+func TestClassifyStoreErrorPreservesAgentsOwnerErrorKinds(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want service.ErrorKind
+	}{
+		{name: "invalid", err: agents.ErrInvalid, want: service.KindValidation},
+		{name: "not found", err: agents.ErrNotFound, want: service.KindNotFound},
+		{name: "already exists", err: agents.ErrAlreadyExists, want: service.KindConflict},
+		{name: "conflict", err: agents.ErrConflict, want: service.KindConflict},
+		{name: "invalid transition", err: agents.ErrInvalidTransition, want: service.KindConflict},
+		{name: "unavailable", err: agents.ErrUnavailable, want: service.KindUnavailable},
+		{name: "invalid persisted state", err: agents.ErrInvalidPersistedState, want: service.KindInternal},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			classified := classifyStoreError("update agent", test.err)
+			var serviceErr *service.ServiceError
+			if !errors.As(classified, &serviceErr) {
+				t.Fatalf("classified error = %T %v", classified, classified)
+			}
+			if serviceErr.Kind != test.want {
+				t.Fatalf("kind = %q, want %q", serviceErr.Kind, test.want)
+			}
+		})
 	}
 }

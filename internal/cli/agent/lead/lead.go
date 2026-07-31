@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
@@ -21,6 +20,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	"github.com/tysonthomas9/loomcli/internal/infra/interactionclient"
+	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -29,7 +31,6 @@ import (
 // session) auto-attribute back to this lead session via OrchestratorSessionID.
 const envOrchestratorSessionID = "LOOM_ORCHESTRATOR_SESSION_ID"
 const envAgentName = "LOOM_AGENT_NAME"
-const envAgentTerminalID = "LOOM_AGENT_TERMINAL_ID"
 
 const leadHeartbeatInterval = 30 * time.Second
 const leadStoreOpTimeout = 10 * time.Second
@@ -84,16 +85,27 @@ func leadStartupPrompt(ctx context.Context, registration leadSessionRegistration
 	if err != nil {
 		return "", err
 	}
-	return applyLeadPromptContext(prompt), nil
+	return applyLeadPromptContextForSession(prompt, registration), nil
 }
 
-func runLead(cmd *cobra.Command, args []string) {
+func runLead(cmd *cobra.Command, args []string) { //nolint:funlen // The foreground CLI keeps lead startup, cleanup, and exit reporting in one lifecycle boundary.
 	// Get current working directory
 	workDir, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting working directory: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Bind to the server-created owner-fenced Interaction session before any
+	// recovery shell or backend child can inherit the process environment. A
+	// wholly absent envelope is explicit standalone mode; a partial envelope
+	// stops before any backend is launched.
+	registration := registerLeadSession(context.Background(), workDir)
+	if err := registration.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid interactive session authority: %v\n", err)
+		return
+	}
+	defer registration.Finalize()
 
 	// Check backend health before invoking. If the binary isn't installed,
 	// show a helpful error and drop into a shell so the user can fix it.
@@ -109,12 +121,6 @@ func runLead(cmd *cobra.Command, args []string) {
 	fmt.Println("Starting LEAD mode (Interactive)")
 	fmt.Println("=========================================")
 	fmt.Println()
-
-	// Best-effort: register this lead as an orchestrator session so workers
-	// the AI spawns via `loom agentdef add` are attributed back to it. Skips
-	// silently if there is no active workspace or fleet-db is unreachable.
-	registration := registerLeadSession(context.Background(), workDir)
-	defer registration.Finalize()
 
 	// Generate the terminal-agent prompt and append the user's initial request if provided.
 	prompt, err := leadStartupPrompt(context.Background(), registration)
@@ -132,6 +138,7 @@ func runLead(cmd *cobra.Command, args []string) {
 	handled, invokeErr := backends.RunControlledLeadRuntime(
 		context.Background(),
 		registration.Store(),
+		registration.Runtime(),
 		registration.Workspace,
 		registration.AgentID,
 		registration.SessionID,
@@ -202,7 +209,11 @@ func loadLeadRolePrompt(ctx context.Context, registration leadSessionRegistratio
 // applyLeadPromptContext appends the backend assignment context and the
 // optional --message initial request onto the base terminal-agent prompt.
 func applyLeadPromptContext(prompt string) string {
-	if assignment := currentLeadAssignmentPrompt(context.Background()); assignment != "" {
+	return applyLeadPromptContextForSession(prompt, leadSessionRegistration{})
+}
+
+func applyLeadPromptContextForSession(prompt string, registration leadSessionRegistration) string {
+	if assignment := currentLeadAssignmentPrompt(context.Background(), registration); assignment != "" {
 		prompt += "\n\n## Loom Backend Assignment\n\n" + assignment
 	}
 	if leadMessage != "" {
@@ -212,12 +223,21 @@ func applyLeadPromptContext(prompt string) string {
 	return prompt
 }
 
-func currentLeadAssignmentPrompt(ctx context.Context) string {
-	handle, ws, ok := openLeadSessionStore(ctx)
-	if !ok {
-		return ""
+func currentLeadAssignmentPrompt(ctx context.Context, registration leadSessionRegistration) string {
+	handle := registration.handle
+	ws := strings.TrimSpace(registration.Workspace)
+	closeHandle := false
+	if handle == nil || handle.Store == nil || ws == "" {
+		var ok bool
+		handle, ws, ok = openLeadSessionStore(ctx)
+		if !ok {
+			return ""
+		}
+		closeHandle = true
 	}
-	defer func() { _ = handle.Close() }()
+	if closeHandle {
+		defer func() { _ = handle.Close() }()
+	}
 
 	loadCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer cancel()
@@ -225,14 +245,19 @@ func currentLeadAssignmentPrompt(ctx context.Context) string {
 	if err != nil || assignment == nil {
 		return ""
 	}
-	if err := markLeadAssignmentDelivered(loadCtx, handle.Store, ws, assignment); err != nil {
+	if err := markLeadAssignmentDelivered(loadCtx, registration.Runtime(), ws, assignment); err != nil {
 		slog.Debug("lead assignment delivery marker failed", "err", err)
 	}
 	return epicrunner.FormatLeadAssignmentContext(assignment)
 }
 
-func markLeadAssignmentDelivered(ctx context.Context, st store.Store, ws string, assignment *epicrunner.LeadAssignmentContext) error {
-	if st == nil || st.AgentSessions() == nil || assignment == nil {
+func markLeadAssignmentDelivered(
+	ctx context.Context,
+	runtime leadcontrol.SessionRuntime,
+	ws string,
+	assignment *epicrunner.LeadAssignmentContext,
+) error {
+	if runtime == nil || assignment == nil {
 		return nil
 	}
 	sessionID := strings.TrimSpace(assignment.OrchestratorSessionID)
@@ -241,25 +266,20 @@ func markLeadAssignmentDelivered(ctx context.Context, st store.Store, ws string,
 		return nil
 	}
 
-	session, err := st.AgentSessions().Get(ctx, ws, sessionID)
-	if errors.Is(err, domain.ErrNotFound) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	metadata := make(map[string]string, len(session.Metadata)+2)
-	for k, v := range session.Metadata {
-		metadata[k] = v
-	}
-	metadata["lead_assignment_delivered_version"] = version
-	metadata["lead_assignment_delivered_epic"] = strings.TrimSpace(assignment.EpicID)
-	_, err = st.AgentSessions().Update(ctx, ws, sessionID, store.AgentSessionUpdate{Metadata: &metadata})
-	return err
+	return runtime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey: ws,
+		SessionID:    sessionID,
+		MetadataUpserts: map[string]string{
+			"lead_assignment_delivered_version": version,
+			"lead_assignment_delivered_epic":    strings.TrimSpace(assignment.EpicID),
+		},
+	})
 }
 
 type leadSessionRegistration struct {
 	handle    *bootstrap.StoreHandle
+	runtime   leadcontrol.SessionRuntime
+	err       error
 	Workspace string
 	SessionID string
 	AgentID   string
@@ -279,36 +299,47 @@ func (r leadSessionRegistration) Store() store.Store {
 	return r.handle.Store
 }
 
-// registerLeadOrchestratorSession opens fleet-db, creates an
-// AgentSession{Kind:orchestration}, and starts a heartbeat goroutine. Returns a
-// registration whose Finalize method marks the session completed and stops the
-// heartbeat. Best-effort: any error returns a no-op registration so lead always
-// runs.
+func (r leadSessionRegistration) Runtime() leadcontrol.SessionRuntime {
+	return r.runtime
+}
+
+func (r leadSessionRegistration) Err() error {
+	return r.err
+}
+
+// registerLeadOrchestratorSession accepts only a complete server-issued
+// SessionEnvelope. The server has already created the AgentSession and lease;
+// the child can only heartbeat, patch its runtime context, finish, and consume
+// its inbox through the owner-fenced Interaction API. No envelope is explicit
+// standalone mode and remains unregistered.
 func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSessionRegistration {
 	noop := func() {}
 	empty := leadSessionRegistration{finalize: noop}
-	handle, ws, ok := openLeadSessionStore(ctx)
-	if !ok {
+	client, registered, err := interactionclient.NewFromEnv()
+	if err != nil {
+		slog.Warn("lead session envelope rejected", "err", err)
+		empty.err = err
 		return empty
 	}
-
-	sid := resolveLeadOrchestratorSessionID()
-	agentID := resolveLeadAgentID()
-	if err := createLeadSession(ctx, handle, ws, sid, agentID, workDir); err != nil {
-		_ = handle.Close()
-		slog.Warn("lead orchestrator session: create failed, continuing without registration", "err", err)
+	if !registered {
 		return empty
 	}
+	proof := client.Proof()
+	handle, _, storeOK := openLeadSessionStore(ctx)
+	if !storeOK {
+		handle = nil
+	}
 
-	activateLeadSessionEnv(sid)
-	fmt.Printf("Lead session: %s (orchestrator linkage active)\n\n", sid)
-	stopHB, wg := startLeadSessionHeartbeat(handle, ws, sid)
+	activateLeadSessionEnv(proof.SessionID)
+	fmt.Printf("Lead session: %s (Interaction authority active)\n\n", proof.SessionID)
+	stopHB, wg := startLeadSessionHeartbeat(client, proof.WorkspaceKey, proof.SessionID)
 	return leadSessionRegistration{
 		handle:    handle,
-		Workspace: ws,
-		SessionID: sid,
-		AgentID:   agentID,
-		finalize:  leadSessionFinalizer(handle, ws, sid, stopHB, wg),
+		runtime:   client,
+		Workspace: proof.WorkspaceKey,
+		SessionID: proof.SessionID,
+		AgentID:   proof.AgentID,
+		finalize:  leadSessionFinalizer(handle, client, proof.WorkspaceKey, proof.SessionID, stopHB, wg),
 	}
 }
 
@@ -327,34 +358,6 @@ func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, 
 	return handle, ws, true
 }
 
-func createLeadSession(ctx context.Context, handle *bootstrap.StoreHandle, ws, sid, agentID, workDir string) error {
-	createCtx, createCancel := context.WithTimeout(ctx, leadStoreOpTimeout)
-	defer createCancel()
-	_, err := handle.Store.AgentSessions().Create(createCtx, store.AgentSessionCreate{
-		WorkspaceKey: ws,
-		SessionID:    sid,
-		AgentID:      agentID,
-		Kind:         domain.AgentSessionKindOrchestration,
-		TerminalID:   strings.TrimSpace(os.Getenv(envAgentTerminalID)),
-		Status:       domain.AgentSessionRunning,
-		Metadata: map[string]string{
-			"actor":        leadSessionActor(),
-			"lead_workdir": workDir,
-		},
-	})
-	if errors.Is(err, domain.ErrAlreadyExists) {
-		return nil
-	}
-	return err
-}
-
-func leadSessionActor() string {
-	if actor := os.Getenv("USER"); actor != "" {
-		return actor
-	}
-	return "unknown"
-}
-
 func activateLeadSessionEnv(sid string) {
 	// Child agents spawned from this session inherit the orchestrator ID.
 	if err := os.Setenv(envOrchestratorSessionID, sid); err != nil {
@@ -362,38 +365,43 @@ func activateLeadSessionEnv(sid string) {
 	}
 }
 
-func startLeadSessionHeartbeat(handle *bootstrap.StoreHandle, ws, sid string) (chan struct{}, *sync.WaitGroup) {
+func startLeadSessionHeartbeat(
+	runtime leadcontrol.SessionRuntime,
+	ws, sid string,
+) (chan struct{}, *sync.WaitGroup) {
 	stopHB := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go heartbeatLeadSession(handle, ws, sid, stopHB, &wg)
+	go heartbeatLeadSession(runtime, ws, sid, stopHB, &wg)
 	return stopHB, &wg
 }
 
-func leadSessionFinalizer(handle *bootstrap.StoreHandle, ws, sid string, stopHB chan struct{}, wg *sync.WaitGroup) func() {
+func leadSessionFinalizer(
+	handle *bootstrap.StoreHandle,
+	runtime leadcontrol.SessionRuntime,
+	ws, sid string,
+	stopHB chan struct{},
+	wg *sync.WaitGroup,
+) func() {
 	return func() {
 		close(stopHB)
 		wg.Wait()
 		finCtx, finCancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
 		defer finCancel()
-		status := domain.AgentSessionCompleted
-		now := time.Now().UTC()
-		finishedAt := &now
-		if _, err := handle.Store.AgentSessions().Update(finCtx, ws, sid, store.AgentSessionUpdate{
-			Status:     &status,
-			FinishedAt: &finishedAt,
+		if err := runtime.FinishSession(finCtx, interaction.FinishSessionCommand{
+			WorkspaceKey: ws,
+			SessionID:    sid,
+			Status:       interaction.SessionCompleted,
 		}); err != nil {
 			slog.Debug("lead orchestrator session: finalize failed", "err", err)
 		}
-		_ = handle.Close()
+		if err := runtime.Close(); err != nil {
+			slog.Debug("lead orchestrator session: credential close failed", "err", err)
+		}
+		if handle != nil {
+			_ = handle.Close()
+		}
 	}
-}
-
-func resolveLeadOrchestratorSessionID() string {
-	if sid := strings.TrimSpace(os.Getenv(envOrchestratorSessionID)); sid != "" {
-		return sid
-	}
-	return "lead-" + uuid.New().String()
 }
 
 func resolveLeadAgentID() string {
@@ -406,11 +414,22 @@ func resolveLeadAgentID() string {
 // heartbeatLeadSession periodically refreshes the lead session's last_heartbeat
 // so observers can detect a stale lead (e.g. tmux force-killed). Stops on stopHB
 // close. Best-effort — heartbeat failures are logged at debug only.
-func heartbeatLeadSession(handle *bootstrap.StoreHandle, ws, sid string, stopHB <-chan struct{}, wg *sync.WaitGroup) {
-	heartbeatLeadSessionEvery(handle, ws, sid, stopHB, wg, leadHeartbeatInterval)
+func heartbeatLeadSession(
+	runtime leadcontrol.SessionRuntime,
+	ws, sid string,
+	stopHB <-chan struct{},
+	wg *sync.WaitGroup,
+) {
+	heartbeatLeadSessionEvery(runtime, ws, sid, stopHB, wg, leadHeartbeatInterval)
 }
 
-func heartbeatLeadSessionEvery(handle *bootstrap.StoreHandle, ws, sid string, stopHB <-chan struct{}, wg *sync.WaitGroup, interval time.Duration) {
+func heartbeatLeadSessionEvery(
+	runtime leadcontrol.SessionRuntime,
+	ws, sid string,
+	stopHB <-chan struct{},
+	wg *sync.WaitGroup,
+	interval time.Duration,
+) {
 	defer wg.Done()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -420,7 +439,12 @@ func heartbeatLeadSessionEvery(handle *bootstrap.StoreHandle, ws, sid string, st
 			return
 		case <-ticker.C:
 			hbCtx, cancel := context.WithTimeout(context.Background(), leadStoreOpTimeout)
-			if _, err := handle.Store.AgentSessions().Heartbeat(hbCtx, ws, sid); err != nil {
+			if err := runtime.HeartbeatSession(hbCtx, interaction.HeartbeatSessionCommand{
+				WorkspaceKey: ws,
+				SessionID:    sid,
+				Phase:        "interactive",
+				LeaseTTL:     2 * leadHeartbeatInterval,
+			}); err != nil {
 				slog.Debug("lead orchestrator session: heartbeat failed", "err", err)
 			}
 			cancel()

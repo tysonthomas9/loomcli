@@ -1,8 +1,12 @@
 package archtest
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
@@ -11,6 +15,69 @@ import (
 func TestRepositoryScalePackageLoadsStaySerialized(t *testing.T) {
 	if repositoryScaleLoadConcurrency != 1 {
 		t.Fatalf("repository-scale package load concurrency = %d, want 1 to bound peak memory", repositoryScaleLoadConcurrency)
+	}
+}
+
+func TestRepositoryProfileCacheIsIsolatedAndRemoved(t *testing.T) {
+	inherited := filepath.Join(t.TempDir(), "inherited-cache")
+	t.Setenv("GOCACHE", inherited)
+
+	var scoped string
+	err := withRepositoryProfileCache(
+		AnalysisProfile{Name: "cache-test", GOOS: "linux", GOARCH: "amd64"},
+		func(environment []string) error {
+			for _, entry := range environment {
+				if strings.HasPrefix(entry, "GOCACHE=") {
+					scoped = strings.TrimPrefix(entry, "GOCACHE=")
+					break
+				}
+			}
+			if scoped == "" {
+				t.Fatal("scoped profile environment has no GOCACHE")
+			}
+			if scoped == inherited {
+				t.Fatalf("scoped GOCACHE = inherited cache %q", inherited)
+			}
+			return os.WriteFile(filepath.Join(scoped, "proof"), []byte("scoped"), 0o600)
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(scoped); !os.IsNotExist(err) {
+		t.Fatalf("scoped GOCACHE still exists after profile analysis: %v", err)
+	}
+	if _, err := os.Stat(inherited); !os.IsNotExist(err) {
+		t.Fatalf("inherited GOCACHE was mutated: %v", err)
+	}
+}
+
+func TestRepositoryProfileCacheIsRemovedAfterAnalysisFailure(t *testing.T) {
+	sentinel := errors.New("analysis failed")
+	var scoped string
+	err := withRepositoryProfileCache(
+		AnalysisProfile{Name: "failure-test", GOOS: "linux", GOARCH: "amd64"},
+		func(environment []string) error {
+			for _, entry := range environment {
+				if strings.HasPrefix(entry, "GOCACHE=") {
+					scoped = strings.TrimPrefix(entry, "GOCACHE=")
+					break
+				}
+			}
+			if scoped == "" || !filepath.IsAbs(scoped) {
+				t.Fatalf("scoped GOCACHE = %q, want an absolute path", scoped)
+			}
+			if err := os.WriteFile(filepath.Join(scoped, "proof"), []byte("scoped"), 0o600); err != nil {
+				return err
+			}
+			return sentinel
+		},
+	)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("profile analysis error = %v, want %v", err, sentinel)
+	}
+	if _, err := os.Stat(scoped); !os.IsNotExist(err) {
+		t.Fatalf("failed profile GOCACHE still exists: %v", err)
 	}
 }
 

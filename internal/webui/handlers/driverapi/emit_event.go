@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
+	dependencies "github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies"
 )
 
 // emit-event is the workflow lane of the internal-event loopback (chunk C14):
@@ -56,9 +57,7 @@ type emitEventResponse struct {
 }
 
 // WorkflowEventAwaitDispatcher is the narrow post-admission AW7 seam.
-type WorkflowEventAwaitDispatcher interface {
-	Dispatch(context.Context, string, trigger.AwaitDispatchEvent) (*trigger.AwaitDispatchResult, error)
-}
+type WorkflowEventAwaitDispatcher = dependencies.WorkflowEventAwaitDispatcher
 
 func (m *Module) emitEvent(ctx context.Context, ws string, id driverIdentity, body []byte) (any, error) {
 	params, err := decodeParams[emitEventParams](body)

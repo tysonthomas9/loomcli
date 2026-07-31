@@ -21,6 +21,13 @@ const (
 )
 
 func (s *sessionServiceImpl) controlPlaneSessionTranscript(ctx context.Context, wsID, taskID, sessionID string) ([]transcript.Event, error) {
+	run, runErr := s.executionTaskRunForSession(ctx, wsID, taskID, sessionID)
+	if runErr == nil {
+		return s.executionTaskRunTranscript(ctx, wsID, run)
+	}
+	if !serviceErrorNotFound(runErr) {
+		return nil, runErr
+	}
 	rec, err := s.controlPlaneSessionRecord(ctx, wsID, taskID, sessionID)
 	if err != nil {
 		return nil, err
@@ -52,7 +59,10 @@ func (s *sessionServiceImpl) GetAgentSessionTranscript(
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, service.ErrNotFound("session not found")
 		}
-		return nil, service.ErrInternal("failed to load session", err)
+		return nil, sessionControlPlaneReadError(
+			"failed to load session",
+			err,
+		)
 	}
 	// Return the same not-found signal for a missing session and a session owned
 	// by another agent so callers cannot enumerate cross-agent transcripts.
@@ -96,6 +106,14 @@ func (s *sessionServiceImpl) loadAgentSessionTranscript(
 	if rec != nil && rec.Metadata != nil {
 		transcriptRef = strings.TrimSpace(rec.Metadata["transcript_ref"])
 	}
+	return loadCanonicalTranscriptArtifact(ctx, transcriptRef, read)
+}
+
+func loadCanonicalTranscriptArtifact(
+	ctx context.Context,
+	transcriptRef string,
+	read func(context.Context, string) ([]byte, error),
+) ([]transcript.Event, error) {
 	if transcriptRef == "" {
 		return nil, service.ErrNotFound("transcript not found")
 	}
@@ -112,7 +130,10 @@ func (s *sessionServiceImpl) loadAgentSessionTranscript(
 		if errors.Is(err, store.ErrArtifactContentUnavailable) {
 			return nil, service.ErrUnavailable("transcript content is temporarily unavailable")
 		}
-		return nil, service.ErrInternal("failed to load transcript", err)
+		return nil, sessionControlPlaneReadError(
+			"failed to load transcript",
+			err,
+		)
 	}
 	events, err := parseCanonicalTranscriptBytes(data)
 	if err != nil {

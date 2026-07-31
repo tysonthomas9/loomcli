@@ -14,6 +14,8 @@ export const RunnerEnv = Object.freeze({
   requestJson: "LOOM_TASK_RUN_REQUEST_JSON",
 });
 
+export const DaytonaProviderSchemaV1 = "daytona-task-run-execution.v1";
+
 export class LoomAPIError extends Error {
   constructor(message, options = {}) {
     super(message);
@@ -74,8 +76,8 @@ export class TaskRunClient {
       get: (artifactId, requestOptions) => this.getArtifact(artifactId, requestOptions),
       list: (input, requestOptions) => this.listArtifacts(input, requestOptions),
     });
-    this.runtimeCredentials = Object.freeze({
-      get: (input, requestOptions) => this.getRuntimeCredential(input, requestOptions),
+    this.daytona = Object.freeze({
+      execute: (input, requestOptions) => this.executeDaytona(input, requestOptions),
     });
   }
 
@@ -197,10 +199,26 @@ export class TaskRunClient {
     }), options);
   }
 
-  async getRuntimeCredential(input = {}, options = {}) {
-    return this.#op("runtime-credential", {
-      provider: required("credential provider", input.provider),
-    }, options);
+  async executeDaytona(input = {}, options = {}) {
+    const delivery = input.delivery ?? {};
+    if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
+      throw new TypeError("daytona delivery must be an object");
+    }
+    return this.#op("daytona-execute", compact({
+      schemaVersion: required("daytona schemaVersion", input.schemaVersion || DaytonaProviderSchemaV1),
+      repositoryUrl: required("daytona repositoryUrl", input.repositoryUrl),
+      baseRef: input.baseRef,
+      taskPrompt: required("daytona taskPrompt", input.taskPrompt),
+      backend: required("daytona backend", input.backend),
+      model: input.model,
+      mode: input.mode,
+      delivery: compact({
+        openPullRequest: delivery.openPullRequest === true,
+        baseBranch: delivery.baseBranch,
+        outputBranch: delivery.outputBranch,
+        draft: delivery.draft === true || undefined,
+      }),
+    }), options);
   }
 
   async completeRun(input = {}, options = {}) {

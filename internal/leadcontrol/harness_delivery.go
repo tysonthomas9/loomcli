@@ -200,6 +200,7 @@ func (d *harnessTurnDeliverer) deliveredThreadID() string { return d.runtime.Cha
 func (d *harnessTurnDeliverer) deliverTurn(
 	ctx context.Context,
 	st store.Store,
+	sessionRuntime SessionRuntime,
 	workspace string,
 	sessionID string,
 	result *DeliveryResult,
@@ -216,7 +217,7 @@ func (d *harnessTurnDeliverer) deliverTurn(
 	status := harnessRuntimeStatus(snap)
 	d.runtime.Status = status
 	result.HarnessRuntime = d.runtime
-	_ = UpdateHarnessRuntimeMetadata(ctx, st, workspace, sessionID, d.runtime)
+	_ = UpdateHarnessRuntimeMetadata(ctx, sessionRuntime, workspace, sessionID, d.runtime)
 	if reason := d.turnBlockReason(handle, status, snap); reason != "" {
 		result.Reason = reason
 		return result, nil
@@ -242,7 +243,7 @@ func (d *harnessTurnDeliverer) deliverTurn(
 	handle.markTurnStarted()
 	d.runtime.Status = RuntimeStatusActive
 	result.HarnessRuntime = d.runtime
-	_ = UpdateHarnessRuntimeMetadata(ctx, st, workspace, sessionID, d.runtime)
+	_ = UpdateHarnessRuntimeMetadata(ctx, sessionRuntime, workspace, sessionID, d.runtime)
 	result.State = DeliveryStateDelivered
 	result.Reason = ""
 	return result, nil

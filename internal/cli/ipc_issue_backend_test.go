@@ -366,7 +366,7 @@ func TestIPCIssueBackend_SearchIssues_DelegatesToDirectBackend(t *testing.T) {
 
 // TestIPCIssueBackend_ReleaseClaim_RoutesThroughIPC asserts that ReleaseClaim
 // goes through the IPC mutator (IPCOpReleaseClaim) — so the daemon applies the
-// lease fence — and does NOT touch the direct backend, even when the direct
+// process-local credential fence — and does NOT touch the direct backend, even when the direct
 // backend implements ClaimReleaser. This is the inverse of the pre-LOOM-1
 // bypass: release is now daemon-mediated like Claim/Update/Close.
 func TestIPCIssueBackend_ReleaseClaim_RoutesThroughIPC(t *testing.T) {

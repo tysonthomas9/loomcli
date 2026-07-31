@@ -137,7 +137,7 @@ func runnerArtifactMetadataWithSource(req TaskExecRequest, source map[string]str
 	return metadata
 }
 
-func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context, req TaskExecRequest, session *flueTaskSession, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
+func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
 	if result.RuntimeMetadata == nil {
 		result.RuntimeMetadata = map[string]string{}
 	}
@@ -150,7 +150,7 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 	}
 	if len(transcriptContent) > 0 && result.RuntimeMetadata["transcript_ref"] == "" {
 		artifactID := taskRunAttemptArtifactID(req, "transcript-"+req.TaskRunID)
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
+		finalized, err := e.createContentArtifact(ctx, req, artifactID, "transcript", "task run transcript", "application/x-ndjson", transcriptContent)
 		if err != nil {
 			return TaskExecResult{}, err
 		}
@@ -158,17 +158,13 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 		result.RuntimeMetadata["transcript_ref"] = "artifact://" + finalized.ArtifactID
 		result.RuntimeMetadata["transcript_artifact_id"] = finalized.ArtifactID
 	}
-	if result.RuntimeMetadata["transcript_ref"] != "" && session != nil {
-		session.Metadata["transcript_ref"] = result.RuntimeMetadata["transcript_ref"]
-	}
-
 	logContent, err := e.runnerFileOrInlineBytes(runner.logsInline(), firstNonEmpty(runner.LogsPath, runner.LogsPathCamel), "logs")
 	if err != nil {
 		return TaskExecResult{}, err
 	}
 	if len(logContent) > 0 && result.LogsRef == "" {
 		artifactID := taskRunAttemptArtifactID(req, "logs-"+req.TaskRunID)
-		finalized, err := e.createContentArtifact(ctx, req, sessionIDFromFlueTaskSession(session), artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
+		finalized, err := e.createContentArtifact(ctx, req, artifactID, "logs", "task run logs", "text/plain; charset=utf-8", logContent)
 		if err != nil {
 			return TaskExecResult{}, err
 		}
@@ -178,9 +174,6 @@ func (e HostBridgeTaskExecutor) persistRunnerOutputArtifacts(ctx context.Context
 	}
 	if result.LogsRef != "" {
 		result.RuntimeMetadata["logs_ref"] = result.LogsRef
-		if session != nil {
-			session.Metadata["logs_ref"] = result.LogsRef
-		}
 	}
 	if result.ArtifactsRef == "" && len(result.ArtifactIDs) > 0 {
 		result.ArtifactsRef = "artifacts://" + req.TaskRunID
@@ -265,7 +258,7 @@ func readHostBridgeArtifactFile(path, label string) ([]byte, error) {
 	return content, nil
 }
 
-func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req TaskExecRequest, sessionID, artifactID, artifactType, summary, mimeType string, content []byte) (*domain.Artifact, error) {
+func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req TaskExecRequest, artifactID, artifactType, summary, mimeType string, content []byte) (*domain.Artifact, error) {
 	if e.Artifacts == nil {
 		return nil, fmt.Errorf("artifacts capability required for %s artifact finalization: %w", artifactType, artifactsmodule.ErrUnavailable)
 	}
@@ -274,7 +267,7 @@ func (e HostBridgeTaskExecutor) createContentArtifact(ctx context.Context, req T
 		return nil, fmt.Errorf("authorize %s artifact finalization: %w", artifactType, err)
 	}
 	result, err := e.Artifacts.CreateContent(ctx, authorities, artifactExecutionOwnerForTask(req), artifactsmodule.CreateCommand{
-		ArtifactID: artifactID, SessionID: sessionID, TaskID: req.TaskID, Type: artifactType,
+		ArtifactID: artifactID, TaskID: req.TaskID, Type: artifactType,
 		Summary: summary, MIMEType: mimeType, Metadata: runnerArtifactMetadata(req),
 	}, content, taskOutputReference(req, artifactID))
 	if err != nil {
@@ -449,13 +442,6 @@ func taskRunAttemptArtifactID(req TaskExecRequest, baseID string) string {
 		return baseID
 	}
 	return fmt.Sprintf("%s-attempt-%d", baseID, attempt)
-}
-
-func sessionIDFromFlueTaskSession(session *flueTaskSession) string {
-	if session == nil {
-		return ""
-	}
-	return session.SessionID
 }
 
 func optionalString(value string) *string {

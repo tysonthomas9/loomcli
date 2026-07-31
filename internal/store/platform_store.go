@@ -11,14 +11,16 @@ import (
 )
 
 type DriverCreate struct {
-	WorkspaceKey    string
-	DriverID        string
-	Name            string
-	OwnerType       domain.DriverOwnerType
-	OwnerRef        string
-	Description     string
-	ActiveVersionID string
-	Status          domain.DriverStatus
+	WorkspaceKey string
+	DriverID     string
+	Name         string
+	OwnerType    domain.DriverOwnerType
+	OwnerRef     string
+	Description  string
+	// Status exists for generic draft creation compatibility. FleetDB rejects
+	// active here; version activation belongs to Workflow Catalog's typed
+	// ActivateVersion command.
+	Status domain.DriverStatus
 	// TrustLevel gates sandbox placement (§7 step 9). Stamped by the
 	// registration path server-side, never from client input; empty means
 	// untrusted (fail closed).
@@ -33,12 +35,13 @@ type DriverFilter struct {
 }
 
 type DriverUpdate struct {
-	Name            *string
-	OwnerType       *domain.DriverOwnerType
-	OwnerRef        *string
-	Description     *string
-	ActiveVersionID *string
-	Status          *domain.DriverStatus
+	Name        *string
+	OwnerType   *domain.DriverOwnerType
+	OwnerRef    *string
+	Description *string
+	// Status retains non-activation administration such as disable/archive.
+	// FleetDB rejects DriverStatusActive on this generic surface.
+	Status *domain.DriverStatus
 	// TrustLevel is the explicit ops elevation/demotion path; workflow
 	// runtimes never reach a surface that sets it.
 	TrustLevel *domain.DriverTrustLevel

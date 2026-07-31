@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/runhistory"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
@@ -38,24 +39,24 @@ func (m *Module) writeSupervisedAgentRuns(
 ) bool {
 	agent, supervised, err := m.supervisedByName(r.Context(), ws, id)
 	if err != nil {
-		writeBindingError(w, err, "get supervised agent failed")
+		writeUnifiedAgentLookupError(w, err)
 		return true
 	}
 	if !supervised {
 		return false
 	}
-	sessions, err := m.listAgentSessionsForHistory(r.Context(), ws, agent.Name, limit)
+	sessions, err := m.supervisedExecutionHistory(r.Context(), ws, agent.Name, limit)
 	if err != nil {
-		writeBindingError(w, err, "list supervised agent sessions failed")
+		writeBindingError(w, err, "list supervised agent execution history failed")
 		return true
 	}
 	if sessions == nil {
-		sessions = []*domain.AgentSession{}
+		sessions = []*agentHistorySessionDTO{}
 	}
 	handler.WriteJSON(w, http.StatusOK, agentRunsResponse{
 		AgentID:  agent.Name,
 		Runs:     []*domain.DriverRun{},
-		Sessions: newAgentHistorySessionDTOs(sessions),
+		Sessions: sessions,
 	})
 	return true
 }
@@ -68,8 +69,8 @@ func (m *Module) writeRecordOrLegacyAgentRuns(
 ) {
 	record, err := m.agentServiceForHistory(r.Context(), ws, id)
 	if err != nil {
-		if !errors.Is(err, domain.ErrNotFound) {
-			handler.WriteDomainError(w, err, "get agent record failed")
+		if !errors.Is(err, agentsmodule.ErrNotFound) {
+			writeAgentRecordError(w, err, "get agent record failed")
 			return
 		}
 		m.writeLegacyBindingAgentRuns(w, r, ws, id, limit)

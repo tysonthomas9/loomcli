@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/notify"
@@ -181,6 +181,15 @@ func newTestIPCDaemon(mb *mockIPCBackend) *Daemon {
 	return d
 }
 
+func configureIPCTestAuth(d *Daemon, agentName, sessionID, token string) {
+	d.sup.WorkspaceID = "WS"
+	d.sup.Agents = []*supervisor.AgentProcess{{
+		Entry:             config.AgentEntry{Worktree: agentName},
+		AgentSessionID:    sessionID,
+		AgentIPCAuthToken: token,
+	}}
+}
+
 // sendIPCRequest connects to the IPC socket, sends a request, reads the response.
 func sendIPCRequest(t *testing.T, socketPath string, req AgentIPCRequest) AgentIPCResponse {
 	t.Helper()
@@ -241,60 +250,34 @@ func TestIPCServer_ClaimSuccess(t *testing.T) {
 	}
 }
 
-func TestIPCServer_ClaimRequiresValidLeaseWhenStoreBacked(t *testing.T) {
+func TestIPCServer_ClaimRequiresValidProcessCredential(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	st := memstore.New()
-	d.store = st
-	d.sup.WorkspaceID = "WS"
-	session, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "sess-1",
-		AgentID:      "falcon",
-		NodeID:       "node-1",
-		Kind:         domain.AgentSessionKindTask,
-		Status:       domain.AgentSessionRunning,
-	})
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	lease, err := st.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
-		WorkspaceKey: "WS",
-		SessionID:    session.SessionID,
-		LeaseID:      "lease-1",
-		AgentID:      "falcon",
-		NodeID:       "node-1",
-		TTL:          time.Minute,
-	})
-	if err != nil {
-		t.Fatalf("create lease: %v", err)
-	}
+	configureIPCTestAuth(d, "falcon", "sess-1", "token-1")
 
 	bad := d.handleIPCClaim(AgentIPCRequest{
-		Operation:  ipcOpClaim,
-		AgentName:  "falcon",
-		IssueID:    "abc-123",
-		SessionID:  session.SessionID,
-		LeaseID:    lease.LeaseID,
-		LeaseToken: "wrong",
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		SessionID: "sess-1",
+		AuthToken: "wrong",
 	})
 	if bad.Success {
-		t.Fatal("claim with bad lease token succeeded")
+		t.Fatal("claim with bad IPC token succeeded")
 	}
 	if len(mb.claimCalls) != 0 {
 		t.Fatalf("backend called for bad token: %d", len(mb.claimCalls))
 	}
 
 	good := d.handleIPCClaim(AgentIPCRequest{
-		Operation:  ipcOpClaim,
-		AgentName:  "falcon",
-		IssueID:    "abc-123",
-		SessionID:  session.SessionID,
-		LeaseID:    lease.LeaseID,
-		LeaseToken: lease.Token,
+		Operation: ipcOpClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		SessionID: "sess-1",
+		AuthToken: "token-1",
 	})
 	if !good.Success {
-		t.Fatalf("claim with valid lease failed: %s", good.Error)
+		t.Fatalf("claim with valid IPC credential failed: %s", good.Error)
 	}
 	if len(mb.claimCalls) != 1 {
 		t.Fatalf("backend claim calls = %d, want 1", len(mb.claimCalls))
@@ -320,60 +303,34 @@ func TestIPCServer_ReleaseClaimSuccess(t *testing.T) {
 	}
 }
 
-func TestIPCServer_ReleaseClaimRequiresValidLeaseWhenStoreBacked(t *testing.T) {
+func TestIPCServer_ReleaseClaimRequiresValidProcessCredential(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
-	st := memstore.New()
-	d.store = st
-	d.sup.WorkspaceID = "WS"
-	session, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "sess-1",
-		AgentID:      "falcon",
-		NodeID:       "node-1",
-		Kind:         domain.AgentSessionKindTask,
-		Status:       domain.AgentSessionRunning,
-	})
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	lease, err := st.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
-		WorkspaceKey: "WS",
-		SessionID:    session.SessionID,
-		LeaseID:      "lease-1",
-		AgentID:      "falcon",
-		NodeID:       "node-1",
-		TTL:          time.Minute,
-	})
-	if err != nil {
-		t.Fatalf("create lease: %v", err)
-	}
+	configureIPCTestAuth(d, "falcon", "sess-1", "token-1")
 
 	bad := d.handleIPCReleaseClaim(AgentIPCRequest{
-		Operation:  ipcOpReleaseClaim,
-		AgentName:  "falcon",
-		IssueID:    "abc-123",
-		SessionID:  session.SessionID,
-		LeaseID:    lease.LeaseID,
-		LeaseToken: "wrong",
+		Operation: ipcOpReleaseClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		SessionID: "sess-1",
+		AuthToken: "wrong",
 	})
 	if bad.Success {
-		t.Fatal("release with bad lease token succeeded")
+		t.Fatal("release with bad IPC token succeeded")
 	}
 	if len(mb.releaseCalls) != 0 {
 		t.Fatalf("backend released for bad token: %d", len(mb.releaseCalls))
 	}
 
 	good := d.handleIPCReleaseClaim(AgentIPCRequest{
-		Operation:  ipcOpReleaseClaim,
-		AgentName:  "falcon",
-		IssueID:    "abc-123",
-		SessionID:  session.SessionID,
-		LeaseID:    lease.LeaseID,
-		LeaseToken: lease.Token,
+		Operation: ipcOpReleaseClaim,
+		AgentName: "falcon",
+		IssueID:   "abc-123",
+		SessionID: "sess-1",
+		AuthToken: "token-1",
 	})
 	if !good.Success {
-		t.Fatalf("release with valid lease failed: %s", good.Error)
+		t.Fatalf("release with valid IPC credential failed: %s", good.Error)
 	}
 	if len(mb.releaseCalls) != 1 {
 		t.Fatalf("backend release calls = %d, want 1", len(mb.releaseCalls))
@@ -816,6 +773,7 @@ func TestIPCServer_ClaimPublishesMutation(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
 	defer close(d.sup.Shutdown)
+	configureIPCTestAuth(d, "falcon", "sess-publish", "token-publish")
 
 	bus := notify.New()
 	defer bus.Close()
@@ -829,6 +787,8 @@ func TestIPCServer_ClaimPublishesMutation(t *testing.T) {
 		Operation: ipcOpClaim,
 		AgentName: "falcon",
 		IssueID:   "abc-123",
+		SessionID: "sess-publish",
+		AuthToken: "token-publish",
 	})
 	if !resp.Success {
 		t.Fatalf("expected success, got error: %s", resp.Error)
@@ -861,6 +821,7 @@ func TestIPCServer_UpdatePublishesMutation(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
 	defer close(d.sup.Shutdown)
+	configureIPCTestAuth(d, "falcon", "sess-publish", "token-publish")
 
 	bus := notify.New()
 	defer bus.Close()
@@ -878,6 +839,8 @@ func TestIPCServer_UpdatePublishesMutation(t *testing.T) {
 		AgentName: "falcon",
 		IssueID:   "abc-123",
 		Args:      args,
+		SessionID: "sess-publish",
+		AuthToken: "token-publish",
 	})
 	if !resp.Success {
 		t.Fatalf("expected success, got error: %s", resp.Error)
@@ -911,6 +874,7 @@ func TestIPCServer_CompletePublishesMutation(t *testing.T) {
 	}
 	d := newTestIPCDaemon(mb)
 	defer close(d.sup.Shutdown)
+	configureIPCTestAuth(d, "falcon", "sess-publish", "token-publish")
 
 	bus := notify.New()
 	defer bus.Close()
@@ -927,6 +891,8 @@ func TestIPCServer_CompletePublishesMutation(t *testing.T) {
 		AgentName: "falcon",
 		IssueID:   "abc-123",
 		Args:      args,
+		SessionID: "sess-publish",
+		AuthToken: "token-publish",
 	})
 	if !resp.Success {
 		t.Fatalf("expected success, got error: %s", resp.Error)
@@ -996,127 +962,69 @@ func TestIPCServer_ClaimError_NoMutation(t *testing.T) {
 	}
 }
 
-// TestIPCServer_Heartbeat_RefreshesLease confirms that a heartbeat request
-// with valid credentials extends the lease's ExpiresAt without performing
-// any business operation against the issue backend. This is the LOOM-12
-// invariant the 10s wrapper-layer keep-alive relies on to survive long,
-// IPC-silent steps like `make gate` (which would otherwise let the 2-minute
-// lease age out and fail the next `loom data close`/`update` with a 409).
-func TestIPCServer_Heartbeat_RefreshesLease(t *testing.T) {
+// A heartbeat authenticates against the active supervisor generation without
+// writing Interaction-owned AgentSession/AgentLease state or invoking the
+// issue backend.
+func TestIPCServer_HeartbeatAuthenticatesWithoutInteractionWrite(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
 	defer close(d.sup.Shutdown)
 	st := memstore.New()
 	d.store = st
-	d.sup.WorkspaceID = "WS"
-
-	session, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "sess-hb",
-		AgentID:      "falcon",
-		NodeID:       "node-1",
-		Kind:         domain.AgentSessionKindTask,
-		Status:       domain.AgentSessionRunning,
-	})
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	lease, err := st.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
-		WorkspaceKey: "WS",
-		SessionID:    session.SessionID,
-		LeaseID:      "lease-hb",
-		AgentID:      "falcon",
-		NodeID:       "node-1",
-		TTL:          100 * time.Millisecond, // intentionally tiny; heartbeat should bump it
-	})
-	if err != nil {
-		t.Fatalf("create lease: %v", err)
-	}
-	originalExpiry := lease.ExpiresAt
+	configureIPCTestAuth(d, "falcon", "sess-hb", "token-hb")
 
 	resp := d.handleIPCHeartbeat(AgentIPCRequest{
-		Operation:  ipcOpHeartbeat,
-		AgentName:  "falcon",
-		SessionID:  session.SessionID,
-		LeaseID:    lease.LeaseID,
-		LeaseToken: lease.Token,
+		Operation: ipcOpHeartbeat,
+		AgentName: "falcon",
+		SessionID: "sess-hb",
+		AuthToken: "token-hb",
 	})
 	if !resp.Success {
-		t.Fatalf("heartbeat with valid lease failed: %s (kind=%s)", resp.Error, resp.Kind)
+		t.Fatalf("heartbeat with valid credential failed: %s (kind=%s)", resp.Error, resp.Kind)
 	}
 	if len(mb.claimCalls) != 0 || len(mb.updateCalls) != 0 || len(mb.closeCalls) != 0 {
 		t.Errorf("heartbeat must not call the issue backend, got claims=%d updates=%d closes=%d",
 			len(mb.claimCalls), len(mb.updateCalls), len(mb.closeCalls))
 	}
 
-	refreshed, err := st.AgentLeases().Get(t.Context(), "WS", lease.LeaseID)
-	if err != nil {
-		t.Fatalf("get lease after heartbeat: %v", err)
-	}
-	if !refreshed.ExpiresAt.After(originalExpiry) {
-		t.Errorf("expected ExpiresAt to advance past %v, got %v", originalExpiry, refreshed.ExpiresAt)
+	if leases, err := st.AgentLeases().List(t.Context(), "WS", store.AgentLeaseFilter{}); err != nil || len(leases) != 0 {
+		t.Fatalf("heartbeat wrote Interaction AgentLease state: leases=%v err=%v", leases, err)
 	}
 }
 
 // TestIPCServer_Heartbeat_RejectsBadToken protects against an attacker (or
-// stale session) refreshing a lease they don't own.
+// stale session) impersonating an active supervised process.
 func TestIPCServer_Heartbeat_RejectsBadToken(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
 	defer close(d.sup.Shutdown)
-	st := memstore.New()
-	d.store = st
-	d.sup.WorkspaceID = "WS"
-
-	session, err := st.AgentSessions().Create(t.Context(), store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "sess-hb2",
-		AgentID:      "falcon",
-		NodeID:       "node-1",
-		Kind:         domain.AgentSessionKindTask,
-		Status:       domain.AgentSessionRunning,
-	})
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	lease, err := st.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
-		WorkspaceKey: "WS",
-		SessionID:    session.SessionID,
-		LeaseID:      "lease-hb2",
-		AgentID:      "falcon",
-		NodeID:       "node-1",
-		TTL:          time.Minute,
-	})
-	if err != nil {
-		t.Fatalf("create lease: %v", err)
-	}
+	configureIPCTestAuth(d, "falcon", "sess-hb2", "token-hb2")
 
 	resp := d.handleIPCHeartbeat(AgentIPCRequest{
-		Operation:  ipcOpHeartbeat,
-		AgentName:  "falcon",
-		SessionID:  session.SessionID,
-		LeaseID:    lease.LeaseID,
-		LeaseToken: "wrong-token",
+		Operation: ipcOpHeartbeat,
+		AgentName: "falcon",
+		SessionID: "sess-hb2",
+		AuthToken: "wrong-token",
 	})
 	if resp.Success {
 		t.Fatal("heartbeat accepted a bad token")
 	}
 }
 
-// TestIPCServer_Heartbeat_NoStore covers the daemon-without-store case (the
-// IPC server running purely for local notifications). The heartbeat must
-// succeed because there is no lease state to refresh.
-func TestIPCServer_Heartbeat_NoStore(t *testing.T) {
+// TestIPCServer_Heartbeat_NoWorkspaceIdentity covers the local notification
+// profile, where no control-plane workspace is configured and IPC credential
+// fencing is therefore disabled.
+func TestIPCServer_Heartbeat_NoWorkspaceIdentity(t *testing.T) {
 	mb := &mockIPCBackend{}
 	d := newTestIPCDaemon(mb)
 	defer close(d.sup.Shutdown)
-	// d.store and d.sup.WorkspaceID are deliberately left empty.
+	// d.sup.WorkspaceID is deliberately left empty.
 
 	resp := d.handleIPCHeartbeat(AgentIPCRequest{
 		Operation: ipcOpHeartbeat,
 		AgentName: "falcon",
 	})
 	if !resp.Success {
-		t.Fatalf("heartbeat against store-less daemon failed: %s", resp.Error)
+		t.Fatalf("heartbeat without workspace identity failed: %s", resp.Error)
 	}
 }

@@ -415,15 +415,14 @@ func TestModifiedAgentsToDrain_DefersActiveEphemeralTask(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create worker: %v", err)
 	}
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: "ws",
-		SessionID:    "sess-1",
-		AgentID:      "worker",
-		Kind:         domain.AgentSessionKindTask,
-		TaskID:       "TASK-1",
-		Status:       domain.AgentSessionRunning,
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:    "ws",
+		TaskRunID:       "task-run-1",
+		TaskID:          "TASK-1",
+		WorkerProfileID: "worker",
+		Status:          domain.TaskRunRunning,
 	}); err != nil {
-		t.Fatalf("create session: %v", err)
+		t.Fatalf("create task run: %v", err)
 	}
 
 	d := &Daemon{
@@ -459,15 +458,14 @@ func TestModifiedAgentsToDrain_DrainsCompletedEphemeralTask(t *testing.T) {
 	if _, err := st.Agents().Update(ctx, "ws", "worker", store.AgentUpdate{State: &stopped}); err != nil {
 		t.Fatalf("stop worker: %v", err)
 	}
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: "ws",
-		SessionID:    "sess-1",
-		AgentID:      "worker",
-		Kind:         domain.AgentSessionKindTask,
-		TaskID:       "TASK-1",
-		Status:       domain.AgentSessionCompleted,
+	if _, err := st.TaskRuns().Create(ctx, store.TaskRunCreate{
+		WorkspaceKey:    "ws",
+		TaskRunID:       "task-run-1",
+		TaskID:          "TASK-1",
+		WorkerProfileID: "worker",
+		Status:          domain.TaskRunCompleted,
 	}); err != nil {
-		t.Fatalf("create completed session: %v", err)
+		t.Fatalf("create completed task run: %v", err)
 	}
 
 	d := &Daemon{

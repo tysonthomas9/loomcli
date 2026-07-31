@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,14 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	workflowdefs "github.com/tysonthomas9/loomcli/internal/infra/workflowdistribution/authoring"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen // Unified response must merge and collision-check three agent representations.
@@ -57,9 +61,9 @@ func (m *Module) listAgents(w http.ResponseWriter, r *http.Request) { //nolint:c
 	// appear in the normal list would make the collection disagree with item
 	// routing. ?include=archived controls display only.
 	includeArchived := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include")), "archived")
-	records, err := m.store.AgentServices().List(r.Context(), ws, store.AgentServiceFilter{IncludeDeleted: true})
+	records, err := m.listAgentRecords(r.Context(), ws, true)
 	if err != nil {
-		handler.WriteDomainError(w, err, "list agent records failed")
+		writeAgentRecordError(w, err, "list agent records failed")
 		return
 	}
 	recordIDs := make(map[string]struct{}, len(records))
@@ -168,11 +172,11 @@ func (m *Module) rejectSupervisedIdentityCollision(w http.ResponseWriter, ctx co
 	// cross-kind namespaces with that prospective stored identity, while leaving
 	// durable record and binding identifiers themselves case-sensitive.
 	id := strings.ToLower(strings.TrimSpace(name))
-	if _, err := m.store.AgentServices().Get(ctx, ws, id); err == nil {
+	if _, err := m.getAgentRecord(ctx, ws, id); err == nil {
 		handler.RespondError(w, http.StatusConflict, "agent identifier is already used by an agent record")
 		return true
-	} else if !errors.Is(err, domain.ErrNotFound) {
-		handler.WriteDomainError(w, err, "check agent identifier failed")
+	} else if !errors.Is(err, agentsmodule.ErrNotFound) {
+		writeAgentRecordError(w, err, "check agent identifier failed")
 		return true
 	}
 	if _, ok, err := m.unattachedBindingByID(ctx, ws, id); err != nil {
@@ -189,44 +193,20 @@ func agentIdentifierCollisionError(id, first, second string) error {
 	return fmt.Errorf("agent identifier %q resolves to both %s and %s: %w", id, first, second, domain.ErrConflict)
 }
 
-func createUniqueAgentRecord(
-	ctx context.Context,
-	st store.Store,
-	ws, name, roleName string,
-	base store.AgentServiceCreate,
-) (*domain.AgentService, error) {
-	for attempt := 0; attempt < 5; attempt++ {
-		id, err := mintAgentRecordID(firstNonEmpty(name, roleName))
-		if err != nil {
-			return nil, err
-		}
-		if _, err := st.Agents().Get(ctx, ws, id); err == nil {
-			continue
-		} else if !errors.Is(err, domain.ErrNotFound) {
-			return nil, err
-		}
-		base.ServiceID = id
-		created, err := st.AgentServices().Create(ctx, base)
-		if err != nil {
-			if errors.Is(err, domain.ErrAlreadyExists) || errors.Is(err, domain.ErrConflict) {
-				continue
-			}
-			return nil, err
-		}
-		if created == nil {
-			return nil, errors.New("create agent record returned no record")
-		}
-		return created, nil
-	}
-	return nil, fmt.Errorf("mint unique agent id in workspace %q: %w", ws, domain.ErrAlreadyExists)
-}
-
 func (m *Module) createSupervisedAgent(w http.ResponseWriter, r *http.Request) {
 	if m.agentSvc == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("agent service not configured"))
 		return
 	}
-	HandleCreate(m.agentSvc, m.hub)(w, r)
+	authorized, ok := m.withSupervisedOperatorAuthority(
+		w,
+		r,
+		agentsmodule.ActionCreateSupervisedAssignment,
+	)
+	if !ok {
+		return
+	}
+	HandleCreate(m.agentSvc, m.hub)(w, authorized)
 }
 
 type promptAgentCreatePlan struct {
@@ -270,42 +250,11 @@ func parsePromptAgentCreatePlan(body []byte) (promptAgentCreatePlan, error) {
 	}, nil
 }
 
-func (m *Module) compensatePromptAgentBindingFailure(
-	ctx context.Context,
-	ws string,
-	agentID string,
-) {
-	if err := m.store.AgentServices().Delete(context.WithoutCancel(ctx), ws, agentID); err != nil {
-		slog.Warn("prompt agent create: compensation failed, orphan agent record left behind",
-			"workspace", ws, "agent_id", agentID, "err", err)
-	}
-}
-
-func (m *Module) compensatePromptAgentGrantFailure(
-	ctx context.Context,
-	ws string,
-	bindingID string,
-	agentID string,
-	authorities promptAgentCreateAuthorities,
-) {
-	compensationCtx := context.WithoutCancel(ctx)
-	if _, err := m.deleteManagedBinding(
-		compensationCtx, ws, bindingID, agentID, authorities.disableBinding, authorities.deleteBinding,
-	); err != nil {
-		slog.Warn("prompt agent create: binding compensation failed after grant error",
-			"workspace", ws, "binding_id", bindingID, "err", err)
-	}
-	if err := m.store.AgentServices().Delete(compensationCtx, ws, agentID); err != nil {
-		slog.Warn("prompt agent create: record compensation failed after grant error, orphan agent record left behind",
-			"workspace", ws, "agent_id", agentID, "err", err)
-	}
-}
-
 func (m *Module) resolvePromptAgentDriverForCreate(
 	w http.ResponseWriter,
 	r *http.Request,
 	ws string,
-) (*domain.Driver, bool) {
+) (*workflowcatalog.Driver, bool) {
 	driverRecord, err := m.resolvePromptAgentDriver(r.Context(), ws)
 	if err == nil {
 		return driverRecord, true
@@ -320,8 +269,9 @@ func (m *Module) resolvePromptAgentDriverForCreate(
 	return nil, false
 }
 
-func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body []byte) { //nolint:funlen // Transaction and compensation stay visibly ordered.
-	if m.store == nil {
+//nolint:funlen // Keep prompt-agent validation, authority resolution, provisioning, and compatibility projection in one compensating transaction.
+func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body []byte) {
+	if m.store == nil || m.provisioning == nil || m.provisioningAuthority == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
 	}
@@ -334,9 +284,13 @@ func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body 
 		handler.RespondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	req := plan.request
-	authorities, ok := m.resolvePromptAgentCreateAuthorities(w, r, ws, len(req.Grants) > 0)
-	if !ok {
+	auth, err := m.provisioningAuthority.ResolveOperatorAuthority(
+		r,
+		ws,
+		agentprovisioning.ActionBeginProvisioning,
+	)
+	if err != nil {
+		writeAgentProvisioningError(w, err, "prompt-agent provisioning authority denied")
 		return
 	}
 	// Resolve and, for the embedded prompt-agent, materialize the executable
@@ -348,138 +302,61 @@ func (m *Module) createPromptAgent(w http.ResponseWriter, r *http.Request, body 
 	if !ok {
 		return
 	}
-	roleResolution, ok := m.resolvePromptAgentRoleForCreate(w, r, ws, plan)
+	role, ok := m.resolvePromptAgentRoleForCreate(w, r, ws, plan)
 	if !ok {
 		return
 	}
-
-	agentMetadata := map[string]string{}
-	if backend := strings.TrimSpace(req.Backend); backend != "" {
-		agentMetadata["backend"] = backend
-	}
-	record, err := createUniqueAgentRecord(r.Context(), m.store, ws, req.Name, plan.roleName, store.AgentServiceCreate{
-		WorkspaceKey: ws,
-		Name:         firstNonEmpty(strings.TrimSpace(req.Name), plan.roleName),
-		Kind:         agentServiceKindForSource(plan.sourceKind),
-		DesiredState: plan.desired,
-		RoleName:     plan.roleName,
-		BudgetPolicy: strings.TrimSpace(req.BudgetPolicy),
-		Metadata:     agentMetadata,
-	})
-	if err != nil {
-		roleResolution.compensate(r.Context(), m, ws)
-		handler.WriteDomainError(w, err, "create agent record failed")
-		return
-	}
-	agentID := record.ServiceID
-
-	binding, err := m.createPromptAgentBinding(
-		r.Context(), authorities.createBinding, ws, agentID, driverRecord, req, plan.roleName, plan.enabled, plan.sourceKind,
+	spec, err := m.promptAgentProvisioningSpec(
+		r.Context(),
+		ws,
+		plan,
+		role,
+		driverRecord,
 	)
 	if err != nil {
-		// Compensation failures are non-fatal by design (§5: an orphan
-		// "unconfigured" agent is legal and deletable) but must never be
-		// silent — the serve log is the only trace an operator gets.
-		m.compensatePromptAgentBindingFailure(r.Context(), ws, agentID)
-		roleResolution.compensate(r.Context(), m, ws)
-		writeBindingError(w, err, "create prompt agent binding failed")
+		writeAgentProvisioningError(w, err, "build prompt-agent provisioning intent failed")
 		return
 	}
-
-	if err := m.provisionPromptAgentGrants(r.Context(), ws, binding.BindingID, req.Grants); err != nil {
-		m.compensatePromptAgentGrantFailure(r.Context(), ws, binding.BindingID, agentID, authorities)
-		roleResolution.compensate(r.Context(), m, ws)
-		handler.WriteDomainError(w, err, "provision connector grants failed")
+	durable, err := m.provisioning.Begin(r.Context(), auth, spec)
+	if err != nil {
+		writeAgentProvisioningError(w, err, "begin prompt-agent provisioning failed")
 		return
 	}
-
+	if durable == nil || strings.TrimSpace(durable.ProvisioningID) == "" {
+		writeAgentProvisioningError(
+			w,
+			agentprovisioning.ErrConflict,
+			"begin prompt-agent provisioning returned invalid state",
+		)
+		return
+	}
+	completed, err := m.provisioning.Run(
+		r.Context(),
+		ws,
+		durable.ProvisioningID,
+	)
+	if err != nil {
+		writeAgentProvisioningError(w, err, "run prompt-agent provisioning failed")
+		return
+	}
+	record, binding, err := promptAgentCommittedProjection(completed, time.Now())
+	if err != nil {
+		writeAgentProvisioningError(w, err, "read prompt-agent provisioning result failed")
+		return
+	}
 	out := m.createdPromptAgentResponse(r.Context(), ws, record, binding, time.Now())
 	broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
 	handler.WriteJSON(w, http.StatusCreated, out)
 }
 
-func (m *Module) resolvePromptAgentDriver(ctx context.Context, ws string) (*domain.Driver, error) {
-	// EnsureBuiltinWorkflow's reuse check is intentionally more than a row
-	// lookup: it verifies that the active version still has a staged manifest
-	// and executable bundle. The check is a cheap stat-only fast path for a
-	// healthy active version, and self-heals (or returns the typed build-toolchain
-	// error) when durable FleetDB state outlives its local bundle directory.
-	return workflowdefs.EnsureAndResolveDriver(ctx, m.store, ws, workflowdefs.BuiltinPromptAgentWorkflowName)
-}
-
-func (m *Module) createPromptAgentBinding(
-	ctx context.Context,
-	auth authority.OperatorAuthority,
-	ws, agentID string,
-	driver *domain.Driver,
-	req createPromptAgentRequest,
-	roleName string,
-	enabled bool,
-	sourceKind string,
-) (*domain.TriggerBinding, error) {
-	if m.bindings == nil {
-		return nil, automation.ErrUnavailable
+func (m *Module) resolvePromptAgentDriver(ctx context.Context, ws string) (*workflowcatalog.Driver, error) {
+	if m == nil || m.prepareWorkflowTarget == nil {
+		return nil, workflowcatalog.ErrUnavailable
 	}
-	if driver == nil {
-		return nil, fmt.Errorf("prompt-agent driver is required: %w", domain.ErrInvalid)
-	}
-	versionID := strings.TrimSpace(driver.ActiveVersionID)
-	if versionID == "" {
-		return nil, fmt.Errorf("driver %q has no active version: %w", driver.DriverID, domain.ErrInvalid)
-	}
-	bindingID := strings.TrimSpace(req.Trigger.BindingID)
-	if bindingID == "" {
-		bindingID = agentID + "-1"
-	}
-	eventPatterns := append([]string(nil), req.Trigger.EventTypePatterns...)
-	if sourceKind == store.InternalSourceKind && len(eventPatterns) == 0 {
-		eventPatterns = []string{"internal.task.ready"}
-	}
-	if sourceKind == store.CronSourceKind && strings.TrimSpace(req.Trigger.Schedule) == "" {
-		return nil, fmt.Errorf("schedule is required for a cron prompt agent: %w", domain.ErrInvalid)
-	}
-	sourceConfigRef, err := promptAgentSourceConfigRef(roleName, req.Backend)
-	if err != nil {
-		return nil, err
-	}
-	return m.bindings.CreateManagedBinding(ctx, auth, automation.CreateManagedBindingCommand{
-		WorkspaceKey: ws, AgentServiceID: agentID,
-		Definition: automation.BindingDefinition{
-			BindingID: bindingID, Name: firstNonEmpty(strings.TrimSpace(req.Name), roleName, bindingID),
-			SourceKind: sourceKind, RouteKey: strings.TrimSpace(req.Trigger.RouteKey), EventTypePatterns: eventPatterns,
-			DriverID: driver.DriverID, DriverVersionID: versionID,
-			TargetEntrypoint:     firstNonEmpty(strings.TrimSpace(req.Trigger.Entrypoint), "run"),
-			TargetAgentServiceID: agentID, Enabled: enabled,
-			Schedule: strings.TrimSpace(req.Trigger.Schedule), ScheduleTimezone: strings.TrimSpace(req.Trigger.ScheduleTimezone),
-			SourceConfigRef: sourceConfigRef, ConcurrencyPolicy: automation.ConcurrencyOneActivePerEpic,
-		},
-	})
-}
-
-func (m *Module) provisionPromptAgentGrants(ctx context.Context, ws, bindingID string, grants []promptAgentGrantRequest) error {
-	for _, grant := range grants {
-		connectorID := strings.TrimSpace(grant.ConnectorID)
-		action := strings.TrimSpace(grant.Action)
-		resourcePattern := strings.TrimSpace(grant.ResourcePattern)
-		if connectorID == "" || action == "" || resourcePattern == "" {
-			return fmt.Errorf("connector_id, action and resource_pattern are required for grants: %w", domain.ErrInvalid)
-		}
-		grantID := strings.TrimSpace(grant.GrantID)
-		if grantID == "" {
-			grantID = "grant-" + bindingID + "-" + strings.ReplaceAll(action, ".", "-")
-		}
-		if _, err := m.store.ConnectorGrants().Create(ctx, store.ConnectorGrantCreate{
-			WorkspaceKey:    ws,
-			GrantID:         grantID,
-			ConnectorID:     connectorID,
-			BindingID:       bindingID,
-			Action:          action,
-			ResourcePattern: resourcePattern,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
+	// The composition-provided target preparation verifies reusable bundle
+	// placement and self-heals the managed builtin through Workflow Catalog's
+	// atomic authoring port before returning its active durable identity.
+	return m.prepareWorkflowTarget(ctx, ws, workflowdefs.BuiltinPromptAgentWorkflowName)
 }
 
 func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
@@ -493,14 +370,14 @@ func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	id := agentRouteValue(r, "name", "idOrName")
 	if supervised, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-		writeBindingError(w, err, "get supervised agent failed")
+		writeUnifiedAgentLookupError(w, err)
 		return
 	} else if ok {
 		handler.WriteJSON(w, http.StatusOK, newSupervisedAgentDTO(supervised))
 		return
 	}
-	record, err := m.store.AgentServices().Get(r.Context(), ws, id)
-	if errors.Is(err, domain.ErrNotFound) {
+	record, err := m.getAgentRecord(r.Context(), ws, id)
+	if errors.Is(err, agentsmodule.ErrNotFound) {
 		binding, ok, bindingErr := m.unattachedBindingByID(r.Context(), ws, id)
 		if bindingErr != nil {
 			writeBindingError(w, bindingErr, "get legacy binding agent failed")
@@ -514,7 +391,7 @@ func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		handler.WriteDomainError(w, err, "get agent record failed")
+		writeAgentRecordError(w, err, "get agent record failed")
 		return
 	}
 	out, err := m.agentRecordDTO(r.Context(), ws, record, time.Now())
@@ -525,7 +402,7 @@ func (m *Module) getAgent(w http.ResponseWriter, r *http.Request) {
 	handler.WriteJSON(w, http.StatusOK, out)
 }
 
-func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen // The endpoint must route three agent kinds before applying record-specific validation.
+func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen,gocognit // Keep multi-aggregate validation, authority, and mutation ordering contiguous to prevent partial Agent or schedule updates.
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
@@ -544,20 +421,20 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:c
 		handler.HandleServiceError(w, err)
 		return
 	}
-	existingRecord, recordErr := m.store.AgentServices().Get(r.Context(), ws, id)
-	if errors.Is(recordErr, domain.ErrNotFound) {
+	existingRecord, recordErr := m.getAgentRecord(r.Context(), ws, id)
+	if errors.Is(recordErr, agentsmodule.ErrNotFound) {
 		m.patchLegacyBindingAgent(w, r, ws, id, req)
 		return
 	}
 	if recordErr != nil {
-		handler.WriteDomainError(w, recordErr, "get agent record failed")
+		writeAgentRecordError(w, recordErr, "get agent record failed")
 		return
 	}
 	if req.Behavior != nil && req.Behavior.RoleName != nil {
 		handler.RespondError(w, http.StatusBadRequest, "behavior.role_name is immutable for managed agent records")
 		return
 	}
-	patch := store.AgentServiceUpdate{}
+	patch := agentsmodule.AgentPatch{}
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
 		if name == "" {
@@ -594,12 +471,25 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:c
 	}
 	record := existingRecord
 	if patch.Name != nil || patch.BudgetPolicy != nil {
-		updatedRecord, updateErr := m.store.AgentServices().Update(r.Context(), ws, existingRecord.ServiceID, patch)
-		if updateErr != nil {
-			handler.WriteDomainError(w, updateErr, "update agent record failed")
+		updateAuth, ok := m.resolveAgentRecordAuthority(w, r, ws, agentsmodule.ActionUpdateAgent)
+		if !ok {
 			return
 		}
-		record = updatedRecord
+		updatedRecord, updateErr := m.agentRecords.UpdateAgent(
+			r.Context(),
+			updateAuth,
+			agentsmodule.UpdateAgentCommand{
+				WorkspaceKey:      ws,
+				AgentID:           existingRecord.ServiceID,
+				ExpectedUpdatedAt: existingRecord.UpdatedAt,
+				Patch:             patch,
+			},
+		)
+		if updateErr != nil {
+			writeAgentRecordError(w, updateErr, "update agent record failed")
+			return
+		}
+		record = canonicalAgentServiceProjection(updatedRecord)
 	}
 	if hasBindingPatch {
 		if _, err := m.bindings.UpdateManagedBinding(r.Context(), updateBindingAuth, automation.UpdateManagedBindingCommand{
@@ -620,7 +510,7 @@ func (m *Module) patchAgent(w http.ResponseWriter, r *http.Request) { //nolint:c
 
 func (m *Module) patchSupervisedAgent(w http.ResponseWriter, r *http.Request, ws, id string) bool {
 	if _, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-		writeBindingError(w, err, "get supervised agent failed")
+		writeUnifiedAgentLookupError(w, err)
 		return true
 	} else if ok {
 		if m.agentSvc == nil {
@@ -630,7 +520,15 @@ func (m *Module) patchSupervisedAgent(w http.ResponseWriter, r *http.Request, ws
 		if !rejectRecordOnlySupervisedPatchFields(w, r) {
 			return true
 		}
-		HandleUpdate(m.agentSvc, m.hub)(w, r)
+		authorized, ok := m.withSupervisedOperatorAuthority(
+			w,
+			r,
+			agentsmodule.ActionUpdateSupervisedAssignmentIntent,
+		)
+		if !ok {
+			return true
+		}
+		HandleUpdate(m.agentSvc, m.hub)(w, authorized)
 		return true
 	}
 	return false
@@ -650,8 +548,7 @@ func rejectRecordOnlySupervisedPatchFields(w http.ResponseWriter, r *http.Reques
 	}
 	allowed := map[string]struct{}{
 		"role_name": {}, "auto": {}, "backend": {}, "fallback_backends": {},
-		"repos": {}, "repo_groups": {}, "cross_repo": {}, "parent": {},
-		"state": {}, "desired_state": {},
+		"repos": {}, "repo_groups": {}, "cross_repo": {}, "desired_state": {},
 	}
 	for field := range fields {
 		if _, supported := allowed[field]; !supported {
@@ -662,7 +559,7 @@ func rejectRecordOnlySupervisedPatchFields(w http.ResponseWriter, r *http.Reques
 	return true
 }
 
-func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen // Lifecycle deletion keeps kind routing, binding cleanup, and archival visibly ordered.
+func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:cyclop,funlen // Keep unified kind routing and the canonical Fleet delete transaction contiguous.
 	if m.store == nil {
 		handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
 		return
@@ -673,87 +570,61 @@ func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:
 	}
 	id := agentRouteValue(r, "name", "idOrName")
 	if _, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-		writeBindingError(w, err, "get supervised agent failed")
+		writeUnifiedAgentLookupError(w, err)
 		return
 	} else if ok {
 		if m.agentSvc == nil {
 			handler.HandleServiceError(w, service.ErrUnavailable("agent service not configured"))
 			return
 		}
-		HandleDelete(m.agentSvc, m.hub)(w, r)
+		authorized, authorizedOK := m.withSupervisedOperatorAuthority(
+			w,
+			r,
+			agentsmodule.ActionRetireSupervisedAssignment,
+		)
+		if !authorizedOK {
+			return
+		}
+		HandleDelete(m.agentSvc, m.hub)(w, authorized)
 		return
 	}
 
-	record, err := m.store.AgentServices().Get(r.Context(), ws, id)
-	if errors.Is(err, domain.ErrNotFound) {
+	record, err := m.getAgentRecord(r.Context(), ws, id)
+	if errors.Is(err, agentsmodule.ErrNotFound) {
 		m.deleteLegacyBindingAgent(w, r, ws, id)
 		return
 	}
 	if err != nil {
-		handler.WriteDomainError(w, err, "get agent record failed")
+		writeAgentRecordError(w, err, "get agent record failed")
 		return
 	}
-	if m.bindings == nil {
-		writeBindingError(w, automation.ErrUnavailable, "list attached bindings failed")
+	if m.agentLifecycle == nil {
+		writeAgentRecordError(w, agentsmodule.ErrUnavailable, "agent lifecycle is unavailable")
 		return
 	}
-	bindings, err := m.bindings.ListBindings(r.Context(), ws, automation.BindingFilter{TargetAgentServiceID: record.ServiceID})
+	lifecycleAuth, ok := m.resolveAgentRecordAuthority(w, r, ws, agentsmodule.ActionApplyLifecycle)
+	if !ok {
+		return
+	}
+	result, err := m.agentLifecycle.ApplyLifecycle(
+		r.Context(),
+		lifecycleAuth,
+		agentsmodule.ApplyLifecycleCommand{
+			WorkspaceKey:         ws,
+			AgentID:              record.ServiceID,
+			Action:               agentsmodule.LifecycleDelete,
+			ExpectedUpdatedAt:    record.UpdatedAt,
+			ExpectedGenerationID: record.GenerationID,
+			IdempotencyKey: agentLifecycleIdempotencyKey(
+				ws, record.ServiceID, agentsmodule.LifecycleDelete, record.UpdatedAt,
+			),
+		},
+	)
 	if err != nil {
-		writeBindingError(w, err, "list attached bindings failed")
+		writeAgentRecordError(w, err, "delete agent record failed")
 		return
 	}
-	bindingsDeleted := 0
-	grantsRevoked := 0
-	var disableBindingAuth, deleteBindingAuth authority.OperatorAuthority
-	if len(bindings) > 0 {
-		var ok bool
-		disableBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionDisableManagedBinding)
-		if !ok {
-			return
-		}
-		deleteBindingAuth, ok = m.resolveBindingAuthority(w, r, ws, automation.ActionDeleteManagedBinding)
-		if !ok {
-			return
-		}
-	}
-	for _, b := range bindings {
-		if b == nil {
-			continue
-		}
-		result, err := m.deleteManagedBinding(
-			r.Context(), ws, b.BindingID, record.ServiceID, disableBindingAuth, deleteBindingAuth,
-		)
-		if err != nil {
-			writeBindingError(w, err, "delete attached binding failed")
-			return
-		}
-		if result.Deleted {
-			bindingsDeleted++
-		}
-		grantsRevoked += result.GrantsRevoked
-	}
-	// Archive via Wave B's deleted_at (fleet-db DELETE archives, never erases;
-	// the record stays GET-able for run attribution). The Wave-A metadata
-	// marker is superseded — deleted_at is the single archive signal, so every
-	// fleet-db consumer sees the same lifecycle state. desired_state is parked
-	// stopped first so a later un-archive (ops) doesn't resurrect a running
-	// agent by surprise.
-	stopped := domain.AgentServiceDesiredStopped
-	if _, err := m.store.AgentServices().Update(r.Context(), ws, record.ServiceID, store.AgentServiceUpdate{
-		DesiredState: &stopped,
-	}); err != nil {
-		handler.WriteDomainError(w, err, "park agent record failed")
-		return
-	}
-	if err := m.store.AgentServices().Delete(r.Context(), ws, record.ServiceID); err != nil {
-		handler.WriteDomainError(w, err, "archive agent record failed")
-		return
-	}
-	archived, err := m.store.AgentServices().Get(r.Context(), ws, record.ServiceID)
-	if err != nil {
-		handler.WriteDomainError(w, err, "get archived agent record failed")
-		return
-	}
+	archived := canonicalAgentServiceProjection(result.Agent)
 	out, err := m.agentRecordDTO(r.Context(), ws, archived, time.Now())
 	if err != nil {
 		writeBindingError(w, err, "decorate archived agent record failed")
@@ -763,8 +634,8 @@ func (m *Module) deleteAgent(w http.ResponseWriter, r *http.Request) { //nolint:
 	handler.WriteJSON(w, http.StatusOK, map[string]any{
 		"agent":            out,
 		"archived":         true,
-		"bindings_deleted": bindingsDeleted,
-		"grants_revoked":   grantsRevoked,
+		"bindings_deleted": len(result.BindingIDs),
+		"grants_revoked":   len(result.GrantIDs),
 	})
 }
 
@@ -785,7 +656,12 @@ func (m *Module) unattachedBindingByID(ctx context.Context, ws, id string) (*dom
 	return binding, true, nil
 }
 
-func (m *Module) patchLegacyBindingAgent(w http.ResponseWriter, r *http.Request, ws, id string, req patchAgentRecordRequest) {
+func (m *Module) patchLegacyBindingAgent(
+	w http.ResponseWriter,
+	r *http.Request,
+	ws, id string,
+	req patchAgentRecordRequest,
+) {
 	binding, ok, err := m.unattachedBindingByID(r.Context(), ws, id)
 	if err != nil {
 		writeBindingError(w, err, "get legacy binding agent failed")
@@ -838,7 +714,13 @@ func (m *Module) deleteLegacyBindingAgent(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	result, err := m.deleteUnmanagedBinding(r.Context(), ws, binding.BindingID, disableAuth, deleteAuth)
+	result, err := m.deleteUnmanagedBinding(
+		r.Context(),
+		ws,
+		binding.BindingID,
+		disableAuth,
+		deleteAuth,
+	)
 	if err != nil {
 		writeBindingError(w, err, "delete legacy binding agent failed")
 		return
@@ -864,7 +746,7 @@ func (m *Module) listAgentSessionsForHistory(
 }
 
 func (m *Module) agentServiceForHistory(ctx context.Context, ws, id string) (*domain.AgentService, error) {
-	return m.store.AgentServices().Get(ctx, ws, id)
+	return m.getAgentRecord(ctx, ws, id)
 }
 
 func (m *Module) listAgentServiceRunsForHistory(
@@ -883,7 +765,8 @@ func (m *Module) listBindingRunsForHistory(
 	return m.store.DriverRuns().List(ctx, ws, store.DriverRunFilter{BindingID: bindingID, Limit: limit})
 }
 
-func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc { //nolint:funlen // The handler keeps authority, record state, and attached-binding updates in one ordered transaction-like flow.
+//nolint:funlen // Keep kind routing, authority checks, and desired-state mutation in one lifecycle endpoint transaction.
+func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if m.store == nil {
 			handler.HandleServiceError(w, service.ErrUnavailable("fleet-db store not configured"))
@@ -895,43 +778,51 @@ func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc { //nolint:funl
 		}
 		id := agentRouteValue(r, "id", "name")
 		if _, ok, err := m.supervisedByName(r.Context(), ws, id); err != nil {
-			writeBindingError(w, err, "get supervised agent failed")
+			writeUnifiedAgentLookupError(w, err)
 			return
 		} else if ok {
 			handler.RespondError(w, http.StatusBadRequest, "supervised agents use start/stop lifecycle actions")
 			return
 		}
-		record, err := m.store.AgentServices().Get(r.Context(), ws, id)
+		record, err := m.getAgentRecord(r.Context(), ws, id)
 		if err != nil {
-			handler.WriteDomainError(w, err, "get agent record failed")
+			writeAgentRecordError(w, err, "get agent record failed")
 			return
 		}
 		if isAgentRecordArchived(record) {
 			handler.RespondError(w, http.StatusConflict, "agent is archived")
 			return
 		}
-		action := automation.ActionDisableManagedBinding
-		if enabled {
-			action = automation.ActionEnableManagedBinding
+		if m.agentLifecycle == nil {
+			writeAgentRecordError(w, agentsmodule.ErrUnavailable, "agent lifecycle is unavailable")
+			return
 		}
-		bindingAuth, ok := m.resolveBindingAuthority(w, r, ws, action)
+		action := agentsmodule.LifecycleDisable
+		if enabled {
+			action = agentsmodule.LifecycleEnable
+		}
+		lifecycleAuth, ok := m.resolveAgentRecordAuthority(w, r, ws, agentsmodule.ActionApplyLifecycle)
 		if !ok {
 			return
 		}
-		desired := domain.AgentServiceDesiredPaused
-		if enabled {
-			desired = domain.AgentServiceDesiredRunning
-		}
-		updated, err := m.store.AgentServices().Update(r.Context(), ws, record.ServiceID, store.AgentServiceUpdate{DesiredState: &desired})
+		result, err := m.agentLifecycle.ApplyLifecycle(
+			r.Context(),
+			lifecycleAuth,
+			agentsmodule.ApplyLifecycleCommand{
+				WorkspaceKey: ws, AgentID: record.ServiceID, Action: action,
+				ExpectedUpdatedAt:    record.UpdatedAt,
+				ExpectedGenerationID: record.GenerationID,
+				IdempotencyKey: agentLifecycleIdempotencyKey(
+					ws, record.ServiceID, action, record.UpdatedAt,
+				),
+			},
+		)
 		if err != nil {
-			handler.WriteDomainError(w, err, "update agent record failed")
+			writeAgentRecordError(w, err, "apply agent lifecycle failed")
 			return
 		}
-		if err := m.setAttachedBindingsEnabled(r.Context(), bindingAuth, ws, record.ServiceID, enabled); err != nil {
-			writeBindingError(w, err, "update attached bindings failed")
-			return
-		}
-		out, err := m.agentRecordDTO(r.Context(), ws, updated, time.Now())
+		updatedRecord := canonicalAgentServiceProjection(result.Agent)
+		out, err := m.agentRecordDTO(r.Context(), ws, updatedRecord, time.Now())
 		if err != nil {
 			writeBindingError(w, err, "decorate agent record failed")
 			return
@@ -939,6 +830,18 @@ func (m *Module) setRecordEnabled(enabled bool) http.HandlerFunc { //nolint:funl
 		broadcastAgentRefresh(m.hub, ws, out.ID, r.Header.Get("X-Actor"))
 		handler.WriteJSON(w, http.StatusOK, out)
 	}
+}
+
+func agentLifecycleIdempotencyKey(
+	workspace,
+	agentID string,
+	action agentsmodule.LifecycleAction,
+	expectedUpdatedAt time.Time,
+) string {
+	payload := workspace + "\x00" + agentID + "\x00" + string(action) + "\x00" +
+		expectedUpdatedAt.UTC().Format(time.RFC3339Nano)
+	digest := sha256.Sum256([]byte(payload))
+	return fmt.Sprintf("webui-agent-lifecycle-%x", digest[:16])
 }
 
 func (m *Module) supervisedByName(ctx context.Context, ws, name string) (*domain.Agent, bool, error) {
@@ -951,8 +854,8 @@ func (m *Module) supervisedByName(ctx context.Context, ws, name string) (*domain
 	}
 	agentExists := agentErr == nil && agent != nil
 
-	record, recordErr := m.store.AgentServices().Get(ctx, ws, name)
-	if recordErr != nil && !errors.Is(recordErr, domain.ErrNotFound) {
+	record, recordErr := m.getAgentRecord(ctx, ws, name)
+	if recordErr != nil && !errors.Is(recordErr, agentsmodule.ErrNotFound) {
 		return nil, false, recordErr
 	}
 	recordExists := recordErr == nil && record != nil

@@ -24,6 +24,18 @@ func profileEnvironment(profile AnalysisProfile) []string {
 	return append(env, "GOOS="+profile.GOOS, "GOARCH="+profile.GOARCH, "CGO_ENABLED=0", "GOFLAGS=")
 }
 
+func profileEnvironmentWithCache(profile AnalysisProfile, cacheDir string) []string {
+	base := profileEnvironment(profile)
+	env := make([]string, 0, len(base)+1)
+	for _, entry := range base {
+		if strings.HasPrefix(entry, "GOCACHE=") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, "GOCACHE="+cacheDir)
+}
+
 func profileBuildFlags(profile AnalysisProfile) []string {
 	tags := append([]string(nil), profile.Tags...)
 	if profile.Race {

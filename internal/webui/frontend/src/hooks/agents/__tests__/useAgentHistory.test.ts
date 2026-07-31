@@ -151,6 +151,32 @@ describe("useAgentHistory", () => {
     expect(result.current.sessions[0]?.status).toBe("running");
   });
 
+  it("recovers from a transient history failure on the next poll", async () => {
+    vi.useFakeTimers();
+    mockListAgentRuns
+      .mockRejectedValueOnce(new Error("FleetDB temporarily unavailable"))
+      .mockResolvedValueOnce(historyResponse("coder"));
+
+    const { result } = renderHook(() => useAgentHistory("WS", "coder"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.error?.message).toBe(
+      "FleetDB temporarily unavailable",
+    );
+    expect(result.current.sessions).toEqual([]);
+
+    await act(async () => {
+      vi.advanceTimersByTime(3_000);
+      await Promise.resolve();
+    });
+
+    expect(mockListAgentRuns).toHaveBeenCalledTimes(2);
+    expect(result.current.sessions[0]?.session_id).toBe("session-coder");
+    expect(result.current.error).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it("does not load or poll history while its pane is hidden", async () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useAgentHistory("WS", "coder", false));

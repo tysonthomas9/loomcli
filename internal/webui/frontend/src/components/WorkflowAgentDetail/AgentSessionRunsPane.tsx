@@ -78,7 +78,7 @@ function fallbackSession(session: AgentHistorySession): SessionRecord {
     : undefined;
   return {
     session_id: session.session_id,
-    task_id: session.task_id ?? "",
+    task_id: session.task_id?.trim() ?? "",
     agent_name: session.agent_id,
     backend: metadata.backend || metadata.runtime_strategy || "agent",
     started_at: startedAt,
@@ -138,7 +138,12 @@ function AgentSessionDetail({
 }: {
   historySession: AgentHistorySession;
 }): JSX.Element {
-  const taskId = historySession.task_id ?? null;
+  const taskId = historySession.task_id?.trim() || null;
+  // A task session must use the task-scoped transcript route.  Older or
+  // partially projected history records can briefly omit task_id; treating
+  // those as interactive sessions sends a guaranteed-wrong agent route and
+  // makes switching agents look like a transcript failure.
+  const taskReferencePending = historySession.kind === "task" && !taskId;
   const { sessions, isLoading, error } = useTaskSessions(taskId);
   const canonical = useMemo(
     () =>
@@ -148,6 +153,17 @@ function AgentSessionDetail({
     [historySession.session_id, sessions],
   );
 
+  if (taskReferencePending) {
+    return (
+      <div
+        className={styles.transcriptEmpty}
+        data-testid="supervised-agent-task-reference-pending"
+      >
+        Task reference is still loading for this session. Transcript evidence
+        will appear when the session projection catches up.
+      </div>
+    );
+  }
   if (!taskId) {
     return (
       <SessionRunDetail
@@ -160,17 +176,7 @@ function AgentSessionDetail({
       />
     );
   }
-  if (error && !canonical) {
-    return (
-      <div className={styles.transcriptEmpty}>
-        Failed to load task-session evidence: {error.message}
-      </div>
-    );
-  }
-  if (isLoading && !canonical) {
-    return <div className={styles.transcriptEmpty}>Loading transcript…</div>;
-  }
-  return (
+  const detail = (
     <SessionRunDetail
       taskId={taskId}
       session={canonical ?? fallbackSession(historySession)}
@@ -179,6 +185,37 @@ function AgentSessionDetail({
       telemetryKnown={canonical != null}
     />
   );
+  if (error && !canonical) {
+    return (
+      <div className={styles.sessionDetailWithWarning}>
+        <div
+          className={styles.sessionMetadataNotice}
+          role="status"
+          data-testid="supervised-agent-session-metadata-warning"
+        >
+          Task-session metadata is temporarily unavailable. Showing transcript
+          evidence from run history. {error.message}
+        </div>
+        {detail}
+      </div>
+    );
+  }
+  if (isLoading && !canonical) {
+    return (
+      <div className={styles.sessionDetailWithWarning}>
+        <div
+          className={styles.sessionMetadataNotice}
+          role="status"
+          data-testid="supervised-agent-session-metadata-loading"
+        >
+          Loading task-session metadata. Showing transcript evidence from run
+          history.
+        </div>
+        {detail}
+      </div>
+    );
+  }
+  return detail;
 }
 
 /** Run-history tab for daemon-supervised and interactive agent assignments. */
@@ -206,6 +243,7 @@ export function AgentSessionRunsPane({
     sessions.find((session) => session.session_id === selectedSessionId) ??
     sessions[0] ??
     null;
+  const selectedTaskId = selected?.task_id?.trim() || null;
 
   return (
     <div className={styles.scroll}>
@@ -230,10 +268,10 @@ export function AgentSessionRunsPane({
             <div>
               <dt>Task</dt>
               <dd>
-                {selected.task_id ? (
+                {selectedTaskId ? (
                   <TaskLink
                     workspaceId={workspaceId}
-                    taskId={selected.task_id}
+                    taskId={selectedTaskId}
                     className={styles.taskLink}
                     onOpenTask={onOpenTask}
                   />
@@ -284,59 +322,62 @@ export function AgentSessionRunsPane({
             className={styles.runList}
             data-testid="supervised-agent-session-list"
           >
-            {sessions.map((session) => (
-              <li
-                key={session.session_id}
-                className={styles.runRow}
-                data-selected={
-                  session.session_id === selected?.session_id || undefined
-                }
-              >
-                <button
-                  type="button"
-                  className={styles.runRowSelect}
-                  data-testid={`supervised-agent-session-${session.session_id}`}
-                  onClick={() => setSelectedSessionId(session.session_id)}
+            {sessions.map((session) => {
+              const taskId = session.task_id?.trim() || null;
+              return (
+                <li
+                  key={session.session_id}
+                  className={styles.runRow}
+                  data-selected={
+                    session.session_id === selected?.session_id || undefined
+                  }
                 >
-                  <span
-                    className={styles.runDot}
-                    style={{ background: sessionDotColor(session) }}
-                    data-live={
-                      ACTIVE_SESSION_STATUSES.has(session.status) || undefined
-                    }
-                    aria-hidden="true"
-                  />
-                  <span className={styles.runMain}>
-                    <span className={styles.runStatus}>{session.status}</span>
-                    <span className={styles.runMeta}>
-                      {session.task_id ? "" : `${session.kind} · `}
-                      {displayTime(sessionStartedAt(session))}
-                    </span>
-                    {session.summary ? (
-                      <span className={styles.runSummary}>
-                        {session.summary}
-                      </span>
-                    ) : null}
-                    {session.error_class ? (
-                      <span className={styles.runErr}>
-                        {session.error_class}
-                      </span>
-                    ) : null}
-                  </span>
-                </button>
-                {session.task_id ? (
-                  <span className={styles.runTaskLinks} aria-label="Run task">
-                    <span className={styles.runTaskLabel}>Task</span>
-                    <TaskLink
-                      workspaceId={workspaceId}
-                      taskId={session.task_id}
-                      className={styles.taskLink}
-                      onOpenTask={onOpenTask}
+                  <button
+                    type="button"
+                    className={styles.runRowSelect}
+                    data-testid={`supervised-agent-session-${session.session_id}`}
+                    onClick={() => setSelectedSessionId(session.session_id)}
+                  >
+                    <span
+                      className={styles.runDot}
+                      style={{ background: sessionDotColor(session) }}
+                      data-live={
+                        ACTIVE_SESSION_STATUSES.has(session.status) || undefined
+                      }
+                      aria-hidden="true"
                     />
-                  </span>
-                ) : null}
-              </li>
-            ))}
+                    <span className={styles.runMain}>
+                      <span className={styles.runStatus}>{session.status}</span>
+                      <span className={styles.runMeta}>
+                        {taskId ? "" : `${session.kind} · `}
+                        {displayTime(sessionStartedAt(session))}
+                      </span>
+                      {session.summary ? (
+                        <span className={styles.runSummary}>
+                          {session.summary}
+                        </span>
+                      ) : null}
+                      {session.error_class ? (
+                        <span className={styles.runErr}>
+                          {session.error_class}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                  {taskId ? (
+                    <span className={styles.runTaskLinks} aria-label="Run task">
+                      <span className={styles.runTaskLabel}>Task</span>
+                      <TaskLink
+                        workspaceId={workspaceId}
+                        taskId={taskId}
+                        className={styles.taskLink}
+                        onOpenTask={onOpenTask}
+                      />
+                    </span>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -62,7 +61,7 @@ func TestHostBridgeTaskExecutorRequiresTaskRunAPIURL(t *testing.T) {
 	})
 }
 
-func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) {
+func TestLocalTaskRunnerSettingsNeverExportGitHubCredential(t *testing.T) {
 	settingsDir := t.TempDir()
 	credential, err := runtimesettings.SealRuntimeCredential(settingsDir, runtimesettings.RuntimeCredentialProviderGitHub, "settings-token", time.Now())
 	if err != nil {
@@ -80,21 +79,21 @@ func TestLocalTaskRunnerSettingsDoNotOverrideInheritedGitHubToken(t *testing.T) 
 	executor := HostBridgeTaskExecutor{WorktreePath: "/wt", LocalSettingsDir: settingsDir}
 
 	env := executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GITHUB_TOKEN=host-token"})
-	if envContains(env, "GITHUB_TOKEN=settings-token") {
-		t.Fatalf("settings GitHub token overrode inherited GITHUB_TOKEN: %v", env)
+	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
+		t.Fatalf("forge credential reached task-runner envelope: %v", env)
 	}
 	if !envContains(env, "LOOM_OPENCODE_MODEL=opencode/model") {
 		t.Fatalf("non-secret local task runner setting was not exported: %v", env)
 	}
 
 	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin", "GH_TOKEN=host-token"})
-	if envContains(env, "GITHUB_TOKEN=settings-token") {
-		t.Fatalf("settings GitHub token overrode inherited GH_TOKEN: %v", env)
+	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
+		t.Fatalf("inherited forge credential reached task-runner envelope: %v", env)
 	}
 
 	env = executor.taskRunnerEnv(req, "{}", []string{"PATH=/bin"})
-	if !envContains(env, "GITHUB_TOKEN=settings-token") {
-		t.Fatalf("settings GitHub token was not exported when inherited env had no GitHub token: %v", env)
+	if envHasAny(env, "GITHUB_TOKEN", "GH_TOKEN") {
+		t.Fatalf("sealed settings forge credential reached task-runner envelope: %v", env)
 	}
 
 	req.Input = json.RawMessage(`{
@@ -457,7 +456,7 @@ func TestHostBridgeTaskExecutorRegistersFinalizedRunnerArtifacts(t *testing.T) {
 	}
 }
 
-func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
+func TestHostBridgeTaskExecutorPersistsFlueTranscriptWithoutSessionShadow(t *testing.T) {
 	ctx, st, run := setupRunningDriverRun(t)
 	executor := HostBridgeTaskExecutor{
 		Store:               st,
@@ -489,28 +488,17 @@ func TestHostBridgeTaskExecutorMapsFlueSessionAndTranscript(t *testing.T) {
 	if len(outcome.ArtifactIDs) != 2 || outcome.ArtifactIDs[0] != "transcript-task-run-1" || outcome.ArtifactIDs[1] != "logs-task-run-1" {
 		t.Fatalf("artifact ids = %+v, want transcript and logs artifacts", outcome.ArtifactIDs)
 	}
-	session, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1")
-	if err != nil {
-		t.Fatalf("get flue agent session: %v", err)
-	}
-	if session.Kind != domain.AgentSessionKindTask || session.TaskID != "TEST-1" || session.ParentSessionID != "lead-session-1" {
-		t.Fatalf("session identity = %+v, want task session under lead-session-1", session)
-	}
-	if session.Status != domain.AgentSessionCompleted || session.FinishedAt == nil {
-		t.Fatalf("session status = %s finished=%v, want completed", session.Status, session.FinishedAt)
-	}
-	if session.Metadata["runtime"] != "flue" || session.Metadata["flue_session"] != "flue-task-run-1" || session.Metadata["task_run_id"] != "task-run-1" {
-		t.Fatalf("session metadata = %+v, want flue task-run metadata", session.Metadata)
-	}
-	if session.Metadata["transcript_ref"] != "artifact://transcript-task-run-1" || session.Metadata["logs_ref"] != "artifact://logs-task-run-1" {
-		t.Fatalf("session refs = %+v, want transcript/log artifact refs", session.Metadata)
+	if _, err := st.AgentSessions().Get(ctx, "TEST", "flue-task-run-1"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("batch TaskRun created Interaction AgentSession shadow: err=%v", err)
 	}
 	transcriptArtifact, err := st.Artifacts().Get(ctx, "TEST", "transcript-task-run-1")
 	if err != nil {
 		t.Fatalf("get transcript artifact: %v", err)
 	}
-	if transcriptArtifact.DurableStatus != "finalized" || transcriptArtifact.SessionID != "flue-task-run-1" || transcriptArtifact.Type != "transcript" {
-		t.Fatalf("transcript artifact = %+v, want finalized transcript owned by session", transcriptArtifact)
+	if transcriptArtifact.DurableStatus != "finalized" || transcriptArtifact.SessionID != "" ||
+		transcriptArtifact.OwnerType != "task_run" || transcriptArtifact.OwnerID != "task-run-1" ||
+		transcriptArtifact.Type != "transcript" {
+		t.Fatalf("transcript artifact = %+v, want finalized transcript owned only by TaskRun", transcriptArtifact)
 	}
 	contentReader, ok := st.Artifacts().(interface {
 		ReadContent(context.Context, string, string) ([]byte, error)
@@ -1187,242 +1175,4 @@ func TestLastJSONLine(t *testing.T) {
 	if !bytes.Equal(line, []byte(`{"ok":true}`)) {
 		t.Fatalf("line = %s, want JSON object", line)
 	}
-}
-
-func TestServeHostedTaskSessionHeartbeatAdvancesUntilCanceled(t *testing.T) {
-	ctx := context.Background()
-	st := memstore.New()
-	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "task-session",
-		AgentID:      "task-agent",
-		Kind:         domain.AgentSessionKindTask,
-		Status:       domain.AgentSessionRunning,
-	}); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	before, err := st.AgentSessions().Get(ctx, "WS", "task-session")
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-
-	hbCtx, cancel := context.WithCancel(context.Background())
-	go heartbeatFlueTaskSession(hbCtx, st, "WS", "task-session", time.Millisecond)
-	t.Cleanup(cancel)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		after, getErr := st.AgentSessions().Get(ctx, "WS", "task-session")
-		if getErr != nil {
-			t.Fatalf("get heartbeat session: %v", getErr)
-		}
-		if after.LastHeartbeat.After(before.LastHeartbeat) {
-			cancel()
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatal("serve-hosted task heartbeat did not advance the session")
-}
-
-func TestFinishFlueTaskSessionDrainsInFlightStaleHeartbeat(t *testing.T) {
-	ctx := t.Context()
-	base := memstore.New()
-	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	if _, err := base.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "task-session-race",
-		AgentID:      "task-agent",
-		Kind:         domain.AgentSessionKindTask,
-		Status:       domain.AgentSessionRunning,
-	}); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	staleSessions := &staleTaskHeartbeatAgentSessionStore{
-		AgentSessionStore: base.AgentSessions(),
-		read:              make(chan struct{}),
-		release:           make(chan struct{}),
-	}
-	controlStore := &taskHeartbeatTestStore{Store: base, sessions: staleSessions}
-	hbCtx, cancel := context.WithCancel(context.Background())
-	session := &flueTaskSession{
-		SessionID:     "task-session-race",
-		Metadata:      map[string]string{},
-		cancel:        cancel,
-		heartbeatDone: startFlueTaskSessionHeartbeat(hbCtx, controlStore, "WS", "task-session-race", time.Millisecond),
-	}
-	select {
-	case <-staleSessions.read:
-	case <-time.After(time.Second):
-		t.Fatal("heartbeat did not capture the running task session")
-	}
-
-	finishDone := make(chan error, 1)
-	go func() {
-		finishDone <- (HostBridgeTaskExecutor{Store: controlStore}).finishFlueTaskSession(
-			context.Background(),
-			TaskExecRequest{WorkspaceKey: "WS"},
-			session,
-			TaskExecResult{Status: domain.TaskRunCompleted},
-			nil,
-			nil,
-		)
-	}()
-	select {
-	case err := <-finishDone:
-		t.Fatalf("finish returned before heartbeat drain: %v", err)
-	case <-time.After(25 * time.Millisecond):
-	}
-
-	close(staleSessions.release)
-	select {
-	case err := <-finishDone:
-		if err != nil {
-			t.Fatalf("finish task session: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("finish did not resume after heartbeat drain")
-	}
-	final, err := base.AgentSessions().Get(ctx, "WS", "task-session-race")
-	if err != nil {
-		t.Fatalf("get finalized task session: %v", err)
-	}
-	if final.Status != domain.AgentSessionCompleted || final.FinishedAt == nil {
-		t.Fatalf("final session = status %q finished_at %v, want completed terminal record", final.Status, final.FinishedAt)
-	}
-}
-
-func TestFinishFlueTaskSessionFinalizesAfterCallerCancellation(t *testing.T) {
-	base := memstore.New()
-	ctx := context.Background()
-	if _, err := base.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	if _, err := base.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    "task-session-canceled",
-		AgentID:      "task-agent",
-		Kind:         domain.AgentSessionKindTask,
-		Status:       domain.AgentSessionRunning,
-	}); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-	canceledCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := (HostBridgeTaskExecutor{Store: base}).finishFlueTaskSession(
-		canceledCtx,
-		TaskExecRequest{WorkspaceKey: "WS"},
-		&flueTaskSession{SessionID: "task-session-canceled", Metadata: map[string]string{}},
-		TaskExecResult{Status: domain.TaskRunCancelled},
-		nil,
-		context.Canceled,
-	)
-	if err != nil {
-		t.Fatalf("finish task session with canceled caller: %v", err)
-	}
-	final, err := base.AgentSessions().Get(ctx, "WS", "task-session-canceled")
-	if err != nil {
-		t.Fatalf("get finalized task session: %v", err)
-	}
-	if final.Status != domain.AgentSessionFailed || final.FinishedAt == nil {
-		t.Fatalf("final session = status %q finished_at %v, want failed terminal record", final.Status, final.FinishedAt)
-	}
-}
-
-func TestFinishFlueTaskSessionPreservesHostOwnedIdentityMetadata(t *testing.T) {
-	ctx := t.Context()
-	st := memstore.New()
-	req := TaskExecRequest{
-		WorkspaceKey: "WS",
-		TaskID:       "TASK-1",
-		TaskRunID:    "task-run-1",
-		DriverRunID:  "driver-run-1",
-		Runner:       "prompt-agent",
-		RunnerKind:   RunnerKindFlueWorkflow,
-	}
-	sessionID := flueTaskSessionID(req)
-	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
-		WorkspaceKey: "WS",
-		SessionID:    sessionID,
-		AgentID:      "task-agent",
-		Kind:         domain.AgentSessionKindTask,
-		TaskID:       req.TaskID,
-		Status:       domain.AgentSessionRunning,
-		Metadata:     flueTaskSessionMetadata(req, sessionID),
-	}); err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-
-	err := (HostBridgeTaskExecutor{Store: st}).finishFlueTaskSession(
-		ctx,
-		req,
-		&flueTaskSession{SessionID: sessionID, Metadata: flueTaskSessionMetadata(req, sessionID)},
-		TaskExecResult{
-			Status: domain.TaskRunCompleted,
-			RuntimeMetadata: map[string]string{
-				"task_id":       "TASK-OTHER",
-				"task_run_id":   "task-run-other",
-				"driver_run_id": "driver-run-other",
-				"runner":        "forged-runner",
-				"custom":        "retained",
-			},
-		},
-		nil,
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("finish session: %v", err)
-	}
-	final, err := st.AgentSessions().Get(ctx, "WS", sessionID)
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-	if final.Metadata["task_id"] != req.TaskID ||
-		final.Metadata["task_run_id"] != req.TaskRunID ||
-		final.Metadata["driver_run_id"] != req.DriverRunID ||
-		final.Metadata["runner"] != req.Runner {
-		t.Fatalf("host-owned metadata was overwritten: %+v", final.Metadata)
-	}
-	if final.Metadata["custom"] != "retained" {
-		t.Fatalf("ordinary runtime metadata = %+v, want custom field retained", final.Metadata)
-	}
-}
-
-type taskHeartbeatTestStore struct {
-	store.Store
-	sessions store.AgentSessionStore
-}
-
-func (s *taskHeartbeatTestStore) AgentSessions() store.AgentSessionStore { return s.sessions }
-
-type staleTaskHeartbeatAgentSessionStore struct {
-	store.AgentSessionStore
-	read    chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-func (s *staleTaskHeartbeatAgentSessionStore) Heartbeat(
-	ctx context.Context,
-	workspaceKey string,
-	sessionID string,
-) (*domain.AgentSession, error) {
-	captured, err := s.AgentSessionStore.Get(ctx, workspaceKey, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	s.once.Do(func() { close(s.read) })
-	// Deliberately ignore cancellation after the read. This models a Redis
-	// transaction that has already begun and can still commit its stale record.
-	<-s.release
-	now := time.Now().UTC()
-	return s.AgentSessionStore.Update(context.Background(), workspaceKey, sessionID, store.AgentSessionUpdate{
-		Status:        &captured.Status,
-		LastHeartbeat: &now,
-	})
 }

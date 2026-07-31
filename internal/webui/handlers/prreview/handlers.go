@@ -16,7 +16,11 @@ import (
 // canonicalizes owner/repo through the workspace membership check, writing
 // the HTTP error itself on failure. Every PR-scoped handler starts here.
 func (m *Module) resolveAuthorizedPR(w http.ResponseWriter, r *http.Request) (string, pullRequestPath, bool) {
-	ws := r.PathValue("ws")
+	ws := canonicalWorkspaceFromRequest(r)
+	if ws == "" {
+		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "canonical workspace is required", false)
+		return "", pullRequestPath{}, false
+	}
 	params, ok := parsePullRequestPath(r.PathValue("owner"), r.PathValue("repo"), r.PathValue("number"))
 	if !ok {
 		writePRReviewErrorCode(w, http.StatusBadRequest, "invalid", "invalid pull request path", false)
@@ -28,6 +32,13 @@ func (m *Module) resolveAuthorizedPR(w http.ResponseWriter, r *http.Request) (st
 	}
 	params.owner, params.repo = canonOwner, canonRepo
 	return ws, params, true
+}
+
+func canonicalWorkspaceFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(middleware.WorkspaceFromContext(r.Context()))
 }
 
 func (m *Module) getPullRequest(w http.ResponseWriter, r *http.Request) {

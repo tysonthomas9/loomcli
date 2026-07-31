@@ -320,6 +320,31 @@ async function setupMocks(
         return;
       }
 
+      // Workspace-scoped monitor status is the production agent-store path.
+      // Keep this raw (not wrapped in ok(...)): fetchStatus consumes the
+      // LoomStatusResponse directly.
+      if (afterWs.startsWith("/monitor/status")) {
+        if (!loomServerAvailable) {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: "invalid json{",
+          });
+          return;
+        }
+        const status = emptyAgents
+          ? { ...mockLoomStatus, agents: [], agent_tasks: {} }
+          : customAgents
+            ? { ...mockLoomStatus, agents: customAgents }
+            : mockLoomStatus;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(status),
+        });
+        return;
+      }
+
       // Ready (issues)
       if (afterWs.startsWith("/ready")) {
         await route.fulfill({
@@ -556,7 +581,7 @@ test.describe("Agents Sidebar", () => {
       await expect(agentCards).toHaveCount(2);
     });
 
-    test("no agent section when loom unavailable and no config agents", async ({
+    test("empty agent section keeps add-agent affordance when loom is unavailable", async ({
       page,
     }) => {
       // No config agents + loom unavailable = no agents at all
@@ -571,8 +596,13 @@ test.describe("Agents Sidebar", () => {
       await expect(sb.getByRole("heading", { name: "Repos" })).toBeVisible({
         timeout: 10000,
       });
-      // Agent section header should NOT be visible (no fleet agents, no config agents)
-      await expect(sb.getByText("Agents")).not.toBeVisible();
+      // The empty section remains actionable so the user can create an agent.
+      const agentSection = sb.locator('[class*="agentSection"]').first();
+      await expect(agentSection.getByText("Agents")).toBeVisible();
+      await expect(agentSection.locator("[data-status]")).toHaveCount(0);
+      await expect(
+        agentSection.getByRole("button", { name: "+ Add agent" }),
+      ).toBeVisible();
     });
   });
 
@@ -612,7 +642,8 @@ test.describe("Agents Sidebar", () => {
       const sb = sidebar(page);
       const agentSection = sb.locator('[class*="agentSection"]').first();
 
-      // nova: working agent card shows status, role, and repo
+      // nova: compact sidebar card shows status and role. Repository identity
+      // lives in the dedicated Repos section instead of being duplicated.
       const workingCard = agentSection.locator('[data-status="working"]');
       await expect(workingCard).toBeVisible({ timeout: 10000 });
       await expect(workingCard.locator('[class*="statusLine"]')).toContainText(
@@ -621,7 +652,8 @@ test.describe("Agents Sidebar", () => {
       await expect(workingCard.locator('[class*="role"]')).toContainText(
         "Task",
       );
-      await expect(workingCard.getByText("loomcli")).toBeVisible();
+      await expect(workingCard.getByText("loomcli")).toHaveCount(0);
+      await expect(sb.getByRole("button", { name: "loomcli" })).toBeVisible();
 
       // falcon: ready agent card shows status and role
       const readyCard = agentSection.locator('[data-status="ready"]');
@@ -655,7 +687,7 @@ test.describe("Agents Sidebar", () => {
   // ------- repos -------
 
   test.describe("repos", () => {
-    test("repos section renders repo rows with branch pills", async ({
+    test("repos section renders repo rows and add-repo affordance", async ({
       page,
     }) => {
       await setupMocks(page);
@@ -665,19 +697,25 @@ test.describe("Agents Sidebar", () => {
       await expect(sb.getByRole("heading", { name: "Repos" })).toBeVisible({
         timeout: 10000,
       });
-      await expect(sb.getByRole("button", { name: /Add repository/i })).toBeVisible();
+      await expect(sb.getByRole("button", { name: "loomcli" })).toBeVisible();
+      await expect(
+        sb.getByRole("button", { name: /\+ Add Repo/i }),
+      ).toBeVisible();
     });
 
-    test("repos section shows open issue count pill", async ({ page }) => {
+    test("collapsed repos rail shows one repo identity badge", async ({
+      page,
+    }) => {
       await setupMocks(page);
       await navigateAndWait(page);
 
-      // mockIssues: 1 open, 1 in_progress, 1 blocked (3 open total)
       const sb = sidebar(page);
-      const repoRow = sb.getByRole("button", {
-        name: /open issues/i,
-      });
-      await expect(repoRow.first()).toBeVisible({ timeout: 10000 });
+      await sb.getByRole("button", { name: "Collapse workspace tree" }).click();
+      await expect(sb).toHaveAttribute("data-collapsed", "true");
+
+      const repoRail = sb.getByTestId("collapsed-repo-rail");
+      await expect(repoRail).toBeVisible();
+      await expect(repoRail.getByLabel("loomcli")).toHaveCount(1);
     });
   });
 
@@ -693,9 +731,7 @@ test.describe("Agents Sidebar", () => {
         timeout: 10000,
       });
 
-      // Click the toggle icon "<" to avoid hitting the ActiveAllToggle (which has stopPropagation)
-      const toggleIcon = sb.locator('[class*="toggleIcon"]');
-      await toggleIcon.click();
+      await sb.getByRole("button", { name: "Collapse workspace tree" }).click();
 
       await expect(sb).toHaveAttribute("data-collapsed", "true");
       // Content hidden when collapsed
@@ -711,13 +747,12 @@ test.describe("Agents Sidebar", () => {
         timeout: 10000,
       });
 
-      // Collapse first
-      const toggleIcon = sb.locator('[class*="toggleIcon"]');
-      await toggleIcon.click();
+      // Collapse first using the public accessible control.
+      await sb.getByRole("button", { name: "Collapse workspace tree" }).click();
       await expect(sb).toHaveAttribute("data-collapsed", "true");
 
-      // Expand — the toggle icon is now ">"
-      await toggleIcon.click();
+      // The collapsed layout replaces the control with its expand action.
+      await sb.getByRole("button", { name: "Expand workspace tree" }).click();
       await expect(sb).toHaveAttribute("data-collapsed", "false");
       await expect(sb.getByText("Agents")).toBeVisible();
     });
@@ -731,13 +766,11 @@ test.describe("Agents Sidebar", () => {
         timeout: 10000,
       });
 
-      // Collapse
-      const toggleIcon = sb.locator('[class*="toggleIcon"]');
-      await toggleIcon.click();
+      await sb.getByRole("button", { name: "Collapse workspace tree" }).click();
       await expect(sb).toHaveAttribute("data-collapsed", "true");
 
       // Healthy connected state does not need a collapsed warning badge.
-      const badge = sb.locator('[class*="collapsedBadge"]');
+      const badge = sb.locator('[class*="collapsedConnectionBadge"]');
       await expect(badge).toHaveCount(0);
     });
   });
@@ -768,7 +801,7 @@ test.describe("Agents Sidebar", () => {
       ).toBeVisible({ timeout: 15000 });
     });
 
-    test("no agent section when agents array is empty and no config agents", async ({
+    test("empty agent section remains actionable when agent sources are empty", async ({
       page,
     }) => {
       // Must also remove workspace config agents to get zero total agents
@@ -780,8 +813,12 @@ test.describe("Agents Sidebar", () => {
       await expect(sb.getByRole("heading", { name: "Repos" })).toBeVisible({
         timeout: 10000,
       });
-      // No agent section since agents.length === 0
-      await expect(sb.getByText("Agents")).not.toBeVisible();
+      const agentSection = sb.locator('[class*="agentSection"]').first();
+      await expect(agentSection.getByText("Agents")).toBeVisible();
+      await expect(agentSection.locator("[data-status]")).toHaveCount(0);
+      await expect(
+        agentSection.getByRole("button", { name: "+ Add agent" }),
+      ).toBeVisible();
     });
   });
 });

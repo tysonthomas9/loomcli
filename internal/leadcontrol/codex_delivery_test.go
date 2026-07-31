@@ -18,7 +18,7 @@ func TestDeliverCurrentAssignmentToCodexStartsTurnWhenIdle(t *testing.T) {
 	fake := installFakeCodexClient(t, CodexThreadStatus{Type: "idle"})
 	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
 
-	result, err := DeliverCurrentAssignmentToCodex(ctx, st, "WS", "nova")
+	result, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverCurrentAssignmentToCodex() error = %v", err)
 	}
@@ -50,7 +50,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesBusyThreadPending(t *testing.T) {
 	fake := installFakeCodexClient(t, CodexThreadStatus{Type: "active", ActiveFlags: []string{"waitingOnUserInput"}})
 	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
 
-	result, err := DeliverCurrentAssignmentToCodex(ctx, st, "WS", "nova")
+	result, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverCurrentAssignmentToCodex() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesBusyThreadPending(t *testing.T) {
 		t.Fatalf("queued body did not include assignment context: %s", queued[0].Body)
 	}
 
-	if _, err := DeliverCurrentAssignmentToCodex(ctx, st, "WS", "nova"); err != nil {
+	if _, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova"); err != nil {
 		t.Fatalf("retry DeliverCurrentAssignmentToCodex() error = %v", err)
 	}
 	queued = queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session")
@@ -94,7 +94,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesBusyThreadPending(t *testing.T) {
 	}
 
 	fake.status = CodexThreadStatus{Type: "idle"}
-	result, err = DeliverPendingLeadMessagesToCodex(ctx, st, "WS", "nova")
+	result, err = deliverPendingLeadMessagesOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverPendingLeadMessagesToCodex() error = %v", err)
 	}
@@ -123,7 +123,7 @@ func TestDeliverCurrentAssignmentToCodexLeavesStartingRuntimePending(t *testing.
 		"actor": "test",
 	})
 
-	result, err := DeliverCurrentAssignmentToCodex(ctx, st, "WS", "nova")
+	result, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverCurrentAssignmentToCodex() error = %v", err)
 	}
@@ -149,7 +149,7 @@ func TestDeliverCurrentAssignmentToCodexDoesNotMarkUnsupportedRuntimeFailed(t *t
 		MetadataRuntimeProvider: "claude",
 	})
 
-	result, err := DeliverCurrentAssignmentToCodex(ctx, st, "WS", "nova")
+	result, err := deliverCurrentAssignmentOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverCurrentAssignmentToCodex() error = %v", err)
 	}
@@ -174,7 +174,7 @@ func TestDeliverLeadMessageToCodexStartsTurnWhenIdle(t *testing.T) {
 	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
 
 	const message = "Task TASK-1 completed under the active epic-runner workflow."
-	result, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("DeliverLeadMessageToCodex() error = %v", err)
 	}
@@ -203,7 +203,7 @@ func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T
 	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
 
 	const message = "Task TASK-1 completed under the active epic-runner workflow."
-	result, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("DeliverLeadMessageToCodex() error = %v", err)
 	}
@@ -219,7 +219,7 @@ func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T
 		t.Fatalf("queued inbox messages = %#v, want one queued completion message", queued)
 	}
 
-	if _, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message); err != nil {
+	if _, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message); err != nil {
 		t.Fatalf("retry DeliverLeadMessageToCodex() error = %v", err)
 	}
 	queued = queuedInboxMessagesForTest(t, st, "WS", "nova", "lead-session")
@@ -228,7 +228,7 @@ func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T
 	}
 
 	fake.status = CodexThreadStatus{Type: "idle"}
-	result, err = DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	result, err = deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("idle DeliverLeadMessageToCodex() error = %v", err)
 	}
@@ -260,7 +260,7 @@ func TestDeliverLeadMessageToCodexQueuesBeforeSessionAndDrainsLater(t *testing.T
 	}
 
 	const message = "Task TASK-1 completed before the lead runtime was ready."
-	result, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("DeliverLeadMessageToCodex() error = %v", err)
 	}
@@ -285,7 +285,7 @@ func TestDeliverLeadMessageToCodexQueuesBeforeSessionAndDrainsLater(t *testing.T
 	fake := installFakeCodexClient(t, CodexThreadStatus{Type: "idle"})
 	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
 
-	result, err = DeliverPendingLeadMessagesToCodex(ctx, st, "WS", "nova")
+	result, err = deliverPendingLeadMessagesOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverPendingLeadMessagesToCodex() error = %v", err)
 	}
@@ -314,7 +314,7 @@ func TestDeliverLeadMessageToCodexDoesNotDuplicateSessionlessMessageAfterSession
 	}
 
 	const message = "Task TASK-1 completed before the lead runtime was ready."
-	result, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("sessionless DeliverLeadMessageToCodex() error = %v", err)
 	}
@@ -335,7 +335,7 @@ func TestDeliverLeadMessageToCodexDoesNotDuplicateSessionlessMessageAfterSession
 	fake := installFakeCodexClient(t, CodexThreadStatus{Type: "active"})
 	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
 
-	result, err = DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	result, err = deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("retry DeliverLeadMessageToCodex() error = %v", err)
 	}
@@ -360,7 +360,7 @@ func TestDeliverPendingLeadMessagesToCodexDrainsQueueWithoutNewMessage(t *testin
 	setCodexRuntimeMetadata(t, st, "WS", "lead-session", "ws://codex.test", "thread-1")
 
 	const message = "Task TASK-2 completed after the workflow exited."
-	result, err := DeliverLeadMessageToCodex(ctx, st, "WS", "nova", message)
+	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
 	if err != nil {
 		t.Fatalf("queue DeliverLeadMessageToCodex() error = %v", err)
 	}
@@ -369,7 +369,7 @@ func TestDeliverPendingLeadMessagesToCodexDrainsQueueWithoutNewMessage(t *testin
 	}
 
 	fake.status = CodexThreadStatus{Type: "idle"}
-	result, err = DeliverPendingLeadMessagesToCodex(ctx, st, "WS", "nova")
+	result, err = deliverPendingLeadMessagesOwned(ctx, st, testSessionRuntime(st), "WS", "nova")
 	if err != nil {
 		t.Fatalf("DeliverPendingLeadMessagesToCodex() error = %v", err)
 	}
@@ -427,7 +427,7 @@ func createAssignedLeadSession(t *testing.T, st store.Store, label string, metad
 func setCodexRuntimeMetadata(t *testing.T, st store.Store, workspace, sessionID, endpoint, threadID string) {
 	t.Helper()
 	ctx := context.Background()
-	if err := UpdateCodexRuntimeMetadata(ctx, st, workspace, sessionID, CodexRuntimeMetadata{
+	if err := UpdateCodexRuntimeMetadata(ctx, testSessionRuntime(st), workspace, sessionID, CodexRuntimeMetadata{
 		Endpoint:   endpoint,
 		ThreadID:   threadID,
 		Status:     RuntimeStatusIdle,

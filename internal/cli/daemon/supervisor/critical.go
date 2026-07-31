@@ -16,7 +16,6 @@ const (
 	GoroutineHealthChecker    = "health_checker"
 	GoroutineConfigReconciler = "config_reconciler"
 	GoroutineNodeHeartbeat    = "node_heartbeat"
-	GoroutineSessionHeartbeat = "agent_session_heartbeat"
 	GoroutineStateUpdater     = "state_updater"
 	GoroutineLivenessWatchdog = "liveness_watchdog"
 	GoroutineAgentPrefix      = "agent:"

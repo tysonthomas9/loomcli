@@ -72,6 +72,20 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 	WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 }
 
+// IsControlPlaneRateLimited reports whether a compatibility dependency
+// preserved the durable control plane's retryable admission classification.
+// Keeping this translation in the shared HTTP boundary lets feature handlers
+// depend on capability APIs instead of importing persistence contracts.
+func IsControlPlaneRateLimited(err error) bool {
+	return errors.Is(err, domain.ErrRateLimited)
+}
+
+// IsControlPlaneUnavailable reports whether a compatibility dependency
+// preserved a retryable control-plane availability failure.
+func IsControlPlaneUnavailable(err error) bool {
+	return errors.Is(err, domain.ErrUnavailable)
+}
+
 // WriteDomainError maps a domain.Err* sentinel to an HTTP status and writes a
 // JSON {"error": ...} body. Store-direct handlers (roles, triggerbindings,
 // webhooks, workflows) receive domain errors rather than service.ServiceError,

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -308,6 +309,179 @@ func TestControlPlaneClientAgentCommandAckSendsClaimantBinding(t *testing.T) {
 	}
 	if cmd.TargetNodeID != "node-new" || cmd.AckedBy != "stable-runtime-owner" {
 		t.Fatalf("Ack response = %+v, want claimant binding", cmd)
+	}
+}
+
+func TestControlPlaneClientAgentLeaseCreateDecodesOneTimeTokenEnvelope(t *testing.T) {
+	now := time.Now().UTC()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-sessions/session-1/leases" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode create: %v", err)
+		}
+		if body["lease_id"] != "lease-1" || body["agent_id"] != "agent-1" || body["node_id"] != "node-1" || body["ttl_seconds"] != float64(30) {
+			t.Fatalf("create body = %#v", body)
+		}
+		writeJSON(t, w, map[string]any{
+			"lease": domain.AgentLease{
+				WorkspaceKey:  "WS",
+				LeaseID:       "lease-1",
+				SessionID:     "session-1",
+				AgentID:       "agent-1",
+				NodeID:        "node-1",
+				FencingToken:  7,
+				Status:        domain.AgentLeaseActive,
+				ExpiresAt:     now.Add(30 * time.Second),
+				LastHeartbeat: now,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			},
+			"token": "one-time-session-token",
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := client.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
+		WorkspaceKey: "WS",
+		SessionID:    "session-1",
+		LeaseID:      "lease-1",
+		AgentID:      "agent-1",
+		NodeID:       "node-1",
+		TTL:          30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("create lease: %v", err)
+	}
+	if lease.Token != "one-time-session-token" || lease.FencingToken != 7 {
+		t.Fatalf("lease = %+v", lease)
+	}
+}
+
+func TestControlPlaneClientAgentOwnershipLeaseAcquireDecodesOneTimeTokenEnvelope(t *testing.T) {
+	now := time.Now().UTC()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-ownership-leases/agent-1/acquire" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode acquire: %v", err)
+		}
+		if body["lease_id"] != "ownership-1" || body["owner_id"] != "runtime-1" ||
+			body["runtime_provider"] != "local" || body["node_id"] != "node-1" ||
+			body["ttl_seconds"] != float64(45) {
+			t.Fatalf("acquire body = %#v", body)
+		}
+		writeJSON(t, w, map[string]any{
+			"lease": domain.AgentOwnershipLease{
+				WorkspaceKey:    "WS",
+				AgentID:         "agent-1",
+				LeaseID:         "ownership-1",
+				OwnerID:         "runtime-1",
+				RuntimeProvider: domain.RuntimeProviderLocal,
+				NodeID:          "node-1",
+				FencingToken:    11,
+				Status:          domain.AgentLeaseActive,
+				ExpiresAt:       now.Add(45 * time.Second),
+				LastHeartbeat:   now,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			},
+			"token": "one-time-ownership-token",
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := client.AgentOwnershipLeases().Acquire(t.Context(), store.AgentOwnershipLeaseAcquire{
+		WorkspaceKey:    "WS",
+		AgentID:         "agent-1",
+		LeaseID:         "ownership-1",
+		OwnerID:         "runtime-1",
+		RuntimeProvider: domain.RuntimeProviderLocal,
+		NodeID:          "node-1",
+		TTL:             45 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("acquire ownership lease: %v", err)
+	}
+	if lease.Token != "one-time-ownership-token" || lease.FencingToken != 11 {
+		t.Fatalf("lease = %+v", lease)
+	}
+}
+
+func TestControlPlaneClientLeaseCreationRejectsMissingEnvelopeToken(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		run  func(*Client) error
+		body any
+	}{
+		{
+			name: "session lease",
+			path: "/api/v1/WS/agent-sessions/session-1/leases",
+			run: func(client *Client) error {
+				_, err := client.AgentLeases().Create(t.Context(), store.AgentLeaseCreate{
+					WorkspaceKey: "WS",
+					SessionID:    "session-1",
+					LeaseID:      "lease-1",
+				})
+				return err
+			},
+			body: domain.AgentLease{
+				WorkspaceKey: "WS",
+				LeaseID:      "lease-1",
+				SessionID:    "session-1",
+				FencingToken: 1,
+			},
+		},
+		{
+			name: "ownership lease",
+			path: "/api/v1/WS/agent-ownership-leases/agent-1/acquire",
+			run: func(client *Client) error {
+				_, err := client.AgentOwnershipLeases().Acquire(t.Context(), store.AgentOwnershipLeaseAcquire{
+					WorkspaceKey: "WS",
+					AgentID:      "agent-1",
+					LeaseID:      "ownership-1",
+				})
+				return err
+			},
+			body: domain.AgentOwnershipLease{
+				WorkspaceKey: "WS",
+				AgentID:      "agent-1",
+				LeaseID:      "ownership-1",
+				FencingToken: 1,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != test.path {
+					t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+				}
+				writeJSON(t, w, test.body)
+			}))
+			defer ts.Close()
+			client, err := New(Config{BaseURL: ts.URL, Actor: "tester"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := test.run(client); err == nil || !strings.Contains(err.Error(), "omitted one-time token") {
+				t.Fatalf("error = %v, want missing token failure", err)
+			}
+		})
 	}
 }
 

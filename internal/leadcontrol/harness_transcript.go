@@ -13,6 +13,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/chat"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -355,14 +356,14 @@ func persistHarnessTranscriptReference(
 	target *harnessTranscriptTarget,
 	artifactID string,
 ) error {
-	// Re-read immediately before the metadata update so transcript capture does
-	// not overwrite runtime state written by the watcher during finalization.
-	session, err := cfg.Store.AgentSessions().Get(ctx, target.workspace, target.sessionID)
-	if err != nil {
-		return fmt.Errorf("reload harness interactive session: %w", err)
+	if cfg.Runtime == nil {
+		return ErrSessionRuntimeUnavailable
 	}
-	metadata := cloneMetadata(session.Metadata)
-	metadata["transcript_ref"] = "artifact://" + artifactID
+	artifactID = strings.TrimSpace(artifactID)
+	if artifactID == "" {
+		return errors.New("persist harness transcript ref: artifact ID is required")
+	}
+	metadata := map[string]string{}
 	harnessSessionID := strings.TrimSpace(cfg.HarnessSessionID)
 	if harnessSessionID == "" {
 		harnessSessionID = strings.TrimSpace(conv.HarnessSessionID())
@@ -370,12 +371,12 @@ func persistHarnessTranscriptReference(
 	if harnessSessionID != "" {
 		metadata[MetadataHarnessSessionID] = harnessSessionID
 	}
-	if _, err := cfg.Store.AgentSessions().Update(
-		ctx,
-		target.workspace,
-		target.sessionID,
-		store.AgentSessionUpdate{Metadata: &metadata},
-	); err != nil {
+	if err := cfg.Runtime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey:         target.workspace,
+		SessionID:            target.sessionID,
+		MetadataUpserts:      metadata,
+		TranscriptArtifactID: &artifactID,
+	}); err != nil {
 		return fmt.Errorf("persist harness transcript ref: %w", err)
 	}
 	return nil

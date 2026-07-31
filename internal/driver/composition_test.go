@@ -18,9 +18,10 @@ import (
 func newCompositionRun(t *testing.T) (*memstore.Store, *domain.DriverRun) {
 	t.Helper()
 	st, parent := newAwaitOpRun(t)
-	active := "version-1"
-	if _, err := st.Drivers().Update(context.Background(), "WS", "driver-1",
-		store.DriverUpdate{ActiveVersionID: &active}); err != nil {
+	if _, err := st.ApproveDriverVersionForTest(context.Background(), "WS", "driver-1", "version-1"); err != nil {
+		t.Fatalf("approve driver version: %v", err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(context.Background(), "WS", "driver-1", "version-1"); err != nil {
 		t.Fatalf("activate driver version: %v", err)
 	}
 	return st, parent

@@ -1,8 +1,8 @@
 package workflows
 
-import workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
+import "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 
 const (
-	BuiltinEpicRunnerWorkflowName        = workflowdefs.BuiltinEpicRunnerWorkflowName
-	BuiltinGitHubReviewAgentWorkflowName = workflowdefs.BuiltinGitHubReviewAgentWorkflowName
+	BuiltinEpicRunnerWorkflowName        = workflowcatalog.BuiltinEpicRunnerWorkflowName
+	BuiltinGitHubReviewAgentWorkflowName = workflowcatalog.BuiltinGitHubReviewAgentWorkflowName
 )

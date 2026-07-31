@@ -10,6 +10,35 @@ import (
 	"testing"
 )
 
+func TestBuildLeafRunnerEnvFiltersForgeAndControlPlaneCredentials(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "forge-secret")
+	t.Setenv("GH_TOKEN", "forge-secret")
+	t.Setenv("LOOM_FLEET_DB_API_KEY", "fleet-secret")
+	t.Setenv("LOOM_AGENT_LEASE_TOKEN", "agent-secret")
+	t.Setenv("OPENAI_API_KEY", "model-secret")
+	t.Setenv("PATH", "/usr/bin")
+
+	got := envMap(buildLeafRunnerEnv(BundledRunnerOptions{
+		ServerPath:  "/tmp/bundle/server.mjs",
+		Worktree:    "/tmp/worktree",
+		Backend:     "codex",
+		LeaseToken:  "task-scoped-token",
+		RequestJSON: `{}`,
+	}, "workflows/local-task-runner.ts", `{}`))
+
+	for _, key := range []string{"GITHUB_TOKEN", "GH_TOKEN", "LOOM_FLEET_DB_API_KEY", "LOOM_AGENT_LEASE_TOKEN"} {
+		if _, present := got[key]; present {
+			t.Fatalf("%s reached bundled leaf environment: %#v", key, got)
+		}
+	}
+	if got["OPENAI_API_KEY"] != "model-secret" {
+		t.Fatalf("AI provider credential missing from local backend leaf: %#v", got)
+	}
+	if got["LOOM_TASK_RUN_LEASE_TOKEN"] != "task-scoped-token" {
+		t.Fatalf("task-scoped credential missing from leaf envelope: %#v", got)
+	}
+}
+
 // fakeCodexBackend is a stand-in codex CLI: it drains stdin (the prompt) then emits
 // codex `exec --json` stream-json with a turn.completed usage event, so the bundled
 // local-task-runner produces a real transcript + usage without a live model.

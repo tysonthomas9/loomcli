@@ -423,7 +423,7 @@ func TestPollAgentCommands_AckGenerationAdvanceDoesNotInvertFIFO(t *testing.T) {
 	}
 }
 
-func TestHandleAgentCommandProjectsBeforeTerminalCompletion(t *testing.T) {
+func TestHandleAgentCommandCompletesWithoutCompatibilityProjection(t *testing.T) {
 	ctx := context.Background()
 	st, command, lease := acknowledgedPersistentStartFixture(t)
 	calls := &lifecycleCallRecorder{}
@@ -443,7 +443,7 @@ func TestHandleAgentCommandProjectsBeforeTerminalCompletion(t *testing.T) {
 	if consumed := d.handleAgentCommand(command); !consumed {
 		t.Fatal("acknowledged command was not consumed")
 	}
-	if got, want := calls.snapshot(), []string{"update-agent", "complete-command"}; !slices.Equal(got, want) {
+	if got, want := calls.snapshot(), []string{"complete-command"}; !slices.Equal(got, want) {
 		t.Fatalf("lifecycle write order = %v, want %v", got, want)
 	}
 	persisted, err := st.AgentCommands().Get(ctx, "ws-1", command.CommandID)
@@ -455,38 +455,36 @@ func TestHandleAgentCommandProjectsBeforeTerminalCompletion(t *testing.T) {
 	}
 }
 
-func TestHandleAgentCommandProjectionInterruptionLeavesCommandAcknowledged(t *testing.T) {
+func TestHandleAgentCommandDoesNotCallRetiredCompatibilityProjection(t *testing.T) {
 	ctx := context.Background()
 	st, command, lease := acknowledgedPersistentStartFixture(t)
-	shutdown := make(chan struct{})
 	calls := &lifecycleCallRecorder{}
 	wrapped := lifecycleObservedStore{
 		Store: st,
 		agents: &recordingAgentStore{
-			AgentStore:     st.Agents(),
-			calls:          calls,
-			fail:           errors.New("projection unavailable"),
-			closeOnFailure: shutdown,
+			AgentStore: st.Agents(),
+			calls:      calls,
+			fail:       errors.New("retired compatibility projection was called"),
 		},
 		commands: &recordingAgentCommandStore{
 			AgentCommandStore: st.AgentCommands(),
 			calls:             calls,
 		},
 	}
-	d := acknowledgedPersistentStartDaemon(wrapped, lease, shutdown)
+	d := acknowledgedPersistentStartDaemon(wrapped, lease, nil)
 
-	if consumed := d.handleAgentCommand(command); consumed {
-		t.Fatal("incomplete acknowledged command advanced the local FIFO")
+	if consumed := d.handleAgentCommand(command); !consumed {
+		t.Fatal("acknowledged command was not consumed")
 	}
-	if got, want := calls.snapshot(), []string{"update-agent"}; !slices.Equal(got, want) {
-		t.Fatalf("lifecycle writes = %v, want projection attempt without terminal completion", got)
+	if got, want := calls.snapshot(), []string{"complete-command"}; !slices.Equal(got, want) {
+		t.Fatalf("lifecycle writes = %v, want command completion without compatibility projection", got)
 	}
 	persisted, err := st.AgentCommands().Get(ctx, "ws-1", command.CommandID)
 	if err != nil {
-		t.Fatalf("get interrupted command: %v", err)
+		t.Fatalf("get completed command: %v", err)
 	}
-	if persisted.Status != domain.AgentCommandAcked {
-		t.Fatalf("command status = %q, want acked for replacement-daemon recovery", persisted.Status)
+	if persisted.Status != domain.AgentCommandSucceeded {
+		t.Fatalf("command status = %q, want succeeded without compatibility projection", persisted.Status)
 	}
 }
 
@@ -1396,8 +1394,12 @@ func TestReassertAgentCommandLifecycle_Stop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get agent: %v", err)
 	}
-	if agent.State != domain.AgentStateStopped || agent.DesiredState != domain.AgentDesiredStopped {
-		t.Fatalf("agent lifecycle = %s/%s, want stopped/stopped", agent.State, agent.DesiredState)
+	if agent.State != domain.AgentStateIdle || agent.DesiredState != domain.AgentDesiredDraining {
+		t.Fatalf(
+			"compatibility projection = %s/%s, want runtime-owned idle and unchanged intent draining",
+			agent.State,
+			agent.DesiredState,
+		)
 	}
 	entry, ok := d.findAgentEntry("worker-1")
 	if !ok || entry.DesiredState != domain.AgentDesiredStopped {
@@ -1405,11 +1407,7 @@ func TestReassertAgentCommandLifecycle_Stop(t *testing.T) {
 	}
 }
 
-func TestReassertAgentCommandLifecycle_RetriesProjection(t *testing.T) {
-	origRetryDelay := agentCommandRetryDelay
-	agentCommandRetryDelay = time.Millisecond
-	t.Cleanup(func() { agentCommandRetryDelay = origRetryDelay })
-
+func TestReassertAgentCommandLifecycle_DoesNotWriteCompatibilityRuntimeProjection(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{
@@ -1455,15 +1453,23 @@ func TestReassertAgentCommandLifecycle_RetriesProjection(t *testing.T) {
 		Type:          "stop",
 	}, DaemonControlResponse{Success: true})
 
-	if flakyAgents.calls != 2 {
-		t.Fatalf("projection update calls = %d, want transient failure plus retry", flakyAgents.calls)
+	if flakyAgents.calls != 0 {
+		t.Fatalf("compatibility projection update calls = %d, want none", flakyAgents.calls)
 	}
 	agent, err := st.Agents().Get(ctx, "ws-1", "worker-1")
 	if err != nil {
 		t.Fatalf("get projected agent: %v", err)
 	}
-	if agent.State != domain.AgentStateStopped || agent.DesiredState != domain.AgentDesiredStopped {
-		t.Fatalf("agent lifecycle = %s/%s, want stopped/stopped", agent.State, agent.DesiredState)
+	if agent.State != domain.AgentStateIdle || agent.DesiredState != domain.AgentDesiredDraining {
+		t.Fatalf(
+			"compatibility projection = %s/%s, want runtime-owned idle and unchanged intent draining",
+			agent.State,
+			agent.DesiredState,
+		)
+	}
+	entry, ok := d.findAgentEntry("worker-1")
+	if !ok || entry.DesiredState != domain.AgentDesiredStopped {
+		t.Fatalf("daemon config agent = %#v, %v; want desired stopped", entry, ok)
 	}
 }
 

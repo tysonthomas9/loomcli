@@ -14,15 +14,15 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 251 {
-		t.Fatalf("direct-write rows = %d, want strict baseline of 251", len(inventory.Writes))
+	if len(inventory.Writes) != 255 {
+		t.Fatalf("direct-write rows = %d, want strict Phase 5 baseline of 255", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 272 {
-		t.Fatalf("direct-write sites = %d, want strict baseline of 272", totalSites)
+	if totalSites != 262 {
+		t.Fatalf("direct-write sites = %d, want strict Phase 5 baseline of 262", totalSites)
 	}
 }
 
@@ -384,6 +384,26 @@ func TestDirectWriteInventoryRejectsExpiredRowsForCompletedPhase(t *testing.T) {
 	}}
 	if err := inventory.ValidateCompletedPhase(2); err == nil || !strings.Contains(err.Error(), "expired after Phase 2") {
 		t.Fatalf("ValidateCompletedPhase error = %v, want expired-row rejection", err)
+	}
+}
+
+func TestDirectWriteRowsPreserveLegacyDriverPhase6Expiry(t *testing.T) {
+	rows := directWriteRows(map[directWriteCountKey]int{
+		{file: "internal/driver/register.go", receiver: "driver.Store", method: "Create", owner: "workflowcatalog"}: 1,
+		{file: "internal/app/serve/agents.go", receiver: "agents.Store", method: "Create", owner: "agents"}:         1,
+	})
+	if len(rows) != 2 {
+		t.Fatalf("direct-write rows = %+v, want 2", rows)
+	}
+	expiryByFile := make(map[string]int, len(rows))
+	for _, row := range rows {
+		expiryByFile[row.File] = row.ExpiresAfterPhase
+	}
+	if got := expiryByFile["internal/driver/register.go"]; got != legacyDriverDirectWriteExpiresAfterPhase {
+		t.Fatalf("driver expiry = %d, want %d", got, legacyDriverDirectWriteExpiresAfterPhase)
+	}
+	if got := expiryByFile["internal/app/serve/agents.go"]; got != 7 {
+		t.Fatalf("non-driver expiry = %d, want 7", got)
 	}
 }
 

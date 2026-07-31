@@ -268,6 +268,37 @@ func TestPutTab_AllowsReclaimWhenPTYIsDead(t *testing.T) {
 	}
 }
 
+func TestPutTabRejectsDeadCanonicalAgentTabReplacement(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "agent-tab", Workspace: ws, Kind: "agent", AgentID: "agent-1",
+		InteractionSessionID: "session-old", InteractionTerminalID: "terminal-old",
+	}); err != nil {
+		t.Fatalf("Set canonical tab: %v", err)
+	}
+	key := SessionKey{Workspace: ws, Name: "agent-tab"}
+	if fake.HasSession(key) {
+		t.Fatal("fixture unexpectedly has a process-local PTY")
+	}
+	err := svc.PutTab(ctx, ws, &tabmeta.TabMetadata{
+		SessionName: "agent-tab", Workspace: ws, Label: "ordinary replacement",
+	})
+	var typed *service.ServiceError
+	if !errors.As(err, &typed) || typed.Kind != service.KindConflict {
+		t.Fatalf("PutTab error = %v, want canonical replacement conflict", err)
+	}
+	got, getErr := svc.tabStore.Get(ctx, ws, key.Name)
+	if getErr != nil {
+		t.Fatalf("Get canonical tab: %v", getErr)
+	}
+	if got == nil || got.InteractionSessionID != "session-old" ||
+		got.InteractionTerminalID != "terminal-old" {
+		t.Fatalf("canonical identity was overwritten: %+v", got)
+	}
+}
+
 func TestDeleteTab_KillsPTY(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
@@ -285,7 +316,7 @@ func TestDeleteTab_KillsPTY(t *testing.T) {
 	}
 }
 
-func TestDeleteTab_IgnoresKillErrorAndStillRemovesMetadata(t *testing.T) {
+func TestDeleteTabRetainsMetadataWhenLifecycleKillFails(t *testing.T) {
 	svc, fake, _ := newLivenessTestSvc(t)
 	ctx := context.Background()
 	const ws = "w"
@@ -294,11 +325,70 @@ func TestDeleteTab_IgnoresKillErrorAndStillRemovesMetadata(t *testing.T) {
 	fake.alive[SessionKey{Workspace: ws, Name: "sess"}] = true
 	fake.killErr = errors.New("PTY kill failed deep in the OS")
 
-	if err := svc.DeleteTab(ctx, ws, "sess"); err != nil {
-		t.Fatalf("DeleteTab should swallow Kill error, got %v", err)
+	if err := svc.DeleteTab(ctx, ws, "sess"); err == nil {
+		t.Fatal("DeleteTab succeeded despite lifecycle kill failure")
 	}
-	if meta, _ := svc.tabStore.Get(ctx, ws, "sess"); meta != nil {
-		t.Errorf("metadata should have been removed despite Kill failure")
+	if meta, _ := svc.tabStore.Get(ctx, ws, "sess"); meta == nil {
+		t.Error("metadata was removed despite lifecycle kill failure")
+	}
+}
+
+func TestDeleteTabMetadataOnlyStillInvokesLifecycleKill(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "agent-tab", Workspace: ws, Kind: "agent", AgentID: "agent-1",
+		InteractionSessionID: "session-old", InteractionTerminalID: "terminal-old",
+	}); err != nil {
+		t.Fatalf("Set tab: %v", err)
+	}
+	key := SessionKey{Workspace: ws, Name: "agent-tab"}
+	if fake.HasSession(key) {
+		t.Fatal("restart fixture unexpectedly has a process-local PTY")
+	}
+	if err := svc.DeleteTab(ctx, ws, key.Name); err != nil {
+		t.Fatalf("DeleteTab: %v", err)
+	}
+	if len(fake.killed) != 1 || fake.killed[0] != key {
+		t.Fatalf("metadata-only lifecycle kills = %+v, want %+v", fake.killed, key)
+	}
+	if meta, _ := svc.tabStore.Get(ctx, ws, key.Name); meta != nil {
+		t.Fatalf("metadata remained after successful convergence: %+v", meta)
+	}
+}
+
+func TestDeleteTabWaitsForAgentLifecycleBoundary(t *testing.T) {
+	svc, fake, _ := newLivenessTestSvc(t)
+	ctx := context.Background()
+	const ws = "w"
+	if err := svc.tabStore.Set(ctx, &tabmeta.TabMetadata{
+		SessionName: "agent-tab", Workspace: ws, Kind: "agent", AgentID: "agent-1",
+		InteractionSessionID: "session-1", InteractionTerminalID: "terminal-1",
+	}); err != nil {
+		t.Fatalf("Set tab: %v", err)
+	}
+	unlock := LockAgentLifecycle(ws, "agent-1")
+	result := make(chan error, 1)
+	go func() {
+		result <- svc.DeleteTab(ctx, ws, "agent-tab")
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if len(fake.killed) != 0 {
+		unlock()
+		t.Fatalf("DeleteTab killed PTY outside lifecycle boundary: %+v", fake.killed)
+	}
+	unlock()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("DeleteTab: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("DeleteTab did not proceed after lifecycle boundary released")
+	}
+	if len(fake.killed) != 1 {
+		t.Fatalf("lifecycle-boundary kills = %+v", fake.killed)
 	}
 }
 

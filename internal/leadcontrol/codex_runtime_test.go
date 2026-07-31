@@ -356,7 +356,7 @@ func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testi
 	}); err != nil {
 		t.Fatalf("create interactive session: %v", err)
 	}
-	if err := UpdateCodexRuntimeMetadata(ctx, st, "WS", "lead-session", CodexRuntimeMetadata{
+	if err := UpdateCodexRuntimeMetadata(ctx, testSessionRuntime(st), "WS", "lead-session", CodexRuntimeMetadata{
 		Endpoint:   "ws://codex.test",
 		ThreadID:   "thread-1",
 		Status:     RuntimeStatusIdle,
@@ -387,7 +387,8 @@ func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testi
 	t.Cleanup(func() { dialCodexAppServerClient = originalDial })
 
 	err := captureCodexInteractiveTranscript(ctx, CodexLeadRuntimeConfig{
-		Store: st, Workspace: "WS", LeadName: "local-review",
+		Store:   st,
+		Runtime: testSessionRuntime(st), Workspace: "WS", LeadName: "local-review",
 		SessionID: "lead-session", WorkDir: "/repo",
 	}, CodexRuntimeMetadata{}, time.Now().Add(-time.Minute))
 	if err != nil {

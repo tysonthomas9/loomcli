@@ -1,15 +1,33 @@
 package terminal
 
 import (
+	"context"
 	"net/http"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
+
+type InteractionSessionAuthorityResolver interface {
+	ResolveSessionAuthority(
+		context.Context,
+		authority.Action,
+		interaction.SessionAuthorityProof,
+	) (authority.SessionAuthority, error)
+}
+
+type InteractionDependencies struct {
+	API                interaction.API
+	Operator           workflowcataloghttp.OperatorAuthorityResolver
+	SessionAuthorities InteractionSessionAuthorityResolver
+}
 
 // Module registers the surviving workspace-scoped terminal routes: the
 // PTY-backed terminal WebSocket, a one-time auth token endpoint, and the
@@ -32,6 +50,8 @@ type Module struct {
 	tabMetaStore    *tabmeta.Store
 	hub             *realtime.Hub
 	serverStartedAt time.Time
+	agentIdentity   terminalAgentIdentity
+	interaction     InteractionDependencies
 }
 
 // NewModule returns a Module. Any of agentSvc, agentTmuxMgr, and termAuth
@@ -50,6 +70,8 @@ func NewModule(
 	tabMetaStore *tabmeta.Store,
 	hub *realtime.Hub,
 	serverStartedAt time.Time,
+	interactionDeps InteractionDependencies,
+	identities ...terminalAgentIdentity,
 ) *Module {
 	return &Module{
 		termSvc:         termSvc,
@@ -63,6 +85,8 @@ func NewModule(
 		tabMetaStore:    tabMetaStore,
 		hub:             hub,
 		serverStartedAt: serverStartedAt,
+		agentIdentity:   firstTerminalAgentIdentity(identities),
+		interaction:     interactionDeps,
 	}
 }
 
@@ -76,7 +100,10 @@ func (m *Module) Register(mux *http.ServeMux) {
 		}
 	}
 	if m.termSvc != nil && m.store != nil {
-		mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/terminal/session", HandleEnsureAgentTerminalSession(m.termSvc, m.store))
+		mux.HandleFunc(
+			"POST /api/workspaces/{ws}/agents/{name}/terminal/session",
+			HandleEnsureAgentTerminalSession(m.termSvc, m.store, m.agentIdentity),
+		)
 	}
 	if m.agentTmuxMgr != nil {
 		mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/terminal/ws", HandleAgentTerminalWS(m.agentTmuxMgr, m.termAuth, m.allowedOrigins))
@@ -87,6 +114,20 @@ func (m *Module) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/token", HandleTerminalToken(m.termSvc))
 	}
 	if m.ptyMgr != nil {
-		mux.HandleFunc("GET /api/workspaces/{ws}/terminal/ws", HandleTerminalWS(m.ptyMgr, m.termAuth, m.allowedOrigins, m.loomServerURL, m.store, m.tabMetaStore, m.hub, m.serverStartedAt))
+		mux.HandleFunc(
+			"GET /api/workspaces/{ws}/terminal/ws",
+			HandleTerminalWSWithInteraction(
+				m.ptyMgr,
+				m.termAuth,
+				m.allowedOrigins,
+				m.loomServerURL,
+				m.store,
+				m.tabMetaStore,
+				m.hub,
+				m.serverStartedAt,
+				m.interaction,
+				m.agentIdentity,
+			),
+		)
 	}
 }

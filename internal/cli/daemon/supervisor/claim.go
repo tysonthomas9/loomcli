@@ -308,8 +308,8 @@ func removeIssueByID(issues []backend.IssueData, id string) []backend.IssueData 
 }
 
 // releaseAssignedTaskClaim releases the issue-claim lock held by this agent on
-// the given task. Called from completeControlPlaneAgentSession when the agent
-// process exits. Without this, fleet-db's per-issue claim lock leaks until its
+// the given task. Called from the agent process completion paths. Without this,
+// fleet-db's per-issue claim lock leaks until its
 // TTL expires (~5 min), so the next agent — even with a fresh assignee — gets
 // HTTP 409 KindConflict on every ClaimIssue attempt and silently NoWorks in
 // the supervisor's restart backoff. The release is best-effort: if the backend

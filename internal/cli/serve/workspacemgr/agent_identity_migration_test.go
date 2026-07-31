@@ -9,8 +9,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	workflowdefs "github.com/tysonthomas9/loomcli/internal/workflows"
 )
 
 type agentServiceCreateRaceStore struct {
@@ -44,7 +44,7 @@ func TestEnsurePromptAgentIdentityRecordsIdempotentAndDoesNotClobber(t *testing.
 	st := newAgentIdentityMigrationStore(t)
 	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "docs-agent", Name: "Docs agent",
-		SourceKind: store.InternalSourceKind, DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+		SourceKind: store.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 		DriverVersionID: "prompt-agent-version-1", SourceConfigRef: `{"roleName":"docs-assistant","backend":"codex"}`,
 		Enabled: true,
 	}); err != nil {
@@ -115,7 +115,7 @@ func TestEnsurePromptAgentIdentityRecordsPrefixesAgentdefNameCollision(t *testin
 	}
 	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "docs-agent", Name: "Docs agent",
-		SourceKind: store.CronSourceKind, DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+		SourceKind: store.CronSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 		DriverVersionID: "prompt-agent-version-1", SourceConfigRef: `{"roleName":"docs-assistant"}`,
 		Schedule: "*/10 * * * *", Enabled: false,
 	}); err != nil {
@@ -156,7 +156,7 @@ func TestEnsurePromptAgentIdentityRecordsDoesNotAdoptUnrelatedRecordID(t *testin
 	}
 	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "docs-agent", Name: "Docs agent",
-		SourceKind: store.InternalSourceKind, DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+		SourceKind: store.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 		DriverVersionID: "prompt-agent-version-1", SourceConfigRef: `{"roleName":"docs-assistant"}`,
 		Enabled: true,
 	}); err != nil {
@@ -195,7 +195,7 @@ func TestEnsurePromptAgentIdentityRecordsReusesExactCrashResidue(t *testing.T) {
 	}
 	if _, err := st.TriggerBindings().Create(ctx, store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "docs-agent", Name: "Docs agent",
-		SourceKind: store.InternalSourceKind, DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+		SourceKind: store.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 		DriverVersionID: "prompt-agent-version-1", SourceConfigRef: `{"roleName":"docs-assistant"}`,
 		Enabled: true,
 	}); err != nil {
@@ -285,7 +285,7 @@ func createPromptAgentMigrationBinding(t *testing.T, st store.Store) {
 	t.Helper()
 	if _, err := st.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
 		WorkspaceKey: "WS", BindingID: "docs-agent", Name: "Docs agent",
-		SourceKind: store.InternalSourceKind, DriverID: workflowdefs.BuiltinPromptAgentWorkflowName,
+		SourceKind: store.InternalSourceKind, DriverID: workflowcatalog.BuiltinPromptAgentWorkflowName,
 		DriverVersionID: "prompt-agent-version-1", SourceConfigRef: `{"roleName":"docs-assistant"}`,
 		Enabled: true,
 	}); err != nil {
@@ -303,16 +303,16 @@ func newAgentIdentityMigrationStore(t *testing.T) *memstore.Store {
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "docs-assistant"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	seedMigrationDriver(t, st, workflowdefs.BuiltinPromptAgentWorkflowName, "prompt-agent-version-1")
+	seedMigrationDriver(t, st, workflowcatalog.BuiltinPromptAgentWorkflowName, "prompt-agent-version-1")
 	seedMigrationDriver(t, st, "scripted-driver", "scripted-version-1")
 	return st
 }
 
-func seedMigrationDriver(t *testing.T, st store.Store, driverID, versionID string) {
+func seedMigrationDriver(t *testing.T, st *memstore.Store, driverID, versionID string) {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
-		WorkspaceKey: "WS", DriverID: driverID, Name: driverID, ActiveVersionID: versionID,
+		WorkspaceKey: "WS", DriverID: driverID, Name: driverID,
 		Status: domain.DriverStatusActive, OwnerType: domain.DriverOwnerSystem,
 	}); err != nil {
 		t.Fatalf("create driver %s: %v", driverID, err)
@@ -323,5 +323,11 @@ func seedMigrationDriver(t *testing.T, st store.Store, driverID, versionID strin
 		ValidationStatus: domain.DriverVersionValidationPassed,
 	}); err != nil {
 		t.Fatalf("create driver version %s: %v", versionID, err)
+	}
+	if _, err := st.ApproveDriverVersionForTest(ctx, "WS", driverID, versionID); err != nil {
+		t.Fatalf("approve driver version %s: %v", versionID, err)
+	}
+	if _, err := st.ActivateDriverVersionForTest(ctx, "WS", driverID, versionID); err != nil {
+		t.Fatalf("activate driver version %s: %v", versionID, err)
 	}
 }

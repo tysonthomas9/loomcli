@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,9 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/sessionfinalize"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -97,26 +97,12 @@ type Supervisor struct {
 	quarantine     *taskQuarantine
 	quarantineOnce sync.Once
 
-	// ControlStore is the fleet-db-backed control plane used for node,
-	// session, lease, terminal, artifact, and command records.
+	// ControlStore is the fleet-db-backed control plane used for node, worker,
+	// agent ownership, and transitional command records.
 	ControlStore store.Store
 	NodeID       string
 	NodeTTL      time.Duration
 	NodeInterval time.Duration
-	// SessionHeartbeatInterval controls the shared control-plane session/lease
-	// heartbeat loop. Zero uses the package default. AgentLeaseTTL controls the
-	// renewed lease duration and likewise defaults when zero.
-	// SessionHeartbeatPassTimeout is capped below the liveness threshold so an
-	// unreachable control plane cannot make the heartbeat loop appear wedged.
-	// Zero uses the package default; tests may use a shorter value.
-	SessionHeartbeatInterval    time.Duration
-	SessionHeartbeatPassTimeout time.Duration
-	AgentLeaseTTL               time.Duration
-	// sessionHeartbeatCursor rotates the first job in each bounded pass so a
-	// persistently slow backend cannot starve agents at the tail of the stable
-	// snapshot. The mutex also makes direct/concurrent test passes race-free.
-	sessionHeartbeatCursorMu sync.Mutex
-	sessionHeartbeatCursor   int
 
 	// ownershipOwnerID is the durable identity of this local supervisor
 	// installation. Unlike NodeID (which intentionally identifies one daemon
@@ -184,7 +170,8 @@ func (s *Supervisor) Start() error {
 	// workers so a brand-new agent doesn't get confused with a leftover one.
 	s.sweepOrphanedBackends()
 
-	// Sweep orphaned sessions from prior daemon runs before launching agents.
+	// Sweep orphaned daemon-local transcript sessions from prior runs before
+	// launching agents.
 	if sessStore, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir()); err != nil {
 		slog.Warn("session store unavailable, skipping orphan sweep", "err", err)
 	} else {
@@ -212,8 +199,6 @@ func (s *Supervisor) Start() error {
 		slog.Info("agent supervision suppressed (fleet mode — agents managed by fleet server)")
 		return nil
 	}
-	s.startAgentSessionHeartbeat()
-
 	// Initialize stop/done channels and start superviseAgent goroutine for each agent
 	s.AgentsMu.RLock()
 	snapshot := make([]*AgentProcess, len(s.Agents))
@@ -245,10 +230,9 @@ func (s *Supervisor) startAgentSupervisor(ap *AgentProcess) {
 }
 
 const (
-	defaultNodeTTL                  = 2 * time.Minute
-	defaultNodeInterval             = 30 * time.Second
-	defaultLeaseTTL                 = 30 * time.Minute
-	defaultSessionHeartbeatInterval = 30 * time.Second
+	defaultNodeTTL        = 2 * time.Minute
+	defaultNodeInterval   = 30 * time.Second
+	agentIPCAuthTokenSize = 32
 )
 
 var controlPlaneOperationTimeout = 2 * time.Second
@@ -280,8 +264,6 @@ func (s *Supervisor) Stop() {
 //nolint:funlen // The restart loop keeps lifecycle ordering visible.
 func (s *Supervisor) superviseAgent(ap *AgentProcess) {
 	slog.Info("starting agent supervisor", "worktree", ap.Entry.Worktree, "role", ap.Entry.Role)
-	s.markAgentActive(ap)
-	defer s.markAgentStoppedOnExit(ap)
 	tickName := agentTickName(ap)
 
 	for {
@@ -483,7 +465,9 @@ func (s *Supervisor) assignEpic(ap *AgentProcess) string {
 	return epicID
 }
 
-// createAgentSession creates a session for liveness tracking.
+// createAgentSession creates the daemon-local transcript/watchdog session and
+// its process-local IPC credential. It does not create an Interaction-owned
+// AgentSession or AgentLease.
 func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 	runtimeDir := cli.GetWorkspaceRuntimeDir()
 	sessStore, err := sessions.NewStore(runtimeDir)
@@ -513,252 +497,21 @@ func (s *Supervisor) createAgentSession(ap *AgentProcess, epicID string) {
 	ap.Mu.Lock()
 	ap.Session = sess
 	ap.AgentSessionID = sess.SessionID()
+	ap.AgentIPCAuthToken = newAgentIPCAuthToken()
 	ap.TranscriptPath = txPath
 	ap.BeforeRef = bRef
 	ap.Mu.Unlock()
-
-	s.createControlPlaneAgentSession(ap, sess.SessionID(), epicID, phase, restartCount)
 }
 
-func (s *Supervisor) createControlPlaneAgentSession(ap *AgentProcess, sessionID, epicID, phase string, attempt int) {
-	if s.ControlStore == nil || s.WorkspaceID == "" || sessionID == "" {
-		return
-	}
-	taskID := s.taskIDForLifecycle(ap, nil)
-	metadata := s.agentSessionMetadata(ap, epicID)
-	createCtx, createCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	if _, err := s.ControlStore.AgentSessions().Create(createCtx, store.AgentSessionCreate{
-		WorkspaceKey:    s.WorkspaceID,
-		SessionID:       sessionID,
-		AgentID:         ap.Entry.Worktree,
-		NodeID:          s.NodeID,
-		Kind:            domain.AgentSessionKindTask,
-		TaskID:          taskID,
-		ParentSessionID: ap.ParentSessionID,
-		Status:          domain.AgentSessionStarting,
-		Phase:           phase,
-		Attempt:         attempt,
-		Metadata:        metadata,
-	}); err != nil {
-		createCancel()
-		slog.Warn("control-plane agent session creation failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
-		return
-	}
-	createCancel()
-
-	leaseCtx, leaseCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer leaseCancel()
-	lease, err := s.ControlStore.AgentLeases().Create(leaseCtx, store.AgentLeaseCreate{
-		WorkspaceKey: s.WorkspaceID,
-		SessionID:    sessionID,
-		LeaseID:      sessionID + "-lease",
-		AgentID:      ap.Entry.Worktree,
-		NodeID:       s.NodeID,
-		TTL:          defaultLeaseTTL,
-	})
-	if err != nil {
-		slog.Warn("control-plane agent lease creation failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
-		return
-	}
-	ap.Mu.Lock()
-	if ap.AgentSessionID == sessionID {
-		ap.AgentLeaseID = lease.LeaseID
-		ap.AgentLeaseToken = lease.Token
-	}
-	ap.Mu.Unlock()
-}
-
-// markControlPlaneAgentState persists the given agent state onto the
-// fleet-db Agent record so UIs and `workspace ops diagnose` reflect
-// supervisor lifecycle transitions (currently used by the
-// backend-availability gate to flip between AgentStateBackendUnavailable
-// and AgentStateActive). Best-effort: failures are logged but do not
-// block the supervisor.
-func (s *Supervisor) markControlPlaneAgentState(ap *AgentProcess, state domain.AgentState) {
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if _, err := s.ControlStore.Agents().Update(ctx, s.WorkspaceID, ap.Entry.Worktree, store.AgentUpdate{
-		State: &state,
-	}); err != nil {
-		slog.Warn("control-plane agent state update failed",
-			"worktree", ap.Entry.Worktree, "state", state, "err", err)
-	}
-}
-
-func (s *Supervisor) markControlPlaneAgentSessionRunning(ap *AgentProcess) {
-	if s.ControlStore == nil || s.WorkspaceID == "" {
-		return
-	}
-	// Heartbeat is a read/apply/full-record write on the Redis backend. Drain a
-	// heartbeat that may have read the starting record before writing running,
-	// then exclude new heartbeats until the transition is durable.
-	ap.SessionHeartbeatMu.Lock()
-	defer ap.SessionHeartbeatMu.Unlock()
-	backend := s.GetEffectiveBackend(ap)
-	ap.Mu.Lock()
-	sessionID := ap.AgentSessionID
-	metadata := s.agentSessionMetadataLocked(ap, backend)
-	ap.Mu.Unlock()
-	if sessionID == "" {
-		return
-	}
-	now := time.Now().UTC()
-	status := domain.AgentSessionRunning
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, sessionID, store.AgentSessionUpdate{
-		Status:        &status,
-		LastHeartbeat: &now,
-		Metadata:      &metadata,
-	}); err != nil {
-		slog.Warn("control-plane agent session running update failed", "worktree", ap.Entry.Worktree, "session_id", sessionID, "err", err)
-	}
-}
-
-func (s *Supervisor) agentSessionMetadata(ap *AgentProcess, epicID string) map[string]string {
-	backend := s.GetEffectiveBackend(ap)
-	ap.Mu.Lock()
-	defer ap.Mu.Unlock()
-	if epicID != "" {
-		ap.AssignedEpicID = epicID
-	}
-	return s.agentSessionMetadataLocked(ap, backend)
-}
-
-// agentSessionMetadataLocked requires ap.Mu to be held.
-func (s *Supervisor) agentSessionMetadataLocked(ap *AgentProcess, backend string) map[string]string {
-	metadata := map[string]string{}
-	if backend != "" {
-		metadata["backend"] = backend
-	}
-	if ap.AssignedEpicID != "" {
-		metadata["epic_id"] = ap.AssignedEpicID
-	}
-	if ap.AssignedTaskID != "" {
-		metadata["task_id"] = ap.AssignedTaskID
-	}
-	if ap.Entry.Mode == domain.AgentModeEphemeral {
-		metadata["attempt_kind"] = "ephemeral_task_attempt"
-		metadata["cleanup_state"] = "retained"
-	}
-	if ap.Entry.Repo != "" {
-		metadata["repo"] = ap.Entry.Repo
-	}
-	if ap.TranscriptPath != "" {
-		metadata["transcript_path"] = ap.TranscriptPath
-	}
-	if ap.LogFilePath != "" {
-		metadata["log_path"] = ap.LogFilePath
-	}
-	return metadata
-}
-
-type agentSessionCompletionInput struct {
-	sessionID  string
-	leaseID    string
-	leaseToken string
-	exitCode   int
-	errClass   string
-	taskID     string
-	diffResult sessionfinalize.WithWorktreeResult
-	// transcriptData is the leaf's on-disk transcript (read once in
-	// finalizeAgentSession). When present it is uploaded as a control-plane artifact
-	// and referenced via metadata["transcript_ref"], so a non-owning serve node can
-	// surface it (controlPlaneSessionTranscript). Empty on the backend-unavailable path.
-	transcriptData []byte
-}
-
-//nolint:funlen // Completion writes status, metadata, transcript artifact, and retry-safe control-plane updates together.
-func (s *Supervisor) completeControlPlaneAgentSession(ap *AgentProcess, input agentSessionCompletionInput) {
-	if s.ControlStore == nil || s.WorkspaceID == "" || input.sessionID == "" {
-		return
-	}
-	status := domain.AgentSessionCompleted
-	if input.exitCode != 0 {
-		status = domain.AgentSessionFailed
-	}
-	finishedAt := time.Now().UTC()
-	finishedAtPtr := &finishedAt
-	exitCodePtr := &input.exitCode
-	var taskIDPtr *string
-	if input.taskID != "" {
-		taskIDPtr = &input.taskID
-	}
-
-	backend := s.GetEffectiveBackend(ap)
-	ap.Mu.Lock()
-	if input.taskID != "" {
-		ap.AssignedTaskID = input.taskID
-	}
-	metadata := s.agentSessionMetadataLocked(ap, backend)
-	ap.Mu.Unlock()
-	sessions.EncodeDiffStatsMetadata(metadata, input.diffResult.DiffStats, input.diffResult.FilesTouched, input.diffResult.HasDiffPatch)
-
-	// Upload the leaf transcript as a control-plane artifact and reference it via
-	// metadata["transcript_ref"] (the same convention the driver host-bridge uses),
-	// so a serve node that does NOT own this session locally can still surface it via
-	// controlPlaneSessionTranscript. Best-effort: a failed upload must not block the
-	// session completion. Own context so it can't eat the Update's timeout budget.
-	if len(input.transcriptData) > 0 {
-		upCtx, upCancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-		if ref := s.uploadTranscriptArtifact(upCtx, ap.Entry.Worktree, input.sessionID, input.taskID, backend, input.transcriptData); ref != "" {
-			metadata["transcript_ref"] = ref
-		}
-		upCancel()
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-	defer cancel()
-	if _, err := s.ControlStore.AgentSessions().Update(ctx, s.WorkspaceID, input.sessionID, store.AgentSessionUpdate{
-		Status:     &status,
-		TaskID:     taskIDPtr,
-		FinishedAt: &finishedAtPtr,
-		ErrorClass: &input.errClass,
-		ExitCode:   &exitCodePtr,
-		Metadata:   &metadata,
-	}); err != nil {
-		slog.Warn("control-plane agent session completion failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "err", err)
-	}
-	if input.leaseID != "" && input.leaseToken != "" {
-		if _, err := s.ControlStore.AgentLeases().Release(ctx, s.WorkspaceID, input.leaseID, input.leaseToken); err != nil {
-			slog.Warn("control-plane agent lease release failed", "worktree", ap.Entry.Worktree, "session_id", input.sessionID, "lease_id", input.leaseID, "err", err)
-		}
-	}
-	s.releaseAssignedTaskClaim(ap, input.taskID)
-	s.deregisterWorker(ap)
-}
-
-// uploadTranscriptArtifact uploads the daemon leaf's transcript as a content
-// artifact and returns its artifact:// ref (or "" on failure). The artifact id is
-// stable per session so a retried finalize reuses it (UploadContentArtifact is
-// idempotent). Owner is the agent session — the daemon leaf has no task_run, which
-// is the driver's owner type.
-func (s *Supervisor) uploadTranscriptArtifact(ctx context.Context, agentID, sessionID, taskID, backend string, data []byte) string {
-	if s.ControlStore == nil {
+func newAgentIPCAuthToken() string {
+	var random [agentIPCAuthTokenSize]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		// A missing token fails closed in daemon IPC validation. Keep local
+		// transcript/watchdog tracking available on this exceptional path.
+		slog.Error("daemon IPC credential generation failed", "err", err)
 		return ""
 	}
-	finalized, err := store.UploadContentArtifact(ctx, s.ControlStore.Artifacts(), store.ArtifactCreate{
-		WorkspaceKey:  s.WorkspaceID,
-		ArtifactID:    "transcript-" + sessionID,
-		AgentID:       agentID,
-		SessionID:     sessionID,
-		TaskID:        taskID,
-		OwnerType:     "session",
-		OwnerID:       sessionID,
-		Type:          "transcript",
-		Summary:       "agent session transcript",
-		MIMEType:      "application/x-ndjson",
-		DurableStatus: "declared",
-		Metadata:      map[string]string{"runtime": "daemon-leaf", "backend": backend},
-	}, data)
-	if err != nil {
-		slog.Warn("daemon transcript artifact upload failed", "session_id", sessionID, "err", err)
-		return ""
-	}
-	return "artifact://" + finalized.ArtifactID
+	return hex.EncodeToString(random[:])
 }
 
 // deregisterWorker removes the agent's fleet-db worker registration on exit,
@@ -808,14 +561,9 @@ func (s *Supervisor) finishSpawnAndWait(ap *AgentProcess, spawnErr error) {
 		if orphan.session != nil {
 			_ = orphan.session.Finalize(sessions.FinalizeOptions{ExitCode: -1, ErrorClass: "spawn_failure"})
 		}
-		s.completeControlPlaneAgentSession(ap, agentSessionCompletionInput{
-			sessionID:  orphan.sessionID,
-			leaseID:    orphan.leaseID,
-			leaseToken: orphan.leaseToken,
-			exitCode:   -1,
-			errClass:   "spawn_failure",
-			taskID:     s.taskIDForLifecycle(ap, nil),
-		})
+		taskID := s.taskIDForLifecycle(ap, nil)
+		s.releaseAssignedTaskClaim(ap, taskID)
+		s.deregisterWorker(ap)
 		s.Concurrency.Release(ap.Entry.Role)
 		s.markSpawnFailure(ap, err)
 		return
@@ -824,7 +572,7 @@ func (s *Supervisor) finishSpawnAndWait(ap *AgentProcess, spawnErr error) {
 	exitCode := s.waitForAgent(ap)
 	s.classifyAgentExit(ap, exitCode)
 	// Ledger hook: LastError is set, the lock is still present, and
-	// AgentSessionID has not been cleared by finalize yet.
+	// The local AgentSessionID has not been cleared by finalization yet.
 	s.recordTaskExitForQuarantine(ap, exitCode)
 	s.finalizeAgentSession(ap, exitCode)
 	s.handleAgentCheckpoint(ap, exitCode)

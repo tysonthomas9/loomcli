@@ -91,12 +91,6 @@ var trustedLocalProviderCredentials = map[string]struct{}{
 	"GOOGLE_API_KEY":                 {},
 	"GOOGLE_APPLICATION_CREDENTIALS": {},
 	"CURSOR_API_KEY":                 {},
-	// GitHub tokens enable the local runner's opt-in pull-request delivery.
-	// They remain in subprocessEnvSensitiveExact so the strict filter still
-	// denies them to Daytona/remote runners; localTaskRunnerBaseEnv adds them
-	// back ONLY for the local-task-runner entrypoint.
-	"GITHUB_TOKEN": {},
-	"GH_TOKEN":     {},
 }
 
 func driverRuntimeBaseEnv(env []string) []string {
@@ -105,9 +99,10 @@ func driverRuntimeBaseEnv(env []string) []string {
 
 // localTaskRunnerBaseEnv is the trusted-local superset of the strict driver
 // allowlist: it keeps everything scopedSubprocessBaseEnv admits (PATH/HOME/…)
-// and additionally admits the provider-credential allowlist so the local
-// backend CLI can authenticate. It is used ONLY for the local-task-runner
-// entrypoint.
+// and additionally admits the AI-provider credential allowlist so the local
+// backend CLI can authenticate. Forge credentials are intentionally absent:
+// Source Control and Connectors own repository/provider operations. It is used
+// ONLY for the local-task-runner entrypoint.
 func localTaskRunnerBaseEnv(env []string) []string {
 	out := scopedSubprocessBaseEnv(env)
 	for _, entry := range env {

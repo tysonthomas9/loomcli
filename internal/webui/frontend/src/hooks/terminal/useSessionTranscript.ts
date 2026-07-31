@@ -67,20 +67,26 @@ export function useSessionTranscript(
 ): UseSessionTranscriptResult {
   const { workspaceId } = useWorkspaceContext();
   const retryUnavailable = options.retryUnavailable === true;
+  const normalizedTaskId = taskId?.trim() || null;
+  const normalizedSessionId = sessionId?.trim() || null;
   const agentId = options.agentId?.trim() || null;
-  const transcriptOwnerKind = taskId ? "task" : agentId ? "agent" : null;
-  const transcriptOwnerId = taskId || agentId;
+  const transcriptOwnerKind = normalizedTaskId
+    ? "task"
+    : agentId
+      ? "agent"
+      : null;
+  const transcriptOwnerId = normalizedTaskId || agentId;
   const requestKey = useMemo(
     () =>
-      transcriptOwnerKind && transcriptOwnerId && sessionId
+      transcriptOwnerKind && transcriptOwnerId && normalizedSessionId
         ? JSON.stringify([
             workspaceId,
             transcriptOwnerKind,
             transcriptOwnerId,
-            sessionId,
+            normalizedSessionId,
           ])
         : "",
-    [workspaceId, transcriptOwnerKind, transcriptOwnerId, sessionId],
+    [workspaceId, transcriptOwnerKind, transcriptOwnerId, normalizedSessionId],
   );
   const [state, setState] = useState<TranscriptState>({
     requestKey,
@@ -91,7 +97,7 @@ export function useSessionTranscript(
   });
 
   useEffect(() => {
-    if (!transcriptOwnerKind || !transcriptOwnerId || !sessionId) {
+    if (!transcriptOwnerKind || !transcriptOwnerId || !normalizedSessionId) {
       setState({
         requestKey,
         entries: [],
@@ -151,13 +157,13 @@ export function useSessionTranscript(
             ? await getSessionTranscript(
                 workspaceId,
                 transcriptOwnerId,
-                sessionId,
+                normalizedSessionId,
                 { preserveNotFound: true },
               )
             : await getAgentSessionTranscript(
                 workspaceId,
                 transcriptOwnerId,
-                sessionId,
+                normalizedSessionId,
                 { preserveNotFound: true },
               );
         if (!cancelled && request === latestRequest) {
@@ -221,7 +227,7 @@ export function useSessionTranscript(
     workspaceId,
     transcriptOwnerKind,
     transcriptOwnerId,
-    sessionId,
+    normalizedSessionId,
     isActive,
     retryUnavailable,
     requestKey,

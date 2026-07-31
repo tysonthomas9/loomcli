@@ -2,19 +2,39 @@ package execution
 
 import (
 	"context"
+	"errors"
 
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
 
+var (
+	ErrInvalid         = errors.New("execution: invalid command")
+	ErrUnavailable     = errors.New("execution: dependency unavailable")
+	ErrConflict        = errors.New("execution: command conflict")
+	ErrNotFound        = errors.New("execution: record not found")
+	ErrFenceConflict   = errors.New("execution: owner fence conflict")
+	ErrAlreadyResumed  = errors.New("execution: driver run already resumed for await")
+	ErrPreflightFailed = errors.New("execution: preflight failed")
+	ErrUnschedulable   = errors.New("execution: task run unschedulable")
+	// ErrTaskRunRequestReplayNotFound is an internal read-only replay miss.
+	// Request ports return it without writes so the service can run live
+	// scheduling only for a genuinely new TaskRun request.
+	ErrTaskRunRequestReplayNotFound = errors.New("execution: task run request replay not found")
+	ErrLaunchFailed                 = errors.New("execution: launch failed")
+	ErrInvalidTransition            = errors.New("execution: invalid transition")
+	ErrCompositionDepthExceeded     = errors.New("execution: composition depth exceeded")
+)
+
 const (
-	ActionPreflight      authority.Action = "execution.preflight"
-	ActionClaimAndLaunch authority.Action = "execution.claim-and-launch"
-	ActionHeartbeat      authority.Action = "execution.heartbeat"
-	ActionAppendLog      authority.Action = "execution.append-log"
-	ActionClassify       authority.Action = "execution.classify"
-	ActionFinalize       authority.Action = "execution.finalize"
-	ActionRecover        authority.Action = "execution.recover"
-	ActionAwait          authority.Action = "execution.await"
+	ActionPreflight            authority.Action = "execution.preflight"
+	ActionClaimAndLaunch       authority.Action = "execution.claim-and-launch"
+	ActionHeartbeat            authority.Action = "execution.heartbeat"
+	ActionAppendLog            authority.Action = "execution.append-log"
+	ActionClassify             authority.Action = "execution.classify"
+	ActionFinalize             authority.Action = "execution.finalize"
+	ActionRecover              authority.Action = "execution.recover"
+	ActionAwait                authority.Action = "execution.await"
+	ActionResolveTrustedRunner authority.Action = "execution.resolve-trusted-runner"
 
 	ActionClaimAwaitEventNotifications          authority.Action = "execution.claim-await-event-notifications"
 	ActionCompleteAwaitEventNotification        authority.Action = "execution.complete-await-event-notification"
@@ -27,6 +47,13 @@ const (
 	ActionRetryTerminalDriverRunWorkRecovery    authority.Action = "execution.retry-terminal-driver-run-work-recovery"
 )
 
+const (
+	DaytonaProviderSchemaV1 = "daytona-task-run-execution.v1"
+	RunnerKindFlueWorkflow  = "flue-workflow"
+	RunnerKindNodeModule    = "node-module"
+	runnerManifestKey       = "runners"
+)
+
 func OperationRules() []authority.OperationRule {
 	return []authority.OperationRule{
 		authority.Allow(ActionPreflight, authority.ClassSystem),
@@ -37,6 +64,7 @@ func OperationRules() []authority.OperationRule {
 		authority.Allow(ActionFinalize, authority.ClassExecution),
 		authority.Allow(ActionRecover, authority.ClassSystem),
 		authority.Allow(ActionAwait, authority.ClassExecution),
+		authority.Allow(ActionResolveTrustedRunner, authority.ClassSystem),
 		authority.Allow(ActionRequestTaskRun, authority.ClassExecution),
 		authority.Allow(ActionClaimTaskRun, authority.ClassSystem),
 		authority.Allow(ActionUpdateTaskRunWorkItemDesign, authority.ClassExecution),

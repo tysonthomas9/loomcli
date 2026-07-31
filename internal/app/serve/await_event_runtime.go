@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/app/serve/automationcomposition"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	platformruntime "github.com/tysonthomas9/loomcli/internal/platform/runtime"
@@ -54,7 +55,10 @@ func NewAwaitEventRuntimeRegistrationWithExecution(
 	}
 	reconciler, err := driver.NewAwaitEventReconcilerWithExecutionStores(
 		queue, authorities, awaits, driverRuns, resolver,
-		workspace, driver.RunOutcomeWorkspaceLister(newAutomationWorkspaceLister(workspacesStore)),
+		workspace,
+		driver.RunOutcomeWorkspaceLister(
+			automationcomposition.NewAutomationWorkspaceLister(workspacesStore),
+		),
 		string(AwaitEventNotificationComponentID),
 	)
 	if err != nil {
@@ -67,4 +71,28 @@ func NewAwaitEventRuntimeRegistrationWithExecution(
 			FailureBackoff: platformruntime.Backoff{Initial: time.Second, Max: time.Minute, Multiplier: 2},
 		},
 	}, nil
+}
+
+func NewRunOutcomeRuntimeRegistrationWithExecution(
+	awaits store.AwaitStore,
+	triggerEvents store.TriggerEventStore,
+	workspacesStore store.WorkspaceStore,
+	publisher driver.RunOutcomePublisher,
+	workspace string,
+	api execution.DriverRunAPI,
+	queue execution.DriverRunOutcomeAPI,
+	terminalWorkQueue execution.TerminalDriverRunWorkRecoveryQueueAPI,
+	authorities execution.SystemAuthorityResolver,
+) (platformruntime.Registration, error) {
+	return automationcomposition.NewRunOutcomeRuntimeRegistrationWithExecution(
+		awaits,
+		triggerEvents,
+		workspacesStore,
+		publisher,
+		workspace,
+		api,
+		queue,
+		terminalWorkQueue,
+		authorities,
+	)
 }

@@ -21,8 +21,7 @@ type AgentIPCClient struct {
 	SocketPath string
 	AgentName  string
 	SessionID  string
-	LeaseID    string
-	LeaseToken string
+	AuthToken  string
 
 	activityMu     sync.Mutex
 	lastActivityAt time.Time
@@ -63,8 +62,7 @@ func (c *AgentIPCClient) Heartbeat(at time.Time) error {
 		Operation:      IPCOpHeartbeat,
 		AgentName:      c.AgentName,
 		SessionID:      c.SessionID,
-		LeaseID:        c.LeaseID,
-		LeaseToken:     c.LeaseToken,
+		AuthToken:      c.AuthToken,
 		LastActivityAt: c.snapshotActivity(),
 	}
 	resp, err := sendAgentIPCRequest(c.SocketPath, req)
@@ -83,8 +81,7 @@ func (c *AgentIPCClient) Claim(issueID string, lockTTL time.Duration) error {
 		AgentName:      c.AgentName,
 		IssueID:        issueID,
 		SessionID:      c.SessionID,
-		LeaseID:        c.LeaseID,
-		LeaseToken:     c.LeaseToken,
+		AuthToken:      c.AuthToken,
 		LastActivityAt: c.snapshotActivity(),
 	}
 
@@ -115,8 +112,7 @@ func (c *AgentIPCClient) Update(issueID string, params backend.UpdateParams) err
 		AgentName:      c.AgentName,
 		IssueID:        issueID,
 		SessionID:      c.SessionID,
-		LeaseID:        c.LeaseID,
-		LeaseToken:     c.LeaseToken,
+		AuthToken:      c.AuthToken,
 		Args:           args,
 		LastActivityAt: c.snapshotActivity(),
 	}
@@ -132,12 +128,11 @@ func (c *AgentIPCClient) Update(issueID string, params backend.UpdateParams) err
 // changing its status or assignee. Idempotent: missing lock returns nil.
 func (c *AgentIPCClient) ReleaseLock(issueID string) error {
 	req := AgentIPCRequest{
-		Operation:  IPCOpReleaseLock,
-		AgentName:  c.AgentName,
-		IssueID:    issueID,
-		SessionID:  c.SessionID,
-		LeaseID:    c.LeaseID,
-		LeaseToken: c.LeaseToken,
+		Operation: IPCOpReleaseLock,
+		AgentName: c.AgentName,
+		IssueID:   issueID,
+		SessionID: c.SessionID,
+		AuthToken: c.AuthToken,
 	}
 
 	resp, err := sendAgentIPCRequest(c.SocketPath, req)
@@ -159,8 +154,7 @@ func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*
 		AgentName:      c.AgentName,
 		IssueID:        issueID,
 		SessionID:      c.SessionID,
-		LeaseID:        c.LeaseID,
-		LeaseToken:     c.LeaseToken,
+		AuthToken:      c.AuthToken,
 		Args:           args,
 		LastActivityAt: c.snapshotActivity(),
 	}
@@ -181,17 +175,17 @@ func (c *AgentIPCClient) Complete(issueID string, params backend.CloseParams) (*
 }
 
 // Release completes this agent's claim on an issue. The daemon validates this
-// agent's lease (the same fence as Claim/Update/Complete) and uses AgentName as
+// agent's process-local credential (the same fence as Claim/Update/Complete)
+// and uses AgentName as
 // the release actor, so no args are carried. Idempotent on the server side:
 // releasing an unheld lock is not an error.
 func (c *AgentIPCClient) Release(issueID string) error {
 	req := AgentIPCRequest{
-		Operation:  IPCOpReleaseClaim,
-		AgentName:  c.AgentName,
-		IssueID:    issueID,
-		SessionID:  c.SessionID,
-		LeaseID:    c.LeaseID,
-		LeaseToken: c.LeaseToken,
+		Operation: IPCOpReleaseClaim,
+		AgentName: c.AgentName,
+		IssueID:   issueID,
+		SessionID: c.SessionID,
+		AuthToken: c.AuthToken,
 	}
 
 	resp, err := sendAgentIPCRequest(c.SocketPath, req)

@@ -94,7 +94,7 @@ func listTaskWorkflowRuns(t *testing.T, mux *http.ServeMux, taskID string) (*htt
 	return rec, response
 }
 
-func TestListTaskWorkflowRunsUsesExactSubjectAndExcludesOnlySessionRepresentedDrivers(t *testing.T) {
+func TestListTaskWorkflowRunsUsesExactSubjectAndExcludesExecutionRepresentedDrivers(t *testing.T) {
 	ctx := t.Context()
 	st := seededWorkflowStore(t, ctx)
 	seedTaskWorkflowBinding(t, ctx, st)
@@ -104,26 +104,16 @@ func TestListTaskWorkflowRunsUsesExactSubjectAndExcludesOnlySessionRepresentedDr
 	// An idempotent event replay must not duplicate the run in the task view.
 	dispatchTaskWorkflowRun(t, ctx, st, "TASK-1", "event-preclaim", json.RawMessage(`{"task_id":"WRONG-PAYLOAD"}`))
 
-	// A TaskRun without an AgentSession is not represented by the existing
-	// sessions endpoint and must remain visible in the supplemental lane.
-	taskRunOnly := dispatchTaskWorkflowRun(t, ctx, st, "TASK-1", "event-task-run-only", json.RawMessage(`{"task_id":"TASK-1"}`))
-	seedTaskRunForWorkflow(t, ctx, st, "task-run-only", taskRunOnly.RunID)
+	// Once Execution has created a TaskRun, the ordinary task history owns that
+	// batch attempt and the supplemental workflow-only lane must dedupe it.
+	executionRepresented := dispatchTaskWorkflowRun(t, ctx, st, "TASK-1", "event-task-run", json.RawMessage(`{"task_id":"TASK-1"}`))
+	seedTaskRunForWorkflow(t, ctx, st, "task-run-1", executionRepresented.RunID)
 
-	// Current task sessions carry the direct DriverRun relation. This run is
-	// already represented by the ordinary session row and must be deduped.
-	representedDirect := dispatchTaskWorkflowRun(t, ctx, st, "TASK-1", "event-session-direct", json.RawMessage(`{"task_id":"TASK-1"}`))
-	seedTaskRunForWorkflow(t, ctx, st, "task-run-direct", representedDirect.RunID)
-	seedTaskAgentSession(t, ctx, st, "session-direct", map[string]string{
-		"driver_run_id": representedDirect.RunID,
-		"task_run_id":   "task-run-direct",
-	})
-
-	// Legacy task sessions carry only task_run_id. The read model joins that
-	// durable id through TaskRun to dedupe the represented DriverRun.
-	representedLegacy := dispatchTaskWorkflowRun(t, ctx, st, "TASK-1", "event-session-legacy", json.RawMessage(`{"task_id":"TASK-1"}`))
-	seedTaskRunForWorkflow(t, ctx, st, "task-run-legacy", representedLegacy.RunID)
-	seedTaskAgentSession(t, ctx, st, "session-legacy", map[string]string{
-		"task_run_id": "task-run-legacy",
+	// A legacy Interaction shadow must not influence the projection. Without an
+	// Execution TaskRun, the DriverRun remains visible here.
+	shadowOnly := dispatchTaskWorkflowRun(t, ctx, st, "TASK-1", "event-shadow-only", json.RawMessage(`{"task_id":"TASK-1"}`))
+	seedTaskAgentSession(t, ctx, st, "session-shadow-only", map[string]string{
+		"driver_run_id": shadowOnly.RunID,
 	})
 
 	// A near-prefix subject carrying the requested id only in mutable payload
@@ -148,19 +138,16 @@ func TestListTaskWorkflowRunsUsesExactSubjectAndExcludesOnlySessionRepresentedDr
 		}
 	}
 	if len(gotRunIDs) != 2 {
-		t.Fatalf("runs = %+v, want preclaim and task-run-only", response.Runs)
+		t.Fatalf("runs = %+v, want preclaim and shadow-only DriverRuns", response.Runs)
 	}
 	if _, ok := gotRunIDs[preclaim.RunID]; !ok {
 		t.Fatalf("runs = %+v, missing preclaim run %q", response.Runs, preclaim.RunID)
 	}
-	if _, ok := gotRunIDs[taskRunOnly.RunID]; !ok {
-		t.Fatalf("runs = %+v, missing TaskRun-without-session run %q", response.Runs, taskRunOnly.RunID)
+	if _, ok := gotRunIDs[shadowOnly.RunID]; !ok {
+		t.Fatalf("runs = %+v, legacy Interaction shadow suppressed DriverRun %q", response.Runs, shadowOnly.RunID)
 	}
-	if _, leaked := gotRunIDs[representedDirect.RunID]; leaked {
-		t.Fatalf("runs = %+v, direct AgentSession representation was not deduped", response.Runs)
-	}
-	if _, leaked := gotRunIDs[representedLegacy.RunID]; leaked {
-		t.Fatalf("runs = %+v, legacy task_run_id AgentSession representation was not deduped", response.Runs)
+	if _, leaked := gotRunIDs[executionRepresented.RunID]; leaked {
+		t.Fatalf("runs = %+v, Execution TaskRun representation was not deduped", response.Runs)
 	}
 	if gotPreclaim == nil || gotPreclaim.Summary == "" || gotPreclaim.Output["blocker"] != "repository_required" {
 		t.Fatalf("preclaim explanation = run %+v", gotPreclaim)

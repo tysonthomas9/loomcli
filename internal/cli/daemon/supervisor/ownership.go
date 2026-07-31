@@ -613,13 +613,10 @@ func (s *Supervisor) endAgentStartTransition(ap *AgentProcess) {
 
 // clearAgentSessionState resets session state between supervision cycles.
 func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
-	ap.SessionHeartbeatMu.Lock()
-	defer ap.SessionHeartbeatMu.Unlock()
 	ap.Mu.Lock()
 	ap.Session = nil
 	ap.AgentSessionID = ""
-	ap.AgentLeaseID = ""
-	ap.AgentLeaseToken = ""
+	ap.AgentIPCAuthToken = ""
 	ap.TranscriptPath = ""
 	ap.BeforeRef = ""
 	ap.AssignedTaskID = ""
