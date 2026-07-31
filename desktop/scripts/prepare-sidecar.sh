@@ -123,7 +123,7 @@ done
 # bundle.
 (
   cd "${REPO_ROOT}"
-  go test -tags loom_packaged_builtins ./internal/workflows \
+  go test -tags loom_packaged_builtins ./internal/infra/workflowdistribution/authoring \
     -run '^TestEmbeddedPackagedBuiltins' -count=1
 )
 

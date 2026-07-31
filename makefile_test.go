@@ -142,6 +142,31 @@ func environmentWithOverrides(overrides map[string]string) []string {
 	return env
 }
 
+func TestDesktopSidecarChecksPackagedBuiltinsAtPhase5Owner(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(
+		repoRoot(t),
+		"desktop",
+		"scripts",
+		"prepare-sidecar.sh",
+	)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents)
+	if !strings.Contains(
+		script,
+		"./internal/infra/workflowdistribution/authoring",
+	) {
+		t.Fatal("desktop sidecar does not test packaged builtins at the Phase 5 workflow-distribution owner")
+	}
+	if strings.Contains(script, "./internal/workflows") {
+		t.Fatal("desktop sidecar still references the retired internal/workflows package")
+	}
+}
+
 func TestMakefileLocalModeVerifyAlwaysReadsLiveManifest(t *testing.T) {
 	t.Parallel()
 
