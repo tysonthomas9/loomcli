@@ -7,6 +7,7 @@ import (
 	"time"
 
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
+	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -151,6 +152,37 @@ func (*interactionActivityStub) ListActivity(
 	return nil, nil
 }
 
+type interactionTranscriptStoreStub struct{}
+
+func (*interactionTranscriptStoreStub) CreateContent(
+	context.Context,
+	interaction.TranscriptArtifactCreate,
+) (string, error) {
+	return "transcript-session-1", nil
+}
+
+func TestInteractionTranscriptArtifactStoreRejectsDivergentRetry(t *testing.T) {
+	persistence := memstore.New()
+	adapter := newInteractionTranscriptArtifactStore(persistence.Artifacts())
+	command := interaction.TranscriptArtifactCreate{
+		WorkspaceKey: "WS",
+		ArtifactID:   "transcript-session-1",
+		AgentID:      "agent-1",
+		SessionID:    "session-1",
+		Content:      []byte("{\"seq\":1,\"text\":\"first\"}\n"),
+	}
+	if artifactID, err := adapter.CreateContent(t.Context(), command); err != nil || artifactID != command.ArtifactID {
+		t.Fatalf("first transcript publish = %q, %v", artifactID, err)
+	}
+	if artifactID, err := adapter.CreateContent(t.Context(), command); err != nil || artifactID != command.ArtifactID {
+		t.Fatalf("exact transcript replay = %q, %v", artifactID, err)
+	}
+	command.Content = []byte("{\"seq\":1,\"text\":\"different\"}\n")
+	if _, err := adapter.CreateContent(t.Context(), command); !errors.Is(err, interaction.ErrConflict) {
+		t.Fatalf("divergent transcript replay error = %v, want conflict", err)
+	}
+}
+
 type interactionForceCommandsStub struct {
 	auth    authority.SystemAuthority
 	command interaction.ForceInterruptCommand
@@ -208,6 +240,7 @@ func TestNewInteractionCapabilityPublishesAPIResolverAndRecoveryRegistration(t *
 		InteractionConfig{WorkspaceKey: "WS"},
 		InteractionDependencies{
 			Sessions:         persistence,
+			Transcripts:      &interactionTranscriptStoreStub{},
 			Terminals:        &interactionTerminalStoreStub{persistence},
 			Inbox:            &interactionInboxStoreStub{},
 			Activity:         activity,
@@ -237,6 +270,7 @@ func TestNewInteractionCapabilityPublishesAPIResolverAndRecoveryRegistration(t *
 		InteractionConfig{WorkspaceKey: "WS"},
 		InteractionDependencies{
 			Sessions:         persistence,
+			Transcripts:      &interactionTranscriptStoreStub{},
 			Terminals:        &interactionTerminalStoreStub{persistence},
 			Inbox:            &interactionInboxStoreStub{},
 			Activity:         activity,

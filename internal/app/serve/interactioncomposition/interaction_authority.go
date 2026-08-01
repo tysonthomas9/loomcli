@@ -135,6 +135,7 @@ func (resolver *interactionSessionAuthorityResolver) ResolveSessionAuthority(
 func interactionSessionAction(action authority.Action) bool {
 	switch action {
 	case interaction.ActionPatchSession,
+		interaction.ActionPublishTranscript,
 		interaction.ActionHeartbeatSession,
 		interaction.ActionFinishSession,
 		interaction.ActionOpenTerminal,

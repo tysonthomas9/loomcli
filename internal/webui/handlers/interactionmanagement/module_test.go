@@ -131,10 +131,35 @@ func TestAgentActivityFailsClosedWithoutCapabilityOrAuthority(t *testing.T) {
 
 type sessionCommandAPIStub struct {
 	activityAPIStub
-	order           []string
-	terminalCommand interaction.UpdateTerminalCommand
-	finishCommand   interaction.FinishSessionCommand
-	completeCommand interaction.CompleteInboxCommand
+	order             []string
+	terminalCommand   interaction.UpdateTerminalCommand
+	finishCommand     interaction.FinishSessionCommand
+	transcriptCommand interaction.PublishTranscriptCommand
+	completeCommand   interaction.CompleteInboxCommand
+}
+
+func (stub *sessionCommandAPIStub) PublishTranscript(
+	_ context.Context,
+	_ authority.SessionAuthority,
+	command interaction.PublishTranscriptCommand,
+) (*interaction.AgentSession, error) {
+	stub.order = append(stub.order, "transcript")
+	command.Content = append([]byte(nil), command.Content...)
+	command.Metadata = cloneTestMetadata(command.Metadata)
+	stub.transcriptCommand = command
+	return &interaction.AgentSession{
+		WorkspaceKey:         command.WorkspaceKey,
+		SessionID:            command.SessionID,
+		TranscriptArtifactID: "transcript-" + command.SessionID,
+	}, nil
+}
+
+func cloneTestMetadata(input map[string]string) map[string]string {
+	cloned := make(map[string]string, len(input))
+	for key, value := range input {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (*sessionCommandAPIStub) PatchSession(
@@ -300,6 +325,61 @@ func TestFinishSessionUsesOneAtomicCommandWithoutTokenLeak(t *testing.T) {
 	for _, token := range resolver.tokens {
 		if token != rawToken {
 			t.Fatalf("resolved token = %q", token)
+		}
+	}
+}
+
+func TestPublishTranscriptStreamsContentWithHeaderProofAndNoTokenLeak(t *testing.T) {
+	const rawToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	api := &sessionCommandAPIStub{}
+	resolver := newSessionAuthorityResolverStub()
+	mux := http.NewServeMux()
+	New(Config{
+		Interaction: api, Authority: &operatorResolverStub{},
+		SessionAuthorities: resolver,
+	}).Register(mux)
+
+	content := []byte("{\"seq\":1,\"role\":\"user\",\"text\":\"hello\"}\n")
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/WS/interaction/sessions/session-1/transcript",
+		bytes.NewReader(content),
+	)
+	request = withCanonicalWorkspace(request, "WS", "WS")
+	request.Header.Set("Content-Type", "application/x-ndjson")
+	request.Header.Set(sessionTokenHeader, rawToken)
+	request.Header.Set(sessionAgentHeader, "agent-docs")
+	request.Header.Set(sessionTerminalHeader, "terminal-1")
+	request.Header.Set(sessionNodeHeader, "node-1")
+	request.Header.Set(sessionLeaseHeader, "lease-1")
+	request.Header.Set(sessionFenceHeader, "7")
+	request.Header.Set(transcriptMetadataHeader, `{"backend":"codex"}`)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status/body = %d/%s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), rawToken) || request.Header.Get(sessionTokenHeader) != "" {
+		t.Fatalf("session credential survived transcript request: body=%s header=%q", response.Body.String(), request.Header.Get(sessionTokenHeader))
+	}
+	if len(api.order) != 1 || api.order[0] != "transcript" ||
+		api.transcriptCommand.WorkspaceKey != "WS" ||
+		api.transcriptCommand.SessionID != "session-1" ||
+		string(api.transcriptCommand.Content) != string(content) ||
+		api.transcriptCommand.Metadata["backend"] != "codex" {
+		t.Fatalf("transcript command/order = %+v/%v", api.transcriptCommand, api.order)
+	}
+	if len(resolver.actions) != 1 || resolver.actions[0] != interaction.ActionPublishTranscript ||
+		resolver.tokens[0] != rawToken {
+		t.Fatalf("resolved action/tokens = %v/%v", resolver.actions, resolver.tokens)
+	}
+	for _, name := range []string{
+		sessionAgentHeader, sessionTerminalHeader, sessionNodeHeader,
+		sessionLeaseHeader, sessionFenceHeader, transcriptMetadataHeader,
+	} {
+		if request.Header.Get(name) != "" {
+			t.Fatalf("session transcript header %s remained on request", name)
 		}
 	}
 }

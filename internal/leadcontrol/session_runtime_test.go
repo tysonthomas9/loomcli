@@ -73,6 +73,30 @@ func (runtime *storeBackedSessionRuntime) PatchSessionRuntimeContext(
 	return err
 }
 
+func (runtime *storeBackedSessionRuntime) PublishTranscript(
+	ctx context.Context,
+	command interaction.PublishTranscriptCommand,
+) error {
+	session, err := runtime.store.AgentSessions().Get(ctx, command.WorkspaceKey, command.SessionID)
+	if err != nil {
+		return err
+	}
+	artifactID := "transcript-" + command.SessionID
+	if _, err := store.UploadContentArtifact(ctx, runtime.store.Artifacts(), store.ArtifactCreate{
+		WorkspaceKey: command.WorkspaceKey, ArtifactID: artifactID,
+		AgentID: session.AgentID, SessionID: session.SessionID, TaskID: session.TaskID,
+		OwnerType: "session", OwnerID: session.SessionID, Type: "transcript",
+		MIMEType: "application/x-ndjson", DurableStatus: "declared",
+		Metadata: command.Metadata,
+	}, command.Content); err != nil {
+		return err
+	}
+	return runtime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey: command.WorkspaceKey, SessionID: command.SessionID,
+		TranscriptArtifactID: &artifactID,
+	})
+}
+
 func (runtime *storeBackedSessionRuntime) FinishSession(
 	ctx context.Context,
 	command interaction.FinishSessionCommand,

@@ -50,6 +50,17 @@ func (runtime *testLeadSessionRuntime) PatchSessionRuntimeContext(
 	return err
 }
 
+func (runtime *testLeadSessionRuntime) PublishTranscript(
+	ctx context.Context,
+	command interaction.PublishTranscriptCommand,
+) error {
+	artifactID := "transcript-" + command.SessionID
+	return runtime.PatchSessionRuntimeContext(ctx, interaction.PatchSessionCommand{
+		WorkspaceKey: command.WorkspaceKey, SessionID: command.SessionID,
+		TranscriptArtifactID: &artifactID,
+	})
+}
+
 func (runtime *testLeadSessionRuntime) FinishSession(
 	ctx context.Context,
 	command interaction.FinishSessionCommand,

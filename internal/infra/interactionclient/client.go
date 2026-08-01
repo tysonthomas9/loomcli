@@ -21,9 +21,17 @@ import (
 )
 
 const (
-	sessionTokenHeader = "X-Loom-Session-Token" //nolint:gosec // HTTP header name, not credential material.
-	maxResponseBytes   = 1 << 20
-	requestTimeout     = 15 * time.Second
+	sessionTokenHeader               = "X-Loom-Session-Token" //nolint:gosec // HTTP header name, not credential material.
+	sessionAgentHeader               = "X-Loom-Session-Agent-ID"
+	sessionTerminalHeader            = "X-Loom-Session-Terminal-ID"
+	sessionNodeHeader                = "X-Loom-Session-Node-ID"
+	sessionLeaseHeader               = "X-Loom-Session-Lease-ID"
+	sessionFenceHeader               = "X-Loom-Session-Fencing-Token"
+	transcriptMetadataHeader         = "X-Loom-Transcript-Metadata"
+	maxResponseBytes                 = 1 << 20
+	maxTranscriptBytes               = (64 << 20) - (1 << 20)
+	maxTranscriptMetadataHeaderBytes = 64 << 10
+	requestTimeout                   = 15 * time.Second
 )
 
 // SessionProof is the credential-free identity portion of one exact
@@ -208,6 +216,23 @@ func (client *Client) PatchSessionRuntimeContext(
 	return client.do(ctx, http.MethodPatch, client.sessionPath(), body, nil)
 }
 
+func (client *Client) PublishTranscript(
+	ctx context.Context,
+	command interaction.PublishTranscriptCommand,
+) error {
+	if len(command.Content) == 0 || len(command.Content) > maxTranscriptBytes {
+		return fmt.Errorf("canonical transcript must contain 1..%d bytes", maxTranscriptBytes)
+	}
+	metadata, err := json.Marshal(command.Metadata)
+	if err != nil {
+		return fmt.Errorf("encode transcript metadata: %w", err)
+	}
+	if len(metadata) > maxTranscriptMetadataHeaderBytes {
+		return errors.New("transcript metadata exceeded limit")
+	}
+	return client.doTranscript(ctx, command.Content, string(metadata))
+}
+
 func (client *Client) FinishSession(ctx context.Context, command interaction.FinishSessionCommand) error {
 	body := client.proofBody()
 	body["status"] = strings.TrimSpace(string(command.Status))
@@ -325,6 +350,50 @@ func (client *Client) do(
 	}
 	if out != nil {
 		*out = append((*out)[:0], content...)
+	}
+	return nil
+}
+
+func (client *Client) doTranscript(ctx context.Context, content []byte, metadata string) error {
+	if client == nil || client.baseURL == nil || client.http == nil {
+		return errors.New("interaction session client is unavailable")
+	}
+	requestURL := strings.TrimRight(client.baseURL.String(), "/") + client.sessionPath() + "/transcript"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(content))
+	if err != nil {
+		return fmt.Errorf("build Interaction transcript request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-ndjson")
+	req.Header.Set(sessionAgentHeader, client.proof.AgentID)
+	req.Header.Set(sessionTerminalHeader, client.proof.TerminalID)
+	req.Header.Set(sessionNodeHeader, client.proof.NodeID)
+	req.Header.Set(sessionLeaseHeader, client.proof.LeaseID)
+	req.Header.Set(sessionFenceHeader, strconv.FormatInt(client.proof.FencingToken, 10))
+	req.Header.Set(transcriptMetadataHeader, metadata)
+	token, err := client.tokenCopy()
+	if err != nil {
+		return err
+	}
+	req.Header.Set(sessionTokenHeader, string(token))
+	clear(token)
+	defer req.Header.Del(sessionTokenHeader)
+	response, err := client.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("interaction transcript request failed: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("read Interaction transcript response: %w", err)
+	}
+	if len(responseBody) > maxResponseBytes {
+		return errors.New("interaction transcript response exceeded limit")
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		if response.StatusCode == http.StatusNotFound {
+			return domain.ErrNotFound
+		}
+		return fmt.Errorf("interaction transcript request failed with status %d", response.StatusCode)
 	}
 	return nil
 }

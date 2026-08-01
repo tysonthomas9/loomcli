@@ -467,10 +467,9 @@ func TestCaptureCodexInteractiveTranscriptPersistsSessionArtifactAndRef(t *testi
 	t.Cleanup(func() { dialCodexAppServerClient = originalDial })
 
 	err := captureCodexInteractiveTranscript(ctx, CodexLeadRuntimeConfig{
-		Store:   st,
 		Runtime: testSessionRuntime(st), Workspace: "WS", LeadName: "local-review",
 		SessionID: "lead-session", WorkDir: "/repo",
-	}, CodexRuntimeMetadata{}, time.Now().Add(-time.Minute))
+	}, CodexRuntimeMetadata{Endpoint: "ws://127.0.0.1:1", ThreadID: "thread-1"}, time.Now().Add(-time.Minute))
 	if err != nil {
 		t.Fatalf("captureCodexInteractiveTranscript() error = %v", err)
 	}

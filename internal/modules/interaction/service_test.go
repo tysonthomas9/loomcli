@@ -29,6 +29,7 @@ type interactionHarness struct {
 	terminals   *fakeTerminalStore
 	inbox       *fakeInboxStore
 	activityLog *fakeActivitySource
+	transcripts *fakeTranscriptArtifactStore
 }
 
 func newInteractionHarness(t *testing.T) *interactionHarness {
@@ -37,6 +38,7 @@ func newInteractionHarness(t *testing.T) *interactionHarness {
 		now:         time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
 		leases:      &fakeLeaseStore{values: map[string]*SessionLease{}},
 		activityLog: &fakeActivitySource{},
+		transcripts: &fakeTranscriptArtifactStore{},
 	}
 	harness.leases.now = func() time.Time { return harness.now }
 	harness.sessions = &fakeSessionStore{
@@ -64,7 +66,7 @@ func newInteractionHarness(t *testing.T) *interactionHarness {
 		t.Fatalf("NewAdmission: %v", err)
 	}
 	service, err := New(
-		harness.sessions, harness.terminals, harness.inbox,
+		harness.sessions, harness.transcripts, harness.terminals, harness.inbox,
 		harness.activityLog, admission, func() time.Time { return harness.now },
 	)
 	if err != nil {
@@ -456,6 +458,58 @@ func TestHeartbeatAndFinishCommitSessionAndLeaseTogether(t *testing.T) {
 	}
 }
 
+func TestPublishTranscriptUsesSessionAuthorityAndLinksExactGeneration(t *testing.T) {
+	harness := newInteractionHarness(t)
+	harness.sessions.values[testSession] = &AgentSession{
+		WorkspaceKey: testWorkspace, SessionID: testSession, AgentID: testAgent,
+		NodeID: "node-1", Kind: SessionKindInteractive, TerminalID: testTerminal,
+		TaskID: "task-1", Status: SessionRunning, CurrentLeaseID: "lease-1",
+		CurrentLeaseFencingToken: 1,
+	}
+	harness.leases.values[testSession] = &SessionLease{
+		WorkspaceKey: testWorkspace, SessionID: testSession, AgentID: testAgent,
+		NodeID: "node-1", LeaseID: "lease-1", FencingToken: 1,
+		Status: "active", ExpiresAt: harness.now.Add(time.Minute),
+	}
+	content := []byte("{\"seq\":1,\"role\":\"user\",\"text\":\"hello\"}\n")
+	updated, err := harness.service.PublishTranscript(
+		t.Context(),
+		harness.session(t, ActionPublishTranscript, testTerminal, 1),
+		PublishTranscriptCommand{
+			WorkspaceKey: testWorkspace, SessionID: testSession,
+			Content: content, Metadata: map[string]string{"backend": "codex"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("PublishTranscript: %v", err)
+	}
+	if updated.TranscriptArtifactID != "transcript-"+testSession {
+		t.Fatalf("published session = %+v", updated)
+	}
+	if len(harness.transcripts.commands) != 1 {
+		t.Fatalf("transcript commands = %+v", harness.transcripts.commands)
+	}
+	command := harness.transcripts.commands[0]
+	if command.WorkspaceKey != testWorkspace || command.SessionID != testSession ||
+		command.AgentID != testAgent || command.TaskID != "task-1" ||
+		string(command.Content) != string(content) || command.Metadata["backend"] != "codex" {
+		t.Fatalf("transcript command = %+v", command)
+	}
+
+	harness.leases.values[testSession].FencingToken = 2
+	_, err = harness.service.PublishTranscript(
+		t.Context(),
+		harness.session(t, ActionPublishTranscript, testTerminal, 1),
+		PublishTranscriptCommand{
+			WorkspaceKey: testWorkspace, SessionID: testSession,
+			Content: content,
+		},
+	)
+	if !errors.Is(err, ErrNotOwner) {
+		t.Fatalf("stale transcript publish error = %v, want ErrNotOwner", err)
+	}
+}
+
 func TestInteractiveFinishRequiresAtomicTerminalResult(t *testing.T) {
 	harness := newInteractionHarness(t)
 	harness.sessions.values[testSession] = &AgentSession{
@@ -841,6 +895,22 @@ type fakeSessionStore struct {
 	recoverStartResult   SessionStart
 	recoverStartErr      error
 	recoverStartCalls    []RecoverSessionStartCommand
+}
+
+type fakeTranscriptArtifactStore struct {
+	commands []TranscriptArtifactCreate
+	err      error
+}
+
+func (store *fakeTranscriptArtifactStore) CreateContent(
+	_ context.Context,
+	command TranscriptArtifactCreate,
+) (string, error) {
+	store.commands = append(store.commands, command)
+	if store.err != nil {
+		return "", store.err
+	}
+	return command.ArtifactID, nil
 }
 
 func (store *fakeSessionStore) Start(_ context.Context, command StartSessionCommand) (SessionStart, error) {

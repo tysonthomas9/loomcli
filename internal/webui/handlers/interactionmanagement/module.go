@@ -31,6 +31,7 @@ type ActivityAPI interface {
 
 type SessionCommandAPI interface {
 	PatchSession(context.Context, authority.SessionAuthority, interaction.PatchSessionCommand) (*interaction.AgentSession, error)
+	PublishTranscript(context.Context, authority.SessionAuthority, interaction.PublishTranscriptCommand) (*interaction.AgentSession, error)
 	HeartbeatSession(context.Context, authority.SessionAuthority, interaction.HeartbeatSessionCommand) (*interaction.AgentSession, error)
 	FinishSession(context.Context, authority.SessionAuthority, interaction.FinishSessionCommand) (*interaction.AgentSession, error)
 	UpdateTerminal(context.Context, authority.SessionAuthority, interaction.UpdateTerminalCommand) (*interaction.TerminalSession, error)
@@ -84,6 +85,10 @@ func (module *Module) Register(mux *http.ServeMux) {
 		module.heartbeatSession,
 	)
 	mux.HandleFunc(
+		"POST /api/workspaces/{ws}/interaction/sessions/{sessionId}/transcript",
+		module.publishTranscript,
+	)
+	mux.HandleFunc(
 		"POST /api/workspaces/{ws}/interaction/sessions/{sessionId}/finish",
 		module.finishSession,
 	)
@@ -98,11 +103,18 @@ func (module *Module) Register(mux *http.ServeMux) {
 }
 
 const (
-	sessionTokenHeader       = "X-Loom-Session-Token" //nolint:gosec // credential header name
-	maxSessionRequestBytes   = 1 << 20
-	defaultSessionLeaseTTL   = 2 * time.Minute
-	maxSessionLeaseTTL       = 30 * time.Minute
-	expectedSessionTokenSize = 32
+	sessionTokenHeader        = "X-Loom-Session-Token" //nolint:gosec // credential header name
+	sessionAgentHeader        = "X-Loom-Session-Agent-ID"
+	sessionTerminalHeader     = "X-Loom-Session-Terminal-ID"
+	sessionNodeHeader         = "X-Loom-Session-Node-ID"
+	sessionLeaseHeader        = "X-Loom-Session-Lease-ID"
+	sessionFenceHeader        = "X-Loom-Session-Fencing-Token"
+	transcriptMetadataHeader  = "X-Loom-Transcript-Metadata"
+	maxSessionRequestBytes    = 1 << 20
+	maxSessionTranscriptBytes = (64 << 20) - (1 << 20)
+	defaultSessionLeaseTTL    = 2 * time.Minute
+	maxSessionLeaseTTL        = 30 * time.Minute
+	expectedSessionTokenSize  = 32
 )
 
 type sessionProofRequest struct {
@@ -207,6 +219,91 @@ func (module *Module) heartbeatSession(response http.ResponseWriter, request *ht
 		return
 	}
 	writeJSON(response, http.StatusOK, value)
+}
+
+func (module *Module) publishTranscript(response http.ResponseWriter, request *http.Request) {
+	if module == nil || module.sessionCommands == nil || module.sessionAuthorities == nil {
+		writeMappedError(response, interaction.ErrUnavailable)
+		return
+	}
+	input, ok := readSessionProofHeaders(response, request)
+	if !ok {
+		return
+	}
+	auth, ok := module.resolveSession(response, request, interaction.ActionPublishTranscript, input)
+	if !ok {
+		return
+	}
+	defer auth.SessionOwner().CloseLeaseCredential()
+	if mediaType := strings.TrimSpace(strings.Split(request.Header.Get("Content-Type"), ";")[0]); mediaType != "application/x-ndjson" {
+		writeError(response, http.StatusUnsupportedMediaType, "invalid", "canonical transcript content type is required")
+		return
+	}
+	metadata, ok := readTranscriptMetadata(response, request)
+	if !ok {
+		return
+	}
+	content, err := io.ReadAll(http.MaxBytesReader(response, request.Body, maxSessionTranscriptBytes))
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "invalid", "canonical transcript exceeds the supported size")
+		return
+	}
+	value, err := module.sessionCommands.PublishTranscript(
+		request.Context(),
+		auth,
+		interaction.PublishTranscriptCommand{
+			WorkspaceKey: canonicalWorkspaceFromRequest(request),
+			SessionID:    request.PathValue("sessionId"),
+			Content:      content,
+			Metadata:     metadata,
+		},
+	)
+	clear(content)
+	if err != nil {
+		writeMappedError(response, err)
+		return
+	}
+	writeJSON(response, http.StatusOK, value)
+}
+
+func readTranscriptMetadata(response http.ResponseWriter, request *http.Request) (map[string]string, bool) {
+	raw := strings.TrimSpace(request.Header.Get(transcriptMetadataHeader))
+	request.Header.Del(transcriptMetadataHeader)
+	if raw == "" {
+		return map[string]string{}, true
+	}
+	if len(raw) > 64<<10 {
+		writeError(response, http.StatusBadRequest, "invalid", "transcript metadata exceeds the supported size")
+		return nil, false
+	}
+	var metadata map[string]string
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		writeError(response, http.StatusBadRequest, "invalid", "invalid transcript metadata")
+		return nil, false
+	}
+	return metadata, true
+}
+
+func readSessionProofHeaders(response http.ResponseWriter, request *http.Request) (sessionProofRequest, bool) {
+	fence, err := strconv.ParseInt(strings.TrimSpace(request.Header.Get(sessionFenceHeader)), 10, 64)
+	input := sessionProofRequest{
+		AgentID:      strings.TrimSpace(request.Header.Get(sessionAgentHeader)),
+		TerminalID:   strings.TrimSpace(request.Header.Get(sessionTerminalHeader)),
+		NodeID:       strings.TrimSpace(request.Header.Get(sessionNodeHeader)),
+		LeaseID:      strings.TrimSpace(request.Header.Get(sessionLeaseHeader)),
+		FencingToken: fence,
+	}
+	for _, name := range []string{
+		sessionAgentHeader, sessionTerminalHeader, sessionNodeHeader,
+		sessionLeaseHeader, sessionFenceHeader,
+	} {
+		request.Header.Del(name)
+	}
+	if err != nil {
+		writeError(response, http.StatusBadRequest, "invalid", "complete canonical session proof is required")
+		return sessionProofRequest{}, false
+	}
+	return input, true
 }
 
 func (module *Module) finishSession(response http.ResponseWriter, request *http.Request) {

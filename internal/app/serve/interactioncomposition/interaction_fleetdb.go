@@ -76,6 +76,7 @@ func newInteractionCapabilityWithFleetDB(
 	dependencies := InteractionDependencies{
 		Sessions: adapter, Terminals: adapter.Terminals(), Inbox: adapter,
 		Activity: adapter, SessionAuthority: adapter,
+		Transcripts:     newInteractionTranscriptArtifactStore(client.Artifacts()),
 		WorkspaceLister: config.WorkspaceLister,
 	}
 	if issuer != nil {

@@ -11,6 +11,7 @@ const (
 	ActionStartSession      authority.Action = "interaction.start-session"
 	ActionRecoverStart      authority.Action = "interaction.recover-session-start"
 	ActionPatchSession      authority.Action = "interaction.patch-session"
+	ActionPublishTranscript authority.Action = "interaction.publish-transcript"
 	ActionHeartbeatSession  authority.Action = "interaction.heartbeat-session"
 	ActionFinishSession     authority.Action = "interaction.finish-session"
 	ActionForceInterrupt    authority.Action = "interaction.force-interrupt"
@@ -41,6 +42,7 @@ func OperationRules() []authority.OperationRule {
 		authority.OperatorOnly(ActionStartSession),
 		authority.Allow(ActionRecoverStart, authority.ClassOperator, authority.ClassSystem),
 		authority.Allow(ActionPatchSession, authority.ClassSession),
+		authority.Allow(ActionPublishTranscript, authority.ClassSession),
 		authority.Allow(ActionHeartbeatSession, authority.ClassSession),
 		authority.Allow(ActionFinishSession, authority.ClassSession),
 		authority.Allow(ActionForceInterrupt, authority.ClassSystem),
@@ -95,6 +97,16 @@ type PatchSessionCommand struct {
 	MetadataUpserts      map[string]string
 	MetadataRemovals     []string
 	TranscriptArtifactID *string
+}
+
+// PublishTranscriptCommand carries one bounded canonical transcript for the
+// exact live AgentSession generation. Artifact identity and ownership are
+// derived by Interaction; the child cannot choose or redirect them.
+type PublishTranscriptCommand struct {
+	WorkspaceKey string
+	SessionID    string
+	Content      []byte
+	Metadata     map[string]string
 }
 
 type FinishSessionCommand struct {
@@ -194,6 +206,7 @@ type API interface {
 	StartSession(context.Context, authority.OperatorAuthority, StartSessionCommand) (SessionStart, error)
 	RecoverSessionStart(context.Context, authority.OperatorAuthority, RecoverSessionStartCommand) (SessionStart, error)
 	PatchSession(context.Context, authority.SessionAuthority, PatchSessionCommand) (*AgentSession, error)
+	PublishTranscript(context.Context, authority.SessionAuthority, PublishTranscriptCommand) (*AgentSession, error)
 	HeartbeatSession(context.Context, authority.SessionAuthority, HeartbeatSessionCommand) (*AgentSession, error)
 	FinishSession(context.Context, authority.SessionAuthority, FinishSessionCommand) (*AgentSession, error)
 	ForceInterrupt(context.Context, authority.SystemAuthority, ForceInterruptCommand) (ForceInterruptResult, error)

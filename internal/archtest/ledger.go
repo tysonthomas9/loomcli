@@ -124,6 +124,7 @@ var requiredMutationCommandIDs = []string{
 	"interaction.heartbeat-session",
 	"interaction.open-terminal",
 	"interaction.patch-session",
+	"interaction.publish-transcript",
 	"interaction.reconcile-sessions",
 	"interaction.recover-session-start",
 	"interaction.start-session",

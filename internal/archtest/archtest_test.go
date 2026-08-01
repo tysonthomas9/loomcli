@@ -82,7 +82,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.AnalysisProfilesEnforced, 11; got != want {
 		t.Fatalf("enforced analysis profiles = %d, want %d", got, want)
 	}
-	if got, want := report.MutationCommands, 101; got != want {
+	if got, want := report.MutationCommands, 102; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
 	if got, want := report.DirectPersistenceWrites, 255; got != want {
@@ -493,8 +493,8 @@ func TestCheckedInPhase5ArchitectureContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Commands) != 101 {
-		t.Fatalf("mutation commands = %d, want 101", len(ledger.Commands))
+	if len(ledger.Commands) != 102 {
+		t.Fatalf("mutation commands = %d, want 102", len(ledger.Commands))
 	}
 }
 

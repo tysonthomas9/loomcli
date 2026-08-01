@@ -91,6 +91,7 @@ func (capability *InteractionCapability) RuntimeRegistrations() []platformruntim
 // substitutes.
 type InteractionDependencies struct {
 	Sessions         interaction.SessionStore
+	Transcripts      interaction.TranscriptArtifactStore
 	Terminals        interaction.TerminalStore
 	Inbox            interaction.InboxStore
 	Activity         interaction.ActivitySource
@@ -139,7 +140,7 @@ func newInteractionCapability(
 	if issuer == nil {
 		return nil, fmt.Errorf("compose Interaction authority: issuer is unavailable")
 	}
-	if dependencies.Sessions == nil || dependencies.Terminals == nil || dependencies.Inbox == nil ||
+	if dependencies.Sessions == nil || dependencies.Transcripts == nil || dependencies.Terminals == nil || dependencies.Inbox == nil ||
 		dependencies.Activity == nil ||
 		dependencies.SessionAuthority == nil ||
 		(config.WorkspaceKey == "" &&
@@ -155,6 +156,7 @@ func newInteractionCapability(
 	}
 	service, err := interaction.New(
 		dependencies.Sessions,
+		dependencies.Transcripts,
 		dependencies.Terminals,
 		dependencies.Inbox,
 		dependencies.Activity,

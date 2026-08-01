@@ -148,6 +148,7 @@ func TestComposeInteractionChatPublishesOnlyOwnedSurfacesOnce(
 		InteractionConfig{WorkspaceKey: "WS"},
 		InteractionDependencies{
 			Sessions:         persistence,
+			Transcripts:      &interactionTranscriptStoreStub{},
 			Terminals:        &interactionTerminalStoreStub{persistence},
 			Inbox:            &interactionInboxStoreStub{},
 			Activity:         &interactionActivityStub{},

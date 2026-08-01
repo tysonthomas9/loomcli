@@ -16,6 +16,7 @@ var ErrSessionRuntimeUnavailable = errors.New("session-owned Interaction runtime
 type SessionRuntime interface {
 	HeartbeatSession(context.Context, interaction.HeartbeatSessionCommand) error
 	PatchSessionRuntimeContext(context.Context, interaction.PatchSessionCommand) error
+	PublishTranscript(context.Context, interaction.PublishTranscriptCommand) error
 	FinishSession(context.Context, interaction.FinishSessionCommand) error
 	ClaimNextInbox(context.Context, interaction.ClaimInboxCommand) (*interaction.InboxMessage, error)
 	CompleteInbox(context.Context, interaction.CompleteInboxCommand) error

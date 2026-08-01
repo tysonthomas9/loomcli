@@ -86,6 +86,25 @@ type SessionStore interface {
 	ListRecoverable(context.Context, string, time.Time) ([]*AgentSession, error)
 }
 
+// TranscriptArtifactCreate is the complete server-derived identity for one
+// session-owned canonical transcript. The child supplies only Content and
+// bounded metadata; Interaction derives every ownership field.
+type TranscriptArtifactCreate struct {
+	WorkspaceKey string
+	ArtifactID   string
+	AgentID      string
+	SessionID    string
+	TaskID       string
+	Content      []byte
+	Metadata     map[string]string
+}
+
+// TranscriptArtifactStore is the narrow Artifacts capability consumed by
+// Interaction. It deliberately exposes no generic artifact CRUD surface.
+type TranscriptArtifactStore interface {
+	CreateContent(context.Context, TranscriptArtifactCreate) (string, error)
+}
+
 type TerminalUpdate struct {
 	Status               *TerminalStatus
 	StreamRef            *string
