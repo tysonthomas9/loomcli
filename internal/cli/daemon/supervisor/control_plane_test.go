@@ -14,6 +14,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -208,6 +209,17 @@ func TestSupervisorKeepsBatchSessionOutOfInteractionControlPlane(t *testing.T) {
 	}
 	if len(ap.AgentIPCAuthToken) != agentIPCAuthTokenSize*2 {
 		t.Fatalf("IPC auth token length = %d, want %d hex characters", len(ap.AgentIPCAuthToken), agentIPCAuthTokenSize*2)
+	}
+	localSessions, err := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
+	if err != nil {
+		t.Fatalf("open local session store: %v", err)
+	}
+	records, err := localSessions.Query(sessions.Filter{AgentName: "worker-1"})
+	if err != nil {
+		t.Fatalf("query local sessions: %v", err)
+	}
+	if len(records) != 1 || records[0].TaskID != "task-1" {
+		t.Fatalf("running local session task = %+v, want task-1", records)
 	}
 	if _, err := st.AgentSessions().Get(t.Context(), "WS", ap.AgentSessionID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("batch supervisor created Interaction AgentSession shadow: %v", err)

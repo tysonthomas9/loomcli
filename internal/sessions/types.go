@@ -33,7 +33,7 @@ type SessionRecord struct {
 
 	// Identity
 	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"` // populated at Finalize, not CreateSession (agent claims task mid-session)
+	TaskID    string `json:"task_id"` // set at creation when the supervisor already owns a task; finalize backfills legacy/interactive flows
 	EpicID    string `json:"epic_id,omitempty"`
 
 	// Agent context
@@ -98,6 +98,7 @@ type TranscriptEntry struct {
 type CreateOptions struct {
 	AgentName  string `json:"agent_name"`
 	Backend    string `json:"backend"`
+	TaskID     string `json:"task_id,omitempty"`
 	EpicID     string `json:"epic_id,omitempty"`
 	Phase      string `json:"phase,omitempty"` // "planning" or "implementation"
 	Prompt     string `json:"prompt,omitempty"`
