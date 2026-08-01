@@ -468,6 +468,23 @@ export async function updateIssue(
 }
 
 /**
+ * Permanently delete an issue. The server rejects the request with 409 while
+ * an agent holds a live claim, preserving the task and its running execution.
+ */
+export async function deleteIssue(
+  workspaceId: string,
+  id: string,
+): Promise<void> {
+  const { error, response } = await api.DELETE(
+    "/api/workspaces/{ws}/issues/{id}",
+    {
+      params: { path: { ws: workspaceId, id } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+}
+
+/**
  * Assign an issue's canonical workspace repository. FleetDB owns the atomic
  * repository-required blocked-to-open recovery and returns the authoritative
  * post-command issue; callers must not issue a separate reopen mutation.

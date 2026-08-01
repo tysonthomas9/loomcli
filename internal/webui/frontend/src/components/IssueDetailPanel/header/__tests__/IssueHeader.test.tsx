@@ -66,6 +66,32 @@ describe("IssueHeader", () => {
     expect(screen.getByLabelText("Close panel")).toBeInTheDocument();
   });
 
+  it("renders and invokes the delete action when provided", () => {
+    const onDelete = vi.fn();
+    render(
+      <IssueHeader issue={mockIssue} onClose={() => {}} onDelete={onDelete} />,
+    );
+    const button = screen.getByTestId("header-delete-button");
+    expect(button).toHaveAccessibleName("Delete issue");
+    fireEvent.click(button);
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the delete action while deleting", () => {
+    render(
+      <IssueHeader
+        issue={mockIssue}
+        onClose={() => {}}
+        onDelete={() => {}}
+        isDeleting={true}
+      />,
+    );
+    expect(screen.getByTestId("header-delete-button")).toBeDisabled();
+    expect(screen.getByTestId("header-delete-button")).toHaveAccessibleName(
+      "Deleting issue",
+    );
+  });
+
   it("applies custom className", () => {
     render(
       <IssueHeader issue={mockIssue} onClose={() => {}} className="custom" />,

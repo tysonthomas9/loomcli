@@ -31,6 +31,10 @@ export interface IssueHeaderProps {
   onCopyLink?: () => void;
   /** Callback when move button is clicked */
   onMove?: () => void;
+  /** Callback when delete button is clicked */
+  onDelete?: () => void;
+  /** Whether an issue deletion is in flight */
+  isDeleting?: boolean;
   /** Callback when epic runner button is clicked */
   onRunEpic?: () => void;
   /** Whether the epic runner request is in flight */
@@ -75,6 +79,8 @@ export function IssueHeader({
   isSavingStatus,
   onCopyLink,
   onMove,
+  onDelete,
+  isDeleting,
   onRunEpic,
   isRunningEpic,
   prUrl,
@@ -204,6 +210,32 @@ export function IssueHeader({
               >
                 <path
                   d="M4 10h12M12 6l4 4-4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              className={styles.deleteButton}
+              onClick={onDelete}
+              disabled={isDeleting}
+              aria-label={isDeleting ? "Deleting issue" : "Delete issue"}
+              data-testid="header-delete-button"
+            >
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 20 20"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4.5 6h11M8 3.5h4M6.5 6l.7 10h5.6l.7-10M8.5 9v4.5M11.5 9v4.5"
                   stroke="currentColor"
                   strokeWidth="1.5"
                   strokeLinecap="round"

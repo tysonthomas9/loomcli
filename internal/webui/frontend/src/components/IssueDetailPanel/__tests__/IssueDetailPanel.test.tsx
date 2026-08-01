@@ -18,7 +18,9 @@ import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
 import type { SessionRecord } from "@/types/agent";
+import { ApiError } from "@/types/common";
 import {
+  deleteIssue,
   updateIssue,
   setIssueRepository,
   startWorkflowRun,
@@ -108,6 +110,7 @@ const {
 vi.mock("@/api", () => ({
   EPIC_RUNNER_WORKFLOW_NAME: "epic-runner",
   updateIssue: vi.fn(),
+  deleteIssue: vi.fn(),
   setIssueRepository: vi.fn(),
   createWorkspaceAgent: vi.fn(),
   deleteWorkspaceAgent: vi.fn().mockResolvedValue(undefined),
@@ -385,6 +388,9 @@ describe("IssueDetailPanel", () => {
       typeof vi.fn
     >;
     mockSetIssueRepository.mockReset();
+    const mockDeleteIssue = deleteIssue as ReturnType<typeof vi.fn>;
+    mockDeleteIssue.mockReset();
+    mockDeleteIssue.mockResolvedValue(undefined);
   });
 
   // Reset body overflow after each test
@@ -399,6 +405,56 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
+    });
+
+    it("confirms and deletes an unclaimed issue", async () => {
+      const onClose = vi.fn();
+      const mockIssue = createTestIssue({ id: "TASK-DELETE" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={onClose} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-delete-button"));
+      expect(screen.getByRole("alertdialog")).toHaveAccessibleName(
+        "Delete TASK-DELETE?",
+      );
+      fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+
+      await waitFor(() => {
+        expect(deleteIssue).toHaveBeenCalledWith("", "TASK-DELETE");
+        expect(onClose).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it("shows the server conflict and keeps a claimed issue open", async () => {
+      const onClose = vi.fn();
+      const mockDeleteIssue = deleteIssue as ReturnType<typeof vi.fn>;
+      mockDeleteIssue.mockRejectedValueOnce(
+        new ApiError(409, "Conflict", {
+          error: "issue is actively claimed by bug-triage",
+        }),
+      );
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssue({ id: "TASK-CLAIMED" })}
+          onClose={onClose}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-delete-button"));
+      fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("delete-error-toast")).toHaveTextContent(
+          "issue is actively claimed by bug-triage",
+        );
+      });
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.getByTestId("issue-detail-panel")).toHaveAttribute(
+        "data-state",
+        "open",
+      );
     });
 
     it("renders children in content area", () => {

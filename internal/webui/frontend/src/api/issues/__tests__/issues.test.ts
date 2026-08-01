@@ -18,6 +18,7 @@ import {
   getBlockedIssues,
   createIssue,
   updateIssue,
+  deleteIssue,
   setIssueRepository,
   closeIssue,
   addDependency,
@@ -1706,6 +1707,38 @@ describe("issues API", () => {
       await expect(
         updateIssue("test-ws-id", "issue-123", { title: "x" }),
       ).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe("deleteIssue", () => {
+    it("calls api.DELETE with the workspace and issue path", async () => {
+      mockApiDelete.mockResolvedValue(
+        okResponse({ success: true, data: { deleted_count: 1 } }),
+      );
+
+      await deleteIssue("test-ws-id", "issue-123");
+
+      expect(mockApiDelete).toHaveBeenCalledWith(
+        "/api/workspaces/{ws}/issues/{id}",
+        expect.objectContaining({
+          params: { path: { ws: "test-ws-id", id: "issue-123" } },
+        }),
+      );
+    });
+
+    it("surfaces an active-claim conflict", async () => {
+      mockApiDelete.mockResolvedValue(
+        errorResponse(409, "Conflict", {
+          error: "issue is actively claimed by bug-triage",
+        }),
+      );
+
+      await expect(
+        deleteIssue("test-ws-id", "issue-123"),
+      ).rejects.toMatchObject({
+        status: 409,
+        message: "issue is actively claimed by bug-triage",
+      });
     });
   });
 
