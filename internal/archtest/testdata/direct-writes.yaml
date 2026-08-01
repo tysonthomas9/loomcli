@@ -58,7 +58,7 @@ persistence_packages:
     receiver_names: [ConnectorGrantStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/interaction
-    receiver_names: [InboxStore, SessionStore, TerminalStore]
+    receiver_names: [InboxStore, SessionStore, TerminalStore, TranscriptArtifactStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     receiver_names: [AuthoringStore, VersionLifecycleStore]
@@ -217,6 +217,9 @@ method_sets:
   - name: interaction_terminal
     read_only: [Get]
     mutating: [Create, Update]
+  - name: interaction_transcript
+    read_only: []
+    mutating: [CreateContent]
   - name: issue_tabs
     read_only: [Close, Get]
     mutating: [Delete, Save]
@@ -472,6 +475,10 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.TerminalStore
     package: github.com/tysonthomas9/loomcli/internal/modules/interaction
     method_set: interaction_terminal
+    capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/interaction.TranscriptArtifactStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    method_set: interaction_transcript
     capability_owner: interaction
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog.AuthoringStore
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
