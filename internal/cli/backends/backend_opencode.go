@@ -146,6 +146,9 @@ func init() {
 func openCodeModelArgs() []string {
 	model := strings.TrimSpace(os.Getenv("LOOM_OPENCODE_MODEL"))
 	if model == "" {
+		model = resolveAgentModel()
+	}
+	if model == "" {
 		return nil
 	}
 	return []string{"--model", model}

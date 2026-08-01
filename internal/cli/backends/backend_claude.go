@@ -213,6 +213,9 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
+	if model := resolveAgentModel(); model != "" {
+		args = append(args, "--model", model)
+	}
 	args = append(args, prompt)
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
@@ -353,6 +356,7 @@ func invokeClaudeRunTurn(ctx context.Context, workDir, prompt, agentName, resume
 		Prompt:        prompt,
 		ExitAfterTurn: true,
 		Output:        output,
+		Model:         resolveAgentModel(),
 	})
 	// RunTurn drives Claude Code's interactive TUI, which does not expose the
 	// stream-json usage records consumed by collectClaudeStreamUsage. Keep the
