@@ -262,6 +262,10 @@ workspaces:
 
 See [API Reference](docs/api.md) for the WebUI HTTP API.
 
+See the [Architecture](docs/architecture.md) doc for system structure — process
+topology, daemon supervision, agent execution, and data stores (HTML+SVG
+version: `docs/architecture.html`).
+
 ## Development
 
 ```bash

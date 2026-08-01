@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>loom Architecture</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0;
+  --code-bg: #f6f8fa; --accent: #0969da; --thead: #f6f8fa;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --line: #30363d;
+    --code-bg: #161b22; --accent: #4493f8; --thead: #161b22;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav {
+  width: 260px; flex: none; position: sticky; top: 0; align-self: flex-start;
+  max-height: 100vh; overflow-y: auto; padding: 24px 16px; font-size: 13px;
+  border-right: 1px solid var(--line);
+}
+nav ul { list-style: none; padding-left: 12px; margin: 4px 0; }
+nav > ul { padding-left: 0; }
+nav a { color: var(--muted); text-decoration: none; display: block; padding: 2px 0; }
+nav a:hover { color: var(--accent); }
+main { min-width: 0; flex: 1; padding: 32px 40px 80px; }
+h1, h2, h3, h4 { line-height: 1.25; scroll-margin-top: 16px; }
+h1 { font-size: 2em; border-bottom: 1px solid var(--line); padding-bottom: .3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid var(--line); padding-bottom: .3em; margin-top: 1.8em; }
+h3 { font-size: 1.2em; margin-top: 1.5em; }
+a { color: var(--accent); }
+code {
+  background: var(--code-bg); border-radius: 6px; padding: .15em .4em;
+  font: 85% ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+pre {
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 14px 16px; overflow-x: auto; line-height: 1.45;
+}
+pre code { background: none; padding: 0; font-size: 85%; }
+table { border-collapse: collapse; display: block; overflow-x: auto; margin: 1em 0; }
+th, td { border: 1px solid var(--line); padding: 6px 13px; text-align: left; }
+thead th { background: var(--thead); }
+figure.diagram { margin: 1.5em 0; text-align: center; overflow-x: auto; }
+figure.diagram svg { max-width: 100%; height: auto; }
+figure.diagram figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
+blockquote { border-left: 4px solid var(--line); margin: 1em 0; padding: 0 1em; color: var(--muted); }
+@media (max-width: 900px) { nav { display: none; } main { padding: 24px 20px 60px; } }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav aria-label="Table of contents">
+<strong>Contents</strong>
+<div class="toc">
+<ul>
+<li><a href="#overview">Overview</a><ul>
+<li><a href="#key-design-decisions">Key Design Decisions</a></li>
+<li><a href="#tech-stack">Tech Stack</a></li>
+</ul>
+</li>
+<li><a href="#project-structure">Project Structure</a></li>
+<li><a href="#process-topology">Process Topology</a></li>
+<li><a href="#daemon-supervision">Daemon Supervision</a><ul>
+<li><a href="#configuration">Configuration</a></li>
+<li><a href="#startup">Startup</a></li>
+<li><a href="#the-supervision-loop">The supervision loop</a></li>
+<li><a href="#restart-backoff">Restart &amp; Backoff</a></li>
+<li><a href="#epic-assignment">Epic assignment</a></li>
+</ul>
+</li>
+<li><a href="#agent-execution-path">Agent Execution Path</a></li>
+<li><a href="#worktree-resolution-legacy-vs-workspace-mode">Worktree Resolution (legacy vs workspace mode)</a></li>
+<li><a href="#webui-server-cortex">WebUI Server (Cortex)</a></li>
+<li><a href="#dashboard-api-server">Dashboard API Server</a></li>
+<li><a href="#events-observability">Events &amp; Observability</a></li>
+<li><a href="#data-stores">Data Stores</a></li>
+<li><a href="#testability">Testability</a></li>
+</ul>
+</div>
+
+</nav>
+<main>
+<h1 id="loom-architecture">Loom Architecture</h1>
+<h2 id="overview">Overview</h2>
+<p><strong>loom</strong> is an agent-management CLI for parallel AI coding workflows. It
+supervises AI coding agents (Claude, Codex, OpenCode) across git worktrees,
+tracks their work as issues in <a href="https://github.com/steveyegge/beads">beads</a>
+(<code>bd</code>), and serves a web UI (Cortex) for monitoring and control.</p>
+<p>This document is canonical for the system's structure. Canonical definitions
+for the domain vocabulary (agent, worktree, workspace, role, backend, epic,
+daemon, …) live in the glossary (<code>docs/glossary.md</code>); the HTTP surface is
+documented in <a href="api.md">docs/api.md</a>. An HTML+SVG replica of this page is kept
+at <code>docs/architecture.html</code>.</p>
+<h3 id="key-design-decisions">Key Design Decisions</h3>
+<ul>
+<li><strong>Single binary</strong> — one <code>loom</code> executable provides the CLI, the agent
+  supervisor (<code>loom daemon</code>), the servers (<code>loom serve</code>), and internal helper
+  commands (<code>loom log-router</code>).</li>
+<li><strong>Issues live in beads</strong> — loom does not own an issue store; it drives the
+  <code>bd</code> CLI and the bd daemon's unix-socket RPC. Issue data syncs through the
+  dedicated <code>beads-sync</code> git branch, not <code>main</code>.</li>
+<li><strong>One agent per worktree</strong> — each supervised agent is bound to a git
+  worktree and a role; a lock file (<code>.agent.lock</code>) enforces exclusivity.</li>
+<li><strong>Backends are pluggable</strong> — agents invoke an AI coding CLI (<code>claude</code>,
+  <code>codex</code>, <code>opencode</code>, or any external <code>loom-backend-*</code> executable) through a
+  common <code>Backend</code> interface, with per-agent failover.</li>
+<li><strong>Supervision is crash-tolerant</strong> — restart with exponential backoff,
+  rate-limit-aware retries, output-timeout watchdog, checkpoint files for
+  resume, and worktree recovery before and after every run.</li>
+<li><strong>Two web servers, one process</strong> — <code>loom serve</code> runs the Cortex webui
+  (default <code>:8080</code>) and a dashboard API server (default <code>:8081</code>) in one
+  process; the frontend reaches the latter only through the <code>/api/loom/*</code>
+  reverse proxy.</li>
+<li><strong>Redis is optional</strong> — fleet coordination, terminal tab metadata, and
+  stale-worker detection activate only when <code>--redis-addr</code> is configured.</li>
+</ul>
+<h3 id="tech-stack">Tech Stack</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Language</td>
+<td>Go (module <code>github.com/tysonthomas9/loomcli</code>)</td>
+</tr>
+<tr>
+<td>CLI framework</td>
+<td>cobra (<code>internal/cli/root.go</code>)</td>
+</tr>
+<tr>
+<td>Issue store</td>
+<td>beads (<code>bd</code>) — SQLite + JSONL export, vendored at <code>third_party/beads/</code></td>
+</tr>
+<tr>
+<td>bd IPC</td>
+<td>JSON over unix socket (<code>internal/rpc</code>), plus <code>bd … --json</code> subprocesses</td>
+</tr>
+<tr>
+<td>Web UI</td>
+<td>React + Vite (<code>internal/webui/frontend/</code>), embedded via <code>embed.FS</code></td>
+</tr>
+<tr>
+<td>Real-time</td>
+<td>SSE fan-out hub + WebSocket terminal relay (<code>nhooyr.io/websocket</code>, <code>creack/pty</code>, tmux)</td>
+</tr>
+<tr>
+<td>Coordination (optional)</td>
+<td>Redis (fleet claims, JWT keys, tab metadata, stale detection)</td>
+</tr>
+<tr>
+<td>Observability</td>
+<td>day-rotated JSONL event log, Prometheus <code>/metrics</code>, optional OTLP export</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="project-structure">Project Structure</h2>
+<pre><code>loomcli/
+├── cmd/loom/                  # main() → internal/cli.Execute()
+├── internal/
+│   ├── cli/                   # ~81 files — cobra commands, daemon supervisor,
+│   │                          #   backends, auto mode, worktree resolver,
+│   │                          #   git/PR ops, monitor TUI, dashboard API server
+│   ├── webui/                 # ~41 files — Cortex HTTP server: REST over bd RPC,
+│   │   │                      #   SSE hub, terminal WS relay, fleet endpoints,
+│   │   │                      #   git/file handlers, middleware
+│   │   ├── daemon/            # bd-daemon connection pool + circuit breaker
+│   │   ├── fleet/             # Redis fleet store, JWT keys, claim timeouts
+│   │   ├── editor/            # external editor detection/launch
+│   │   ├── tabmeta/           # Redis-backed terminal tab metadata
+│   │   └── frontend/          # React app (api/, components/, hooks/, utils/)
+│   ├── rpc/                   # bd daemon client: wire protocol, unix transport,
+│   │                          #   socket-path rules (103-byte limit fallback)
+│   ├── types/                 # shared beads domain types (Issue, enums, locks)
+│   ├── events/                # event bus + JSONL writer + metrics (+ otelexport/)
+│   ├── usage/                 # token/cost accounting → usage.jsonl
+│   ├── logrouter/             # loom log-router engine (agent/task log tee)
+│   ├── agenterr/              # agent failure classification (per backend)
+│   ├── kv/                    # Redis worker claim/heartbeat + stale detector
+│   ├── lockfile/              # flock + process-liveness (reads bd daemon.lock)
+│   ├── circuitbreaker/        # generic closed/open/half-open breaker
+│   └── debug/ testutil/
+├── third_party/beads/         # vendored beads (bd)
+└── docs/                      # api.md, security.md, beads-sync.md, design/,
+                               #   glossary.md, this file + architecture.html
+</code></pre>
+<p>File counts are approximate by design — packages are the stable unit.</p>
+<hr />
+<h2 id="process-topology">Process Topology</h2>
+
+<figure class="diagram">
+<svg viewBox="0 0 860 700" role="img" aria-label="Process topology: browser and CLI clients, the loom serve process with webui and dashboard API servers, the bd daemon and database, and the loom daemon spawning agent processes that run backend CLIs">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+<rect x="80" y="14" width="180" height="52" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="170" y="36" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="14" font-weight="600">Browser</text>
+<text x="170" y="54" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="12" opacity="0.75">Cortex UI</text>
+
+<rect x="340" y="14" width="200" height="52" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="440" y="36" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="14" font-weight="600">loom CLI one-shots</text>
+<text x="440" y="54" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="12" opacity="0.75">list · push · pr · monitor …</text>
+
+<path d="M170,66 V128" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<text x="180" y="100" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11">REST · SSE · WS</text>
+
+<rect x="40" y="132" width="420" height="150" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="6 4" rx="10"/>
+<text x="52" y="152" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="12" opacity="0.7">loom serve (one process)</text>
+
+<rect x="60" y="162" width="180" height="60" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="150" y="184" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">webui server :8080</text>
+<text x="150" y="202" text-anchor="middle" fill="currentColor" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11">internal/webui</text>
+
+<rect x="260" y="162" width="180" height="60" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="350" y="184" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">dashboard API :8081</text>
+<text x="350" y="202" text-anchor="middle" fill="currentColor" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11">internal/cli/serve</text>
+
+<path d="M240,192 H256" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<text x="248" y="246" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11">/api/loom/* proxy</text>
+<text x="248" y="182" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11"> </text>
+
+<path d="M150,222 V330" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<text x="160" y="280" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11">RPC pool + circuit breaker</text>
+
+<path d="M350,222 V262 H520 V330" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<text x="530" y="290" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11">bd &lt;cmd&gt; --json</text>
+<path d="M440,66 V110 H560 V330" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+
+<rect x="60" y="334" width="200" height="56" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="160" y="356" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">bd daemon</text>
+<text x="160" y="374" text-anchor="middle" fill="currentColor" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11">.beads/bd.sock</text>
+
+<rect x="440" y="334" width="200" height="56" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="540" y="356" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">bd CLI subprocesses</text>
+<text x="540" y="374" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">JSON on stdout</text>
+
+<path d="M440,362 H264" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<path d="M160,390 V420" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+
+<rect x="40" y="424" width="300" height="52" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="190" y="446" text-anchor="middle" fill="currentColor" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="12">.beads/beads.db</text>
+<text x="190" y="464" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">+ JSONL on the beads-sync branch</text>
+
+<rect x="560" y="120" width="260" height="60" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="690" y="142" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="14" font-weight="600">loom daemon</text>
+<text x="690" y="160" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">supervisor · .loom/ state · events</text>
+
+<path d="M690,180 V212" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<text x="700" y="200" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11">spawns (process group)</text>
+
+<rect x="560" y="216" width="260" height="64" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="690" y="238" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">agent processes</text>
+<text x="690" y="256" text-anchor="middle" fill="currentColor" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11">loom task|plan|agent --auto</text>
+<text x="690" y="272" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">one per worktree</text>
+
+<path d="M630,280 V500" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<path d="M760,280 V416" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+
+<rect x="660" y="420" width="190" height="64" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="755" y="442" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">tmux + log-router</text>
+<text x="755" y="460" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">agent + per-task logs</text>
+<text x="755" y="476" text-anchor="middle" fill="currentColor" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="10">~/.loom/logs/</text>
+
+<rect x="530" y="504" width="200" height="64" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="630" y="526" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">backend CLI</text>
+<text x="630" y="544" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">claude · codex · opencode</text>
+<text x="630" y="560" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">stream-JSON on stdout</text>
+
+<path d="M690,280 C620,300 560,310 520,330" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)" opacity="0.85"/>
+<text x="470" y="316" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11">bd ready --json</text>
+
+<rect x="60" y="600" width="760 " height="0" fill="none"/>
+</svg>
+<figcaption>Process topology. The webui reaches beads over the bd daemon's unix socket; everything in <code>internal/cli</code> shells out to the bd CLI. The loom daemon and <code>loom serve</code> are independent processes.</figcaption>
+</figure>
+
+<table>
+<thead>
+<tr>
+<th>Process</th>
+<th>Started by</th>
+<th>Talks over</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>loom</code> one-shots (<code>list</code>, <code>push</code>, <code>pr</code>, <code>monitor</code>, …)</td>
+<td>user</td>
+<td><code>bd &lt;cmd&gt; --json</code> subprocesses, git</td>
+</tr>
+<tr>
+<td><code>loom daemon</code></td>
+<td>user</td>
+<td>spawns agent subprocesses (<code>Setpgid</code>); state in <code>.loom/</code></td>
+</tr>
+<tr>
+<td>Agent processes (<code>loom task/plan/agent --auto --daemon-mode</code>)</td>
+<td>loom daemon</td>
+<td><code>bd</code> subprocesses; backend CLI; log files</td>
+</tr>
+<tr>
+<td>tmux session + <code>loom log-router</code></td>
+<td>agent auto mode (when tmux exists)</td>
+<td>tee to <code>~/.loom/logs/agents/</code> and <code>~/.loom/logs/tasks/</code></td>
+</tr>
+<tr>
+<td>Backend CLI (<code>claude</code>/<code>codex</code>/<code>opencode</code>/<code>loom-backend-*</code>)</td>
+<td>agent process</td>
+<td>stdout stream-JSON</td>
+</tr>
+<tr>
+<td><code>loom serve</code> webui server</td>
+<td>user (<code>loom serve</code>, goroutine)</td>
+<td>HTTP <code>:8080</code> (<code>--webui-port</code>, auto-increments if busy)</td>
+</tr>
+<tr>
+<td><code>loom serve</code> dashboard API</td>
+<td>same process</td>
+<td>HTTP <code>:8081</code> (<code>--port</code> / <code>LOOM_SERVER_PORT</code>)</td>
+</tr>
+<tr>
+<td>bd daemon (external)</td>
+<td>auto-started by <code>loom serve</code> (unless <code>--no-daemon</code>)</td>
+<td>unix socket <code>.beads/bd.sock</code> (or <code>/tmp/beads-&lt;hash&gt;/bd.sock</code> when the path would exceed the 103-byte unix limit — <code>internal/rpc/socket_path.go</code>)</td>
+</tr>
+<tr>
+<td>Redis (external, optional)</td>
+<td>—</td>
+<td><code>--redis-addr</code> / <code>LOOM_REDIS_ADDR</code> / <code>daemon.redis_url</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Two bd access paths.</strong> <code>internal/cli</code> shells out to the <code>bd</code> CLI
+(<code>execCommand</code> via the <code>BDRunner</code> interface in <code>deps.go</code>); <code>internal/webui</code>
+speaks the bd daemon's unix-socket RPC directly through a connection pool
+(<code>internal/webui/daemon/pool.go</code>) wrapped in a circuit breaker
+(failure threshold 5, open timeout 30 s, half-open probe 1).</p>
+<p><strong>Two HTTP APIs with overlapping names.</strong> Both servers expose <code>/health</code>,
+<code>/api/stats</code>, and <code>/api/metrics</code>, but they are different handlers with
+different data sources: the webui's come from bd RPC; the dashboard API's
+come from the monitor collector (subprocess-derived). Docs and clients must
+say which port they mean. See <a href="api.md">docs/api.md</a>.</p>
+<hr />
+<h2 id="daemon-supervision">Daemon Supervision</h2>
+<p><code>loom daemon</code> (<code>internal/cli/daemon_cmd.go</code>, <code>daemon.go</code>) supervises the
+agents declared in <code>loom.yaml</code>.</p>
+<h3 id="configuration">Configuration</h3>
+<p><code>LoadDaemonConfig</code> merges built-in defaults → global <code>~/.loom/config.yaml</code> →
+project <code>loom.yaml</code> (local wins; agents come from the project file only).
+Before parsing, the config bytes pass env substitution
+(<code>config_envsubst.go</code>), secret resolution (<code>secrets.go</code> —
+<code>${secret:…}</code>-style refs via pluggable backends), a version check, and
+validation.</p>
+<p><code>loom.yaml</code> shape:</p>
+<pre><code class="language-yaml">version: …
+backend: claude                # project default backend
+daemon:
+  pid_file: .loom/daemon.pid
+  log_dir: .loom/logs
+  events_dir: .loom/events
+  max_agents: 20
+  redis_url: …                 # optional
+  restart_policy:              # see Restart &amp; Backoff below
+  otel: …                      # optional OTLP export
+roles:
+  &lt;name&gt;:                      # prompt_file, model, task_filter, backend,
+                               # path_patterns, skills, max_priority,
+                               # max_concurrency, read_only, allowed/denied_tools
+agents:
+  - worktree: &lt;name&gt;           # + role, auto, backend, fallback_backends,
+                               #   path_patterns
+</code></pre>
+<h3 id="startup">Startup</h3>
+<p><code>runDaemon</code> validates paths, takes the exclusive <code>.loom/daemon.lock</code>, writes
+<code>.loom/daemon.pid</code>, and starts the <code>Daemon</code>. <code>Start()</code> first runs
+<code>resetWorktreeBranches()</code> — WIP-committing dirty worktrees and checking each
+back onto its own branch to avoid git cross-checkout deadlocks — then runs
+one health-checker goroutine plus one <code>superviseAgent</code> goroutine per agent.
+Supervisor state snapshots go to <code>.loom/daemon-agents.json</code> (read by
+<code>loom daemon status</code>).</p>
+<h3 id="the-supervision-loop">The supervision loop</h3>
+<p>Each <code>superviseAgent</code> iteration (<code>daemon.go</code>):</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 798" role="img" aria-label="The 13-step daemon supervision loop from concurrency acquisition through spawn, exit classification, epic transition, and restart backoff">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+<rect x="120" y="16" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="38" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">1. Acquire per-role concurrency slot</text><text x="360" y="54" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">ConcurrencyTracker — blocks at max_concurrency</text><path d="M360,62 V74" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="78" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="100" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">2. Pre-flight worktree recovery</text><text x="360" y="116" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">RecoverWorktree: stale locks, orphaned tasks</text><path d="M360,124 V136" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="140" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="162" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">3. Epic assignment</text><text x="360" y="178" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">EpicAssigner → epic_assigned</text><path d="M360,186 V198" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="202" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="224" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">4. Ensure branch</text><text x="360" y="240" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">epic branch or worktree branch</text><path d="M360,248 V260" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="264" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="286" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">5. Spawn agent</text><text x="360" y="302" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">loom task|plan|agent --auto --daemon-mode → agent_started</text><path d="M360,310 V322" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="326" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="348" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">6. Wait for exit</text><text x="360" y="364" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">agent_stopped</text><path d="M360,372 V384" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="388" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="410" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">7. Classify exit + checkpoint</text><text x="360" y="426" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">agenterr class; save/clear .agent.checkpoint.json</text><path d="M360,434 V446" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="450" width="480" height="34" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="472" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">8. Post-mortem worktree recovery</text><path d="M360,484 V496" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="500" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="522" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">9. Ensure epic PR</text><text x="360" y="538" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">non-fatal → pr_created</text><path d="M360,546 V558" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="562" width="480" height="34" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="584" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">10. Release epic + concurrency slot</text><path d="M360,596 V608" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="612" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="634" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">11. Epic transition</text><text x="360" y="650" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">epic_exhausted → reassign or non-epic mode</text><path d="M360,658 V670" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="674" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="696" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">12. Backend failover</text><text x="360" y="712" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">advance fallback_backends index if needed</text><path d="M360,720 V732" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><rect x="120" y="736" width="480" height="46" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/><text x="360" y="758" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">13. Restart decision + backoff</text><text x="360" y="774" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">agent_restarted → loop</text><path d="M600,759 C700,699 700,99 604,39" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/><text x="668" y="399" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" transform="rotate(90 668 399)" text-anchor="middle">restart loop (until fatal or shutdown)</text>
+</svg>
+<figcaption>One iteration of <code>superviseAgent</code>. Steps 2 and 8 both run worktree recovery; events emitted per step are shown in italics.</figcaption>
+</figure>
+
+<p>Spawned commands (<code>daemon_spawn.go:buildCommand</code>):</p>
+<ul>
+<li>built-in roles: <code>loom &lt;plan|task&gt; &lt;worktree&gt; --auto --daemon-mode
+  [--backend X] [--parent &lt;epicID&gt;]</code></li>
+<li>custom roles: <code>loom agent &lt;worktree&gt; --prompt &lt;file&gt; [--task-filter F]
+  --auto --daemon-mode …</code></li>
+</ul>
+<p>The environment is scrubbed (<code>FilteredEnv()</code>) and extended with <code>BD_ACTOR</code>,
+<code>LOOM_WORKTREE_PATH</code>, <code>LOOM_EVENTS_DIR</code>, and the <code>LOOM_ROLE_*</code> /
+<code>LOOM_ALLOWED_TOOLS</code> / <code>LOOM_DENIED_TOOLS</code> / <code>LOOM_READ_ONLY</code> variables that
+the agent-side task router reads back (<code>task_router.go</code>).</p>
+<h3 id="restart-backoff">Restart &amp; Backoff</h3>
+<p><code>daemon_restart.go</code> — defaults: <code>max_retries</code> 3, <code>backoff_initial</code> 2s,
+<code>backoff_max</code> 300s, <code>output_timeout</code> 900s.</p>
+<ul>
+<li>Clean exit resets counters; a run longer than one minute also resets
+  backend failover to the primary.</li>
+<li><code>NoWork</code> always restarts, never counts against retries, sleeps
+  <code>no_work_backoff</code> (30s).</li>
+<li>Rate limits retry on a separate counter (unlimited by default,
+  <code>rate_limit_no_count</code>), capped by <code>rate_limit_max_wait</code>, honoring server
+  <code>Retry-After</code>.</li>
+<li>Fatal classes (auth, billing, model-not-found — <code>agenterr.IsFatal</code>) stop
+  the supervisor for that agent.</li>
+<li>Everything else: exponential <code>initial × 2ⁿ</code> clamped to <code>backoff_max</code>.</li>
+</ul>
+<p>The health checker watches each agent's log-file mtime; silence beyond
+<code>output_timeout</code> kills the process group (watchdog).</p>
+<h3 id="epic-assignment">Epic assignment</h3>
+<p><code>EpicAssigner</code> (<code>daemon_epic.go</code>) assigns each worktree the highest-priority
+open epic that has ready tasks (probed via <code>bd ready --parent &lt;epic&gt; --json
+--limit 1</code>), scoping the agent's discovery with <code>--parent</code>. When an epic
+runs dry the daemon emits <code>epic_exhausted</code> and either reassigns or switches
+the agent to non-epic mode. Epic-mode agents work on a per-epic branch
+(<code>daemon_branch.go</code>).</p>
+<hr />
+<h2 id="agent-execution-path">Agent Execution Path</h2>
+<p>An agent iteration in auto mode:</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 760 420" role="img" aria-label="Agent auto-mode iteration: idle, poll ready tasks, claim and lock, generate prompt, invoke backend, record usage, back to idle">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+<rect x="40" y="180" width="130" height="48" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="105" y="208" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">idle</text>
+
+<rect x="240" y="40" width="220" height="56" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="350" y="62" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">poll ready tasks</text>
+<text x="350" y="80" text-anchor="middle" fill="currentColor" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11">bd ready --json + task filters</text>
+
+<rect x="540" y="110" width="190" height="56" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="635" y="132" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">lock active</text>
+<text x="635" y="150" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">capture HEAD</text>
+
+<rect x="540" y="210" width="190" height="56" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="635" y="232" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">generate prompt</text>
+<text x="635" y="250" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">role prompt + checkpoint context</text>
+
+<rect x="430" y="310" width="220" height="56" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="540" y="332" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">invoke backend CLI</text>
+<text x="540" y="350" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" opacity="0.75">stream-JSON → usage collector</text>
+
+<rect x="150" y="310" width="200" height="56" fill="none" stroke="currentColor" stroke-width="1.5" rx="8"/>
+<text x="250" y="332" text-anchor="middle" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" font-weight="600">record usage</text>
+<text x="250" y="350" text-anchor="middle" fill="currentColor" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="11">usage.jsonl</text>
+
+<path d="M130,180 C150,110 200,80 236,68" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<path d="M460,80 C520,88 560,96 590,106" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<path d="M635,166 V206" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<path d="M615,266 C600,282 580,296 565,306" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<path d="M430,342 H354" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+<path d="M150,338 C110,320 95,270 100,232" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
+
+<path d="M300,96 C260,140 180,170 174,192" stroke="currentColor" stroke-width="1.5" fill="none" marker-end="url(#ah)" opacity="0.8"/>
+<text x="230" y="150" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11">none → no-work backoff /</text>
+<text x="230" y="165" fill="currentColor" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11">idle-timeout exit</text>
+</svg>
+<figcaption>One auto-mode iteration (<code>RunAutoModeLoop</code>; the tmux variant wraps the same flow in a tmux session piped through <code>loom log-router</code>). Three consecutive errors abort the loop; <code>task_failed</code> is emitted on error.</figcaption>
+</figure>
+
+<p><strong>Task discovery</strong> — <code>automode_poller.go</code> runs <code>bd ready --json --limit 100</code>;
+predicates in <code>taskfilter.go</code> (<code>NeedsPlan</code>, <code>ReadyToImplement</code>,
+<code>IsWorkableTask</code>, …) route issues by role, deliberately kept in sync with
+the frontend's <code>issueCategory.ts</code>. Role constraints arrive via the
+<code>LOOM_ROLE_*</code> env vars and are applied by <code>task_router.go</code>
+(<code>MatchTask</code>, <code>SelectBestTask</code>).</p>
+<p><strong>Two loop implementations</strong> — with tmux available, <code>RunAutoModeTmux</code> runs
+the agent inside a tmux session piped through <code>loom log-router</code> (per-agent
+and per-task/phase logs with rotation), streams the log to the console, and
+supports live attach. Without tmux, <code>RunAutoModeLoop</code> drives the backend
+directly and parses its stream-JSON output. There is <strong>no PTY on the agent
+path</strong> — <code>creack/pty</code> is used only by the browser terminal relay.</p>
+<p><strong>Backends</strong> — <code>backend.go</code> defines the <code>Backend</code> interface and registry;
+resolution order: <code>--backend</code> flag &gt; <code>LOOM_BACKEND</code> &gt; project <code>loom.yaml</code> &gt;
+<code>~/.loom/config.yaml</code> &gt; <code>claude</code>.</p>
+<ul>
+<li><code>claude</code>: <code>claude -p --verbose --output-format stream-json
+  --dangerously-skip-permissions</code>, prompt fed via a stdin pipe (kept out of
+  <code>ps</code>), stdout parsed line-by-line for display and usage.</li>
+<li><code>codex</code>: <code>codex exec --json --dangerously-bypass-approvals-and-sandbox</code>.</li>
+<li><code>opencode</code>: <code>opencode run [--format json]</code>.</li>
+<li>external: any <code>loom-backend-*</code> executable on <code>$PATH</code>, auto-registered
+  unless <code>LOOM_NO_EXTERNAL_BACKENDS</code>; built-ins win name collisions.</li>
+</ul>
+<p>Failures are classified per backend (<code>internal/agenterr</code>) into retryable
+(rate limit, timeout, transient, no-work) vs fatal (auth, billing,
+model-not-found, context overflow) classes that drive daemon restart
+decisions. A process guard delivers SIGTERM to the process group on
+shutdown.</p>
+<p><strong>Usage accounting</strong> — <code>internal/usage</code>: a <code>Collector</code> accumulates token
+counts from stream events (deduplicated by message ID); each session appends
+a row to <code>&lt;beadsDir&gt;/usage.jsonl</code> under flock, with cost estimated from
+per-backend pricing tables. Surfaced by <code>loom usage</code> and the Usage
+dashboard.</p>
+<p><strong>Lock &amp; checkpoint files</strong> — <code>.agent.lock</code> holds pid, agent, current task,
+and execution state (<code>active</code>/<code>idle</code>); acquisition is <code>O_CREATE|O_EXCL</code> with
+retries, staleness detection, and force-release via <code>loom recover</code>. On
+non-zero exit the daemon writes <code>.agent.checkpoint.json</code> (agent, task, epic,
+≤4 KB git diff, exit code, error class); the next session's prompt includes
+that context. In workspace mode the lock dir collapses to the workspace root
+so all repos share one lock.</p>
+<hr />
+<h2 id="worktree-resolution-legacy-vs-workspace-mode">Worktree Resolution (legacy vs workspace mode)</h2>
+<p><code>internal/cli/worktree.go</code> — the <code>Resolver</code> has two modes:</p>
+<ul>
+<li><strong>Legacy</strong>: scan <code>./worktrees/</code> in the current repo.</li>
+<li><strong>Workspace</strong>: named workspaces from <code>~/.loom/config.yaml</code>, each grouping
+  multiple repos with per-repo default branches.</li>
+</ul>
+<p>The mode determines worktree discovery, lock-file placement, beads-dir
+resolution (<code>GetBeadsDir</code>), diff capture, and how <code>push</code>/<code>pull</code>/<code>sync</code>/<code>pr</code>
+iterate repos. <code>ResolveAgentTarget</code> maps a CLI argument to a concrete
+worktree in either mode.</p>
+<p><strong>Git integration</strong> — <code>push</code>/<code>pull</code>/<code>sync</code> move work between worktree
+branches and the integration branch (default <code>main</code>,
+<code>LOOM_DEFAULT_BRANCH</code>/per-repo override). On merge conflicts, loom invokes
+an AI agent with a conflict-resolution prompt
+(<code>conflict_resolution.go</code> → <code>Backend.InvokeAgentForConflicts</code>), emitting
+<code>conflict_resolved</code>. <code>loom pr</code> creates PRs; the daemon's <code>EnsureEpicPR</code> does
+the same for epic branches.</p>
+<hr />
+<h2 id="webui-server-cortex">WebUI Server (Cortex)</h2>
+<p><code>internal/webui/server.go</code> + <code>routes.go</code>. Serves the embedded React frontend
+(SPA fallback; <code>--dev</code> serves from disk) and the REST API.</p>
+<p><strong>Middleware chain</strong> (outermost first): rate limit → security headers
+(optional HSTS) → API-key auth (key at <code>~/.loom/webui-api-key</code>) → CORS →
+mux, wrapped in h2c.</p>
+<p><strong>API groups</strong> (full reference: <a href="api.md">docs/api.md</a>):</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Backing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Issues, comments, deps, ready/blocked, graph</td>
+<td>bd RPC pool</td>
+</tr>
+<tr>
+<td>SSE <code>/api/events</code></td>
+<td><code>DaemonSubscriber</code> long-polls bd mutations (<code>wait_for_mutations</code>, fallback polling + DB-mtime watch) → <code>SSEHub</code> fan-out</td>
+</tr>
+<tr>
+<td>Terminal <code>/api/terminal/*</code>, <code>/api/agents/{name}/terminal/*</code></td>
+<td><code>TerminalManager</code>: tmux sessions attached over <code>creack/pty</code>, one-time-token WS auth; default command <code>loom lead</code></td>
+</tr>
+<tr>
+<td>Fleet <code>/api/fleet/*</code> (Redis only)</td>
+<td><code>internal/webui/fleet</code>: Lua CAS claim store, JWT auth (signing keys in Redis), claim timeout enforcer</td>
+</tr>
+<tr>
+<td>Git/files <code>/api/agents/{name}/git/*</code>, <code>/files</code></td>
+<td>implementations injected from <code>internal/cli</code> (<code>NewGitOps()</code>)</td>
+</tr>
+<tr>
+<td>Logs <code>/api/agents/{name}/logs</code>, <code>/api/tasks/{id}/logs/{phase}</code></td>
+<td>tails <code>~/.loom/logs</code> via fsnotify, base64 chunk SSE</td>
+</tr>
+<tr>
+<td>Editors, config, health/stats</td>
+<td>local</td>
+</tr>
+<tr>
+<td><code>/api/loom/*</code></td>
+<td>SSRF-guarded reverse proxy to the dashboard API server</td>
+</tr>
+</tbody>
+</table>
+<p><strong>bd connectivity</strong> — pooled unix-socket RPC clients with auto-discovery
+(<code>BEADS_SOCKET</code> env, else computed socket path; walks up to find <code>.beads/</code>),
+protected by the circuit breaker; handlers check out a client per request.</p>
+<hr />
+<h2 id="dashboard-api-server">Dashboard API Server</h2>
+<p><code>internal/cli/serve.go</code> (<code>--port</code>, default 8081) exposes
+<code>/api/status|agents|tasks|stats|sync|usage|workspaces|observability/*</code> plus
+Prometheus <code>/metrics</code> (KEDA-oriented). Its data comes from the <strong>monitor
+collector</strong> (<code>monitor.go</code>) — the same code that powers the <code>loom monitor</code>
+TUI — which runs <code>bd ready/blocked/stats</code> and per-worktree git in parallel.
+Results are cached for 2 s (<code>serve_cache.go</code>) so frontend polling doesn't
+fork 60–90 subprocesses per cycle. <code>loom serve</code> also auto-starts the bd
+daemon (unless <code>--no-daemon</code>) and, when Redis is configured, the fleet
+endpoints' supporting services and the <strong>stale detector</strong> (leader-elected
+via a Redis lock) whose <code>Reconciler</code> resets claims of workers that stopped
+heartbeating (<code>internal/kv</code>).</p>
+<hr />
+<h2 id="events-observability">Events &amp; Observability</h2>
+<p><code>internal/events</code> is loom's own observability stream, disjoint from the
+webui's SSE mutations: daemon and agents emit <code>agent_*</code>, <code>epic_*</code>, <code>task_*</code>,
+<code>pr_created</code>, <code>conflict_resolved</code>, <code>health_check</code> events through an
+<code>Emitter</code> into day-rotated JSONL files under <code>.loom/events/</code> (50 MB
+rotation). <code>LOOM_EVENTS_DIR</code> propagates the destination to subprocesses.
+Optional OTLP export mirrors events as traces/metrics
+(<code>internal/events/otelexport</code>, configured by <code>daemon.otel</code>). The dashboard
+API's <code>/api/observability/*</code> endpoints query these files with a metrics
+cache.</p>
+<hr />
+<h2 id="data-stores">Data Stores</h2>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Location</th>
+<th>Owner</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>beads SQLite (+WAL)</td>
+<td><code>.beads/beads.db</code></td>
+<td>bd daemon</td>
+</tr>
+<tr>
+<td>beads JSONL export</td>
+<td><code>.beads/issues.jsonl</code> (+ config, lock, log)</td>
+<td>bd; synced on the <code>beads-sync</code> git branch (<code>docs/beads-sync.md</code>)</td>
+</tr>
+<tr>
+<td>bd socket</td>
+<td><code>.beads/bd.sock</code> or <code>/tmp/beads-&lt;hash&gt;/bd.sock</code></td>
+<td>bd</td>
+</tr>
+<tr>
+<td>Daemon state</td>
+<td><code>.loom/daemon.pid</code>, <code>.loom/daemon.lock</code>, <code>.loom/daemon-agents.json</code></td>
+<td>loom daemon</td>
+</tr>
+<tr>
+<td>Daemon agent logs</td>
+<td><code>.loom/logs/&lt;role&gt;-&lt;worktree&gt;.log</code></td>
+<td>loom daemon</td>
+</tr>
+<tr>
+<td>Router logs</td>
+<td><code>~/.loom/logs/agents/&lt;agent&gt;.log</code>, <code>~/.loom/logs/tasks/&lt;id&gt;/{planning,implementation}.log</code></td>
+<td>log-router (read by webui log streaming)</td>
+</tr>
+<tr>
+<td>Event JSONL</td>
+<td><code>.loom/events/events-YYYY-MM-DD.jsonl</code></td>
+<td><code>internal/events</code></td>
+</tr>
+<tr>
+<td>Usage</td>
+<td><code>&lt;beadsDir&gt;/usage.jsonl</code></td>
+<td><code>internal/usage</code></td>
+</tr>
+<tr>
+<td>Per-worktree agent state</td>
+<td><code>&lt;lockDir&gt;/.agent.lock</code>, <code>.agent.checkpoint.json</code></td>
+<td>agent / daemon</td>
+</tr>
+<tr>
+<td>Global config + webui API key</td>
+<td><code>~/.loom/config.yaml</code>, <code>~/.loom/webui-api-key</code></td>
+<td>loom</td>
+</tr>
+<tr>
+<td>Redis (optional)</td>
+<td>fleet claims/registrations/JWT keys, <code>terminal:meta:&lt;session&gt;</code>, worker heartbeats + stale-detector leadership</td>
+<td><code>internal/webui/fleet</code>, <code>tabmeta</code>, <code>internal/kv</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="testability">Testability</h2>
+<p><code>internal/cli</code> stays testable through a dependency container
+(<code>deps.go</code>: <code>Git</code>, <code>Exec</code>, <code>FS</code>, <code>Clock</code>, <code>BD</code> interfaces), package-level
+swappable <code>execCommand</code>/<code>lookPath</code>, and mockable backend invokers.
+<code>scripts/check-no-raw-exec.sh</code> enforces that subprocess calls go through the
+container. Quality gates: <code>make gate</code> (Go + frontend), <code>gate-e2e</code>,
+<code>gate-e2e-full</code> (see <code>docs/testing/</code>).</p>
+</main>
+</div>
+</body>
+</html>
