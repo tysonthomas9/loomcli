@@ -54,10 +54,7 @@ func (service *Service) PublishTranscript(
 	auth authority.SessionAuthority,
 	command PublishTranscriptCommand,
 ) (*AgentSession, error) {
-	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
-	command.SessionID = strings.TrimSpace(command.SessionID)
-	command.Content = append([]byte(nil), command.Content...)
-	command.Metadata = cloneMetadata(command.Metadata)
+	command = normalizeTranscriptPublish(command)
 	if err := service.requireSession(
 		ctx,
 		ActionPublishTranscript,
@@ -78,6 +75,23 @@ func (service *Service) PublishTranscript(
 	if err := validateSession(session, command.WorkspaceKey, command.SessionID, auth.AgentID()); err != nil {
 		return nil, err
 	}
+	return service.persistOwnedTranscript(ctx, auth, command, session)
+}
+
+func normalizeTranscriptPublish(command PublishTranscriptCommand) PublishTranscriptCommand {
+	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
+	command.SessionID = strings.TrimSpace(command.SessionID)
+	command.Content = append([]byte(nil), command.Content...)
+	command.Metadata = cloneMetadata(command.Metadata)
+	return command
+}
+
+func (service *Service) persistOwnedTranscript(
+	ctx context.Context,
+	auth authority.SessionAuthority,
+	command PublishTranscriptCommand,
+	session *AgentSession,
+) (*AgentSession, error) {
 	artifactID := "transcript-" + command.SessionID
 	persistedID, err := service.transcripts.CreateContent(ctx, TranscriptArtifactCreate{
 		WorkspaceKey: command.WorkspaceKey,

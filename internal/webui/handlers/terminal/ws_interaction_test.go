@@ -72,6 +72,14 @@ func (*terminalInteractionAPIStub) PatchSession(
 	return nil, nil
 }
 
+func (*terminalInteractionAPIStub) PublishTranscript(
+	context.Context,
+	authority.SessionAuthority,
+	interaction.PublishTranscriptCommand,
+) (*interaction.AgentSession, error) {
+	return nil, nil
+}
+
 func (*terminalInteractionAPIStub) HeartbeatSession(
 	context.Context,
 	authority.SessionAuthority,
