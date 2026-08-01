@@ -133,7 +133,7 @@ func TestAgentUpdateHooksPatch(t *testing.T) {
 		resetHookFlags(t)
 		agentUpdateClear = true
 
-		got, err := agentUpdateHooksPatch()
+		got, err := agentUpdateHooksPatch(false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -150,7 +150,7 @@ func TestAgentUpdateHooksPatch(t *testing.T) {
 		agentUpdateCommentReply = true
 		agentUpdateLabels = []string{"criticized"}
 
-		got, err := agentUpdateHooksPatch()
+		got, err := agentUpdateHooksPatch(false)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -179,7 +179,7 @@ func TestAgentUpdateHooksPatch(t *testing.T) {
 				agentUpdateCommentReply = tc.reply
 				agentUpdateLabels = tc.labels
 
-				_, err := agentUpdateHooksPatch()
+				_, err := agentUpdateHooksPatch(false)
 				if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 					t.Fatalf("error = %v, want a conflict error", err)
 				}
@@ -190,7 +190,7 @@ func TestAgentUpdateHooksPatch(t *testing.T) {
 	t.Run("no flags is an error, not a silent no-op", func(t *testing.T) {
 		resetHookFlags(t)
 
-		_, err := agentUpdateHooksPatch()
+		_, err := agentUpdateHooksPatch(false)
 		if err == nil || !strings.Contains(err.Error(), "nothing to update") {
 			t.Fatalf("error = %v, want a no-op error", err)
 		}
@@ -200,7 +200,7 @@ func TestAgentUpdateHooksPatch(t *testing.T) {
 		resetHookFlags(t)
 		agentUpdateLabels = []string{" "}
 
-		if _, err := agentUpdateHooksPatch(); err == nil {
+		if _, err := agentUpdateHooksPatch(false); err == nil {
 			t.Fatal("expected a blank-label error")
 		}
 	})
