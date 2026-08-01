@@ -11,8 +11,9 @@ Fleet Redis is configured via `loom serve` flags and environment variables:
 | Flag | Env Var | Description |
 |------|---------|-------------|
 | `--redis-addr` | `LOOM_REDIS_ADDR` | Redis address for fleet coordination and stale detection |
+| `--redis-password` | `LOOM_REDIS_PASSWORD` | Redis password (prefer the env var to avoid leaking the password in the process list) |
 
-Redis password authentication is supported at the library level (`internal/kv` and `internal/webui/fleet`) but is not yet exposed via CLI flags or environment variables. If your Redis instance requires password authentication, use network-level access controls (localhost binding, firewall rules) until CLI password support is added.
+If your Redis instance requires password authentication, set `LOOM_REDIS_PASSWORD` rather than passing `--redis-password` on the command line, and combine it with network-level access controls (localhost binding, firewall rules).
 
 ### Config File Security
 

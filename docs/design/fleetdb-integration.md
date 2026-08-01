@@ -1,6 +1,6 @@
 # Fleet-DB Integration Design
 
-**Status:** Approved
+**Status:** Approved — not yet implemented (design only; the files described below, e.g. `internal/cli/issue_backend.go`, `bd_backend.go`, `fleetdb_backend.go`, do not exist yet)
 **Date:** 2026-03-13
 **Approach:** Pragmatic Hybrid (3-phase)
 

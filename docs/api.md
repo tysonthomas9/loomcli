@@ -4,7 +4,7 @@ The loom WebUI server exposes a REST API for managing issues, dependencies, flee
 
 ## Overview
 
-- **Base URL:** `http://localhost:8080` (configurable via `--port` and `--bind`)
+- **Base URL:** `http://localhost:8080` (configurable via `--webui-port` and `--bind`; `--port` sets the separate dashboard API server, default 8081)
 - **Content-Type:** `application/json` for all request and response bodies
 - **Request body limit:** 1 MB
 
@@ -551,7 +551,7 @@ data: {"type":"update","issue_id":"abc","title":"...","assignee":"user","actor":
 
 ## Fleet Coordination
 
-Fleet endpoints are only available when Redis is configured (`--fleet-redis`) and `--fleet-api-key` is set. Fleet endpoints use their own authentication (not the standard bearer token).
+Fleet endpoints are only available when Redis is configured (`--redis-addr` or `LOOM_REDIS_ADDR`) and `--fleet-api-key` is set. Fleet endpoints use their own authentication (not the standard bearer token).
 
 ### `POST /api/fleet/register`
 
