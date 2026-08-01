@@ -39,7 +39,7 @@ var codexNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown 
 // buildCodexInteractiveCmd constructs the exec.Cmd for interactive Codex invocation.
 // Extracted for testability — callers can inspect the returned cmd without execution.
 func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
-	args := []string{"--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"}
+	args := append([]string{"--no-alt-screen"}, codexSandboxArgs()...)
 	args = appendCodexEffortArgs(args, resolveAgentEffort())
 	args = appendCodexModelArgs(args, resolveAgentModel())
 	args = append(args, prompt)
@@ -62,6 +62,9 @@ func isTerminal(f *os.File) bool {
 }
 
 func defaultCodexInvoker(workDir, prompt, agentName string) error {
+	if err := validateSafetyKnobsFromEnv("codex"); err != nil {
+		return err
+	}
 	// When stdin is not a TTY (e.g. daemon subprocess), Codex interactive
 	// mode fails with "stdin is not a terminal". Fall back to non-interactive
 	// exec mode which works headlessly.
@@ -79,6 +82,9 @@ func defaultCodexInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	if err := validateSafetyKnobsFromEnv("codex"); err != nil {
+		return err
+	}
 	fmt.Println("Launching Codex agent (non-interactive)...")
 	fmt.Println("")
 
@@ -106,7 +112,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 // `codex exec` does not read the prompt from stdin. Pass it as the final
 // positional prompt argument instead.
 func buildCodexNonInteractiveArgs(prompt string) []string {
-	args := []string{"exec", "--json", "--dangerously-bypass-approvals-and-sandbox"}
+	args := append([]string{"exec", "--json"}, codexSandboxArgs()...)
 	if prompt != "" {
 		args = append(args, prompt)
 	}

@@ -187,7 +187,7 @@ func buildClaudeContinueSessionArgs(sessionID string) []string {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
-	return args
+	return appendClaudeSafetyArgs(args)
 }
 
 // LastSessionID returns the most recent session ID. Returns "" because Claude
@@ -216,6 +216,7 @@ func buildClaudeInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	if model := resolveAgentModel(); model != "" {
 		args = append(args, "--model", model)
 	}
+	args = appendClaudeSafetyArgs(args)
 	args = append(args, prompt)
 	cmd := exec.Command("claude", args...) //nolint:gosec // G204: intentional subprocess launch for claude CLI
 	cmd.Dir = workDir
@@ -281,7 +282,10 @@ func buildClaudeRunTurnArgs(resumeSessionID string) []string {
 	if effort := resolveAgentEffort(); effort != "" {
 		args = append(args, "--effort", effort)
 	}
-	return args
+	// Role safety knobs (allowed/denied tools, read_only deny-set). Appended
+	// on the RunTurn path too, so the daemon leaf is enforced, not just the
+	// interactive one.
+	return appendClaudeSafetyArgs(args)
 }
 
 func claudeResumeArgs(sessionID string) []string {

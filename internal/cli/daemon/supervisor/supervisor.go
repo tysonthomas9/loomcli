@@ -427,6 +427,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.gateBackendAvailable(ap); err != nil {
 		return false
 	}
+	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
+		return false
+	}
 
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {

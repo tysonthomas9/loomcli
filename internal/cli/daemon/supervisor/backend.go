@@ -9,6 +9,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/agentpolicy"
 	"github.com/tysonthomas9/loomcli/internal/cli/backendcheck"
+	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -81,6 +82,32 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 			worktree, backend, info.InstallHint)
 	}
 	return ErrBackendUnavailable
+}
+
+// gateSafetyKnobsEnforceable fails closed when the role carries safety knobs
+// (allowed_tools / denied_tools / read_only) the resolved backend cannot
+// enforce. Running anyway would silently drop the restriction — the exact
+// config-that-lies failure these knobs used to be. The agent parks with a
+// visible error (SpawnFailure class) instead; the daemon's config poll picks
+// up a corrected role without a restart.
+func (s *Supervisor) gateSafetyKnobsEnforceable(ap *AgentProcess) error {
+	backendName := s.GetEffectiveBackend(ap)
+	err := backends.ValidateSafetyKnobs(backendName,
+		ap.RoleConfig.AllowedTools, ap.RoleConfig.DeniedTools, ap.RoleConfig.ReadOnly)
+	if err == nil {
+		return nil
+	}
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
+		Message:   err.Error(),
+		Backend:   backendName,
+		Timestamp: time.Now(),
+	}
+	worktree := ap.Entry.Worktree
+	ap.Mu.Unlock()
+	log.Printf("[daemon] Agent %s: %v — skipping spawn", worktree, err)
+	return err
 }
 
 // GetEffectiveBackend returns the backend name for the agent's current failover position.
