@@ -136,6 +136,55 @@ func TestSetupAgentLogFile_ArchiveWithoutDaemonLog(t *testing.T) {
 	}
 }
 
+func TestSetupAgentLogFile_TruncatesPriorRunForClassification(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("LOOM_WORKSPACE_RUNTIME_DIR", tmp)
+	t.Setenv("LOOM_CONFIG_DIR", "")
+
+	daemonLogDir := filepath.Join(tmp, "daemon-logs")
+	workspaceLogDir := filepath.Join(daemonLogDir, "ws-test")
+	if err := os.MkdirAll(workspaceLogDir, 0700); err != nil {
+		t.Fatalf("creating daemon log directory: %v", err)
+	}
+	logPath := filepath.Join(workspaceLogDir, "plan-ember.log")
+	if err := os.WriteFile(logPath, []byte("HTTP 401 authentication required\n"), 0600); err != nil {
+		t.Fatalf("seeding prior run log: %v", err)
+	}
+
+	s := &Supervisor{
+		ConfigSnapshot: func() *cfgpkg.DaemonConfig {
+			return &cfgpkg.DaemonConfig{Daemon: cfgpkg.DaemonSettings{LogDir: daemonLogDir}}
+		},
+		ProjectDir:    tmp,
+		WorkspaceID:   "ws-test",
+		Shutdown:      make(chan struct{}),
+		StoppedAgents: make(map[string]struct{}),
+		EmitEvent:     func(events.Event) {},
+	}
+	ap := &AgentProcess{
+		Entry:        cfgpkg.AgentEntry{Worktree: "ember", Role: "plan"},
+		RoleConfig:   cfgpkg.RoleConfig{Description: "Built-in plan agent"},
+		WorktreePath: tmp,
+	}
+
+	cmd := &exec.Cmd{}
+	ap.Mu.Lock()
+	s.setupAgentLogFile(ap, cmd)
+	ap.Mu.Unlock()
+
+	const currentRun = "Error: task handoff validation failed\n"
+	if _, err := cmd.Stdout.Write([]byte(currentRun)); err != nil {
+		t.Fatalf("writing current run log: %v", err)
+	}
+	ap.Mu.Lock()
+	closeAgentLogs(ap)
+	ap.Mu.Unlock()
+
+	if got := readFile(t, logPath); got != currentRun {
+		t.Fatalf("daemon log content = %q, want only current run %q", got, currentRun)
+	}
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path) //nolint:gosec // G304: test-controlled path under t.TempDir()

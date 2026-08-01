@@ -387,8 +387,9 @@ func (s *Supervisor) spawnAgent(ap *AgentProcess) error {
 //
 //   - The daemon process log (<daemon.LogDir>/<ws>/<role>-<worktree>.log): the
 //     watchdog stats its mtime for liveness (see checkWatchdog) and the crash
-//     classifier reads its tail (see classify.go), so its path and append
-//     semantics are preserved exactly.
+//     classifier reads its tail (see classify.go). It is truncated for every
+//     subprocess run so a prior run's error text cannot misclassify a later
+//     failure. Persistent history lives in the canonical agent archive below.
 //   - The canonical agent archive (~/.loom/logs/<ws>/agents/<worktree>.log): the
 //     web UI "Logs" tab reads this via webuilog.GetAgentLogPath. Without it,
 //     daemon-supervised agents 404 in the Logs tab even though tmux-mode agents
@@ -452,7 +453,7 @@ func (s *Supervisor) openDaemonLogFile(ap *AgentProcess) *os.File {
 	logFilePath := filepath.Join(logDir, fmt.Sprintf("%s-%s.log", safeRole, safeWorktree))
 	ap.LogFilePath = logFilePath
 
-	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600) //nolint:gosec // G304: log file path from daemon config
+	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600) //nolint:gosec // G304: log file path from daemon config
 	if err != nil {
 		log.Printf("[daemon] Agent %s: failed to open log file: %v", ap.Entry.Worktree, err)
 		return nil

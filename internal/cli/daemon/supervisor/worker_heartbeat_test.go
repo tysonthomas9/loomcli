@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
@@ -98,6 +99,7 @@ func TestStartWorkerHeartbeatEvery_NoControlStoreIsNoOp(t *testing.T) {
 
 func TestStartWorkerHeartbeatEvery_RenewsAssignedIssueClaim(t *testing.T) {
 	issueBackend := &renewingActorBackend{MockIssueBackend: clitest.NewMockIssueBackend()}
+	issueBackend.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "BUG-23", Status: "in_progress"}}
 	s := &Supervisor{
 		IssueBackend: issueBackend,
 		WorkspaceID:  "WS",
@@ -117,6 +119,27 @@ func TestStartWorkerHeartbeatEvery_RenewsAssignedIssueClaim(t *testing.T) {
 	}
 	if issueBackend.ttl != 0 {
 		t.Fatalf("renewed claim TTL = %v, want server default", issueBackend.ttl)
+	}
+}
+
+func TestRenewAssignedTaskClaim_StopsAfterReviewHandoff(t *testing.T) {
+	issueBackend := &renewingActorBackend{MockIssueBackend: clitest.NewMockIssueBackend()}
+	issueBackend.GetResult = &backend.IssueDetailData{IssueData: backend.IssueData{ID: "BUG-23", Status: "review"}}
+	s := &Supervisor{
+		IssueBackend: issueBackend,
+		WorkspaceID:  "WS",
+		Shutdown:     make(chan struct{}),
+	}
+	ap := &AgentProcess{
+		Entry:          cfgpkg.AgentEntry{Worktree: "bug-triage"},
+		AssignedTaskID: "BUG-23",
+	}
+
+	if err := s.renewAssignedTaskClaim(ap); err != nil {
+		t.Fatalf("renewAssignedTaskClaim: %v", err)
+	}
+	if got := issueBackend.claims.Load(); got != 0 {
+		t.Fatalf("claim renewals after Review handoff = %d, want 0", got)
 	}
 }
 

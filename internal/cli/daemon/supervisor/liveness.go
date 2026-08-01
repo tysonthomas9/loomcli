@@ -282,11 +282,14 @@ func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.D
 }
 
 // renewAssignedTaskClaim refreshes the distributed issue lock through the
-// same actor-scoped backend used for the original claim. Fleet worker
-// heartbeats remain the normal registration lease, but the claim refresh is a
-// second, direct fence: a live model process must never lose its issue to a
-// competing role merely because worker-heartbeat transport or projection is
-// delayed. Same-actor claims are idempotent in fleet-db.
+// same actor-scoped backend used for the original claim while the task remains
+// in progress. Fleet worker heartbeats remain the normal registration lease,
+// but the claim refresh is a second, direct fence: a live model process must
+// never lose its issue to a competing role merely because worker-heartbeat
+// transport or projection is delayed. Once the agent hands the task to Review
+// (or any other state), renewal must stop: ClaimIssue also performs the normal
+// claim transition, so calling it after handoff would regress Review back to
+// In Progress. Same-actor in-progress claims are idempotent in fleet-db.
 func (s *Supervisor) renewAssignedTaskClaim(ap *AgentProcess) error {
 	actorBackend, ok := s.IssueBackend.(actorClaimBackend)
 	if !ok || ap.Entry.Worktree == "" {
@@ -300,5 +303,15 @@ func (s *Supervisor) renewAssignedTaskClaim(ap *AgentProcess) error {
 	}
 	ctx, cancel := s.operationContext()
 	defer cancel()
+	issue, err := s.IssueBackend.Get(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("read assigned issue before claim renewal: %w", err)
+	}
+	if issue == nil {
+		return fmt.Errorf("read assigned issue before claim renewal: task %s not found", taskID)
+	}
+	if !strings.EqualFold(strings.TrimSpace(issue.Status), "in_progress") {
+		return nil
+	}
 	return actorBackend.ClaimIssueAsActor(ctx, taskID, 0, ap.Entry.Worktree)
 }

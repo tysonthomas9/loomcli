@@ -134,20 +134,25 @@ func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts,
 }
 
 // reserveIssuesForDedicatedRoles prevents a broad planner from racing a
-// configured bug-triage worker for a fresh Bug. Once triage adds the fixed
-// "triaged" marker, the reservation ends and human approval can hand the Bug
-// into the normal Planner -> Coder path. This keeps the legacy daemon templates
-// composable instead of making whichever 30-second poll fires first define the
-// workflow.
+// configured bug-triage worker for a fresh Bug. A triaged Bug remains reserved
+// while it is in Review; human approval moves it back to Open before Planner
+// can claim it into the normal Planner -> Coder path. This keeps the legacy
+// daemon templates composable instead of making whichever 30-second poll fires
+// first define the workflow.
 func (s *Supervisor) reserveIssuesForDedicatedRoles(ap *AgentProcess, issues []backend.IssueData, constraints cli.RoleConstraints) []backend.IssueData {
 	if strings.TrimSpace(constraints.TaskFilter) != "needs_plan" || len(issues) == 0 {
 		return issues
 	}
 	out := make([]backend.IssueData, 0, len(issues))
 	for _, issue := range issues {
-		if strings.EqualFold(strings.TrimSpace(issue.IssueType), "bug") &&
-			!issueHasLabel(issue, "triaged") && s.hasDedicatedBugAgent(ap, issue.SourceRepo) {
-			continue
+		if strings.EqualFold(strings.TrimSpace(issue.IssueType), "bug") {
+			triaged := issueHasLabel(issue, "triaged")
+			if triaged && strings.EqualFold(strings.TrimSpace(issue.Status), "review") {
+				continue
+			}
+			if !triaged && s.hasDedicatedBugAgent(ap, issue.SourceRepo) {
+				continue
+			}
 		}
 		out = append(out, issue)
 	}

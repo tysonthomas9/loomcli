@@ -102,6 +102,30 @@ func TestClaimTask_PlannerAcceptsTriagedBug(t *testing.T) {
 	}
 }
 
+func TestClaimTask_PlannerWaitsForApprovalOnTriagedReviewBug(t *testing.T) {
+	mock := clitest.NewMockIssueBackend()
+	mock.ReadyResult = []backend.IssueData{
+		{ID: "BUG-1", IssueType: "bug", Status: "review", Priority: 0, SourceRepo: "repo-1", Labels: []string{"triaged"}},
+		{ID: "TASK-1", IssueType: "task", Status: "open", Priority: 2, SourceRepo: "repo-1"},
+	}
+	planner := &AgentProcess{
+		Entry:      cfgpkg.AgentEntry{Worktree: "planner", Role: "plan", Repos: []string{"repo-1"}},
+		RoleConfig: cfgpkg.RoleConfig{TaskFilter: "needs_plan"},
+	}
+	s := &Supervisor{
+		IssueBackend: mock,
+		Repos:        []cfgpkg.RepoConfig{{Name: "repo-1", SourceRepoID: "repo-1"}},
+		Agents:       []*AgentProcess{planner},
+	}
+
+	if !s.claimTask(planner, "") {
+		t.Fatal("planner did not claim the non-bug fallback")
+	}
+	if planner.AssignedTaskID != "TASK-1" {
+		t.Fatalf("planner claimed %q, want TASK-1; triaged Review Bug requires human approval", planner.AssignedTaskID)
+	}
+}
+
 func TestClaimTask_PlannerReservesRepoLessBugForRepoScopedTriageAgent(t *testing.T) {
 	mock := clitest.NewMockIssueBackend()
 	mock.ReadyResult = []backend.IssueData{
