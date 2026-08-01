@@ -733,7 +733,9 @@ func validateAgentOwnershipLeaseEnvelope(lease domain.AgentOwnershipLease, token
 		return fmt.Errorf("fleetdb: agent ownership lease acquire response workspace %q does not match %q", lease.WorkspaceKey, in.WorkspaceKey)
 	case lease.AgentID != in.AgentID:
 		return fmt.Errorf("fleetdb: agent ownership lease acquire response agent %q does not match %q", lease.AgentID, in.AgentID)
-	case lease.LeaseID != in.LeaseID:
+	case lease.LeaseID == "":
+		return errors.New("fleetdb: agent ownership lease acquire response omitted lease id")
+	case in.LeaseID != "" && lease.LeaseID != in.LeaseID:
 		return fmt.Errorf("fleetdb: agent ownership lease acquire response lease %q does not match %q", lease.LeaseID, in.LeaseID)
 	case lease.OwnerID != in.OwnerID:
 		return fmt.Errorf("fleetdb: agent ownership lease acquire response owner %q does not match %q", lease.OwnerID, in.OwnerID)

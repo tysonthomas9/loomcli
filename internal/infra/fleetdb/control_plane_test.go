@@ -423,6 +423,32 @@ func TestControlPlaneClientAgentOwnershipLeaseAcquireDecodesOneTimeTokenEnvelope
 	}
 }
 
+func TestValidateAgentOwnershipLeaseEnvelopeAcceptsOnlyNonEmptyServerGeneratedLeaseID(t *testing.T) {
+	in := store.AgentOwnershipLeaseAcquire{
+		WorkspaceKey: "WS", AgentID: "agent-1", OwnerID: "runtime-1",
+		RuntimeProvider: domain.RuntimeProviderLocal, NodeID: "node-1",
+	}
+	lease := domain.AgentOwnershipLease{
+		WorkspaceKey: in.WorkspaceKey, AgentID: in.AgentID, LeaseID: "ol-generated",
+		OwnerID: in.OwnerID, RuntimeProvider: in.RuntimeProvider, NodeID: in.NodeID,
+		FencingToken: 1,
+	}
+	if err := validateAgentOwnershipLeaseEnvelope(lease, "one-time-token", in); err != nil {
+		t.Fatalf("server-generated lease id rejected: %v", err)
+	}
+	lease.LeaseID = ""
+	if err := validateAgentOwnershipLeaseEnvelope(lease, "one-time-token", in); err == nil ||
+		!strings.Contains(err.Error(), "omitted lease id") {
+		t.Fatalf("empty server-generated lease id error = %v", err)
+	}
+	lease.LeaseID = "different"
+	in.LeaseID = "requested"
+	if err := validateAgentOwnershipLeaseEnvelope(lease, "one-time-token", in); err == nil ||
+		!strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched requested lease id error = %v", err)
+	}
+}
+
 func TestControlPlaneClientOwnedAgentOwnershipLifecycleSendsCompleteProof(t *testing.T) {
 	now := time.Now().UTC()
 	proof := store.AgentOwnershipLeaseProof{
