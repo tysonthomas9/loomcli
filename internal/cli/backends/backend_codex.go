@@ -41,6 +41,7 @@ var codexNonInteractiveInvoker func(workDir, prompt, agentName string, shutdown 
 func buildCodexInteractiveCmd(workDir, prompt, agentName string) *exec.Cmd {
 	args := []string{"--no-alt-screen", "--dangerously-bypass-approvals-and-sandbox"}
 	args = appendCodexEffortArgs(args, resolveAgentEffort())
+	args = appendCodexModelArgs(args, resolveAgentModel())
 	args = append(args, prompt)
 	cmd := exec.Command("codex", args...)
 	cmd.Dir = workDir
@@ -84,7 +85,7 @@ func defaultCodexNonInteractiveInvoker(workDir, prompt, agentName string, shutdo
 	effort := resolveAgentEffort()
 	return runHarness(context.Background(), shutdown, harnessInvocation{
 		BinaryName:  "codex",
-		Args:        appendCodexEffortArgs(buildCodexNonInteractiveArgs(prompt), effort),
+		Args:        appendCodexModelArgs(appendCodexEffortArgs(buildCodexNonInteractiveArgs(prompt), effort), resolveAgentModel()),
 		WorkDir:     workDir,
 		Env:         buildBackendEnv(workDir, agentName),
 		Prompt:      "",
