@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: accb1fa60a8a546b8952368d52d5cee85bdf00ee
+source_head: 232ca1da3fa9e5c81bfac1bf60bf32ce36c60581
 adapter_roots:
   - internal/app
   - internal/cli
@@ -1259,6 +1259,12 @@ writes:
     method: UpdateInteractionTerminal
     count: 1
     aggregate_owner: interaction
+    expires_after_phase: 7
+  - file: internal/app/serve/interactioncomposition/interaction_transcript.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store
+    method: UploadContentArtifact
+    count: 1
+    aggregate_owner: artifacts
     expires_after_phase: 7
   - file: internal/app/serve/sourcecontrolcomposition/connectors_fleetdb.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.ConnectorGrantStore

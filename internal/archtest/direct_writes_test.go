@@ -14,15 +14,15 @@ func TestCheckedInDirectWriteInventoryStrictCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(inventory.Writes) != 255 {
-		t.Fatalf("direct-write rows = %d, want strict Phase 5 baseline of 255", len(inventory.Writes))
+	if len(inventory.Writes) != 256 {
+		t.Fatalf("direct-write rows = %d, want strict Phase 5 baseline of 256", len(inventory.Writes))
 	}
 	totalSites := 0
 	for _, use := range inventory.Writes {
 		totalSites += use.Count
 	}
-	if totalSites != 262 {
-		t.Fatalf("direct-write sites = %d, want strict Phase 5 baseline of 262", totalSites)
+	if totalSites != 263 {
+		t.Fatalf("direct-write sites = %d, want strict Phase 5 baseline of 263", totalSites)
 	}
 }
 
