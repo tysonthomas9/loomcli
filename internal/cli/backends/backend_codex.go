@@ -115,12 +115,94 @@ func buildCodexNonInteractiveArgs(prompt string) []string {
 // buildBackendEnv constructs the standard environment for backend subprocess invocations.
 func buildBackendEnv(workDir, agentName string) []string {
 	env := appendLoomExecutableDirToPath(cli.FilteredEnv())
+	env = preserveSupervisorShellPin(env)
 	env = append(env, "LOOM_WORKTREE_PATH="+workDir)
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
 	env = append(env, activeSessionEnvVars()...)
 	return env
+}
+
+// preserveSupervisorShellPin carries the daemon's trusted shell-startup pin
+// across FilteredEnv. The filter intentionally drops generic shell-startup
+// variables, but the supervisor uses them to keep Codex login-shell commands
+// on the exact Loom binary that launched the worker. Only accept the pin when
+// LOOM_CLI_BIN is the current executable and the startup files are contained
+// by ZDOTDIR; arbitrary parent shell hooks remain filtered out.
+func preserveSupervisorShellPin(env []string) []string {
+	env = removeBackendEnvValues(env, "LOOM_CLI_BIN", "ZDOTDIR", "BASH_ENV", "ENV")
+	pinnedExecutable := strings.TrimSpace(os.Getenv("LOOM_CLI_BIN"))
+	currentExecutable, err := os.Executable()
+	if err != nil || !sameExecutable(pinnedExecutable, currentExecutable) {
+		return env
+	}
+
+	shellHome := strings.TrimSpace(os.Getenv("ZDOTDIR"))
+	if shellHome == "" || !filepath.IsAbs(shellHome) {
+		return env
+	}
+	shellHome = filepath.Clean(shellHome)
+	if info, statErr := os.Stat(shellHome); statErr != nil || !info.IsDir() {
+		return env
+	}
+
+	env = replaceBackendEnvValue(env, "LOOM_CLI_BIN", filepath.Clean(pinnedExecutable))
+	env = replaceBackendEnvValue(env, "ZDOTDIR", shellHome)
+	for _, name := range []string{"BASH_ENV", "ENV"} {
+		startupPath := strings.TrimSpace(os.Getenv(name))
+		if startupPath == "" || filepath.Dir(filepath.Clean(startupPath)) != shellHome {
+			continue
+		}
+		if info, statErr := os.Stat(startupPath); statErr == nil && !info.IsDir() {
+			env = replaceBackendEnvValue(env, name, filepath.Clean(startupPath))
+		}
+	}
+	return env
+}
+
+func removeBackendEnvValues(env []string, names ...string) []string {
+	prefixes := make([]string, 0, len(names))
+	for _, name := range names {
+		prefixes = append(prefixes, name+"=")
+	}
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		remove := false
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(entry, prefix) {
+				remove = true
+				break
+			}
+		}
+		if !remove {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func sameExecutable(left, right string) bool {
+	if left == "" || right == "" {
+		return false
+	}
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	if leftErr == nil && rightErr == nil {
+		return os.SameFile(leftInfo, rightInfo)
+	}
+	return filepath.Clean(left) == filepath.Clean(right)
+}
+
+func replaceBackendEnvValue(env []string, name, value string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return append(out, prefix+value)
 }
 
 func appendLoomExecutableDirToPath(env []string) []string {

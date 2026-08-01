@@ -3,6 +3,7 @@ package backends
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -223,6 +224,68 @@ func TestBuildInteractiveCmd_EnvVars(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildCodexInteractiveCmd_PreservesTrustedSupervisorShellPin(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	shellHome := t.TempDir()
+	startupPath := filepath.Join(shellHome, "shell-env")
+	startup := "loom() { \"$LOOM_CLI_BIN\" \"$@\"; }\n"
+	if err := os.WriteFile(startupPath, []byte(startup), 0o600); err != nil {
+		t.Fatalf("write startup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(shellHome, ".zshenv"), []byte(startup), 0o600); err != nil {
+		t.Fatalf("write zsh startup: %v", err)
+	}
+
+	t.Setenv("LOOM_CLI_BIN", executable)
+	t.Setenv("ZDOTDIR", shellHome)
+	t.Setenv("BASH_ENV", startupPath)
+	t.Setenv("ENV", startupPath)
+
+	cmd := buildCodexInteractiveCmd("/tmp/work", "test prompt", "agent")
+	for name, want := range map[string]string{
+		"LOOM_CLI_BIN": executable,
+		"ZDOTDIR":      shellHome,
+		"BASH_ENV":     startupPath,
+		"ENV":          startupPath,
+	} {
+		if got, ok := envValue(cmd.Env, name); !ok || got != want {
+			t.Fatalf("%s = %q, %v; want %q", name, got, ok, want)
+		}
+	}
+
+	zsh, err := exec.LookPath("zsh")
+	if err != nil {
+		t.Skip("zsh is unavailable")
+	}
+	loginShell := exec.Command(zsh, "-lc", "whence -w loom") //nolint:gosec // fixed regression probe
+	loginShell.Env = cmd.Env
+	output, err := loginShell.CombinedOutput()
+	if err != nil {
+		t.Fatalf("login shell probe failed: %v: %s", err, output)
+	}
+	if got := strings.TrimSpace(string(output)); got != "loom: function" {
+		t.Fatalf("login shell resolved %q, want controlled loom function", got)
+	}
+}
+
+func TestBuildCodexInteractiveCmd_RejectsUntrustedSupervisorShellPin(t *testing.T) {
+	shellHome := t.TempDir()
+	t.Setenv("LOOM_CLI_BIN", filepath.Join(shellHome, "different-loom"))
+	t.Setenv("ZDOTDIR", shellHome)
+	t.Setenv("BASH_ENV", filepath.Join(shellHome, "shell-env"))
+	t.Setenv("ENV", filepath.Join(shellHome, "shell-env"))
+
+	cmd := buildCodexInteractiveCmd("/tmp/work", "test prompt", "agent")
+	for _, name := range []string{"LOOM_CLI_BIN", "ZDOTDIR", "BASH_ENV", "ENV"} {
+		if envHasKey(cmd.Env, name) {
+			t.Fatalf("untrusted %s unexpectedly reached Codex", name)
+		}
 	}
 }
 
