@@ -432,6 +432,17 @@ func (b *fleetDBIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, 
 	})
 }
 
+func (b *fleetDBIssueBackend) RenewIssueClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	return b.withBackend(ctx, "RenewIssueClaim", func(ib backend.IssueBackend) error {
+		if actorBackend, ok := ib.(interface {
+			RenewIssueClaimAsActor(context.Context, string, time.Duration, string) error
+		}); ok {
+			return actorBackend.RenewIssueClaimAsActor(ctx, id, lockTTL, actor)
+		}
+		return fmt.Errorf("renew issue claim: backend does not support renewal-only claims")
+	})
+}
+
 func (b *fleetDBIssueBackend) ReleaseIssueLock(ctx context.Context, id, actor string) error {
 	return b.withBackend(ctx, "ReleaseIssueLock", func(ib backend.IssueBackend) error {
 		return ib.ReleaseIssueLock(ctx, id, actor)

@@ -1013,7 +1013,10 @@ paths:
       description: |
         Atomically acquires a lock on the issue for the actor. Transitions
         the issue to in_progress status and sets the assignee. Returns 409 while
-        a typed TaskRun claim generation is active.
+        a typed TaskRun claim generation is active. With renew_only, refreshes
+        the operational claim without changing status or assignee; if the issue
+        has already left in_progress, the lock is released and current state is
+        returned.
       operationId: claimIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
@@ -10961,6 +10964,10 @@ components:
           type: integer
           description: Lock TTL in seconds. Defaults to 300.
           default: 300
+        renew_only:
+          type: boolean
+          description: Refresh an existing claim without changing issue status or assignee.
+          default: false
 
     LockHolderResponse:
       type: object

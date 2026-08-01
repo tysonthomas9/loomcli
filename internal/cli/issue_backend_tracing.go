@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -252,6 +253,23 @@ func (t *tracedIssueBackend) ClaimIssueAsActor(ctx context.Context, id string, l
 		return err
 	}
 	err := t.inner.ClaimIssue(ctx, id, lockTTL)
+	endSpan(span, err)
+	return err
+}
+
+func (t *tracedIssueBackend) RenewIssueClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	ctx, span := t.startSpan(ctx, "RenewIssueClaimAsActor",
+		attribute.String("loom.task_id", id),
+		attribute.Int64("lock_ttl_ms", lockTTL.Milliseconds()),
+	)
+	if actorBackend, ok := t.inner.(interface {
+		RenewIssueClaimAsActor(context.Context, string, time.Duration, string) error
+	}); ok {
+		err := actorBackend.RenewIssueClaimAsActor(ctx, id, lockTTL, actor)
+		endSpan(span, err)
+		return err
+	}
+	err := fmt.Errorf("renew issue claim: backend does not support renewal-only claims")
 	endSpan(span, err)
 	return err
 }

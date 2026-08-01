@@ -27,6 +27,22 @@ func (b *FleetBackend) ClaimIssueAsActor(ctx context.Context, id string, lockTTL
 	return b.execAsActor(ctx, "ClaimIssue", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
 }
 
+// RenewIssueClaimAsActor refreshes the actor's existing issue claim without
+// allowing the heartbeat to change issue status or assignee.
+func (b *FleetBackend) RenewIssueClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error {
+	if id == "" {
+		return backend.ErrValidation("RenewIssueClaim", "id must not be empty")
+	}
+	if actor == "" {
+		return backend.ErrValidation("RenewIssueClaim", "actor must not be empty")
+	}
+	body, err := renewIssueClaimBody(lockTTL)
+	if err != nil {
+		return err
+	}
+	return b.execAsActor(ctx, "RenewIssueClaim", "/issues/"+url.PathEscape(id)+"/claim", body, actor)
+}
+
 // ReleaseIssueLock releases only the operational lock on the issue without
 // changing its status or assignee. Idempotent: a missing lock returns nil.
 // Returns KindConflict if the lock is held by a different actor.
@@ -71,4 +87,18 @@ func claimIssueBody(lockTTL time.Duration) (interface{}, error) {
 	return struct {
 		LockTTL int `json:"lock_ttl"`
 	}{LockTTL: seconds}, nil
+}
+
+func renewIssueClaimBody(lockTTL time.Duration) (interface{}, error) {
+	if lockTTL < 0 {
+		return nil, backend.ErrValidation("RenewIssueClaim", "lockTTL must not be negative")
+	}
+	seconds := 0
+	if lockTTL > 0 {
+		seconds = int((lockTTL + time.Second - time.Nanosecond) / time.Second)
+	}
+	return struct {
+		LockTTL   int  `json:"lock_ttl,omitempty"`
+		RenewOnly bool `json:"renew_only"`
+	}{LockTTL: seconds, RenewOnly: true}, nil
 }

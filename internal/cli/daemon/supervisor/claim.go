@@ -25,6 +25,13 @@ type actorClaimBackend interface {
 	ClaimIssueAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
 }
 
+// actorClaimRenewBackend is the heartbeat-only claim API. Unlike a normal
+// claim it cannot transition workflow state, so a late heartbeat cannot move
+// a Review task back to In Progress.
+type actorClaimRenewBackend interface {
+	RenewIssueClaimAsActor(ctx context.Context, id string, lockTTL time.Duration, actor string) error
+}
+
 // actorReleaseBackend is the optional symmetric counterpart of
 // actorClaimBackend. Backends that support this method allow the supervisor
 // to release the claim lock on a task when the agent that holds it exits,

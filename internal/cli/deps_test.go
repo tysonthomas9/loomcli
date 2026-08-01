@@ -792,6 +792,13 @@ func TestFleetDBIssueBackend_FailsClosedWhenStoreUnavailable(t *testing.T) {
 		t.Fatal("fleetDBIssueBackend does not implement ClaimIssueAsActor")
 	}
 	assertUnavailable("ClaimIssueAsActor", actorBackend.ClaimIssueAsActor(ctx, "T-1", time.Minute, "agent"))
+	renewBackend, ok := ib.(interface {
+		RenewIssueClaimAsActor(context.Context, string, time.Duration, string) error
+	})
+	if !ok {
+		t.Fatal("fleetDBIssueBackend does not implement RenewIssueClaimAsActor")
+	}
+	assertUnavailable("RenewIssueClaimAsActor", renewBackend.RenewIssueClaimAsActor(ctx, "T-1", time.Minute, "agent"))
 	assertUnavailable("DeferIssue", ib.DeferIssue(ctx, "T-1", time.Now()))
 	assertUnavailable("UndeferIssue", ib.UndeferIssue(ctx, "T-1"))
 	_, err = ib.Close(ctx, "T-1", backend.CloseParams{})

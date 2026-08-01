@@ -990,6 +990,32 @@ func TestClaimIssueAsActor_OverridesActorHeader(t *testing.T) {
 	}
 }
 
+func TestRenewIssueClaimAsActor_SendsRenewOnly(t *testing.T) {
+	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {
+			t.Errorf("unexpected: %s %s", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("X-Actor"); got != "desktopqa" {
+			t.Fatalf("X-Actor = %q, want desktopqa", got)
+		}
+		var body struct {
+			RenewOnly bool `json:"renew_only"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if !body.RenewOnly {
+			t.Error("renew_only = false, want true")
+		}
+		respondOK(w, json.RawMessage(`{}`))
+	})
+	defer ts.Close()
+
+	if err := fb.RenewIssueClaimAsActor(context.Background(), "test-1", 0, "desktopqa"); err != nil {
+		t.Fatalf("RenewIssueClaimAsActor: %v", err)
+	}
+}
+
 func TestClaimIssue_ForwardsLockTTL(t *testing.T) {
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/issues/test-1/claim") {

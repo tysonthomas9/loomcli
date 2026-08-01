@@ -263,7 +263,7 @@ func TestBuildCodexInteractiveCmd_PreservesTrustedSupervisorShellPin(t *testing.
 	if err != nil {
 		t.Skip("zsh is unavailable")
 	}
-	loginShell := exec.Command(zsh, "-lc", "whence -w loom") //nolint:gosec // fixed regression probe
+	loginShell := exec.Command(zsh, "-lc", "whence -w loom") //nolint:norawexec,gosec // fixed regression probe
 	loginShell.Env = cmd.Env
 	output, err := loginShell.CombinedOutput()
 	if err != nil {
