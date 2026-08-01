@@ -509,7 +509,10 @@ func TestSessionServiceAgentSessionTranscriptUsesAgentOwnership(t *testing.T) {
 		AgentID:      "local-review",
 		Kind:         domain.AgentSessionKindOrchestration,
 		Status:       domain.AgentSessionCompleted,
-		Metadata:     map[string]string{"transcript_ref": "artifact://" + finalized.ArtifactID},
+		// Fleet's interaction transcript command stores the canonical artifact
+		// ID directly. The reader also retains artifact:// compatibility for
+		// transcripts persisted by older writers.
+		Metadata: map[string]string{"transcript_ref": finalized.ArtifactID},
 	}); err != nil {
 		t.Fatalf("create interactive agent session: %v", err)
 	}

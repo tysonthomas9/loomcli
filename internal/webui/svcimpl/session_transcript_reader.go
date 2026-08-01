@@ -151,11 +151,10 @@ func (s *sessionServiceImpl) readOwnedAgentTranscriptArtifact(
 	rec *domain.AgentSession,
 	ref string,
 ) ([]byte, error) {
-	ref = strings.TrimSpace(ref)
-	if rec == nil || !strings.HasPrefix(ref, "artifact://") {
+	artifactID, ok := transcriptArtifactID(ref)
+	if rec == nil || !ok {
 		return nil, domain.ErrNotFound
 	}
-	artifactID := strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
 	if artifactID == "" || s.store == nil || s.store.Artifacts() == nil {
 		return nil, domain.ErrNotFound
 	}
@@ -190,11 +189,10 @@ func (s *sessionServiceImpl) readOwnedTaskSessionTranscriptArtifact(
 	rec *domain.AgentSession,
 	ref string,
 ) ([]byte, error) {
-	ref = strings.TrimSpace(ref)
-	if rec == nil || !strings.HasPrefix(ref, "artifact://") {
+	artifactID, ok := transcriptArtifactID(ref)
+	if rec == nil || !ok {
 		return nil, domain.ErrNotFound
 	}
-	artifactID := strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
 	if artifactID == "" || s.store == nil || s.store.Artifacts() == nil {
 		return nil, domain.ErrNotFound
 	}
@@ -207,6 +205,25 @@ func (s *sessionServiceImpl) readOwnedTaskSessionTranscriptArtifact(
 		return nil, domain.ErrNotFound
 	}
 	return s.readManagedArtifactContent(ctx, wsID, artifactID)
+}
+
+// transcriptArtifactID accepts both the raw artifact ID written by Fleet's
+// interaction transcript command and the artifact:// reference emitted by
+// older session writers. Other URI schemes remain invalid. Artifact ownership
+// and finalization are validated by the caller before any content is read.
+func transcriptArtifactID(ref string) (string, bool) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", false
+	}
+	if strings.HasPrefix(ref, "artifact://") {
+		artifactID := strings.TrimSpace(strings.TrimPrefix(ref, "artifact://"))
+		return artifactID, artifactID != ""
+	}
+	if strings.Contains(ref, "://") {
+		return "", false
+	}
+	return ref, true
 }
 
 func taskSessionTranscriptArtifactMatches(
