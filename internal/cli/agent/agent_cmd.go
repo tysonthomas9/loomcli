@@ -282,8 +282,18 @@ func makeCustomPromptGen(promptFile string) func(string, *config.WorkspaceConfig
 			if readErr != nil {
 				return fmt.Sprintf("Error: could not load prompt file %s: %v", promptFile, err)
 			}
-			return string(content)
+			return withReadOnlyPreamble(string(content))
 		}
-		return prompt
+		return withReadOnlyPreamble(prompt)
 	}
+}
+
+// withReadOnlyPreamble prepends the read-only notice for read_only roles —
+// the soft companion to the backend-level tool denial, so the model explains
+// rather than fights denied writes.
+func withReadOnlyPreamble(prompt string) string {
+	if preamble := ReadOnlyPreamble(); preamble != "" {
+		return preamble + "\n\n" + prompt
+	}
+	return prompt
 }
