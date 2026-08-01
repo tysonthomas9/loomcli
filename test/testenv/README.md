@@ -61,6 +61,5 @@ backend to point a test at.
 fleet-db is built from the sibling checkout (`../../../fleet-db`), matching the
 other stacks, so a local fleet-db change is testable before it is pushed.
 
-Modelled on orche's `fleet-db.docker-compose.yml` + `scripts/fleet-db-docker.sh`,
-which pair a dockerized backend on a dedicated port with a dedicated
-`ORCHE-TEST` workspace.
+The shape is deliberate: a dockerized backend on a dedicated port paired with a
+dedicated throwaway workspace, so tests never share state with a live stack.
