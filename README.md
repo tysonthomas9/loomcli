@@ -262,6 +262,9 @@ workspaces:
 
 See [API Reference](docs/api.md) for the WebUI HTTP API.
 
+See the [Glossary](docs/glossary.md) for canonical definitions of loom's
+domain vocabulary (agent, worktree, workspace, epic, daemon, fleet, …).
+
 ## Development
 
 ```bash
