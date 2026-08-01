@@ -1,6 +1,6 @@
 # Long-running Orchestrators and Ephemeral Workers — PRD
 
-**Status:** Draft
+**Status:** Historical draft; superseded for Phase 5 command and ownership semantics
 **Date:** 2026-05-07
 **Owner:** Tyson
 **Related:**
@@ -10,6 +10,13 @@
 - `docs/product/daemon-agent-runtime-architecture.md`
 - `docs/design/distributed-control-plane.md`
 - Aether Orchestrator Wireframes (external design ref)
+
+> **Phase 5 note:** Keep this document as product-history context, not current
+> CLI guidance. `agentdef` now owns durable Agent identity/lifecycle only.
+> Task launch belongs to Execution, orchestrator/session attribution belongs to
+> Interaction, and repository/parent-epic scheduling scope belongs to
+> WorkerProfile. See
+> `docs/migrations/modular-monolith/11-phase-5-decisions-and-evidence.md`.
 
 ---
 
@@ -1590,7 +1597,7 @@ finally mean something) even without the UI.
 | Primitive | Path | What we reuse |
 |---|---|---|
 | `loom lead` | `internal/cli/agent/lead.go` | The orchestrator chat itself |
-| `loom agentdef add/rm` | `internal/cli/agentdef/agentdef_cmd.go` | Spawn/despawn primitive — already supports `--mode ephemeral`, `--parent` |
+| `loom agentdef add/remove` | `internal/cli/agentdef/agentdef_cmd.go` | Historical spawn/despawn primitive; Phase 5 retains identity/lifecycle only and moves parent scope to WorkerProfile |
 | Daemon reconciler | `internal/cli/daemon/daemon_reconciler.go` | Picks up new agentdefs in 30 s — works as-is |
 | Per-agent supervisor goroutine | `internal/cli/daemon/supervisor/supervisor.go` | One restart-loop branch added; rest unchanged |
 | `AgentSession.Kind = orchestration` | `internal/domain/control_plane.go:60` | First real consumer |

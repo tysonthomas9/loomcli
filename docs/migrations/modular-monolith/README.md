@@ -1,10 +1,11 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 4 and its reliability hardening are implemented; refreshed
-  packaged Desktop and Podman/raw-browser product journeys pass at Loom
-  `67c45972f` with FleetDB `9ffa69f60`; the exact-head architecture checks and
-  aggregate Loom gate pass; Phase 5 has not started
-- **Date:** 2026-07-21
+- **Status:** Phase 5 source ownership is complete and the checked-in graph is
+  ratcheted to `completed_phase: 5`; the exact Loom and FleetDB gates pass.
+  Twenty local packaged-Desktop real-Codex rows are accepted, four GitHub rows
+  remain authorization-fenced, and the repaired-package UI regression awaits
+  macOS unlock
+- **Date:** 2026-08-01
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
@@ -38,6 +39,8 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 | [08-phase-3-decisions-and-evidence.md](08-phase-3-decisions-and-evidence.md) | Which Automation boundary, durable admission/dispatch contracts, runtime components, and compatibility decisions define Phase 3? |
 | [09-phase-4-decisions-and-evidence.md](09-phase-4-decisions-and-evidence.md) | Which Execution and minimal Artifacts boundaries, replay classes, supervisor-disabled proof, and packaged Desktop evidence define Phase 4? |
 | [10-local-open-mode-authority-revision.md](10-local-open-mode-authority-revision.md) | How does local open mode work without operator credential ceremony while OIDC remains authoritative for shared deployments? |
+| [11-phase-5-decisions-and-evidence.md](11-phase-5-decisions-and-evidence.md) | Which Phase 5 seams and ownership invariants are complete, and which exact-head acceptance proofs remain? |
+| [12-phase-5-real-codex-proof.md](12-phase-5-real-codex-proof.md) | What exact packaged-Desktop, 24-execution real-Codex matrix must close Phase 5 acceptance? |
 
 ## Scope boundaries
 
@@ -54,7 +57,7 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 
 The migration does **not** introduce microservices, multiple `go.mod` files, feature npm packages, microfrontends, or a generic in-process event bus.
 
-## Phase 0 through current Phase 4 status
+## Phase 0 through current Phase 5 status
 
 The required base integration is complete and its validated code heads are pushed. The Phase 1 branch starts from Loom `122d4d79`, where `origin/v5` at `95e97289` is an ancestor; companion FleetDB is `8120c788`. The original divergence counts, semantic conflict ledger, gate results, and local-mode proof remain frozen in the [Phase 0 baseline](00-phase-0-baseline.md), while the machine-readable baseline records the refreshed heads and structural ratchets.
 
@@ -86,8 +89,43 @@ packaged Desktop at Loom `53cbe2577` completed a real GPT-5.6 Terra
 planner/coder journey and the unavailable-backend fail-closed journey, after
 which Codex was restored as the project default. The immutable final validation
 snapshot records those results at Loom `53cbe2577` and FleetDB `afb688768`.
-Physical supervisor deletion remains Phase 6 work, and Phase 5 has not started.
-See the [Phase 4 record](09-phase-4-decisions-and-evidence.md).
+Physical supervisor deletion remains Phase 6 work. At that immutable
+validation snapshot, Phase 5 had not started. See the
+[Phase 4 record](09-phase-4-decisions-and-evidence.md).
+
+Phase 5 source ownership is complete. Agents, Interaction, minimal Source
+Control and Connectors, durable AgentProvisioning, and Workflow Catalog
+authoring seams are active. The all-`internal` Interaction sole-writer scan now
+finds zero direct `AgentSession`, `TerminalSession`, `AgentLease`, or inbox
+mutation sites outside Interaction and persistence adapters, and the graph is
+ratcheted to `completed_phase: 5`. The Interaction inbox delivery adapter
+receives only a narrow enqueuer and derives a fresh, registered
+`serve-interaction-inbox-delivery` system authority for the exact enqueue; it
+never receives the issuer. Inbox retry completion is bound to the exact claimed
+attempt, so a delayed completion cannot clear a successor claim. The
+typed 11-profile direct-write inventory now records 260 rows across 269 sites.
+The increase is classifier coverage from moving FleetDB transport interfaces
+into owner-specific packages; it exposes previously latent, type-resolved calls
+rather than adding persistence behavior. The inventory includes the
+owner-private Agents prompt-repair primitive.
+The exact structural ratchets now record 78 composite-Store files, 66 outside
+composition, and 87 legacy handler-import exceptions. The remaining
+composition-edge adapters are explicit transitional bridges; the owner modules
+do not receive the composite Store.
+It includes the three remaining mixed `internal/driver` rows in the primary
+scan, with their Phase 6 expiry preserved; the former Interaction-owned driver
+rows are gone. The exact runtime ledger now names 90 components, 61 of
+them managed, after adding separately scheduled Workspace
+repository-admission restart recovery and lease renewal without changing the
+54 ticker definitions. Recording the bounded Phase 5 ownership-analysis
+worker plus the guarded repository-admission materialization watchdog and
+renewal worker brings the exact all-source goroutine-launch ledger to 105. The
+[Phase 5 record](11-phase-5-decisions-and-evidence.md) separates this
+source-level closure from the partially complete packaged Desktop proof. The
+FleetDB container gate is green; the repaired-package UI regression and four
+GitHub-backed rows remain outside the accepted local matrix. The exact
+24-execution acceptance matrix is recorded
+in the [real-Codex proof record](12-phase-5-real-codex-proof.md).
 
 The current reliability closeout is committed through Loom `67c45972f` with
 FleetDB `9ffa69f60`. Core hardening at `ee971be22` adds healthy-parent,
@@ -131,4 +169,4 @@ historical Phase 1 through Phase 4 evidence remains immutable.
 
 ---
 
-[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 4 evidence](09-phase-4-decisions-and-evidence.md)
+[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 5 evidence](11-phase-5-decisions-and-evidence.md)

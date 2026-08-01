@@ -36,10 +36,10 @@ real/live path is blocked, report blocked/unverified — never fabricate state. 
 
 ## Generated Workflow Bundles
 
-Do not commit `internal/workflows/builtin-dist/` or other generated Flue bundle
+Do not commit `internal/infra/workflowdistribution/builtin-dist/` or other generated Flue bundle
 output. Build bundles locally when needed for verification, but keep generated
 artifacts out of git and change the workflow source under
-`internal/workflows/builtin/` instead.
+`internal/infra/workflowdistribution/builtin/` instead.
 
 ## Local Gate Environment
 

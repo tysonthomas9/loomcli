@@ -1,6 +1,7 @@
 # Target Architecture and Capability Boundaries
 
-- **Status:** Target reviewed and approved; the Phase 4 architecture slice is complete, with paired full gates and exact packaged-Desktop positive, fail-closed, and restart-persistence proof at Loom `f0011b248` with FleetDB `de89f0544`; Phase 5 has not started
+- **Status:** Target reviewed and approved through Phase 5; the Interaction
+  sole-writer ratchet is zero and the graph is at `completed_phase: 5`
 - **Scope:** In-process ownership and dependencies inside `loom serve`, operator CLI transport behavior, and corresponding frontend feature boundaries
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -33,7 +34,7 @@ Activity, history, usage, and observability are read projections—not another w
 | Driver, DriverVersion, trust state | Workflow Catalog | Automation resolves an activated version through the catalog API |
 | TriggerBinding, Event, Delivery | Automation | Webhooks enter only Automation ingestion |
 | DriverRun, DriverStep, TaskRun, TaskRunEvent, Node/Worker/WorkerProfile, run Lease, Await | Execution | Automation requests execution and consumes durable outcomes; Execution never imports Automation |
-| AgentSession, TerminalSession, AgentLease, inbox, current lead-delivery Outbox | Interaction | Session records remain distinct from batch execution records; NodeID is an opaque placement reference |
+| AgentSession, TerminalSession, AgentLease, inbox, current lead-delivery Outbox | Interaction | Session records remain distinct from batch execution records; NodeID is an opaque placement reference. Delivery callers receive only a narrow `InboxEnqueuer`; the registered `serve-interaction-inbox-delivery` component derives one exact system authority per enqueue without exposing the issuer |
 | Worktree, stack lineage/publication state | Source Control | Workspace owns catalog/configuration; Source Control owns materialization mechanics |
 | Connector, Grant, secret/audit state | Connectors | Callers request granted actions; plaintext credentials never cross the public API |
 | Artifact | Artifacts | Execution/Interaction use the Artifacts `Create`, `Upload`, `Finalize`, `Reference`, `Get`, `List`, or composed `CreateContent` surface and retain references; neither writes Artifact storage directly |
