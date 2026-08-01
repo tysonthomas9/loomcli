@@ -28,6 +28,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -72,7 +73,7 @@ const termEnv = "TERM=xterm-256color"
 const workspaceEnvPrefix = "LOOM_WORKSPACE="
 
 func terminalSpawnEnv(base []string) []string {
-	filtered := interaction.FilterChildBaseEnv(base)
+	filtered := pinCurrentLoomOnPath(interaction.FilterChildBaseEnv(base))
 	env := make([]string, 0, len(filtered)+1)
 	for _, entry := range filtered {
 		switch {
@@ -85,6 +86,36 @@ func terminalSpawnEnv(base []string) []string {
 		}
 	}
 	return append(env, termEnv)
+}
+
+// pinCurrentLoomOnPath makes commands launched from an agent's AI shell use
+// the same Loom binary that started the terminal. Packaged Desktop launches
+// the outer agent with an absolute sidecar path, but the AI later invokes
+// plain `loom` commands from its shell. Without this pin an older user-global
+// binary can win PATH and speak an incompatible local FleetDB protocol.
+func pinCurrentLoomOnPath(env []string) []string {
+	executable := strings.TrimSpace(loomExecutableForTerminal())
+	if executable == "" || executable == "loom" || !filepath.IsAbs(executable) {
+		return env
+	}
+	executableDir := filepath.Clean(filepath.Dir(executable))
+	pathValue := ""
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if ok && name == "PATH" {
+			pathValue = value
+			continue
+		}
+		out = append(out, entry)
+	}
+	pathEntries := []string{executableDir}
+	for _, entry := range filepath.SplitList(pathValue) {
+		if filepath.Clean(entry) != executableDir {
+			pathEntries = append(pathEntries, entry)
+		}
+	}
+	return append(out, "PATH="+strings.Join(pathEntries, string(os.PathListSeparator)))
 }
 
 func terminalSessionEnv(base []string, key SessionKey) []string {

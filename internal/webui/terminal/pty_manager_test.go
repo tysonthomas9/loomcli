@@ -45,8 +45,14 @@ func TestNewPTYManager_CwdIsRespected(t *testing.T) {
 }
 
 func TestTerminalSpawnEnv_StripsStaleGeometryAndOverridesTERM(t *testing.T) {
+	oldExecutable := currentExecutable
+	currentExecutable = func() (string, error) {
+		return "/Applications/Loom Agents.app/Contents/MacOS/loom", nil
+	}
+	t.Cleanup(func() { currentExecutable = oldExecutable })
+
 	env := terminalSpawnEnv([]string{
-		"PATH=/usr/bin",
+		"PATH=/usr/bin:/Applications/Loom Agents.app/Contents/MacOS",
 		"COLUMNS=88",
 		"LINES=33",
 		"TERM=screen-256color",
@@ -66,9 +72,27 @@ func TestTerminalSpawnEnv_StripsStaleGeometryAndOverridesTERM(t *testing.T) {
 	if !strings.Contains(joined, termEnv) {
 		t.Fatalf("terminalSpawnEnv() missing %q: %q", termEnv, joined)
 	}
+	if !strings.Contains(joined, "PATH=/Applications/Loom Agents.app/Contents/MacOS:/usr/bin") {
+		t.Fatalf("terminalSpawnEnv() did not pin the current Loom binary first: %q", joined)
+	}
+}
+
+func TestPinCurrentLoomOnPathFallsBackWhenExecutableCannotBeResolved(t *testing.T) {
+	oldExecutable := currentExecutable
+	currentExecutable = func() (string, error) { return "", errors.New("boom") }
+	t.Cleanup(func() { currentExecutable = oldExecutable })
+
+	got := pinCurrentLoomOnPath([]string{"PATH=/usr/bin", "HOME=/tmp/home"})
+	if joined := strings.Join(got, "\n"); joined != "PATH=/usr/bin\nHOME=/tmp/home" {
+		t.Fatalf("pinCurrentLoomOnPath() = %q, want unchanged environment", joined)
+	}
 }
 
 func TestTerminalSpawnEnvFiltersAmbientCredentialsAndOverlayIsExact(t *testing.T) {
+	oldExecutable := currentExecutable
+	currentExecutable = func() (string, error) { return "/current/loom", nil }
+	t.Cleanup(func() { currentExecutable = oldExecutable })
+
 	env := terminalSpawnEnv([]string{
 		"PATH=/usr/bin",
 		"CODEX_HOME=/tmp/codex",
@@ -87,7 +111,7 @@ func TestTerminalSpawnEnvFiltersAmbientCredentialsAndOverlayIsExact(t *testing.T
 	})
 	joined := strings.Join(env, "\n")
 	for _, wanted := range []string{
-		"PATH=/usr/bin", "CODEX_HOME=/tmp/codex", "LOOM_AGENT_NAME=docs",
+		"PATH=/current:/usr/bin", "CODEX_HOME=/tmp/codex", "LOOM_AGENT_NAME=docs",
 		"LOOM_CONFIG_DIR=/trusted/loom-data",
 		"LOOM_SESSION_ID=session-1", "LOOM_SESSION_AUTH_TOKEN=session-secret",
 	} {
