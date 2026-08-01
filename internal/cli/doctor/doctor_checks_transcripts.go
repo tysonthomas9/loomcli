@@ -246,11 +246,12 @@ func earliestUnclaimed(candidates []transcriptCandidate, claimed map[string]bool
 	return best
 }
 
-// claudeProjectsRoot returns ~/.claude/projects, or "" if home is unavailable.
+// claudeProjectsRoot returns Claude Code's projects dir (honoring
+// CLAUDE_CONFIG_DIR), or "" if it cannot be resolved.
 func claudeProjectsRoot() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
+	root := sessions.ClaudeConfigDir()
+	if root == "" {
 		return ""
 	}
-	return filepath.Join(home, ".claude", "projects")
+	return filepath.Join(root, "projects")
 }
