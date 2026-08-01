@@ -26,6 +26,8 @@ const (
 	codexThreadDiscoveryInterval = 500 * time.Millisecond
 )
 
+var codexLeadCurrentExecutable = os.Executable
+
 type CodexLeadRuntimeConfig struct {
 	Store     store.Store
 	Runtime   SessionRuntime
@@ -251,7 +253,88 @@ func codexLeadChildEnv(runtimeHome string, baseEnv []string) ([]string, error) {
 	if err := linkCodexHomeFile(sourceHome, isolatedHome, "config.toml", false); err != nil {
 		return nil, err
 	}
-	return replaceEnvironmentValue(baseEnv, "CODEX_HOME", isolatedHome), nil
+	env := replaceEnvironmentValue(baseEnv, "CODEX_HOME", isolatedHome)
+	return pinCurrentLoomForCodexShell(runtimeHome, env)
+}
+
+// pinCurrentLoomForCodexShell keeps the AI's shell on the same Loom binary
+// that launched the controlled session. Codex may use a login shell for tool
+// commands, and user startup files can otherwise restore an older global Loom
+// after the parent process pins PATH. The private startup directory is loaded
+// by zsh, bash, and POSIX shells and the function binding remains authoritative
+// even if a later startup file rewrites PATH.
+func pinCurrentLoomForCodexShell(runtimeHome string, env []string) ([]string, error) {
+	executable, err := codexLeadCurrentExecutable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve controlled Loom executable: %w", err)
+	}
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return nil, errors.New("resolve controlled Loom executable: empty path")
+	}
+	if !filepath.IsAbs(executable) {
+		executable, err = filepath.Abs(executable)
+		if err != nil {
+			return nil, fmt.Errorf("resolve absolute controlled Loom executable: %w", err)
+		}
+	}
+	executable = filepath.Clean(executable)
+	executableDir := filepath.Dir(executable)
+
+	shellHome := filepath.Join(runtimeHome, "shell-home")
+	if err := os.MkdirAll(shellHome, 0700); err != nil {
+		return nil, fmt.Errorf("create controlled shell home: %w", err)
+	}
+	// #nosec G302 -- the startup files control executable selection and must be owner-only.
+	if err := os.Chmod(shellHome, 0700); err != nil {
+		return nil, fmt.Errorf("secure controlled shell home: %w", err)
+	}
+	startup := "export PATH=" + shellSingleQuote(executableDir) + ":\"${PATH:-}\"\n" +
+		"loom() { " + shellSingleQuote(executable) + " \"$@\"; }\n"
+	startupPath := filepath.Join(shellHome, "shell-env")
+	for _, path := range []string{
+		startupPath,
+		filepath.Join(shellHome, ".zshenv"),
+		filepath.Join(shellHome, ".zprofile"),
+	} {
+		// #nosec G306 -- these executable-selection files are intentionally owner-only.
+		if err := os.WriteFile(path, []byte(startup), 0600); err != nil {
+			return nil, fmt.Errorf("write controlled shell startup: %w", err)
+		}
+		if err := os.Chmod(path, 0600); err != nil {
+			return nil, fmt.Errorf("secure controlled shell startup: %w", err)
+		}
+	}
+
+	env = replaceEnvironmentValue(env, "PATH", prependPathEntry(environmentValue(env, "PATH"), executableDir))
+	env = replaceEnvironmentValue(env, "ZDOTDIR", shellHome)
+	env = replaceEnvironmentValue(env, "BASH_ENV", startupPath)
+	env = replaceEnvironmentValue(env, "ENV", startupPath)
+	return env, nil
+}
+
+func prependPathEntry(pathValue, entry string) string {
+	entries := []string{entry}
+	for _, candidate := range filepath.SplitList(pathValue) {
+		if filepath.Clean(candidate) != entry {
+			entries = append(entries, candidate)
+		}
+	}
+	return strings.Join(entries, string(os.PathListSeparator))
+}
+
+func environmentValue(env []string, name string) string {
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key == name {
+			return value
+		}
+	}
+	return ""
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func sourceCodexHome(baseEnv []string) (string, error) {
