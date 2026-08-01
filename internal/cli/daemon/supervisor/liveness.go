@@ -241,7 +241,8 @@ func (s *Supervisor) startWorkerHeartbeat(ap *AgentProcess) func() {
 // allowing tests to drive the heartbeat without real-time waits. It is a no-op
 // (returns a no-op stop) when the control plane is not wired.
 func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.Duration) func() {
-	if s.ControlStore == nil || s.WorkspaceID == "" || ap.Entry.Worktree == "" {
+	_, canRenewClaim := s.IssueBackend.(actorClaimBackend)
+	if s.WorkspaceID == "" || ap.Entry.Worktree == "" || (s.ControlStore == nil && !canRenewClaim) {
 		return func() {}
 	}
 	workerID := ap.Entry.Worktree
@@ -258,11 +259,17 @@ func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.D
 			case <-s.Shutdown:
 				return
 			case <-ticker.C:
-				ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
-				err := s.ControlStore.Workers().Heartbeat(ctx, s.WorkspaceID, workerID)
-				cancel()
-				if err != nil {
-					slog.Debug("supervisor worker heartbeat failed",
+				if s.ControlStore != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), controlPlaneOperationTimeout)
+					err := s.ControlStore.Workers().Heartbeat(ctx, s.WorkspaceID, workerID)
+					cancel()
+					if err != nil {
+						slog.Warn("supervisor worker heartbeat failed",
+							"workspace", s.WorkspaceID, "worker_id", workerID, "err", err)
+					}
+				}
+				if err := s.renewAssignedTaskClaim(ap); err != nil {
+					slog.Warn("supervisor issue claim renewal failed",
 						"workspace", s.WorkspaceID, "worker_id", workerID, "err", err)
 				}
 			}
@@ -272,4 +279,26 @@ func (s *Supervisor) startWorkerHeartbeatEvery(ap *AgentProcess, interval time.D
 		close(stop)
 		<-done
 	}
+}
+
+// renewAssignedTaskClaim refreshes the distributed issue lock through the
+// same actor-scoped backend used for the original claim. Fleet worker
+// heartbeats remain the normal registration lease, but the claim refresh is a
+// second, direct fence: a live model process must never lose its issue to a
+// competing role merely because worker-heartbeat transport or projection is
+// delayed. Same-actor claims are idempotent in fleet-db.
+func (s *Supervisor) renewAssignedTaskClaim(ap *AgentProcess) error {
+	actorBackend, ok := s.IssueBackend.(actorClaimBackend)
+	if !ok || ap.Entry.Worktree == "" {
+		return nil
+	}
+	ap.Mu.Lock()
+	taskID := ap.AssignedTaskID
+	ap.Mu.Unlock()
+	if taskID == "" {
+		return nil
+	}
+	ctx, cancel := s.operationContext()
+	defer cancel()
+	return actorBackend.ClaimIssueAsActor(ctx, taskID, 0, ap.Entry.Worktree)
 }

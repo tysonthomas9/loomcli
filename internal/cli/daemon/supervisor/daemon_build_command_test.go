@@ -47,6 +47,60 @@ func TestBuildCommand_SourceReposInjected(t *testing.T) {
 	}
 }
 
+func TestPinAgentLoomShellSurvivesLoginShellPathReset(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	executable := filepath.Join(runtimeRoot, "Loom Agents.app", "Contents", "MacOS", "loom")
+	env, err := pinAgentLoomShell(
+		[]string{"PATH=/Users/test/go/bin:/usr/bin", "ZDOTDIR=/old", "KEEP=value"},
+		executable,
+		runtimeRoot,
+		"planner",
+	)
+	if err != nil {
+		t.Fatalf("pinAgentLoomShell: %v", err)
+	}
+
+	if got := envValue(env, "LOOM_CLI_BIN"); got != executable {
+		t.Fatalf("LOOM_CLI_BIN = %q, want %q", got, executable)
+	}
+	if got := filepath.SplitList(envValue(env, "PATH")); len(got) == 0 || got[0] != filepath.Dir(executable) {
+		t.Fatalf("PATH = %q, want packaged executable directory first", envValue(env, "PATH"))
+	}
+	shellHome := envValue(env, "ZDOTDIR")
+	if shellHome == "" || shellHome == "/old" {
+		t.Fatalf("ZDOTDIR = %q, want controlled shell home", shellHome)
+	}
+	startupPath := filepath.Join(shellHome, ".zprofile")
+	startup, err := os.ReadFile(startupPath)
+	if err != nil {
+		t.Fatalf("read controlled startup: %v", err)
+	}
+	for _, want := range []string{
+		"export LOOM_CLI_BIN=" + shellSingleQuote(executable),
+		"loom() { \"$LOOM_CLI_BIN\" \"$@\"; }",
+	} {
+		if !strings.Contains(string(startup), want) {
+			t.Fatalf("startup = %q, want %q", startup, want)
+		}
+	}
+	if got := envValue(env, "BASH_ENV"); got != filepath.Join(shellHome, "shell-env") {
+		t.Fatalf("BASH_ENV = %q, want controlled startup", got)
+	}
+}
+
+func TestPinAgentLoomShellRejectsParentAgentPath(t *testing.T) {
+	runtimeRoot := t.TempDir()
+	executable := filepath.Join(runtimeRoot, "loom")
+	env, err := pinAgentLoomShell(nil, executable, runtimeRoot, "..")
+	if err != nil {
+		t.Fatalf("pinAgentLoomShell: %v", err)
+	}
+	want := filepath.Join(runtimeRoot, ".loom", "agent-shells", "agent")
+	if got := envValue(env, "ZDOTDIR"); got != want {
+		t.Fatalf("ZDOTDIR = %q, want contained fallback %q", got, want)
+	}
+}
+
 // TestBuildCommand_SourceReposAbsentWhenEmpty verifies LOOM_SOURCE_REPOS is not
 // set when the agent has no repo affinity.
 func TestBuildCommand_SourceReposAbsentWhenEmpty(t *testing.T) {

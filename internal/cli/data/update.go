@@ -24,6 +24,8 @@ var (
 	updateDescription  string
 	updateDescFile     string
 	updateExternalRef  string
+	updateAddLabels    []string
+	updateRemoveLabels []string
 	updateAddDeps      []string
 	updateRemoveDeps   []string
 )
@@ -169,6 +171,14 @@ func applyDirectUpdateFlags(cmd *cobra.Command, params *backend.UpdateParams) bo
 		params.ExternalRef = &updateExternalRef
 		changed = true
 	}
+	if cmd.Flags().Changed("add-label") {
+		params.AddLabels = append([]string(nil), updateAddLabels...)
+		changed = true
+	}
+	if cmd.Flags().Changed("remove-label") {
+		params.RemoveLabels = append([]string(nil), updateRemoveLabels...)
+		changed = true
+	}
 	return changed
 }
 
@@ -250,6 +260,8 @@ func init() {
 	updateCmd.Flags().StringVar(&updateDescription, "description", "", "Set description")
 	updateCmd.Flags().StringVar(&updateDescFile, "description-from-file", "", "Read description from file (use - for stdin)")
 	updateCmd.Flags().StringVar(&updateExternalRef, "external-ref", "", "Set external reference")
+	updateCmd.Flags().StringArrayVar(&updateAddLabels, "add-label", nil, "Add label (repeatable)")
+	updateCmd.Flags().StringArrayVar(&updateRemoveLabels, "remove-label", nil, "Remove label (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateAddDeps, "depends-on", nil, "Add dependency on issue ID (repeatable)")
 	updateCmd.Flags().StringArrayVar(&updateRemoveDeps, "remove-depends-on", nil, "Remove dependency on issue ID (repeatable)")
 }

@@ -6,10 +6,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+type renewingActorBackend struct {
+	*clitest.MockIssueBackend
+	claims atomic.Int64
+	taskID string
+	actor  string
+	ttl    time.Duration
+}
+
+func (b *renewingActorBackend) ClaimIssueAsActor(_ context.Context, taskID string, ttl time.Duration, actor string) error {
+	b.taskID = taskID
+	b.actor = actor
+	b.ttl = ttl
+	b.claims.Add(1)
+	return nil
+}
 
 // countingWorkerStore is a store.WorkerStore that counts calls.
 type countingWorkerStore struct {
@@ -77,6 +94,30 @@ func TestStartWorkerHeartbeatEvery_NoControlStoreIsNoOp(t *testing.T) {
 	// Must return a usable no-op stop and never panic.
 	stop := s.startWorkerHeartbeatEvery(ap, time.Millisecond)
 	stop()
+}
+
+func TestStartWorkerHeartbeatEvery_RenewsAssignedIssueClaim(t *testing.T) {
+	issueBackend := &renewingActorBackend{MockIssueBackend: clitest.NewMockIssueBackend()}
+	s := &Supervisor{
+		IssueBackend: issueBackend,
+		WorkspaceID:  "WS",
+		Shutdown:     make(chan struct{}),
+	}
+	ap := &AgentProcess{
+		Entry:          cfgpkg.AgentEntry{Worktree: "bug-triage"},
+		AssignedTaskID: "BUG-23",
+	}
+
+	stop := s.startWorkerHeartbeatEvery(ap, 10*time.Millisecond)
+	waitForCount(t, issueBackend.claims.Load, 2)
+	stop()
+
+	if issueBackend.taskID != "BUG-23" || issueBackend.actor != "bug-triage" {
+		t.Fatalf("renewed claim = task %q actor %q, want BUG-23/bug-triage", issueBackend.taskID, issueBackend.actor)
+	}
+	if issueBackend.ttl != 0 {
+		t.Fatalf("renewed claim TTL = %v, want server default", issueBackend.ttl)
+	}
 }
 
 func TestDeregisterWorker_CallsStore(t *testing.T) {

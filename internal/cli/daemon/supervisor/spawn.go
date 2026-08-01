@@ -31,6 +31,8 @@ func ResolveDaemonPath(projectDir, path string) string {
 }
 
 // buildCommand constructs the exec.Cmd for spawning an agent subprocess (does not start it).
+//
+//nolint:funlen // Keep command construction ordering visible; shell pinning must precede user/session env.
 func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	cfg := s.ConfigSnapshot()
 
@@ -55,6 +57,10 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 
 	cmd.Env = appendRoleEnv(cmd.Env, ap)
 	cmd.Env = appendRoutingEnv(cmd.Env, ap)
+	cmd.Env, err = pinAgentLoomShell(cmd.Env, cmd.Path, s.ProjectDir, ap.Entry.Worktree)
+	if err != nil {
+		return nil, fmt.Errorf("pin agent Loom shell: %w", err)
+	}
 
 	sourceRepos, err := cfgpkg.ResolveAgentRepos(ap.Entry, s.Repos)
 	if err != nil {
@@ -83,6 +89,97 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 	}
 
 	return cmd, nil
+}
+
+// pinAgentLoomShell keeps model-launched shell commands on the exact Loom
+// binary that spawned the daemon worker. Codex invokes a login shell for tool
+// calls, so a user-global startup file can otherwise replace the PATH prefix
+// inherited from packaged Desktop and select an older, protocol-incompatible
+// Loom binary. ZDOTDIR plus the POSIX/Bash startup hooks make the pin survive
+// that login-shell reset; LOOM_CLI_BIN also gives prompts and diagnostics an
+// explicit, auditable executable identity.
+func pinAgentLoomShell(env []string, executable, runtimeRoot, agentName string) ([]string, error) {
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return nil, fmt.Errorf("empty Loom executable")
+	}
+	if !filepath.IsAbs(executable) {
+		absolute, err := filepath.Abs(executable)
+		if err != nil {
+			return nil, fmt.Errorf("resolve absolute Loom executable: %w", err)
+		}
+		executable = absolute
+	}
+	executable = filepath.Clean(executable)
+	executableDir := filepath.Dir(executable)
+	if strings.TrimSpace(runtimeRoot) == "" {
+		runtimeRoot = os.TempDir()
+	}
+	safeAgent := filepath.Base(strings.TrimSpace(agentName))
+	if safeAgent == "" || safeAgent == "." || safeAgent == ".." || safeAgent == string(filepath.Separator) {
+		safeAgent = "agent"
+	}
+	shellHome := filepath.Join(runtimeRoot, ".loom", "agent-shells", safeAgent)
+	if err := os.MkdirAll(shellHome, 0o700); err != nil {
+		return nil, fmt.Errorf("create controlled shell home: %w", err)
+	}
+	if err := os.Chmod(shellHome, 0o700); err != nil { //nolint:gosec // directories require execute bits; 0700 is owner-only
+		return nil, fmt.Errorf("secure controlled shell home: %w", err)
+	}
+	startup := "export LOOM_CLI_BIN=" + shellSingleQuote(executable) + "\n" +
+		"export PATH=" + shellSingleQuote(executableDir) + ":\"${PATH:-}\"\n" +
+		"loom() { \"$LOOM_CLI_BIN\" \"$@\"; }\n"
+	startupPath := filepath.Join(shellHome, "shell-env")
+	for _, path := range []string{startupPath, filepath.Join(shellHome, ".zshenv"), filepath.Join(shellHome, ".zprofile")} {
+		if err := os.WriteFile(path, []byte(startup), 0o600); err != nil {
+			return nil, fmt.Errorf("write controlled shell startup: %w", err)
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			return nil, fmt.Errorf("secure controlled shell startup: %w", err)
+		}
+	}
+
+	env = replaceEnvValue(env, "LOOM_CLI_BIN", executable)
+	env = replaceEnvValue(env, "PATH", prependAgentPath(envValue(env, "PATH"), executableDir))
+	env = replaceEnvValue(env, "ZDOTDIR", shellHome)
+	env = replaceEnvValue(env, "BASH_ENV", startupPath)
+	env = replaceEnvValue(env, "ENV", startupPath)
+	return env, nil
+}
+
+func replaceEnvValue(env []string, name, value string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return append(out, prefix+value)
+}
+
+func envValue(env []string, name string) string {
+	prefix := name + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
+}
+
+func prependAgentPath(current, entry string) string {
+	parts := []string{entry}
+	for _, candidate := range filepath.SplitList(current) {
+		if candidate != "" && filepath.Clean(candidate) != entry {
+			parts = append(parts, candidate)
+		}
+	}
+	return strings.Join(parts, string(os.PathListSeparator))
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 // buildAgentExecCmd creates the exec.Cmd with the correct arguments for the agent role.

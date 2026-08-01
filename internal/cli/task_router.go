@@ -247,12 +247,24 @@ func applyTaskFilter(issue backend.IssueData, filter string) string {
 		if !strings.EqualFold(strings.TrimSpace(issue.IssueType), "bug") {
 			return "filter: issue type is not bug"
 		}
+		if hasTaskLabel(issue.Labels, "triaged") {
+			return "filter: bug is already triaged"
+		}
 	default:
 		if !ReadyToImplement(issue) {
 			return "filter: not ready to implement"
 		}
 	}
 	return ""
+}
+
+func hasTaskLabel(labels []string, want string) bool {
+	for _, label := range labels {
+		if strings.EqualFold(strings.TrimSpace(label), want) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesRepo returns true if repo appears in the repos list.

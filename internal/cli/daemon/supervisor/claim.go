@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,6 +122,7 @@ func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts,
 		s.setPreflightError(ap, agenterr.OutcomeFromHarness(wrapper.ErrUnknown), fmt.Sprintf("ready query failed: %v", err))
 		return false, true
 	}
+	issues = s.reserveIssuesForDedicatedRoles(ap, issues, constraints)
 	claimed, failed := s.tryClaimBestTask(ap, issues, constraints)
 	if claimed {
 		return true, true
@@ -131,8 +133,65 @@ func (s *Supervisor) tryClaimFromReady(ap *AgentProcess, opts backend.ReadyOpts,
 	return false, false
 }
 
+// reserveIssuesForDedicatedRoles prevents a broad planner from racing a
+// configured bug-triage worker for a fresh Bug. Once triage adds the fixed
+// "triaged" marker, the reservation ends and human approval can hand the Bug
+// into the normal Planner -> Coder path. This keeps the legacy daemon templates
+// composable instead of making whichever 30-second poll fires first define the
+// workflow.
+func (s *Supervisor) reserveIssuesForDedicatedRoles(ap *AgentProcess, issues []backend.IssueData, constraints cli.RoleConstraints) []backend.IssueData {
+	if strings.TrimSpace(constraints.TaskFilter) != "needs_plan" || len(issues) == 0 {
+		return issues
+	}
+	out := make([]backend.IssueData, 0, len(issues))
+	for _, issue := range issues {
+		if strings.EqualFold(strings.TrimSpace(issue.IssueType), "bug") &&
+			!issueHasLabel(issue, "triaged") && s.hasDedicatedBugAgent(ap, issue.SourceRepo) {
+			continue
+		}
+		out = append(out, issue)
+	}
+	return out
+}
+
+func (s *Supervisor) hasDedicatedBugAgent(current *AgentProcess, sourceRepo string) bool {
+	s.AgentsMu.RLock()
+	defer s.AgentsMu.RUnlock()
+	for _, candidate := range s.Agents {
+		if candidate == nil || candidate == current || strings.TrimSpace(candidate.RoleConfig.TaskFilter) != "bug" {
+			continue
+		}
+		repos, err := config.ResolveAgentRepos(candidate.Entry, s.Repos)
+		if err != nil {
+			continue
+		}
+		// An issue without repository metadata is eligible for every role in
+		// MatchTask, so a dedicated Bug role must reserve it regardless of that
+		// role's configured affinity. Otherwise the broad Planner can still win
+		// the exact first-poll race this reservation is meant to eliminate.
+		if len(repos) == 0 || sourceRepo == "" {
+			return true
+		}
+		for _, repo := range repos {
+			if sourceRepo != "" && repo == sourceRepo {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func issueHasLabel(issue backend.IssueData, label string) bool {
+	for _, candidate := range issue.Labels {
+		if strings.EqualFold(strings.TrimSpace(candidate), label) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Supervisor) readyIssues(opts backend.ReadyOpts) ([]backend.IssueData, error) {
-	readyCtx, readyCancel := s.operationContext(claimOperationTimeout)
+	readyCtx, readyCancel := s.operationContext()
 	issues, err := s.IssueBackend.Ready(readyCtx, opts)
 	readyCancel()
 	return issues, err
@@ -235,7 +294,7 @@ func conflictHolder(err error) string {
 }
 
 func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string) error {
-	claimCtx, claimCancel := s.operationContext(claimOperationTimeout)
+	claimCtx, claimCancel := s.operationContext()
 	var err error
 	if ap.Entry.Worktree != "" {
 		if actorBackend, ok := s.IssueBackend.(actorClaimBackend); ok {
@@ -258,11 +317,11 @@ func (s *Supervisor) claimIssueForAgent(ap *AgentProcess, taskID, reason string)
 	return nil
 }
 
-// operationContext returns a context bounded by both the given timeout and
+// operationContext returns a context bounded by both the claim timeout and
 // the supervisor's Shutdown channel, so a slow backend call doesn't outlive
 // supervisor shutdown.
-func (s *Supervisor) operationContext(timeout time.Duration) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+func (s *Supervisor) operationContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), claimOperationTimeout)
 	if s.Shutdown == nil {
 		return ctx, cancel
 	}
@@ -324,7 +383,7 @@ func (s *Supervisor) releaseAssignedTaskClaim(ap *AgentProcess, taskID string) {
 	if !ok {
 		return
 	}
-	ctx, cancel := s.operationContext(claimOperationTimeout)
+	ctx, cancel := s.operationContext()
 	defer cancel()
 	if err := releaser.ReleaseIssueAsActor(ctx, taskID, ap.Entry.Worktree); err != nil {
 		slog.Debug("agent task claim release skipped", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
