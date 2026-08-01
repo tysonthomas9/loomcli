@@ -307,6 +307,29 @@ type AgentOwnershipLeaseFilter struct {
 	Limit           int
 }
 
+// AgentOwnershipLeaseProof identifies one exact ownership generation. It is
+// request-only: LeaseToken is a bearer secret and must never be persisted or
+// returned in a public projection.
+type AgentOwnershipLeaseProof struct {
+	WorkspaceKey    string
+	AgentID         string
+	LeaseID         string
+	LeaseToken      string
+	OwnerID         string
+	RuntimeProvider domain.RuntimeProvider
+	NodeID          string
+	FencingToken    int64
+}
+
+// AgentOwnershipLeaseOwnedStore is the narrow compatibility seam used by the
+// transitional daemon supervisor when FleetDB publishes owner-fenced Phase 5
+// ownership commands. Implementations validate the complete proof atomically;
+// callers may fall back to AgentOwnershipLeaseStore only for legacy backends.
+type AgentOwnershipLeaseOwnedStore interface {
+	HeartbeatOwned(ctx context.Context, proof AgentOwnershipLeaseProof, ttl time.Duration) (*domain.AgentOwnershipLease, error)
+	ReleaseOwned(ctx context.Context, proof AgentOwnershipLeaseProof) (*domain.AgentOwnershipLease, error)
+}
+
 type AgentOwnershipLeaseStore interface {
 	Acquire(ctx context.Context, in AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error)
 	Get(ctx context.Context, workspaceKey, agentID string) (*domain.AgentOwnershipLease, error)

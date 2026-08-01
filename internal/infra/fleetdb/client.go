@@ -287,7 +287,6 @@ func (c *Client) initializeStores() {
 	c.artifacts = &artifactStore{client: c}
 	c.artifactCommands = &artifactCommandStore{client: c}
 	c.leases = &agentLeaseStore{client: c}
-	c.ownership = &agentOwnershipLeaseStore{client: c}
 	c.commands = &agentCommandStore{client: c}
 	c.inbox = &agentInboxMessageStore{client: c}
 	c.drivers = &driverStore{client: c}
@@ -295,6 +294,7 @@ func (c *Client) initializeStores() {
 	c.catalog = &workflowCatalogStore{client: c}
 	c.provisioning = agentprovisioningtransport.New(capabilityRequests)
 	c.agentManagement = agentmanagementtransport.New(capabilityRequests)
+	c.ownership = &agentOwnershipLeaseStore{client: c, management: c.agentManagement}
 	c.interaction = interactiontransport.New(capabilityRequests)
 	c.repositoryAdmissions = repositoryadmissiontransport.New(capabilityRequests)
 	c.automation = &automationStore{client: c}

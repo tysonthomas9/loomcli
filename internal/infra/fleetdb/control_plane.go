@@ -678,30 +678,31 @@ func (s *agentLeaseStore) Release(ctx context.Context, ws, leaseID, token string
 	return &out, nil
 }
 
-type agentOwnershipLeaseStore struct{ client *Client }
+type agentOwnershipLeaseStore struct {
+	client     *Client
+	management AgentManagementTransport
+}
 
 var _ store.AgentOwnershipLeaseStore = (*agentOwnershipLeaseStore)(nil)
+var _ store.AgentOwnershipLeaseOwnedStore = (*agentOwnershipLeaseStore)(nil)
 
 func (s *agentOwnershipLeaseStore) Acquire(ctx context.Context, in store.AgentOwnershipLeaseAcquire) (*domain.AgentOwnershipLease, error) {
-	body := map[string]any{
-		"lease_id":         in.LeaseID,
-		"owner_id":         in.OwnerID,
-		"runtime_provider": in.RuntimeProvider,
-		"node_id":          in.NodeID,
-		"ttl_seconds":      ttlSeconds(in.TTL),
-	}
-	var response struct {
-		Lease domain.AgentOwnershipLease `json:"lease"`
-		Token string                     `json:"token"`
-	}
-	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/agent-ownership-leases/"+pathEscape(in.AgentID)+"/acquire", body, &response); err != nil {
+	grant, err := s.management.AcquireAgentOwnership(ctx, AgentOwnershipAcquireInput{
+		WorkspaceKey: in.WorkspaceKey, AgentID: in.AgentID, LeaseID: in.LeaseID,
+		OwnerID: in.OwnerID, RuntimeProvider: in.RuntimeProvider, NodeID: in.NodeID,
+		TTLSeconds: ttlSeconds(in.TTL), DelegatedActor: in.OwnerID,
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := validateAgentOwnershipLeaseEnvelope(response.Lease, response.Token, in); err != nil {
+	if grant == nil || grant.Lease == nil {
+		return nil, errors.New("fleetdb: agent ownership lease acquire response omitted lease")
+	}
+	if err := validateAgentOwnershipLeaseEnvelope(*grant.Lease, grant.Token, in); err != nil {
 		return nil, err
 	}
-	response.Lease.Token = response.Token
-	return &response.Lease, nil
+	grant.Lease.Token = grant.Token
+	return grant.Lease, nil
 }
 
 func validateAgentLeaseEnvelope(lease domain.AgentLease, token string, in store.AgentLeaseCreate) error {
@@ -796,12 +797,43 @@ func (s *agentOwnershipLeaseStore) Heartbeat(ctx context.Context, ws, agentID, t
 	return &out, nil
 }
 
+func (s *agentOwnershipLeaseStore) HeartbeatOwned(
+	ctx context.Context,
+	proof store.AgentOwnershipLeaseProof,
+	ttl time.Duration,
+) (*domain.AgentOwnershipLease, error) {
+	return s.management.RenewAgentOwnership(ctx, AgentOwnershipRenewInput{
+		Proof:          ownershipProofInput(proof),
+		TTLSeconds:     ttlSeconds(ttl),
+		DelegatedActor: proof.OwnerID,
+	})
+}
+
 func (s *agentOwnershipLeaseStore) Release(ctx context.Context, ws, agentID, token string) (*domain.AgentOwnershipLease, error) {
 	var out domain.AgentOwnershipLease
 	if err := s.client.doWithHeaders(ctx, "POST", "/api/v1/"+pathEscape(ws)+"/agent-ownership-leases/"+pathEscape(agentID)+"/release", nil, &out, map[string]string{"X-Agent-Ownership-Lease-Token": token}); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (s *agentOwnershipLeaseStore) ReleaseOwned(
+	ctx context.Context,
+	proof store.AgentOwnershipLeaseProof,
+) (*domain.AgentOwnershipLease, error) {
+	return s.management.ReleaseAgentOwnership(ctx, AgentOwnershipReleaseInput{
+		Proof:          ownershipProofInput(proof),
+		DelegatedActor: proof.OwnerID,
+	})
+}
+
+func ownershipProofInput(proof store.AgentOwnershipLeaseProof) AgentOwnershipProof {
+	return AgentOwnershipProof{
+		WorkspaceKey: proof.WorkspaceKey, AgentID: proof.AgentID, LeaseID: proof.LeaseID,
+		LeaseToken: proof.LeaseToken, OwnerID: proof.OwnerID,
+		RuntimeProvider: proof.RuntimeProvider, NodeID: proof.NodeID,
+		FencingToken: proof.FencingToken,
+	}
 }
 
 type agentCommandStore struct{ client *Client }

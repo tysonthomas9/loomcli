@@ -370,6 +370,9 @@ func TestControlPlaneClientAgentOwnershipLeaseAcquireDecodesOneTimeTokenEnvelope
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/WS/agent-ownership-leases/agent-1/acquire" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
 		}
+		if got := r.Header.Get(FleetDelegatedActorHeader); got != "runtime-1" {
+			t.Fatalf("%s = %q, want runtime-1", FleetDelegatedActorHeader, got)
+		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode acquire: %v", err)
@@ -420,6 +423,71 @@ func TestControlPlaneClientAgentOwnershipLeaseAcquireDecodesOneTimeTokenEnvelope
 	}
 }
 
+func TestControlPlaneClientOwnedAgentOwnershipLifecycleSendsCompleteProof(t *testing.T) {
+	now := time.Now().UTC()
+	proof := store.AgentOwnershipLeaseProof{
+		WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "ownership-1",
+		LeaseToken: "raw-ownership-token", OwnerID: "runtime-1",
+		RuntimeProvider: domain.RuntimeProviderLocal, NodeID: "node-1", FencingToken: 11,
+	}
+	calls := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if got := r.Header.Get(FleetDelegatedActorHeader); got != proof.OwnerID {
+			t.Fatalf("%s = %q, want %q", FleetDelegatedActorHeader, got, proof.OwnerID)
+		}
+		if got := r.Header.Get(AgentOwnershipLeaseTokenHeader); got != proof.LeaseToken {
+			t.Fatalf("%s = %q, want exact proof token", AgentOwnershipLeaseTokenHeader, got)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode ownership command: %v", err)
+		}
+		if body["lease_id"] != proof.LeaseID || body["owner_id"] != proof.OwnerID ||
+			body["runtime_provider"] != "local" || body["node_id"] != proof.NodeID ||
+			body["fencing_token"] != float64(proof.FencingToken) {
+			t.Fatalf("ownership proof body = %#v", body)
+		}
+		switch r.URL.Path {
+		case "/api/v1/WS/agent-ownership-leases/agent-1/heartbeat":
+			if body["ttl_seconds"] != float64(45) {
+				t.Fatalf("heartbeat ttl_seconds = %#v, want 45", body["ttl_seconds"])
+			}
+		case "/api/v1/WS/agent-ownership-leases/agent-1/release":
+			if _, ok := body["ttl_seconds"]; ok {
+				t.Fatalf("release body must not contain ttl_seconds: %#v", body)
+			}
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+		writeJSON(t, w, domain.AgentOwnershipLease{
+			WorkspaceKey: proof.WorkspaceKey, AgentID: proof.AgentID, LeaseID: proof.LeaseID,
+			OwnerID: proof.OwnerID, RuntimeProvider: proof.RuntimeProvider, NodeID: proof.NodeID,
+			FencingToken: proof.FencingToken, Status: domain.AgentLeaseActive,
+			LastHeartbeat: now, ExpiresAt: now.Add(time.Minute), CreatedAt: now, UpdatedAt: now,
+		})
+	}))
+	defer ts.Close()
+
+	client, err := New(Config{BaseURL: ts.URL, Actor: "loom-local-service"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned, ok := client.AgentOwnershipLeases().(store.AgentOwnershipLeaseOwnedStore)
+	if !ok {
+		t.Fatal("FleetDB ownership adapter does not expose owner-fenced lifecycle commands")
+	}
+	if _, err := owned.HeartbeatOwned(t.Context(), proof, 45*time.Second); err != nil {
+		t.Fatalf("heartbeat owned: %v", err)
+	}
+	if _, err := owned.ReleaseOwned(t.Context(), proof); err != nil {
+		t.Fatalf("release owned: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
+	}
+}
+
 func TestControlPlaneClientLeaseCreationRejectsMissingEnvelopeToken(t *testing.T) {
 	tests := []struct {
 		name string
@@ -450,18 +518,20 @@ func TestControlPlaneClientLeaseCreationRejectsMissingEnvelopeToken(t *testing.T
 			path: "/api/v1/WS/agent-ownership-leases/agent-1/acquire",
 			run: func(client *Client) error {
 				_, err := client.AgentOwnershipLeases().Acquire(t.Context(), store.AgentOwnershipLeaseAcquire{
-					WorkspaceKey: "WS",
-					AgentID:      "agent-1",
-					LeaseID:      "ownership-1",
+					WorkspaceKey:    "WS",
+					AgentID:         "agent-1",
+					LeaseID:         "ownership-1",
+					OwnerID:         "runtime-1",
+					RuntimeProvider: domain.RuntimeProviderLocal,
+					NodeID:          "node-1",
 				})
 				return err
 			},
-			body: domain.AgentOwnershipLease{
-				WorkspaceKey: "WS",
-				AgentID:      "agent-1",
-				LeaseID:      "ownership-1",
-				FencingToken: 1,
-			},
+			body: map[string]any{"lease": domain.AgentOwnershipLease{
+				WorkspaceKey: "WS", AgentID: "agent-1", LeaseID: "ownership-1",
+				OwnerID: "runtime-1", RuntimeProvider: domain.RuntimeProviderLocal,
+				NodeID: "node-1", FencingToken: 1,
+			}},
 		},
 	}
 
