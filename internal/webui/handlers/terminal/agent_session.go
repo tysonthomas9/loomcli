@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -439,6 +440,13 @@ func agentLaunchEnv(workspace, sessionName, backend, orchestratorID string, agen
 		"LOOM_AGENT_ROLE":        agent.RoleName,
 		"LOOM_AGENT_TERMINAL_ID": sessionName,
 		"LOOM_WORKSPACE":         workspace,
+	}
+	// The PTY base environment deliberately strips every ambient LOOM_* value.
+	// Add the server-resolved local data directory back as a trusted launch
+	// overlay so the child CLI shares the Desktop workspace registry instead of
+	// silently falling back to ~/.loom.
+	if configDir := strings.TrimSpace(bootstrap.LoomDir()); configDir != "" {
+		env["LOOM_CONFIG_DIR"] = configDir
 	}
 	if backend != "" {
 		env["LOOM_BACKEND"] = backend

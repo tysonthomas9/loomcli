@@ -165,6 +165,8 @@ func TestEnsureAgentTerminalSessionPutFailureDoesNotCreateRunningSession(t *test
 }
 
 func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("LOOM_CONFIG_DIR", configDir)
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{
@@ -186,6 +188,9 @@ func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("launch command %q missing %q", cmd, want)
 		}
+	}
+	if launch.Env["LOOM_CONFIG_DIR"] != configDir {
+		t.Fatalf("launch config dir = %q, want %q", launch.Env["LOOM_CONFIG_DIR"], configDir)
 	}
 }
 

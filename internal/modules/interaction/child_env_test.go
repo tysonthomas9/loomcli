@@ -50,7 +50,7 @@ func TestFilterChildBaseEnvFailsClosedForOperatorForgeAndInternalCredentials(t *
 
 func TestChildLaunchOverlayIsExactNotBroadLoomPrefix(t *testing.T) {
 	for _, allowed := range []string{
-		"LOOM_WORKSPACE", "LOOM_AGENT_NAME", EnvSessionID, EnvSessionToken, EnvSessionFence,
+		"LOOM_WORKSPACE", "LOOM_CONFIG_DIR", "LOOM_AGENT_NAME", EnvSessionID, EnvSessionToken, EnvSessionFence,
 		EnvInteractionAPIURL,
 	} {
 		if !ChildLaunchEnvAllowed(allowed) {

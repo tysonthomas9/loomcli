@@ -33,6 +33,7 @@ var childBaseAllowed = map[string]struct{}{
 
 var childLaunchAllowed = map[string]struct{}{
 	"LOOM_WORKSPACE": {}, "LOOM_AGENT_NAME": {}, "LOOM_AGENT_ROLE": {},
+	"LOOM_CONFIG_DIR":        {},
 	"LOOM_AGENT_TERMINAL_ID": {}, "LOOM_BACKEND": {},
 	"LOOM_ORCHESTRATOR_SESSION_ID": {}, "LOOM_WORKTREE_PATH": {},
 	EnvSessionWorkspace: {}, EnvSessionID: {}, EnvSessionAgentID: {},

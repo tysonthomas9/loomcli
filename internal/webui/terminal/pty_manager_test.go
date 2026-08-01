@@ -79,6 +79,7 @@ func TestTerminalSpawnEnvFiltersAmbientCredentialsAndOverlayIsExact(t *testing.T
 	})
 	env = overlayTerminalEnv(env, map[string]string{
 		"LOOM_AGENT_NAME":         "docs",
+		"LOOM_CONFIG_DIR":         "/trusted/loom-data",
 		"LOOM_SESSION_ID":         "session-1",
 		"LOOM_SESSION_AUTH_TOKEN": "session-secret",
 		"LOOM_FLEET_DB_API_KEY":   "forged-internal-secret",
@@ -87,6 +88,7 @@ func TestTerminalSpawnEnvFiltersAmbientCredentialsAndOverlayIsExact(t *testing.T
 	joined := strings.Join(env, "\n")
 	for _, wanted := range []string{
 		"PATH=/usr/bin", "CODEX_HOME=/tmp/codex", "LOOM_AGENT_NAME=docs",
+		"LOOM_CONFIG_DIR=/trusted/loom-data",
 		"LOOM_SESSION_ID=session-1", "LOOM_SESSION_AUTH_TOKEN=session-secret",
 	} {
 		if !strings.Contains(joined, wanted) {
