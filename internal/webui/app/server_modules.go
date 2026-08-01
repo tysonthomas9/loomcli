@@ -157,6 +157,9 @@ func (app *Server) unifiedAgentModuleDeps() modbuilder.UnifiedAgentModuleDeps {
 	if transcripts, ok := app.sessSvc.(service.AgentSessionTranscriptService); ok {
 		deps.AgentSessionTranscripts = transcripts
 	}
+	if history, ok := app.sessSvc.(service.AgentLocalSessionHistoryService); ok {
+		deps.AgentLocalSessionHistory = history
+	}
 	if capability := app.config.ArtifactsCapability; capability != nil {
 		deps.Artifacts = capability.ArtifactsAPI()
 	}

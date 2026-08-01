@@ -443,6 +443,81 @@ func TestSessionServiceTranscriptUsesRuntimeStoreBeforeWorkspaceTopology(t *test
 	}
 }
 
+func TestSessionServiceAgentLocalHistoryAndTranscriptEnforceOwnership(t *testing.T) {
+	ctx := t.Context()
+	rootDir := t.TempDir()
+	runtimeDir := filepath.Join(rootDir, "workspaces", "LOCALMODE")
+	workspaceRuntimeDir := filepath.Join(rootDir, "workspaces", "WS")
+	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
+		t.Fatalf("create active runtime directory: %v", err)
+	}
+	localStore, err := sessions.NewStore(workspaceRuntimeDir)
+	if err != nil {
+		t.Fatalf("new workspace session store: %v", err)
+	}
+	sess, err := localStore.CreateSession(sessions.CreateOptions{
+		AgentName: "advanced-planner",
+		Backend:   "codex",
+		Phase:     "planning",
+	})
+	if err != nil {
+		t.Fatalf("create local supervised session: %v", err)
+	}
+	sourceTranscript := filepath.Join(t.TempDir(), "codex.jsonl")
+	if err := os.WriteFile(sourceTranscript, []byte(
+		`{"timestamp":"2026-08-01T08:40:04Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"local plan"}]}}`+"\n",
+	), 0o600); err != nil {
+		t.Fatalf("write source transcript: %v", err)
+	}
+	if err := localStore.SyncNativeTranscript(sess.SessionID(), sourceTranscript, sessions.TranscriptFormatRaw); err != nil {
+		t.Fatalf("sync native transcript: %v", err)
+	}
+	if err := sess.Finalize(sessions.FinalizeOptions{TaskID: "TASK-LOCAL-1", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize local supervised session: %v", err)
+	}
+	activeStore, err := sessions.NewStore(runtimeDir)
+	if err != nil {
+		t.Fatalf("new active workspace session store: %v", err)
+	}
+	activeSession, err := activeStore.CreateSession(sessions.CreateOptions{
+		AgentName: "advanced-planner",
+		Backend:   "codex",
+		Phase:     "planning",
+	})
+	if err != nil {
+		t.Fatalf("create active workspace session: %v", err)
+	}
+	if err := activeSession.Finalize(sessions.FinalizeOptions{TaskID: "TASK-OTHER-1", ExitCode: 0}); err != nil {
+		t.Fatalf("finalize active workspace session: %v", err)
+	}
+
+	svc := NewSessionServiceWithRuntimeDir(memstore.New(), nil, runtimeDir)
+	history := svc.(service.AgentLocalSessionHistoryService)
+	items, err := history.ListAgentLocalSessions(ctx, "WS", "advanced-planner")
+	if err != nil {
+		t.Fatalf("ListAgentLocalSessions: %v", err)
+	}
+	if len(items) != 1 || items[0].SessionID != sess.SessionID() ||
+		items[0].TaskID != "TASK-LOCAL-1" || !items[0].HasTranscript {
+		t.Fatalf("local history = %+v, want one transcript-bearing task session", items)
+	}
+
+	transcripts := svc.(service.AgentSessionTranscriptService)
+	events, err := transcripts.GetAgentSessionTranscript(ctx, "WS", "advanced-planner", sess.SessionID())
+	if err != nil {
+		t.Fatalf("GetAgentSessionTranscript: %v", err)
+	}
+	if len(events) != 1 || events[0].Text != "local plan" {
+		t.Fatalf("events = %+v, want local plan", events)
+	}
+	_, err = transcripts.GetAgentSessionTranscript(ctx, "WS", "another-agent", sess.SessionID())
+	assertServiceError(t, err, service.KindNotFound, "session not found")
+	_, err = transcripts.GetAgentSessionTranscript(ctx, "OTHER", "advanced-planner", sess.SessionID())
+	assertServiceError(t, err, service.KindNotFound, "session not found")
+	_, err = transcripts.GetAgentSessionTranscript(ctx, "WS", "advanced-planner", activeSession.SessionID())
+	assertServiceError(t, err, service.KindNotFound, "session not found")
+}
+
 func TestSiblingWorkspaceRuntimeDirRequiresDirectWorkspaceSibling(t *testing.T) {
 	rootDir := t.TempDir()
 	workspaceRuntimeDir := filepath.Join(rootDir, "workspaces", "LOCALMODE")

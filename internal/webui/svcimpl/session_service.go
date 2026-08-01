@@ -21,6 +21,7 @@ import (
 // Compile-time check.
 var _ service.SessionService = (*sessionServiceImpl)(nil)
 var _ service.AgentSessionTranscriptService = (*sessionServiceImpl)(nil)
+var _ service.AgentLocalSessionHistoryService = (*sessionServiceImpl)(nil)
 
 var userHomeDir = os.UserHomeDir
 
@@ -138,16 +139,31 @@ func (c *sessionStoreCollection) addExistingRuntimeDir(runtimeDir string) {
 	c.add(absRuntimeDir)
 }
 
-// addRuntimeSessionStoreCandidates adds the active runtime and, only for the
-// conventional <root>/workspaces/<workspace> layout, the requested workspace's
-// direct sibling. This lets a local serve running in LOCALMODE read a session
-// owned by another local workspace without asking FleetDB to enumerate the
-// workspace topology.
+// addRuntimeSessionStoreCandidates adds only the requested workspace's runtime
+// in the conventional <root>/workspaces/<workspace> layout. A local serve often
+// runs from LOCALMODE while serving other workspaces; adding the active runtime
+// unconditionally would let a request for one workspace discover another one's
+// sessions. Non-conventional single-workspace layouts retain the configured
+// runtime fallback.
 func (s *sessionServiceImpl) addRuntimeSessionStoreCandidates(wsID string, collection *sessionStoreCollection) {
-	collection.addExistingRuntimeDir(s.runtimeDir)
-	if siblingRuntimeDir, ok := siblingWorkspaceRuntimeDir(s.runtimeDir, wsID); ok {
-		collection.addExistingRuntimeDir(siblingRuntimeDir)
+	if runtimeDirUsesWorkspaceLayout(s.runtimeDir) {
+		if siblingRuntimeDir, ok := siblingWorkspaceRuntimeDir(s.runtimeDir, wsID); ok {
+			collection.addExistingRuntimeDir(siblingRuntimeDir)
+		}
+		return
 	}
+	collection.addExistingRuntimeDir(s.runtimeDir)
+}
+
+func runtimeDirUsesWorkspaceLayout(runtimeDir string) bool {
+	if runtimeDir == "" {
+		return false
+	}
+	absRuntimeDir, err := filepath.Abs(runtimeDir)
+	if err != nil {
+		return false
+	}
+	return filepath.Base(filepath.Dir(absRuntimeDir)) == "workspaces"
 }
 
 // siblingWorkspaceRuntimeDir returns <runtime parent>/<wsID> only when the
@@ -282,6 +298,60 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 			items = append(items, item)
 		}
 	}
+	return items, nil
+}
+
+// ListAgentLocalSessions returns the daemon-local compatibility records owned
+// by one supervised agent. The unified agent activity query merges these
+// read-only records after canonical Execution TaskRuns and Interaction
+// AgentSessions, so local evidence never shadows a durable aggregate.
+func (s *sessionServiceImpl) ListAgentLocalSessions(
+	ctx context.Context,
+	wsID, agentID string,
+) ([]service.SessionListItem, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" || !validTaskID.MatchString(agentID) {
+		return nil, service.ErrValidation("invalid agent ID")
+	}
+	stores, err := s.storesForWorkspace(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]service.SessionListItem, 0)
+	seen := make(map[string]struct{})
+	for _, sessStore := range stores {
+		records, queryErr := sessStore.Query(sessions.Filter{AgentName: agentID})
+		if queryErr != nil {
+			continue
+		}
+		for _, rec := range records {
+			if strings.TrimSpace(rec.SessionID) == "" || rec.AgentName != agentID {
+				continue
+			}
+			if _, duplicate := seen[rec.SessionID]; duplicate {
+				continue
+			}
+			seen[rec.SessionID] = struct{}{}
+			item := service.SessionListItem{
+				SessionRecord: rec,
+				IsActive:      rec.Status == sessions.StatusRunning,
+			}
+			if info, statErr := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); statErr == nil && info.Size() > 0 {
+				item.HasTranscript = true
+			}
+			if !item.HasTranscript && eventStoreHasTranscript(sessStore, rec.SessionID) {
+				item.HasTranscript = true
+			}
+			if diff, readErr := sessStore.ReadDiff(rec.SessionID); readErr == nil && diff != "" {
+				item.HasDiff = true
+			}
+			items = append(items, item)
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].StartedAt.After(items[j].StartedAt)
+	})
 	return items, nil
 }
 

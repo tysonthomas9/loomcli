@@ -73,10 +73,108 @@ func (m *Module) supervisedExecutionHistory(
 		}
 		if item := newAgentHistorySessionDTO(session); item != nil {
 			history = append(history, item)
+			representedSessionIDs[item.SessionID] = struct{}{}
 		}
+	}
+	history, err = m.appendLocalSessionHistory(
+		ctx,
+		workspaceKey,
+		agentID,
+		history,
+		representedSessionIDs,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	return sortAndLimitAgentHistory(history, limit), nil
+}
+
+func (m *Module) appendLocalSessionHistory(
+	ctx context.Context,
+	workspaceKey, agentID string,
+	history []*agentHistorySessionDTO,
+	representedSessionIDs map[string]struct{},
+) ([]*agentHistorySessionDTO, error) {
+	if m.localSessionHistory == nil {
+		return history, nil
+	}
+	localSessions, err := m.localSessionHistory.ListAgentLocalSessions(ctx, workspaceKey, agentID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range localSessions {
+		item := newLocalHistorySessionDTO(localSessions[i], workspaceKey, agentID)
+		if item == nil {
+			continue
+		}
+		if _, represented := representedSessionIDs[item.SessionID]; represented {
+			continue
+		}
+		representedSessionIDs[item.SessionID] = struct{}{}
+		history = append(history, item)
+	}
+	return history, nil
+}
+
+func newLocalHistorySessionDTO(
+	item agentLocalSessionHistoryItem,
+	workspaceKey, agentID string,
+) *agentHistorySessionDTO {
+	if strings.TrimSpace(item.SessionID) == "" ||
+		strings.TrimSpace(item.AgentName) != agentID {
+		return nil
+	}
+	startedAt := nonZeroAgentSessionTime(item.StartedAt)
+	updatedAt := item.StartedAt
+	if item.EndedAt != nil && !item.EndedAt.IsZero() {
+		updatedAt = *item.EndedAt
+	}
+	var exitCode *int
+	if string(item.Status) != "running" {
+		value := item.ExitCode
+		exitCode = &value
+	}
+	metadata := publicAgentSessionMetadata(map[string]string{
+		"backend":           item.Backend,
+		"runtime_strategy":  item.RuntimeStrategy,
+		"delivery":          item.DeliveryMode,
+		"patch_back_status": item.PatchBackStatus,
+		"local_branch":      item.LocalBranch,
+		"head_sha":          item.HeadSHA,
+		"github_branch":     item.GitHubBranch,
+		"github_pr_url":     item.GitHubPRURL,
+	})
+	return &agentHistorySessionDTO{
+		WorkspaceKey: workspaceKey,
+		SessionID:    item.SessionID,
+		AgentID:      agentID,
+		Kind:         domain.AgentSessionKindTask,
+		TaskID:       item.TaskID,
+		Status:       agentHistoryStatusFromLocalSession(string(item.Status)),
+		Phase:        item.Phase,
+		Attempt:      item.AttemptNum,
+		StartedAt:    startedAt,
+		FinishedAt:   cloneNonZeroAgentSessionTime(item.EndedAt),
+		ErrorClass:   item.ErrorClass,
+		ExitCode:     exitCode,
+		Metadata:     metadata,
+		CreatedAt:    item.StartedAt,
+		UpdatedAt:    updatedAt,
+	}
+}
+
+func agentHistoryStatusFromLocalSession(status string) domain.AgentSessionStatus {
+	switch status {
+	case "completed":
+		return domain.AgentSessionCompleted
+	case "failed":
+		return domain.AgentSessionFailed
+	case "aborted":
+		return domain.AgentSessionCancelled
+	default:
+		return domain.AgentSessionRunning
+	}
 }
 
 func sortAndLimitAgentHistory(

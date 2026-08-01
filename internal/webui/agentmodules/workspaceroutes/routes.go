@@ -33,7 +33,8 @@ func New(deps routecontracts.Deps, automationModules automationroutes.Modules) [
 	return []interface{ Register(*http.ServeMux) }{
 		agents.New(agents.Config{
 			AgentService: deps.AgentSvc, SessionTranscripts: deps.AgentSessionTranscripts,
-			AgentRecords: deps.Agents, AgentRecordAuthority: deps.AgentsOperator,
+			LocalSessionHistory: deps.AgentLocalSessionHistory,
+			AgentRecords:        deps.Agents, AgentRecordAuthority: deps.AgentsOperator,
 			Store: deps.Store, Hub: deps.Hub,
 			Bindings: deps.AutomationBindings, OperatorAuthority: deps.AutomationOperator,
 			Provisioning: deps.AgentProvisioning, ProvisioningAuthority: deps.AgentProvisioningOperator,

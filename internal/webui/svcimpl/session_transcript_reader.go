@@ -51,25 +51,44 @@ func (s *sessionServiceImpl) GetAgentSessionTranscript(
 	if sessionID == "" || !validSessionID.MatchString(sessionID) {
 		return nil, service.ErrValidation("invalid session ID")
 	}
-	if s.store == nil || s.store.AgentSessions() == nil {
-		return nil, service.ErrUnavailable("agent session store not available")
-	}
-	rec, err := s.store.AgentSessions().Get(ctx, wsID, sessionID)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, service.ErrNotFound("session not found")
+	if s.store != nil && s.store.AgentSessions() != nil {
+		rec, err := s.store.AgentSessions().Get(ctx, wsID, sessionID)
+		if err == nil {
+			// Return the same not-found signal for a missing session and a session
+			// owned by another agent so callers cannot enumerate transcripts.
+			if rec == nil || strings.TrimSpace(rec.AgentID) != agentID {
+				return nil, service.ErrNotFound("session not found")
+			}
+			return s.ownedAgentSessionTranscript(ctx, wsID, rec)
 		}
-		return nil, sessionControlPlaneReadError(
-			"failed to load session",
-			err,
-		)
+		if !errors.Is(err, domain.ErrNotFound) {
+			return nil, sessionControlPlaneReadError(
+				"failed to load session",
+				err,
+			)
+		}
 	}
-	// Return the same not-found signal for a missing session and a session owned
-	// by another agent so callers cannot enumerate cross-agent transcripts.
-	if rec == nil || strings.TrimSpace(rec.AgentID) != agentID {
+	return s.localAgentSessionTranscript(ctx, wsID, agentID, sessionID)
+}
+
+// localAgentSessionTranscript serves a daemon-local supervised session only
+// after the workspace-scoped store metadata proves the exact agent and task
+// relationship. The task transcript reader repeats task ownership validation,
+// so knowledge of a session ID alone cannot cross either boundary.
+func (s *sessionServiceImpl) localAgentSessionTranscript(
+	ctx context.Context,
+	wsID, agentID, sessionID string,
+) ([]transcript.Event, error) {
+	sessStore, err := s.findStoreForSession(ctx, wsID, sessionID)
+	if err != nil {
 		return nil, service.ErrNotFound("session not found")
 	}
-	return s.ownedAgentSessionTranscript(ctx, wsID, rec)
+	meta, err := sessStore.LoadMetadata(sessionID)
+	if err != nil || meta == nil || strings.TrimSpace(meta.AgentName) != agentID ||
+		strings.TrimSpace(meta.TaskID) == "" {
+		return nil, service.ErrNotFound("session not found")
+	}
+	return s.GetSessionTranscript(ctx, wsID, meta.TaskID, sessionID)
 }
 
 func (s *sessionServiceImpl) agentSessionTranscript(

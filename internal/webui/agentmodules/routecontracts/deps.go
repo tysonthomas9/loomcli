@@ -32,6 +32,7 @@ type Deps struct {
 	Store                         store.Store
 	AgentSvc                      service.AgentService
 	AgentSessionTranscripts       service.AgentSessionTranscriptService
+	AgentLocalSessionHistory      service.AgentLocalSessionHistoryService
 	IssueSvc                      service.IssueService
 	Hub                           *realtime.Hub
 	FleetBaseURL                  string

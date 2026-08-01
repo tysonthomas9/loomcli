@@ -26,6 +26,15 @@ type BindingGrantCompatibility interface {
 }
 
 type agentSessionTranscriptEvents = service.TranscriptEvents
+type agentLocalSessionHistoryItem = service.SessionListItem
+
+// AgentLocalSessionHistoryReader is the read-only compatibility projection
+// consumed by supervised agent history. Keeping this transport-owned port here
+// prevents the history implementation from importing the legacy WebUI service
+// package while composition can still supply the session service structurally.
+type AgentLocalSessionHistoryReader interface {
+	ListAgentLocalSessions(context.Context, string, string) ([]agentLocalSessionHistoryItem, error)
+}
 
 // Config composes the unified transport with the canonical Agents identity
 // surface and Automation bindings. The composite Store remains for supervised
@@ -39,6 +48,7 @@ type Config struct {
 	SupervisedAuthority   SupervisedAuthorityContext
 	TaskRunHistory        AgentTaskRunHistoryReader
 	SessionTranscripts    service.AgentSessionTranscriptService
+	LocalSessionHistory   AgentLocalSessionHistoryReader
 	Store                 store.Store
 	Hub                   *realtime.Hub
 	Bindings              automation.BindingOperations
@@ -58,6 +68,7 @@ type Module struct {
 	supervisedAuthority   SupervisedAuthorityContext
 	taskRunHistory        AgentTaskRunHistoryReader
 	sessionTranscripts    service.AgentSessionTranscriptService
+	localSessionHistory   AgentLocalSessionHistoryReader
 	store                 store.Store
 	hub                   *realtime.Hub
 	bindings              automation.BindingOperations
@@ -96,6 +107,7 @@ func New(config Config) *Module {
 		supervisedAuthority:  supervisedAuthority,
 		taskRunHistory:       taskRunHistory,
 		sessionTranscripts:   config.SessionTranscripts,
+		localSessionHistory:  config.LocalSessionHistory,
 		store:                config.Store, hub: config.Hub,
 		bindings: config.Bindings, operatorAuthority: config.OperatorAuthority,
 		provisioning: config.Provisioning, provisioningAuthority: config.ProvisioningAuthority,
