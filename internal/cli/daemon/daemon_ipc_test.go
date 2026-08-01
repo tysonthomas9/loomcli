@@ -24,17 +24,32 @@ import (
 // It records calls and returns configurable results/errors.
 type mockIPCBackend struct {
 	// Recorded calls
+	getCalls     []string
+	listCalls    []backend.ListOpts
+	readyCalls   []backend.ReadyOpts
+	blockedCalls []backend.BlockedOpts
+	commentCalls []backend.CommentAddParams
 	claimCalls   []mockClaimCall
 	updateCalls  []mockUpdateCall
 	closeCalls   []mockCloseCall
 	releaseCalls []mockReleaseCall
 
 	// Configurable returns
-	claimErr    error
-	updateErr   error
-	closeErr    error
-	closeResult *backend.CloseResult
-	releaseErr  error
+	getResult     *backend.IssueDetailData
+	getErr        error
+	listResult    []backend.IssueData
+	listErr       error
+	readyResult   []backend.IssueData
+	readyErr      error
+	blockedResult []backend.IssueData
+	blockedErr    error
+	commentResult *backend.CommentData
+	commentErr    error
+	claimErr      error
+	updateErr     error
+	closeErr      error
+	closeResult   *backend.CloseResult
+	releaseErr    error
 }
 
 // ReleaseClaim records the call so handleIPCReleaseClaim tests can assert the
@@ -92,18 +107,21 @@ func (m *mockIPCBackend) Close(_ context.Context, id string, params backend.Clos
 	}, nil
 }
 
-// Stub methods to satisfy the IssueBackend interface (not used by IPC server).
-func (m *mockIPCBackend) Get(context.Context, string) (*backend.IssueDetailData, error) {
-	panic("not implemented")
+func (m *mockIPCBackend) Get(_ context.Context, id string) (*backend.IssueDetailData, error) {
+	m.getCalls = append(m.getCalls, id)
+	return m.getResult, m.getErr
 }
-func (m *mockIPCBackend) List(context.Context, backend.ListOpts) ([]backend.IssueData, error) {
-	panic("not implemented")
+func (m *mockIPCBackend) List(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+	m.listCalls = append(m.listCalls, opts)
+	return m.listResult, m.listErr
 }
-func (m *mockIPCBackend) Ready(context.Context, backend.ReadyOpts) ([]backend.IssueData, error) {
-	panic("not implemented")
+func (m *mockIPCBackend) Ready(_ context.Context, opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	m.readyCalls = append(m.readyCalls, opts)
+	return m.readyResult, m.readyErr
 }
-func (m *mockIPCBackend) Blocked(context.Context, backend.BlockedOpts) ([]backend.IssueData, error) {
-	panic("not implemented")
+func (m *mockIPCBackend) Blocked(_ context.Context, opts backend.BlockedOpts) ([]backend.IssueData, error) {
+	m.blockedCalls = append(m.blockedCalls, opts)
+	return m.blockedResult, m.blockedErr
 }
 func (m *mockIPCBackend) Stats(context.Context) (*backend.StatsData, error) {
 	panic("not implemented")
@@ -147,8 +165,9 @@ func (m *mockIPCBackend) RemoveLabel(context.Context, string, string) error {
 func (m *mockIPCBackend) ListComments(context.Context, string) ([]backend.CommentData, error) {
 	panic("not implemented")
 }
-func (m *mockIPCBackend) AddComment(context.Context, backend.CommentAddParams) (*backend.CommentData, error) {
-	panic("not implemented")
+func (m *mockIPCBackend) AddComment(_ context.Context, params backend.CommentAddParams) (*backend.CommentData, error) {
+	m.commentCalls = append(m.commentCalls, params)
+	return m.commentResult, m.commentErr
 }
 func (m *mockIPCBackend) ListEvents(context.Context, string, int) ([]backend.EventData, error) {
 	panic("not implemented")
@@ -223,6 +242,63 @@ func sendIPCRequest(t *testing.T, socketPath string, req AgentIPCRequest) AgentI
 		t.Fatalf("unmarshal response: %v", err)
 	}
 	return resp
+}
+
+func TestIPCServer_TaskQueriesAndCommentsRequireSessionCredential(t *testing.T) {
+	mb := &mockIPCBackend{
+		getResult:     &backend.IssueDetailData{IssueData: backend.IssueData{ID: "task-1"}},
+		listResult:    []backend.IssueData{{ID: "task-1"}},
+		readyResult:   []backend.IssueData{{ID: "task-2"}},
+		blockedResult: []backend.IssueData{{ID: "task-3"}},
+		commentResult: &backend.CommentData{IssueID: "task-1", Text: "review"},
+	}
+	d := newTestIPCDaemon(mb)
+	configureIPCTestAuth(d, "planner", "sess-1", "token-1")
+
+	bad := d.handleIPCGet(AgentIPCRequest{
+		Operation: ipcOpGet, AgentName: "planner", IssueID: "task-1",
+		SessionID: "sess-1", AuthToken: "wrong",
+	})
+	if bad.Success || len(mb.getCalls) != 0 {
+		t.Fatalf("unauthenticated get reached backend: response=%+v calls=%v", bad, mb.getCalls)
+	}
+
+	requests := []AgentIPCRequest{
+		{Operation: ipcOpGet, AgentName: "planner", IssueID: "task-1", SessionID: "sess-1", AuthToken: "token-1"},
+		{Operation: ipcOpList, AgentName: "planner", SessionID: "sess-1", AuthToken: "token-1", Args: json.RawMessage(`{"limit":5}`)},
+		{Operation: ipcOpReady, AgentName: "planner", SessionID: "sess-1", AuthToken: "token-1", Args: json.RawMessage(`{"limit":6}`)},
+		{Operation: ipcOpBlocked, AgentName: "planner", SessionID: "sess-1", AuthToken: "token-1", Args: json.RawMessage(`{"limit":7}`)},
+		{Operation: ipcOpAddComment, AgentName: "planner", IssueID: "task-1", SessionID: "sess-1", AuthToken: "token-1", Args: json.RawMessage(`{"issue_id":"task-1","text":"review"}`)},
+	}
+	for _, req := range requests {
+		resp := d.dispatchIPCOperation(req)
+		if !resp.Success {
+			t.Fatalf("%s failed: %+v", req.Operation, resp)
+		}
+		if len(resp.Data) == 0 {
+			t.Fatalf("%s returned no data", req.Operation)
+		}
+	}
+	if len(mb.getCalls) != 1 || mb.listCalls[0].Limit != 5 ||
+		mb.readyCalls[0].Limit != 6 || mb.blockedCalls[0].Limit != 7 ||
+		len(mb.commentCalls) != 1 || mb.commentCalls[0].Author != "planner" {
+		t.Fatalf("backend calls get=%v list=%v ready=%v blocked=%v comments=%v",
+			mb.getCalls, mb.listCalls, mb.readyCalls, mb.blockedCalls, mb.commentCalls)
+	}
+}
+
+func TestIPCServer_AddCommentRejectsMismatchedIssueID(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	resp := d.handleIPCAddComment(AgentIPCRequest{
+		Operation: ipcOpAddComment,
+		AgentName: "planner",
+		IssueID:   "task-1",
+		Args:      json.RawMessage(`{"issue_id":"task-2","text":"review"}`),
+	})
+	if resp.Success || resp.Kind != string(backend.KindValidation) || len(mb.commentCalls) != 0 {
+		t.Fatalf("mismatched comment issue accepted: response=%+v calls=%v", resp, mb.commentCalls)
+	}
 }
 
 func TestIPCServer_ClaimSuccess(t *testing.T) {

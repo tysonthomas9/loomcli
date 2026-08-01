@@ -72,6 +72,87 @@ func (c *AgentIPCClient) Heartbeat(at time.Time) error {
 	return ipcResponseToError(resp, "ipc.heartbeat")
 }
 
+// Get loads one task through the daemon-owned issue backend. Controlled
+// agents use this path so FleetDB's service credential remains in the daemon.
+func (c *AgentIPCClient) Get(issueID string) (*backend.IssueDetailData, error) {
+	var result backend.IssueDetailData
+	if err := c.query(IPCOpGet, issueID, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// List returns the workspace task list visible to the authenticated agent.
+func (c *AgentIPCClient) List(opts backend.ListOpts) ([]backend.IssueData, error) {
+	var result []backend.IssueData
+	if err := c.query(IPCOpList, "", opts, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Ready returns the canonical ready view through the daemon-owned backend.
+func (c *AgentIPCClient) Ready(opts backend.ReadyOpts) ([]backend.IssueData, error) {
+	var result []backend.IssueData
+	if err := c.query(IPCOpReady, "", opts, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Blocked returns the canonical blocked view through the daemon-owned backend.
+func (c *AgentIPCClient) Blocked(opts backend.BlockedOpts) ([]backend.IssueData, error) {
+	var result []backend.IssueData
+	if err := c.query(IPCOpBlocked, "", opts, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// AddComment adds a task comment through the same fenced daemon session as
+// Update and Complete.
+func (c *AgentIPCClient) AddComment(params backend.CommentAddParams) (*backend.CommentData, error) {
+	var result backend.CommentData
+	if err := c.query(IPCOpAddComment, params.IssueID, params, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *AgentIPCClient) query(operation, issueID string, args, result any) error {
+	var raw json.RawMessage
+	if args != nil {
+		encoded, err := json.Marshal(args)
+		if err != nil {
+			return backend.ErrInternal("ipc."+operation, "marshal args", err)
+		}
+		raw = encoded
+	}
+	req := AgentIPCRequest{
+		Operation:      operation,
+		AgentName:      c.AgentName,
+		IssueID:        issueID,
+		SessionID:      c.SessionID,
+		AuthToken:      c.AuthToken,
+		Args:           raw,
+		LastActivityAt: c.snapshotActivity(),
+	}
+	resp, err := sendAgentIPCRequest(c.SocketPath, req)
+	if err != nil {
+		return err
+	}
+	if err := ipcResponseToError(resp, "ipc."+operation); err != nil {
+		return err
+	}
+	if result == nil {
+		return nil
+	}
+	if err := json.Unmarshal(resp.Data, result); err != nil {
+		return backend.ErrInternal("ipc."+operation, "failed to decode result", err)
+	}
+	return nil
+}
+
 // Claim atomically claims an issue for this agent. Pass lockTTL=0 to use the
 // server's default TTL. Returns *backend.BackendError with KindConflict if
 // already claimed, KindNotFound if issue missing.

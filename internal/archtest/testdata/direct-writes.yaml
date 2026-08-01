@@ -316,11 +316,13 @@ method_sets:
       - Finalize
       - Finish
       - Heartbeat
+      - HeartbeatOwned
       - MarkResult
       - RecoverStale
       - RecoverStaleTaskRuns
       - RegisterAwaitAndCheck
       - Release
+      - ReleaseOwned
       - RepairTerminalDriverStep
       - RequestCancel
       - Requeue
@@ -504,6 +506,10 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
     capability_owner: interaction
+  - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseOwnedStore
+    package: github.com/tysonthomas9/loomcli/internal/store
+    method_set: store_repository
+    capability_owner: agents
   - receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseStore
     package: github.com/tysonthomas9/loomcli/internal/store
     method_set: store_repository
@@ -1483,6 +1489,18 @@ writes:
     aggregate_owner: interaction
     expires_after_phase: 7
   - file: internal/cli/cmdstore/store_tracing_control_plane.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseOwnedStore
+    method: HeartbeatOwned
+    count: 1
+    aggregate_owner: agents
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_control_plane.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseOwnedStore
+    method: ReleaseOwned
+    count: 1
+    aggregate_owner: agents
+    expires_after_phase: 7
+  - file: internal/cli/cmdstore/store_tracing_control_plane.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseStore
     method: Acquire
     count: 1
@@ -1491,13 +1509,13 @@ writes:
   - file: internal/cli/cmdstore/store_tracing_control_plane.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseStore
     method: Heartbeat
-    count: 1
+    count: 2
     aggregate_owner: agents
     expires_after_phase: 7
   - file: internal/cli/cmdstore/store_tracing_control_plane.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseStore
     method: Release
-    count: 1
+    count: 2
     aggregate_owner: agents
     expires_after_phase: 7
   - file: internal/cli/cmdstore/store_tracing_control_plane.go
@@ -1997,6 +2015,18 @@ writes:
     method: Heartbeat
     count: 1
     aggregate_owner: execution
+    expires_after_phase: 7
+  - file: internal/cli/daemon/supervisor/ownership.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseOwnedStore
+    method: HeartbeatOwned
+    count: 1
+    aggregate_owner: agents
+    expires_after_phase: 7
+  - file: internal/cli/daemon/supervisor/ownership.go
+    receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseOwnedStore
+    method: ReleaseOwned
+    count: 1
+    aggregate_owner: agents
     expires_after_phase: 7
   - file: internal/cli/daemon/supervisor/ownership.go
     receiver: github.com/tysonthomas9/loomcli/internal/store.AgentOwnershipLeaseStore

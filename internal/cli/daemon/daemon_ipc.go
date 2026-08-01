@@ -19,7 +19,7 @@ import (
 
 // AgentIPCRequest is sent by an agent subprocess to the daemon IPC socket.
 type AgentIPCRequest struct {
-	Operation      string          `json:"operation"`                  // "claim", "update", "complete", "heartbeat", "release_claim"
+	Operation      string          `json:"operation"`                  // authenticated task query or mutation operation
 	AgentName      string          `json:"agent_name"`                 // LOOM_AGENT_NAME identity (required)
 	IssueID        string          `json:"issue_id"`                   // target issue (required except for "heartbeat")
 	SessionID      string          `json:"session_id,omitempty"`       // supervisor-local transcript session id
@@ -39,6 +39,11 @@ type AgentIPCResponse struct {
 // Operation name constants for agent IPC.
 // These string values must stay in sync with the cli package's IPCOp* constants.
 const (
+	ipcOpGet          = "get"
+	ipcOpList         = "list"
+	ipcOpReady        = "ready"
+	ipcOpBlocked      = "blocked"
+	ipcOpAddComment   = "add_comment"
 	ipcOpClaim        = "claim"
 	ipcOpUpdate       = "update"
 	ipcOpComplete     = "complete"
@@ -133,8 +138,8 @@ func (d *Daemon) handleIPCConnection(conn net.Conn) {
 }
 
 // validateIPCRequest checks required fields. Returns (response, false) on failure.
-// Heartbeat requests are exempt from the IssueID requirement: the daemon
-// updates per-agent liveness by name, not by issue.
+// Workspace-scoped list views and heartbeat requests are exempt from the
+// IssueID requirement.
 func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 	if req.AgentName == "" {
 		return AgentIPCResponse{
@@ -142,13 +147,22 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 			Kind:  string(backend.KindValidation),
 		}, false
 	}
-	if req.Operation != ipcOpHeartbeat && req.IssueID == "" {
+	if ipcOperationRequiresIssueID(req.Operation) && req.IssueID == "" {
 		return AgentIPCResponse{
 			Error: "issue_id is required",
 			Kind:  string(backend.KindValidation),
 		}, false
 	}
 	return AgentIPCResponse{}, true
+}
+
+func ipcOperationRequiresIssueID(operation string) bool {
+	switch operation {
+	case ipcOpHeartbeat, ipcOpList, ipcOpReady, ipcOpBlocked:
+		return false
+	default:
+		return true
+	}
 }
 
 // dispatchIPCOperation routes to the appropriate handler based on operation.
@@ -162,7 +176,8 @@ func validateIPCRequest(req AgentIPCRequest) (AgentIPCResponse, bool) {
 // can thread it through to inherit the span as parent.
 func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	switch req.Operation {
-	case ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat, ipcOpReleaseLock, ipcOpReleaseClaim:
+	case ipcOpGet, ipcOpList, ipcOpReady, ipcOpBlocked, ipcOpAddComment,
+		ipcOpClaim, ipcOpUpdate, ipcOpComplete, ipcOpHeartbeat, ipcOpReleaseLock, ipcOpReleaseClaim:
 		// known method — fall through to traced dispatch below
 	default:
 		return AgentIPCResponse{Error: fmt.Sprintf("unknown operation: %q", req.Operation)}
@@ -174,6 +189,16 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 
 	var resp AgentIPCResponse
 	switch req.Operation {
+	case ipcOpGet:
+		resp = d.handleIPCGet(req)
+	case ipcOpList:
+		resp = d.handleIPCList(req)
+	case ipcOpReady:
+		resp = d.handleIPCReady(req)
+	case ipcOpBlocked:
+		resp = d.handleIPCBlocked(req)
+	case ipcOpAddComment:
+		resp = d.handleIPCAddComment(req)
 	case ipcOpClaim:
 		resp = d.handleIPCClaim(req)
 	case ipcOpUpdate:
@@ -196,6 +221,120 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	}
 	recordIPCErr(span, resp)
 	return resp
+}
+
+func (d *Daemon) handleIPCGet(req AgentIPCRequest) AgentIPCResponse {
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.Get(ctx, req.IssueID)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func (d *Daemon) handleIPCList(req AgentIPCRequest) AgentIPCResponse {
+	var opts backend.ListOpts
+	if resp, ok := decodeIPCArgs(req.Args, &opts); !ok {
+		return resp
+	}
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.List(ctx, opts)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func (d *Daemon) handleIPCReady(req AgentIPCRequest) AgentIPCResponse {
+	var opts backend.ReadyOpts
+	if resp, ok := decodeIPCArgs(req.Args, &opts); !ok {
+		return resp
+	}
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.Ready(ctx, opts)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func (d *Daemon) handleIPCBlocked(req AgentIPCRequest) AgentIPCResponse {
+	var opts backend.BlockedOpts
+	if resp, ok := decodeIPCArgs(req.Args, &opts); !ok {
+		return resp
+	}
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.Blocked(ctx, opts)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func (d *Daemon) handleIPCAddComment(req AgentIPCRequest) AgentIPCResponse {
+	var params backend.CommentAddParams
+	if resp, ok := decodeIPCArgs(req.Args, &params); !ok {
+		return resp
+	}
+	if params.IssueID != req.IssueID {
+		return AgentIPCResponse{
+			Error: "comment issue_id must match request issue_id",
+			Kind:  string(backend.KindValidation),
+		}
+	}
+	if resp, ok := d.validateIPCSession(req); !ok {
+		return resp
+	}
+	// The actor is the authenticated daemon session, never caller-controlled
+	// comment JSON.
+	params.Author = req.AgentName
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := d.issueBackend.AddComment(ctx, params)
+	if err != nil {
+		return ipcErrorResponse(err)
+	}
+	return marshalIPCResult(result)
+}
+
+func decodeIPCArgs(raw json.RawMessage, target any) (AgentIPCResponse, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return AgentIPCResponse{}, true
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return AgentIPCResponse{
+			Error: "invalid operation args: " + err.Error(),
+			Kind:  string(backend.KindValidation),
+		}, false
+	}
+	return AgentIPCResponse{}, true
+}
+
+func marshalIPCResult(result any) AgentIPCResponse {
+	data, err := json.Marshal(result)
+	if err != nil {
+		return AgentIPCResponse{
+			Error: "failed to marshal operation result: " + err.Error(),
+			Kind:  string(backend.KindInternal),
+		}
+	}
+	return AgentIPCResponse{Success: true, Data: data}
 }
 
 // recordIPCActivity forwards req.LastActivityAt to the supervisor's per-agent
@@ -382,7 +521,7 @@ func (d *Daemon) validateIPCSession(req AgentIPCRequest) (AgentIPCResponse, bool
 	}
 	if req.SessionID == "" || req.AuthToken == "" {
 		return AgentIPCResponse{
-			Error: "session_id and auth_token are required for fenced daemon IPC mutations",
+			Error: "session_id and auth_token are required for fenced daemon IPC operations",
 			Kind:  string(backend.KindValidation),
 		}, false
 	}
