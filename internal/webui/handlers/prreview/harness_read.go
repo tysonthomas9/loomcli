@@ -11,11 +11,11 @@ import (
 
 	hwtranscript "github.com/olesho/harness-wrapper/pkg/transcript"
 	"github.com/olesho/harness-wrapper/pkg/transcript/claudecode"
-	"github.com/olesho/harness-wrapper/pkg/transcript/gemini"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
 // Conversation states beyond the codex path's starting/reconnecting/idle/
@@ -41,13 +41,17 @@ type harnessTranscriptReader interface {
 }
 
 // harnessTranscriptReaders maps a lead runtime provider to the reader for its
-// harness-owned transcript. Providers absent here (opencode, cursor) have no
-// known transcript source; their chat state is "unsupported" while the
+// harness-owned transcript. Providers absent here (opencode, cursor, gemini)
+// have no known transcript source; their chat state is "unsupported" while the
 // terminal tab remains fully functional. Codex is deliberately absent: its
 // conversation is read live over the app-server socket, not from files.
+//
+// Gemini was dropped when harness-wrapper removed its gemini support wholesale
+// (transcript reader, harness profile, discovery probe, and versions entry). A
+// gemini lead therefore degrades to "unsupported" here rather than failing to
+// build against a package that no longer exists upstream.
 var harnessTranscriptReaders = map[string]harnessTranscriptReader{
 	"claude": claudecode.New(),
-	"gemini": gemini.New(),
 }
 
 // reviewerSnapshot is the provider-neutral conversation snapshot both the SSE
@@ -135,11 +139,11 @@ func newestClaudeSessionSince(reader harnessTranscriptReader, workDir string, si
 		root = cr.ProjectsRoot
 	}
 	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
+		configDir := sessions.ClaudeConfigDir()
+		if configDir == "" {
 			return "", false
 		}
-		root = filepath.Join(home, ".claude", "projects")
+		root = filepath.Join(configDir, "projects")
 	}
 	entries, err := os.ReadDir(filepath.Join(root, claudecode.EncodedCWD(workDir)))
 	if err != nil {
