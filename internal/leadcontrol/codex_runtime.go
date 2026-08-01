@@ -97,11 +97,24 @@ func prepareCodexLeadRuntime(cfg CodexLeadRuntimeConfig) (string, string, []stri
 	if err := os.MkdirAll(sqliteHome, 0700); err != nil {
 		return "", "", nil, fmt.Errorf("create codex lead runtime directory: %w", err)
 	}
-	childEnv, err := codexLeadChildEnv(runtimeHome, interaction.FilterChildBaseEnv(os.Environ()))
+	childEnv, err := codexLeadChildEnv(runtimeHome, codexLeadRuntimeBaseEnv(cfg, os.Environ()))
 	if err != nil {
 		return "", "", nil, err
 	}
 	return runtimeHome, sqliteHome, childEnv, nil
+}
+
+// codexLeadRuntimeBaseEnv filters all ambient LOOM_* values, then adds back
+// only the workspace selected by the trusted launch config. This lets commands
+// run by the interactive Lead resolve their workspace without inheriting a
+// stale or forged operator scope from the Desktop process.
+func codexLeadRuntimeBaseEnv(cfg CodexLeadRuntimeConfig, base []string) []string {
+	env := interaction.FilterChildBaseEnv(base)
+	workspace := strings.TrimSpace(cfg.Workspace)
+	if workspace == "" {
+		return env
+	}
+	return replaceEnvironmentValue(env, "LOOM_WORKSPACE", workspace)
 }
 
 func captureCodexTranscriptAfterTUI(

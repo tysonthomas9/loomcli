@@ -177,6 +177,33 @@ func TestCodexLeadChildEnvUsesIsolatedHomeWithoutCopyingCredentials(t *testing.T
 	}
 }
 
+func TestCodexLeadRuntimeBaseEnvUsesTrustedWorkspaceScope(t *testing.T) {
+	env := codexLeadRuntimeBaseEnv(CodexLeadRuntimeConfig{Workspace: "  PROOF-WS  "}, []string{
+		"PATH=/usr/bin",
+		"LOOM_WORKSPACE=STALE",
+		"LOOM_FLEET_DB_API_KEY=secret",
+		"LOOM_ARBITRARY=forged",
+	})
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "PATH=/usr/bin") ||
+		!strings.Contains(joined, "LOOM_WORKSPACE=PROOF-WS") {
+		t.Fatalf("runtime env missing trusted scope: %#v", env)
+	}
+	for _, forbidden := range []string{"LOOM_WORKSPACE=STALE", "secret", "forged"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("runtime env retained %q: %#v", forbidden, env)
+		}
+	}
+
+	unscoped := codexLeadRuntimeBaseEnv(CodexLeadRuntimeConfig{}, []string{
+		"PATH=/usr/bin",
+		"LOOM_WORKSPACE=STALE",
+	})
+	if strings.Contains(strings.Join(unscoped, "\n"), "LOOM_WORKSPACE") {
+		t.Fatalf("unscoped runtime inherited ambient workspace: %#v", unscoped)
+	}
+}
+
 func TestCodexLeadChildEnvFailsClosedWithoutAuthentication(t *testing.T) {
 	_, err := codexLeadChildEnv(t.TempDir(), []string{"CODEX_HOME=" + t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "auth.json") {
