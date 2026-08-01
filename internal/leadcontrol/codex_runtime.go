@@ -30,6 +30,7 @@ type CodexLeadRuntimeConfig struct {
 	Store     store.Store
 	Runtime   SessionRuntime
 	Workspace string
+	ConfigDir string
 	LeadName  string
 	SessionID string
 	WorkDir   string
@@ -105,16 +106,20 @@ func prepareCodexLeadRuntime(cfg CodexLeadRuntimeConfig) (string, string, []stri
 }
 
 // codexLeadRuntimeBaseEnv filters all ambient LOOM_* values, then adds back
-// only the workspace selected by the trusted launch config. This lets commands
-// run by the interactive Lead resolve their workspace without inheriting a
-// stale or forged operator scope from the Desktop process.
+// only the workspace and local data directory selected by the trusted launch
+// config. This lets commands run by the interactive Lead resolve the Desktop
+// workspace without inheriting stale or forged operator scope or credentials.
 func codexLeadRuntimeBaseEnv(cfg CodexLeadRuntimeConfig, base []string) []string {
 	env := interaction.FilterChildBaseEnv(base)
 	workspace := strings.TrimSpace(cfg.Workspace)
-	if workspace == "" {
-		return env
+	if workspace != "" {
+		env = replaceEnvironmentValue(env, "LOOM_WORKSPACE", workspace)
 	}
-	return replaceEnvironmentValue(env, "LOOM_WORKSPACE", workspace)
+	configDir := strings.TrimSpace(cfg.ConfigDir)
+	if configDir != "" {
+		env = replaceEnvironmentValue(env, "LOOM_CONFIG_DIR", configDir)
+	}
+	return env
 }
 
 func captureCodexTranscriptAfterTUI(
@@ -314,6 +319,7 @@ func replaceEnvironmentValue(base []string, name, value string) []string {
 
 func normalizeCodexLeadRuntimeConfig(cfg CodexLeadRuntimeConfig) CodexLeadRuntimeConfig {
 	cfg.Workspace = strings.TrimSpace(cfg.Workspace)
+	cfg.ConfigDir = strings.TrimSpace(cfg.ConfigDir)
 	cfg.LeadName = strings.TrimSpace(cfg.LeadName)
 	cfg.SessionID = strings.TrimSpace(cfg.SessionID)
 	cfg.WorkDir = strings.TrimSpace(cfg.WorkDir)

@@ -3,6 +3,7 @@ package backends
 import (
 	"context"
 
+	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -22,6 +23,7 @@ func RunCodexLeadRuntime(
 		Store:     st,
 		Runtime:   sessionRuntime,
 		Workspace: workspace,
+		ConfigDir: bootstrap.LoomDir(),
 		LeadName:  leadName,
 		SessionID: sessionID,
 		WorkDir:   workDir,

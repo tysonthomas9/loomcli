@@ -178,18 +178,23 @@ func TestCodexLeadChildEnvUsesIsolatedHomeWithoutCopyingCredentials(t *testing.T
 }
 
 func TestCodexLeadRuntimeBaseEnvUsesTrustedWorkspaceScope(t *testing.T) {
-	env := codexLeadRuntimeBaseEnv(CodexLeadRuntimeConfig{Workspace: "  PROOF-WS  "}, []string{
+	env := codexLeadRuntimeBaseEnv(CodexLeadRuntimeConfig{
+		Workspace: "  PROOF-WS  ",
+		ConfigDir: "  /trusted/loom-data  ",
+	}, []string{
 		"PATH=/usr/bin",
 		"LOOM_WORKSPACE=STALE",
+		"LOOM_CONFIG_DIR=/forged/loom-data",
 		"LOOM_FLEET_DB_API_KEY=secret",
 		"LOOM_ARBITRARY=forged",
 	})
 	joined := strings.Join(env, "\n")
 	if !strings.Contains(joined, "PATH=/usr/bin") ||
-		!strings.Contains(joined, "LOOM_WORKSPACE=PROOF-WS") {
+		!strings.Contains(joined, "LOOM_WORKSPACE=PROOF-WS") ||
+		!strings.Contains(joined, "LOOM_CONFIG_DIR=/trusted/loom-data") {
 		t.Fatalf("runtime env missing trusted scope: %#v", env)
 	}
-	for _, forbidden := range []string{"LOOM_WORKSPACE=STALE", "secret", "forged"} {
+	for _, forbidden := range []string{"LOOM_WORKSPACE=STALE", "/forged/loom-data", "secret", "forged"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("runtime env retained %q: %#v", forbidden, env)
 		}
@@ -198,9 +203,11 @@ func TestCodexLeadRuntimeBaseEnvUsesTrustedWorkspaceScope(t *testing.T) {
 	unscoped := codexLeadRuntimeBaseEnv(CodexLeadRuntimeConfig{}, []string{
 		"PATH=/usr/bin",
 		"LOOM_WORKSPACE=STALE",
+		"LOOM_CONFIG_DIR=/forged/loom-data",
 	})
-	if strings.Contains(strings.Join(unscoped, "\n"), "LOOM_WORKSPACE") {
-		t.Fatalf("unscoped runtime inherited ambient workspace: %#v", unscoped)
+	unscopedJoined := strings.Join(unscoped, "\n")
+	if strings.Contains(unscopedJoined, "LOOM_WORKSPACE") || strings.Contains(unscopedJoined, "LOOM_CONFIG_DIR") {
+		t.Fatalf("unscoped runtime inherited ambient Loom scope: %#v", unscoped)
 	}
 }
 
