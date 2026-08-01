@@ -286,7 +286,7 @@ func sendAgentIPCRequest(socketPath string, req AgentIPCRequest) (*AgentIPCRespo
 	}
 	defer func() { _ = conn.Close() }()
 
-	data, err := json.Marshal(req)
+	data, err := json.Marshal(req) // #nosec G117 -- AuthToken is intentionally serialized over the owner-only local daemon socket.
 	if err != nil {
 		return nil, backend.ErrInternal("ipc."+req.Operation, "marshal request", err)
 	}

@@ -219,7 +219,7 @@ func sendIPCRequest(t *testing.T, socketPath string, req AgentIPCRequest) AgentI
 	}
 	defer func() { _ = conn.Close() }()
 
-	data, err := json.Marshal(req)
+	data, err := json.Marshal(req) // #nosec G117 -- test helper intentionally exercises local IPC token serialization.
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}

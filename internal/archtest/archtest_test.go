@@ -532,7 +532,7 @@ func TestPhase5InteractionOwnershipBlockerRatchet(t *testing.T) {
 			rel == "internal/cli/cmdstore/store_tracing_control_plane.go" {
 			return nil
 		}
-		contents, err := os.ReadFile(path)
+		contents, err := os.ReadFile(path) // #nosec G122 -- WalkDir is rooted in the checked-out repository and does not follow symlinks.
 		if err != nil {
 			return err
 		}
