@@ -381,7 +381,27 @@ func (s *Supervisor) clearAgentSessionState(ap *AgentProcess) {
 	ap.ResumeTaskID = ""          // per-cycle; re-detected in preFlightSetup (ResumeFailures persists)
 	ap.RecoveryMode = recoverCold // per-cycle; re-classified in preFlightSetup
 	ap.LastActivity = time.Time{}
+	// A child that died while parked on an interactive prompt never sends its
+	// "end", so the in-flight count must not survive into the next cycle: a
+	// stale pending count would suspend the output-timeout watchdog for an
+	// agent that is no longer waiting on anything.
+	ap.InputWaitPending = 0
+	ap.InputWaitSince = time.Time{}
 	ap.Mu.Unlock()
+}
+
+// findAgentByWorktree returns the supervised agent with the given worktree name,
+// or nil when none matches. Shared by the agent-IPC sinks (RecordAgentActivity,
+// RecordAgentInputWait), which are both keyed by the agent's IPC identity.
+func (s *Supervisor) findAgentByWorktree(agentName string) *AgentProcess {
+	s.AgentsMu.RLock()
+	defer s.AgentsMu.RUnlock()
+	for _, ap := range s.Agents {
+		if ap.Entry.Worktree == agentName {
+			return ap
+		}
+	}
+	return nil
 }
 
 // RecordAgentActivity advances ap.LastActivity for the named agent toward the
@@ -392,15 +412,7 @@ func (s *Supervisor) RecordAgentActivity(agentName string, at time.Time) {
 	if agentName == "" || at.IsZero() {
 		return
 	}
-	s.AgentsMu.RLock()
-	var target *AgentProcess
-	for _, ap := range s.Agents {
-		if ap.Entry.Worktree == agentName {
-			target = ap
-			break
-		}
-	}
-	s.AgentsMu.RUnlock()
+	target := s.findAgentByWorktree(agentName)
 	if target == nil {
 		return
 	}
@@ -427,6 +439,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if err := s.gateBackendAvailable(ap); err != nil {
 		return false
 	}
+	if err := s.gateSafetyKnobsEnforceable(ap); err != nil {
+		return false
+	}
 
 	taskID, mode := s.detectRecovery(ap)
 	switch mode {
@@ -438,7 +453,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		ap.Mu.Lock()
 		ap.ResumeFailures = 0 // cold-starting ⇒ let a future interruption recover again
 		ap.Mu.Unlock()
-		if err := s.recoverAgent(ap, 0); err != nil {
+		// Cold start: nothing here is being continued, so recovery takes its
+		// fully destructive form (incomplete=false).
+		if err := s.recoverAgent(ap, 0, false); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
 	}
@@ -841,7 +858,7 @@ func (s *Supervisor) postMortemRecovery(ap *AgentProcess, exitCode int) {
 		slog.Info("skipping post-mortem recovery for yield exit", "worktree", ap.Entry.Worktree)
 		return
 	}
-	if err := s.recoverAgent(ap, exitCode); err != nil {
+	if err := s.recoverAgent(ap, exitCode, isIncompleteRun(ap)); err != nil {
 		slog.Warn("post-mortem recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 	}
 }

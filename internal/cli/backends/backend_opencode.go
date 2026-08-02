@@ -56,6 +56,9 @@ func openCodeInteractiveArgs() []string {
 }
 
 func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
+	if err := validateSafetyKnobsFromEnv("opencode"); err != nil {
+		return err
+	}
 	cmd := buildOpenCodeInteractiveCmd(workDir, prompt, agentName)
 
 	fmt.Println("Launching OpenCode agent...")
@@ -65,6 +68,9 @@ func defaultOpenCodeInvoker(workDir, prompt, agentName string) error {
 }
 
 func defaultOpenCodeNonInteractiveInvoker(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error {
+	if err := validateSafetyKnobsFromEnv("opencode"); err != nil {
+		return err
+	}
 	args := append([]string{"run", "--format", "json", "--dir", workDir}, openCodeModelArgs()...)
 
 	fmt.Println("Launching OpenCode agent (non-interactive)...")
@@ -145,6 +151,9 @@ func init() {
 
 func openCodeModelArgs() []string {
 	model := strings.TrimSpace(os.Getenv("LOOM_OPENCODE_MODEL"))
+	if model == "" {
+		model = resolveAgentModel()
+	}
 	if model == "" {
 		return nil
 	}

@@ -38,6 +38,20 @@ var (
 
 const envLocalRuntimeMode = "LOOM_LOCAL_RUNTIME"
 
+// defaultEnsureRuntimeTimeout budgets the whole ensure-then-wait sequence
+// of `ensure-runtime`. Both the --timeout flag default and the fallback in
+// workspaceOpsEnsureTimeout derive from it so the two cannot drift apart.
+//
+// It must clear backends.VersionProbeTimeout (20s) by a wide margin. Every
+// status reload inside the daemon wait loop probes each runnable agent's
+// backend with `<binary> --version`, and that probe builds its own context
+// — this deadline cannot cancel it, only outlive it. The previous default
+// was 20s, exactly the probe bound, so one cold probe could eat the entire
+// budget and ensure-runtime would exit non-zero having never waited for the
+// daemon at all. 60s leaves 40s of real waiting after a worst-case probe,
+// twice what the whole command used to get.
+const defaultEnsureRuntimeTimeout = 60 * time.Second
+
 var workspaceOpsCmd = &cobra.Command{
 	Use:   "ops",
 	Short: "Agent-safe workspace operations",
@@ -68,7 +82,8 @@ var workspaceOpsEnsureRuntimeCmd = &cobra.Command{
 
 func init() {
 	workspaceOpsCmd.PersistentFlags().BoolVar(&workspaceOpsJSON, "json", false, "Output JSON")
-	workspaceOpsEnsureRuntimeCmd.Flags().IntVar(&workspaceOpsTimeoutSec, "timeout", 20, "Seconds to wait for runtime and daemon readiness")
+	workspaceOpsEnsureRuntimeCmd.Flags().IntVar(&workspaceOpsTimeoutSec, "timeout",
+		int(defaultEnsureRuntimeTimeout/time.Second), "Seconds to wait for runtime and daemon readiness")
 	workspaceOpsCmd.AddCommand(workspaceOpsStatusCmd, workspaceOpsDiagnoseCmd, workspaceOpsEnsureRuntimeCmd)
 	workspaceCmd.AddCommand(workspaceOpsCmd)
 }
@@ -232,9 +247,13 @@ func runWorkspaceOpsEnsureRuntime(cmd *cobra.Command, args []string) error {
 	return renderWorkspaceOpsStatus(cmd, status)
 }
 
+// workspaceOpsEnsureTimeout resolves the deadline for one ensure-runtime
+// run. A non-positive --timeout — an explicit `--timeout 0`, or the zero
+// value when the flag was never parsed because the command was driven
+// programmatically — falls back to the same default the flag advertises.
 func workspaceOpsEnsureTimeout() time.Duration {
 	if workspaceOpsTimeoutSec <= 0 {
-		return 20 * time.Second
+		return defaultEnsureRuntimeTimeout
 	}
 	return time.Duration(workspaceOpsTimeoutSec) * time.Second
 }

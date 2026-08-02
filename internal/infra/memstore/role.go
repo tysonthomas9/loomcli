@@ -51,12 +51,14 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 		Skills:         append([]string(nil), in.Skills...),
 		Labels:         append([]string(nil), in.Labels...),
 		ExcludeLabels:  append([]string(nil), in.ExcludeLabels...),
+		InputPolicy:    in.InputPolicy.Clone(),
 		MaxPriority:    clonePtr(in.MaxPriority),
 		MaxConcurrency: clonePtr(in.MaxConcurrency),
 		ReadOnly:       in.ReadOnly,
 		AllowedTools:   append([]string(nil), in.AllowedTools...),
 		DeniedTools:    append([]string(nil), in.DeniedTools...),
 		MaxBudgetUSD:   clonePtr(in.MaxBudgetUSD),
+		MaxRunDuration: clonePtr(in.MaxRunDuration),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -130,6 +132,12 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	if patch.ExcludeLabels != nil {
 		r.ExcludeLabels = append([]string(nil), (*patch.ExcludeLabels)...)
 	}
+	if patch.InputPolicy != nil {
+		// Deep-copied on the way in as well as on the way out: the caller keeps
+		// a reference to the Kinds map it built, and a shared map would let it
+		// flip a role's disposition after the store accepted the patch.
+		r.InputPolicy = (*patch.InputPolicy).Clone()
+	}
 	if patch.MaxPriority != nil {
 		r.MaxPriority = clonePtr(*patch.MaxPriority)
 	}
@@ -147,6 +155,9 @@ func (s *roleStore) Update(_ context.Context, ws, name string, patch store.RoleU
 	}
 	if patch.MaxBudgetUSD != nil {
 		r.MaxBudgetUSD = clonePtr(*patch.MaxBudgetUSD)
+	}
+	if patch.MaxRunDuration != nil {
+		r.MaxRunDuration = clonePtr(*patch.MaxRunDuration)
 	}
 	r.UpdatedAt = time.Now().UTC()
 	return cloneRole(r), nil
@@ -180,8 +191,10 @@ func cloneRole(r *domain.Role) *domain.Role {
 	out.ExcludeLabels = append([]string(nil), r.ExcludeLabels...)
 	out.AllowedTools = append([]string(nil), r.AllowedTools...)
 	out.DeniedTools = append([]string(nil), r.DeniedTools...)
+	out.InputPolicy = r.InputPolicy.Clone()
 	out.MaxPriority = clonePtr(r.MaxPriority)
 	out.MaxConcurrency = clonePtr(r.MaxConcurrency)
 	out.MaxBudgetUSD = clonePtr(r.MaxBudgetUSD)
+	out.MaxRunDuration = clonePtr(r.MaxRunDuration)
 	return &out
 }

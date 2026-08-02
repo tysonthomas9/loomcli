@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // RoleConstraints holds the resolved routing constraints from a config.RoleConfig
@@ -28,6 +29,9 @@ type RoleConstraints struct {
 	ReadOnly      bool     // informational, carried through for downstream use
 	AllowedTools  []string // informational, carried through for downstream use
 	DeniedTools   []string // informational, carried through for downstream use
+	// InputPolicy is informational here too — the leaf reads the policy off
+	// the env directly at invocation time. Nil means deny every prompt.
+	InputPolicy *domain.RoleInputPolicy
 }
 
 // HasRoutingConstraints reports whether any constraint would affect task
@@ -62,6 +66,7 @@ func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstr
 		ReadOnly:      rc.ReadOnly,
 		AllowedTools:  rc.AllowedTools,
 		DeniedTools:   rc.DeniedTools,
+		InputPolicy:   rc.InputPolicy,
 	}
 
 	// config.AgentEntry overrides
@@ -230,6 +235,18 @@ func RoleConfigFromEnv() config.RoleConfig {
 	}
 	if v := os.Getenv("LOOM_ROLE_TASK_FILTER"); v != "" {
 		rc.TaskFilter = v
+	}
+	// A malformed or truncated policy leaves rc.InputPolicy nil, which is the
+	// deny-everything zero value: the agent auto-answers no harness prompt at
+	// all. Decoding is deliberately not fatal here — this reconstruction runs
+	// inside an already-spawned agent, so erroring out would turn a bad env var
+	// into a crash loop, and the fallback is the restrictive one either way.
+	if v := os.Getenv("LOOM_ROLE_INPUT_POLICY"); v != "" {
+		policy, err := domain.DecodeRoleInputPolicy(v)
+		if err != nil {
+			log.Printf("[router] Warning: invalid LOOM_ROLE_INPUT_POLICY: %v; denying every harness prompt", err)
+		}
+		rc.InputPolicy = policy
 	}
 	return rc
 }

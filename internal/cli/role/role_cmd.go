@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -19,18 +20,20 @@ import (
 )
 
 var (
-	roleAddDescription   string
-	roleAddKind          string
-	roleAddPrompt        string
-	roleAddPromptFile    string
-	roleAddModel         string
-	roleAddBackend       string
-	roleAddEffort        string
-	roleAddSkills        []string
-	roleAddLabels        []string
-	roleAddExcludeLabels []string
-	roleAddMaxConc       int
-	roleAddReadOnly      bool
+	roleAddDescription    string
+	roleAddKind           string
+	roleAddPrompt         string
+	roleAddPromptFile     string
+	roleAddModel          string
+	roleAddBackend        string
+	roleAddEffort         string
+	roleAddSkills         []string
+	roleAddLabels         []string
+	roleAddExcludeLabels  []string
+	roleAddMaxConc        int
+	roleAddReadOnly       bool
+	roleAddInputPolicy    []string
+	roleAddInputPolicyDef string
 
 	roleListJSON bool
 	roleShowJSON bool
@@ -86,12 +89,22 @@ var roleSetCmd = &cobra.Command{
   max_priority    integer
   max_concurrency integer
   max_budget_usd  float
+  max_run_duration integer (seconds; 0 disables the run-duration cap)
   skills          comma-separated list
   labels          comma-separated list (issue must carry ALL of these; evaluated after exclude_labels)
   exclude_labels  comma-separated list (issue rejected if it carries ANY of these; evaluated before labels)
   path_patterns   comma-separated list
   allowed_tools   comma-separated list
-  denied_tools    comma-separated list`,
+  denied_tools    comma-separated list
+  input_policy    comma-separated KIND=DISPOSITION pairs
+
+input_policy controls which interactive harness prompts an agent in this role
+may auto-answer. DISPOSITION is one of deny, allow, ask. The reserved KIND
+"default" sets the disposition for every kind not named; anything unnamed with
+no default is denied, and so is a role with no policy at all. "ask" has no
+human attached yet and currently behaves as deny (the agent logs when it does).
+
+  loom role set task input_policy "default=deny,trust_prompt=allow"`,
 	Args: cobra.ExactArgs(3),
 	RunE: runRoleSet,
 }
@@ -103,6 +116,8 @@ var roleUnsetCmd = &cobra.Command{
   max_priority    *int     (clear)
   max_concurrency *int     (clear)
   max_budget_usd  *float64 (clear)
+  max_run_duration *int    (clear — the role falls back to the daemon default)
+  input_policy    (clear — the role then auto-answers no harness prompt)
   description / kind / prompt / prompt_file / model / task_filter / backend / effort  (set to "")
   skills / labels / exclude_labels / path_patterns / allowed_tools / denied_tools      (set to empty list)
   read_only                                                 (set to false)`,
@@ -122,7 +137,9 @@ func init() {
 	roleAddCmd.Flags().StringSliceVar(&roleAddLabels, "labels", nil, "Issue must carry ALL of these labels (comma-separated or repeat flag)")
 	roleAddCmd.Flags().StringSliceVar(&roleAddExcludeLabels, "exclude-labels", nil, "Reject issue if it carries ANY of these labels (comma-separated or repeat flag)")
 	roleAddCmd.Flags().IntVar(&roleAddMaxConc, "max-concurrency", 0, "Max concurrent agents (0 = unlimited)")
-	roleAddCmd.Flags().BoolVar(&roleAddReadOnly, "read-only", false, "Read-only role")
+	roleAddCmd.Flags().BoolVar(&roleAddReadOnly, "read-only", false, "Read-only role (hard on claude/codex/gemini; prompt-only elsewhere, and the daemon logs which one you get)")
+	roleAddCmd.Flags().StringSliceVar(&roleAddInputPolicy, "input-policy", nil, "Auto-answer disposition per harness prompt kind, KIND=deny|allow|ask (comma-separated or repeat flag)")
+	roleAddCmd.Flags().StringVar(&roleAddInputPolicyDef, "input-policy-default", "", "Disposition for prompt kinds --input-policy does not name (deny|allow|ask; default deny)")
 
 	roleListCmd.Flags().BoolVar(&roleListJSON, "json", false, "JSON output")
 	roleShowCmd.Flags().BoolVar(&roleShowJSON, "json", false, "JSON output")
@@ -141,6 +158,10 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 	if err := validateRolePromptFile(args[0], roleAddKind, roleAddPromptFile); err != nil {
 		return err
 	}
+	inputPolicy, err := buildAddInputPolicy(roleAddInputPolicyDef, roleAddInputPolicy)
+	if err != nil {
+		return err
+	}
 	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
 		in := store.RoleCreate{
 			WorkspaceKey:  ws,
@@ -156,6 +177,7 @@ func runRoleAdd(_ *cobra.Command, args []string) error {
 			Labels:        trimFilterLabels(roleAddLabels),
 			ExcludeLabels: trimFilterLabels(roleAddExcludeLabels),
 			ReadOnly:      roleAddReadOnly,
+			InputPolicy:   inputPolicy,
 		}
 		if roleAddMaxConc > 0 {
 			v := roleAddMaxConc
@@ -241,6 +263,13 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		}
 		if r.ReadOnly {
 			fmt.Printf("Read-only:    true\n")
+		}
+		// Printed only when set. A role with no policy denies every prompt,
+		// which is also what the whole rest of the fleet does, so a line on
+		// every role would be noise; the interesting state is a role that has
+		// opted something in.
+		if r.InputPolicy != nil {
+			fmt.Printf("Input policy: %s\n", formatInputPolicy(r.InputPolicy))
 		}
 		return nil
 	})
@@ -377,6 +406,21 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 		}
 		ptr := &f
 		patch.MaxBudgetUSD = &ptr
+	case "max_run_duration":
+		if unset {
+			var nilInt *int
+			patch.MaxRunDuration = &nilInt
+			return patch, nil
+		}
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return patch, fmt.Errorf("max_run_duration must be an integer number of seconds: %w", err)
+		}
+		// 0 is accepted, not rejected: it is how a role says "no wall-clock cap
+		// on my runs". Clearing the field (unset) means something different —
+		// inherit the daemon default — which is why both spellings exist.
+		ptr := &n
+		patch.MaxRunDuration = &ptr
 	case "skills":
 		patch.Skills = sliceCSVPtr(value)
 	case "labels":
@@ -389,6 +433,20 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 		patch.AllowedTools = sliceCSVPtr(value)
 	case "denied_tools":
 		patch.DeniedTools = sliceCSVPtr(value)
+	case "input_policy":
+		if unset {
+			// Clearing lands as the deny-everything zero value, not as an
+			// empty-but-present policy: a role with `{}` and a role with
+			// nothing must resolve identically, and both must resolve to deny.
+			var nilPolicy *domain.RoleInputPolicy
+			patch.InputPolicy = &nilPolicy
+			return patch, nil
+		}
+		policy, err := parseInputPolicySpec(splitCSV(value))
+		if err != nil {
+			return patch, err
+		}
+		patch.InputPolicy = &policy
 	default:
 		return patch, fmt.Errorf("unknown key %q (run 'loom role set --help' for supported keys)", key)
 	}
@@ -563,17 +621,126 @@ func trimFilterLabels(in []string) []string {
 // becomes an empty slice (which fleet-db treats as "set to empty list",
 // equivalent to clearing the field).
 func sliceCSVPtr(csv string) *[]string {
-	if csv == "" {
-		empty := []string{}
-		return &empty
+	out := splitCSV(csv)
+	if out == nil {
+		out = []string{}
+	}
+	return &out
+}
+
+// splitCSV trims and drops empties from a comma-separated value.
+func splitCSV(csv string) []string {
+	if strings.TrimSpace(csv) == "" {
+		return nil
 	}
 	parts := strings.Split(csv, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
+		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
 		}
 	}
-	return &out
+	return out
+}
+
+// inputPolicyDefaultKind is the reserved KIND that sets RoleInputPolicy.Default
+// in the flat KIND=DISPOSITION spelling the CLI accepts. It is the same word the
+// JSON field uses, and no harness names a prompt kind "default" — a role that
+// somehow needs one has to go through the API or the YAML, which is a documented
+// limit rather than a silent collision.
+const inputPolicyDefaultKind = "default"
+
+// parseInputPolicySpec turns KIND=DISPOSITION entries into a policy.
+//
+// It validates against the same closed vocabulary and the same bounds the
+// server enforces, with the server's wording, so a typo fails here instead of
+// after a round trip. Returning nil for an empty spec keeps "said nothing" and
+// "denies everything" the same value all the way down.
+func parseInputPolicySpec(entries []string) (*domain.RoleInputPolicy, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+	policy := &domain.RoleInputPolicy{}
+	for _, entry := range entries {
+		kind, disposition, ok := strings.Cut(entry, "=")
+		if !ok {
+			return nil, fmt.Errorf("input_policy entry %q must be KIND=DISPOSITION (one of deny, allow, ask)", entry)
+		}
+		kind = strings.TrimSpace(kind)
+		disposition = strings.ToLower(strings.TrimSpace(disposition))
+		if kind == "" {
+			return nil, fmt.Errorf("role input_policy kind is required")
+		}
+		// An explicitly empty disposition is rejected rather than accepted as
+		// the deny it would resolve to. Resolution has to treat unset as deny
+		// (a half-written policy must fail closed), but a human typing
+		// "trust_prompt=" at a terminal has made a mistake, and quietly
+		// accepting it hides which of the two they meant.
+		valid := disposition != "" && domain.ValidateRoleInputDisposition(disposition)
+		// The reserved kind is checked before the message is chosen so a bad
+		// value there reports as a bad DEFAULT — the field it actually sets,
+		// and the wording the server would have used for it.
+		if kind == inputPolicyDefaultKind {
+			if !valid {
+				return nil, fmt.Errorf("role input_policy default %q must be one of deny, allow, ask", disposition)
+			}
+			policy.Default = disposition
+			continue
+		}
+		if !valid {
+			return nil, fmt.Errorf("role input_policy kind %q disposition %q must be one of deny, allow, ask", kind, disposition)
+		}
+		if policy.Kinds == nil {
+			policy.Kinds = make(map[string]string, len(entries))
+		}
+		if _, dup := policy.Kinds[kind]; dup {
+			return nil, fmt.Errorf("input_policy names kind %q twice", kind)
+		}
+		policy.Kinds[kind] = disposition
+	}
+	if err := domain.ValidateRoleInputPolicy(policy); err != nil {
+		return nil, err
+	}
+	return policy, nil
+}
+
+// buildAddInputPolicy merges `role add`'s two policy flags. The dedicated
+// --input-policy-default is applied first so an explicit `default=` inside
+// --input-policy wins; they are the same knob, so last-one-wins is the only
+// answer that does not need the operator to remember a precedence rule.
+func buildAddInputPolicy(defaultDisposition string, entries []string) (*domain.RoleInputPolicy, error) {
+	defaultDisposition = strings.ToLower(strings.TrimSpace(defaultDisposition))
+	if defaultDisposition != "" {
+		entries = append([]string{inputPolicyDefaultKind + "=" + defaultDisposition}, entries...)
+	}
+	return parseInputPolicySpec(entries)
+}
+
+// formatInputPolicy renders a policy for `loom role show` in the same
+// KIND=DISPOSITION spelling `loom role set` accepts, so what is displayed can
+// be pasted back. Kinds are sorted because Go map order is not stable and a
+// role's displayed policy should not change between two reads of the same role.
+func formatInputPolicy(p *domain.RoleInputPolicy) string {
+	if p == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(p.Kinds)+1)
+	if p.Default != "" {
+		parts = append(parts, inputPolicyDefaultKind+"="+p.Default)
+	}
+	kinds := make([]string, 0, len(p.Kinds))
+	for kind := range p.Kinds {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	for _, kind := range kinds {
+		parts = append(parts, kind+"="+p.Kinds[kind])
+	}
+	if len(parts) == 0 {
+		// A present-but-empty policy resolves exactly like no policy, so say
+		// what it does rather than printing a blank line the reader has to
+		// interpret.
+		return "deny (empty policy)"
+	}
+	return strings.Join(parts, ", ")
 }

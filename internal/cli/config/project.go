@@ -67,24 +67,32 @@ type RestartPolicy struct {
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
 type RoleConfig struct {
-	Kind           string   `yaml:"kind,omitempty"`
-	Description    string   `yaml:"description,omitempty"`
-	Prompt         string   `yaml:"prompt,omitempty"`
-	PromptFile     string   `yaml:"prompt_file,omitempty"`
-	Model          string   `yaml:"model,omitempty"`
-	TaskFilter     string   `yaml:"task_filter,omitempty"`
-	Backend        string   `yaml:"backend,omitempty"`
-	Effort         string   `yaml:"effort,omitempty"`
-	PathPatterns   []string `yaml:"path_patterns,omitempty"`
-	Skills         []string `yaml:"skills,omitempty"`
-	Labels         []string `yaml:"labels,omitempty"`
-	ExcludeLabels  []string `yaml:"exclude_labels,omitempty"`
-	MaxPriority    *int     `yaml:"max_priority,omitempty"`
-	MaxConcurrency *int     `yaml:"max_concurrency,omitempty"`
-	ReadOnly       bool     `yaml:"read_only,omitempty"`
-	AllowedTools   []string `yaml:"allowed_tools,omitempty"`
-	DeniedTools    []string `yaml:"denied_tools,omitempty"`
-	MaxBudgetUSD   *float64 `yaml:"max_budget_usd,omitempty"`
+	Kind          string   `yaml:"kind,omitempty"`
+	Description   string   `yaml:"description,omitempty"`
+	Prompt        string   `yaml:"prompt,omitempty"`
+	PromptFile    string   `yaml:"prompt_file,omitempty"`
+	Model         string   `yaml:"model,omitempty"`
+	TaskFilter    string   `yaml:"task_filter,omitempty"`
+	Backend       string   `yaml:"backend,omitempty"`
+	Effort        string   `yaml:"effort,omitempty"`
+	PathPatterns  []string `yaml:"path_patterns,omitempty"`
+	Skills        []string `yaml:"skills,omitempty"`
+	Labels        []string `yaml:"labels,omitempty"`
+	ExcludeLabels []string `yaml:"exclude_labels,omitempty"`
+	// InputPolicy governs which harness prompts an agent in this role may
+	// auto-answer. Nil denies every prompt — see domain.RoleInputPolicy for
+	// why the unset case has to be the restrictive one.
+	InputPolicy    *domain.RoleInputPolicy `yaml:"input_policy,omitempty"`
+	MaxPriority    *int                    `yaml:"max_priority,omitempty"`
+	MaxConcurrency *int                    `yaml:"max_concurrency,omitempty"`
+	ReadOnly       bool                    `yaml:"read_only,omitempty"`
+	AllowedTools   []string                `yaml:"allowed_tools,omitempty"`
+	DeniedTools    []string                `yaml:"denied_tools,omitempty"`
+	MaxBudgetUSD   *float64                `yaml:"max_budget_usd,omitempty"`
+	// MaxRunDuration caps a single supervised run's wall-clock age, in
+	// seconds. Nil inherits the daemon-wide default; <= 0 disables the cap for
+	// this role. See supervisor/run_duration.go.
+	MaxRunDuration *int `yaml:"max_run_duration,omitempty"`
 }
 
 // AgentEntry defines a single agent assignment.
@@ -318,12 +326,14 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 		Skills:         append([]string(nil), r.Skills...),
 		Labels:         append([]string(nil), r.Labels...),
 		ExcludeLabels:  append([]string(nil), r.ExcludeLabels...),
+		InputPolicy:    r.InputPolicy.Clone(),
 		MaxPriority:    cloneIntPtr(r.MaxPriority),
 		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
 		ReadOnly:       r.ReadOnly,
 		AllowedTools:   append([]string(nil), r.AllowedTools...),
 		DeniedTools:    append([]string(nil), r.DeniedTools...),
 		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
+		MaxRunDuration: cloneIntPtr(r.MaxRunDuration),
 	}
 }
 

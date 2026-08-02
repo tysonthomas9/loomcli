@@ -27,6 +27,7 @@ type AgentIPCRequest struct {
 	LeaseToken     string          `json:"lease_token,omitempty"`      // fleet-db AgentLease token
 	Args           json.RawMessage `json:"args,omitempty"`             // operation-specific params
 	LastActivityAt time.Time       `json:"last_activity_at,omitempty"` // most recent wrapper PTY-output observation; piggybacked on every op
+	InputWait      string          `json:"input_wait,omitempty"`       // "begin"/"end": the agent parked on (or was released from) an interactive prompt; piggybacked like LastActivityAt
 }
 
 // AgentIPCResponse is sent by the daemon back to the agent subprocess.
@@ -46,6 +47,14 @@ const (
 	ipcOpHeartbeat    = "heartbeat"
 	ipcOpReleaseLock  = "release_lock"
 	ipcOpReleaseClaim = "release_claim"
+)
+
+// Interactive-input-wait phases carried in AgentIPCRequest.InputWait.
+// These string values must stay in sync with the cli package's
+// IPCInputWait* constants.
+const (
+	ipcInputWaitBegin = "begin"
+	ipcInputWaitEnd   = "end"
 )
 
 // ipcClaimArgs are the optional arguments for the claim operation.
@@ -190,10 +199,12 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 	}
 	if resp.Success {
 		// Every successful op also advances per-agent liveness when a
-		// timestamp was attached. Done last so a half-applied mutation
+		// timestamp was attached, and applies any interactive-input-wait
+		// edge it carried. Done last so a half-applied mutation
 		// (claim succeeded but heartbeat write failed — impossible
 		// today, but defensive) cannot mask the mutation outcome.
 		d.recordIPCActivity(req)
+		d.recordIPCInputWait(req)
 	}
 	recordIPCErr(span, resp)
 	return resp
@@ -206,6 +217,29 @@ func (d *Daemon) recordIPCActivity(req AgentIPCRequest) {
 		return
 	}
 	d.sup.RecordAgentActivity(req.AgentName, req.LastActivityAt)
+}
+
+// recordIPCInputWait forwards an interactive-input-wait edge to the supervisor's
+// per-agent counter, which suspends the output-timeout idle kill while a human
+// still owes the agent an answer (see supervisor/input_wait.go).
+//
+// This rides the EXISTING agent-IPC channel rather than a new transport. The
+// same request that already piggybacks LastActivityAt on every op carries the
+// phase, so the child needs no second socket, no new operation, and no new
+// lease fence — the edge is authenticated by whatever op it rode in on. An
+// unrecognized phase is ignored: a newer child talking to an older daemon (or
+// vice versa) must never be able to move the counter by accident, because a
+// count stuck above zero is a suspended watchdog.
+func (d *Daemon) recordIPCInputWait(req AgentIPCRequest) {
+	if d.sup == nil {
+		return
+	}
+	switch req.InputWait {
+	case ipcInputWaitBegin:
+		d.sup.RecordAgentInputWait(req.AgentName, true)
+	case ipcInputWaitEnd:
+		d.sup.RecordAgentInputWait(req.AgentName, false)
+	}
 }
 
 // handleIPCHeartbeat handles the "heartbeat" operation. Its only side

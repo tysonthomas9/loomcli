@@ -113,6 +113,12 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.MaxBudgetUSD != nil {
 		base.MaxBudgetUSD = overlay.MaxBudgetUSD
 	}
+	// A pointer, so an explicit 0 survives the merge: "this role opts out of the
+	// run-duration cap" has to be expressible, and a plain int could not tell it
+	// apart from "unset, inherit the daemon default".
+	if overlay.MaxRunDuration != nil {
+		base.MaxRunDuration = overlay.MaxRunDuration
+	}
 	if overlay.Backend != "" {
 		base.Backend = overlay.Backend
 	}
@@ -130,6 +136,13 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	}
 	if len(overlay.DeniedTools) > 0 {
 		base.DeniedTools = overlay.DeniedTools
+	}
+	// A non-nil overlay policy replaces the base wholesale rather than merging
+	// the Kinds maps. Merging would let a base entry the overlay deliberately
+	// dropped survive, and for a policy whose entries grant permission that
+	// resolves the wrong way: the surviving entry could be the permissive one.
+	if overlay.InputPolicy != nil {
+		base.InputPolicy = overlay.InputPolicy
 	}
 	// PromptFile intentionally NOT merged for built-in roles
 	return base

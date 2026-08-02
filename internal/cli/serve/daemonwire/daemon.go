@@ -268,12 +268,14 @@ func roleConfigFromDomain(r *domain.Role) config.RoleConfig {
 		Skills:         append([]string(nil), r.Skills...),
 		Labels:         append([]string(nil), r.Labels...),
 		ExcludeLabels:  append([]string(nil), r.ExcludeLabels...),
+		InputPolicy:    r.InputPolicy.Clone(),
 		MaxPriority:    cloneIntPtr(r.MaxPriority),
 		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
 		ReadOnly:       r.ReadOnly,
 		AllowedTools:   append([]string(nil), r.AllowedTools...),
 		DeniedTools:    append([]string(nil), r.DeniedTools...),
 		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
+		MaxRunDuration: cloneIntPtr(r.MaxRunDuration),
 	}
 }
 
