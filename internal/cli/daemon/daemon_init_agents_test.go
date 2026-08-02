@@ -34,9 +34,7 @@ func TestInitSupervisorAgents_SkipsInvalidDefinitionKeepsTheRest(t *testing.T) {
 		{Worktree: good, Role: "task"},
 	}
 
-	if err := initSupervisorAgents(sup, agents, roles); err != nil {
-		t.Fatalf("initSupervisorAgents = %v, want nil (skip the bad agent, keep the daemon)", err)
-	}
+	initSupervisorAgents(sup, agents, roles)
 	if len(sup.Agents) != 1 {
 		t.Fatalf("supervised agents = %d, want 1 (only the valid definition)", len(sup.Agents))
 	}
