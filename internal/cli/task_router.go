@@ -56,6 +56,9 @@ func MergeRoleConstraints(rc config.RoleConfig, ae config.AgentEntry) RoleConstr
 	}
 
 	// config.AgentEntry overrides
+	if ae.TaskFilter != "" {
+		c.TaskFilter = ae.TaskFilter
+	}
 	if ae.PathPatterns != nil {
 		c.PathPatterns = ae.PathPatterns
 	}

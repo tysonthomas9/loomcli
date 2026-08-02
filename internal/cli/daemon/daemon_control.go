@@ -191,8 +191,39 @@ func (d *Daemon) handleAgentControlStop(name string, force bool) DaemonControlRe
 		return DaemonControlResponse{Error: fmt.Sprintf("failed to stop agent %q: %v", name, err)}
 	}
 
+	d.markAgentStopAccepted(name)
+
 	slog.Info("agent stopped via control socket", "worktree", name, "force", force)
 	return DaemonControlResponse{Success: true}
+}
+
+// markAgentStopAccepted persists a manual stop as the agent's desired state.
+// StoppedAgents alone is process memory: a daemon restart rebuilt every agent
+// from the store, where the definition still said "running", so a manually
+// stopped agent quietly resurrected on the next restart — observed live on the
+// compose stack. The start path already persists the symmetric transition
+// (markAgentStartAccepted); stop writing only to memory was the asymmetry.
+// Best-effort like its sibling: a store failure logs and leaves the in-memory
+// stop in force for this daemon's lifetime.
+func (d *Daemon) markAgentStopAccepted(name string) {
+	if d.store == nil || d.sup == nil || d.sup.WorkspaceID == "" {
+		return
+	}
+	desired := domain.AgentDesiredStopped
+	state := domain.AgentStateStopped
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	d.reconcileMu.Lock()
+	defer d.reconcileMu.Unlock()
+	if _, err := d.store.Agents().Update(ctx, d.sup.WorkspaceID, name, store.AgentUpdate{
+		DesiredState: &desired,
+		State:        &state,
+	}); err != nil {
+		slog.Warn("failed to mark agent stop accepted", "worktree", name, "err", err)
+		return
+	}
+	d.setConfigAgentDesiredStateLocked(name, desired)
 }
 
 // handleAgentControlStart starts a previously stopped agent.
