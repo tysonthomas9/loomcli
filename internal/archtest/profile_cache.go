@@ -38,13 +38,14 @@ func withRepositoryProfileCache(profile AnalysisProfile, analyze func([]string) 
 	return analyze(profileEnvironmentWithCache(profile, cacheDir))
 }
 
-// reusableNativeProfileCache avoids holding two full native compilation
-// caches at once during make gate. The preceding vet/build/lint stages have
-// already populated the caller-owned cache for this exact untagged target, so
-// reuse adds no cross-target variants. Tagged, race, and cross-compiled
-// profiles remain isolated and are removed after each analysis.
+// reusableNativeProfileCache avoids recompiling the repository and standard
+// library from an empty cache for every native tag/race profile. Go's build
+// cache is content addressed, so profile-specific variants cannot be confused
+// with one another and the toolchain applies its normal bounded cache
+// maintenance. Cross-compiled profiles remain isolated and are removed after
+// each analysis so foreign-target variants do not accumulate locally.
 func reusableNativeProfileCache(profile AnalysisProfile) (string, bool) {
-	if profile.GOOS != runtime.GOOS || profile.GOARCH != runtime.GOARCH || profile.Race || len(profile.Tags) != 0 {
+	if profile.GOOS != runtime.GOOS || profile.GOARCH != runtime.GOARCH {
 		return "", false
 	}
 	for _, entry := range os.Environ() {
@@ -58,5 +59,14 @@ func reusableNativeProfileCache(profile AnalysisProfile) (string, bool) {
 		}
 		return "", false
 	}
-	return "", false
+	userCacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", false
+	}
+	cacheDir := filepath.Join(userCacheDir, "go-build")
+	info, err := os.Stat(cacheDir)
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	return filepath.Clean(cacheDir), true
 }

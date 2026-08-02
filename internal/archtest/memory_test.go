@@ -53,13 +53,16 @@ func TestRepositoryProfileCacheIsIsolatedAndRemoved(t *testing.T) {
 	}
 }
 
-func TestRepositoryNativeProfileReusesExplicitCallerCache(t *testing.T) {
+func TestRepositoryNativeTaggedRaceProfileReusesExplicitCallerCache(t *testing.T) {
 	inherited := t.TempDir()
 	t.Setenv("GOCACHE", inherited)
 
 	var scoped string
 	err := withRepositoryProfileCache(
-		AnalysisProfile{Name: "native-cache-test", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
+		AnalysisProfile{
+			Name: "native-cache-test", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
+			Tags: []string{"integration"}, Race: true,
+		},
 		func(environment []string) error {
 			for _, entry := range environment {
 				if strings.HasPrefix(entry, "GOCACHE=") {

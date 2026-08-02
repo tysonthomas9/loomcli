@@ -477,10 +477,10 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 		}
 	}
 	if baseline := inventory.LegacyDriver; baseline != nil {
-		legacy, err := snapshotDirectWritesAtRoots(root, matrix, inventory, []string{baseline.Root})
-		if err != nil {
-			return nil, nil, fmt.Errorf("scan legacy driver direct writes: %w", err)
+		if !rootCoveredByAdapterRoots(baseline.Root, inventory.AdapterRoots) {
+			return nil, nil, fmt.Errorf("legacy driver root %s must be covered by adapter_roots", baseline.Root)
 		}
+		legacy := directWritesWithinRoot(observed, baseline.Root)
 		rows, sites, digest := directWriteDigest(legacy)
 		owners := directWriteOwnerBaselines(legacy)
 		if rows != baseline.Rows || sites != baseline.Sites || digest != baseline.Digest || !slices.Equal(owners, baseline.Owners) {
@@ -488,6 +488,33 @@ func CheckDirectWrites(root string, matrix AnalysisMatrix, inventory DirectWrite
 		}
 	}
 	return observed, violations, nil
+}
+
+func rootCoveredByAdapterRoots(root string, adapterRoots []string) bool {
+	root = cleanInventoryPath(root)
+	for _, adapterRoot := range adapterRoots {
+		adapterRoot = cleanInventoryPath(adapterRoot)
+		if root == adapterRoot || strings.HasPrefix(root, adapterRoot+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func directWritesWithinRoot(uses []DirectWriteUse, root string) []DirectWriteUse {
+	root = cleanInventoryPath(root)
+	within := make([]DirectWriteUse, 0, len(uses))
+	for _, use := range uses {
+		file := cleanInventoryPath(use.File)
+		if file == root || strings.HasPrefix(file, root+"/") {
+			within = append(within, use)
+		}
+	}
+	return within
+}
+
+func cleanInventoryPath(path string) string {
+	return strings.Trim(filepath.ToSlash(filepath.Clean(strings.TrimSpace(path))), "/")
 }
 
 func SnapshotDirectWrites(
