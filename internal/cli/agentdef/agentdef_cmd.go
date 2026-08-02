@@ -123,6 +123,9 @@ func init() {
 	registerHookFlags(agentUpdateCmd, &agentUpdateCommentReply, &agentUpdateWriteDesign, &agentUpdateLabels,
 		&agentUpdateRemoveLabels, &agentUpdateSetStatus, &agentUpdateClose, &agentUpdateCycle)
 	agentUpdateCmd.Flags().BoolVar(&agentUpdateClear, "clear-on-complete", false, "Remove all on_complete hooks from this agent")
+	agentUpdateCmd.Flags().StringVar(&agentUpdateParent, "parent", "", "Epic ID to scope this agent to (pass an empty string to clear the scope)")
+	agentUpdateCmd.Flags().StringVar(&agentUpdateRole, "role", "", "Role name to switch this agent to")
+	agentUpdateCmd.Flags().StringVar(&agentUpdateMode, "mode", "", "Agent mode: ephemeral or service (empty clears it)")
 
 	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd, agentUpdateCmd)
 	cli.RegisterCommand(agentdefCmd)
