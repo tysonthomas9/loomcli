@@ -305,6 +305,17 @@ func (s *Supervisor) setupAgentLogFile(ap *AgentProcess, cmd *exec.Cmd) {
 
 	switch len(sinks) {
 	case 0:
+		// Both sinks are unavailable, so the child's stdout and stderr go
+		// nowhere: cmd.Stdout/Stderr stay nil, which os/exec wires to
+		// /dev/null. That is survivable but it must not be silent — with no
+		// child output there is no way to tell a working agent from one that
+		// printed an error and exited, which is exactly the state that made a
+		// real "every agent exits 0 doing nothing" bug undiagnosable. The two
+		// openers each log their own reason above; this says what the
+		// combination costs.
+		log.Printf("[daemon] Agent %s: NO LOG SINK — the agent's output is being discarded; "+
+			"set daemon.log_dir or fix the agent archive to make this run diagnosable",
+			ap.Entry.Worktree)
 		return
 	case 1:
 		cmd.Stdout, cmd.Stderr = sinks[0], sinks[0]
