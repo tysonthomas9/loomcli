@@ -59,3 +59,28 @@ func TestAgentUpdateHooksPatch_IdentityOnlyLeavesHooksUntouched(t *testing.T) {
 		t.Fatal("no flags at all must still be a 'nothing to update' error")
 	}
 }
+
+// The task filter decides what an agent claims — and for a custom-role agent,
+// WHETHER it claims at all. add grew --task-filter long before update did, so
+// the only CLI way to change it was remove + re-add (losing hooks). These pin
+// the patch: aliases canonicalize, garbage is rejected, empty clears.
+func TestAgentUpdateIdentityPatch_TaskFilter(t *testing.T) {
+	agentUpdateFilter = "needs_design"
+	t.Cleanup(func() { agentUpdateFilter = "" })
+	patch, touched, err := agentUpdateIdentityPatch(changedSet("task-filter"))
+	if err != nil || !touched || patch.TaskFilter == nil || *patch.TaskFilter != "needs_plan" {
+		t.Fatalf("patch = %+v touched=%v err=%v, want canonical TaskFilter=needs_plan", patch, touched, err)
+	}
+
+	agentUpdateFilter = "sometimes"
+	if _, _, err := agentUpdateIdentityPatch(changedSet("task-filter")); err == nil ||
+		!strings.Contains(err.Error(), "invalid task filter") {
+		t.Fatalf("garbage filter must be rejected, got err=%v", err)
+	}
+
+	agentUpdateFilter = ""
+	patch, touched, err = agentUpdateIdentityPatch(changedSet("task-filter"))
+	if err != nil || !touched || patch.TaskFilter == nil || *patch.TaskFilter != "" {
+		t.Fatalf("explicit --task-filter \"\" must clear back to the role's filter; patch = %+v err=%v", patch, err)
+	}
+}
