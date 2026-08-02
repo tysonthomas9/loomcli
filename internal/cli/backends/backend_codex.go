@@ -254,6 +254,15 @@ type codexUsageEvent struct {
 // collectCodexStreamUsage is best-effort: Codex emits turn.completed events
 // with a usage object when running with --json. If the line doesn't contain
 // usage data, it's silently ignored.
+//
+// NOT ALSO READ FROM THE TRANSCRIPT. Claude's turn-lifecycle path has no live
+// usage stream, so it back-fills from the harness transcript
+// (accumulateHarnessUsage); Codex's does, and this handler runs on every line
+// of it. Adding a transcript read on top would fold codex's cumulative
+// total_token_usage into a collector that has already counted the same tokens
+// per turn.completed event — a straight double-count. The transcript read
+// belongs only where there is no collector to double against: the supervisor's
+// post-reap finalize.
 func collectCodexStreamUsage(line string, collector *usage.Collector) {
 	var event codexUsageEvent
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
