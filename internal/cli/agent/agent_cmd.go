@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -148,18 +149,23 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
 	}
 
-	// Adopt parent-created session env vars for transcript tracking
-	if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
-		inheritedRuntimeDir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")
-		if inheritedRuntimeDir == "" {
-			inheritedRuntimeDir = cli.GetWorkspaceRuntimeDir()
-		}
-		backends.SetActiveSessionRuntimeEnv(inheritedRuntimeDir, inheritedSID)
-		defer backends.ClearActiveSessionEnv()
-	}
-
 	ws, _ := config.ResolveActiveWorkspace()
 	prompt := promptGen(agentName, ws)
+	// Adopt the parent-created session (daemon spawn) or create our own, exactly
+	// like runTaskDaemon/runPlanDaemon. This replaces an inline copy of only the
+	// adopt half, which left no session handle to finalize — so a custom role's
+	// self-started run recorded nothing at all: no diff stats, no transcript
+	// mirror, no tokens, no cost. Under a supervisor spawn the session is
+	// inherited and the supervisor owns the finalize; this covers every other way
+	// --daemon-mode is entered. Phase is "implementation" rather than a third
+	// value so the local record agrees with the phase the supervisor stamps on
+	// the control-plane session for any non-plan role.
+	sess := adoptOrCreateSession(agentName, agentParentID, prompt, "implementation")
+	defer backends.ClearActiveSessionEnv()
+
+	beforeRef := automode.CaptureHEADRef(worktreePath)
+	startedAt := time.Now()
+
 	// Daemon-spawned subprocesses have no controlling TTY. InvokeAgent's
 	// interactive path inherits the daemon's stdin/stdout, which makes backend
 	// TUIs render nothing — the supervisor watchdog then times the silent run
@@ -168,8 +174,14 @@ func runAgentDaemon(worktreePath, agentName string, promptGen func(string, *conf
 	// path: PTY + stream-json, retry policy, and liveness ticks.
 	shutdown := automode.SetupSignalHandler()
 	collector := usage.NewCollector(cli.GetBackendName(), agentName)
-	if err := cli.InvokeAgentNonInteractive(worktreePath, prompt, agentName, shutdown, collector); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	invokeErr := cli.InvokeAgentNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
+
+	// Finalize BEFORE the error exit: a failed run's tokens were still spent, and
+	// ExitWithFlush never returns, so an exit-first ordering would drop them.
+	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, agentParentID)
+
+	if invokeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
 		cli.ExitWithFlush(1)
 	}
 }
