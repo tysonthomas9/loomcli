@@ -113,6 +113,13 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if len(overlay.DeniedTools) > 0 {
 		base.DeniedTools = overlay.DeniedTools
 	}
+	// A non-nil overlay policy replaces the base wholesale rather than merging
+	// the Kinds maps. Merging would let a base entry the overlay deliberately
+	// dropped survive, and for a policy whose entries grant permission that
+	// resolves the wrong way: the surviving entry could be the permissive one.
+	if overlay.InputPolicy != nil {
+		base.InputPolicy = overlay.InputPolicy
+	}
 	// PromptFile intentionally NOT merged for built-in roles
 	return base
 }

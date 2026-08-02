@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/observability/tracing"
 
@@ -130,6 +131,20 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 	}
 	if ap.RoleConfig.ReadOnly {
 		env = append(env, "LOOM_READ_ONLY=1")
+	}
+	// The input policy is structured, so unlike the tool lists it travels as
+	// JSON in one variable. Nothing is exported for a nil policy: the leaf
+	// reads an absent variable as deny-everything, which is the same state, so
+	// an empty export would only add a way for the two to disagree. An encode
+	// failure is logged and skipped rather than failing the spawn — the agent
+	// then runs under the deny-everything default, which is the restrictive
+	// direction, and refusing to spawn over a serialization bug would take the
+	// fleet down for a knob that is failing safe.
+	if policy, err := domain.EncodeRoleInputPolicy(ap.RoleConfig.InputPolicy); err != nil {
+		log.Printf("[daemon] Agent %s: input_policy not exported (%v) — the agent will deny every harness prompt",
+			ap.Entry.Worktree, err)
+	} else if policy != "" {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_INPUT_POLICY=%s", policy))
 	}
 	if ap.RoleConfig.MaxBudgetUSD != nil {
 		env = append(env, fmt.Sprintf("LOOM_MAX_BUDGET_USD=%.2f", *ap.RoleConfig.MaxBudgetUSD))

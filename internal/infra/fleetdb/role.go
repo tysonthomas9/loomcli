@@ -13,27 +13,33 @@ type roleStore struct{ client *Client }
 var _ store.RoleStore = (*roleStore)(nil)
 
 // roleWire mirrors fleet-db's models.Role JSON shape.
+//
+// input_policy carries domain.RoleInputPolicy directly rather than a local
+// mirror struct: its JSON tags already match fleet-db's models.RoleInputPolicy
+// field for field, and a second copy of a type whose whole point is a
+// deny-by-default rule is a second place for that rule to be got wrong.
 type roleWire struct {
-	WorkspaceKey   string    `json:"workspace_key"`
-	Name           string    `json:"name"`
-	Kind           string    `json:"kind,omitempty"`
-	Description    string    `json:"description,omitempty"`
-	Prompt         string    `json:"prompt,omitempty"`
-	PromptFile     string    `json:"prompt_file,omitempty"`
-	Model          string    `json:"model,omitempty"`
-	TaskFilter     string    `json:"task_filter,omitempty"`
-	Backend        string    `json:"backend,omitempty"`
-	Effort         string    `json:"effort,omitempty"`
-	PathPatterns   []string  `json:"path_patterns,omitempty"`
-	Skills         []string  `json:"skills,omitempty"`
-	MaxPriority    *int      `json:"max_priority,omitempty"`
-	MaxConcurrency *int      `json:"max_concurrency,omitempty"`
-	ReadOnly       bool      `json:"read_only,omitempty"`
-	AllowedTools   []string  `json:"allowed_tools,omitempty"`
-	DeniedTools    []string  `json:"denied_tools,omitempty"`
-	MaxBudgetUSD   *float64  `json:"max_budget_usd,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	WorkspaceKey   string                  `json:"workspace_key"`
+	Name           string                  `json:"name"`
+	Kind           string                  `json:"kind,omitempty"`
+	Description    string                  `json:"description,omitempty"`
+	Prompt         string                  `json:"prompt,omitempty"`
+	PromptFile     string                  `json:"prompt_file,omitempty"`
+	Model          string                  `json:"model,omitempty"`
+	TaskFilter     string                  `json:"task_filter,omitempty"`
+	Backend        string                  `json:"backend,omitempty"`
+	Effort         string                  `json:"effort,omitempty"`
+	PathPatterns   []string                `json:"path_patterns,omitempty"`
+	Skills         []string                `json:"skills,omitempty"`
+	InputPolicy    *domain.RoleInputPolicy `json:"input_policy,omitempty"`
+	MaxPriority    *int                    `json:"max_priority,omitempty"`
+	MaxConcurrency *int                    `json:"max_concurrency,omitempty"`
+	ReadOnly       bool                    `json:"read_only,omitempty"`
+	AllowedTools   []string                `json:"allowed_tools,omitempty"`
+	DeniedTools    []string                `json:"denied_tools,omitempty"`
+	MaxBudgetUSD   *float64                `json:"max_budget_usd,omitempty"`
+	CreatedAt      time.Time               `json:"created_at"`
+	UpdatedAt      time.Time               `json:"updated_at"`
 }
 
 func (r roleWire) toDomain() *domain.Role {
@@ -50,6 +56,7 @@ func (r roleWire) toDomain() *domain.Role {
 		Effort:         r.Effort,
 		PathPatterns:   r.PathPatterns,
 		Skills:         r.Skills,
+		InputPolicy:    r.InputPolicy.Clone(),
 		MaxPriority:    r.MaxPriority,
 		MaxConcurrency: r.MaxConcurrency,
 		ReadOnly:       r.ReadOnly,
@@ -63,23 +70,24 @@ func (r roleWire) toDomain() *domain.Role {
 
 func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Role, error) {
 	body := struct {
-		Name           string   `json:"name"`
-		Kind           string   `json:"kind,omitempty"`
-		Description    string   `json:"description,omitempty"`
-		Prompt         string   `json:"prompt,omitempty"`
-		PromptFile     string   `json:"prompt_file,omitempty"`
-		Model          string   `json:"model,omitempty"`
-		TaskFilter     string   `json:"task_filter,omitempty"`
-		Backend        string   `json:"backend,omitempty"`
-		Effort         string   `json:"effort,omitempty"`
-		PathPatterns   []string `json:"path_patterns,omitempty"`
-		Skills         []string `json:"skills,omitempty"`
-		MaxPriority    *int     `json:"max_priority,omitempty"`
-		MaxConcurrency *int     `json:"max_concurrency,omitempty"`
-		ReadOnly       bool     `json:"read_only,omitempty"`
-		AllowedTools   []string `json:"allowed_tools,omitempty"`
-		DeniedTools    []string `json:"denied_tools,omitempty"`
-		MaxBudgetUSD   *float64 `json:"max_budget_usd,omitempty"`
+		Name           string                  `json:"name"`
+		Kind           string                  `json:"kind,omitempty"`
+		Description    string                  `json:"description,omitempty"`
+		Prompt         string                  `json:"prompt,omitempty"`
+		PromptFile     string                  `json:"prompt_file,omitempty"`
+		Model          string                  `json:"model,omitempty"`
+		TaskFilter     string                  `json:"task_filter,omitempty"`
+		Backend        string                  `json:"backend,omitempty"`
+		Effort         string                  `json:"effort,omitempty"`
+		PathPatterns   []string                `json:"path_patterns,omitempty"`
+		Skills         []string                `json:"skills,omitempty"`
+		InputPolicy    *domain.RoleInputPolicy `json:"input_policy,omitempty"`
+		MaxPriority    *int                    `json:"max_priority,omitempty"`
+		MaxConcurrency *int                    `json:"max_concurrency,omitempty"`
+		ReadOnly       bool                    `json:"read_only,omitempty"`
+		AllowedTools   []string                `json:"allowed_tools,omitempty"`
+		DeniedTools    []string                `json:"denied_tools,omitempty"`
+		MaxBudgetUSD   *float64                `json:"max_budget_usd,omitempty"`
 	}{
 		Name:           in.Name,
 		Kind:           in.Kind,
@@ -92,6 +100,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		Effort:         in.Effort,
 		PathPatterns:   in.PathPatterns,
 		Skills:         in.Skills,
+		InputPolicy:    in.InputPolicy,
 		MaxPriority:    in.MaxPriority,
 		MaxConcurrency: in.MaxConcurrency,
 		ReadOnly:       in.ReadOnly,
@@ -136,25 +145,27 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 	// "clear", **int = &&value signals "set", and nil signals "leave
 	// alone") into that wire shape.
 	body := struct {
-		Description       *string   `json:"description,omitempty"`
-		Kind              *string   `json:"kind,omitempty"`
-		Prompt            *string   `json:"prompt,omitempty"`
-		PromptFile        *string   `json:"prompt_file,omitempty"`
-		Model             *string   `json:"model,omitempty"`
-		TaskFilter        *string   `json:"task_filter,omitempty"`
-		Backend           *string   `json:"backend,omitempty"`
-		Effort            *string   `json:"effort,omitempty"`
-		PathPatterns      *[]string `json:"path_patterns,omitempty"`
-		Skills            *[]string `json:"skills,omitempty"`
-		MaxPriority       *int      `json:"max_priority,omitempty"`
-		ClearMaxPriority  bool      `json:"clear_max_priority,omitempty"`
-		MaxConcurrency    *int      `json:"max_concurrency,omitempty"`
-		ClearConcurrency  bool      `json:"clear_concurrency,omitempty"`
-		ReadOnly          *bool     `json:"read_only,omitempty"`
-		AllowedTools      *[]string `json:"allowed_tools,omitempty"`
-		DeniedTools       *[]string `json:"denied_tools,omitempty"`
-		MaxBudgetUSD      *float64  `json:"max_budget_usd,omitempty"`
-		ClearMaxBudgetUSD bool      `json:"clear_max_budget_usd,omitempty"`
+		Description       *string                 `json:"description,omitempty"`
+		Kind              *string                 `json:"kind,omitempty"`
+		Prompt            *string                 `json:"prompt,omitempty"`
+		PromptFile        *string                 `json:"prompt_file,omitempty"`
+		Model             *string                 `json:"model,omitempty"`
+		TaskFilter        *string                 `json:"task_filter,omitempty"`
+		Backend           *string                 `json:"backend,omitempty"`
+		Effort            *string                 `json:"effort,omitempty"`
+		PathPatterns      *[]string               `json:"path_patterns,omitempty"`
+		Skills            *[]string               `json:"skills,omitempty"`
+		InputPolicy       *domain.RoleInputPolicy `json:"input_policy,omitempty"`
+		ClearInputPolicy  bool                    `json:"clear_input_policy,omitempty"`
+		MaxPriority       *int                    `json:"max_priority,omitempty"`
+		ClearMaxPriority  bool                    `json:"clear_max_priority,omitempty"`
+		MaxConcurrency    *int                    `json:"max_concurrency,omitempty"`
+		ClearConcurrency  bool                    `json:"clear_concurrency,omitempty"`
+		ReadOnly          *bool                   `json:"read_only,omitempty"`
+		AllowedTools      *[]string               `json:"allowed_tools,omitempty"`
+		DeniedTools       *[]string               `json:"denied_tools,omitempty"`
+		MaxBudgetUSD      *float64                `json:"max_budget_usd,omitempty"`
+		ClearMaxBudgetUSD bool                    `json:"clear_max_budget_usd,omitempty"`
 	}{
 		Description:  patch.Description,
 		Kind:         patch.Kind,
@@ -169,6 +180,18 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		ReadOnly:     patch.ReadOnly,
 		AllowedTools: patch.AllowedTools,
 		DeniedTools:  patch.DeniedTools,
+	}
+	// input_policy is `omitempty` on a pointer, so a &nil patch would serialize
+	// to nothing at all and read on the server as "leave it alone" — silently
+	// keeping a policy the operator asked to remove. The explicit
+	// clear_input_policy flag is what makes "clear" distinguishable from
+	// "absent", exactly as it is for the numeric caps below.
+	if patch.InputPolicy != nil {
+		if *patch.InputPolicy == nil {
+			body.ClearInputPolicy = true
+		} else {
+			body.InputPolicy = *patch.InputPolicy
+		}
 	}
 	if patch.MaxPriority != nil {
 		if *patch.MaxPriority == nil {

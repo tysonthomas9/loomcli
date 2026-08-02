@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
 // --- MergeRoleConstraints tests ---
@@ -888,5 +889,49 @@ func TestBuildRouterTaskCheck_SourceReposOnlyConstraint(t *testing.T) {
 	check := BuildRouterTaskCheck(rc, ae, "")
 	if check == nil {
 		t.Error("BuildRouterTaskCheck() should return non-nil when AgentEntry.SourceRepos is set")
+	}
+}
+
+// --- input policy env reconstruction ---
+
+// The env→RoleConfig hop for the structured knob. Every "unset" shape has to
+// land on nil, which DispositionFor reads as deny-everything: an agent spawned
+// by a daemon that never set the variable, or one whose variable got mangled,
+// must auto-answer no harness prompt rather than every one of them.
+func TestRoleConfigFromEnv_InputPolicyFailsClosed(t *testing.T) {
+	for _, tt := range []struct{ name, value string }{
+		{name: "absent", value: ""},
+		{name: "malformed json", value: "{not json"},
+		{name: "not an object", value: `["allow"]`},
+		{name: "disposition outside the vocabulary", value: `{"kinds":{"trust_prompt":"yes"}}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LOOM_ROLE_INPUT_POLICY", tt.value)
+			rc := RoleConfigFromEnv()
+			if rc.InputPolicy != nil {
+				t.Fatalf("InputPolicy = %+v, want nil", rc.InputPolicy)
+			}
+			if got := rc.InputPolicy.DispositionFor("trust_prompt"); got != domain.RoleInputDeny {
+				t.Fatalf("resolved to %q, want %q", got, domain.RoleInputDeny)
+			}
+		})
+	}
+}
+
+func TestRoleConfigFromEnv_InputPolicyDecoded(t *testing.T) {
+	t.Setenv("LOOM_ROLE_INPUT_POLICY", `{"default":"deny","kinds":{"trust_prompt":"allow"}}`)
+	rc := RoleConfigFromEnv()
+	if rc.InputPolicy == nil {
+		t.Fatal("InputPolicy = nil, want the decoded policy")
+	}
+	if got := rc.InputPolicy.DispositionFor("trust_prompt"); got != domain.RoleInputAllow {
+		t.Errorf("DispositionFor(trust_prompt) = %q, want allow", got)
+	}
+	if got := rc.InputPolicy.DispositionFor("confirm"); got != domain.RoleInputDeny {
+		t.Errorf("DispositionFor(confirm) = %q, want deny", got)
+	}
+	// ...and it survives the merge into RoleConstraints.
+	if got := MergeRoleConstraints(rc, AgentEntry{}).InputPolicy.DispositionFor("trust_prompt"); got != domain.RoleInputAllow {
+		t.Errorf("after MergeRoleConstraints DispositionFor(trust_prompt) = %q, want allow", got)
 	}
 }
