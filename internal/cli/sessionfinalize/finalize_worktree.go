@@ -1,6 +1,8 @@
 package sessionfinalize
 
 import (
+	"log/slog"
+
 	"github.com/tysonthomas9/loomcli/internal/backendnames"
 	"github.com/tysonthomas9/loomcli/internal/cli/git"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
@@ -52,7 +54,19 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 		return result, nil
 	}
 	if sess.Meta.Backend == backendnames.Codex {
-		_, _ = sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
+		path, err := sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
+		if err != nil {
+			slog.Warn("codex transcript sync failed",
+				"session_id", sess.Meta.SessionID,
+				"worktree", opts.WorktreePath,
+				"err", err,
+			)
+		} else if path == "" {
+			slog.Warn("codex transcript unavailable after run",
+				"session_id", sess.Meta.SessionID,
+				"worktree", opts.WorktreePath,
+			)
+		}
 	}
 	if sess.Meta.Backend == backendnames.Claude {
 		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)

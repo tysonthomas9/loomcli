@@ -96,11 +96,17 @@ func codexSessionWalkRoots(root string, since, now time.Time) []string {
 		return nil
 	}
 	cutoff := since.Add(-1 * time.Minute)
+	loc := now.Location()
 	if now.Before(cutoff) {
-		now = cutoff
+		now = cutoff.In(loc)
 	}
-	start := dateOnly(cutoff)
-	end := dateOnly(now)
+	// Codex lays out rollouts under calendar-day directories in the machine's
+	// local timezone, while Loom persists session start times in UTC. Convert
+	// both endpoints to the runtime's local timezone before deriving date
+	// directories; otherwise an evening run in the Americas can look under the
+	// following UTC day and silently miss the rollout that Codex just wrote.
+	start := dateOnly(cutoff.In(loc))
+	end := dateOnly(now.In(loc))
 	if end.Sub(start) > 14*24*time.Hour {
 		return []string{root}
 	}
