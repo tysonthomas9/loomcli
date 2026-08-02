@@ -15,6 +15,7 @@ const (
 	LockConflictOutcome                     // fleet-db task locked by another agent
 	SpawnFailureOutcome                     // supervisor could not exec the agent subprocess
 	BackendUnavailableOutcome               // backend CLI binary not on PATH (folded from wrapper ErrBinaryNotFound)
+	IncompleteRunOutcome                    // agent exited 0 but never released its task claim (turn ended before the task did)
 )
 
 func (d DomainOutcome) String() string {
@@ -27,6 +28,8 @@ func (d DomainOutcome) String() string {
 		return "SpawnFailure"
 	case BackendUnavailableOutcome:
 		return "BackendUnavailable"
+	case IncompleteRunOutcome:
+		return "IncompleteRun"
 	default:
 		return "None"
 	}

@@ -462,9 +462,14 @@ func (s *Supervisor) waitForAgent(ap *AgentProcess) int {
 
 // recoverAgent calls RecoverWorktree for cleanup.
 // exitCode is passed so recovery can make smarter decisions (e.g. skip task
-// reset on clean exit when the task status is already terminal).
-func (s *Supervisor) recoverAgent(ap *AgentProcess, exitCode int) error {
-	return agent.RecoverWorktree(ap.WorktreePath, ap.Entry.Worktree, exitCode)
+// reset on clean exit when the task status is already terminal). incomplete
+// splits the exit-0 case further: an unfinished turn requeues its task but
+// keeps the worktree intact for the next attempt. It is an explicit argument
+// rather than a read of ap.LastError because the pre-flight caller runs BEFORE
+// this cycle classifies anything — it would otherwise inherit the previous
+// cycle's verdict and skip the cold-start cleanup it exists to perform.
+func (s *Supervisor) recoverAgent(ap *AgentProcess, exitCode int, incomplete bool) error {
+	return agent.RecoverWorktree(ap.WorktreePath, ap.Entry.Worktree, exitCode, incomplete)
 }
 
 // appendDaemonEnv appends daemon-level env vars (workspace ID, IPC socket path)
