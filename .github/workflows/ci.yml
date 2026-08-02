@@ -4,8 +4,9 @@ on:
   push:
     branches: [main, v5]
   pull_request:
-    # Empty branches filter = runs on PRs targeting any branch. The Go and
-    # Frontend quality-gate jobs below are equivalent to `make gate`.
+    # Empty branches filter = runs on PRs targeting any branch. The measured
+    # architecture job plus the Go and Frontend quality jobs are collectively
+    # equivalent to `make gate` without scanning the repository twice.
     types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
@@ -43,7 +44,7 @@ jobs:
           make build
 
       - name: make check-go
-        run: make check-go
+        run: make check-go CHECK_GO_SKIP_ARCHITECTURE=1
 
   # Separate budget proof so the ordinary quality gate does not hide a
   # repository-analyzer RSS regression inside a later aggregate test run.
@@ -100,7 +101,10 @@ jobs:
           git config --global user.email "ci@loomcli.test"
 
       - name: Run tests with coverage
-        run: go test -race -coverprofile=coverage.out -tags=integration -timeout 15m ./...
+        # The dedicated Archcheck Memory Budget job runs and measures the full
+        # repository analyzer. Keep its focused unit coverage here without
+        # repeating that repository-scale integration scan under -race.
+        run: go test -race -coverprofile=coverage.out -tags=integration -skip '^TestCheckedInManifestsAndRepository$' -timeout 15m ./...
 
       - name: Check coverage threshold
         run: ./scripts/check-coverage.sh coverage.out 60
@@ -184,7 +188,10 @@ jobs:
           git config --global user.email "ci@loomcli.test"
 
       - name: Test
-        run: go test -v -race -timeout 15m ./...
+        # The Linux architecture job already checks every declared Linux and
+        # Darwin profile. Keep all focused archtest units on macOS without
+        # repeating the repository-scale analyzer.
+        run: go test -v -race -skip '^TestCheckedInManifestsAndRepository$' -timeout 15m ./...
 
   # Builds the builtin workflow sources against pinned Flue in a scratch
   # directory and runs their Node tests. Generated bundle output is intentionally
