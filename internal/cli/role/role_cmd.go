@@ -226,60 +226,65 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		if roleShowJSON {
 			return cmdstore.WriteJSON(r)
 		}
-		fmt.Printf("Workspace:    %s\n", r.WorkspaceKey)
-		fmt.Printf("Name:         %s\n", r.Name)
-		if r.Description != "" {
-			fmt.Printf("Description:  %s\n", r.Description)
-		}
-		if r.Kind != "" {
-			fmt.Printf("Kind:         %s\n", r.Kind)
-		}
-		if r.Model != "" {
-			fmt.Printf("Model:        %s\n", r.Model)
-		}
-		if r.Backend != "" {
-			fmt.Printf("Backend:      %s\n", r.Backend)
-		}
-		if r.Effort != "" {
-			fmt.Printf("Effort:       %s\n", r.Effort)
-		}
-		if r.Prompt != "" {
-			fmt.Printf("Prompt:       %s\n", r.Prompt)
-		}
-		if r.PromptFile != "" {
-			fmt.Printf("Prompt file:  %s\n", r.PromptFile)
-		}
-		// The task filter decides which tasks agents in this role CLAIM — it is
-		// the single most routing-relevant field on the role, and hiding it
-		// cost a live debugging session an hour: `role show` printed labels
-		// and read-only while the filter silently defaulted.
-		if r.TaskFilter != "" {
-			fmt.Printf("Task filter:  %s\n", r.TaskFilter)
-		}
-		if len(r.Skills) > 0 {
-			fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
-		}
-		if len(r.Labels) > 0 {
-			fmt.Printf("Labels:       %s\n", strings.Join(r.Labels, ", "))
-		}
-		if len(r.ExcludeLabels) > 0 {
-			fmt.Printf("Exclude labels: %s\n", strings.Join(r.ExcludeLabels, ", "))
-		}
-		if r.MaxConcurrency != nil {
-			fmt.Printf("Max concurrency: %d\n", *r.MaxConcurrency)
-		}
-		if r.ReadOnly {
-			fmt.Printf("Read-only:    true\n")
-		}
-		// Printed only when set. A role with no policy denies every prompt,
-		// which is also what the whole rest of the fleet does, so a line on
-		// every role would be noise; the interesting state is a role that has
-		// opted something in.
-		if r.InputPolicy != nil {
-			fmt.Printf("Input policy: %s\n", formatInputPolicy(r.InputPolicy))
-		}
+		printRoleDetails(r)
 		return nil
 	})
+}
+
+// printRoleDetails renders the human view of a role, omitting unset fields.
+func printRoleDetails(r *domain.Role) {
+	fmt.Printf("Workspace:    %s\n", r.WorkspaceKey)
+	fmt.Printf("Name:         %s\n", r.Name)
+	if r.Description != "" {
+		fmt.Printf("Description:  %s\n", r.Description)
+	}
+	if r.Kind != "" {
+		fmt.Printf("Kind:         %s\n", r.Kind)
+	}
+	if r.Model != "" {
+		fmt.Printf("Model:        %s\n", r.Model)
+	}
+	if r.Backend != "" {
+		fmt.Printf("Backend:      %s\n", r.Backend)
+	}
+	if r.Effort != "" {
+		fmt.Printf("Effort:       %s\n", r.Effort)
+	}
+	if r.Prompt != "" {
+		fmt.Printf("Prompt:       %s\n", r.Prompt)
+	}
+	if r.PromptFile != "" {
+		fmt.Printf("Prompt file:  %s\n", r.PromptFile)
+	}
+	// The task filter decides which tasks agents in this role CLAIM — it is
+	// the single most routing-relevant field on the role, and hiding it
+	// cost a live debugging session an hour: `role show` printed labels
+	// and read-only while the filter silently defaulted.
+	if r.TaskFilter != "" {
+		fmt.Printf("Task filter:  %s\n", r.TaskFilter)
+	}
+	if len(r.Skills) > 0 {
+		fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
+	}
+	if len(r.Labels) > 0 {
+		fmt.Printf("Labels:       %s\n", strings.Join(r.Labels, ", "))
+	}
+	if len(r.ExcludeLabels) > 0 {
+		fmt.Printf("Exclude labels: %s\n", strings.Join(r.ExcludeLabels, ", "))
+	}
+	if r.MaxConcurrency != nil {
+		fmt.Printf("Max concurrency: %d\n", *r.MaxConcurrency)
+	}
+	if r.ReadOnly {
+		fmt.Printf("Read-only:    true\n")
+	}
+	// Printed only when set. A role with no policy denies every prompt,
+	// which is also what the whole rest of the fleet does, so a line on
+	// every role would be noise; the interesting state is a role that has
+	// opted something in.
+	if r.InputPolicy != nil {
+		fmt.Printf("Input policy: %s\n", formatInputPolicy(r.InputPolicy))
+	}
 }
 
 func runRoleRemove(_ *cobra.Command, args []string) error {

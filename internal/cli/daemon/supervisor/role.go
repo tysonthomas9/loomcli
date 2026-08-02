@@ -37,23 +37,8 @@ func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, proje
 	}
 
 	if rc.PromptFile == "" {
-		// An inline prompt is the other half of the role-set surface
-		// (`role set <name> prompt "..."`): the control plane stores it and
-		// the CLI offers it as a first-class knob, so the daemon has to honor
-		// it. The child process only takes a prompt FILE, so materialize the
-		// text under the workspace runtime dir and hand that path on. Written
-		// on every resolve, so a role-prompt edit lands on the next restart
-		// rather than pinning the first version forever.
 		if strings.TrimSpace(rc.Prompt) != "" {
-			promptPath := filepath.Join(projectDir, ".loom", "role-prompts", roleName+".md")
-			if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
-				return cfgpkg.RoleConfig{}, fmt.Errorf("role %q: materialize inline prompt: %w", roleName, err)
-			}
-			if err := os.WriteFile(promptPath, []byte(rc.Prompt), 0o644); err != nil {
-				return cfgpkg.RoleConfig{}, fmt.Errorf("role %q: materialize inline prompt: %w", roleName, err)
-			}
-			rc.PromptFile = promptPath
-			return rc, nil
+			return materializeInlinePrompt(rc, roleName, projectDir)
 		}
 		return cfgpkg.RoleConfig{}, fmt.Errorf("custom role %q missing prompt_file (set prompt_file, or an inline prompt via `role set %s prompt ...`)", roleName, roleName)
 	}
@@ -78,6 +63,24 @@ func ResolveRoleConfigStatic(roleName string, config *cfgpkg.DaemonConfig, proje
 	}
 	rc.PromptFile = promptPath
 
+	return rc, nil
+}
+
+// materializeInlinePrompt honors the other half of the role-set surface:
+// `role set <name> prompt "..."` is a first-class knob the control plane
+// stores, so the daemon has to accept it. The child process only takes a
+// prompt FILE, so the text is written under the workspace runtime dir and the
+// path handed on. Written on every resolve, so a role-prompt edit lands on
+// the next restart rather than pinning the first version forever.
+func materializeInlinePrompt(rc cfgpkg.RoleConfig, roleName, projectDir string) (cfgpkg.RoleConfig, error) {
+	promptPath := filepath.Join(projectDir, ".loom", "role-prompts", roleName+".md")
+	if err := os.MkdirAll(filepath.Dir(promptPath), 0o755); err != nil {
+		return cfgpkg.RoleConfig{}, fmt.Errorf("role %q: materialize inline prompt: %w", roleName, err)
+	}
+	if err := os.WriteFile(promptPath, []byte(rc.Prompt), 0o644); err != nil {
+		return cfgpkg.RoleConfig{}, fmt.Errorf("role %q: materialize inline prompt: %w", roleName, err)
+	}
+	rc.PromptFile = promptPath
 	return rc, nil
 }
 
