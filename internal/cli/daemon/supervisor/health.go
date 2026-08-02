@@ -145,6 +145,10 @@ func waitForProcessExit(ap *AgentProcess, pid int, timeout time.Duration) bool {
 //     "silent" and is wrongly killed at the timeout.
 //   - session transcript mtime (updated by hooks on every turn, when installed).
 //   - stdout log file mtime.
+//
+// Silence is only evidence of a hang when nobody asked the agent to be quiet:
+// applyIdleKill suspends the kill (and only the kill) while an interactive
+// prompt is outstanding. See input_wait.go.
 func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath string, lastStart time.Time, worktreeName string) {
 	var lastActivity time.Time
 	activitySource := "none"
@@ -183,21 +187,52 @@ func (s *Supervisor) checkWatchdog(ap *AgentProcess, outputTimeout int, logPath 
 	}
 
 	// Apply timeout if we found any activity signal
-	if activitySource != "none" {
-		// Use lastStart if activity signal predates agent spawn
-		if lastActivity.Before(lastStart) {
-			lastActivity = lastStart
-		}
-		silent := time.Since(lastActivity)
-		threshold := time.Duration(outputTimeout) * time.Second
-		if silent > threshold {
-			slog.Error("killing hung process, no activity detected",
-				"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second),
-				"threshold_sec", outputTimeout, "source", activitySource)
-			s.setStopReasonDefault(ap, StopReasonWatchdog)
-			s.StopAgent(ap, 10*time.Second)
-		}
+	if activitySource == "none" {
+		return
 	}
+	// Use lastStart if activity signal predates agent spawn
+	if lastActivity.Before(lastStart) {
+		lastActivity = lastStart
+	}
+	s.applyIdleKill(ap, time.Since(lastActivity), outputTimeout, activitySource, worktreeName)
+}
+
+// applyIdleKill kills the agent when it has been silent past outputTimeout,
+// unless an outstanding interactive prompt explains the silence.
+//
+// The decision this function makes is exactly:
+//
+//	idle := silent > threshold && !(pending > 0)
+//
+// and the negated term is the whole of the change. A harness parked on a dialog
+// emits no PTY output by design, so "no output" stops being evidence of a hang
+// for as long as loom knows an answer is outstanding — and only for that long,
+// because inputWaitHoldsOff refuses to keep suspending once the wait exceeds its
+// bound. Nothing else is suspended: shutdown, drain and manual stop never
+// consult the counter, so a waiting agent can always be stopped immediately.
+// See input_wait.go for why the signal is a counter rather than a flag.
+func (s *Supervisor) applyIdleKill(ap *AgentProcess, silent time.Duration, outputTimeout int, activitySource, worktreeName string) {
+	threshold := time.Duration(outputTimeout) * time.Second
+	holdOff, pending, expired := inputWaitHoldsOff(ap, s.GetInputWaitMax())
+	idle := silent > threshold && !holdOff
+
+	if !idle {
+		if silent > threshold {
+			slog.Info("watchdog idle kill suspended, agent is waiting on interactive input",
+				"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second),
+				"threshold_sec", outputTimeout, "input_wait_pending", pending)
+		}
+		return
+	}
+
+	// input_wait_expired distinguishes "nothing was pending, this really is a
+	// hang" from "a human never answered and the wait outlived its bound".
+	slog.Error("killing hung process, no activity detected",
+		"worktree", worktreeName, "silent_duration", silent.Truncate(time.Second),
+		"threshold_sec", outputTimeout, "source", activitySource,
+		"input_wait_pending", pending, "input_wait_expired", expired)
+	s.setStopReasonDefault(ap, StopReasonWatchdog)
+	s.StopAgent(ap, 10*time.Second)
 }
 
 // healthChecker runs periodic health checks in a goroutine.
