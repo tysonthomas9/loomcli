@@ -236,3 +236,44 @@ func TestAgent_HooksJSONRoundTrip(t *testing.T) {
 		t.Errorf("round trip lost the pipeline: %+v", back.Hooks)
 	}
 }
+
+// The reconciler compares a freshly loaded pipeline against the previous
+// load, so every load allocates a new Cycle. When Equal compared the POINTER,
+// the same stored cycle hook never equaled itself across loads and the
+// daemon restarted the agent on every diff pass — observed live as one
+// innocent agent in every "config changed" batch.
+func TestAgentHooksEqual_CycleComparesContentNotPointer(t *testing.T) {
+	mk := func() *AgentHooks {
+		return &AgentHooks{OnComplete: []AgentHookAction{{
+			Type:  AgentHookActionCycle,
+			Cycle: &AgentHookCycle{Threshold: 3, RearmLabel: "criticized", ShipLabel: "ready-to-implement"},
+		}}}
+	}
+	if !mk().Equal(mk()) {
+		t.Fatal("identical cycle content in fresh allocations must compare equal")
+	}
+
+	changed := mk()
+	changed.OnComplete[0].Cycle.Threshold = 4
+	if mk().Equal(changed) {
+		t.Fatal("a real cycle difference must still be seen")
+	}
+
+	oneNil := mk()
+	oneNil.OnComplete[0].Cycle = nil
+	if mk().Equal(oneNil) || oneNil.Equal(mk()) {
+		t.Fatal("cycle present vs absent must not compare equal")
+	}
+}
+
+func TestAgentHooksClone_DoesNotAliasCycle(t *testing.T) {
+	orig := &AgentHooks{OnComplete: []AgentHookAction{{
+		Type:  AgentHookActionCycle,
+		Cycle: &AgentHookCycle{Threshold: 3, RearmLabel: "criticized", ShipLabel: "ship"},
+	}}}
+	clone := orig.Clone()
+	clone.OnComplete[0].Cycle.Threshold = 99
+	if orig.OnComplete[0].Cycle.Threshold != 3 {
+		t.Fatal("Clone shared the Cycle pointer; mutating the clone reached the original")
+	}
+}

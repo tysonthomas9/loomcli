@@ -281,6 +281,14 @@ func (h *AgentHooks) Clone() *AgentHooks {
 	out := &AgentHooks{}
 	if h.OnComplete != nil {
 		out.OnComplete = append([]AgentHookAction(nil), h.OnComplete...)
+		// The slice copy above still aliases each action's Cycle pointer,
+		// which is exactly the sharing this method promises not to do.
+		for i, a := range out.OnComplete {
+			if a.Cycle != nil {
+				c := *a.Cycle
+				out.OnComplete[i].Cycle = &c
+			}
+		}
 	}
 	return out
 }
@@ -295,11 +303,26 @@ func (h *AgentHooks) Equal(other *AgentHooks) bool {
 		return false
 	}
 	for i := range h.OnComplete {
-		if h.OnComplete[i] != other.OnComplete[i] {
+		if !h.OnComplete[i].equalAction(other.OnComplete[i]) {
 			return false
 		}
 	}
 	return true
+}
+
+// equalAction compares by content. A plain struct != would compare the Cycle
+// POINTER, so two loads of the same stored cycle hook — a fresh allocation
+// each time — never matched: the daemon reconciler saw every cycle-hook agent
+// as "modified" on every diff pass and restarted it for a config change that
+// did not exist.
+func (a AgentHookAction) equalAction(b AgentHookAction) bool {
+	if a.Type != b.Type || a.Source != b.Source || a.Value != b.Value || a.Reason != b.Reason {
+		return false
+	}
+	if (a.Cycle == nil) != (b.Cycle == nil) {
+		return false
+	}
+	return a.Cycle == nil || *a.Cycle == *b.Cycle
 }
 
 // Validate checks the pipeline shape and its write ordering. It is enforced
