@@ -48,6 +48,41 @@ func BuiltinStatuses() []Status {
 	return s
 }
 
+// IsSystemManaged reports whether the server owns this status rather than the
+// caller: tombstone is written by delete, pinned by the pin endpoints, hooked by
+// hook attachment. A client that names one is asking for a transition a status
+// write does not perform.
+//
+// The three are named here once. ValidateSettableStatus and the API-layer
+// validators both need "is this the server's to set?" and answered it with a
+// list of their own until this existed.
+func (s Status) IsSystemManaged() bool {
+	switch s {
+	case StatusTombstone, StatusPinned, StatusHooked:
+		return true
+	}
+	return false
+}
+
+// UserFacingStatuses returns, in canonical order, the built-in statuses a client
+// may name at all: every built-in except the system-managed ones.
+//
+// This is a wider set than ValidateSettableStatus admits, and deliberately so.
+// closed and in_progress are user-facing — a caller may legitimately ask for
+// them — they just have to travel through the close and claim endpoints instead
+// of a plain status write. A validator that only asks "may a caller say this
+// word?" wants this list; one that asks "may a caller PATCH this?" wants
+// ValidateSettableStatus.
+func UserFacingStatuses() []Status {
+	out := make([]Status, 0, len(builtinStatuses))
+	for _, s := range builtinStatuses {
+		if !s.IsSystemManaged() {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // ValidateSettableStatus reports whether s may be written by a plain status
 // write, returning the error the caller sees when it may not. It is loom's copy
 // of fleet-db's models.ValidateSettableStatus — the PATCH /issues/{id} status
@@ -61,7 +96,8 @@ func BuiltinStatuses() []Status {
 //     a plain write would leave a half-made transition behind. loom's own fleet
 //     client shows this from the other side: FleetBackend.applyStatusUpdate
 //     re-routes both targets to /claim and /close rather than PATCHing them.
-//   - tombstone, pinned and hooked are set by the server itself.
+//   - tombstone, pinned and hooked are set by the server itself — see
+//     IsSystemManaged, which is where that trio is named.
 //   - Custom workspace statuses are refused too, matching the endpoint, which
 //     validates a status update against the built-in set only.
 //
@@ -72,6 +108,9 @@ func ValidateSettableStatus(s Status) error {
 	if !s.IsValid() {
 		return fmt.Errorf("invalid status %q", s)
 	}
+	if s.IsSystemManaged() {
+		return fmt.Errorf("status %s is system-managed", s)
+	}
 	switch s {
 	case StatusOpen, StatusBlocked, StatusDeferred, StatusReview:
 		return nil
@@ -79,11 +118,9 @@ func ValidateSettableStatus(s Status) error {
 		return errors.New("status closed must use close endpoint")
 	case StatusInProgress:
 		return errors.New("status in_progress must use claim endpoint")
-	case StatusTombstone, StatusPinned, StatusHooked:
-		return fmt.Errorf("status %s is system-managed", s)
 	}
-	// Unreachable: IsValid above admits only the built-in statuses, and every
-	// one of them is named in the switch.
+	// Unreachable: IsValid above admits only the built-in statuses,
+	// IsSystemManaged takes three of them, and the switch names the other six.
 	return nil
 }
 
