@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-stack-up test-stack-down test-stack-verify test-env-up test-env-down test-env-status ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -157,13 +157,109 @@ fleetdb-empty-down:
 	fi; \
 	$$compose -f test/fleetdb/docker-compose.empty.yml down -v --remove-orphans
 
-# Start the local-mode dogfood stack: fleet-db, loom serve, workspace daemon
-# manager, a deterministic planner/coder backend, and the Web UI.
-local-mode-frontend-dist:
+# Guard for every UI-bearing compose stack. The Web UI bundle is gitignored
+# build output, and compose bind-mounts $(FRONTEND_DIR)/dist into the Caddy
+# sidecar. Docker silently substitutes an empty directory when the bind-mount
+# source is missing, so a stack started from a clean checkout comes up "healthy"
+# and serves 404 with nothing in any log. Build it once on the host instead.
+ensure-frontend-dist:
 	@if [ ! -f "$(FRONTEND_DIR)/dist/index.html" ]; then \
 	  echo "Web UI dist is missing; building it once on the host..."; \
 	  $(MAKE) build-frontend; \
 	fi
+
+# Guard for every target that shells into the frontend toolchain. npm scripts
+# resolve binaries out of node_modules/.bin, which is gitignored and therefore
+# absent in a fresh clone and in any new git worktree (worktrees do not inherit
+# the parent's ignored files). Without this the gate dies with a bare
+#   sh: prettier: command not found
+#   make[1]: *** [check-frontend] Error 127
+# and because check-frontend runs inside the pre-push hook, that surfaces as
+# "git push is broken" with nothing pointing at missing dependencies. The
+# playwright targets fail worse: npx reaches for the registry and runs an
+# unpinned browser driver instead of failing at all.
+#
+# Marker is node_modules/.package-lock.json, the file npm writes when it
+# finishes reifying the tree — same idiom as scripts/dev.sh:61-68. A bare
+# presence check on a binary passes for an interrupted install and for a tree
+# that predates a package.json/package-lock.json change (e.g. after `git pull`),
+# which then fails at import time instead of here.
+ensure-frontend-deps:
+	@marker="$(FRONTEND_DIR)/node_modules/.package-lock.json"; \
+	if [ ! -f "$$marker" ] \
+	   || [ "$(FRONTEND_DIR)/package-lock.json" -nt "$$marker" ] \
+	   || [ "$(FRONTEND_DIR)/package.json" -nt "$$marker" ]; then \
+	  echo "Frontend dependencies are missing or stale; installing them once on the host..."; \
+	  cd $(FRONTEND_DIR) && npm install; \
+	fi
+
+# Recreate a throwaway production-shaped stack (planner + worker + critic) on the
+# deterministic backend, and verify it actually runs a supervisor. `up` destroys
+# the previous stack first: a fix validated against carried-over state has not
+# been validated.
+test-stack-up:
+	@./scripts/test-stack.sh up
+
+test-stack-verify:
+	@./scripts/test-stack.sh verify
+
+test-stack-down:
+	@./scripts/test-stack.sh down
+
+# Disposable fleet-db backend for tests that need a real control plane. Kept
+# separate from the live stack on :3011, which holds real workspace data: a test
+# that writes there is mutating production. See scripts/test-env.sh.
+test-env-up:
+	@./scripts/test-env.sh up
+
+test-env-down:
+	@./scripts/test-env.sh down
+
+test-env-status:
+	@./scripts/test-env.sh status
+
+# Start the fleet-db regression stack: redis, fleet-db, loom serve on the
+# fleet-db backend, the Web UI sidecar, and a one-shot fixture seeder.
+#
+# Engine support: this stack needs docker compose >= 2.22, which is where
+# `additional_contexts: fdb-source: "service:fleet-db"` (the build-time edge the
+# seeder image depends on) landed. The podman-compose / `podman compose`
+# fallbacks below are kept for parity with fleetdb-empty-up, but they are not
+# known to implement `service:` build contexts: on those engines the seeder
+# build degrades back to the original "pull access denied" failure. Use docker
+# compose for the regression stack.
+fleetdb-regression-up: ensure-frontend-dist
+	@echo "Starting fleet-db regression stack (API http://localhost:8082, UI http://localhost:8083)..."
+	@set -e; \
+	if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	else \
+	  echo "docker compose or podman compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/fleetdb/docker-compose.regression.yml up --build -d
+
+fleetdb-regression-down:
+	@set -e; \
+	if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then \
+	  compose="docker compose"; \
+	elif command -v podman-compose >/dev/null 2>&1; then \
+	  compose="podman-compose"; \
+	elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then \
+	  compose="podman compose"; \
+	else \
+	  echo "docker compose or podman compose is required" >&2; \
+	  exit 127; \
+	fi; \
+	$$compose -f test/fleetdb/docker-compose.regression.yml down -v --remove-orphans
+
+# Start the local-mode dogfood stack: fleet-db, loom serve, workspace daemon
+# manager, a deterministic planner/coder backend, and the Web UI.
+local-mode-frontend-dist: ensure-frontend-dist
 
 local-mode-up: local-mode-frontend-dist
 	@echo "Starting local-mode dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
@@ -282,7 +378,7 @@ test-coverage: test
 	@./scripts/check-coverage.sh
 
 # Run frontend tests with coverage threshold enforcement
-test-frontend-coverage:
+test-frontend-coverage: ensure-frontend-deps
 	@echo "Running frontend tests with coverage..."
 	@cd $(FRONTEND_DIR) && npm run test:coverage
 
@@ -331,32 +427,32 @@ check-go-api-staleness:
 	@./scripts/check-go-api-staleness.sh
 
 # Run frontend linter + typecheck
-lint-frontend:
+lint-frontend: ensure-frontend-deps
 	@echo "Running frontend typecheck..."
 	@cd $(FRONTEND_DIR) && npm run typecheck
 	@echo "Running frontend ESLint..."
 	@cd $(FRONTEND_DIR) && npm run lint
 
 # Run frontend unit tests (vitest)
-test-frontend:
+test-frontend: ensure-frontend-deps
 	@echo "Running frontend unit tests..."
 	@cd $(FRONTEND_DIR) && npx vitest run
 
 # Run Playwright e2e tests — mocked chromium tests (no server needed)
 e2e: test-e2e
 
-test-e2e:
+test-e2e: ensure-frontend-deps
 	@echo "Running Playwright e2e tests (mocked)..."
 	@cd $(FRONTEND_DIR) && npx playwright install --with-deps chromium 2>/dev/null || true
 	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium --workers=1
 
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
-test-e2e-api:
+test-e2e-api: ensure-frontend-deps
 	@echo "Running Playwright API e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=api
 
 # Run Playwright API e2e tests against already-running loom serve
-test-e2e-api-local:
+test-e2e-api-local: ensure-frontend-deps
 	@echo "Running Playwright API e2e tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=api
 
@@ -381,37 +477,37 @@ test-e2e-stackpublish:
 	@GOCACHE=$${GOCACHE:-/tmp/go-build-cache} go test -count=1 -tags e2e -run TestE2EStackPublisher ./internal/stackpublish -timeout 10m
 
 # Run the real Playwright smoke suite: browser + API contracts against FleetDB-backed loom serve.
-test-e2e-real-smoke:
+test-e2e-real-smoke: ensure-frontend-deps
 	@echo "Running real Playwright smoke tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration-smoke --project=api-smoke
 
 # Run the real Playwright smoke suite against an already-running loom serve/UI.
-test-e2e-real-smoke-local:
+test-e2e-real-smoke-local: ensure-frontend-deps
 	@echo "Running real Playwright smoke tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration-smoke --project=api-smoke
 
 # Run the real Playwright regression suite: slower browser + API contracts.
-test-e2e-real-regression:
+test-e2e-real-regression: ensure-frontend-deps
 	@echo "Running real Playwright regression tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration-regression --project=api-regression
 
 # Run the real Playwright regression suite against an already-running loom serve/UI.
-test-e2e-real-regression-local:
+test-e2e-real-regression-local: ensure-frontend-deps
 	@echo "Running real Playwright regression tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration-regression --project=api-regression
 
 # Run Playwright integration e2e tests (self-contained, starts loom serve automatically)
-test-e2e-integration:
+test-e2e-integration: ensure-frontend-deps
 	@echo "Running Playwright integration e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 npx playwright test --project=integration
 
 # Run Playwright integration e2e tests against local loom serve
-test-e2e-integration-local:
+test-e2e-integration-local: ensure-frontend-deps
 	@echo "Running Playwright integration e2e tests (local server)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 LOOM_LOCAL_SERVER=1 npx playwright test --project=integration
 
 # Run ALL Playwright integration e2e tests including cross-workspace and terminal-fleetdb-regression
-test-e2e-integration-full:
+test-e2e-integration-full: ensure-frontend-deps
 	@echo "Running full Playwright integration e2e tests (self-contained)..."
 	@cd $(FRONTEND_DIR) && RUN_INTEGRATION_TESTS=1 RUN_LOCAL_INTEGRATION_TESTS=1 npx playwright test --project=integration --project=local-integration
 
@@ -508,7 +604,7 @@ check-go:
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)
-check-frontend:
+check-frontend: ensure-frontend-deps
 	@echo "=== [1/6] Frontend: format check ==="
 	@cd $(FRONTEND_DIR) && npm run format:check
 	@echo "=== [2/6] Frontend: typecheck ==="
@@ -636,6 +732,10 @@ help:
 	@echo "  make test-frontend     - Run frontend unit tests (vitest)"
 	@echo "  make test-e2e          - Run Playwright mocked e2e tests (no server)"
 	@echo "  make test-fleetdb-ui   - Run fleet-db-only UI regression suite"
+	@echo "  make test-env-up        - Start the disposable fleet-db test backend (workspace LOOMTEST, :53351)"
+	@echo "  make test-env-down      - Stop it and drop its volumes"
+	@echo "                            Point a shell at it: eval \"\$$(scripts/test-env.sh env)\""
+	@echo "                            Use this, not the live stack on :3011, for anything that writes"
 	@echo "  make local-mode-up      - Run local-mode Podman/Docker stack"
 	@echo "  make local-mode-codex-up - Run local-mode stack with Codex agents"
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"

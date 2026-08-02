@@ -25,6 +25,16 @@ case "$AGENT_BACKEND" in
 esac
 PLAN_AGENT="${LOOM_LOCAL_MODE_PLAN_AGENT:-$DEFAULT_PLAN_AGENT}"
 CODE_AGENT="${LOOM_LOCAL_MODE_CODE_AGENT:-$DEFAULT_CODE_AGENT}"
+MAX_AGENTS="${LOOM_LOCAL_MODE_MAX_AGENTS:-2}"
+# name:role pairs, comma separated, e.g. "critic:critic,reviewer:critic". A role
+# that is not built in (plan/task) is created as a worker role with a generated
+# prompt file, because a custom role without prompt_file fails daemon creation.
+EXTRA_AGENTS="${LOOM_LOCAL_MODE_EXTRA_AGENTS:-}"
+# Comma-separated extra repo names to register in the workspace. A single-repo
+# workspace cannot exercise repo selection at all: selectRepo returns early
+# before reaching the no-selector fallback, so behavior that depends on
+# choosing between repos is unreachable without this.
+EXTRA_REPOS="${LOOM_LOCAL_MODE_EXTRA_REPOS:-}"
 PLAN_TASK_ID="${LOOM_LOCAL_MODE_PLAN_TASK_ID:-${WORKSPACE}-2}"
 CODE_TASK_ID="${LOOM_LOCAL_MODE_CODE_TASK_ID:-${WORKSPACE}-3}"
 LOOM_BIND="${LOOM_LOCAL_MODE_BIND:-0.0.0.0}"
@@ -170,11 +180,39 @@ trust_codex_local_mode_paths() {
   trust_codex_project_path "${WORKSPACE_ROOT}/worktrees/source-repo/${CODE_AGENT}"
 }
 
+# seed_extra_repos registers additional repos so the workspace can reproduce
+# multi-repo routing. Each gets its own bare origin and an initial commit, so it
+# is a real repo rather than an empty registration.
+seed_extra_repos() {
+  [ -n "$EXTRA_REPOS" ] || return 0
+  local name path origin
+  echo "$EXTRA_REPOS" | tr ',' '\n' | while IFS= read -r name; do
+    name="$(echo "$name" | tr -d '[:space:]')"
+    [ -n "$name" ] || continue
+    path="/workspace/${name}"
+    origin="/workspace/${name}-origin.git"
+    if [ ! -d "$path/.git" ]; then
+      mkdir -p "$path"
+      git init -q "$path"
+      git -C "$path" config user.email loom@local
+      git -C "$path" config user.name loom
+      printf '# %s\n' "$name" > "$path/README.md"
+      git -C "$path" add README.md
+      git -C "$path" commit -q -m "Initial ${name} fixture"
+      [ -d "$origin" ] || git init -q --bare "$origin"
+      git -C "$path" remote add origin "$origin" 2>/dev/null || git -C "$path" remote set-url origin "$origin"
+      git -C "$path" push -q -u origin "$(git -C "$path" branch --show-current)" 2>/dev/null || true
+    fi
+    loom repo add "$name" "$origin" >/dev/null 2>&1 \
+      || echo "[local-mode] WARNING: could not register extra repo ${name}"
+  done
+}
+
 register_agents() {
   loom daemon profile set issue_backend fleetdb
   loom daemon profile set log_dir "${WORKSPACE_ROOT}/.loom/daemon-logs"
   loom daemon profile set events_dir "${WORKSPACE_ROOT}/.loom/events"
-  loom daemon profile set max_agents 2
+  loom daemon profile set max_agents "$MAX_AGENTS"
   loom daemon profile set startup_timeout 30
 
   if [ "$AGENT_BACKEND" != "localdogfood" ]; then
@@ -186,6 +224,130 @@ register_agents() {
   loom agentdef remove "$CODE_AGENT" >/dev/null 2>&1 || true
   loom agentdef add "$PLAN_AGENT" --role plan --auto --backend "$AGENT_BACKEND" --repos source-repo
   loom agentdef add "$CODE_AGENT" --role task --auto --backend "$AGENT_BACKEND" --repos source-repo
+  seed_extra_repos
+  seed_extra_agents
+  seed_pipeline
+}
+
+# seed_pipeline wires a label-routed pipeline while the daemon is still down.
+# Applying the same configuration to a RUNNING workspace can stop every agent
+# from spawning, permanently and with no error recorded anywhere, so
+# ordering here is not cosmetic.
+#
+# Spec: STAGE_ROLE:EXCLUDE_LABEL:STAMP_LABEL for the first stage, and
+# CYCLE_ROLE:THRESHOLD:REARM:SHIP for the stage that owns the counter.
+seed_pipeline() {
+  [ -n "${LOOM_LOCAL_MODE_PIPELINE:-}" ] || return 0
+  local stage_role stage_exclude stage_stamp cycle_role threshold rearm ship failures_before
+  IFS=':' read -r stage_role stage_exclude stage_stamp <<EOF2
+${LOOM_LOCAL_MODE_PIPELINE_STAGE:-}
+EOF2
+  IFS=':' read -r cycle_role threshold rearm ship <<EOF2
+${LOOM_LOCAL_MODE_PIPELINE_CYCLE:-}
+EOF2
+
+  PIPELINE_WIRING_FAILED=0
+
+  if [ -n "$stage_role" ]; then
+    failures_before=$PIPELINE_WIRING_FAILED
+    pipeline_wire loom role set "$stage_role" exclude_labels "$stage_exclude"
+    pipeline_wire loom role set "$stage_role" task_filter any
+    pipeline_wire loom agentdef update "$(pipeline_agent_for_role "$stage_role")" \
+      --on-complete-add-label "$stage_stamp"
+    if [ "$PIPELINE_WIRING_FAILED" -eq "$failures_before" ]; then
+      echo "[local-mode] pipeline: ${stage_role} claims un-${stage_exclude} tasks, stamps ${stage_stamp}"
+    fi
+  fi
+  if [ -n "$cycle_role" ]; then
+    failures_before=$PIPELINE_WIRING_FAILED
+    pipeline_wire loom role set "$cycle_role" labels "$rearm"
+    pipeline_wire loom role set "$cycle_role" task_filter any
+    pipeline_wire loom agentdef update "$(pipeline_agent_for_role "$cycle_role")" \
+      --on-complete-cycle "${threshold}:${rearm}:${ship}"
+    if [ "$PIPELINE_WIRING_FAILED" -eq "$failures_before" ]; then
+      echo "[local-mode] pipeline: ${cycle_role} runs ${threshold} rounds, then ships ${ship}"
+    fi
+
+    # Constrain whoever consumes the ship label. Without this the downstream
+    # role keeps its broad filter and claims the task before the loop ever
+    # starts — exclusion only binds agents that declare it.
+    if [ -n "${LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE:-}" ]; then
+      failures_before=$PIPELINE_WIRING_FAILED
+      pipeline_wire loom role set "$LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE" labels "$ship"
+      if [ "$PIPELINE_WIRING_FAILED" -eq "$failures_before" ]; then
+        echo "[local-mode] pipeline: ${LOOM_LOCAL_MODE_PIPELINE_SHIP_ROLE} waits for ${ship}"
+      fi
+    fi
+  fi
+
+  # A partially wired pipeline is worse than none: agents still start, tasks
+  # still move, and the stack reports ready — so a fix "validated" against it
+  # was validated against routing that does not exist. Fail the entrypoint
+  # instead (set -e), which surfaces as the API never coming up.
+  if [ "$PIPELINE_WIRING_FAILED" -ne 0 ]; then
+    echo "[local-mode] FATAL: ${PIPELINE_WIRING_FAILED} pipeline wiring call(s) failed; refusing to start a half-wired stack" >&2
+    return 1
+  fi
+}
+
+# pipeline_wire runs one wiring call and reports what went wrong. Every call
+# here used to end in `>/dev/null 2>&1 || true` followed by an unconditional
+# success echo, so a typo'd role name, a rejected flag or a racing daemon left
+# the pipeline half-wired behind success-shaped logs — and nothing downstream
+# (agent count, UI, daemon status) can see the difference.
+pipeline_wire() {
+  local out
+  if out="$("$@" 2>&1)"; then
+    return 0
+  fi
+  echo "[local-mode] ERROR: pipeline wiring failed: $*" >&2
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out" | sed 's/^/[local-mode]   /' >&2
+  fi
+  PIPELINE_WIRING_FAILED=$((PIPELINE_WIRING_FAILED + 1))
+  return 0
+}
+
+# pipeline_agent_for_role maps a role name to the agent that runs it.
+pipeline_agent_for_role() {
+  case "$1" in
+    plan) echo "$PLAN_AGENT" ;;
+    task) echo "$CODE_AGENT" ;;
+    *)    echo "$1" ;;
+  esac
+}
+
+# seed_extra_agents mirrors a real workspace's agent topology so a test stack can
+# reproduce dispatch behavior that only appears with more than two agents.
+seed_extra_agents() {
+  [ -n "$EXTRA_AGENTS" ] || return 0
+  mkdir -p "${WORKSPACE_ROOT}/prompts"
+  local spec name role prompt
+  echo "$EXTRA_AGENTS" | tr ',' '\n' | while IFS= read -r spec; do
+    spec="$(echo "$spec" | tr -d '[:space:]')"
+    [ -n "$spec" ] || continue
+    case "$spec" in
+      *:*) name="${spec%%:*}"; role="${spec#*:}" ;;
+      *)   name="$spec";       role="task" ;;
+    esac
+    [ -n "$role" ] || role="task"
+
+    case "$role" in
+      plan|task) ;;
+      *)
+        prompt="prompts/${role}.md"
+        if [ ! -f "${WORKSPACE_ROOT}/${prompt}" ]; then
+          printf 'Test-stack %s role. Inspect the assigned task and record a short assessment.\n' "$role" \
+            > "${WORKSPACE_ROOT}/${prompt}"
+        fi
+        loom role add "$role" --kind worker --prompt-file "$prompt" >/dev/null 2>&1 || true
+        ;;
+    esac
+
+    loom agentdef remove "$name" >/dev/null 2>&1 || true
+    loom agentdef add "$name" --role "$role" --auto --backend "$AGENT_BACKEND" --repos source-repo \
+      || echo "[local-mode] WARNING: could not seed extra agent ${name} (role ${role})"
+  done
 }
 
 prepare_codex_credentials() {
