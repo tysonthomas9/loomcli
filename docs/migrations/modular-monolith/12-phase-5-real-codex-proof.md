@@ -1,12 +1,13 @@
 # Phase 5 Packaged Desktop Real-Codex Proof
 
-- **Status:** Twenty local positive rows accepted; four GitHub rows remain
-  authorization-fenced. Restart, transcript switching, task-panel routing,
-  active-delete conflict, and UTC/local transcript finalization pass; crash
-  recovery and Codex-unavailable checks remain
+- **Status:** Complete under operator-approved local scope: twenty local
+  positive rows pass, four GitHub rows are explicitly waived, and restart,
+  transcript switching, task-panel routing, active-delete conflict,
+  UTC/local transcript finalization, crash recovery, and Codex-unavailable
+  persistence pass
 - **Date:** 2026-08-01
-- **Loom current source head:** `e76a0502b`
-- **FleetDB current source head:** `1bff0bd`
+- **Loom final implementation head:** `4ecb69bfefa6bb64dce7728bcc396c913fd8cd31`
+- **FleetDB final implementation head:** `955bbd7fc8771d58c77f40534b84c11827515744`
 - **Backend:** real Codex CLI using the packaged Desktop user's configured
   authentication
 - **Required executions:** 24, comprising two distinct real executions for
@@ -121,14 +122,20 @@ eight Loom checks at `20620ff09` (including the measured Architecture job in
 did not establish repaired-runtime acceptance; the live Desktop proof is
 recorded below.
 
-Before the transcript rollover repair, the source-to-package deltas were
-non-runtime-only. Loom
-`07af29dfb..20620ff09` changes `.github/workflows/ci.yml`, `Makefile`, and
-`internal/archtest/memory_test.go`. FleetDB `6ea9bcf..1bff0bd` changes its two
-workflow files and two PostgreSQL integration tests. There is therefore no
-production, frontend, Desktop, sidecar, or packaged-asset delta after the
-recorded package hashes; the packaged generation remains the exact product
-candidate for the pending UI acceptance.
+Final acceptance rebuilt and ad-hoc resealed the package again from the final
+implementation heads Loom `4ecb69bfefa6bb64dce7728bcc396c913fd8cd31` and
+FleetDB `955bbd7fc8771d58c77f40534b84c11827515744`. Its post-signing SHA-256
+values are Loom
+`294cab0b84b9a6c04c7de985edda4eac76b87b48286d801d2862d1c1946a1596`,
+FleetDB `d3780989681d6cef7721521bd9b882ebe13139991e84951368800a7115e8a3c2`,
+Desktop executable
+`2ebc0c30f7b4a363aff6e8b3dfc1dadb7e0a933acd11c46a57b137988485ab52`,
+and packaged Node
+`34c0af7cb2ba9eeb14e0675695e3f6da15fa5e98901e62149cf4fc1d594c8fa0`.
+The Loom sidecar reports `dev (4ecb69bfe)`. Deep strict signature verification,
+Node `v24.13.1`, the JIT entitlement, and the JIT smoke test pass. Computer Use
+relaunched this exact signed package on port `58959`, opened the durable proof
+workspace, and visibly retained the fail-closed canary in Blocked.
 
 After macOS became available, Computer Use relaunched the repaired package,
 proved restart persistence, switched among three agents with at least two runs
@@ -347,17 +354,17 @@ Populate this table only from live evidence.
 | 04 and 12 | PASS | Task `PHASE5-REAL-CODEX-20260731-4`; Coder `automation-run-f06d2230c5b59f76f3c91e9ac2b2dab0`; Local Review `automation-run-6038117ca334ee04b931bea9bdee3d6f` | Coder delivered `loom/PHASE5-REAL-CODEX-20260731-4@fb3be81b03b44be011de927ac55dc65461af6613`; Local Review completed with a distinct transcript and approval. |
 | 05 | PASS | Task `PHASE5-REAL-CODEX-20260731-5`; DriverRun `automation-run-dcc071f9feb1be904f91048bd5fc38f7` | Review-triggered role completed once, returned the task to Review, ran `npm test` (2 passed), and delivered documentation-only branch `loom/PHASE5-REAL-CODEX-20260731-5@5bd00278c986e5634958735eb89b0c0617c8a53d`. |
 | 06 | PASS | Task `PHASE5-REAL-CODEX-20260731-6`; DriverRun `automation-run-229b9b804e2213604c7c61d6a0bffb29` | Distinct review-triggered run completed once, returned to Review, ran `npm test` (2 passed), and delivered documentation-only branch `loom/PHASE5-REAL-CODEX-20260731-6@26ee8ba8d6d5d1d0a40ae51ee1aae7468b46fa76`. |
-| 07-10 | FENCED | PENDING | The authorized value is still the literal placeholder `<owner/repository>`; no GitHub mutation is attempted until an actual repository is supplied. |
+| 07-10 | WAIVED BY OPERATOR (2026-08-01) | N/A | The operator explicitly directed Phase 5 to skip the GitHub-backed rows. They are waivers, not positive executions. |
 | 13-14 | PASS | Lead sessions `session-adddb569-81c2-4309-a477-717ee7944448` and `session-08582d38-9c2c-475c-a332-c2799fb1466f`; `/tmp/phase5-row13-lead-transcript.json`, `/tmp/phase5-row14-lead-transcript.json` | Distinct normal-exit real-Codex sessions, four transcript entries each; SHA-256 `df6cf37a16b6ddfa910fc2ac3899a3ec55029165f0c1ac27b343b6ddeadd9802` and `82d407e8614fffce4684cd91ea9de6335b8e3a53c4f33b6887871fcc791b02ad`. |
 | 15-16 | PASS | PR Review sessions `session-f17e3049-0f0d-42de-995f-bd28c5e2cfca` and `session-3e509bc1-9ddf-46f4-9390-d150984c901a`; `/tmp/phase5-row15-pr-review-transcript.json`, `/tmp/phase5-row16-pr-review-transcript.json` | Distinct completed local review-target conversations; no GitHub mutation was performed. SHA-256 `a9902a426f64c4340538c29f34f5c36f526e30fd36100609a02d25a9e669b59c` and `d7dfb1094ca1a1792b94701104748cddb44f8e40273bdb8ef554cae136b06573`. |
 | 17-18 | PASS | Custom Proof Librarian sessions `session-5107e222-26cb-4003-8533-ba270f877e71` and `session-79601615-f903-49bc-aa82-8dacda41cce3` | Stored custom role prompt plus distinct four-entry real-Codex transcripts. SHA-256 `f073c5d3...` and `e0a711c4...`. |
 | 19-20 | PASS | Tasks `PHASE5-REAL-CODEX-20260731-7` and `PHASE5-REAL-CODEX-20260731-8`; sessions `20260801-084004-phase5-advanced-planner--76d26a61` and `20260801-171735-phase5-advanced-planner--315d85d0` | Distinct persisted designs and zero code diff; transcript SHA-256 `b840bc71...` and `0c7e1bbf...`. |
 | 21-22 | PASS | Sessions `20260801-172733-phase5-advanced-task-runner--c9016b2b` and `20260801-173243-phase5-advanced-task-runner--d53e335e`; commits `4833f71a09777f2059fa0583b889987684c2e47e` and `64a25e3fb6b7f4e4344638ab42bc3740043f8aeb` | Distinct implementation transcripts/diffs; tests passed. Transcript SHA-256 `1f0f2ed5...` and `aa72ed93...`. |
-| 23-24 | PASS WITH DEFECT FOLLOW-UP | Bugs `PHASE5-REAL-CODEX-20260731-9` and `PHASE5-REAL-CODEX-20260731-10`; sessions `20260801-173933-phase5-advanced-bug-triage--5398eba2` and `20260801-174622-phase5-advanced-bug-triage--44c7885d` | Both triage runs completed to Review with reproduction/root-cause comments and no product diff. Transcript SHA-256 `fb8439d8...` and `08c3ea5a...`. Their surrounding race exposed and motivated `539dd37`/`b080f316a`; repaired-package switching, persistence, and deletion checks pass, while the destructive crash canary remains. |
+| 23-24 | PASS; DEFECT FOLLOW-UP CLOSED | Bugs `PHASE5-REAL-CODEX-20260731-9` and `PHASE5-REAL-CODEX-20260731-10`; sessions `20260801-173933-phase5-advanced-bug-triage--5398eba2` and `20260801-174622-phase5-advanced-bug-triage--44c7885d` | Both triage runs completed to Review with reproduction/root-cause comments and no product diff. Transcript SHA-256 `fb8439d8...` and `08c3ea5a...`. Their surrounding race exposed and motivated the worker/route repairs; the final owner-fenced crash canary now passes. |
 | Transcript switching and task-side-panel checks | PASS | `/tmp/phase5-third-agent-second-run.png`, `/tmp/phase5-task-side-panel.png` | After relaunching the repaired package, Planner (six runs), Bug Triage (two runs), and Task Runner (two runs) each loaded their latest and an older real-Codex transcript without HTTP 500. A visible task ID opened the right-side issue panel while the selected Agent route persisted. Screenshot SHA-256 `c9fc68eef0e6ab73c2ee9cbc6c1f197cc8ca91fc38d4f71ced90be7daf734976` and `8b8a2bfc7ad70610c485ea80b7851fbc01346b1bcfa8e8125b45eb6569608a57`. |
 | Restart persistence | PASS | `/tmp/phase5-row17-after-restart.json`, `/tmp/phase5-row20-after-restart.json`; repaired-package relaunch on port `55478` | The repaired package was quit and relaunched through Computer Use. The durable workspace, agent run histories, transcripts, task links, terminal states, and prior diffs remained readable. The exact transcript SHA-256 values remain `f073c5d3d54602ac15af3c1078113e5bf4c7857154046a98365c229aca7b8df9` and `0c7e1bbf75eee5d98820d021800e126e145b7c9ff99634e5ed82db7526214912`. |
-| Crash/stale recovery | DEFECT REPRODUCED AND PATCHED | Competing Planner/Bug-triage sessions and daemon log timestamps; Fleet `539dd37`, Loom `b080f316a` | Owner loss and clean stop/requeue were observed. New lock/worker renewal and deterministic route reservation pass unit/full gates; the packaged destructive-process regression remains. |
-| Codex-unavailable fail-closed path | PENDING | PENDING | No fake evidence permitted |
+| Crash/stale recovery | PASS | Task `PHASE5-REPAIRED-20260801-20`; failed session `20260802-053914-phase5-repaired-planner--77a3782e`; completed successor `20260802-053959-phase5-repaired-planner--3118114d`; `/tmp/phase5-owner-fenced-crash-recovery.jpeg` | Computer Use created the card and showed assignee `phase5-repaired-planner`; only its owned Codex child was killed. The daemon released the Fleet lock as that exact actor, reset the task to Open, reclaimed it four seconds later, and converged to Review. The UI shows one failed and one completed run. Screenshot SHA-256 `cfbd860e082e3f1add152c2a36c244beeb08f563acc56da55b3a9b62d5b0962f`. Final ownership fixes are Fleet `955bbd7fc8771d58c77f40534b84c11827515744` and Loom `4ecb69bfefa6bb64dce7728bcc396c913fd8cd31`. |
+| Codex-unavailable fail-closed path | PASS | Task `PHASE5-REPAIRED-20260801-22`; session `flue-promptagent-automation-run-cba9ddf5ec8ead91dadeeb81039e333b-PHASE5-REPAIRED-20260801-22`; `/tmp/phase5-codex-unavailable-blocked.jpeg`; `/tmp/phase5-codex-unavailable-after-restart.jpeg`; `/tmp/phase5-final-signed-package-blocked.jpeg` | With both Codex launchers temporarily absent from the packaged daemon PATH, the UI-created Behavior Planner run failed in 0.429713s with `local_backend_unavailable`; the card became unassigned Blocked with zero tokens, no transcript, no diff, no design/PR reference, and no repository mutation. Both launchers were restored. Restarts on ports `59519` and final exact signed-package port `58959` retained the visible Blocked card and identical read-only session data. Screenshot SHA-256 values are `bf5f6ba73addda1d5bea4cee1734784f9f5525f3c7bd3a40ba40880ac5294b51`, `edabaf751682e49e1fc7980a4b5a9c8de9809c2bc76e768965a9126344a9d0f4`, and `ea08c643560afca0e050b0d8316505beb62dbadff41e8c83d04d8c05ad64952a`. |
 | Active-card deletion conflict | PASS | Task `PHASE5-REPAIRED-20260801-17`; `/tmp/phase5-active-delete-conflict.png` | Computer Use issued DELETE while the task was visibly In Progress and its real `codex exec` child remained alive. Fleet returned `issue is already claimed`; the card stayed In Progress and the run continued. Screenshot SHA-256 `a20f1e408898bc11a8fb8c96df838e10f5f4dcc66b5a163cbbdd790336122359`. Two earlier human-driven DELETE attempts happened only after their claims had released and are excluded from this result. |
 | UTC/local transcript rollover | PASS | Task `PHASE5-REPAIRED-20260801-18`; session `20260802-044627-phase5-repaired-planner--7d90ddd2`; `/tmp/phase5-transcript-timezone-fix.jpeg` | The Desktop-created task ran through a real `codex exec`, reached Review, and finalized Completed. The packaged UI displays its transcript; the persisted redacted native transcript has 70 JSONL records / 136,876 bytes and SHA-256 `a6d86133e52ba42784f92a018b0b73df1b9cb8f7aadaa8b88d04ada63b89dc7a`. Screenshot SHA-256 `6c3da01d0ca6740adda03f0dccc6d3ef3eb34bd463c6b9aede7fc806b7db366f`. |
 

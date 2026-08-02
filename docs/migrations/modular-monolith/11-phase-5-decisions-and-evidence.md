@@ -3,18 +3,18 @@
 - **Status:** Source ownership plus the FleetDB and Loom full gates are
   complete; the Interaction sole-writer scan is zero and the graph is at
   `completed_phase: 5`. Twenty local packaged Desktop real-Codex rows are
-  accepted, four GitHub rows remain authorization-fenced, and the repaired
-  package passes restart, transcript, task-panel, and active-delete checks;
-  crash recovery and fail-closed checks remain
+  accepted, four GitHub rows are operator-waived, and the repaired package
+  passes crash recovery, fail-closed persistence, restart, transcript,
+  task-panel, and active-delete checks
 - **Date:** 2026-08-01
 - **Working base:** Loom `accb1fa60a8a546b8952368d52d5cee85bdf00ee`
 - **FleetDB contract commit:** `a2e603b` (`feat: add phase 5 capability contracts`)
-- **FleetDB current source head:** `1bff0bd`
-  (`test: stabilize and split CI gates`)
+- **FleetDB final implementation head:** `955bbd7fc8771d58c77f40534b84c11827515744`
+  (`fix: preserve delegated claim ownership`)
 - **Loom implementation commit:** `33206b1af`
   (`refactor: extract phase 5 capability modules`)
-- **Loom current source head:** `e76a0502b`
-  (`fix: preserve Codex transcripts across timezone boundaries`)
+- **Loom final implementation head:** `4ecb69bfefa6bb64dce7728bcc396c913fd8cd31`
+  (`fix: fence delegated agent claims`)
 - **Last completed source-architecture phase:** 5
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -24,10 +24,10 @@ roots and the `AgentProvisioning` process manager are present. Production
 session, terminal, lease, and inbox mutations now pass through Interaction
 commands or owner-private persistence adapters, so the graph is ratcheted to
 `completed_phase: 5`. The exact Loom source gate and FleetDB full gate are
-green. Packaged Desktop real-backend rows 01-06 and 11-24 are accepted. Rows
-07-10 require an actual authorized GitHub repository, and the repaired package
-still needs the final crash-recovery and fail-closed regressions before final
-acceptance.
+green. Packaged Desktop real-backend rows 01-06 and 11-24 are accepted. The
+operator waived GitHub rows 07-10 on 2026-08-01, and the repaired package passes
+the remaining destructive crash-recovery and Codex-unavailable fail-closed
+regressions.
 
 ## Implemented Phase 5 seams
 
@@ -188,16 +188,16 @@ fingerprint, and expected version while process-local mutations are serialized.
 | Runtime, performance, retired-workflows, and profile-boundary focused checks | PASS | Exact runtime AST parity, performance/runtime totals, retired-workflows tombstone, profile boundary, cache lifecycle, and checked-snapshot focused tests pass |
 | Interaction sole-writer ratchet | PASS | The live scan observes exactly zero direct aggregate mutation sites and the test now requires zero at `completed_phase: 5` |
 | Exact 11-profile direct-write refresh | PASS | `go run ./scripts/archcheck snapshot-direct-writes` completed all four release and seven tag/race profiles. The checked inventory exactly matches 260 rows / 269 sites; the additional rows are type-resolution coverage from owner-specific FleetDB transport packages, the Agents-owned prompt-repair primitive is classified at its private persistence adapter, and all three driver rows retain Phase 6 expiry |
-| Loom full gate | PASS | At package head `07af29dfb`, the complete local `make gate` passed against Fleet `6ea9bcf` with `FLEET_DB_REPO` and `FLEET_DB_BIN` pinned to the Phase 5 worktree and exact built binary. At exact source head `20620ff09`, all eight PR checks passed: Go Quality 14m22s, measured Architecture 12m46s, Go Coverage 7m14s, macOS Go 12m26s, standalone Frontend 8m51s, Frontend Quality 5m51s, Frontend Coverage 4m48s, and Builtin Bundle 48s. The local architecture stage peaked at 1276.0 MiB below 2048 MiB; its standalone exact RSS gate peaked at 1293.0 MiB and completed in 808.305 seconds. |
+| Loom full gate | PASS | At final source head `4ecb69bfefa6bb64dce7728bcc396c913fd8cd31`, the complete local `make gate` passed against Fleet `955bbd7fc8771d58c77f40534b84c11827515744` with `FLEET_DB_REPO` and `FLEET_DB_BIN` pinned to that exact companion source and binary. Go and frontend quality both passed. The bounded final race/coverage sweep used `-p 2`; a live sample observed its parent at about 115 MiB RSS and active `go list` child at about 68 MiB. Earlier exact architecture evidence remains 1276.0 MiB peak below the 2048 MiB guard and 1293.0 MiB for the standalone RSS gate. |
 | SDK and Desktop static validation | PASS | SDK tests and typecheck passed 72/72; Desktop typecheck and frontend build passed. Packaged runtime acceptance remains separate below |
 | Agent route, task panel, and transcript regression tests | PASS | The focused Vitest run passed 65/65 tests across `AgentsPage`, `AgentSessionRunsPane`, and `useSessionTranscript`, including route-switch selection, prior-agent response exclusion, task ownership reset, and durable transcript fallback. This is source-level regression evidence; the packaged UI canary remains separate below. |
 | Architecture memory, disk, and structural ratchets | PASS | Exact guard: Store 78/78, outside composition 66/66, handler imports 87/87, direct writes 260, module roots 8, mutation commands 102, runtime components 90, goroutine definitions 105, profiles 11/11. The exact-head full-gate stage observed 1276.0 MiB peak tree RSS below 2048 MiB. Native target profiles reuse Go's content-addressed caller cache, cross-target caches remain disposable, and the legacy driver ratchet filters the primary scan instead of loading all 11 profiles a second time. |
-| Paired FleetDB contract checksum | PASS | FleetDB `api/openapi.yaml` and Loom's vendored `fleetdb-openapi.yaml` both hash to `f4a5726bd78e643d867bbabdc9b9de37ff6b9dbcdfa57f7de10ab90c2a9c4479` |
-| FleetDB full container gate | PASS | At implementation head `6ea9bcf`, the complete local `make gate` passed: race/static/build/lint, 80.8% coverage with all 28 enforced packages above the floor, isolated PostgreSQL storage and archive contracts, Redis restart/crash recovery, real-container E2E in 96.595 seconds, and harness evaluation. Shared per-binary PostgreSQL fixtures now bound container concurrency while retaining per-test database isolation. At exact source head `1bff0bd`, all five PR checks passed: build 1m53s, lint 4m14s, harness 3m55s, real-container E2E 5m09s, and the full test/coverage/PostgreSQL suite 19m45s. |
-| Packaged Desktop preflight | PASS | `Loom Agents.app` is rebuilt and ad-hoc resealed from Loom `07af29dfb` with paired FleetDB `6ea9bcf`; all six embedded workflows passed their packaged-builtin gate, the Loom sidecar reports `dev (07af29dfb)`, packaged Node is `v24.13.1`, the JIT smoke/entitlement pass, and deep strict signature verification passes. The packaged app relaunched successfully through Computer Use on port `55478`. |
-| Package-to-source runtime equivalence | PASS | Loom `07af29dfb..20620ff09` changes only CI, Make gate topology, and an archtest unit; FleetDB `6ea9bcf..1bff0bd` changes only CI and two PostgreSQL integration tests. No production, frontend, Desktop, sidecar, or packaged asset changed after the recorded package hashes. |
+| Paired FleetDB contract checksum | PASS | At final closure, FleetDB `api/openapi.yaml` and Loom's vendored `fleetdb-openapi.yaml` both hash to `debf38cab19ae22bb8a25978f4c091b4c4c8e30d0b0dfb0ca7c5ab0ffe5693ba`. |
+| FleetDB full container gate | PASS | At final source head `955bbd7fc8771d58c77f40534b84c11827515744`, `make gate` passed static/lint, race-enabled unit and integration suites, 78.0% aggregate coverage with all 28 enforced packages above the floor, PostgreSQL storage/archive/API contracts, Redis restart/crash recovery, 103.074-second real-container E2E, and harness evaluation. Unrelated OpenWiki/architecture WIP remained unstaged. |
+| Packaged Desktop preflight | PASS | `Loom Agents.app` was rebuilt from final implementation heads Loom `4ecb69bfefa6bb64dce7728bcc396c913fd8cd31` and FleetDB `955bbd7fc8771d58c77f40534b84c11827515744`. The Loom sidecar reports `dev (4ecb69bfe)`, packaged Node is `v24.13.1`, its JIT entitlement and smoke test pass, and ad-hoc deep strict signature verification passes. The signed package relaunched through Computer Use on port `58959`, opened `PHASE5-REPAIRED-20260801`, and visibly retained the fail-closed canary in Blocked. |
+| Final package provenance | PASS | Post-signing SHA-256 values are Loom `294cab0b84b9a6c04c7de985edda4eac76b87b48286d801d2862d1c1946a1596`, FleetDB `d3780989681d6cef7721521bd9b882ebe13139991e84951368800a7115e8a3c2`, Desktop executable `2ebc0c30f7b4a363aff6e8b3dfc1dadb7e0a933acd11c46a57b137988485ab52`, and packaged Node `34c0af7cb2ba9eeb14e0675695e3f6da15fa5e98901e62149cf4fc1d594c8fa0`. The final signed-package screenshot is `/tmp/phase5-final-signed-package-blocked.jpeg`, SHA-256 `ea08c643560afca0e050b0d8316505beb62dbadff41e8c83d04d8c05ad64952a`. |
 | Remote-less local worktree handoff | PASS | `e68159bd6` admits only a same-common-directory local source. `512b97e01` additionally carries the token-free admitted repository source only to the trusted bundled local task runner, so local-branch delivery and Local Review never depend on a mutable named `origin`. Two distinct Coder branches and two Local Review runs completed through the packaged UI. |
-| Packaged Desktop real-backend positive, fail-closed, and restart proof | RUNNING (20/24 POSITIVE ROWS; 4 AUTHORIZATION-FENCED) | Rows 01-06 and 11-24 have distinct real Codex transcripts and their required designs, commits, diffs, comments, task links, or normal interactive completion. Rows 23-24 exposed stale worker registration and login-shell CLI drift; the repairs introduced at Fleet `539dd37` and Loom `b080f316a` remain present at exact package heads Fleet `6ea9bcf` and Loom `07af29dfb`. Repaired-package restart persistence, three-agent/two-run transcript switching, task-side-panel routing, and live-claim deletion conflict now pass. Rows 07-10 still require an actual GitHub target; crash-recovery and fail-closed runtime proof remain. |
+| Packaged Desktop real-backend positive, fail-closed, and restart proof | PASS UNDER OPERATOR-APPROVED LOCAL SCOPE (20 PASS; 4 GITHUB WAIVED) | Rows 01-06 and 11-24 have distinct real Codex transcripts and their required designs, commits, diffs, comments, task links, or normal interactive completion. Rows 07-10 were waived by the operator on 2026-08-01. Repaired-package crash recovery, Codex-unavailable durable Blocked state, restart persistence, three-agent/two-run transcript switching, task-side-panel routing, and live-claim deletion conflict all pass. |
 | Local-date Codex transcript finalization | PASS | Task `PHASE5-REPAIRED-20260801-18`; session `20260802-044627-phase5-repaired-planner--7d90ddd2`; `/tmp/phase5-transcript-timezone-fix.jpeg` | A real Codex run started at local 21:46 on August 1 while its persisted UTC start was August 2. The packaged UI rendered the completed transcript, and the durable redacted native transcript contains 70 JSONL records / 136,876 bytes with SHA-256 `a6d86133e52ba42784f92a018b0b73df1b9cb8f7aadaa8b88d04ada63b89dc7a`. Commit `e76a0502b` makes calendar-directory selection use the runtime local timezone and logs an explicit warning if Codex transcript discovery still returns empty. Screenshot SHA-256 `6c3da01d0ca6740adda03f0dccc6d3ef3eb34bd463c6b9aede7fc806b7db366f`. |
 
 Cross-target and tagged profiles retain a disposable absolute `GOCACHE` that
@@ -216,14 +216,10 @@ batch and interactive persistence are separated, the delivery system authority
 is registered and least-privileged, exact-attempt retry fencing is durable, and
 the ledger enumerates every mutating Interaction action.
 
-Final acceptance still requires:
-
-1. repaired-package UI regression proving crash recovery and fail-closed
-   authority; and
-2. completion of GitHub rows 07-10 after `<owner/repository>` is replaced by an
-   actual authorized test repository; and
-3. an immutable append with commit hashes, contract checksum, commands, and
-   artifact locations.
+Final acceptance is complete under the operator-approved local scope. The four
+GitHub-backed rows are recorded as waivers, not passes and not pending work.
+The immutable final runtime append, commit hashes, contract checksum, commands,
+and artifact locations are recorded in the Phase 5 real-Codex proof.
 
 ---
 

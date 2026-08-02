@@ -3,8 +3,8 @@
 - **Status:** Phase 5 source ownership is complete and the checked-in graph is
   ratcheted to `completed_phase: 5`; the exact Loom and FleetDB gates pass.
   Twenty local packaged-Desktop real-Codex rows are accepted, four GitHub rows
-  remain authorization-fenced, and the repaired-package UI regression awaits
-  macOS unlock
+  are operator-waived, and the repaired-package crash, fail-closed, restart,
+  transcript, task-panel, and active-delete regressions pass
 - **Date:** 2026-08-01
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -39,8 +39,8 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 | [08-phase-3-decisions-and-evidence.md](08-phase-3-decisions-and-evidence.md) | Which Automation boundary, durable admission/dispatch contracts, runtime components, and compatibility decisions define Phase 3? |
 | [09-phase-4-decisions-and-evidence.md](09-phase-4-decisions-and-evidence.md) | Which Execution and minimal Artifacts boundaries, replay classes, supervisor-disabled proof, and packaged Desktop evidence define Phase 4? |
 | [10-local-open-mode-authority-revision.md](10-local-open-mode-authority-revision.md) | How does local open mode work without operator credential ceremony while OIDC remains authoritative for shared deployments? |
-| [11-phase-5-decisions-and-evidence.md](11-phase-5-decisions-and-evidence.md) | Which Phase 5 seams and ownership invariants are complete, and which exact-head acceptance proofs remain? |
-| [12-phase-5-real-codex-proof.md](12-phase-5-real-codex-proof.md) | What exact packaged-Desktop, 24-execution real-Codex matrix must close Phase 5 acceptance? |
+| [11-phase-5-decisions-and-evidence.md](11-phase-5-decisions-and-evidence.md) | Which Phase 5 seams, ownership invariants, gates, and exact-head acceptance proofs closed the phase? |
+| [12-phase-5-real-codex-proof.md](12-phase-5-real-codex-proof.md) | How did the packaged-Desktop real-Codex matrix close with 20 local passes and four operator waivers? |
 
 ## Scope boundaries
 
@@ -121,10 +121,10 @@ repository-admission restart recovery and lease renewal without changing the
 worker plus the guarded repository-admission materialization watchdog and
 renewal worker brings the exact all-source goroutine-launch ledger to 105. The
 [Phase 5 record](11-phase-5-decisions-and-evidence.md) separates this
-source-level closure from the partially complete packaged Desktop proof. The
-FleetDB container gate is green; the repaired-package UI regression and four
-GitHub-backed rows remain outside the accepted local matrix. The exact
-24-execution acceptance matrix is recorded
+source-level closure from the packaged Desktop proof. The FleetDB and Loom
+gates are green, the repaired-package regression matrix passes, and the four
+GitHub-backed rows are explicitly waived by the operator. The exact
+24-row acceptance matrix and its 20-pass/4-waiver disposition are recorded
 in the [real-Codex proof record](12-phase-5-real-codex-proof.md).
 
 The current reliability closeout is committed through Loom `67c45972f` with
