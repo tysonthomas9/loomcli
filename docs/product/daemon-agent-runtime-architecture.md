@@ -366,6 +366,65 @@ candidate runner exits
 UI continues to show current owner
 ```
 
+### Completing A Run (on_complete Hooks)
+
+An agent definition may carry an ordered `hooks.on_complete` pipeline. The
+supervisor executes it itself after a successful turn, so the state transition
+that marks a stage done is owned by the daemon rather than by the agent's
+prompt. A run that dies mid-turn then cannot leave the issue in an ambiguous
+state with no retry signal.
+
+```text
+subprocess exits 0
+supervisor classifies the exit
+supervisor runs on_complete in stored order   <- before finalize/recovery
+  comment(final_reply)  -> post the run's final assistant reply
+  add_label(<label>)    -> stamp the task
+supervisor finalizes the session, checkpoints, recovers
+```
+
+Two actions exist: `comment` with `source: final_reply`, and `add_label` with a
+literal `value`. Nothing else — no commands, URLs, or templates. Agent
+definitions are remotely writable control-plane data, so an action carrying a
+shell string would be daemon-host code execution.
+
+**Write before stamp.** All comment actions must precede every `add_label`.
+Fleet-db enforces this on write and the supervisor re-checks it before
+executing, refusing an out-of-order stored pipeline rather than reordering it.
+Actions run strictly in order and stop at the first error, so a completion label
+can never be observed without the artifact it certifies. The converse is
+possible: a crash between chunks can duplicate a comment on retry. That is the
+accepted trade.
+
+**Eligibility.** Hooks run only for a real claimed-task run whose subprocess
+exited 0 and concluded on its own. Skipped for: spawn failure, nonzero exit,
+no-work, watchdog/timeout, shutdown/drain, yield, config removal, backend
+unavailable, and exit 0 with no task. An agent with no hooks configured is
+completely unaffected.
+
+**Failure.** Any hook failure — including an empty or unreadable final reply
+when a comment action is configured — converts the run into a synthetic failure
+(`LastExitCode = -1`, class `CompletionHookFailure`) *before* session finalize,
+checkpoint, and post-mortem recovery. The session records failed, the owned task
+reopens, and `agentpolicy` applies bounded counted retry with the default
+backoff, blocking after the retry budget is spent. The already-emitted
+`AgentStopped` process event keeps its factual exit code 0; the higher-level
+hook failure lives in the session state and `last_error_class`.
+
+**Reply extraction** reads the current session's transcript through
+`sessions.Store.LoadNativeEvents` and takes the last contiguous run of assistant
+text events, stopping at the preceding tool cycle or user turn. The boundary is
+structural rather than identity-based because canonical TS-leaf events carry no
+message UUID. The read waits a bounded window for the leaf to flush, then fails
+closed. When the session has nothing readable yet — the case for a raw backend
+such as codex, whose rollout is otherwise only mirrored during finalize, which
+runs *after* the hooks — the supervisor mirrors the backend's native transcript
+itself before waiting. Sessions that already have a transcript (the TS leaf, and
+Claude via live hook dispatch) are read as-is and never re-mirrored. Replies over
+fleet-db's 10,000-byte comment cap are split at rune
+boundaries with `[final reply - part i/n]` headers, and every chunk must land
+before a label action runs. Reply text is never logged.
+
 ### Stopping An Agent
 
 ```text

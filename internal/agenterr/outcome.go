@@ -10,11 +10,12 @@ import "github.com/olesho/harness-wrapper/pkg/wrapper"
 type DomainOutcome int
 
 const (
-	DomainNone                DomainOutcome = iota
-	NoWorkOutcome                           // no claimable task / epic exhausted
-	LockConflictOutcome                     // fleet-db task locked by another agent
-	SpawnFailureOutcome                     // supervisor could not exec the agent subprocess
-	BackendUnavailableOutcome               // backend CLI binary not on PATH (folded from wrapper ErrBinaryNotFound)
+	DomainNone                   DomainOutcome = iota
+	NoWorkOutcome                              // no claimable task / epic exhausted
+	LockConflictOutcome                        // fleet-db task locked by another agent
+	SpawnFailureOutcome                        // supervisor could not exec the agent subprocess
+	BackendUnavailableOutcome                  // backend CLI binary not on PATH (folded from wrapper ErrBinaryNotFound)
+	CompletionHookFailureOutcome               // the subprocess exited 0 but a configured on_complete hook write failed
 )
 
 func (d DomainOutcome) String() string {
@@ -27,6 +28,8 @@ func (d DomainOutcome) String() string {
 		return "SpawnFailure"
 	case BackendUnavailableOutcome:
 		return "BackendUnavailable"
+	case CompletionHookFailureOutcome:
+		return "CompletionHookFailure"
 	default:
 		return "None"
 	}

@@ -118,7 +118,13 @@ func init() {
 	agentShowCmd.Flags().BoolVar(&agentShowJSON, "json", false, "JSON output")
 	agentStopCmd.Flags().BoolVar(&agentStopForce, "force", false, "Stop without graceful yield when handled by a local daemon")
 
-	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd)
+	registerHookFlags(agentAddCmd, &agentAddCommentReply, &agentAddWriteDesign, &agentAddLabels,
+		&agentAddRemoveLabels, &agentAddSetStatus, &agentAddClose, &agentAddCycle)
+	registerHookFlags(agentUpdateCmd, &agentUpdateCommentReply, &agentUpdateWriteDesign, &agentUpdateLabels,
+		&agentUpdateRemoveLabels, &agentUpdateSetStatus, &agentUpdateClose, &agentUpdateCycle)
+	agentUpdateCmd.Flags().BoolVar(&agentUpdateClear, "clear-on-complete", false, "Remove all on_complete hooks from this agent")
+
+	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd, agentUpdateCmd)
 	cli.RegisterCommand(agentdefCmd)
 }
 
@@ -166,6 +172,11 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) (store.
 	if err != nil {
 		return store.AgentCreate{}, err
 	}
+	hooks, err := hooksFromFlags(agentAddCommentReply, agentAddWriteDesign, agentAddLabels,
+		agentAddRemoveLabels, agentAddSetStatus, agentAddClose, agentAddCycle)
+	if err != nil {
+		return store.AgentCreate{}, err
+	}
 	return store.AgentCreate{
 		WorkspaceKey:   workspace,
 		Name:           name,
@@ -181,6 +192,7 @@ func agentCreateFromFlags(workspace, name string, mode domain.AgentMode) (store.
 		MaxConcurrency: agentAddMaxConc,
 		BudgetPolicy:   agentAddBudget,
 		DesiredState:   desiredState,
+		Hooks:          hooks,
 	}, nil
 }
 
@@ -342,6 +354,7 @@ func runAgentShow(_ *cobra.Command, args []string) error {
 		if a.BudgetPolicy != "" {
 			fmt.Printf("Budget:       %s\n", a.BudgetPolicy)
 		}
+		printHookPipeline(a.Hooks)
 		return nil
 	})
 }

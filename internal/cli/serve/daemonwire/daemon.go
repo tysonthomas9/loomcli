@@ -292,6 +292,7 @@ func agentEntryFromDomain(a *domain.Agent) config.AgentEntry {
 		CrossRepo:        a.CrossRepo,
 		Parent:           a.Parent,
 		DesiredState:     a.DesiredState,
+		Hooks:            a.Hooks.Clone(),
 	}
 }
 

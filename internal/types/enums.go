@@ -1,6 +1,10 @@
 package types
 
-import "strings"
+import (
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // Status represents the current state of an issue
 type Status string
@@ -25,6 +29,62 @@ func (s Status) IsValid() bool {
 		return true
 	}
 	return false
+}
+
+// builtinStatuses is the canonical list of every built-in status, mirroring
+// fleet-db's models.builtinStatuses. IsValid keeps its own switch (a compiler-
+// checked exhaustive form); this exists so a caller that has to walk the whole
+// vocabulary — a contract-parity test, most of all — does not re-list it and
+// then quietly miss the next status somebody adds.
+var builtinStatuses = [...]Status{
+	StatusOpen, StatusInProgress, StatusBlocked, StatusDeferred,
+	StatusReview, StatusClosed, StatusTombstone, StatusPinned, StatusHooked,
+}
+
+// BuiltinStatuses returns all built-in status values.
+func BuiltinStatuses() []Status {
+	s := make([]Status, len(builtinStatuses))
+	copy(s, builtinStatuses[:])
+	return s
+}
+
+// ValidateSettableStatus reports whether s may be written by a plain status
+// write, returning the error the caller sees when it may not. It is loom's copy
+// of fleet-db's models.ValidateSettableStatus — the PATCH /issues/{id} status
+// contract — error strings included, so a value refused here is refused by the
+// server in the same words.
+//
+// Only open, blocked, deferred and review are settable:
+//
+//   - closed and in_progress have dedicated endpoints that do more than move the
+//     field (close records closed_at and a close reason; claim takes a lease), so
+//     a plain write would leave a half-made transition behind. loom's own fleet
+//     client shows this from the other side: FleetBackend.applyStatusUpdate
+//     re-routes both targets to /claim and /close rather than PATCHing them.
+//   - tombstone, pinned and hooked are set by the server itself.
+//   - Custom workspace statuses are refused too, matching the endpoint, which
+//     validates a status update against the built-in set only.
+//
+// The caller this exists for is the set_status completion-hook action, which
+// must accept exactly the statuses the update endpoint accepts: a status a hook
+// can store and the server then refuses 400s on every single run.
+func ValidateSettableStatus(s Status) error {
+	if !s.IsValid() {
+		return fmt.Errorf("invalid status %q", s)
+	}
+	switch s {
+	case StatusOpen, StatusBlocked, StatusDeferred, StatusReview:
+		return nil
+	case StatusClosed:
+		return errors.New("status closed must use close endpoint")
+	case StatusInProgress:
+		return errors.New("status in_progress must use claim endpoint")
+	case StatusTombstone, StatusPinned, StatusHooked:
+		return fmt.Errorf("status %s is system-managed", s)
+	}
+	// Unreachable: IsValid above admits only the built-in statuses, and every
+	// one of them is named in the switch.
+	return nil
 }
 
 // IsValidWithCustom checks if the status is valid, including custom statuses.
