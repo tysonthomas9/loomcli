@@ -147,9 +147,13 @@ func listServerOpts(opts backend.ListOpts) backend.ListOpts {
 	if len(opts.Labels) > 1 {
 		server.Labels = nil
 	}
-	if len(opts.SourceRepos) > 1 {
-		server.SourceRepos = nil
-	}
+	// The repo filter is always evaluated client-side, exactly as
+	// readyServerOpts/blockedServerOpts already do it. Two reasons, and a
+	// single repo hits both: fleet-db 400s (INVALID_REPO) on a bare repo name,
+	// so the request never even returns rows; and its server-side repo filter
+	// drops issues with no source repo, which issueDataMatches deliberately
+	// keeps as unscoped work.
+	server.SourceRepos = nil
 	if needsListClientFilter(opts) {
 		server.Limit = 0
 	}
@@ -157,7 +161,7 @@ func listServerOpts(opts backend.ListOpts) backend.ListOpts {
 }
 
 func needsListClientFilter(opts backend.ListOpts) bool {
-	return len(opts.Labels) > 1 || len(opts.SourceRepos) > 1
+	return len(opts.Labels) > 1 || len(opts.SourceRepos) > 0
 }
 
 func addListCoreFilters(q url.Values, opts backend.ListOpts) {
@@ -213,9 +217,8 @@ func addListAdvancedFilters(q url.Values, opts backend.ListOpts) {
 	addAll(q, "exclude_types", opts.ExcludeTypes)
 	setBoolIfTrue(q, "deferred", opts.Deferred)
 	setBoolIfTrue(q, "overdue", opts.Overdue)
-	if len(opts.SourceRepos) > 0 {
-		q.Set("repo", opts.SourceRepos[0])
-	}
+	// No "repo" param: the repo filter is client-side (see listServerOpts), the
+	// same way readyOptsToQuery has never had one.
 	setBoolIfTrue(q, "allow_stale", opts.AllowStale)
 }
 
@@ -256,22 +259,39 @@ func readyServerOpts(opts backend.ReadyOpts) backend.ReadyOpts {
 //
 // Supported: Status, IssueType (mapped to "type"), Assignee, Labels
 // (mapped to singular "label"; fleet's count endpoint accepts a single label
-// filter, not a list), SourceRepos (mapped to singular "repo"), GroupBy.
+// filter, not a list), GroupBy. SourceRepos is not serialized — a repo-scoped
+// count never reaches this endpoint (see countOptsToListOpts).
 func countOptsToQuery(opts backend.CountOpts) string {
 	q := url.Values{}
 	setNonEmpty(q, "status", opts.Status)
 	setNonEmpty(q, "type", opts.IssueType)
 	setNonEmpty(q, "assignee", opts.Assignee)
-	// fleet-db's count endpoint takes a single label/repo; validation rejects
+	// fleet-db's count endpoint takes a single label; validation rejects
 	// multi-value inputs before this serializer runs.
 	if len(opts.Labels) > 0 {
 		q.Set("label", opts.Labels[0])
 	}
-	if len(opts.SourceRepos) > 0 {
-		q.Set("repo", opts.SourceRepos[0])
-	}
 	setNonEmpty(q, "group_by", opts.GroupBy)
 	return q.Encode()
+}
+
+// countOptsToListOpts projects a repo-scoped count onto the list endpoint,
+// which is the only way to apply the repo filter client-side: /issues/count
+// returns a total, not rows, so there is nothing for issueDataMatches to run
+// over. Count uses it whenever SourceRepos is set (see FleetBackend.Count).
+//
+// Only the fields countOptsToQuery actually serializes are carried across.
+// Everything else on CountOpts is already ignored server-side, and mapping it
+// here would turn a silently-ignored filter into a checkFleetUnsupportedFilters
+// error — a behavior change this fix has no business making.
+func countOptsToListOpts(opts backend.CountOpts) backend.ListOpts {
+	return backend.ListOpts{
+		Status:      opts.Status,
+		IssueType:   opts.IssueType,
+		Assignee:    opts.Assignee,
+		Labels:      opts.Labels,
+		SourceRepos: opts.SourceRepos,
+	}
 }
 
 func checkFleetUnsupportedCountFilters(opts backend.CountOpts) error {
