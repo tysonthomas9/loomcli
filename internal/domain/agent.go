@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 // AgentState reports whether an agent assignment is currently running,
@@ -46,6 +48,27 @@ type AgentHookActionType string
 const (
 	// AgentHookActionComment posts the run's artifact as an issue comment.
 	AgentHookActionComment AgentHookActionType = "comment"
+	// AgentHookActionWriteDesign writes the run's final assistant reply into the
+	// owned task's design field.
+	//
+	// It exists so a read_only role can produce a design at all. Writing one
+	// otherwise means `loom data update --design`, which needs a shell: a planner
+	// restricted to read-only tools can reason a design out and then has no way
+	// to record it, so the artifact dies with the run. Handing the write to the
+	// supervisor keeps the role read-only and still lands the design.
+	//
+	// Content comes from the same place a comment's does — Source must be
+	// final_reply — rather than from a second mechanism that could disagree with
+	// the first about what "the run's artifact" is. The supervisor reuses the one
+	// extraction for both (see executeCompletionHooks).
+	//
+	// Deliberately uncapped, unlike comment: a comment body is chunked to
+	// fleet-db's 10 KB per-comment cap, a design is a whole document, and
+	// truncating one to a comment's budget would defeat the point of the action.
+	// The effective ceiling is fleet-db's 1 MB request-body limit. Nothing grows
+	// the stored pipeline either way — the action names a source and carries no
+	// body of its own.
+	AgentHookActionWriteDesign AgentHookActionType = "write_design"
 	// AgentHookActionAddLabel stamps a literal label on the owned task.
 	AgentHookActionAddLabel AgentHookActionType = "add_label"
 	// AgentHookActionRemoveLabel strips a literal label from the owned task —
@@ -71,6 +94,29 @@ const (
 	// Carries a literal label and nothing else, so the closed vocabulary above
 	// is unchanged: like add_label it cannot express a path or a shell string.
 	AgentHookActionRemoveLabel AgentHookActionType = "remove_label"
+	// AgentHookActionSetStatus moves the owned task to a literal status, carried
+	// in Value.
+	//
+	// Without it a stage could only route by label, so every hand-off condition
+	// had to be encoded as one — including the ones the board and the task router
+	// already express as status. A planner that finishes by parking its task in
+	// `review` for a human had no way to say so.
+	//
+	// The legal set is not a preference: it is the server's own PATCH contract,
+	// checked through types.ValidateSettableStatus, which is loom's copy of
+	// fleet-db's models.ValidateSettableStatus down to the error strings. open,
+	// blocked, deferred and review are settable; in_progress belongs to the claim
+	// endpoint, which also takes the lease. closed is excluded because the close
+	// action already owns it, through a different endpoint that also records
+	// closed_at and a close reason — the two actions are non-overlapping by
+	// server contract, not by convention, so neither can express what the other
+	// does.
+	//
+	// A blocked status must carry a Reason; see the field.
+	//
+	// Carries a status drawn from a closed set, so the vocabulary above is
+	// unchanged: like add_label it cannot express a path or a shell string.
+	AgentHookActionSetStatus AgentHookActionType = "set_status"
 	// AgentHookActionClose closes the owned task, and must be the last action
 	// in a pipeline.
 	//
@@ -162,14 +208,20 @@ func (c *AgentHookCycle) CompletedRounds(labels []string) int {
 // IsValid returns true if the action type is a recognized constant.
 func (t AgentHookActionType) IsValid() bool {
 	switch t {
-	case AgentHookActionComment, AgentHookActionAddLabel, AgentHookActionRemoveLabel,
+	case AgentHookActionComment, AgentHookActionWriteDesign,
+		AgentHookActionAddLabel, AgentHookActionRemoveLabel, AgentHookActionSetStatus,
 		AgentHookActionClose, AgentHookActionCycle:
 		return true
 	}
 	return false
 }
 
-// AgentHookCommentSource enumerates where a comment action draws its text from.
+// AgentHookCommentSource enumerates where a body-writing action draws its text
+// from. Both comment and write_design use it: there is one notion of "the run's
+// artifact", and a second source vocabulary could disagree with this one about
+// what that is. The type keeps its original name — the wire value is what the
+// contract publishes, and renaming the Go symbol would be churn with no effect
+// on it.
 type AgentHookCommentSource string
 
 // AgentHookCommentSourceFinalReply takes the run's final assistant reply.
@@ -182,6 +234,26 @@ type AgentHookAction struct {
 	Source AgentHookCommentSource `json:"source,omitempty" yaml:"source,omitempty"`
 	Value  string                 `json:"value,omitempty" yaml:"value,omitempty"`
 
+	// Reason explains a status transition. Required when Type == set_status and
+	// Value is blocked, rejected on every other action type, and rejected on a
+	// set_status moving to any other status — where nothing would consume it,
+	// which is the inert-by-construction shape this validation exists to refuse.
+	// Requiring it only for blocked can be widened later without breaking a
+	// stored definition; the reverse cannot.
+	//
+	// It is its own field because Value already carries the status and Source
+	// names an artifact, so neither is free. Cycle is the precedent for an
+	// action-specific field; a lone scalar does not need a block of its own.
+	//
+	// The rule it enforces is that a blocked task must say why it is blocked.
+	// loom checks that today only in `data update` (enforceBlockReason), and a
+	// hook never goes through that path — so a supervisor could park a task in
+	// blocked with no signal on it, and the board's needs-attention state is
+	// literally "blocked AND has notes", so a bare blocked card sits until a
+	// human happens to review it. The supervisor writes the reason into those
+	// notes; see setTaskStatus.
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+
 	// Cycle is required for Type == cycle and must be unset otherwise.
 	Cycle *AgentHookCycle `json:"cycle,omitempty" yaml:"cycle,omitempty"`
 }
@@ -189,9 +261,9 @@ type AgentHookAction struct {
 // AgentHooks holds the supervisor-owned hook pipelines for an agent.
 type AgentHooks struct {
 	// OnComplete runs in slice order after a successful agent turn. Every
-	// comment action must precede every label-writing action (add_label,
-	// remove_label, cycle) so a completion label can never outrun the artifact
-	// it certifies (see Validate).
+	// body-writing action (comment, write_design) must precede every stamping
+	// action (add_label, remove_label, set_status, cycle) so a stamp can never
+	// outrun the artifact it certifies (see Validate).
 	OnComplete []AgentHookAction `json:"on_complete,omitempty" yaml:"on_complete,omitempty"`
 }
 
@@ -237,13 +309,16 @@ func (h *AgentHooks) Validate() error {
 	if h == nil {
 		return nil
 	}
-	sawLabel := false
+	// sawStamp covers every action that writes observable routing state — a
+	// label or a status — not only add_label; see the write-before-stamp check
+	// in validateHookAction.
+	sawStamp := false
 	sawClose := false
 	sawCycle := false
 	for i := range h.OnComplete {
 		a := h.OnComplete[i]
 		if !a.Type.IsValid() {
-			return fmt.Errorf("hooks.on_complete[%d]: unknown action type %q (must be one of: comment, add_label, remove_label, close, cycle)", i, a.Type)
+			return fmt.Errorf("hooks.on_complete[%d]: unknown action type %q (must be one of: comment, write_design, add_label, remove_label, set_status, close, cycle)", i, a.Type)
 		}
 		// Nothing may follow the close: every write in this pipeline targets the
 		// task, and a terminal issue rejects further mutation.
@@ -263,18 +338,24 @@ func (h *AgentHooks) Validate() error {
 			return fmt.Errorf("hooks.on_complete[%d]: close action must not be combined with a cycle action "+
 				"(a cycle hands the task to the next stage; closing it makes that hand-off unclaimable)", i)
 		}
-		if err := validateHookAction(i, a, sawLabel); err != nil {
+		if err := validateHookAction(i, a, sawStamp); err != nil {
 			return err
 		}
 		switch a.Type {
-		// Both mutate the label set, so write-before-stamp binds both: a
-		// comment may not follow either.
+		// Both mutate the label set, so write-before-stamp binds both: a body
+		// write may not follow either.
 		case AgentHookActionAddLabel, AgentHookActionRemoveLabel:
-			sawLabel = true
+			sawStamp = true
+		case AgentHookActionSetStatus:
+			// A status is observable routing state — the thing a predicate
+			// selects on, and in loom the thing that decides whether the task
+			// can be claimed at all — so it is a stamp, and binds
+			// write-before-stamp exactly as add_label does.
+			sawStamp = true
 		case AgentHookActionCycle:
-			// A cycle writes labels, so later comments would violate
+			// A cycle writes labels, so later body writes would violate
 			// write-before-stamp exactly as they would after add_label.
-			sawLabel = true
+			sawStamp = true
 			sawCycle = true
 		case AgentHookActionClose:
 			sawClose = true
@@ -286,29 +367,40 @@ func (h *AgentHooks) Validate() error {
 // validateHookAction checks the fields appropriate to one action's type. Split
 // out of Validate so the ordering rules above stay readable as the action
 // vocabulary grows; the two concerns are independent.
-func validateHookAction(i int, a AgentHookAction, sawLabel bool) error {
+func validateHookAction(i int, a AgentHookAction, sawStamp bool) error {
 	if a.Cycle != nil && a.Type != AgentHookActionCycle {
 		return fmt.Errorf("hooks.on_complete[%d]: %s action must not set cycle", i, a.Type)
 	}
+	// A reason justifies a status transition and nothing else. close is
+	// deliberately included: it stays argument-free, and its own endpoint
+	// carries the close reason.
+	if a.Reason != "" && a.Type != AgentHookActionSetStatus {
+		return fmt.Errorf("hooks.on_complete[%d]: %s action must not set reason", i, a.Type)
+	}
 	switch a.Type {
-	case AgentHookActionComment:
+	// write_design shares comment's arm outright, matching fleet-db: both write
+	// a body, both draw it from the same run artifact, and both are what a later
+	// stamp certifies. Sharing is the point — a source one accepted and the
+	// other refused would be a difference no caller could predict.
+	case AgentHookActionComment, AgentHookActionWriteDesign:
 		if a.Source == "" {
-			return fmt.Errorf("hooks.on_complete[%d]: comment action requires source", i)
+			return fmt.Errorf("hooks.on_complete[%d]: %s action requires source", i, a.Type)
 		}
 		if a.Source != AgentHookCommentSourceFinalReply {
-			return fmt.Errorf("hooks.on_complete[%d]: comment source %q must be final_reply", i, a.Source)
+			return fmt.Errorf("hooks.on_complete[%d]: %s source %q must be final_reply", i, a.Type, a.Source)
 		}
 		if a.Value != "" {
-			return fmt.Errorf("hooks.on_complete[%d]: comment action must not set value", i)
+			return fmt.Errorf("hooks.on_complete[%d]: %s action must not set value", i, a.Type)
 		}
-		// Write-before-stamp: the artifact must land before the label that
-		// certifies it, so a label is never observable without its comment.
-		// The message names add_label for any label write (remove_label and
-		// cycle set sawLabel too); the wording is fleet-db's verbatim so a
+		// Write-before-stamp: the artifact must land before the stamp that
+		// certifies it, so a stamp is never observable without its body. The
+		// message names add_label because that is the archetype of a stamp, not
+		// because it is the only one that trips this (remove_label, set_status
+		// and cycle set sawStamp too); the wording is fleet-db's verbatim so a
 		// pipeline refused by one repo is refused by the other in the same
 		// words.
-		if sawLabel {
-			return fmt.Errorf("hooks.on_complete[%d]: comment action must not follow an add_label action", i)
+		if sawStamp {
+			return fmt.Errorf("hooks.on_complete[%d]: %s action must not follow an add_label action", i, a.Type)
 		}
 	// remove_label shares add_label's arm outright, matching fleet-db. Sharing
 	// it is the point: a value the two disagreed about would be storable
@@ -324,6 +416,8 @@ func validateHookAction(i int, a AgentHookAction, sawLabel bool) error {
 		if a.Source != "" {
 			return fmt.Errorf("hooks.on_complete[%d]: %s action must not set source", i, a.Type)
 		}
+	case AgentHookActionSetStatus:
+		return validateSetStatusAction(i, a)
 	case AgentHookActionClose:
 		if a.Value != "" {
 			return fmt.Errorf("hooks.on_complete[%d]: close action must not set value", i)
@@ -333,6 +427,42 @@ func validateHookAction(i int, a AgentHookAction, sawLabel bool) error {
 		}
 	case AgentHookActionCycle:
 		return validateCycleAction(i, a)
+	}
+	return nil
+}
+
+// validateSetStatusAction checks the one action whose legal values are owned by
+// the server rather than by this file. Split out for the same reason
+// validateCycleAction is: the ordering rules in Validate stay readable only if
+// per-action field checks live beside the action they belong to.
+func validateSetStatusAction(i int, a AgentHookAction) error {
+	if strings.TrimSpace(a.Value) == "" {
+		return fmt.Errorf("hooks.on_complete[%d]: set_status action requires a non-blank value", i)
+	}
+	// The legal set is the server's own PATCH contract, run through loom's copy
+	// of the same function fleet-db runs — not a third list that could drift
+	// from either. That contract is also what keeps this action and close
+	// non-overlapping: it refuses closed and points at the close endpoint, which
+	// the close action already owns. Note the value is checked untrimmed: " open"
+	// is not a status any endpoint would accept either, and silently repairing
+	// it here would hide a typo the server would still reject.
+	if err := types.ValidateSettableStatus(types.Status(a.Value)); err != nil {
+		return fmt.Errorf("hooks.on_complete[%d]: set_status value %q is not a settable status: %w", i, a.Value, err)
+	}
+	if a.Source != "" {
+		return fmt.Errorf("hooks.on_complete[%d]: set_status action must not set source", i)
+	}
+	// A blocked task that does not say why is a dead card: it sits until a human
+	// reviews it. loom enforces this only in `data update` today, and a hook does
+	// not go through that path — so it holds here or nowhere.
+	if types.Status(a.Value) == types.StatusBlocked && strings.TrimSpace(a.Reason) == "" {
+		return fmt.Errorf("hooks.on_complete[%d]: set_status action to blocked requires a non-blank reason", i)
+	}
+	// ...and on any other status a reason is inert: nothing reads it. Refusing it
+	// keeps the option of widening the rule later, which accepting-and-dropping
+	// it would not.
+	if a.Reason != "" && types.Status(a.Value) != types.StatusBlocked {
+		return fmt.Errorf("hooks.on_complete[%d]: set_status action must not set reason for status %q (only blocked carries one)", i, a.Value)
 	}
 	return nil
 }

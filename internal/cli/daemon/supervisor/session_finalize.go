@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -494,6 +495,12 @@ func (s *Supervisor) executeCompletionHooks(
 		switch action.Type {
 		case domain.AgentHookActionComment:
 			err = s.postFinalReplyComment(ctx, ap, taskID, reply)
+		case domain.AgentHookActionWriteDesign:
+			// Same extracted reply the comment posts — resolved once above, for
+			// both. A second extraction could disagree with the first about what
+			// "the run's artifact" is, and a pipeline that comments one text and
+			// records another as the design is worse than either alone.
+			err = s.writeTaskDesign(ctx, taskID, reply)
 		case domain.AgentHookActionAddLabel:
 			err = s.IssueBackend.AddLabel(ctx, taskID, action.Value)
 		case domain.AgentHookActionRemoveLabel:
@@ -521,6 +528,8 @@ func (s *Supervisor) executeCompletionHooks(
 			// guarded here: this executor cannot see the upstream filter, so
 			// any guard would be a guess at intent.
 			err = s.IssueBackend.RemoveLabel(ctx, taskID, action.Value)
+		case domain.AgentHookActionSetStatus:
+			err = s.setTaskStatus(ctx, taskID, action)
 		case domain.AgentHookActionCycle:
 			err = s.advanceReviewCycle(ctx, taskID, action.Cycle)
 		case domain.AgentHookActionClose:
@@ -554,9 +563,13 @@ func (s *Supervisor) executeCompletionHooks(
 	return nil
 }
 
+// completionHooksNeedReply reports whether the pipeline contains a body write,
+// i.e. whether the run's artifact has to be extracted before the loop starts.
+// Both body-writing actions draw on the SAME extraction, so this stays a single
+// "do we need it at all?" question rather than one read per action.
 func completionHooksNeedReply(hooks *domain.AgentHooks) bool {
 	for _, a := range hooks.OnComplete {
-		if a.Type == domain.AgentHookActionComment {
+		if a.Type == domain.AgentHookActionComment || a.Type == domain.AgentHookActionWriteDesign {
 			return true
 		}
 	}
@@ -581,6 +594,78 @@ func (s *Supervisor) postFinalReplyComment(ctx context.Context, ap *AgentProcess
 		}); err != nil {
 			return fmt.Errorf("post comment chunk %d/%d: %w", i+1, len(chunks), err)
 		}
+	}
+	return nil
+}
+
+// writeTaskDesign records the run's final reply as the owned task's design.
+//
+// Unlike a comment this is NOT chunked: a design is one document, and the write
+// is a plain field PATCH bounded only by fleet-db's request-body limit. It is
+// also idempotent — a full replace — which is why hooksFromFlags puts it ahead
+// of the comment: when a later action fails the run is demoted and retried, and
+// re-running an overwrite costs nothing while re-running a comment leaves a
+// duplicate behind.
+//
+// An empty reply fails the action rather than clearing the field. finalReply
+// extraction already refuses to return "" (see finalAssistantReply), so this
+// cannot trigger today; it stays because the failure it guards is silent —
+// wiping a planner's design and reporting a clean run — and the caller is one
+// refactor away from being able to hand us an empty string.
+func (s *Supervisor) writeTaskDesign(ctx context.Context, taskID, reply string) error {
+	if strings.TrimSpace(reply) == "" {
+		return fmt.Errorf("write design: the run produced no final reply, refusing to write an empty design")
+	}
+	if err := s.IssueBackend.Update(ctx, taskID, backend.UpdateParams{Design: &reply}); err != nil {
+		return fmt.Errorf("write design: %w", err)
+	}
+	return nil
+}
+
+// setTaskStatus moves the owned task to the action's status, carrying a blocked
+// transition's reason with it.
+//
+// ONE Update, deliberately, rather than a status write plus a follow-up. The
+// fleet client decomposes a composite update in a verified-safe order (PATCH
+// body fields -> labels -> status transition -> assign), which is the same
+// property writeQuarantine relies on for its blocked+unassign+label write. Two
+// consequences here:
+//
+//   - The reason lands in the PATCH that PRECEDES the status transition, so the
+//     card is never observably blocked without the note explaining it. That is
+//     write-before-stamp again, one layer down. quarantine's split — status
+//     write, then a best-effort comment that must not unlatch it — applies to a
+//     genuinely optional follow-up; a blocked reason is not optional, so it does
+//     not go second. Nothing here can fail after the status has landed.
+//   - Assignee is deliberately NOT set. review and blocked transition out of
+//     in_progress by releasing the claim lock AS current.Assignee inside the
+//     fleet client (transitionToBlockedOrReview, LOOM-1), and
+//     shouldAssignBeforeStatus exists to keep an assign from running first and
+//     erasing the identity that release needs. Passing no assignee at all means
+//     the ordering question never arises: the lock holder is still on the issue
+//     when the release runs. The action carries no assignee either, so writing
+//     one would be a routing decision its vocabulary cannot express.
+//
+// The reason goes into notes because that is where loom already keeps it: the
+// board's needs-attention state is "blocked AND notes present", and
+// enforceBlockReason tells operators to write it as --notes "BLOCKED: ...". A
+// hook-written note therefore has to read the same as a hand-written one, prefix
+// included. It replaces the field rather than appending, like every other writer
+// of notes — the reason for the block that is happening NOW supersedes an older
+// one, and appending would need a read-modify-write that could lose a concurrent
+// edit anyway.
+func (s *Supervisor) setTaskStatus(ctx context.Context, taskID string, action domain.AgentHookAction) error {
+	status := action.Value
+	params := backend.UpdateParams{Status: &status}
+	// Validate guarantees a reason is present only on a set_status to blocked,
+	// so the field's presence IS the condition. Re-testing the status here would
+	// be a second rule free to drift from the one that is actually enforced.
+	if action.Reason != "" {
+		notes := "BLOCKED: " + action.Reason
+		params.Notes = &notes
+	}
+	if err := s.IssueBackend.Update(ctx, taskID, params); err != nil {
+		return fmt.Errorf("set status %q: %w", status, err)
 	}
 	return nil
 }

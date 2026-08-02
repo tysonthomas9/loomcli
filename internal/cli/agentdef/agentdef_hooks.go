@@ -19,14 +19,18 @@ import (
 // already the default.
 var (
 	agentAddCommentReply bool
+	agentAddWriteDesign  bool
 	agentAddLabels       []string
 	agentAddRemoveLabels []string
+	agentAddSetStatus    string
 	agentAddClose        bool
 	agentAddCycle        string
 
 	agentUpdateCommentReply bool
+	agentUpdateWriteDesign  bool
 	agentUpdateLabels       []string
 	agentUpdateRemoveLabels []string
+	agentUpdateSetStatus    string
 	agentUpdateClose        bool
 	agentUpdateCycle        string
 	agentUpdateClear        bool
@@ -43,6 +47,8 @@ the run to failed so the owned task is reopened and retried.
 
   loom agentdef update critic --on-complete-comment-reply --on-complete-add-label criticized
   loom agentdef update critic --on-complete-remove-label needs-review --on-complete-add-label reviewed
+  loom agentdef update planner --on-complete-write-design --on-complete-set-status review
+  loom agentdef update planner --on-complete-set-status "blocked:upstream API decision pending"
   loom agentdef update critic --clear-on-complete`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAgentUpdate,
@@ -50,19 +56,31 @@ the run to failed so the owned task is reopened and retried.
 
 func registerHookFlags(
 	cmd *cobra.Command,
-	reply *bool,
+	reply, writeDesign *bool,
 	labels, removeLabels *[]string,
+	setStatus *string,
 	closeTask *bool,
 	cycleSpec *string,
 ) {
 	cmd.Flags().BoolVar(reply, "on-complete-comment-reply", false,
 		"After a successful run, post the agent's final reply as a comment on the owned task")
+	cmd.Flags().BoolVar(writeDesign, "on-complete-write-design", false,
+		"After a successful run, write the agent's final reply into the owned task's design field. "+
+			"Lets a read_only role produce a design at all — writing one otherwise needs a shell. "+
+			"Applied before the comment and before any label, and it replaces the field rather than appending")
 	cmd.Flags().StringArrayVar(labels, "on-complete-add-label", nil,
 		"After a successful run, add this label to the owned task (repeat for several; applied in flag order, always after the comment)")
 	cmd.Flags().StringArrayVar(removeLabels, "on-complete-remove-label", nil,
 		"After a successful run, remove this label from the owned task (repeat for several; applied in flag order, after the comment and before the added labels). "+
 			"CAUTION: removing a label that a FEEDING stage excludes re-arms that stage — it matches the task again, re-stamps the label, and the pipeline loops "+
 			"forever (seen live as a ship/re-stamp cycle every ~32s). Check what upstream filter treats this label as its \"already handled\" marker before removing it")
+	cmd.Flags().StringVar(setStatus, "on-complete-set-status", "",
+		"After a successful run, move the owned task to STATUS[:REASON]. Settable: open, review, deferred, blocked "+
+			"(in_progress belongs to the claim endpoint and closed to --on-complete-close, so neither is accepted). "+
+			"blocked REQUIRES a reason, which is stored as the task's notes (\"BLOCKED: <reason>\") because the board's "+
+			"needs-attention state is blocked-with-notes; no other status may carry one. "+
+			"Applied after the added labels: only an open task is claimable, so the status is the gate that makes the "+
+			"hand-off actionable and has to land last. Example: blocked:upstream API decision pending")
 	cmd.Flags().StringVar(cycleSpec, "on-complete-cycle", "",
 		"After a successful run, advance a bounded review loop: THRESHOLD:REARM_LABEL:SHIP_LABEL[:PREFIX]. "+
 			"Below the threshold it removes REARM_LABEL to hand the task back to the previous stage and bumps a counter label; "+
@@ -72,29 +90,41 @@ func registerHookFlags(
 }
 
 // hooksFromFlags builds the pipeline in the only order the invariants permit:
-// the comment first, then the removals, then the added labels in the order the
-// flags were given.
+// the bodies first (design, then comment), then the removals, then the added
+// labels in the order the flags were given, then the status.
 //
-// Removals sit between the two because add_label is the CERTIFYING write — the
-// token the next stage waits on — and everything the run did has to be visible
-// before it. Stamping first would open a window in which the task carries both
-// the label that routed it here and the label that hands it on, claimable by
-// the upstream and downstream stages at once; removing first can only leave the
-// task briefly unrouted, which stalls visibly instead of forking. It is the
-// same argument the review cycle's remove-then-bump ordering rests on.
+// The design goes ahead of the comment because both draw on the same extracted
+// reply and only one of them is idempotent. A failure anywhere later demotes the
+// run, which reopens the task and retries the WHOLE pipeline: re-running an
+// overwritten design field costs nothing, while re-running a comment leaves a
+// duplicate on the task forever. Put the replaceable write first and the
+// append-only write last, and a retry converges.
+//
+// Removals sit between the bodies and the stamps because add_label is the
+// CERTIFYING write — the token the next stage waits on — and everything the run
+// did has to be visible before it. Stamping first would open a window in which
+// the task carries both the label that routed it here and the label that hands
+// it on, claimable by the upstream and downstream stages at once; removing first
+// can only leave the task briefly unrouted, which stalls visibly instead of
+// forking. It is the same argument the review cycle's remove-then-bump ordering
+// rests on.
+//
+// set_status comes after the added labels, one level up from that same
+// argument: in loom the status is what decides whether a task can be claimed at
+// all (task_router scores anything that is not `open` as 0), so it is the gate,
+// not just another token. Opening a task before its hand-off label is stamped
+// would make it claimable while unrouted — the fork the removals ordering exists
+// to avoid. The cycle still goes last because it manages the status itself,
+// returning the task to `open` for whichever stage it hands to.
 func hooksFromFlags(
-	commentReply bool,
+	commentReply, writeDesign bool,
 	labels, removeLabels []string,
+	setStatus string,
 	closeTask bool,
 	cycleSpec string,
 ) (*domain.AgentHooks, error) {
-	actions := make([]domain.AgentHookAction, 0, 2+len(labels)+len(removeLabels))
-	if commentReply {
-		actions = append(actions, domain.AgentHookAction{
-			Type:   domain.AgentHookActionComment,
-			Source: domain.AgentHookCommentSourceFinalReply,
-		})
-	}
+	actions := make([]domain.AgentHookAction, 0, 4+len(labels)+len(removeLabels))
+	actions = append(actions, bodyActions(writeDesign, commentReply)...)
 	removals, err := labelActions(domain.AgentHookActionRemoveLabel, "--on-complete-remove-label", removeLabels)
 	if err != nil {
 		return nil, err
@@ -105,6 +135,13 @@ func hooksFromFlags(
 		return nil, err
 	}
 	actions = append(actions, stamps...)
+	if setStatus != "" {
+		status, err := parseSetStatusSpec(setStatus)
+		if err != nil {
+			return nil, err
+		}
+		actions = append(actions, status)
+	}
 	if cycleSpec != "" {
 		cyc, err := parseCycleSpec(cycleSpec)
 		if err != nil {
@@ -128,6 +165,27 @@ func hooksFromFlags(
 	return hooks, nil
 }
 
+// bodyActions builds the run's body writes. Both name the same source, because
+// there is one notion of "the run's artifact" and the supervisor resolves it
+// once for both; the design leads for the retry-convergence reason argued in
+// hooksFromFlags.
+func bodyActions(writeDesign, commentReply bool) []domain.AgentHookAction {
+	var actions []domain.AgentHookAction
+	if writeDesign {
+		actions = append(actions, domain.AgentHookAction{
+			Type:   domain.AgentHookActionWriteDesign,
+			Source: domain.AgentHookCommentSourceFinalReply,
+		})
+	}
+	if commentReply {
+		actions = append(actions, domain.AgentHookAction{
+			Type:   domain.AgentHookActionComment,
+			Source: domain.AgentHookCommentSourceFinalReply,
+		})
+	}
+	return actions
+}
+
 // labelActions builds one label-carrying action per flag value. add_label and
 // remove_label share it because they share a validation arm in the model: a
 // value one accepts and the other refuses would be a difference no caller could
@@ -145,6 +203,30 @@ func labelActions(t domain.AgentHookActionType, flag string, labels []string) ([
 		actions = append(actions, domain.AgentHookAction{Type: t, Value: label})
 	}
 	return actions, nil
+}
+
+// parseSetStatusSpec reads STATUS[:REASON]. One flag rather than two, for the
+// same reason parseCycleSpec takes a positional spec: the parts are meaningless
+// apart. A reason configures nothing without the status it explains, and a
+// `blocked` status without one is refused outright — so two flags would let an
+// operator half-configure a pair that is only ever valid together.
+//
+// Split on the FIRST colon only, so a reason keeps any colons of its own
+// ("blocked:waiting on infra: the new cluster"). Which statuses are legal, and
+// which of them may carry a reason, is not decided here: hooksFromFlags runs the
+// model's Validate, which runs the server's own PATCH contract, so the CLI
+// cannot accept a status fleet-db would refuse on write.
+func parseSetStatusSpec(spec string) (domain.AgentHookAction, error) {
+	status, reason, _ := strings.Cut(spec, ":")
+	action := domain.AgentHookAction{
+		Type:   domain.AgentHookActionSetStatus,
+		Value:  strings.TrimSpace(status),
+		Reason: strings.TrimSpace(reason),
+	}
+	if action.Value == "" {
+		return domain.AgentHookAction{}, fmt.Errorf("--on-complete-set-status expects STATUS[:REASON], got %q", spec)
+	}
+	return action, nil
 }
 
 // parseCycleSpec reads THRESHOLD:REARM:SHIP[:PREFIX]. Positional rather than
@@ -194,20 +276,23 @@ func runAgentUpdate(_ *cobra.Command, args []string) error {
 // empty pipeline means "clear". Conflicting and no-op invocations are errors
 // rather than silent successes, so a typo never looks like it took effect.
 func agentUpdateHooksPatch() (*domain.AgentHooks, error) {
-	setRequested := agentUpdateCommentReply || len(agentUpdateLabels) > 0 ||
-		len(agentUpdateRemoveLabels) > 0 || agentUpdateClose || agentUpdateCycle != ""
+	setRequested := agentUpdateCommentReply || agentUpdateWriteDesign || len(agentUpdateLabels) > 0 ||
+		len(agentUpdateRemoveLabels) > 0 || agentUpdateSetStatus != "" ||
+		agentUpdateClose || agentUpdateCycle != ""
 	switch {
 	case agentUpdateClear && setRequested:
 		return nil, fmt.Errorf("--clear-on-complete cannot be combined with --on-complete-comment-reply, " +
-			"--on-complete-add-label, --on-complete-remove-label, --on-complete-close or --on-complete-cycle")
+			"--on-complete-write-design, --on-complete-add-label, --on-complete-remove-label, " +
+			"--on-complete-set-status, --on-complete-close or --on-complete-cycle")
 	case agentUpdateClear:
 		return &domain.AgentHooks{}, nil
 	case !setRequested:
-		return nil, fmt.Errorf("nothing to update: pass --on-complete-comment-reply, --on-complete-add-label, " +
-			"--on-complete-remove-label, --on-complete-close and/or --on-complete-cycle, or --clear-on-complete")
+		return nil, fmt.Errorf("nothing to update: pass --on-complete-comment-reply, --on-complete-write-design, " +
+			"--on-complete-add-label, --on-complete-remove-label, --on-complete-set-status, " +
+			"--on-complete-close and/or --on-complete-cycle, or --clear-on-complete")
 	}
-	return hooksFromFlags(agentUpdateCommentReply, agentUpdateLabels, agentUpdateRemoveLabels,
-		agentUpdateClose, agentUpdateCycle)
+	return hooksFromFlags(agentUpdateCommentReply, agentUpdateWriteDesign, agentUpdateLabels,
+		agentUpdateRemoveLabels, agentUpdateSetStatus, agentUpdateClose, agentUpdateCycle)
 }
 
 // printHookPipeline renders the ordered steps as stored, so an operator can see
@@ -221,6 +306,16 @@ func printHookPipeline(h *domain.AgentHooks) {
 		switch a.Type {
 		case domain.AgentHookActionComment:
 			fmt.Printf("  %d. comment (source=%s)\n", i+1, a.Source)
+		case domain.AgentHookActionWriteDesign:
+			fmt.Printf("  %d. write_design (source=%s)\n", i+1, a.Source)
+		case domain.AgentHookActionSetStatus:
+			// The reason is part of what the step DOES — it becomes the task's
+			// notes — so it is printed, not summarized away.
+			if a.Reason != "" {
+				fmt.Printf("  %d. set_status %s (reason=%s)\n", i+1, a.Value, a.Reason)
+			} else {
+				fmt.Printf("  %d. set_status %s\n", i+1, a.Value)
+			}
 		case domain.AgentHookActionAddLabel:
 			fmt.Printf("  %d. add_label %s\n", i+1, a.Value)
 		case domain.AgentHookActionRemoveLabel:
