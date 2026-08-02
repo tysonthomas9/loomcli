@@ -91,10 +91,16 @@ func runAgent(cmd *cobra.Command, args []string) {
 		taskCheckFn = routerCheck
 	}
 
+	// Publish the mode before anything can reach a backend: cli.InvokeAgent
+	// refuses the interactive path under it, which is what turns a TTY-less
+	// daemon spawn into a loud failure instead of a silent exit-0 no-op.
+	cli.SetDaemonMode(agentDaemonMode)
+
 	target, err := workspace.ResolveAgentTarget(argName, "")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		cli.ExitWithFlush(1)
+		return
 	}
 
 	worktreePath := target.WorkDir
