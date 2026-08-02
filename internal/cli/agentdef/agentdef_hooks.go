@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -43,6 +44,7 @@ var (
 	agentUpdateParent string
 	agentUpdateRole   string
 	agentUpdateMode   string
+	agentUpdateFilter string
 )
 
 var agentUpdateCmd = &cobra.Command{
@@ -322,6 +324,17 @@ func agentUpdateIdentityPatch(changed func(string) bool) (store.AgentUpdate, boo
 		patch.RoleName = &r
 		touched = true
 	}
+	// add grew --task-filter long before update did, which left an agent's
+	// filter write-once from the CLI: the only way to change the one knob that
+	// decides what the agent claims was to delete and recreate the agent.
+	if changed("task-filter") {
+		canonical, err := cli.ValidateTaskFilter(strings.TrimSpace(agentUpdateFilter))
+		if err != nil {
+			return store.AgentUpdate{}, false, err
+		}
+		patch.TaskFilter = &canonical // empty clears it back to the role's filter
+		touched = true
+	}
 	if changed("mode") {
 		m := strings.TrimSpace(agentUpdateMode)
 		if m != "" && m != string(domain.AgentModeEphemeral) && m != string(domain.AgentModeService) {
@@ -351,7 +364,7 @@ func agentUpdateHooksPatch(identityChanged bool) (*domain.AgentHooks, error) {
 	case !setRequested && identityChanged:
 		return nil, nil // identity-only update; leave the pipeline untouched
 	case !setRequested:
-		return nil, fmt.Errorf("nothing to update: pass --parent/--role/--mode, " +
+		return nil, fmt.Errorf("nothing to update: pass --parent/--role/--mode/--task-filter, " +
 			"--on-complete-comment-reply, --on-complete-write-design, " +
 			"--on-complete-add-label, --on-complete-remove-label, --on-complete-set-status, " +
 			"--on-complete-close and/or --on-complete-cycle, or --clear-on-complete")

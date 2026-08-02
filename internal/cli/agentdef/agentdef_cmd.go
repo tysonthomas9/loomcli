@@ -126,6 +126,7 @@ func init() {
 	agentUpdateCmd.Flags().StringVar(&agentUpdateParent, "parent", "", "Epic ID to scope this agent to (pass an empty string to clear the scope)")
 	agentUpdateCmd.Flags().StringVar(&agentUpdateRole, "role", "", "Role name to switch this agent to")
 	agentUpdateCmd.Flags().StringVar(&agentUpdateMode, "mode", "", "Agent mode: ephemeral or service (empty clears it)")
+	agentUpdateCmd.Flags().StringVar(&agentUpdateFilter, "task-filter", "", "Task filter for task-driven agents: needs_design, has_design, or any (empty clears it back to the role's filter)")
 
 	agentdefCmd.AddCommand(agentAddCmd, agentListCmd, agentShowCmd, agentRemoveCmd, agentStartCmd, agentStopCmd, agentUpdateCmd)
 	cli.RegisterCommand(agentdefCmd)
