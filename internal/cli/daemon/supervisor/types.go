@@ -99,6 +99,17 @@ const (
 	// with backends exhausted, or a capped block that never made progress).
 	// Surfaced as "failed" in daemon-status.
 	StopReasonFastFail StopReason = "fast_fail"
+	// StopReasonRunDurationExceeded marks a run the supervisor killed for
+	// outliving its wall-clock cap (see run_duration.go).
+	//
+	// Deliberately NOT folded into StopReasonWatchdog. That reason means "silent
+	// too long"; this one means "running too long", and the two describe
+	// opposite failures: an agent hitting this cap may have been chattering
+	// happily the whole time, or parked on a prompt the silence watchdog was
+	// explicitly told to excuse. classifyAgentExit keys on the distinction —
+	// a watchdog stop with no task is read as idle NoWork, which is the one
+	// verdict a four-hour run must never get.
+	StopReasonRunDurationExceeded StopReason = "run_duration_exceeded"
 )
 
 // resolveRemote returns the git remote name for this agent.
