@@ -115,7 +115,7 @@ func init() {
 	roleAddCmd.Flags().StringVar(&roleAddEffort, "effort", "", "Agent effort (low, medium, high, xhigh, max)")
 	roleAddCmd.Flags().StringSliceVar(&roleAddSkills, "skills", nil, "Skills (comma-separated or repeat flag)")
 	roleAddCmd.Flags().IntVar(&roleAddMaxConc, "max-concurrency", 0, "Max concurrent agents (0 = unlimited)")
-	roleAddCmd.Flags().BoolVar(&roleAddReadOnly, "read-only", false, "Read-only role")
+	roleAddCmd.Flags().BoolVar(&roleAddReadOnly, "read-only", false, "Read-only role (hard on claude/codex/gemini; prompt-only elsewhere, and the daemon logs which one you get)")
 
 	roleListCmd.Flags().BoolVar(&roleListJSON, "json", false, "JSON output")
 	roleShowCmd.Flags().BoolVar(&roleShowJSON, "json", false, "JSON output")
