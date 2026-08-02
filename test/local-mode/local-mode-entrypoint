@@ -261,6 +261,13 @@ EOF2
   if [ -n "$cycle_role" ]; then
     failures_before=$PIPELINE_WIRING_FAILED
     pipeline_wire loom role set "$cycle_role" labels "$rearm"
+    # The ship label must be EXCLUDED here, not just routed elsewhere: the cycle
+    # hook keeps the re-arm label when it ships (so a human can send the task
+    # back around), which means a shipped task still matches this role's label
+    # filter. Without the exclusion the cycle role re-claims its own shipped
+    # task on every backoff tick and re-fires the ship hook until the consumer
+    # happens to win the race — observed live as a 4-second ship loop.
+    pipeline_wire loom role set "$cycle_role" exclude_labels "$ship"
     pipeline_wire loom role set "$cycle_role" task_filter any
     pipeline_wire loom agentdef update "$(pipeline_agent_for_role "$cycle_role")" \
       --on-complete-cycle "${threshold}:${rearm}:${ship}"

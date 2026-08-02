@@ -105,20 +105,28 @@ type RoleConfig struct {
 //
 // An agent with neither repos nor repo_groups can work on any repo.
 type AgentEntry struct {
-	Worktree         string                   `yaml:"worktree"`
-	Role             string                   `yaml:"role"`
-	Repo             string                   `yaml:"repo,omitempty"`
-	Auto             bool                     `yaml:"auto,omitempty"`
-	Backend          string                   `yaml:"backend,omitempty"`
-	FallbackBackends []string                 `yaml:"fallback_backends,omitempty"`
-	PathPatterns     []string                 `yaml:"path_patterns,omitempty"`
-	SourceRepos      []string                 `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
-	Repos            []string                 `yaml:"repos,omitempty"`
-	RepoGroups       []string                 `yaml:"repo_groups,omitempty"`
-	CrossRepo        bool                     `yaml:"cross_repo,omitempty"`
-	Parent           string                   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
-	Mode             domain.AgentMode         `yaml:"mode,omitempty"`   // ephemeral: exit cleanly after one successful task; service: loop forever (default)
-	DesiredState     domain.AgentDesiredState `yaml:"desired_state,omitempty"`
+	Worktree         string   `yaml:"worktree"`
+	Role             string   `yaml:"role"`
+	Repo             string   `yaml:"repo,omitempty"`
+	Auto             bool     `yaml:"auto,omitempty"`
+	Backend          string   `yaml:"backend,omitempty"`
+	FallbackBackends []string `yaml:"fallback_backends,omitempty"`
+	PathPatterns     []string `yaml:"path_patterns,omitempty"`
+	// TaskFilter is the agent-level claim filter (needs_plan/has_design/any),
+	// overriding the role's. Absent from this struct for a long time, the
+	// stored value was displayed by `agentdef show` and consumed by NOTHING:
+	// the claim gate could not see it, and — because Equal and the reconcile
+	// hash serialize this struct — a task_filter-only change diffed as "no
+	// change", so the running agent silently kept its old definition. One
+	// missing field, three symptoms.
+	TaskFilter   string                   `yaml:"task_filter,omitempty"`
+	SourceRepos  []string                 `yaml:"-" json:"-"` // resolved repo IDs; env-only transport, not persisted in YAML
+	Repos        []string                 `yaml:"repos,omitempty"`
+	RepoGroups   []string                 `yaml:"repo_groups,omitempty"`
+	CrossRepo    bool                     `yaml:"cross_repo,omitempty"`
+	Parent       string                   `yaml:"parent,omitempty"` // epic ID to scope this agent to; empty = no epic assignment
+	Mode         domain.AgentMode         `yaml:"mode,omitempty"`   // ephemeral: exit cleanly after one successful task; service: loop forever (default)
+	DesiredState domain.AgentDesiredState `yaml:"desired_state,omitempty"`
 	// Hooks are the supervisor-owned post-run pipelines. Nil preserves the
 	// pre-hook behavior (the agent's own prompt does its bookkeeping).
 	Hooks *domain.AgentHooks `yaml:"hooks,omitempty"`
@@ -128,7 +136,7 @@ type AgentEntry struct {
 func (a AgentEntry) Equal(b AgentEntry) bool {
 	return a.Worktree == b.Worktree && a.Role == b.Role && a.Repo == b.Repo &&
 		a.Auto == b.Auto && a.Backend == b.Backend && a.CrossRepo == b.CrossRepo && a.Parent == b.Parent &&
-		a.Mode == b.Mode &&
+		a.Mode == b.Mode && a.TaskFilter == b.TaskFilter &&
 		a.DesiredState == b.DesiredState &&
 		a.Hooks.Equal(b.Hooks) &&
 		slices.Equal(a.FallbackBackends, b.FallbackBackends) && slices.Equal(a.PathPatterns, b.PathPatterns) &&
@@ -353,6 +361,7 @@ func agentEntryFromDomain(a *domain.Agent) AgentEntry {
 		Parent:           a.Parent,
 		Mode:             a.Mode,
 		DesiredState:     a.DesiredState,
+		TaskFilter:       a.TaskFilter,
 		Hooks:            a.Hooks.Clone(),
 	}
 }

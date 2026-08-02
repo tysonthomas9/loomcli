@@ -62,6 +62,20 @@ func TestMergeRoleConstraints_AgentPathPatternsOverride(t *testing.T) {
 	}
 }
 
+// task_filter is the knob that decides whether a custom-role agent claims at
+// all and what it claims; the agent-level value must beat the role's, same as
+// every other per-agent override in this merge.
+func TestMergeRoleConstraints_AgentTaskFilterOverride(t *testing.T) {
+	rc := RoleConfig{TaskFilter: "needs_plan"}
+	ae := AgentEntry{TaskFilter: "any"}
+
+	got := MergeRoleConstraints(rc, ae)
+
+	if got.TaskFilter != "any" {
+		t.Errorf("TaskFilter = %q, want the agent-level %q", got.TaskFilter, "any")
+	}
+}
+
 func TestMergeRoleConstraints_AgentBackendOverride(t *testing.T) {
 	rc := RoleConfig{Backend: "claude"}
 	ae := AgentEntry{Backend: "codex"}

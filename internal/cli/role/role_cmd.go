@@ -249,6 +249,13 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		if r.PromptFile != "" {
 			fmt.Printf("Prompt file:  %s\n", r.PromptFile)
 		}
+		// The task filter decides which tasks agents in this role CLAIM — it is
+		// the single most routing-relevant field on the role, and hiding it
+		// cost a live debugging session an hour: `role show` printed labels
+		// and read-only while the filter silently defaulted.
+		if r.TaskFilter != "" {
+			fmt.Printf("Task filter:  %s\n", r.TaskFilter)
+		}
 		if len(r.Skills) > 0 {
 			fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
 		}
