@@ -76,32 +76,69 @@ func TestGeminiApprovalMode_ReadOnlyIsPlan(t *testing.T) {
 	}
 }
 
-func TestValidateSafetyKnobs_FailClosedMatrix(t *testing.T) {
+func TestValidateSafetyKnobs_EnforcementMatrix(t *testing.T) {
 	cases := []struct {
 		backend  string
 		tools    bool
 		readOnly bool
 		ok       bool
+		soft     bool // runs, but read_only is prompt-only
 	}{
-		{"claude", true, true, true},
-		{"codex", false, true, true},   // --sandbox read-only
-		{"codex", true, false, false},  // no tool vocabulary
-		{"gemini", false, true, true},  // --approval-mode plan
-		{"gemini", true, false, false}, // upstream deprecated --allowed-tools
-		{"opencode", false, true, false},
-		{"cursor", true, false, false},
-		{"external", false, true, false},
-		{"opencode", false, false, true}, // no knobs, nothing to enforce
+		{backend: "claude", tools: true, readOnly: true, ok: true},
+		{backend: "codex", readOnly: true, ok: true},                // --sandbox read-only
+		{backend: "codex", tools: true, ok: false},                  // no tool vocabulary
+		{backend: "gemini", readOnly: true, ok: true},               // --approval-mode plan
+		{backend: "gemini", tools: true, ok: false},                 // upstream deprecated --allowed-tools
+		{backend: "opencode", readOnly: true, ok: true, soft: true}, // degrades to the preamble
+		{backend: "localdogfood", readOnly: true, ok: true, soft: true},
+		{backend: "cursor", tools: true, ok: false},
+		{backend: "external", readOnly: true, ok: true, soft: true},
+		{backend: "opencode", ok: true}, // no knobs, nothing to enforce
 	}
 	for _, c := range cases {
 		var allowed []string
 		if c.tools {
 			allowed = []string{"Read"}
 		}
-		err := ValidateSafetyKnobs(c.backend, allowed, nil, c.readOnly)
+		warning, err := ValidateSafetyKnobs(c.backend, allowed, nil, c.readOnly)
 		if (err == nil) != c.ok {
 			t.Errorf("ValidateSafetyKnobs(%s, tools=%v, ro=%v) err=%v, want ok=%v",
 				c.backend, c.tools, c.readOnly, err, c.ok)
+		}
+		if (warning != "") != c.soft {
+			t.Errorf("ValidateSafetyKnobs(%s, tools=%v, ro=%v) warning=%q, want soft=%v",
+				c.backend, c.tools, c.readOnly, warning, c.soft)
+		}
+	}
+}
+
+// The seeded built-in `plan` role carries read_only on every workspace, so a
+// hard refusal here refuses every planner on every backend without a sandbox —
+// including the deterministic test backend. It must run, and it must say that
+// the restriction is prompt-deep.
+func TestValidateSafetyKnobs_SeededPlannerRunsOnASoftBackend(t *testing.T) {
+	warning, err := ValidateSafetyKnobs("localdogfood", nil, nil, true)
+	if err != nil {
+		t.Fatalf("read_only must degrade, not refuse: %v", err)
+	}
+	if !strings.Contains(warning, "prompt") || !strings.Contains(warning, "localdogfood") {
+		t.Fatalf("warning must name the backend and say the enforcement is prompt-only; got %q", warning)
+	}
+}
+
+// Tool lists have no soft equivalent, so they keep failing closed even on the
+// backends where read_only now degrades.
+func TestValidateSafetyKnobs_ToolListsStayFailClosed(t *testing.T) {
+	for _, backend := range []string{"opencode", "cursor", "external", "localdogfood", "codex", "gemini"} {
+		warning, err := ValidateSafetyKnobs(backend, []string{"Read"}, nil, false)
+		if err == nil {
+			t.Errorf("allowed_tools on %q must refuse the run", backend)
+		}
+		if warning != "" {
+			t.Errorf("a refusal must not also warn (%q): %q", backend, warning)
+		}
+		if _, err := ValidateSafetyKnobs(backend, nil, []string{"Bash"}, false); err == nil {
+			t.Errorf("denied_tools on %q must refuse the run", backend)
 		}
 	}
 }
@@ -109,10 +146,24 @@ func TestValidateSafetyKnobs_FailClosedMatrix(t *testing.T) {
 func TestSupportsToolControl_MatchesTheValidator(t *testing.T) {
 	for _, name := range []string{"claude", "codex", "gemini", "opencode", "cursor"} {
 		fromTable := SupportsToolControl(name)
-		fromValidator := ValidateSafetyKnobs(name, []string{"Read"}, nil, false) == nil
-		if fromTable != fromValidator {
+		_, err := ValidateSafetyKnobs(name, []string{"Read"}, nil, false)
+		if fromValidator := err == nil; fromTable != fromValidator {
 			t.Errorf("SupportsToolControl(%s)=%v but ValidateSafetyKnobs says %v — keep them in lockstep",
 				name, fromTable, fromValidator)
+		}
+	}
+}
+
+func TestSupportsHardReadOnly_MatchesTheValidator(t *testing.T) {
+	for _, name := range []string{"claude", "codex", "gemini", "opencode", "cursor", "localdogfood"} {
+		fromTable := SupportsHardReadOnly(name)
+		warning, err := ValidateSafetyKnobs(name, nil, nil, true)
+		if err != nil {
+			t.Fatalf("read_only must never refuse now: %s -> %v", name, err)
+		}
+		if fromValidator := warning == ""; fromTable != fromValidator {
+			t.Errorf("SupportsHardReadOnly(%s)=%v but the validator %s — keep them in lockstep",
+				name, fromTable, map[bool]string{true: "warns", false: "does not warn"}[warning != ""])
 		}
 	}
 }

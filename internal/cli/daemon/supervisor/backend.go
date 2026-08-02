@@ -85,16 +85,33 @@ func (s *Supervisor) gateBackendAvailable(ap *AgentProcess) error {
 }
 
 // gateSafetyKnobsEnforceable fails closed when the role carries safety knobs
-// (allowed_tools / denied_tools / read_only) the resolved backend cannot
-// enforce. Running anyway would silently drop the restriction — the exact
-// config-that-lies failure these knobs used to be. The agent parks with a
-// visible error (SpawnFailure class) instead; the daemon's config poll picks
-// up a corrected role without a restart.
+// the resolved backend cannot enforce, and warns when a knob is in force only
+// softly. Spawning under a dropped restriction would be the exact
+// config-that-lies failure these knobs used to be, so a tool list the backend
+// cannot apply parks the agent with a visible error (SpawnFailure class); the
+// daemon's config poll picks up a corrected role without a restart.
+//
+// read_only on a backend with no hard mechanism is the one knob that
+// degrades rather than refuses — see backends.ValidateSafetyKnobs for why —
+// and the warning is what keeps that honest. It is logged once per distinct
+// message rather than per spawn attempt: this gate runs on every polling
+// cycle, including cycles that claim no task, so an unconditional line would
+// bury the daemon log.
 func (s *Supervisor) gateSafetyKnobsEnforceable(ap *AgentProcess) error {
 	backendName := s.GetEffectiveBackend(ap)
-	err := backends.ValidateSafetyKnobs(backendName,
+	warning, err := backends.ValidateSafetyKnobs(backendName,
 		ap.RoleConfig.AllowedTools, ap.RoleConfig.DeniedTools, ap.RoleConfig.ReadOnly)
 	if err == nil {
+		if warning != "" {
+			ap.Mu.Lock()
+			repeat := ap.SoftKnobWarning == warning
+			ap.SoftKnobWarning = warning
+			worktree := ap.Entry.Worktree
+			ap.Mu.Unlock()
+			if !repeat {
+				log.Printf("[daemon] Agent %s: SOFT ENFORCEMENT ONLY — %s", worktree, warning)
+			}
+		}
 		return nil
 	}
 	ap.Mu.Lock()

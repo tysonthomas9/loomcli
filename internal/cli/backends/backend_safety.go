@@ -8,10 +8,11 @@ import (
 
 // Role safety knobs (allowed_tools / denied_tools / read_only), delivered by
 // the supervisor as env (LOOM_ALLOWED_TOOLS / LOOM_DENIED_TOOLS /
-// LOOM_READ_ONLY) and enforced here as real backend CLI flags. The rule is
-// fail-closed: a knob the resolved backend cannot enforce refuses the run
-// (ValidateSafetyKnobs) rather than running without the restriction — config
-// that lies is worse than config that errors.
+// LOOM_READ_ONLY) and enforced here as real backend CLI flags. The governing
+// rule is that a knob never silently means less than it says
+// (ValidateSafetyKnobs): tool lists refuse the run on a backend that cannot
+// apply them, and read_only degrades to the prompt preamble with a loud
+// warning. Config that lies is worse than config that errors.
 //
 // Per-backend enforcement (verified against the installed CLIs):
 //
@@ -24,7 +25,8 @@ import (
 //	gemini   read_only = `--approval-mode plan` (gemini's documented
 //	         read-only mode) instead of yolo; no supported tool lists (its
 //	         --allowed-tools is deprecated upstream).
-//	others   nothing enforceable — any knob fails closed.
+//	others   no hard mechanism: tool lists fail closed, read_only falls back
+//	         to ReadOnlyPreamble and says so.
 func resolveAllowedTools() []string {
 	return splitToolList(os.Getenv("LOOM_ALLOWED_TOOLS"))
 }
@@ -111,39 +113,75 @@ func SupportsToolControl(backendName string) bool {
 	return backendName == "claude"
 }
 
-// ValidateSafetyKnobs fails closed when the resolved backend cannot enforce a
-// requested knob. Called by the supervisor before spawn and by the backend
-// invokers as defense in depth (an older daemon or direct CLI use bypasses
-// the supervisor's check).
-func ValidateSafetyKnobs(backendName string, allowedTools, deniedTools []string, readOnly bool) error {
+// SupportsHardReadOnly reports whether the backend has a mechanism that makes
+// read_only true regardless of what the model decides to do — a CLI flag or
+// an OS sandbox policy — as opposed to the prompt preamble alone.
+func SupportsHardReadOnly(backendName string) bool {
+	switch backendName {
+	case "claude", "codex", "gemini":
+		return true
+	}
+	return false
+}
+
+// ValidateSafetyKnobs decides whether a role's safety knobs can run on the
+// resolved backend. A non-empty warning means a knob is in force only softly
+// and the caller must say so out loud; a non-nil error means refuse the run.
+// Called by the supervisor before spawn and by the backend invokers as
+// defense in depth (an older daemon or direct CLI use bypasses the
+// supervisor's check).
+//
+// The two knob families are deliberately treated differently.
+//
+// Tool lists FAIL CLOSED. There is no soft equivalent of an allowlist: the
+// only way to honor "you may use Read and Grep and nothing else" without the
+// flag is to ask the model nicely, which is not what allowed_tools claims to
+// do. An unapplied allowlist is pure fiction, and fiction in a security-shaped
+// field is the defect this whole change removes.
+//
+// read_only DEGRADES to ReadOnlyPreamble with a warning. Unlike a tool list it
+// has a real, if weaker, soft layer that every backend gets, and failing
+// closed on it turned out to break the product: seedBuiltInRoles gives the
+// built-in `plan` role ReadOnly: true on every workspace, so a hard refusal
+// refuses to spawn EVERY planner on every backend without a hard mechanism —
+// localdogfood, opencode, cursor, external — including the deterministic test
+// backend. The knob was inert for long enough that its default was set without
+// anyone seeing that implication. Degrading loudly keeps the "never silently a
+// lie" property, which is the part that matters: the operator is told, in the
+// daemon log, exactly how much enforcement they are getting.
+func ValidateSafetyKnobs(backendName string, allowedTools, deniedTools []string, readOnly bool) (string, error) {
 	hasTools := len(allowedTools) > 0 || len(deniedTools) > 0
 	if !hasTools && !readOnly {
-		return nil
+		return "", nil
 	}
+	if hasTools && !SupportsToolControl(backendName) {
+		return "", fmt.Errorf("backend %q cannot enforce allowed_tools/denied_tools (%s); refusing to run without the restriction (fail-closed) — remove the knob or use a backend with tool control",
+			backendName, toolControlGap(backendName))
+	}
+	if readOnly && !SupportsHardReadOnly(backendName) {
+		return fmt.Sprintf("backend %q has no hard read-only mechanism: read_only is enforced by prompt preamble only, so the agent CAN still write. Use a backend with a sandbox or tool control for a real restriction", backendName), nil
+	}
+	return "", nil
+}
+
+// toolControlGap names why a backend has no tool vocabulary, so the refusal
+// says something more useful than "unsupported".
+func toolControlGap(backendName string) string {
 	switch backendName {
-	case "claude":
-		return nil // full support
 	case "codex":
-		if hasTools {
-			return fmt.Errorf("backend %q cannot enforce allowed_tools/denied_tools (no tool vocabulary); remove the knob or use the claude backend", backendName)
-		}
-		return nil // read_only maps to --sandbox read-only
+		return "no tool vocabulary; its sandbox is all-or-nothing"
 	case "gemini":
-		if hasTools {
-			return fmt.Errorf("backend %q cannot enforce allowed_tools/denied_tools (upstream deprecated --allowed-tools); remove the knob or use the claude backend", backendName)
-		}
-		return nil // read_only maps to --approval-mode plan
+		return "upstream deprecated --allowed-tools"
 	default:
-		knob := "read_only"
-		if hasTools {
-			knob = "allowed_tools/denied_tools"
-		}
-		return fmt.Errorf("backend %q cannot enforce %s; refusing to run without the restriction (fail-closed)", backendName, knob)
+		return "no tool-restriction flags"
 	}
 }
 
 // validateSafetyKnobsFromEnv is the invoker-side defense-in-depth check,
-// reading the same env the supervisor exported.
+// reading the same env the supervisor exported. The supervisor has already
+// logged any soft-enforcement warning through its own gate; repeating it here
+// would double every line in the daemon log, so this layer only enforces.
 func validateSafetyKnobsFromEnv(backendName string) error {
-	return ValidateSafetyKnobs(backendName, resolveAllowedTools(), resolveDeniedTools(), resolveReadOnly())
+	_, err := ValidateSafetyKnobs(backendName, resolveAllowedTools(), resolveDeniedTools(), resolveReadOnly())
+	return err
 }
