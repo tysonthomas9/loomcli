@@ -273,6 +273,7 @@ func roleConfigFromDomain(r *domain.Role) config.RoleConfig {
 		AllowedTools:   append([]string(nil), r.AllowedTools...),
 		DeniedTools:    append([]string(nil), r.DeniedTools...),
 		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
+		MaxRunDuration: cloneIntPtr(r.MaxRunDuration),
 	}
 }
 

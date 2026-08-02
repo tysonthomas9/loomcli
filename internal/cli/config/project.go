@@ -86,6 +86,10 @@ type RoleConfig struct {
 	AllowedTools   []string                `yaml:"allowed_tools,omitempty"`
 	DeniedTools    []string                `yaml:"denied_tools,omitempty"`
 	MaxBudgetUSD   *float64                `yaml:"max_budget_usd,omitempty"`
+	// MaxRunDuration caps a single supervised run's wall-clock age, in
+	// seconds. Nil inherits the daemon-wide default; <= 0 disables the cap for
+	// this role. See supervisor/run_duration.go.
+	MaxRunDuration *int `yaml:"max_run_duration,omitempty"`
 }
 
 // AgentEntry defines a single agent assignment.
@@ -319,6 +323,7 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 		AllowedTools:   append([]string(nil), r.AllowedTools...),
 		DeniedTools:    append([]string(nil), r.DeniedTools...),
 		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
+		MaxRunDuration: cloneIntPtr(r.MaxRunDuration),
 	}
 }
 
