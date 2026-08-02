@@ -319,7 +319,15 @@ func initSupervisorAgents(sup *supervisor.Supervisor, agents []cfgpkg.AgentEntry
 		}
 		ap, err := sup.NewAgent(entry, i)
 		if err != nil {
-			return err
+			// One broken definition must not take the whole fleet down: this
+			// runs at daemon creation, so returning the error here turns a
+			// single bad agentdef into a crash loop for every OTHER agent in
+			// the workspace (observed live: an agentdef added against a role
+			// with no prompt kept the daemon from ever starting again). Skip
+			// the agent loudly and let the rest supervise; the definition
+			// stays visible in agentdef show for the operator to repair.
+			slog.Error("skipping agent with invalid definition", "worktree", entry.Worktree, "role", entry.Role, "err", err)
+			continue
 		}
 		sup.Agents = append(sup.Agents, ap)
 	}
