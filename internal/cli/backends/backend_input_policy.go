@@ -8,6 +8,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/chat"
 	"github.com/olesho/harness-wrapper/pkg/oneshot"
 
+	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 )
 
@@ -75,6 +76,19 @@ func resolveRoleInputPolicy() *domain.RoleInputPolicy {
 // oversight the next time someone adds a default.
 func inputPolicyTurnFields(policy *domain.RoleInputPolicy) (*chat.InputPolicy, func(chat.InputRequest) (chat.InputAnswer, bool)) {
 	return &chat.InputPolicy{Default: chat.DispositionAsk}, func(req chat.InputRequest) (chat.InputAnswer, bool) {
+		// Tell the daemon a prompt is outstanding for as long as this callback
+		// owns it. pkg/chat invokes OnInputRequest synchronously and treats the
+		// return value as the resolution, so the callback's duration IS the
+		// window in which loom is holding an unanswered prompt — exactly the
+		// window the supervisor's output-timeout watchdog must not read as a
+		// hang, because the harness emits no PTY output while it is parked.
+		//
+		// Every disposition answers immediately today, so the window is
+		// microseconds and the pair of IPC edges is nearly free. It is wired
+		// here regardless because this is where an honored "ask" will block: the
+		// moment this callback waits on a human, the daemon already knows not to
+		// kill the agent, and knows to stop waiting if nobody ever answers.
+		defer cli.BeginDaemonInputWait()()
 		return answerInputRequest(policy, req)
 	}
 }
