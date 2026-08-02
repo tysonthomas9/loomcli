@@ -29,6 +29,8 @@ type Role struct {
 	Effort         string   `json:"effort,omitempty"`
 	PathPatterns   []string `json:"path_patterns,omitempty"`
 	Skills         []string `json:"skills,omitempty"`
+	Labels         []string `json:"labels,omitempty"`
+	ExcludeLabels  []string `json:"exclude_labels,omitempty"`
 	MaxPriority    *int     `json:"max_priority,omitempty"`
 	MaxConcurrency *int     `json:"max_concurrency,omitempty"`
 	ReadOnly       bool     `json:"read_only,omitempty"`

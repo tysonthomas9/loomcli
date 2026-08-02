@@ -21,6 +21,8 @@ type RoleCreate struct {
 	Effort         string
 	PathPatterns   []string
 	Skills         []string
+	Labels         []string
+	ExcludeLabels  []string
 	MaxPriority    *int
 	MaxConcurrency *int
 	ReadOnly       bool
@@ -41,6 +43,8 @@ type RoleUpdate struct {
 	Effort         *string
 	PathPatterns   *[]string
 	Skills         *[]string
+	Labels         *[]string
+	ExcludeLabels  *[]string
 	MaxPriority    **int
 	MaxConcurrency **int
 	ReadOnly       *bool

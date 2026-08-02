@@ -890,3 +890,386 @@ func TestBuildRouterTaskCheck_SourceReposOnlyConstraint(t *testing.T) {
 		t.Error("BuildRouterTaskCheck() should return non-nil when AgentEntry.SourceRepos is set")
 	}
 }
+
+// --- Label routing tests ---
+
+func TestMatchTask_RequiredLabelPresent(t *testing.T) {
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		Labels: []string{"plan-ready"},
+	}
+	c := RoleConstraints{
+		TaskFilter: "has_design",
+		Labels:     []string{"plan-ready"},
+	}
+
+	got := MatchTask(issue, c)
+
+	// base(100) + priority(12) = 112
+	if got.Score != 112 {
+		t.Errorf("Score = %d, want 112", got.Score)
+	}
+}
+
+func TestMatchTask_RequiredLabelMissing(t *testing.T) {
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		Labels: []string{"other"},
+	}
+	c := RoleConstraints{
+		TaskFilter: "has_design",
+		Labels:     []string{"plan-ready"},
+	}
+
+	got := MatchTask(issue, c)
+
+	if got.Score != 0 {
+		t.Errorf("Score = %d, want 0", got.Score)
+	}
+	want := `missing required label "plan-ready"`
+	if got.Reason != want {
+		t.Errorf("Reason = %q, want %q", got.Reason, want)
+	}
+}
+
+func TestMatchTask_RequiredLabelsAllPresent(t *testing.T) {
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		Labels: []string{"plan-ready", "approved"},
+	}
+	c := RoleConstraints{
+		TaskFilter: "has_design",
+		Labels:     []string{"plan-ready", "approved"},
+	}
+
+	got := MatchTask(issue, c)
+
+	// base(100) + priority(12) = 112
+	if got.Score != 112 {
+		t.Errorf("Score = %d, want 112", got.Score)
+	}
+}
+
+func TestMatchTask_RequiredLabelsPartiallyPresent(t *testing.T) {
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		Labels: []string{"plan-ready"},
+	}
+	c := RoleConstraints{
+		TaskFilter: "has_design",
+		Labels:     []string{"plan-ready", "approved"},
+	}
+
+	got := MatchTask(issue, c)
+
+	if got.Score != 0 {
+		t.Errorf("Score = %d, want 0", got.Score)
+	}
+	want := `missing required label "approved"`
+	if got.Reason != want {
+		t.Errorf("Reason = %q, want %q", got.Reason, want)
+	}
+}
+
+func TestMatchTask_ExcludedLabel(t *testing.T) {
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		Labels: []string{"plan-reviewed"},
+	}
+	c := RoleConstraints{
+		TaskFilter:    "has_design",
+		ExcludeLabels: []string{"plan-reviewed"},
+	}
+
+	got := MatchTask(issue, c)
+
+	if got.Score != 0 {
+		t.Errorf("Score = %d, want 0", got.Score)
+	}
+	want := `excluded by label "plan-reviewed"`
+	if got.Reason != want {
+		t.Errorf("Reason = %q, want %q", got.Reason, want)
+	}
+}
+
+func TestMatchTask_ExcludeBeatsInclude(t *testing.T) {
+	// Same label required and excluded -- exclusion must win, pinning that
+	// ExcludeLabels is evaluated before Labels.
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		Labels: []string{"plan-ready"},
+	}
+	c := RoleConstraints{
+		TaskFilter:    "has_design",
+		Labels:        []string{"plan-ready"},
+		ExcludeLabels: []string{"plan-ready"},
+	}
+
+	got := MatchTask(issue, c)
+
+	if got.Score != 0 {
+		t.Errorf("Score = %d, want 0", got.Score)
+	}
+	want := `excluded by label "plan-ready"`
+	if got.Reason != want {
+		t.Errorf("Reason = %q, want %q (exclusion must be evaluated first)", got.Reason, want)
+	}
+}
+
+func TestMatchTask_NoLabelConstraints(t *testing.T) {
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+	}
+	c := RoleConstraints{TaskFilter: "has_design"}
+
+	got := MatchTask(issue, c)
+
+	// base(100) + priority(12) = 112 -- unchanged from pre-existing behavior
+	if got.Score != 112 {
+		t.Errorf("Score = %d, want 112", got.Score)
+	}
+}
+
+func TestMatchTask_LabelRejectBeatsSkillFallback(t *testing.T) {
+	issue := backend.IssueData{
+		ID: "T-1", Status: "open", IssueType: "task",
+		Priority: 2, Design: "plan",
+		Labels: []string{"frontend", "plan-reviewed"},
+	}
+	c := RoleConstraints{
+		TaskFilter:    "has_design",
+		Skills:        []string{"go", "daemon"},
+		ExcludeLabels: []string{"plan-reviewed"},
+	}
+
+	got := MatchTask(issue, c)
+
+	// Must hard-reject (0), not soft-demote to the skill-mismatch fallback (10).
+	if got.Score != 0 {
+		t.Errorf("Score = %d, want 0 (hard reject beats skill fallback)", got.Score)
+	}
+}
+
+func TestMatchTask_NilIssueLabels(t *testing.T) {
+	t.Run("required label rejects nil labels", func(t *testing.T) {
+		issue := backend.IssueData{
+			ID: "T-1", Status: "open", IssueType: "task",
+			Priority: 2, Design: "plan",
+			Labels: nil,
+		}
+		c := RoleConstraints{
+			TaskFilter: "has_design",
+			Labels:     []string{"plan-ready"},
+		}
+
+		got := MatchTask(issue, c)
+
+		if got.Score != 0 {
+			t.Errorf("Score = %d, want 0", got.Score)
+		}
+		want := `missing required label "plan-ready"`
+		if got.Reason != want {
+			t.Errorf("Reason = %q, want %q", got.Reason, want)
+		}
+	})
+
+	t.Run("exclude labels cannot match nil labels", func(t *testing.T) {
+		issue := backend.IssueData{
+			ID: "T-1", Status: "open", IssueType: "task",
+			Priority: 2, Design: "plan",
+			Labels: nil,
+		}
+		c := RoleConstraints{
+			TaskFilter:    "has_design",
+			ExcludeLabels: []string{"plan-reviewed"},
+		}
+
+		got := MatchTask(issue, c)
+
+		// base:100 + priority bonus (20 - 2*4 = 12) = 112; nil issue labels
+		// can't match ExcludeLabels, so this must score normally, not reject.
+		if got.Score != 112 {
+			t.Errorf("Score = %d, want 112 (nil labels can't match an exclude label)", got.Score)
+		}
+	})
+}
+
+func TestMergeRoleConstraints_LabelsPropagated(t *testing.T) {
+	rc := RoleConfig{
+		Labels:        []string{"plan-ready"},
+		ExcludeLabels: []string{"plan-reviewed"},
+	}
+	ae := AgentEntry{}
+
+	got := MergeRoleConstraints(rc, ae)
+
+	if len(got.Labels) != 1 || got.Labels[0] != "plan-ready" {
+		t.Errorf("Labels = %v, want [plan-ready]", got.Labels)
+	}
+	if len(got.ExcludeLabels) != 1 || got.ExcludeLabels[0] != "plan-reviewed" {
+		t.Errorf("ExcludeLabels = %v, want [plan-reviewed]", got.ExcludeLabels)
+	}
+}
+
+func TestRoleConfigFromEnv_Labels(t *testing.T) {
+	t.Setenv("LOOM_ROLE_SKILLS", "")
+	t.Setenv("LOOM_ROLE_PATH_PATTERNS", "")
+	t.Setenv("LOOM_ROLE_MAX_PRIORITY", "")
+	t.Setenv("LOOM_ROLE_TASK_FILTER", "")
+	t.Setenv("LOOM_ROLE_LABELS", "a,b")
+	t.Setenv("LOOM_ROLE_EXCLUDE_LABELS", "c")
+
+	rc := RoleConfigFromEnv()
+
+	if len(rc.Labels) != 2 || rc.Labels[0] != "a" || rc.Labels[1] != "b" {
+		t.Errorf("Labels = %v, want [a b]", rc.Labels)
+	}
+	if len(rc.ExcludeLabels) != 1 || rc.ExcludeLabels[0] != "c" {
+		t.Errorf("ExcludeLabels = %v, want [c]", rc.ExcludeLabels)
+	}
+}
+
+func TestRoleConfigFromEnv_LabelsEmptyElements(t *testing.T) {
+	t.Setenv("LOOM_ROLE_LABELS", " , ")
+	t.Setenv("LOOM_ROLE_EXCLUDE_LABELS", "")
+
+	rc := RoleConfigFromEnv()
+
+	if rc.Labels != nil {
+		t.Errorf("Labels = %v, want nil (empty elements dropped)", rc.Labels)
+	}
+}
+
+func TestBuildRouterTaskCheck_ExcludeLabelsOnlyConstraint(t *testing.T) {
+	rc := RoleConfig{ExcludeLabels: []string{"plan-reviewed"}}
+	ae := AgentEntry{}
+
+	check := BuildRouterTaskCheck(rc, ae, "")
+	if check == nil {
+		t.Error("BuildRouterTaskCheck() should return non-nil when RoleConfig.ExcludeLabels is set")
+	}
+}
+
+// --- HasRoutingConstraints tests ---
+
+func TestHasRoutingConstraints_Skills(t *testing.T) {
+	c := RoleConstraints{Skills: []string{"go"}}
+	if !c.HasRoutingConstraints("") {
+		t.Error("HasRoutingConstraints() = false, want true when Skills is set")
+	}
+}
+
+func TestHasRoutingConstraints_MaxPriority(t *testing.T) {
+	maxP := 2
+	c := RoleConstraints{MaxPriority: &maxP}
+	if !c.HasRoutingConstraints("") {
+		t.Error("HasRoutingConstraints() = false, want true when MaxPriority is set")
+	}
+}
+
+func TestHasRoutingConstraints_TaskFilter(t *testing.T) {
+	c := RoleConstraints{TaskFilter: "needs_plan"}
+	if !c.HasRoutingConstraints("") {
+		t.Error("HasRoutingConstraints() = false, want true when TaskFilter is set")
+	}
+}
+
+func TestHasRoutingConstraints_RepoLabel(t *testing.T) {
+	c := RoleConstraints{}
+	if !c.HasRoutingConstraints("frontend") {
+		t.Error("HasRoutingConstraints() = false, want true when repoLabel is set")
+	}
+}
+
+func TestHasRoutingConstraints_SourceRepos(t *testing.T) {
+	c := RoleConstraints{SourceRepos: []string{"repo-a"}}
+	if !c.HasRoutingConstraints("") {
+		t.Error("HasRoutingConstraints() = false, want true when SourceRepos is set")
+	}
+}
+
+func TestHasRoutingConstraints_Labels(t *testing.T) {
+	c := RoleConstraints{Labels: []string{"plan-ready"}}
+	if !c.HasRoutingConstraints("") {
+		t.Error("HasRoutingConstraints() = false, want true when Labels is set")
+	}
+}
+
+func TestHasRoutingConstraints_ExcludeLabels(t *testing.T) {
+	c := RoleConstraints{ExcludeLabels: []string{"plan-reviewed"}}
+	if !c.HasRoutingConstraints("") {
+		t.Error("HasRoutingConstraints() = false, want true when ExcludeLabels is set")
+	}
+}
+
+func TestHasRoutingConstraints_AllEmpty(t *testing.T) {
+	c := RoleConstraints{}
+	if c.HasRoutingConstraints("") {
+		t.Error("HasRoutingConstraints() = true, want false when nothing is set")
+	}
+}
+
+// --- SelectBestTask over a label-routed pipeline ---
+
+// A label-gated pipeline is the whole point of label constraints: stage 1
+// claims issues that carry its input label and not yet its output label, stamps
+// the output label, and stage 2 claims what stage 1 produced. Every other label
+// test stops at MatchTask; this one drives SelectBestTask, which is the
+// function the supervisor's claim preflight actually calls, over a mixed queue.
+//
+// It pins both halves of the story: exactly the eligible issue is selected out
+// of a queue whose other entries are only distinguishable by label, and once
+// the stage has drained its input the same role gets nil instead of re-claiming
+// its own output -- the termination property the re-claim loop lacked.
+func TestSelectBestTask_LabelRoutedPipeline(t *testing.T) {
+	reviewer := RoleConstraints{
+		TaskFilter:    "has_design",
+		Labels:        []string{"plan-ready"},
+		ExcludeLabels: []string{"plan-reviewed"},
+	}
+
+	queue := []backend.IssueData{
+		// The reviewer's own output: must not come back around.
+		{ID: "T-1", Status: "open", IssueType: "task", Priority: 0, Design: "plan",
+			Labels: []string{"plan-ready", "plan-reviewed"}},
+		// Never entered the pipeline: missing the required stage label.
+		{ID: "T-2", Status: "open", IssueType: "task", Priority: 0, Design: "plan",
+			Labels: []string{"backlog"}},
+		// The one piece of work for this stage. Worst priority of the three, so
+		// it can only be selected by being the sole surviving candidate.
+		{ID: "T-3", Status: "open", IssueType: "task", Priority: 3, Design: "plan",
+			Labels: []string{"plan-ready"}},
+	}
+
+	got := SelectBestTask(queue, reviewer)
+	if got == nil {
+		t.Fatal("SelectBestTask() = nil, want the one eligible issue")
+	}
+	if got.Issue.ID != "T-3" {
+		t.Fatalf("selected %q, want %q -- the label gate did not survive selection", got.Issue.ID, "T-3")
+	}
+
+	// The downstream stage consumes exactly what this one stamped.
+	downstream := RoleConstraints{TaskFilter: "has_design", Labels: []string{"plan-reviewed"}}
+	next := SelectBestTask(queue, downstream)
+	if next == nil {
+		t.Fatal("downstream stage selected nothing, want T-1")
+	}
+	if next.Issue.ID != "T-1" {
+		t.Fatalf("downstream stage selected %q, want %q", next.Issue.ID, "T-1")
+	}
+
+	// Stage 1 after stamping T-3: its input is drained, so it must idle rather
+	// than loop on its own output.
+	queue[2].Labels = append(queue[2].Labels, "plan-reviewed")
+	if drained := SelectBestTask(queue, reviewer); drained != nil {
+		t.Fatalf("SelectBestTask() = %q, want nil once the stage drained its input", drained.Issue.ID)
+	}
+}

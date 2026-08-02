@@ -144,9 +144,26 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 }
 
 // appendRoutingEnv adds routing constraint env vars (skills, path patterns, priority, role).
+//
+// Every list is comma-joined and the child splits it back apart the same way
+// (cli.RoleConfigFromEnv), so a comma INSIDE an element does not survive the
+// round trip: the supervisor's own claim loop reads RoleConfig directly and
+// sees one label "a,b", while the child reconstructs two labels "a" and "b" and
+// therefore applies a stricter constraint than configured. This is the
+// long-standing encoding for Skills and PathPatterns and Labels inherits it.
+// Neither CLI ingress can produce such a label (--labels and `role set
+// labels=` are themselves CSV), so it takes a direct fleet-db API write to hit;
+// if commas ever need to be legal in a label, all five vars have to move to an
+// escaped encoding together.
 func appendRoutingEnv(env []string, ap *AgentProcess) []string {
 	if len(ap.RoleConfig.Skills) > 0 {
 		env = append(env, fmt.Sprintf("LOOM_ROLE_SKILLS=%s", strings.Join(ap.RoleConfig.Skills, ",")))
+	}
+	if len(ap.RoleConfig.Labels) > 0 {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_LABELS=%s", strings.Join(ap.RoleConfig.Labels, ",")))
+	}
+	if len(ap.RoleConfig.ExcludeLabels) > 0 {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_EXCLUDE_LABELS=%s", strings.Join(ap.RoleConfig.ExcludeLabels, ",")))
 	}
 	if len(ap.RoleConfig.PathPatterns) > 0 {
 		env = append(env, fmt.Sprintf("LOOM_ROLE_PATH_PATTERNS=%s", strings.Join(ap.RoleConfig.PathPatterns, ",")))

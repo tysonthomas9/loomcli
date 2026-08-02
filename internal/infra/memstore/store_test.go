@@ -215,6 +215,54 @@ func TestRoleStoreKindCreatePatchClear(t *testing.T) {
 	}
 }
 
+// TestRoleStoreLabelsCreateUpdateClear covers the Labels/ExcludeLabels
+// round-trip through Create, a partial Update (each field independently),
+// and Update-to-empty-slice clearing -- mirroring how Skills is exercised
+// via config/daemonwire projection tests, since memstore has no dedicated
+// Skills round-trip test of its own.
+func TestRoleStoreLabelsCreateUpdateClear(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+
+	role, err := s.Roles().Create(ctx, store.RoleCreate{
+		WorkspaceKey:  "WS",
+		Name:          "task",
+		Labels:        []string{"plan-ready", "approved"},
+		ExcludeLabels: []string{"plan-reviewed"},
+	})
+	if err != nil {
+		t.Fatalf("Create role: %v", err)
+	}
+	if len(role.Labels) != 2 || role.Labels[0] != "plan-ready" || role.Labels[1] != "approved" {
+		t.Fatalf("created Labels = %v, want [plan-ready approved]", role.Labels)
+	}
+	if len(role.ExcludeLabels) != 1 || role.ExcludeLabels[0] != "plan-reviewed" {
+		t.Fatalf("created ExcludeLabels = %v, want [plan-reviewed]", role.ExcludeLabels)
+	}
+
+	nextLabels := []string{"needs-revision"}
+	role, err = s.Roles().Update(ctx, "WS", "task", store.RoleUpdate{Labels: &nextLabels})
+	if err != nil {
+		t.Fatalf("Update role labels: %v", err)
+	}
+	if len(role.Labels) != 1 || role.Labels[0] != "needs-revision" {
+		t.Fatalf("updated Labels = %v, want [needs-revision]", role.Labels)
+	}
+	// ExcludeLabels untouched by a Labels-only patch.
+	if len(role.ExcludeLabels) != 1 || role.ExcludeLabels[0] != "plan-reviewed" {
+		t.Fatalf("ExcludeLabels after Labels-only update = %v, want [plan-reviewed] (unchanged)", role.ExcludeLabels)
+	}
+
+	empty := []string{}
+	role, err = s.Roles().Update(ctx, "WS", "task", store.RoleUpdate{ExcludeLabels: &empty})
+	if err != nil {
+		t.Fatalf("Clear role exclude_labels: %v", err)
+	}
+	if len(role.ExcludeLabels) != 0 {
+		t.Fatalf("cleared ExcludeLabels = %v, want empty", role.ExcludeLabels)
+	}
+}
+
 // TestDaemonProfileGetReturnsDefaults verifies that Get on a workspace
 // with no explicit Upsert returns sensible defaults rather than
 // ErrNotFound — the API contract is "every workspace has a profile".

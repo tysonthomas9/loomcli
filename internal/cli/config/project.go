@@ -76,6 +76,8 @@ type RoleConfig struct {
 	Effort         string   `yaml:"effort,omitempty"`
 	PathPatterns   []string `yaml:"path_patterns,omitempty"`
 	Skills         []string `yaml:"skills,omitempty"`
+	Labels         []string `yaml:"labels,omitempty"`
+	ExcludeLabels  []string `yaml:"exclude_labels,omitempty"`
 	MaxPriority    *int     `yaml:"max_priority,omitempty"`
 	MaxConcurrency *int     `yaml:"max_concurrency,omitempty"`
 	ReadOnly       bool     `yaml:"read_only,omitempty"`
@@ -308,6 +310,8 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 		Effort:         r.Effort,
 		PathPatterns:   append([]string(nil), r.PathPatterns...),
 		Skills:         append([]string(nil), r.Skills...),
+		Labels:         append([]string(nil), r.Labels...),
+		ExcludeLabels:  append([]string(nil), r.ExcludeLabels...),
 		MaxPriority:    cloneIntPtr(r.MaxPriority),
 		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
 		ReadOnly:       r.ReadOnly,
