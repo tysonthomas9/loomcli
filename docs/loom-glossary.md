@@ -84,6 +84,26 @@ Interactive prompts loaded through `loom lead --prompt <file>` share the same
 template but only receive `AgentName`, `WorktreeName` and `Role`; they get the
 safety rules appended unconditionally.
 
+## Isolation and Trust
+
+These words are the most overloaded in the codebase, because several
+isolation-*shaped* features are not isolation:
+
+- **Sandbox**: In Loom this almost always means the L1 workflow-bundle
+  container (`LOOM_DRIVER_SANDBOX=container`), which contains the DriverRun
+  bundle only. The TaskRun leaf that runs the LLM and edits code is not
+  containerized on any local path.
+- **Trust level** (`trusted` / `untrusted`): An admission decision, not a
+  confinement. Untrusted means Loom refuses to run something; it never bounds
+  what a running process can reach.
+- **`read_only` / `allowed_tools` / `denied_tools`**: Backend tool and approval
+  policy. Real restrictions where the backend has a mechanism, a prompt
+  preamble where it does not — never an OS boundary.
+
+`docs/design/execution-isolation.md` has the three-level model, the per-level
+mechanisms, the Daytona remote-isolation path, and an explicit list of what is
+not isolation.
+
 ## Other Overloaded Names
 
 - **fleet / fleet-db**: The control-plane data service that stores Loom state.
