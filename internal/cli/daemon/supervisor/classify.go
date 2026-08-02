@@ -4,6 +4,8 @@ import (
 	"log"
 	"time"
 
+	"github.com/olesho/harness-wrapper/pkg/wrapper"
+
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/agent"
@@ -37,19 +39,16 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		backend = s.ConfigSnapshot().Backend
 	}
 
+	// A duration kill is classified from the stop reason rather than the exit,
+	// and checked before everything else because every arm below would read it
+	// wrong. See markRunDurationExceeded.
+	if stopReason == StopReasonRunDurationExceeded {
+		s.markRunDurationExceeded(ap, exitCode, backend)
+		return
+	}
+
 	if taskID == "" && (exitCode == 0 || stopReason == StopReasonWatchdog) {
-		// No work available — no task was claimed. A watchdog stop can make an
-		// otherwise idle agent exit non-zero, so prefer NoWork over log-pattern
-		// timeout classification when there is no task context.
-		ap.Mu.Lock()
-		ap.LastError = &agenterr.AgentError{
-			Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
-			Message: "no claimable tasks",
-			Backend: backend,
-		}
-		ap.LastNoWork = true
-		ap.Mu.Unlock()
-		log.Printf("[daemon] Agent %s: no work available (idle)", ap.Entry.Worktree)
+		s.markNoWork(ap, backend)
 	} else if exitCode != 0 {
 		ae := agenterr.ClassifyFromLog(logPath, exitCode, backend)
 		ap.Mu.Lock()
@@ -65,6 +64,71 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		ap.LastNoWork = false
 		ap.Mu.Unlock()
 	}
+}
+
+// markNoWork records an exit with no task attached: the agent found nothing
+// claimable and went home. A watchdog stop can make an otherwise idle agent exit
+// non-zero, so this is preferred over log-pattern timeout classification
+// whenever there is no task context — but only for the silence watchdog. A run
+// stopped for LENGTH never reaches here; see markRunDurationExceeded.
+func (s *Supervisor) markNoWork(ap *AgentProcess, backend string) {
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
+		Message: "no claimable tasks",
+		Backend: backend,
+	}
+	ap.LastNoWork = true
+	ap.Mu.Unlock()
+	log.Printf("[daemon] Agent %s: no work available (idle)", ap.Entry.Worktree)
+}
+
+// markRunDurationExceeded records a run the supervisor killed for outliving its
+// wall-clock cap.
+//
+// It is classified here, from the stop reason, because none of the exit-shaped
+// arms can get it right — and which one it lands in turns on nothing more
+// meaningful than whether the harness installed a SIGTERM handler:
+//
+//   - Exit 0 with no task claimed reaches the NoWork arm, which reads a
+//     four-hour stall as "idle, nothing to do" and hands it an UNCOUNTED retry
+//     (agentpolicy.Decide on NoWorkOutcome). The cap would then fire every four
+//     hours forever and change nothing. Folding this into StopReasonWatchdog
+//     would be worse still: that reason widens the arm to any exit code.
+//   - Exit 0 with a task claimed reaches the IncompleteRun arm. Close, but
+//     wrong in the way that matters — that outcome describes a turn that ended
+//     before its task did, whereas this run did not end early, it was ended
+//     late, by us. And if the claim happens to have been released, it reaches
+//     the clean-success arm instead, where shouldRestart zeroes every counter
+//     the kill was meant to charge.
+//   - A non-zero exit log-classifies the tail: whatever the agent happened to
+//     print in its last hundred lines. A run capped for length has no
+//     characteristic output, so the verdict is arbitrary — in practice the
+//     exit-143 fallback, Transient, which is the wrong backoff bucket.
+//
+// The class is wrapper.ErrTimeout rather than a new domain outcome. That is
+// already where the silence watchdog's own kills resolve (exit 137 via
+// classifyByExitCode), and its disposition is precisely what a blown time budget
+// wants: a COUNTED retry on the timeout backoff, escalating to Block when the
+// budget is spent, and quarantine-eligible — two runs of the same task both
+// hitting the ceiling is exactly the no-progress signal task quarantine watches
+// for. A fresh DomainOutcome would have to re-earn all three, and would be
+// quarantine-INeligible by construction: QuarantineEligible answers false for
+// every domain outcome, on the grounds that they are coordination signals rather
+// than task-fault. A run that cannot finish inside four hours is task-fault.
+func (s *Supervisor) markRunDurationExceeded(ap *AgentProcess, exitCode int, backend string) {
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:     agenterr.OutcomeFromHarness(wrapper.ErrTimeout),
+		ExitCode:  exitCode,
+		Message:   "run exceeded its maximum duration and was stopped by the supervisor",
+		Backend:   backend,
+		Timestamp: time.Now(),
+	}
+	ap.LastNoWork = false
+	ap.Mu.Unlock()
+	log.Printf("[daemon] Agent %s: run exceeded its maximum duration — treating the run as failed",
+		ap.Entry.Worktree)
 }
 
 // markIncompleteRun records an exit-0 run whose claim was never released: the
