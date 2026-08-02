@@ -53,6 +53,24 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	if sess == nil {
 		return result, nil
 	}
+	syncNativeTranscript(sess, opts)
+	return result, sess.Finalize(sessions.FinalizeOptions{
+		TaskID:       opts.TaskID,
+		ExitCode:     opts.ExitCode,
+		ErrorClass:   opts.ErrorClass,
+		FilesTouched: result.FilesTouched,
+		DiffPatch:    diffPatch,
+		DiffStats:    result.DiffStats,
+
+		InputTokens:      opts.InputTokens,
+		OutputTokens:     opts.OutputTokens,
+		CacheReadTokens:  opts.CacheReadTokens,
+		CacheWriteTokens: opts.CacheWriteTokens,
+		EstimatedCostUSD: opts.EstimatedCostUSD,
+	})
+}
+
+func syncNativeTranscript(sess *sessions.Session, opts WithWorktreeOptions) {
 	if sess.Meta.Backend == backendnames.Codex {
 		path, err := sess.SyncLatestCodexRollout(opts.WorktreePath, sess.Meta.StartedAt)
 		if err != nil {
@@ -71,18 +89,4 @@ func WithWorktree(sess *sessions.Session, opts WithWorktreeOptions) (WithWorktre
 	if sess.Meta.Backend == backendnames.Claude {
 		_, _ = sess.SyncLatestClaudeTranscript(opts.WorktreePath, opts.ClaudeSessionID, sess.Meta.StartedAt)
 	}
-	return result, sess.Finalize(sessions.FinalizeOptions{
-		TaskID:       opts.TaskID,
-		ExitCode:     opts.ExitCode,
-		ErrorClass:   opts.ErrorClass,
-		FilesTouched: result.FilesTouched,
-		DiffPatch:    diffPatch,
-		DiffStats:    result.DiffStats,
-
-		InputTokens:      opts.InputTokens,
-		OutputTokens:     opts.OutputTokens,
-		CacheReadTokens:  opts.CacheReadTokens,
-		CacheWriteTokens: opts.CacheWriteTokens,
-		EstimatedCostUSD: opts.EstimatedCostUSD,
-	})
 }

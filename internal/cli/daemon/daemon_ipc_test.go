@@ -63,6 +63,7 @@ func (m *mockIPCBackend) ReleaseClaim(_ context.Context, id, actor string) error
 type mockClaimCall struct {
 	ID      string
 	LockTTL time.Duration
+	Actor   string
 }
 
 type mockUpdateCall struct {
@@ -82,6 +83,15 @@ type mockReleaseCall struct {
 
 func (m *mockIPCBackend) ClaimIssue(_ context.Context, id string, lockTTL time.Duration) error {
 	m.claimCalls = append(m.claimCalls, mockClaimCall{ID: id, LockTTL: lockTTL})
+	return m.claimErr
+}
+
+type actorClaimIPCBackend struct {
+	*mockIPCBackend
+}
+
+func (m *actorClaimIPCBackend) ClaimIssueAsActor(_ context.Context, id string, lockTTL time.Duration, actor string) error {
+	m.claimCalls = append(m.claimCalls, mockClaimCall{ID: id, LockTTL: lockTTL, Actor: actor})
 	return m.claimErr
 }
 
@@ -323,6 +333,25 @@ func TestIPCServer_ClaimSuccess(t *testing.T) {
 	}
 	if mb.claimCalls[0].LockTTL != 0 {
 		t.Errorf("claim LockTTL = %v, want 0", mb.claimCalls[0].LockTTL)
+	}
+}
+
+func TestIPCServer_ClaimUsesAuthenticatedAgentAsDelegatedActor(t *testing.T) {
+	base := &mockIPCBackend{}
+	backend := &actorClaimIPCBackend{mockIPCBackend: base}
+	d := newTestIPCDaemon(base)
+	d.issueBackend = backend
+	configureIPCTestAuth(d, "phase5-repaired-planner", "sess-1", "token-1")
+
+	resp := d.handleIPCClaim(AgentIPCRequest{
+		Operation: ipcOpClaim, AgentName: "phase5-repaired-planner", IssueID: "PHASE5-19",
+		SessionID: "sess-1", AuthToken: "token-1",
+	})
+	if !resp.Success {
+		t.Fatalf("claim failed: %s", resp.Error)
+	}
+	if len(base.claimCalls) != 1 || base.claimCalls[0].Actor != "phase5-repaired-planner" {
+		t.Fatalf("claim calls = %+v, want authenticated agent actor", base.claimCalls)
 	}
 }
 

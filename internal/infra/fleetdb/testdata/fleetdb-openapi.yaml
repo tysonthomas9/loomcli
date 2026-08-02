@@ -1016,10 +1016,13 @@ paths:
         a typed TaskRun claim generation is active. With renew_only, refreshes
         the operational claim without changing status or assignee; if the issue
         has already left in_progress, the lock is released and current state is
-        returned.
+        returned. An API-key or Unix-socket service actor may supply
+        X-Fleet-Delegated-Actor to bind the lock and assignee to its authenticated
+        worker; the service identity remains the authorization principal.
       operationId: claimIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
+        - $ref: "#/components/parameters/FleetDelegatedActor"
       requestBody:
         required: false
         content:
@@ -1128,10 +1131,12 @@ paths:
         agent has already transitioned the issue. Idempotent: a missing lock
         returns 204. Returns 409 when a different actor holds the generic lock
         or while an active typed TaskRun generation owns the issue; only the
-        owning typed terminal command may retire that generation.
+        owning typed terminal command may retire that generation. Trusted
+        service actors use X-Fleet-Delegated-Actor to name that owner.
       operationId: releaseIssueLock
       parameters:
         - $ref: "#/components/parameters/XActor"
+        - $ref: "#/components/parameters/FleetDelegatedActor"
       responses:
         "204":
           description: Lock released (or already absent)
@@ -1157,10 +1162,12 @@ paths:
         Releases a previously claimed issue back to open status. Clears the
         assignee and makes the issue available in the ready queue again.
         Returns 409 while a typed TaskRun claim generation is active; the
-        owning typed terminal command must retire that generation first.
+        owning typed terminal command must retire that generation first. Trusted
+        service actors use X-Fleet-Delegated-Actor to name that owner.
       operationId: releaseIssue
       parameters:
         - $ref: "#/components/parameters/XActor"
+        - $ref: "#/components/parameters/FleetDelegatedActor"
       responses:
         "204":
           description: Issue released

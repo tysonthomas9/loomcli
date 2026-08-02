@@ -159,14 +159,22 @@ func (b *FleetBackend) doRequest(ctx context.Context, method, path string, body 
 	return apiResp, resp.StatusCode, nil
 }
 
-// doRequestAsActor performs a POST request with the X-Actor header overridden.
+// doRequestAsActor performs a POST request for a logical worker actor. An
+// API-key-authenticated FleetDB treats X-Actor as untrusted/ignored, so service
+// hops carry the worker in X-Fleet-Delegated-Actor while retaining the
+// configured service actor for authentication and authorization. Dev-mode
+// header auth continues to override X-Actor directly.
 // Only POST is needed in practice (claim / release endpoints); see execAsActor.
 func (b *FleetBackend) doRequestAsActor(ctx context.Context, path string, body interface{}, actor string) (*apiResponse, int, error) {
 	b.mu.RLock()
 	auth := fleethttp.Auth{BearerToken: b.authToken, APIKey: b.apiKey, Actor: b.actor}
 	b.mu.RUnlock()
 	if actor != "" {
-		auth.Actor = actor
+		if auth.APIKey != "" {
+			auth.DelegatedActor = actor
+		} else {
+			auth.Actor = actor
+		}
 	}
 
 	req, err := fleethttp.BuildJSONRequest(ctx, "POST", b.baseWorkspaceURL+path, auth, body)

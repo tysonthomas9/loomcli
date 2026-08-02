@@ -380,7 +380,15 @@ func (d *Daemon) handleIPCClaim(req AgentIPCRequest) AgentIPCResponse {
 	if resp, ok := d.validateIPCSession(req); !ok {
 		return resp
 	}
-	if err := d.issueBackend.ClaimIssue(ctx, req.IssueID, lockTTL); err != nil {
+	var err error
+	if actorBackend, ok := d.issueBackend.(interface {
+		ClaimIssueAsActor(context.Context, string, time.Duration, string) error
+	}); ok {
+		err = actorBackend.ClaimIssueAsActor(ctx, req.IssueID, lockTTL, req.AgentName)
+	} else {
+		err = d.issueBackend.ClaimIssue(ctx, req.IssueID, lockTTL)
+	}
+	if err != nil {
 		return ipcErrorResponse(err)
 	}
 
