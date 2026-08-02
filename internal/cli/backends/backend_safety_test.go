@@ -10,6 +10,7 @@ func clearSafetyEnv(t *testing.T) {
 	t.Setenv("LOOM_ALLOWED_TOOLS", "")
 	t.Setenv("LOOM_DENIED_TOOLS", "")
 	t.Setenv("LOOM_READ_ONLY", "")
+	t.Setenv(envRoleInputPolicy, "")
 }
 
 // The knobs used to be written to env and read by nobody; these pin the real
