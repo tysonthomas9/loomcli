@@ -85,6 +85,11 @@ func TestRepositoryNativeTaggedRaceProfileReusesExplicitCallerCache(t *testing.T
 }
 
 func TestRepositoryProfileCacheIsRemovedAfterAnalysisFailure(t *testing.T) {
+	// Force the native-profile reuse check to fail on every host. Otherwise the
+	// linux/amd64 CI runner correctly reuses its caller cache and this test
+	// incorrectly expects that shared cache to be deleted.
+	t.Setenv("GOCACHE", filepath.Join(t.TempDir(), "missing-cache"))
+
 	sentinel := errors.New("analysis failed")
 	var scoped string
 	err := withRepositoryProfileCache(
