@@ -11,12 +11,13 @@ import (
 // tests do not leak values into each other.
 func resetHookFlags(t *testing.T) {
 	t.Helper()
-	agentAddCommentReply, agentAddLabels = false, nil
-	agentUpdateCommentReply, agentUpdateLabels, agentUpdateClear = false, nil, false
-	t.Cleanup(func() {
-		agentAddCommentReply, agentAddLabels = false, nil
-		agentUpdateCommentReply, agentUpdateLabels, agentUpdateClear = false, nil, false
-	})
+	clear := func() {
+		agentAddCommentReply, agentAddLabels, agentAddRemoveLabels = false, nil, nil
+		agentUpdateCommentReply, agentUpdateLabels, agentUpdateRemoveLabels = false, nil, nil
+		agentUpdateClear = false
+	}
+	clear()
+	t.Cleanup(clear)
 }
 
 func TestHooksFromFlags(t *testing.T) {
@@ -94,7 +95,7 @@ func TestHooksFromFlags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := hooksFromFlags(tt.commentReply, tt.labels, tt.closeTask, "")
+			got, err := hooksFromFlags(tt.commentReply, tt.labels, nil, tt.closeTask, "")
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 					t.Fatalf("hooksFromFlags() error = %v, want it to contain %q", err, tt.wantErr)
