@@ -255,9 +255,16 @@ func buildClaudeEnv(workDir, agentName string) []string {
 	if agentName != "" {
 		env = append(env, "LOOM_AGENT_NAME="+agentName)
 	}
-	// claude-code refuses `--dangerously-skip-permissions` when running as root unless
-	// IS_SANDBOX is set. loom runs claude as root inside its isolated lead/agent container,
-	// so set it explicitly (FilteredEnv strips it otherwise). Harmless outside a container.
+	// claude-code refuses `--dangerously-skip-permissions` when running as root
+	// unless IS_SANDBOX is set, so a containerized deployment that runs loom as
+	// root cannot launch an agent without it (FilteredEnv strips it otherwise).
+	//
+	// Be clear about what this is: loom does NOT create a container around an
+	// agent — see docs/design/execution-isolation.md — so on a host run this
+	// asserts a sandbox that is not there, purely to stop claude-code from
+	// refusing. It buys nothing and costs nothing outside a container, and
+	// inside one it is the deployment's container doing the isolating, not
+	// loom's.
 	env = append(env, "IS_SANDBOX=1")
 	return append(env, activeSessionEnvVars()...)
 }
