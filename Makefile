@@ -492,9 +492,19 @@ check-go:
 	@echo "=== [11/13] Go: generated API staleness ==="
 	@./scripts/check-go-api-staleness.sh
 	@echo "=== [12/13] Go: test with race detector ==="
-	@./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile=/tmp/loom.coverage.out -timeout 15m ./...
-	@echo "=== [13/13] Go: coverage threshold ==="
-	@COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh
+#   Steps 12 and 13 share one shell so they can share a PER-RUN profile path.
+#   A fixed /tmp path is unsafe two ways: two concurrent gates interleave writes
+#   into one file, and a gate killed mid-`go test` leaves a truncated file behind
+#   for the next run to read. Either produces a malformed record and the opaque
+#   failure `cover: line "..." doesn't match expected format`, which looks like a
+#   coverage regression but is a corrupt profile. The trap removes it on every
+#   exit path, so nothing stale survives to poison a later run.
+	@set -e; \
+	 profile="$$(mktemp "$${TMPDIR:-/tmp}/loom.coverage.XXXXXX")"; \
+	 trap 'rm -f "$$profile"' EXIT; \
+	 ./scripts/with-clean-loom-env.sh go test -p 1 -race -covermode=atomic -coverprofile="$$profile" -timeout 15m ./...; \
+	 echo "=== [13/13] Go: coverage threshold ==="; \
+	 COVERAGE_THRESHOLD=60 ./scripts/check-coverage.sh "$$profile"
 	@echo "=== Go quality gates PASSED ==="
 
 # Frontend-only quality gate (no Go toolchain, no dist prerequisite)
