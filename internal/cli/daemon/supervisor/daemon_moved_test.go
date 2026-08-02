@@ -816,6 +816,38 @@ func TestResolveRoleConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("custom role with inline prompt materializes a prompt file", func(t *testing.T) {
+		dir := t.TempDir()
+		config := makeSupervisorConfig(
+			nil,
+			map[string]cfgpkg.RoleConfig{
+				"reviewer": {
+					Description: "Code reviewer",
+					Prompt:      "You are a reviewer. Be brief.",
+					// no PromptFile: the inline prompt must carry the role on
+					// its own — role set offers it as a first-class knob.
+				},
+			},
+		)
+		cfg := config
+		s := &Supervisor{ConfigSnapshot: func() *cfgpkg.DaemonConfig { return cfg }, ProjectDir: dir, Shutdown: make(chan struct{}), StoppedAgents: make(map[string]struct{}), Agents: make([]*AgentProcess, 0), EmitEvent: func(events.Event) {}}
+
+		rc, err := s.resolveRoleConfig("reviewer", 0)
+		if err != nil {
+			t.Fatalf("inline prompt should satisfy the custom-role requirement, got %v", err)
+		}
+		if rc.PromptFile == "" {
+			t.Fatal("PromptFile empty — the spawn path only passes files, so the inline prompt went nowhere")
+		}
+		data, readErr := os.ReadFile(rc.PromptFile)
+		if readErr != nil {
+			t.Fatalf("read materialized prompt: %v", readErr)
+		}
+		if string(data) != "You are a reviewer. Be brief." {
+			t.Errorf("materialized prompt = %q, want the inline text", data)
+		}
+	})
+
 	t.Run("custom role not found in config returns error", func(t *testing.T) {
 		config := makeSupervisorConfig(nil, nil) // no custom roles
 		cfg := config
