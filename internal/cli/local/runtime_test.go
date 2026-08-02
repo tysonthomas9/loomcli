@@ -250,12 +250,15 @@ func TestEnsureRuntimeStartedRestartsUnhealthyRecordedRuntime(t *testing.T) {
 		return &RuntimeStartResult{PID: 456}, nil
 	}
 
-	status, err := EnsureRuntimeStarted(context.Background(), "/tmp/loom-data", 4321)
+	status, action, err := EnsureRuntimeStarted(context.Background(), "/tmp/loom-data", 4321)
 	if err != nil {
 		t.Fatalf("EnsureRuntimeStarted returned error: %v", err)
 	}
 	if !restarted {
 		t.Fatal("EnsureRuntimeStarted did not restart unhealthy recorded runtime")
+	}
+	if action != RuntimeEnsureRestarted {
+		t.Fatalf("action = %q, want %q", action, RuntimeEnsureRestarted)
 	}
 	if status == nil || !status.Healthy || status.Runtime == nil || status.Runtime.PID != 456 {
 		t.Fatalf("status = %#v, want healthy restarted runtime", status)
