@@ -48,6 +48,29 @@ const (
 	AgentHookActionComment AgentHookActionType = "comment"
 	// AgentHookActionAddLabel stamps a literal label on the owned task.
 	AgentHookActionAddLabel AgentHookActionType = "add_label"
+	// AgentHookActionRemoveLabel strips a literal label from the owned task —
+	// the symmetric counterpart of add_label, carrying the same literal value
+	// and validated by exactly the same rules.
+	//
+	// Without it label state is monotonic: a stage can only ever add, so the
+	// label that routed work to it is still on the task when it finishes and
+	// the routing predicate keeps matching. A stage that wants to consume its
+	// own token had no way to say so — the only removal primitive was the one
+	// buried in a cycle's re-arm, which is not separable from the bounded-loop
+	// counter it exists to drive.
+	//
+	// CAUTION — removing a label a FEEDING stage EXCLUDES re-arms that stage.
+	// A stage that stopped re-claiming a task because the task carries label X
+	// matches it again the moment X is removed, re-stamps X, and the loop runs
+	// forever. This has been observed live as an unbounded ship/re-stamp cycle
+	// firing every ~32 seconds. Before removing X, check what upstream filter
+	// treats X as its "already handled" marker. Nothing here detects the loop:
+	// which label an upstream filter keys on is configuration this action
+	// cannot see, so a code guard would only be guessing at intent.
+	//
+	// Carries a literal label and nothing else, so the closed vocabulary above
+	// is unchanged: like add_label it cannot express a path or a shell string.
+	AgentHookActionRemoveLabel AgentHookActionType = "remove_label"
 	// AgentHookActionClose closes the owned task, and must be the last action
 	// in a pipeline.
 	//
@@ -139,7 +162,8 @@ func (c *AgentHookCycle) CompletedRounds(labels []string) int {
 // IsValid returns true if the action type is a recognized constant.
 func (t AgentHookActionType) IsValid() bool {
 	switch t {
-	case AgentHookActionComment, AgentHookActionAddLabel, AgentHookActionClose, AgentHookActionCycle:
+	case AgentHookActionComment, AgentHookActionAddLabel, AgentHookActionRemoveLabel,
+		AgentHookActionClose, AgentHookActionCycle:
 		return true
 	}
 	return false
@@ -165,8 +189,9 @@ type AgentHookAction struct {
 // AgentHooks holds the supervisor-owned hook pipelines for an agent.
 type AgentHooks struct {
 	// OnComplete runs in slice order after a successful agent turn. Every
-	// comment action must precede every add_label action so a completion label
-	// can never outrun the artifact it certifies (see Validate).
+	// comment action must precede every label-writing action (add_label,
+	// remove_label, cycle) so a completion label can never outrun the artifact
+	// it certifies (see Validate).
 	OnComplete []AgentHookAction `json:"on_complete,omitempty" yaml:"on_complete,omitempty"`
 }
 
@@ -218,7 +243,7 @@ func (h *AgentHooks) Validate() error {
 	for i := range h.OnComplete {
 		a := h.OnComplete[i]
 		if !a.Type.IsValid() {
-			return fmt.Errorf("hooks.on_complete[%d]: unknown action type %q (must be one of: comment, add_label, close, cycle)", i, a.Type)
+			return fmt.Errorf("hooks.on_complete[%d]: unknown action type %q (must be one of: comment, add_label, remove_label, close, cycle)", i, a.Type)
 		}
 		// Nothing may follow the close: every write in this pipeline targets the
 		// task, and a terminal issue rejects further mutation.
@@ -242,7 +267,9 @@ func (h *AgentHooks) Validate() error {
 			return err
 		}
 		switch a.Type {
-		case AgentHookActionAddLabel:
+		// Both mutate the label set, so write-before-stamp binds both: a
+		// comment may not follow either.
+		case AgentHookActionAddLabel, AgentHookActionRemoveLabel:
 			sawLabel = true
 		case AgentHookActionCycle:
 			// A cycle writes labels, so later comments would violate
@@ -276,15 +303,26 @@ func validateHookAction(i int, a AgentHookAction, sawLabel bool) error {
 		}
 		// Write-before-stamp: the artifact must land before the label that
 		// certifies it, so a label is never observable without its comment.
+		// The message names add_label for any label write (remove_label and
+		// cycle set sawLabel too); the wording is fleet-db's verbatim so a
+		// pipeline refused by one repo is refused by the other in the same
+		// words.
 		if sawLabel {
 			return fmt.Errorf("hooks.on_complete[%d]: comment action must not follow an add_label action", i)
 		}
-	case AgentHookActionAddLabel:
+	// remove_label shares add_label's arm outright, matching fleet-db. Sharing
+	// it is the point: a value the two disagreed about would be storable
+	// through one action and refused by the other for no reason a caller could
+	// predict. The value caps fleet-db layers on top (256 bytes, no commas or
+	// semicolons — labels are stored comma-separated) are enforced there at
+	// write time and bind both actions identically, so nothing here can accept
+	// a value for one that the server would take only for the other.
+	case AgentHookActionAddLabel, AgentHookActionRemoveLabel:
 		if strings.TrimSpace(a.Value) == "" {
-			return fmt.Errorf("hooks.on_complete[%d]: add_label action requires a non-blank value", i)
+			return fmt.Errorf("hooks.on_complete[%d]: %s action requires a non-blank value", i, a.Type)
 		}
 		if a.Source != "" {
-			return fmt.Errorf("hooks.on_complete[%d]: add_label action must not set source", i)
+			return fmt.Errorf("hooks.on_complete[%d]: %s action must not set source", i, a.Type)
 		}
 	case AgentHookActionClose:
 		if a.Value != "" {

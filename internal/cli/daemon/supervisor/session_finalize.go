@@ -496,6 +496,31 @@ func (s *Supervisor) executeCompletionHooks(
 			err = s.postFinalReplyComment(ctx, ap, taskID, reply)
 		case domain.AgentHookActionAddLabel:
 			err = s.IssueBackend.AddLabel(ctx, taskID, action.Value)
+		case domain.AgentHookActionRemoveLabel:
+			// Writes the same task as every other action here, and the loop
+			// executes stored order verbatim — so the position that matters is
+			// the one the pipeline was BUILT with (hooksFromFlags), and the
+			// rule Validate enforces: after the comment, before the stamp.
+			//
+			// After the comment because a removal mutates the label set and is
+			// therefore observable routing state, exactly like add_label:
+			// write-before-stamp binds it, and Validate refuses a comment that
+			// follows it.
+			//
+			// Before the add_label because add_label is the certifying write —
+			// the token the next stage waits on. Removing after it would leave
+			// a window where the task carries both the label that routed it
+			// here and the label that hands it on, claimable by the upstream
+			// and downstream stages at once. Removing first can only leave the
+			// task briefly unrouted, which stalls visibly instead of forking.
+			// Same reasoning as the cycle's remove-then-bump ordering above.
+			//
+			// CAUTION: if an upstream stage's filter EXCLUDES this label, this
+			// removal re-arms that stage — it re-claims, re-stamps, and the
+			// pipeline loops forever. See AgentHookActionRemoveLabel. Not
+			// guarded here: this executor cannot see the upstream filter, so
+			// any guard would be a guess at intent.
+			err = s.IssueBackend.RemoveLabel(ctx, taskID, action.Value)
 		case domain.AgentHookActionCycle:
 			err = s.advanceReviewCycle(ctx, taskID, action.Cycle)
 		case domain.AgentHookActionClose:
