@@ -323,6 +323,16 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 			if reason == "" {
 				reason = "claude turn errored"
 			}
+			// The harness may have declared WHY the turn is terminal. When it
+			// names an expired login or an exhausted quota, carry that verdict
+			// out as a marker so the supervisor's classifier acts on it
+			// directly instead of re-deriving it from the log tail — the
+			// difference between "renew the login" / "back off blamelessly"
+			// and an Unknown that burns the restart budget on a turn that
+			// cannot succeed.
+			if ie := terminalTurnInvocationError(reason, outputTail); ie != nil {
+				return ie
+			}
 			return &InvocationError{Err: errors.New(reason), OutputTail: outputTail, ExitCode: 1}
 		}
 		return wrapInvocationError(err, outputTail)
