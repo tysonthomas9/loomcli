@@ -125,3 +125,66 @@ func TestIPCDispatch_HeartbeatZeroTimestampIsNoop(t *testing.T) {
 		t.Errorf("LastActivity = %v, want %v (zero heartbeat must not regress existing value)", got, t0)
 	}
 }
+
+// The input-wait signal rides the existing heartbeat op rather than a new
+// transport: the phase is read off the request exactly as LastActivityAt is.
+func TestIPCDispatch_HeartbeatCarriesInputWaitEdges(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.sup.Shutdown)
+
+	ap := &supervisor.AgentProcess{Entry: config.AgentEntry{Worktree: "worker", Role: "task"}}
+	d.sup.Agents = []*supervisor.AgentProcess{ap}
+
+	beat := func(phase string) {
+		t.Helper()
+		resp := d.dispatchIPCOperation(AgentIPCRequest{
+			Operation: ipcOpHeartbeat,
+			AgentName: "worker",
+			InputWait: phase,
+		})
+		if !resp.Success {
+			t.Fatalf("heartbeat(input_wait=%q) returned error: %s", phase, resp.Error)
+		}
+	}
+
+	beat(ipcInputWaitBegin)
+	beat(ipcInputWaitBegin)
+	if got := pendingInputWaits(ap); got != 2 {
+		t.Errorf("InputWaitPending = %d, want 2 after two begins", got)
+	}
+
+	beat(ipcInputWaitEnd)
+	if got := pendingInputWaits(ap); got != 1 {
+		t.Errorf("InputWaitPending = %d, want 1 after one end", got)
+	}
+}
+
+// An unrecognized phase must not move the counter — a count stuck above zero is
+// a suspended watchdog, so version skew has to fail closed.
+func TestIPCDispatch_UnknownInputWaitPhaseIsIgnored(t *testing.T) {
+	mb := &mockIPCBackend{}
+	d := newTestIPCDaemon(mb)
+	defer close(d.sup.Shutdown)
+
+	ap := &supervisor.AgentProcess{Entry: config.AgentEntry{Worktree: "worker", Role: "task"}}
+	d.sup.Agents = []*supervisor.AgentProcess{ap}
+
+	resp := d.dispatchIPCOperation(AgentIPCRequest{
+		Operation: ipcOpHeartbeat,
+		AgentName: "worker",
+		InputWait: "paused",
+	})
+	if !resp.Success {
+		t.Fatalf("heartbeat with unknown phase returned error: %s", resp.Error)
+	}
+	if got := pendingInputWaits(ap); got != 0 {
+		t.Errorf("InputWaitPending = %d, want 0 (unknown phase must be ignored)", got)
+	}
+}
+
+func pendingInputWaits(ap *supervisor.AgentProcess) int {
+	ap.Mu.Lock()
+	defer ap.Mu.Unlock()
+	return ap.InputWaitPending
+}
