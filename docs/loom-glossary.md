@@ -50,6 +50,40 @@ Prompt values can be:
   `builtin:pr-review` selects the embedded PR-review terminal-agent prompt.
 - Empty for the default built-in lead prompt.
 
+### Custom Prompt Template Variables
+
+A prompt file is a Go `text/template`. Unlike the built-in planning and task
+prompts — which get a workspace table, an epic-scope line, safety rules and a
+prior-attempt checkpoint spliced in for them — nothing is added to a custom
+prompt. These variables are how a custom prompt asks for those same pieces, one
+at a time. Referencing none of them leaves the file rendered exactly as written.
+
+| Variable | Contents |
+|---|---|
+| `{{.AgentName}}` | Agent (worktree) name this run was launched for. |
+| `{{.WorktreeName}}` | Same value as `AgentName`. |
+| `{{.Role}}` | The real role name the daemon spawned the agent under; `custom` for a hand-run `loom agent`. |
+| `{{.TaskID}}` | The task the daemon pre-claimed for this run. Empty in one-shot and auto mode, where the agent claims its own task mid-turn. |
+| `{{.EpicID}}` | The epic the agent is scoped to (`--parent`), or empty. |
+| `{{.WorkspaceBlock}}` | Multi-repo workspace section: the repo/path/branch table plus the "run git here, run `loom data` there" rules. Empty outside workspace mode. |
+| `{{.EpicScope}}` | The "only select tasks from this epic" instruction the built-in prompts use. Empty when `EpicID` is empty. |
+| `{{.SafetyBlock}}` | Shared multi-agent safety rules (do not stash, do not switch branches, do not clean up another agent's files). |
+| `{{.CheckpointBlock}}` | "PREVIOUS ATTEMPT CONTEXT" for the last crashed or preempted attempt in this worktree. Empty when there is no checkpoint or a session resume is armed. |
+| `{{.TaskDetail}}` | Full detail of `TaskID`: title, status, priority, labels, description, design, acceptance criteria, notes, dependencies. |
+
+The last five are computed only when the template names them, so a prompt that
+ignores `{{.TaskDetail}}` never pays for the issue-backend fetch it would need.
+The detection reads the parsed template, so mentioning a variable name in prose
+is not a reference; a template that renders the whole context wholesale with
+`{{.}}` names nothing and therefore gets only the first five.
+
+Read-only roles additionally get the read-only preamble prepended, once,
+regardless of what the template references.
+
+Interactive prompts loaded through `loom lead --prompt <file>` share the same
+template but only receive `AgentName`, `WorktreeName` and `Role`; they get the
+safety rules appended unconditionally.
+
 ## Other Overloaded Names
 
 - **fleet / fleet-db**: The control-plane data service that stores Loom state.
