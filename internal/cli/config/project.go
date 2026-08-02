@@ -59,6 +59,7 @@ type RestartPolicy struct {
 	RateLimitNoCount *bool `yaml:"rate_limit_no_count,omitempty"` // default true: rate-limit retries don't count toward max_retries
 	TimeoutBackoff   *int  `yaml:"timeout_backoff,omitempty"`     // seconds (default 5)
 	NoWorkBackoff    *int  `yaml:"no_work_backoff,omitempty"`     // seconds (default 30); fixed interval when no tasks available
+	NoWorkBackoffMax *int  `yaml:"no_work_backoff_max,omitempty"` // seconds (default 900); cap for the post-spawn no-work exponential backoff
 	IdlePollInterval *int  `yaml:"idle_poll_interval,omitempty"`  // seconds (default 30); polling interval for task availability
 	YieldTimeout     *int  `yaml:"yield_timeout,omitempty"`       // seconds; how long to wait for agent to yield before SIGTERM (default 60)
 	SigtermTimeout   *int  `yaml:"sigterm_timeout,omitempty"`     // seconds; SIGTERM→SIGKILL window (default 300)
@@ -289,6 +290,7 @@ func restartPolicyFromDomain(r domain.RestartPolicy) RestartPolicy {
 		RateLimitNoCount: cloneBoolPtr(r.RateLimitNoCount),
 		TimeoutBackoff:   cloneIntPtr(r.TimeoutBackoff),
 		NoWorkBackoff:    cloneIntPtr(r.NoWorkBackoff),
+		NoWorkBackoffMax: cloneIntPtr(r.NoWorkBackoffMax),
 		IdlePollInterval: cloneIntPtr(r.IdlePollInterval),
 		YieldTimeout:     cloneIntPtr(r.YieldTimeout),
 		SigtermTimeout:   cloneIntPtr(r.SigtermTimeout),
@@ -542,6 +544,9 @@ func overlayRestartPolicy(dst, src *RestartPolicy) {
 	}
 	if src.NoWorkBackoff != nil {
 		dst.NoWorkBackoff = src.NoWorkBackoff
+	}
+	if src.NoWorkBackoffMax != nil {
+		dst.NoWorkBackoffMax = src.NoWorkBackoffMax
 	}
 	if src.IdlePollInterval != nil {
 		dst.IdlePollInterval = src.IdlePollInterval

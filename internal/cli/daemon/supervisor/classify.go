@@ -15,25 +15,27 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 	// Read lock info before recovery clears it (for logging and NoWork detection)
 	lockInfo, _, _ := cli.CheckLock(ap.WorktreePath)
 	taskID := s.taskIDForLifecycle(ap, lockInfo)
-	if taskID != "" {
-		title := ""
-		if lockInfo != nil {
-			title = lockInfo.TaskTitle
-		}
-		log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
-			ap.Entry.Worktree, exitCode, taskID, title)
-	} else {
-		log.Printf("[daemon] Agent %s: exited with code %d", ap.Entry.Worktree, exitCode)
-	}
+	logAgentExit(ap, lockInfo, taskID, exitCode)
 
 	// Resolve backend for classification
 	ap.Mu.Lock()
 	backend := ap.Entry.Backend
 	logPath := ap.LogFilePath
 	stopReason := ap.StopReason
+	lastStart := ap.LastStart
 	ap.Mu.Unlock()
 	if backend == "" {
 		backend = s.ConfigSnapshot().Backend
+	}
+
+	// An agent that held a claim but still has nothing actionable can say so
+	// explicitly via `loom complete --no-work` (the marker channel). This is
+	// consulted before the "no task claimed" heuristic below and does not
+	// depend on taskID, so it also covers claimed-but-unworked advisory runs.
+	// Only consult on a clean exit — a crash after the marker was written is
+	// still a crash (ClassifyFromLog wins below).
+	if exitCode == 0 && s.classifyNoWorkMarker(ap, backend, lastStart) {
+		return
 	}
 
 	if taskID == "" && (exitCode == 0 || stopReason == StopReasonWatchdog) {
@@ -47,6 +49,7 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 			Backend: backend,
 		}
 		ap.LastNoWork = true
+		ap.LastNoWorkPostSpawn = true
 		ap.Mu.Unlock()
 		log.Printf("[daemon] Agent %s: no work available (idle)", ap.Entry.Worktree)
 	} else if exitCode != 0 {
@@ -54,14 +57,55 @@ func (s *Supervisor) classifyAgentExit(ap *AgentProcess, exitCode int) {
 		ap.Mu.Lock()
 		ap.LastError = ae
 		ap.LastNoWork = false
+		ap.LastNoWorkPostSpawn = false
 		ap.Mu.Unlock()
 		log.Printf("[daemon] Agent %s: classified error: %v", ap.Entry.Worktree, ae)
 	} else {
 		ap.Mu.Lock()
 		ap.LastError = nil
 		ap.LastNoWork = false
+		ap.LastNoWorkPostSpawn = false
 		ap.Mu.Unlock()
 	}
+}
+
+// logAgentExit logs the raw exit code alongside the task context, if any.
+func logAgentExit(ap *AgentProcess, lockInfo *cli.LockInfo, taskID string, exitCode int) {
+	if taskID == "" {
+		log.Printf("[daemon] Agent %s: exited with code %d", ap.Entry.Worktree, exitCode)
+		return
+	}
+	title := ""
+	if lockInfo != nil {
+		title = lockInfo.TaskTitle
+	}
+	log.Printf("[daemon] Agent %s: exited with code %d (task %s: %s)",
+		ap.Entry.Worktree, exitCode, taskID, title)
+}
+
+// classifyNoWorkMarker checks for a fresh `loom complete --no-work` marker
+// and, if present, classifies the exit as NoWork with the reported reason.
+// Returns true when it handled the classification (caller should stop).
+func (s *Supervisor) classifyNoWorkMarker(ap *AgentProcess, backend string, lastStart time.Time) bool {
+	report, ok := NoWorkReportedAfter(ap.WorktreePath, lastStart)
+	if !ok {
+		return false
+	}
+	msg := "agent reported no work"
+	if report.Reason != "" {
+		msg = report.Reason
+	}
+	ap.Mu.Lock()
+	ap.LastError = &agenterr.AgentError{
+		Class:   agenterr.OutcomeFromDomain(agenterr.NoWorkOutcome),
+		Message: msg,
+		Backend: backend,
+	}
+	ap.LastNoWork = true
+	ap.LastNoWorkPostSpawn = true
+	ap.Mu.Unlock()
+	log.Printf("[daemon] Agent %s: no work reported (%s)", ap.Entry.Worktree, msg)
+	return true
 }
 
 // markSpawnFailure records a spawn failure as a synthetic agent exit so the
@@ -86,6 +130,7 @@ func (s *Supervisor) markSpawnFailure(ap *AgentProcess, spawnErr error) {
 	ap.Mu.Lock()
 	ap.LastExitCode = -1
 	ap.LastNoWork = false
+	ap.LastNoWorkPostSpawn = false
 	ap.LastError = &agenterr.AgentError{
 		Class:     agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
 		ExitCode:  -1,

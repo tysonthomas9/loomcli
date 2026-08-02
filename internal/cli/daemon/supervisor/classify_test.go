@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
@@ -339,5 +340,187 @@ func TestSaveYieldCheckpoint_NoYieldFile_DefaultsToUnknown(t *testing.T) {
 	}
 	if cp.ErrorClass != "Yielded" {
 		t.Errorf("ErrorClass: got %q, want %q", cp.ErrorClass, "Yielded")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// classifyAgentExit tests
+// ---------------------------------------------------------------------------
+
+func TestClassifyAgentExit_NoLockNoTask_ExitZero_NoWork(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	s := newTestSupervisor()
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "falcon"},
+		WorktreePath: tmpDir,
+		LastStart:    time.Now(),
+	}
+
+	s.classifyAgentExit(ap, 0)
+
+	if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.NoWorkOutcome) {
+		t.Fatalf("LastError: got %+v, want NoWorkOutcome", ap.LastError)
+	}
+	if ap.LastError.Message != "no claimable tasks" {
+		t.Errorf("Message: got %q, want %q", ap.LastError.Message, "no claimable tasks")
+	}
+	if !ap.LastNoWork {
+		t.Error("LastNoWork: got false, want true")
+	}
+	if !ap.LastNoWorkPostSpawn {
+		t.Error("LastNoWorkPostSpawn: got false, want true")
+	}
+}
+
+func TestClassifyAgentExit_ClaimedTask_FreshMarker_NoWorkWithReason(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	start := time.Now()
+	writeLockFile(t, tmpDir, &cli.LockInfo{
+		PID:       os.Getpid(),
+		Command:   "task",
+		AgentName: "critic",
+		TaskID:    "loom-99",
+		StartedAt: start,
+	})
+
+	s := newTestSupervisor()
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "critic"},
+		WorktreePath: tmpDir,
+		LastStart:    start,
+	}
+
+	if err := WriteNoWorkFile(tmpDir, &NoWorkReport{Reason: "design unchanged since last critique"}); err != nil {
+		t.Fatalf("WriteNoWorkFile failed: %v", err)
+	}
+
+	s.classifyAgentExit(ap, 0)
+
+	if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.NoWorkOutcome) {
+		t.Fatalf("LastError: got %+v, want NoWorkOutcome", ap.LastError)
+	}
+	if ap.LastError.Message != "design unchanged since last critique" {
+		t.Errorf("Message: got %q, want the marker's reason", ap.LastError.Message)
+	}
+	if !ap.LastNoWork || !ap.LastNoWorkPostSpawn {
+		t.Errorf("LastNoWork=%v LastNoWorkPostSpawn=%v, want both true", ap.LastNoWork, ap.LastNoWorkPostSpawn)
+	}
+}
+
+func TestClassifyAgentExit_ClaimedTask_NoMarker_CleanSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	writeLockFile(t, tmpDir, &cli.LockInfo{
+		PID:       os.Getpid(),
+		Command:   "task",
+		AgentName: "falcon",
+		TaskID:    "loom-100",
+		StartedAt: time.Now(),
+	})
+
+	s := newTestSupervisor()
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "falcon"},
+		WorktreePath: tmpDir,
+		LastStart:    time.Now(),
+	}
+
+	s.classifyAgentExit(ap, 0)
+
+	if ap.LastError != nil {
+		t.Errorf("LastError: got %+v, want nil (clean success)", ap.LastError)
+	}
+	if ap.LastNoWork {
+		t.Error("LastNoWork: got true, want false")
+	}
+	if ap.LastNoWorkPostSpawn {
+		t.Error("LastNoWorkPostSpawn: got true, want false")
+	}
+}
+
+func TestClassifyAgentExit_StaleMarker_CleanSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Marker written first (earlier), then the run "starts" after it — so the
+	// marker predates this run's LastStart and must be ignored as stale.
+	if err := WriteNoWorkFile(tmpDir, &NoWorkReport{Reason: "stale from a prior killed run"}); err != nil {
+		t.Fatalf("WriteNoWorkFile failed: %v", err)
+	}
+
+	writeLockFile(t, tmpDir, &cli.LockInfo{
+		PID:       os.Getpid(),
+		Command:   "task",
+		AgentName: "falcon",
+		TaskID:    "loom-101",
+		StartedAt: time.Now(),
+	})
+
+	s := newTestSupervisor()
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "falcon"},
+		WorktreePath: tmpDir,
+		LastStart:    time.Now().Add(time.Hour), // well after the marker's mtime
+	}
+
+	s.classifyAgentExit(ap, 0)
+
+	if ap.LastError != nil {
+		t.Errorf("LastError: got %+v, want nil (stale marker ignored)", ap.LastError)
+	}
+	if ap.LastNoWork {
+		t.Error("LastNoWork: got true, want false for a stale marker")
+	}
+}
+
+func TestClassifyAgentExit_NonZeroExit_MarkerPresent_ClassifiedFromLog(t *testing.T) {
+	tmpDir := t.TempDir()
+	start := time.Now()
+
+	if err := WriteNoWorkFile(tmpDir, &NoWorkReport{Reason: "should be ignored"}); err != nil {
+		t.Fatalf("WriteNoWorkFile failed: %v", err)
+	}
+
+	s := newTestSupervisor()
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "falcon"},
+		WorktreePath: tmpDir,
+		LastStart:    start,
+		LogFilePath:  filepath.Join(tmpDir, "missing.log"),
+	}
+
+	s.classifyAgentExit(ap, 1)
+
+	if ap.LastNoWork {
+		t.Error("LastNoWork: got true, want false — a non-zero exit is a crash, not NoWork, even with a marker present")
+	}
+	if ap.LastError == nil || ap.LastError.Class.Is(agenterr.NoWorkOutcome) {
+		t.Fatalf("LastError: got %+v, want a non-NoWork classification from the log", ap.LastError)
+	}
+}
+
+func TestClassifyAgentExit_MalformedMarker_NoWorkNoPanic(t *testing.T) {
+	tmpDir := t.TempDir()
+	start := time.Now()
+
+	if err := os.WriteFile(filepath.Join(tmpDir, NoWorkFileName), []byte("not json"), 0600); err != nil {
+		t.Fatalf("failed to write malformed marker: %v", err)
+	}
+
+	s := newTestSupervisor()
+	ap := &AgentProcess{
+		Entry:        config.AgentEntry{Worktree: "falcon"},
+		WorktreePath: tmpDir,
+		LastStart:    start,
+	}
+
+	s.classifyAgentExit(ap, 0)
+
+	if ap.LastError == nil || !ap.LastError.Class.Is(agenterr.NoWorkOutcome) {
+		t.Fatalf("LastError: got %+v, want NoWorkOutcome even for a malformed marker", ap.LastError)
+	}
+	if ap.LastError.Message != "agent reported no work" {
+		t.Errorf("Message: got %q, want the fallback message for a malformed/reasonless marker", ap.LastError.Message)
 	}
 }
