@@ -1,0 +1,11 @@
+# Per-package import-fanout allowances (see check-import-fanout.sh).
+# Format: <package path relative to module> <max internal imports>
+#
+# These are grandfathered ceilings, not targets. The supervisor is the daemon's
+# orchestration hub: the completion-hook, usage-accounting, watchdog and
+# run-duration work each add a seam it must coordinate, which pushed it past
+# the global threshold of 18. internal/cli grew one import for the same line of
+# work. Ratchet these back down (or remove the entries) when coupling is paid
+# down; do not raise them without recording why here.
+internal/cli/daemon/supervisor 21
+internal/cli 19
