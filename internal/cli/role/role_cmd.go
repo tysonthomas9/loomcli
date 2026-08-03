@@ -395,56 +395,32 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 		}
 		patch.ReadOnly = &b
 	case "max_priority":
-		if unset {
-			var nilInt *int
-			patch.MaxPriority = &nilInt
-			return patch, nil
-		}
-		n, err := strconv.Atoi(value)
+		v, err := intPatchValue(value, unset, "max_priority must be an integer")
 		if err != nil {
-			return patch, fmt.Errorf("max_priority must be an integer: %w", err)
+			return patch, err
 		}
-		ptr := &n
-		patch.MaxPriority = &ptr
+		patch.MaxPriority = v
 	case "max_concurrency":
-		if unset {
-			var nilInt *int
-			patch.MaxConcurrency = &nilInt
-			return patch, nil
-		}
-		n, err := strconv.Atoi(value)
+		v, err := intPatchValue(value, unset, "max_concurrency must be an integer")
 		if err != nil {
-			return patch, fmt.Errorf("max_concurrency must be an integer: %w", err)
+			return patch, err
 		}
-		ptr := &n
-		patch.MaxConcurrency = &ptr
+		patch.MaxConcurrency = v
 	case "max_budget_usd":
-		if unset {
-			var nilF *float64
-			patch.MaxBudgetUSD = &nilF
-			return patch, nil
-		}
-		f, err := strconv.ParseFloat(value, 64)
+		v, err := floatPatchValue(value, unset, "max_budget_usd must be a number")
 		if err != nil {
-			return patch, fmt.Errorf("max_budget_usd must be a number: %w", err)
+			return patch, err
 		}
-		ptr := &f
-		patch.MaxBudgetUSD = &ptr
+		patch.MaxBudgetUSD = v
 	case "max_run_duration":
-		if unset {
-			var nilInt *int
-			patch.MaxRunDuration = &nilInt
-			return patch, nil
-		}
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return patch, fmt.Errorf("max_run_duration must be an integer number of seconds: %w", err)
-		}
 		// 0 is accepted, not rejected: it is how a role says "no wall-clock cap
 		// on my runs". Clearing the field (unset) means something different —
 		// inherit the daemon default — which is why both spellings exist.
-		ptr := &n
-		patch.MaxRunDuration = &ptr
+		v, err := intPatchValue(value, unset, "max_run_duration must be an integer number of seconds")
+		if err != nil {
+			return patch, err
+		}
+		patch.MaxRunDuration = v
 	case "skills":
 		patch.Skills = sliceCSVPtr(value)
 	case "labels":
@@ -481,6 +457,36 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 // yields a non-nil pointer to "" so unset of string fields lands as
 // "set to empty" on the wire.
 func strPtr(s string) *string { return &s }
+
+// intPatchValue parses one numeric role-patch value into the
+// clear-via-double-pointer form buildRolePatch uses: unset yields a pointer to
+// a nil *int (clear the field), a parsed value yields a pointer to its address.
+func intPatchValue(value string, unset bool, invalidMsg string) (**int, error) {
+	if unset {
+		var nilInt *int
+		return &nilInt, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", invalidMsg, err)
+	}
+	ptr := &n
+	return &ptr, nil
+}
+
+// floatPatchValue is intPatchValue for *float64 fields.
+func floatPatchValue(value string, unset bool, invalidMsg string) (**float64, error) {
+	if unset {
+		var nilF *float64
+		return &nilF, nil
+	}
+	f, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", invalidMsg, err)
+	}
+	ptr := &f
+	return &ptr, nil
+}
 
 func normalizeRoleKindValue(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
