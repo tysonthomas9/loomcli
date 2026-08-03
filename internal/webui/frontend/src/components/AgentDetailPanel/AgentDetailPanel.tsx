@@ -41,6 +41,7 @@ import { OpenInEditor } from "../OpenInEditor";
 import { RepoBadge } from "../RepoBadge";
 import styles from "./AgentDetailPanel.module.css";
 import { AgentLogsTab } from "./AgentLogsTab";
+import { PendingInputBanner } from "./PendingInputBanner";
 import { GitTab } from "./GitTab";
 import {
   getAvatarColor,
@@ -234,6 +235,8 @@ export function AgentDetailPanel({
                   )}
                 </div>
               ) : null}
+
+              <PendingInputBanner agentName={agent.name} />
 
               {/* Tab Bar */}
               <div

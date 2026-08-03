@@ -45,6 +45,7 @@ func (s *roleStore) Create(_ context.Context, in store.RoleCreate) (*domain.Role
 		PromptFile:     in.PromptFile,
 		Model:          in.Model,
 		TaskFilter:     in.TaskFilter,
+		Executor:       in.Executor,
 		Backend:        in.Backend,
 		Effort:         in.Effort,
 		PathPatterns:   append([]string(nil), in.PathPatterns...),
@@ -121,6 +122,9 @@ func applyRoleDefinitionPatch(r *domain.Role, patch store.RoleUpdate) {
 	}
 	if patch.TaskFilter != nil {
 		r.TaskFilter = *patch.TaskFilter
+	}
+	if patch.Executor != nil {
+		r.Executor = *patch.Executor
 	}
 	if patch.Backend != nil {
 		r.Backend = *patch.Backend

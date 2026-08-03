@@ -83,6 +83,7 @@ var roleSetCmd = &cobra.Command{
   prompt_file     string
   model           string
   task_filter     string
+  executor        string (turn/conversation)
   backend         string
   effort          string (low/medium/high/xhigh/max)
   read_only       bool ("true"/"false")
@@ -258,6 +259,9 @@ func printRoleDefinition(r *domain.Role) {
 	if r.PromptFile != "" {
 		fmt.Printf("Prompt file:  %s\n", r.PromptFile)
 	}
+	if r.Executor != "" {
+		fmt.Printf("Executor:     %s\n", r.Executor)
+	}
 	if len(r.Skills) > 0 {
 		fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
 	}
@@ -367,6 +371,14 @@ func buildRolePatch(key, value string, unset bool) (store.RoleUpdate, error) {
 			return patch, err
 		}
 		patch.TaskFilter = strPtr(canonical)
+	case "executor":
+		// Closed vocabulary, validated client-side so a typo fails here with
+		// the accepted values instead of as a server 400: "" (clear, same as
+		// turn), "turn", or "conversation".
+		if value != "" && value != "turn" && value != "conversation" {
+			return store.RoleUpdate{}, fmt.Errorf("executor must be %q or %q (empty clears it)", "turn", "conversation")
+		}
+		patch.Executor = strPtr(value)
 	case "backend":
 		patch.Backend = strPtr(value)
 	case "effort":

@@ -17,6 +17,7 @@ type RoleCreate struct {
 	PromptFile     string
 	Model          string
 	TaskFilter     string
+	Executor       string
 	Backend        string
 	Effort         string
 	PathPatterns   []string
@@ -41,6 +42,7 @@ type RoleUpdate struct {
 	PromptFile    *string
 	Model         *string
 	TaskFilter    *string
+	Executor      *string
 	Backend       *string
 	Effort        *string
 	PathPatterns  *[]string

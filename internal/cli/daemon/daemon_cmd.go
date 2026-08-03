@@ -84,6 +84,7 @@ Commands:
   loom daemon logs                 View agent logs
   loom daemon stop                 Stop the running daemon
   loom daemon stop <agent>         Stop a single agent
+  loom daemon answer [agent] [opt] Show or answer a pending interactive prompt
   loom daemon start <agent>        Start a previously stopped agent
   loom daemon restart <agent>      Restart a single agent with fresh state
   loom daemon queue <agent>        Preview an agent's filtered work queue
@@ -152,6 +153,7 @@ func init() {
 	daemonCmd.AddCommand(daemonAgentStartCmd)
 	daemonCmd.AddCommand(daemonAgentRestartCmd)
 	daemonCmd.AddCommand(daemonQueueCmd)
+	daemonCmd.AddCommand(daemonAnswerCmd)
 	daemonCmd.AddCommand(daemonConfigCmd)
 	cli.RegisterCommand(daemonCmd)
 }
@@ -507,12 +509,41 @@ func runDaemonStatus(cmd *cobra.Command, args []string) {
 	fmt.Printf("Agents: %d\n", len(state.Agents))
 	fmt.Println("")
 
+	// Pending interactive prompts come from the live daemon, not the state
+	// file: a question is meaningful only while the asking process waits, so
+	// it is never persisted. Best-effort — status must render even when the
+	// control socket does not.
+	waiting := pendingInputsByAgent()
+
 	// Format agent table
 	for _, agent := range state.Agents {
 		printAgentStatus(agent)
+		if p, ok := waiting[agent.Worktree]; ok {
+			fmt.Printf("      ⏳ Waiting on input (%s): %s\n", p.Kind, firstLine(p.Prompt))
+			fmt.Printf("         answer with: loom daemon answer %s\n", agent.Worktree)
+		}
 	}
 
 	printQuarantinedTasks(state.QuarantinedTasks)
+}
+
+// pendingInputsByAgent fetches every pending prompt from the daemon control
+// socket, keyed by agent name. Any failure returns an empty map — the status
+// listing degrades to what the state file knows.
+func pendingInputsByAgent() map[string]PendingInput {
+	out := map[string]PendingInput{}
+	socketPath, err := resolveControlSocketFromCwd()
+	if err != nil {
+		return out
+	}
+	pending, err := fetchPendingInputs(socketPath, "")
+	if err != nil {
+		return out
+	}
+	for _, p := range pending {
+		out[p.Agent] = p
+	}
+	return out
 }
 
 func runDaemonStop(cmd *cobra.Command, args []string) {
