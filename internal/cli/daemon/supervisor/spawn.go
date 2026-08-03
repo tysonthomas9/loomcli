@@ -47,6 +47,10 @@ func (s *Supervisor) buildCommand(ap *AgentProcess) (*exec.Cmd, error) {
 
 	cmd.Env = appendRoleEnv(cmd.Env, ap)
 	cmd.Env = appendRoutingEnv(cmd.Env, ap)
+	// Both ends of a human answer wait need the same clock: the child's ask
+	// deadline runs slightly inside this bound so an unanswered prompt ends in
+	// the child's clean decline, never the watchdog's kill.
+	cmd.Env = append(cmd.Env, fmt.Sprintf("LOOM_INPUT_WAIT_MAX_SECONDS=%d", s.GetInputWaitMax()))
 
 	sourceRepos, err := cfgpkg.ResolveAgentRepos(ap.Entry, s.Repos)
 	if err != nil {
