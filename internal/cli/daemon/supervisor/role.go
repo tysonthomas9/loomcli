@@ -89,6 +89,9 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.TaskFilter != "" {
 		base.TaskFilter = overlay.TaskFilter
 	}
+	if overlay.Executor != "" {
+		base.Executor = overlay.Executor
+	}
 	if overlay.MaxConcurrency != nil {
 		base.MaxConcurrency = overlay.MaxConcurrency
 	}
