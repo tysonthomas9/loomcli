@@ -158,27 +158,23 @@ func ClassifyFromOutput(output string, exitCode int, backend string) *AgentError
 	return classifyFromText(output, exitCode, backend)
 }
 
-// classifyFromText is the shared classification implementation. It is a thin
-// adapter over the harness-wrapper classifier (the single source of truth for
-// cost / rate-limit / transport / API-error fingerprints), with a small
-// loom-specific residual for the distinctions the wrapper does not model.
-func classifyFromText(text string, exitCode int, backend string) *AgentError {
-	now := time.Now()
-
-	var result *classifyResult
-
+// classifyHarnessMarkers matches the explicit, categorical markers that
+// outrank every pattern-based inference: the loom-side backend-missing
+// marker, a wrapper launch failure, and the harness's own terminal verdict
+// (auth required / usage limited). Returns nil when none apply.
+func classifyHarnessMarkers(text string) *classifyResult {
 	// 1. Cross-cutting wrapper signal: the loom-side translator prepends this
 	//    marker when the backend CLI is missing. It outranks everything else.
 	if backendUnavailableRe.MatchString(text) {
-		result = &classifyResult{Class: OutcomeFromDomain(BackendUnavailableOutcome), Message: "backend binary not on PATH"}
+		return &classifyResult{Class: OutcomeFromDomain(BackendUnavailableOutcome), Message: "backend binary not on PATH"}
 	}
 
 	// A wrapper launch failure (PTY/exec) means the backend process never
 	// started — typically the backend binary was mid-update and momentarily
 	// unexecutable ("exec format error"). Treat it as a retryable SpawnFailure
 	// and keep the reason so it surfaces instead of a generic Unknown.
-	if result == nil && agentLaunchFailedRe.MatchString(text) {
-		result = &classifyResult{
+	if agentLaunchFailedRe.MatchString(text) {
+		return &classifyResult{
 			Class:   OutcomeFromDomain(SpawnFailureOutcome),
 			Message: "agent process failed to launch (backend binary may be updating or incompatible)",
 		}
@@ -186,17 +182,17 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 
 	// The harness's own terminal verdict outranks any pattern matching: it is
 	// a categorical statement, not an inference from wording. Both are
-	// blameless — see the marker docs — so getting here rather than falling
+	// blameless — see the marker docs — so returning here rather than falling
 	// through to the residual table is what keeps a quota window from
 	// consuming an agent's restart budget.
-	if result == nil && authRequiredRe.MatchString(text) {
-		result = &classifyResult{
+	if authRequiredRe.MatchString(text) {
+		return &classifyResult{
 			Class:   OutcomeFromHarness(wrapper.ErrAuth),
 			Message: "harness login expired or re-authentication required — renew the harness login",
 		}
 	}
-	if result == nil && usageLimitedRe.MatchString(text) {
-		result = &classifyResult{
+	if usageLimitedRe.MatchString(text) {
+		result := &classifyResult{
 			Class:   OutcomeFromHarness(wrapper.ErrRateLimited),
 			Message: "harness usage or session limit reached — retry after the quota window resets",
 		}
@@ -205,7 +201,20 @@ func classifyFromText(text string, exitCode int, backend string) *AgentError {
 		if d := parseRetryAfter(text); d > 0 {
 			result.RetryAfter = d
 		}
+		return result
 	}
+	return nil
+}
+
+// classifyFromText is the shared classification implementation. It is a thin
+// adapter over the harness-wrapper classifier (the single source of truth for
+// cost / rate-limit / transport / API-error fingerprints), with a small
+// loom-specific residual for the distinctions the wrapper does not model.
+func classifyFromText(text string, exitCode int, backend string) *AgentError {
+	now := time.Now()
+
+	// Explicit markers and the harness's terminal verdict come first.
+	result := classifyHarnessMarkers(text)
 
 	// 2. Primary: harness-wrapper owns the cost/rate-limit/transport/API-error
 	//    patterns. Run its classifier as a one-shot over the captured text and
