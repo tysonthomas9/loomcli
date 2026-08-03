@@ -104,6 +104,13 @@ func builtInRoleConfig(roleName string) cfgpkg.RoleConfig {
 // Description falls back to base when overlay has none.
 // PromptFile is NOT merged (built-in roles don't use prompt files).
 func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
+	base = mergeRoleIdentity(base, overlay)
+	return mergeRoleExecution(base, overlay)
+}
+
+// mergeRoleIdentity overlays the identity and routing half of the config:
+// what the role is and which tasks it may claim.
+func mergeRoleIdentity(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.Kind != "" {
 		base.Kind = overlay.Kind
 	}
@@ -131,6 +138,12 @@ func MergeRoleConfig(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.MaxConcurrency != nil {
 		base.MaxConcurrency = overlay.MaxConcurrency
 	}
+	return base
+}
+
+// mergeRoleExecution overlays the execution half of the config: backend
+// selection, spend and duration bounds, and the safety knobs.
+func mergeRoleExecution(base, overlay cfgpkg.RoleConfig) cfgpkg.RoleConfig {
 	if overlay.MaxBudgetUSD != nil {
 		base.MaxBudgetUSD = overlay.MaxBudgetUSD
 	}
