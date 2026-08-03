@@ -103,7 +103,7 @@ func (s *Supervisor) runLeftClaimHeld(ap *AgentProcess, taskID string) bool {
 	if s.IssueBackend == nil || taskID == "" {
 		return false
 	}
-	ctx, cancel := s.operationContext(claimOperationTimeout)
+	ctx, cancel := s.operationContext()
 	defer cancel()
 	return agent.ClaimStillHeld(ctx, s.IssueBackend, taskID, ap.Entry.Worktree)
 }
