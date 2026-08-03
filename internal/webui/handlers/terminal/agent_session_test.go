@@ -16,7 +16,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -88,7 +90,7 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "lead-ui-e2e",
 		RoleName:     "lead",
@@ -97,7 +99,7 @@ func TestEnsureAgentTerminalSessionCreatesLeadLaunchSpec(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-ui-e2e")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-ui-e2e", terminalStoreIdentity{services: st.AgentServices()})
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -148,11 +150,11 @@ func TestEnsureAgentTerminalSessionPutFailureDoesNotCreateRunningSession(t *test
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead", Backend: "codex"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "E2E", Name: "lead-put-fail", RoleName: "lead"}); err != nil {
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{WorkspaceKey: "E2E", Name: "lead-put-fail", RoleName: "lead"}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if _, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-put-fail"); err == nil || !strings.Contains(err.Error(), "put failed") {
+	if _, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-put-fail", terminalStoreIdentity{services: st.AgentServices()}); err == nil || !strings.Contains(err.Error(), "put failed") {
 		t.Fatalf("ensure error = %v, want PutTab failure", err)
 	}
 	sessions, err := st.AgentSessions().List(ctx, "E2E", store.AgentSessionFilter{AgentID: "lead-put-fail"})
@@ -177,7 +179,7 @@ func TestBuildAgentLaunchSpecIncludesPromptForInteractiveRole(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "nova", RoleName: "lead"}
 
 	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_nova", agent, "lead-1")
 	if err != nil {
@@ -205,7 +207,7 @@ func TestBuildAgentLaunchSpecIncludesBuiltinPromptForInteractiveRole(t *testing.
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "review-nova", RoleName: "pr-review"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "review-nova", RoleName: "pr-review"}
 
 	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "lead-1")
 	if err != nil {
@@ -230,7 +232,7 @@ func TestBuildAgentLaunchSpecIncludesCheckoutPromptForPRReviewerRole(t *testing.
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "review-nova-pr-7", RoleName: "pr-reviewer"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "review-nova-pr-7", RoleName: "pr-reviewer"}
 
 	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "lead-1")
 	if err != nil {
@@ -256,7 +258,7 @@ func TestBuildAgentLaunchSpecInlinePromptOmitsRolePromptFile(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "operator-a", RoleName: "operator"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "operator-a", RoleName: "operator"}
 
 	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_operator", agent, "lead-1")
 	if err != nil {
@@ -282,7 +284,7 @@ func TestBuildAgentLaunchSpecCustomInteractiveRoleUsesLeadRuntime(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "operator-a", RoleName: "operator"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "operator-a", RoleName: "operator"}
 
 	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_operator", agent, "lead-1")
 	if err != nil {
@@ -313,15 +315,15 @@ func TestBuildAgentLaunchSpecRejectsDaemonSupervisedWorker(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "review-a", RoleName: "reviewer", Parent: "EPIC-1"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "review-a", RoleName: "reviewer"}
 
 	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_review", agent, "")
 	var svcErr *service.ServiceError
 	if launch != nil || !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
 		t.Fatalf("buildAgentLaunchSpec = (%#v, %v), want worker-terminal validation", launch, err)
 	}
-	if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
-		t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
+	if !strings.Contains(svcErr.Message, "background worker") {
+		t.Fatalf("validation message = %q, want background worker guidance", svcErr.Message)
 	}
 }
 
@@ -361,7 +363,7 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "nova",
 		RoleName:     "lead",
@@ -370,7 +372,7 @@ func TestEnsureAgentTerminalSessionLaunchesLeadInConfiguredWorktree(t *testing.T
 		t.Fatalf("create agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", terminalStoreIdentity{services: st.AgentServices()})
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -397,7 +399,7 @@ func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "nova", RoleName: "lead"}
 
 	launch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_nova", agent, "lead-1")
 	if err != nil {
@@ -415,6 +417,7 @@ func TestBuildAgentLaunchSpecFallsBackWhenConfiguredWorktreeMissing(t *testing.T
 // when to emit a fresh tab instead of returning the cached one.
 func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "E2E", Name: "E2E"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -422,11 +425,11 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "E2E", Name: "lead"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "nova", RoleName: "lead"}
 
 	// Build the "previous" cached spec via the same builder so the only
-	// thing that changes between the two states is the workspace's daemon
-	// profile (which contributes the --backend fallback).
+	// thing that changes between the two states is the workspace's local node
+	// provider (which contributes the --backend fallback).
 	cachedLaunch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_old", agent, "")
 	if err != nil {
 		t.Fatalf("build cached launch: %v", err)
@@ -437,11 +440,8 @@ func TestAgentTerminalLaunchSpecStale_DetectsBackendChange(t *testing.T) {
 		t.Fatal("with no workspace default backend, the cached spec matches what would be built — spec is fresh")
 	}
 
-	if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{
-		WorkspaceKey: "E2E",
-		AgentBackend: "codex",
-	}); err != nil {
-		t.Fatalf("upsert daemon profile: %v", err)
+	if err := localnodeconfig.SetRuntimeProvider("E2E", "codex"); err != nil {
+		t.Fatalf("set runtime provider: %v", err)
 	}
 
 	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
@@ -460,7 +460,7 @@ func TestAgentTerminalLaunchSpecStaleDetectsInteractivePromptFileChange(t *testi
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "operator-a", RoleName: "operator"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "operator-a", RoleName: "operator"}
 	cachedLaunch, _, err := buildAgentLaunchSpec(ctx, st, "E2E", "term_old", agent, "lead-1")
 	if err != nil {
 		t.Fatalf("build cached launch: %v", err)
@@ -486,7 +486,7 @@ func TestAgentTerminalLaunchSpecStaleDetectsInteractivePromptFileChange(t *testi
 func TestAgentTerminalLaunchSpecStale_NilLaunchTreatedStale(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	agent := &domain.Agent{WorkspaceKey: "E2E", Name: "nova", RoleName: "lead"}
+	agent := &agents.RuntimeIdentity{WorkspaceKey: "E2E", AgentID: "nova", RoleName: "lead"}
 	existing := &tabmeta.TabMetadata{SessionName: "term_old", Launch: nil}
 	if !agentTerminalLaunchSpecStale(ctx, st, "E2E", existing, agent) {
 		t.Fatal("existing tab with nil Launch should be treated as stale")
@@ -513,7 +513,7 @@ func TestEnsureAgentTerminalSessionSerializesConcurrentCreates(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "nova",
 		RoleName:     "lead",
@@ -532,7 +532,7 @@ func TestEnsureAgentTerminalSessionSerializesConcurrentCreates(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
+			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", terminalStoreIdentity{services: st.AgentServices()})
 			if err != nil {
 				errs <- err
 				return
@@ -610,16 +610,16 @@ func TestEnsureAgentTerminalSessionWaitsForStopLifecycleBoundary(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "first-terminal-race",
 		RoleName:     "lead",
-		DesiredState: domain.AgentDesiredRunning,
+		DesiredState: agents.DesiredRunning,
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	active := domain.AgentStateActive
-	if _, err := st.Agents().Update(ctx, "E2E", "first-terminal-race", store.AgentUpdate{State: &active}); err != nil {
+	active := terminalTestAgentStateActive
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "first-terminal-race", terminalTestAgentUpdate{State: &active}); err != nil {
 		t.Fatalf("activate agent: %v", err)
 	}
 
@@ -640,7 +640,7 @@ func TestEnsureAgentTerminalSessionWaitsForStopLifecycleBoundary(t *testing.T) {
 	ensureStarted := make(chan struct{})
 	go func() {
 		close(ensureStarted)
-		meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "first-terminal-race")
+		meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "first-terminal-race", terminalStoreIdentity{services: st.AgentServices()})
 		resultCh <- ensureResult{meta: meta, err: err}
 	}()
 	<-ensureStarted
@@ -650,9 +650,9 @@ func TestEnsureAgentTerminalSessionWaitsForStopLifecycleBoundary(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 
-	stopped := domain.AgentStateStopped
-	desiredStopped := domain.AgentDesiredStopped
-	if _, err := st.Agents().Update(ctx, "E2E", "first-terminal-race", store.AgentUpdate{
+	stopped := terminalTestAgentStateStopped
+	desiredStopped := agents.DesiredStopped
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "first-terminal-race", terminalTestAgentUpdate{
 		State:        &stopped,
 		DesiredState: &desiredStopped,
 	}); err != nil {
@@ -667,16 +667,13 @@ func TestEnsureAgentTerminalSessionWaitsForStopLifecycleBoundary(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("terminal metadata creation did not finish after Stop released the lifecycle boundary")
 	}
-	if result.err != nil {
-		t.Fatalf("ensureAgentTerminalSession: %v", result.err)
-	}
-	if result.meta == nil || result.meta.AgentID != "first-terminal-race" {
-		t.Fatalf("terminal metadata = %#v, want stopped interactive agent tab", result.meta)
+	if result.err == nil || !strings.Contains(result.err.Error(), "agent is not running") {
+		t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want stopped-agent validation", result.meta, result.err)
 	}
 	select {
 	case <-putCalled:
+		t.Fatal("terminal metadata was created after Stop made desired_state=stopped durable")
 	default:
-		t.Fatal("terminal metadata was not created after Stop released the lifecycle boundary")
 	}
 }
 
@@ -692,28 +689,28 @@ func TestEnsureAgentTerminalSessionRejectsStoppedAgentWithoutSession(t *testing.
 		time.Now(),
 	)
 
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "worker-done",
 		RoleName:     "task",
-		DesiredState: domain.AgentDesiredStopped,
+		DesiredState: agents.DesiredStopped,
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	stopped := domain.AgentStateStopped
-	if _, err := st.Agents().Update(ctx, "E2E", "worker-done", store.AgentUpdate{
+	stopped := terminalTestAgentStateStopped
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "worker-done", terminalTestAgentUpdate{
 		State: &stopped,
 	}); err != nil {
 		t.Fatalf("stop agent: %v", err)
 	}
 
-	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done")
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done", terminalStoreIdentity{services: st.AgentServices()})
 	var svcErr *service.ServiceError
 	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
 	}
-	if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
-		t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
+	if !strings.Contains(svcErr.Message, "background worker") {
+		t.Fatalf("validation message = %q, want background worker guidance", svcErr.Message)
 	}
 }
 
@@ -729,30 +726,30 @@ func TestEnsureAgentTerminalSessionRejectsActiveEphemeralWorkerWithoutRelaunch(t
 		time.Now(),
 	)
 
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey:   "E2E",
 		Name:           "worker-live",
 		RoleName:       "task",
-		Mode:           domain.AgentModeEphemeral,
-		DesiredState:   domain.AgentDesiredRunning,
+		Mode:           "ephemeral",
+		DesiredState:   agents.DesiredRunning,
 		MaxConcurrency: 1,
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	active := domain.AgentStateActive
-	if _, err := st.Agents().Update(ctx, "E2E", "worker-live", store.AgentUpdate{
+	active := terminalTestAgentStateActive
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "worker-live", terminalTestAgentUpdate{
 		State: &active,
 	}); err != nil {
 		t.Fatalf("activate agent: %v", err)
 	}
 
-	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live")
+	_, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-live", terminalStoreIdentity{services: st.AgentServices()})
 	var svcErr *service.ServiceError
 	if !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession error = %v, want validation", err)
 	}
-	if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
-		t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
+	if !strings.Contains(svcErr.Message, "background worker") {
+		t.Fatalf("validation message = %q, want background worker guidance", svcErr.Message)
 	}
 
 	tabs, err := svc.ListTabs(ctx, "E2E")
@@ -760,7 +757,7 @@ func TestEnsureAgentTerminalSessionRejectsActiveEphemeralWorkerWithoutRelaunch(t
 		t.Fatalf("list tabs: %v", err)
 	}
 	if len(tabs) != 0 {
-		t.Fatalf("tab count = %d, want no terminal tab created for daemon-supervised worker", len(tabs))
+		t.Fatalf("tab count = %d, want no terminal tab created for background worker", len(tabs))
 	}
 }
 
@@ -801,27 +798,27 @@ func TestEnsureAgentTerminalSessionRejectsAdvancedServiceWorkersWithoutCreatingT
 					t.Fatalf("create role: %v", err)
 				}
 			}
-			if _, err := st.Agents().Create(ctx, store.AgentCreate{
+			if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 				WorkspaceKey: "E2E",
 				Name:         "advanced-worker",
 				RoleName:     tt.roleName,
-				Mode:         domain.AgentModeService,
-				DesiredState: domain.AgentDesiredRunning,
+				Mode:         "service",
+				DesiredState: agents.DesiredRunning,
 			}); err != nil {
 				t.Fatalf("create agent: %v", err)
 			}
-			active := domain.AgentStateActive
-			if _, err := st.Agents().Update(ctx, "E2E", "advanced-worker", store.AgentUpdate{State: &active}); err != nil {
+			active := terminalTestAgentStateActive
+			if _, err := terminalTestAgents(st).Update(ctx, "E2E", "advanced-worker", terminalTestAgentUpdate{State: &active}); err != nil {
 				t.Fatalf("activate agent: %v", err)
 			}
 
-			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "advanced-worker")
+			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "advanced-worker", terminalStoreIdentity{services: st.AgentServices()})
 			var svcErr *service.ServiceError
 			if meta != nil || !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
 				t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want validation", meta, err)
 			}
-			if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
-				t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
+			if !strings.Contains(svcErr.Message, "background worker") {
+				t.Fatalf("validation message = %q, want background worker guidance", svcErr.Message)
 			}
 			tabs, err := svc.ListTabs(ctx, "E2E")
 			if err != nil {
@@ -882,17 +879,17 @@ func TestEnsureAgentTerminalSessionAllowsInteractiveLeadPRReviewAndCustomAssignm
 					t.Fatalf("create role: %v", err)
 				}
 			}
-			if _, err := st.Agents().Create(ctx, store.AgentCreate{
+			if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 				WorkspaceKey: "E2E",
 				Name:         "interactive-agent",
 				RoleName:     tt.roleName,
-				Mode:         domain.AgentModeService,
-				DesiredState: domain.AgentDesiredRunning,
+				Mode:         "service",
+				DesiredState: agents.DesiredRunning,
 			}); err != nil {
 				t.Fatalf("create agent: %v", err)
 			}
 
-			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "interactive-agent")
+			meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "interactive-agent", terminalStoreIdentity{services: st.AgentServices()})
 			if err != nil {
 				t.Fatalf("ensureAgentTerminalSession: %v", err)
 			}
@@ -913,7 +910,7 @@ func TestEnsureAgentTerminalSessionAllowsInteractiveLeadPRReviewAndCustomAssignm
 	}
 }
 
-func TestEnsureAgentTerminalSessionAllowsStoppedCustomInteractiveRole(t *testing.T) {
+func TestEnsureAgentTerminalSessionRejectsStoppedCustomInteractiveRole(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
 	svc := webuiterminal.NewTerminalService(
@@ -933,25 +930,22 @@ func TestEnsureAgentTerminalSessionAllowsStoppedCustomInteractiveRole(t *testing
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator-a",
 		RoleName:     "operator",
-		DesiredState: domain.AgentDesiredStopped,
+		DesiredState: agents.DesiredStopped,
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	stopped := domain.AgentStateStopped
-	if _, err := st.Agents().Update(ctx, "E2E", "operator-a", store.AgentUpdate{State: &stopped}); err != nil {
+	stopped := terminalTestAgentStateStopped
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "operator-a", terminalTestAgentUpdate{State: &stopped}); err != nil {
 		t.Fatalf("stop agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "operator-a")
-	if err != nil {
-		t.Fatalf("ensureAgentTerminalSession: %v", err)
-	}
-	if meta.Launch == nil || !meta.Writable {
-		t.Fatalf("launch/writable = %#v/%v, want stopped interactive-kind agent launchable", meta.Launch, meta.Writable)
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "operator-a", terminalStoreIdentity{services: st.AgentServices()})
+	if err == nil || !strings.Contains(err.Error(), "agent is not running") {
+		t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want stopped-agent validation", meta, err)
 	}
 }
 
@@ -974,21 +968,21 @@ func TestEnsureAgentTerminalSessionAllowsEphemeralCustomInteractiveRole(t *testi
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator-live",
 		RoleName:     "operator",
-		Mode:         domain.AgentModeEphemeral,
-		DesiredState: domain.AgentDesiredRunning,
+		Mode:         "ephemeral",
+		DesiredState: agents.DesiredRunning,
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	active := domain.AgentStateActive
-	if _, err := st.Agents().Update(ctx, "E2E", "operator-live", store.AgentUpdate{State: &active}); err != nil {
+	active := terminalTestAgentStateActive
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "operator-live", terminalTestAgentUpdate{State: &active}); err != nil {
 		t.Fatalf("activate agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "operator-live")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "operator-live", terminalStoreIdentity{services: st.AgentServices()})
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -1016,7 +1010,7 @@ func TestEnsureAgentTerminalSessionCreatesOrchestrationForCustomInteractiveRole(
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "operator-a",
 		RoleName:     "operator",
@@ -1024,7 +1018,7 @@ func TestEnsureAgentTerminalSessionCreatesOrchestrationForCustomInteractiveRole(
 		t.Fatalf("create agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "operator-a")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "operator-a", terminalStoreIdentity{services: st.AgentServices()})
 	if err != nil {
 		t.Fatalf("ensureAgentTerminalSession: %v", err)
 	}
@@ -1037,7 +1031,7 @@ func TestEnsureAgentTerminalSessionCreatesOrchestrationForCustomInteractiveRole(
 	}
 }
 
-func TestEnsureAgentTerminalSessionCreatesLaunchForStoppedAssignedLead(t *testing.T) {
+func TestEnsureAgentTerminalSessionRejectsStoppedAssignedLead(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
 	svc := webuiterminal.NewTerminalService(
@@ -1056,41 +1050,29 @@ func TestEnsureAgentTerminalSessionCreatesLaunchForStoppedAssignedLead(t *testin
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "nova",
 		RoleName:     "lead",
 		Parent:       "E2E-8",
-		DesiredState: domain.AgentDesiredStopped,
+		DesiredState: agents.DesiredStopped,
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	stopped := domain.AgentStateStopped
-	if _, err := st.Agents().Update(ctx, "E2E", "nova", store.AgentUpdate{
+	stopped := terminalTestAgentStateStopped
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "nova", terminalTestAgentUpdate{
 		State: &stopped,
 	}); err != nil {
 		t.Fatalf("stop agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova")
-	if err != nil {
-		t.Fatalf("ensureAgentTerminalSession: %v", err)
-	}
-	if meta.Launch == nil {
-		t.Fatal("launch spec = nil, want assigned lead to be resumable")
-	}
-	if !meta.Writable {
-		t.Fatal("writable = false, want assigned lead terminal to be writable")
-	}
-	cmd := strings.Join(meta.Launch.Argv, " ")
-	for _, want := range []string{"--backend", "codex", "lead"} {
-		if !strings.Contains(cmd, want) {
-			t.Fatalf("launch argv %q missing %q", cmd, want)
-		}
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "nova", terminalStoreIdentity{services: st.AgentServices()})
+	if err == nil || !strings.Contains(err.Error(), "agent is not running") {
+		t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want stopped-agent validation", meta, err)
 	}
 }
 
-func TestEnsureAgentTerminalSessionCreatesLaunchForStoppedUnassignedLead(t *testing.T) {
+func TestEnsureAgentTerminalSessionRejectsStoppedUnassignedLead(t *testing.T) {
 	ctx := context.Background()
 	st, tabStore, rdb := newAgentSessionTestDeps(t)
 	svc := webuiterminal.NewTerminalService(
@@ -1109,36 +1091,24 @@ func TestEnsureAgentTerminalSessionCreatesLaunchForStoppedUnassignedLead(t *test
 	}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "atlas",
 		RoleName:     "lead",
-		DesiredState: domain.AgentDesiredStopped,
+		DesiredState: agents.DesiredStopped,
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	stopped := domain.AgentStateStopped
-	if _, err := st.Agents().Update(ctx, "E2E", "atlas", store.AgentUpdate{
+	stopped := terminalTestAgentStateStopped
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "atlas", terminalTestAgentUpdate{
 		State: &stopped,
 	}); err != nil {
 		t.Fatalf("stop agent: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "atlas")
-	if err != nil {
-		t.Fatalf("ensureAgentTerminalSession: %v", err)
-	}
-	if meta.Launch == nil {
-		t.Fatal("launch spec = nil, want unassigned lead to be resumable")
-	}
-	if !meta.Writable {
-		t.Fatal("writable = false, want unassigned lead terminal to be writable")
-	}
-	cmd := strings.Join(meta.Launch.Argv, " ")
-	for _, want := range []string{"--backend", "codex", "lead"} {
-		if !strings.Contains(cmd, want) {
-			t.Fatalf("launch argv %q missing %q", cmd, want)
-		}
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "atlas", terminalStoreIdentity{services: st.AgentServices()})
+	if err == nil || !strings.Contains(err.Error(), "agent is not running") {
+		t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want stopped-agent validation", meta, err)
 	}
 }
 
@@ -1154,16 +1124,16 @@ func TestEnsureAgentTerminalSessionRejectsWorkerWithExistingTerminalTab(t *testi
 		time.Now(),
 	)
 
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "worker-done",
 		RoleName:     "task",
-		DesiredState: domain.AgentDesiredStopped,
+		DesiredState: agents.DesiredStopped,
 	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	stopped := domain.AgentStateStopped
-	if _, err := st.Agents().Update(ctx, "E2E", "worker-done", store.AgentUpdate{
+	stopped := terminalTestAgentStateStopped
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "worker-done", terminalTestAgentUpdate{
 		State: &stopped,
 	}); err != nil {
 		t.Fatalf("stop agent: %v", err)
@@ -1188,13 +1158,13 @@ func TestEnsureAgentTerminalSessionRejectsWorkerWithExistingTerminalTab(t *testi
 		t.Fatalf("seed tab: %v", err)
 	}
 
-	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done")
+	meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "worker-done", terminalStoreIdentity{services: st.AgentServices()})
 	var svcErr *service.ServiceError
 	if meta != nil || !errors.As(err, &svcErr) || svcErr.Kind != service.KindValidation {
 		t.Fatalf("ensureAgentTerminalSession = (%#v, %v), want validation", meta, err)
 	}
-	if !strings.Contains(svcErr.Message, "daemon-supervised worker") {
-		t.Fatalf("validation message = %q, want daemon-supervised worker guidance", svcErr.Message)
+	if !strings.Contains(svcErr.Message, "background worker") {
+		t.Fatalf("validation message = %q, want background worker guidance", svcErr.Message)
 	}
 	stored, err := svc.GetTab(ctx, "E2E", "term_worker_done")
 	if err != nil {
@@ -1217,7 +1187,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgen
 		time.Now(),
 	)
 
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "lead-live",
 		RoleName:     "lead",
@@ -1254,7 +1224,7 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgen
 	}
 	resultChannel := make(chan ensureResult, 1)
 	go func() {
-		meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-live")
+		meta, err := ensureAgentTerminalSession(ctx, svc, st, "E2E", "lead-live", terminalStoreIdentity{services: st.AgentServices()})
 		resultChannel <- ensureResult{meta: meta, err: err}
 	}()
 	var result ensureResult
@@ -1296,9 +1266,9 @@ func TestEnsureAgentTerminalSessionCreatesFreshTabForStaleRunningInteractiveAgen
 func TestBuildAgentLaunchSpecRejectsUnknownRoleWithoutPrompt(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	agent := &domain.Agent{
+	agent := &agents.RuntimeIdentity{
 		WorkspaceKey: "E2E",
-		Name:         "reviewer",
+		AgentID:      "reviewer",
 		RoleName:     "reviewer",
 	}
 
@@ -1309,24 +1279,22 @@ func TestBuildAgentLaunchSpecRejectsUnknownRoleWithoutPrompt(t *testing.T) {
 
 // TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend asserts that when the
 // agent and role both have no backend, the launch spec picks up the
-// workspace's daemon-profile backend. Without this fallback, `loom agentdef
+// workspace's local-node backend. Without this fallback, `loom agentdef
 // add nova --role lead` (no --backend) produced a launch command of
 // `loom lead` with no --backend flag, so the terminal never started codex.
 func TestBuildAgentLaunchSpecFallsBackToWorkspaceBackend(t *testing.T) {
 	ctx := context.Background()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "E2E", Name: "E2E"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{
-		WorkspaceKey: "E2E",
-		AgentBackend: "codex",
-	}); err != nil {
-		t.Fatalf("upsert daemon profile: %v", err)
+	if err := localnodeconfig.SetRuntimeProvider("E2E", "codex"); err != nil {
+		t.Fatalf("set runtime provider: %v", err)
 	}
-	agent := &domain.Agent{
+	agent := &agents.RuntimeIdentity{
 		WorkspaceKey: "E2E",
-		Name:         "nova",
+		AgentID:      "nova",
 		RoleName:     "lead",
 		// No Backend set on the agent itself
 	}

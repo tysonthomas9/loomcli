@@ -157,63 +157,6 @@ func TestCheckGitRepo(t *testing.T) {
 	})
 }
 
-func TestCheckProjectConfig(t *testing.T) {
-	t.Run("no loom.yaml", func(t *testing.T) {
-		dir := t.TempDir()
-		defer ResetWorkspaceRuntimeDirCache()
-		ResetWorkspaceRuntimeDirCache()
-		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
-
-		result := checkProjectConfig()
-		if result.Status != StatusPass {
-			t.Errorf("expected pass for FleetDB daemon config defaults, got %v: %s", result.Status, result.Summary)
-		}
-		if !strings.Contains(result.Summary, "FleetDB daemon profile loaded") {
-			t.Errorf("expected FleetDB daemon profile summary, got: %s", result.Summary)
-		}
-	})
-
-	t.Run("invalid loom.yaml ignored by FleetDB config", func(t *testing.T) {
-		dir := t.TempDir()
-		defer ResetWorkspaceRuntimeDirCache()
-		ResetWorkspaceRuntimeDirCache()
-		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
-
-		// Write invalid YAML with a missing colon on line 3
-		invalidYAML := "agents:\n  - worktree: falcon\n    role plan\n  - worktree: nova\n"
-		if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(invalidYAML), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		result := checkProjectConfig()
-		if result.Status != StatusPass {
-			t.Errorf("expected pass because daemon config is FleetDB-backed, got %v: %s", result.Status, result.Summary)
-		}
-	})
-
-	t.Run("valid loom.yaml", func(t *testing.T) {
-		dir := t.TempDir()
-		defer ResetWorkspaceRuntimeDirCache()
-		ResetWorkspaceRuntimeDirCache()
-		setupWorkspaceConfig(t, &LoomConfig{DefaultWorkspace: "test", Workspaces: map[string]WorkspaceConfig{"test": {Path: dir}}})
-
-		yamlContent := `agents:
-  - worktree: falcon
-    role: plan
-  - worktree: nova
-    role: task
-`
-		if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(yamlContent), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		result := checkProjectConfig()
-		if result.Status != StatusPass {
-			t.Errorf("expected pass for valid loom.yaml, got %v: %s", result.Status, result.Summary)
-		}
-	})
-}
-
 func TestCheckGlobalConfig(t *testing.T) {
 	t.Run("no config", func(t *testing.T) {
 		dir := t.TempDir()
@@ -344,7 +287,7 @@ func TestDoctorJSONOutput(t *testing.T) {
 	output := DoctorOutput{
 		Checks: []CheckResult{
 			{Name: "git", Status: StatusPass, Summary: "git 2.44 found"},
-			{Name: "tmux", Status: StatusWarn, Summary: "tmux not installed", Detail: "Required for daemon mode"},
+			{Name: "tmux", Status: StatusWarn, Summary: "tmux not installed", Detail: "Required for auto mode and terminal-backed workflows"},
 			{Name: "fleet-db", Status: StatusFail, Summary: "fleet-db not configured", Detail: "Set LOOM_FLEET_URL"},
 		},
 		Summary: DoctorSummary{Pass: 1, Warn: 1, Fail: 1},
@@ -434,26 +377,6 @@ func TestCheckBackendCLI(t *testing.T) {
 		// Status could be pass or fail depending on environment
 		if result.Status != StatusPass && result.Status != StatusFail {
 			t.Errorf("expected pass or fail, got %v", result.Status)
-		}
-	})
-}
-
-func TestCheckLoomDaemon(t *testing.T) {
-	t.Run("no pid file", func(t *testing.T) {
-		dir := t.TempDir()
-		origDir, _ := os.Getwd()
-		if err := os.Chdir(dir); err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = os.Chdir(origDir) }()
-
-		// Prevent real config loading from interfering
-		t.Setenv("LOOM_CONFIG_DIR", dir)
-		defer ResetWorkspaceRuntimeDirCache()
-
-		result := checkLoomDaemon()
-		if result.Status != StatusWarn {
-			t.Errorf("expected warn when no PID file, got %v: %s", result.Status, result.Summary)
 		}
 	})
 }
@@ -843,7 +766,7 @@ func TestCheckOrphanedTmuxSessions_FixModePartialFailure(t *testing.T) {
 }
 
 func TestCheckFleetDB_Integration(t *testing.T) {
-	t.Run("local mode checks embedded binary without daemon config", func(t *testing.T) {
+	t.Run("local mode checks embedded binary without runtime config", func(t *testing.T) {
 		dir := t.TempDir()
 		origDir, _ := os.Getwd()
 		if err := os.Chdir(dir); err != nil {

@@ -1597,7 +1597,7 @@ function App() {
         {...(prefillOnboardingAgent && shouldPrefillOnboardingAgent
           ? {
               defaultName: ONBOARDING_AGENT_NAME,
-              supervisedRole: ONBOARDING_AGENT_ROLE,
+              requiredRole: ONBOARDING_AGENT_ROLE,
             }
           : {})}
         onClose={() => {

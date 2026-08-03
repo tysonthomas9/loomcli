@@ -525,13 +525,6 @@ func TestEnsureReviewerCreatesAgentWorktreeAndSeed(t *testing.T) {
 		agent.DesiredState != agents.DesiredRunning {
 		t.Fatalf("canonical reviewer Agent = %+v", agent)
 	}
-	if _, err := h.store.Agents().Get(
-		context.Background(),
-		prReviewTestWorkspace,
-		agentName,
-	); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("legacy Agent row lookup = %v, want not found", err)
-	}
 	if _, err := h.store.Roles().Get(
 		context.Background(),
 		prReviewTestWorkspace,

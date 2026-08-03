@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/agentprovisioning"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
@@ -113,12 +114,9 @@ func (m *Module) promptAgentProvisioningSpec(
 	if m == nil || m.store == nil || driver == nil {
 		return agentprovisioning.Spec{}, agentprovisioning.ErrUnavailable
 	}
-	versionID := strings.TrimSpace(driver.ActiveVersionID)
-	if strings.TrimSpace(driver.DriverID) == "" || versionID == "" {
-		return agentprovisioning.Spec{}, fmt.Errorf(
-			"prompt-agent driver requires an active version: %w",
-			agentprovisioning.ErrInvalid,
-		)
+	versionID, err := activePromptAgentVersion(driver)
+	if err != nil {
+		return agentprovisioning.Spec{}, err
 	}
 	agentID, err := m.mintAvailablePromptAgentID(
 		ctx,
@@ -137,11 +135,15 @@ func (m *Module) promptAgentProvisioningSpec(
 		return agentprovisioning.Spec{}, err
 	}
 	eventPatterns := promptAgentEventPatterns(plan)
+	agentSpec, err := promptAgentServiceSpec(plan, role, agentID)
+	if err != nil {
+		return agentprovisioning.Spec{}, err
+	}
 	return agentprovisioning.Spec{
 		ProvisioningID: "provision-" + agentID,
 		WorkspaceKey:   workspace,
 		Role:           role,
-		Agent:          promptAgentServiceSpec(plan, agentID),
+		Agent:          agentSpec,
 		Binding: promptAgentBindingSpec(
 			plan,
 			bindingID,
@@ -152,6 +154,14 @@ func (m *Module) promptAgentProvisioningSpec(
 		),
 		Grants: promptAgentGrantSpecs(bindingID, plan.request.Grants),
 	}, nil
+}
+
+func activePromptAgentVersion(driver *workflowcatalog.Driver) (string, error) {
+	versionID := strings.TrimSpace(driver.ActiveVersionID)
+	if strings.TrimSpace(driver.DriverID) == "" || versionID == "" {
+		return "", fmt.Errorf("prompt-agent driver requires an active version: %w", agentprovisioning.ErrInvalid)
+	}
+	return versionID, nil
 }
 
 func promptAgentBindingID(plan promptAgentCreatePlan, agentID string) string {
@@ -174,18 +184,21 @@ func promptAgentEventPatterns(plan promptAgentCreatePlan) []string {
 
 func promptAgentServiceSpec(
 	plan promptAgentCreatePlan,
+	role agentprovisioning.RoleSpec,
 	agentID string,
-) agentprovisioning.AgentSpec {
-	metadata := map[string]string{}
-	if backend := strings.TrimSpace(plan.request.Backend); backend != "" {
-		metadata["backend"] = backend
+) (agentprovisioning.AgentSpec, error) {
+	metadata, err := agentsmodule.WithRuntimeMetadata(nil, agentsmodule.RuntimeMetadata{
+		RoleKind: strings.TrimSpace(role.Kind), Backend: strings.TrimSpace(plan.request.Backend),
+	})
+	if err != nil {
+		return agentprovisioning.AgentSpec{}, err
 	}
 	return agentprovisioning.AgentSpec{
 		AgentID: agentID, Name: firstNonEmpty(plan.request.Name, plan.roleName),
 		Kind:         string(agentServiceKindForSource(plan.sourceKind)),
 		DesiredState: string(plan.desired), RoleName: plan.roleName,
 		BudgetPolicy: plan.request.BudgetPolicy, Metadata: metadata,
-	}
+	}, nil
 }
 
 func promptAgentBindingSpec(
@@ -242,11 +255,6 @@ func (m *Module) mintAvailablePromptAgentID(
 	for attempt := 0; attempt < 5; attempt++ {
 		agentID, err := mintAgentRecordID(name)
 		if err != nil {
-			return "", err
-		}
-		if _, err := m.store.Agents().Get(ctx, workspace, agentID); err == nil {
-			continue
-		} else if !errors.Is(err, domain.ErrNotFound) {
 			return "", err
 		}
 		if _, err := m.store.AgentServices().Get(ctx, workspace, agentID); err == nil {

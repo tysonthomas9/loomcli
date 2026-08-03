@@ -10,9 +10,33 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
+
+type convergenceAgentQueries struct {
+	agents []*agentsmodule.Agent
+}
+
+func (queries convergenceAgentQueries) GetAgent(_ context.Context, workspace, agentID string) (*agentsmodule.Agent, error) {
+	for _, agent := range queries.agents {
+		if agent != nil && agent.WorkspaceKey == workspace && agent.AgentID == agentID {
+			return agent, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (queries convergenceAgentQueries) ListAgents(_ context.Context, workspace string, _ agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error) {
+	out := make([]*agentsmodule.Agent, 0, len(queries.agents))
+	for _, agent := range queries.agents {
+		if agent != nil && agent.WorkspaceKey == workspace {
+			out = append(out, agent)
+		}
+	}
+	return out, nil
+}
 
 func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing.T) {
 	ctx := context.Background()
@@ -20,12 +44,15 @@ func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "workspace"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "lead", Kind: string(domain.RoleKindInteractive)}); err != nil {
+	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey: "WS", ProfileID: "lead-profile", Name: "lead-profile", Role: "lead", ParentEpic: "EPIC-1",
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "WS", Name: "lead-1", RoleName: "lead", Parent: "EPIC-1"}); err != nil {
-		t.Fatal(err)
-	}
+	agentQueries := convergenceAgentQueries{agents: []*agentsmodule.Agent{{
+		WorkspaceKey: "WS", AgentID: "lead-1", Name: "lead-1", Kind: agentsmodule.AgentKindLead,
+		Behavior: agentsmodule.BehaviorReference{RoleName: "lead"}, ProfileName: "lead-profile",
+	}}}
 	if _, err := st.Drivers().Create(ctx, store.DriverCreate{
 		WorkspaceKey: "WS", DriverID: "driver-1", Name: "driver", OwnerType: domain.DriverOwnerSystem,
 		Status: domain.DriverStatusActive,
@@ -89,7 +116,7 @@ func TestExecutionTaskRunConvergenceAdaptersAreIdempotentAndTokenFree(t *testing
 	}
 	dependencies, err := NewExecutionTaskRunConvergenceDependencies(ExecutionTaskRunConvergenceDependencies{
 		TaskRuns: st.TaskRuns(), Checkpoints: checkpoints, DriverRuns: st.DriverRuns(), DriverSteps: repairStore,
-		Events: st.TaskRunEvents(), Agents: st.Agents(), Outbox: st.Outbox(),
+		Events: st.TaskRunEvents(), AgentQueries: agentQueries, WorkerProfiles: st.WorkerProfiles(), Outbox: st.Outbox(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +214,7 @@ func TestExecutionTaskRunConvergenceAdapterAcceptsCancelledToSkippedOnly(t *test
 	checkpoints := st.TaskRuns().(store.TaskRunTerminalConvergenceStore)
 	dependencies, err := NewExecutionTaskRunConvergenceDependencies(ExecutionTaskRunConvergenceDependencies{
 		TaskRuns: st.TaskRuns(), Checkpoints: checkpoints, DriverRuns: st.DriverRuns(), DriverSteps: repairs,
-		Events: st.TaskRunEvents(), Agents: st.Agents(), Outbox: st.Outbox(),
+		Events: st.TaskRunEvents(), AgentQueries: convergenceAgentQueries{}, WorkerProfiles: st.WorkerProfiles(), Outbox: st.Outbox(),
 	})
 	if err != nil {
 		t.Fatal(err)

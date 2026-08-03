@@ -18,6 +18,7 @@ import (
 	"nhooyr.io/websocket" //nolint:staticcheck // SA1019: websocket migration tracked separately
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -385,8 +386,8 @@ func classifyAttachErr(err error, session, workspace string) (websocket.StatusCo
 	case errors.Is(err, errAgentTerminalStopped):
 		slog.Info("stopped agent terminal attach refused", "session", session, "workspace", workspace)
 		return websocket.StatusPolicyViolation, err.Error() //nolint:staticcheck // SA1019
-	case errors.Is(err, errDaemonSupervisedWorkerTerminal):
-		slog.Info("daemon-supervised worker terminal attach refused", "session", session, "workspace", workspace)
+	case errors.Is(err, errBackgroundWorkerTerminal):
+		slog.Info("background worker terminal attach refused", "session", session, "workspace", workspace)
 		return websocket.StatusPolicyViolation, err.Error() //nolint:staticcheck // SA1019
 	case errors.Is(err, errTerminalLaunchMetaMissing):
 		slog.Error("terminal metadata missing launch spec", "session", session, "workspace", workspace)
@@ -651,7 +652,7 @@ func authorizeAgentTerminalLaunch(
 	if agentID == "" {
 		return errors.New("agent terminal metadata missing agent identity")
 	}
-	agent, err := loadTerminalAgent(ctx, st.Agents(), workspace, agentID, identities...)
+	agent, err := loadTerminalAgent(ctx, workspace, agentID, identities...)
 	if err != nil {
 		return fmt.Errorf("load agent terminal state: %w", err)
 	}
@@ -659,10 +660,10 @@ func authorizeAgentTerminalLaunch(
 	if err != nil {
 		return fmt.Errorf("load agent terminal role: %w", err)
 	}
-	if isDaemonSupervisedWorker(agent, domain.ResolveRoleKind(role, agent.RoleName)) {
-		return errDaemonSupervisedWorkerTerminal
+	if isBackgroundWorker(agent, domain.ResolveRoleKind(role, agent.RoleName)) {
+		return errBackgroundWorkerTerminal
 	}
-	if agent.State == domain.AgentStateStopped || agent.DesiredState == domain.AgentDesiredStopped {
+	if agent.DesiredState != agents.DesiredRunning {
 		return errAgentTerminalStopped
 	}
 	return nil

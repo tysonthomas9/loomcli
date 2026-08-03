@@ -214,7 +214,6 @@ type Client struct {
 
 	workspaces           *workspaceStore
 	repos                *repoStore
-	agents               *agentStore
 	nodes                *nodeStore
 	sessions             *agentSessionStore
 	terminals            *terminalSessionStore
@@ -222,7 +221,6 @@ type Client struct {
 	artifactCommands     *artifactCommandStore
 	leases               *agentLeaseStore
 	ownership            *agentOwnershipLeaseStore
-	commands             *agentCommandStore
 	inbox                *agentInboxMessageStore
 	drivers              *driverStore
 	versions             *driverVersionStore
@@ -247,7 +245,6 @@ type Client struct {
 	awaits               *awaitStore
 	workers              *workerStore
 	roles                *roleStore
-	daemon               *daemonStore
 
 	connectors      *connectorStore
 	connectorGrants *connectorGrantStore
@@ -280,14 +277,12 @@ func (c *Client) initializeStores() {
 	capabilityRequests := &capabilityRequester{client: c}
 	c.workspaces = &workspaceStore{client: c}
 	c.repos = &repoStore{client: c}
-	c.agents = &agentStore{client: c}
 	c.nodes = &nodeStore{client: c}
 	c.sessions = &agentSessionStore{client: c}
 	c.terminals = &terminalSessionStore{client: c}
 	c.artifacts = &artifactStore{client: c}
 	c.artifactCommands = &artifactCommandStore{client: c}
 	c.leases = &agentLeaseStore{client: c}
-	c.commands = &agentCommandStore{client: c}
 	c.inbox = &agentInboxMessageStore{client: c}
 	c.drivers = &driverStore{client: c}
 	c.versions = &driverVersionStore{client: c}
@@ -313,7 +308,6 @@ func (c *Client) initializeStores() {
 	c.awaits = &awaitStore{client: c}
 	c.workers = &workerStore{client: c}
 	c.roles = &roleStore{client: c}
-	c.daemon = &daemonStore{client: c}
 	c.connectors = &connectorStore{client: c}
 	c.connectorGrants = &connectorGrantStore{client: c}
 	c.connectorCalls = &connectorAuditStore{client: c}
@@ -387,9 +381,6 @@ func (c *Client) Workspaces() store.WorkspaceStore { return c.workspaces }
 // Repos returns the RepoStore.
 func (c *Client) Repos() store.RepoStore { return c.repos }
 
-// Agents returns the AgentStore.
-func (c *Client) Agents() store.AgentStore { return c.agents }
-
 // Nodes returns the NodeStore.
 func (c *Client) Nodes() store.NodeStore { return c.nodes }
 
@@ -411,8 +402,6 @@ func (c *Client) ArtifactCommands() ArtifactTransport { return c.artifactCommand
 func (c *Client) AgentLeases() store.AgentLeaseStore { return c.leases }
 
 func (c *Client) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return c.ownership }
-
-func (c *Client) AgentCommands() store.AgentCommandStore { return c.commands }
 
 func (c *Client) AgentInboxMessages() store.AgentInboxMessageStore { return c.inbox }
 
@@ -510,9 +499,6 @@ func (c *Client) Workers() store.WorkerStore { return c.workers }
 
 // Roles returns the RoleStore.
 func (c *Client) Roles() store.RoleStore { return c.roles }
-
-// Daemon returns the DaemonProfileStore.
-func (c *Client) Daemon() store.DaemonProfileStore { return c.daemon }
 
 // Close is a no-op — HTTP clients hold no resources beyond the
 // transport's connection pool, and that is shared / not owned by us.
@@ -790,7 +776,6 @@ func classifyForbiddenHTTPError(prefix, path, code string) error {
 		return fmt.Errorf("%s: %w", prefix, domain.ErrAwaitActorForbidden)
 	}
 	if strings.Contains(path, "/driver-runs/") || strings.Contains(path, "/task-runs/") ||
-		strings.Contains(path, "/agent-commands/") ||
 		strings.Contains(path, "/agent-ownership-leases/") ||
 		strings.Contains(path, "/agent-session-authority/") ||
 		strings.Contains(path, "/desired-state/owned") ||

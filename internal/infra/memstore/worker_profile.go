@@ -106,6 +106,9 @@ func (s *workerProfileStore) Update(_ context.Context, ws, profileID string, pat
 		return nil, fmt.Errorf("worker profile %q in workspace %q: %w", profileID, ws, domain.ErrNotFound)
 	}
 	updated := cloneWorkerProfile(profile)
+	if patch.ExpectedParentEpic != nil && updated.ParentEpic != *patch.ExpectedParentEpic {
+		return nil, domain.ErrConflict
+	}
 	applyWorkerProfileUpdateMem(updated, patch)
 	updated.ProfileID = strings.TrimSpace(updated.ProfileID)
 	if strings.TrimSpace(updated.Name) == "" {

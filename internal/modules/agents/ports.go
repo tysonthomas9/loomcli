@@ -65,6 +65,14 @@ type LifecycleStore interface {
 	ApplyLifecycle(context.Context, ApplyLifecycleMutation) (*LifecycleResult, error)
 }
 
+// DesiredStateBindingSource is the read-only Automation projection consumed
+// by Agents' desired-state controller. It reveals only whether each binding
+// attached to one Agent is enabled; binding identity and mutation remain
+// Automation-owned.
+type DesiredStateBindingSource interface {
+	ListAgentBindingStates(context.Context, string, string) ([]bool, error)
+}
+
 // OwnershipStore is the only persistence port for AgentOwnershipLease.
 // Renew and Release must validate every field in OwnershipProof atomically.
 type OwnershipStore interface {

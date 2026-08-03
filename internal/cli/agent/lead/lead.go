@@ -241,7 +241,12 @@ func currentLeadAssignmentPrompt(ctx context.Context, registration leadSessionRe
 
 	loadCtx, cancel := context.WithTimeout(ctx, leadStoreOpTimeout)
 	defer cancel()
-	assignment, err := epicrunner.LoadLeadAssignmentContext(loadCtx, handle.Store, ws, resolveLeadAgentID())
+	assignment, err := epicrunner.LoadLeadAssignmentContext(
+		loadCtx,
+		epicrunner.NewStoreLeadAssignmentSource(handle.Store),
+		ws,
+		resolveLeadAgentID(),
+	)
 	if err != nil || assignment == nil {
 		return ""
 	}

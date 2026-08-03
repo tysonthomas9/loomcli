@@ -377,7 +377,6 @@ func (e *workflowEndpointE2E) startLoomServe() {
 	}
 
 	cmd := exec.Command(e.loomBin, "serve",
-		"--no-daemon",
 		"--bind", "127.0.0.1",
 		"--port", strconv.Itoa(port),
 		"--frontend-url", "http://127.0.0.1:9",

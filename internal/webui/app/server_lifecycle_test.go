@@ -42,7 +42,6 @@ func TestStartServer_GracefulShutdown_CompletesWithinTimeout(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            port,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 2 * time.Second,
 		MaxPortAttempts: 5,
 	}
@@ -158,7 +157,6 @@ func TestStartServer_GracefulShutdown_AllPortsExhausted(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            startPort,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: maxAttempts,
 	}
@@ -229,7 +227,6 @@ func TestStartServer_FleetJWTKey_PreProvisioned(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            port,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 1 * time.Second,
 		MaxPortAttempts: 5,
 
@@ -268,7 +265,6 @@ func TestStartServer_ConcurrentRequests_DuringShutdown(t *testing.T) {
 	config := webui.ServerConfig{
 		Port:            port,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        1,
 		ShutdownTimeout: 3 * time.Second,
 		MaxPortAttempts: 5,
 	}

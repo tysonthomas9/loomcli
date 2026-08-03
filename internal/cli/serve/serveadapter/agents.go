@@ -42,10 +42,14 @@ func (capability *AgentsCapability) AgentProvisioningCommands() agentprovisionin
 }
 
 func (capability *AgentsCapability) RuntimeRegistrations() []platformruntime.Registration {
-	if capability == nil || capability.provisioning == nil {
+	if capability == nil {
 		return nil
 	}
-	return capability.provisioning.RuntimeRegistrations()
+	registrations := capability.capability.RuntimeRegistrations()
+	if capability.provisioning != nil {
+		registrations = append(registrations, capability.provisioning.RuntimeRegistrations()...)
+	}
+	return registrations
 }
 
 func (capability *AgentsCapability) SourceControlMaterializer() sourcecontrol.Materializer {
@@ -75,11 +79,11 @@ func BuildAgentsCapability(config AgentsConfig) (*AgentsCapability, error) { //n
 		return nil, fmt.Errorf("compose Agents: FleetDB Store handle is required")
 	}
 	capability, err := appserve.NewAgentsCapability(appserve.AgentsConfig{
-		FleetDBClient:              config.StoreHandle.FleetDBClient(),
-		CompatibilityRoles:         config.StoreHandle.Store.Roles(),
-		CompatibilityAgentServices: config.StoreHandle.Store.AgentServices(),
-		CompatibilityAssignments:   config.StoreHandle.Store.Agents(),
-		ExternalAuth:               config.ExternalAuth,
+		FleetDBClient:   config.StoreHandle.FleetDBClient(),
+		TriggerBindings: config.StoreHandle.Store.TriggerBindings(),
+		WorkspaceKey:    config.Workspace,
+		WorkspaceLister: newAgentProvisioningWorkspaceLister(config.StoreHandle.Store.Workspaces()),
+		ExternalAuth:    config.ExternalAuth,
 		ExternalOperatorResolverFactory: newExternalOperatorResolverFactory(
 			config.WorkspaceRoleResolver,
 		),

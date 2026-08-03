@@ -4,13 +4,39 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
+// ListFilter is the Web UI query contract for issue listings. It is owned by
+// the service port rather than by the retired daemon RPC protocol.
+type ListFilter struct {
+	Query               string
+	Status              string
+	Priority            *int
+	IssueType           string
+	Assignee            string
+	Labels              []string
+	LabelsAny           []string
+	SourceRepos         []string
+	Limit               int
+	TitleContains       string
+	DescriptionContains string
+	NotesContains       string
+	CreatedAfter        string
+	CreatedBefore       string
+	UpdatedAfter        string
+	UpdatedBefore       string
+	EmptyDescription    bool
+	NoAssignee          bool
+	NoLabels            bool
+	Pinned              *bool
+	ParentID            string
+	Lightweight         bool
+}
+
 // ListIssuesParams holds the parsed parameters for listing issues.
 type ListIssuesParams struct {
-	Args           *rpc.ListArgs
+	Args           *ListFilter
 	ExcludeStatus  []string
 	IncludeBlocked bool
 }

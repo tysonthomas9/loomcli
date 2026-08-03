@@ -10,8 +10,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agentinbox"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type (
@@ -189,8 +189,10 @@ const (
 // Like StaleTaskSweeper it is always-on policy: loom serve runs it whenever
 // it has a store, independent of LOOM_DRIVER_EXECUTOR.
 type OutboxDispatcher struct {
-	Store store.Store
-	Chat  interaction.ChatMessenger
+	Delivery    execution.OutboxDeliveryAPI
+	Authorities execution.SystemAuthorityResolver
+	Workspaces  WorkspaceLister
+	Chat        interaction.ChatMessenger
 	// WorkspaceKey scopes dispatch to one workspace. Empty dispatches every
 	// workspace returned by Store.Workspaces().List.
 	WorkspaceKey string
@@ -219,6 +221,12 @@ type OutboxDispatcher struct {
 	) (AgentMessageDeliveryResult, error)
 }
 
+// WorkspaceLister is the read-only workspace directory consumed when the
+// dispatcher is not scoped to one workspace.
+type WorkspaceLister interface {
+	ListWorkspaceKeys(context.Context) ([]string, error)
+}
+
 // outboxAttempt is the provider-agnostic view of one delivery attempt that
 // the dispatcher maps onto an OutboxDeliveryUpdate.
 type outboxAttempt struct {
@@ -230,8 +238,8 @@ type outboxAttempt struct {
 // RunOnce drains one batch of due outbox rows per target workspace and
 // returns how many rows reached delivered status.
 func (d *OutboxDispatcher) RunOnce(ctx context.Context) (int, error) {
-	if d == nil || d.Store == nil {
-		return 0, fmt.Errorf("store required: %w", domain.ErrInvalid)
+	if d == nil || d.Delivery == nil || d.Authorities == nil {
+		return 0, fmt.Errorf("execution outbox delivery API required: %w", domain.ErrInvalid)
 	}
 	workspaces, err := d.workspaceKeys(ctx)
 	if err != nil {
@@ -239,22 +247,32 @@ func (d *OutboxDispatcher) RunOnce(ctx context.Context) (int, error) {
 	}
 	delivered := 0
 	for _, ws := range workspaces {
-		rows, err := d.Store.Outbox().ListDue(ctx, ws, store.OutboxDueFilter{
-			Now:   d.now(),
-			Limit: d.batchLimit(),
+		auth, err := d.Authorities.ResolveExecutionSystemAuthority(
+			ctx, ws, execution.ActionListDueOutboxDeliveries, string(execution.OutboxDeliveryComponentID),
+		)
+		if err != nil {
+			return delivered, fmt.Errorf("resolve outbox delivery authority in workspace %q: %w", ws, err)
+		}
+		rows, err := d.Delivery.ListDueOutboxDeliveries(ctx, auth, execution.ListDueOutboxDeliveriesCommand{
+			WorkspaceKey: ws,
+			Now:          d.now(),
+			Limit:        d.batchLimit(),
 		})
 		if err != nil {
 			return delivered, fmt.Errorf("list due outbox rows in workspace %q: %w", ws, err)
 		}
 		for _, row := range rows {
-			if row == nil {
-				continue
-			}
 			update := d.attemptDelivery(ctx, row)
-			if _, err := d.Store.Outbox().MarkResult(ctx, ws, row.OutboxID, update); err != nil {
+			recordAuth, err := d.Authorities.ResolveExecutionSystemAuthority(
+				ctx, ws, execution.ActionRecordOutboxDeliveryResult, string(execution.OutboxDeliveryComponentID),
+			)
+			if err != nil {
+				return delivered, fmt.Errorf("resolve outbox result authority in workspace %q: %w", ws, err)
+			}
+			if _, err := d.Delivery.RecordOutboxDeliveryResult(ctx, recordAuth, update); err != nil {
 				return delivered, fmt.Errorf("mark outbox result for %q: %w", row.OutboxID, err)
 			}
-			if update.Status == domain.OutboxStatusDelivered {
+			if update.Status == execution.OutboxDeliveryStatusDelivered {
 				delivered++
 			}
 		}
@@ -266,24 +284,26 @@ func (d *OutboxDispatcher) RunOnce(ctx context.Context) (int, error) {
 // outcome onto the stored result: delivered/queued (or any inbox message
 // created) is delivered, unsupported is terminal, and everything else stays
 // pending with capped exponential backoff.
-func (d *OutboxDispatcher) attemptDelivery(ctx context.Context, row *domain.OutboxRecord) store.OutboxDeliveryUpdate {
+func (d *OutboxDispatcher) attemptDelivery(ctx context.Context, row execution.OutboxDelivery) execution.RecordOutboxDeliveryResultCommand {
 	attempt := row.Attempt + 1
 	result, err := d.deliverRow(ctx, row)
 	if err != nil {
-		return d.retryUpdate(attempt, err.Error())
+		return d.retryUpdate(row, attempt, err.Error())
 	}
 	switch {
 	case result.State == string(interaction.ChatDeliveryDelivered),
 		result.State == "queued",
 		result.InboxMessageID != "":
-		return store.OutboxDeliveryUpdate{
-			Status:         domain.OutboxStatusDelivered,
+		return execution.RecordOutboxDeliveryResultCommand{
+			WorkspaceKey: row.WorkspaceKey, OutboxID: row.OutboxID,
+			Status:         execution.OutboxDeliveryStatusDelivered,
 			Attempt:        attempt,
 			InboxMessageID: result.InboxMessageID,
 		}
 	case result.State == string(interaction.ChatDeliveryUnsupported):
-		return store.OutboxDeliveryUpdate{
-			Status:    domain.OutboxStatusUnsupported,
+		return execution.RecordOutboxDeliveryResultCommand{
+			WorkspaceKey: row.WorkspaceKey, OutboxID: row.OutboxID,
+			Status:    execution.OutboxDeliveryStatusUnsupported,
 			Attempt:   attempt,
 			LastError: result.Reason,
 		}
@@ -292,14 +312,14 @@ func (d *OutboxDispatcher) attemptDelivery(ctx context.Context, row *domain.Outb
 		if reason == "" {
 			reason = "delivery state " + result.State
 		}
-		return d.retryUpdate(attempt, reason)
+		return d.retryUpdate(row, attempt, reason)
 	}
 }
 
 // deliverRow routes one row to its kind-specific delivery path.
-func (d *OutboxDispatcher) deliverRow(ctx context.Context, row *domain.OutboxRecord) (outboxAttempt, error) {
+func (d *OutboxDispatcher) deliverRow(ctx context.Context, row execution.OutboxDelivery) (outboxAttempt, error) {
 	switch row.Kind {
-	case domain.OutboxKindLeadAssignment:
+	case execution.OutboxKindLeadAssignment:
 		delivery, err := d.assignmentDeliverer()(
 			ctx,
 			d.Chat,
@@ -319,7 +339,7 @@ func (d *OutboxDispatcher) deliverRow(ctx context.Context, row *domain.OutboxRec
 			Reason:         delivery.Reason,
 			InboxMessageID: delivery.InboxMessageID,
 		}, nil
-	case domain.OutboxKindLeadTaskMessage:
+	case execution.OutboxKindLeadTaskMessage:
 		result, err := d.taskMessageDeliverer()(
 			ctx,
 			d.Chat,
@@ -350,13 +370,15 @@ func (d *OutboxDispatcher) deliverRow(ctx context.Context, row *domain.OutboxRec
 }
 
 // retryUpdate keeps a row pending with the next capped-backoff retry time.
-func (d *OutboxDispatcher) retryUpdate(attempt int, lastError string) store.OutboxDeliveryUpdate {
+func (d *OutboxDispatcher) retryUpdate(row execution.OutboxDelivery, attempt int, lastError string) execution.RecordOutboxDeliveryResultCommand {
 	next := d.now().Add(outboxRetryDelay(attempt))
-	return store.OutboxDeliveryUpdate{
-		Status:      domain.OutboxStatusPending,
-		Attempt:     attempt,
-		NextRetryAt: &next,
-		LastError:   lastError,
+	return execution.RecordOutboxDeliveryResultCommand{
+		WorkspaceKey: row.WorkspaceKey,
+		OutboxID:     row.OutboxID,
+		Status:       execution.OutboxDeliveryStatusPending,
+		Attempt:      attempt,
+		NextRetryAt:  &next,
+		LastError:    lastError,
 	}
 }
 
@@ -383,17 +405,14 @@ func (d *OutboxDispatcher) workspaceKeys(ctx context.Context) ([]string, error) 
 	if d.WorkspaceKey != "" {
 		return []string{d.WorkspaceKey}, nil
 	}
-	workspaces, err := d.Store.Workspaces().List(ctx)
+	if d.Workspaces == nil {
+		return nil, fmt.Errorf("workspace lister required: %w", domain.ErrInvalid)
+	}
+	keys, err := d.Workspaces.ListWorkspaceKeys(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list workspaces for outbox dispatch: %w", err)
 	}
-	keys := make([]string, 0, len(workspaces))
-	for _, workspace := range workspaces {
-		if workspace != nil {
-			keys = append(keys, workspace.Key)
-		}
-	}
-	return keys, nil
+	return append([]string(nil), keys...), nil
 }
 
 func (d *OutboxDispatcher) assignmentDeliverer() func(

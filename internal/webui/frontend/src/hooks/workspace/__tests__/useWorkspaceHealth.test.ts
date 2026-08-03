@@ -31,14 +31,14 @@ const mockGet = vi.mocked(checkWorkspaceHealth);
 
 /** Helper to create a successful health response. */
 function healthOk() {
-  return { status: "ok" as const, daemon: { connected: true } };
+  return { status: "ok" as const };
 }
 
 /** Helper to create a failed/degraded health response. */
 function healthDegraded(error?: string) {
   return {
     status: "degraded" as const,
-    daemon: { connected: false, error },
+    error,
   };
 }
 
@@ -537,7 +537,7 @@ describe("useWorkspaceHealth", () => {
       expect(result.current.lastError).toBe("Low memory");
     });
 
-    it("treats response with status=ok and workspace service.connected=true as available", async () => {
+    it("treats response with status=ok as available", async () => {
       mockGet.mockResolvedValueOnce(healthOk());
 
       const { result } = renderHook(() => useWorkspaceHealth());
@@ -563,7 +563,7 @@ describe("useWorkspaceHealth", () => {
     it('sets connectionMode to "starting" when health returns status=starting', async () => {
       mockGet.mockResolvedValueOnce({
         status: "starting" as const,
-        daemon: { connected: false, error: "workspace service is starting up" },
+        error: "workspace service is starting up",
       });
 
       const { result } = renderHook(() => useWorkspaceHealth());
@@ -578,7 +578,6 @@ describe("useWorkspaceHealth", () => {
     it("uses default error message when starting response has no error field", async () => {
       mockGet.mockResolvedValueOnce({
         status: "starting" as const,
-        daemon: { connected: false },
       });
 
       const { result } = renderHook(() => useWorkspaceHealth());
@@ -592,7 +591,7 @@ describe("useWorkspaceHealth", () => {
     it("schedules retry after starting response", async () => {
       mockGet.mockResolvedValueOnce({
         status: "starting" as const,
-        daemon: { connected: false, error: "workspace service is starting up" },
+        error: "workspace service is starting up",
       });
 
       const { result } = renderHook(() => useWorkspaceHealth());
@@ -607,7 +606,7 @@ describe("useWorkspaceHealth", () => {
       // First check: starting
       mockGet.mockResolvedValueOnce({
         status: "starting" as const,
-        daemon: { connected: false, error: "workspace service is starting up" },
+        error: "workspace service is starting up",
       });
 
       const { result } = renderHook(() => useWorkspaceHealth());

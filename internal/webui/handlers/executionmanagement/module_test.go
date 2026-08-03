@@ -24,6 +24,14 @@ type workerProfileAPIStub struct {
 	remove  execution.DeleteWorkerProfileCommand
 }
 
+func (stub *workerProfileAPIStub) GetWorkerProfile(context.Context, string, string) (*execution.WorkerProfile, error) {
+	return nil, stub.err
+}
+
+func (stub *workerProfileAPIStub) ListWorkerProfiles(context.Context, string, execution.WorkerProfileFilter) ([]*execution.WorkerProfile, error) {
+	return nil, stub.err
+}
+
 func (stub *workerProfileAPIStub) CreateWorkerProfile(_ context.Context, _ authority.OperatorAuthority, command execution.CreateWorkerProfileCommand) (*execution.WorkerProfile, error) {
 	stub.creates++
 	stub.create = command

@@ -51,13 +51,10 @@ type Server struct {
 	wsModules           []wsModule // workspace-scoped route modules (registered on wsMux)
 	connectorDispatcher *connector.Dispatcher
 
-	// Connection pools
-	pool      appinfra.Pool // may be nil if daemon unavailable at startup
-	multiPool *appinfra.MultiPool
-
 	// Service layer
 	issueSvc     service.IssueService
 	agentSvc     service.AgentService
+	agentRuntime service.InteractiveAgentRuntime
 	workspaceSvc service.WorkspaceService
 	termSvc      service.TerminalService // nil if termMgr is nil
 	diffSvc      service.DiffService     // nil if ops.GitOps is nil
@@ -134,14 +131,6 @@ func (app *Server) buildHandlers() {
 		getFleetTimeouts = app.fleetRegistry.GetTotalTimeoutCount
 	}
 
-	var daemonSupervisorH, daemonConfigH http.HandlerFunc
-	if app.config.DaemonSupervisorFn != nil {
-		daemonSupervisorH = webui.HandleDaemonSupervisor(app.config.DaemonSupervisorFn)
-	}
-	if app.config.DaemonConfigFn != nil {
-		daemonConfigH = webui.HandleDaemonConfig(app.config.DaemonConfigFn)
-	}
-
 	var backendsHealthH http.HandlerFunc
 	if app.config.BackendOps != nil {
 		backendsHealthH = webui.HandleBackendsHealth(app.config.BackendOps)
@@ -155,24 +144,16 @@ func (app *Server) buildHandlers() {
 		maxSess = app.ptyMgr.MaxSessions()
 	}
 	app.handlers = handlermux.BuildHandlers(handlermux.HandlerDeps{
-		Pool:               app.pool,
 		Hub:                app.hub,
 		ExtAuthURL:         app.config.ExtAuthURL,
 		BackendsHealthH:    backendsHealthH,
 		NotifyToken:        app.notifyToken,
-		DaemonSupervisor:   daemonSupervisorH,
-		DaemonConfig:       daemonConfigH,
 		FleetTimeoutsFn:    getFleetTimeouts,
 		ClaimMetrics:       app.claimMetrics,
 		TerminalGraceMS:    graceMS,
 		TerminalIdleMS:     idleMS,
 		TerminalMaxSession: maxSess,
 		IssueBackendFn:     app.config.IssueBackendFn,
-		// Fleet client mode is the only deployment that runs without a local
-		// issue daemon. FleetEnabled (--fleet-mode) is a separate signal: it
-		// controls whether this server registers fleet API routes for other
-		// clients to consume.
-		DaemonExpected: !app.config.FleetClient,
 	})
 }
 
@@ -376,15 +357,6 @@ func (app *Server) run(ctx context.Context) error { //nolint:funlen // server li
 	if app.hub != nil {
 		app.hub.Stop()
 		logger.Info("SSE hub stopped")
-	}
-
-	// Close MultiPool (closes all per-workspace pools including the initial one)
-	if app.multiPool != nil {
-		if err := app.multiPool.Close(); err != nil {
-			logger.Warn("error closing multi-pool", "err", err)
-		} else {
-			logger.Info("multi-pool closed")
-		}
 	}
 
 	return nil

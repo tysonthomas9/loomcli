@@ -114,6 +114,29 @@ func LoadDirectWriteInventory(path string) (DirectWriteInventory, error) {
 	return value, nil
 }
 
+// LoadDirectWriteSnapshotPolicy loads only the scanner policy needed to create
+// a fresh direct-write snapshot. Unlike LoadDirectWriteInventory, it does not
+// validate the checked-in writes or an expiring legacy baseline: those are the
+// stale observations that snapshot generation exists to replace. The scanner
+// still fails closed on metadata, persistence-surface classifications, and
+// generic-mechanism policy.
+func LoadDirectWriteSnapshotPolicy(path string) (DirectWriteInventory, error) {
+	var value DirectWriteInventory
+	if err := decodeYAML(path, &value); err != nil {
+		return DirectWriteInventory{}, fmt.Errorf("decode direct-write snapshot policy: %w", err)
+	}
+	if err := value.validateMetadata(); err != nil {
+		return DirectWriteInventory{}, err
+	}
+	if err := value.validatePersistencePolicy(); err != nil {
+		return DirectWriteInventory{}, err
+	}
+	if err := value.validateGenericMechanisms(); err != nil {
+		return DirectWriteInventory{}, err
+	}
+	return value, nil
+}
+
 func (i DirectWriteInventory) Validate() error {
 	if err := i.validateMetadata(); err != nil {
 		return err
@@ -201,7 +224,7 @@ func (i DirectWriteInventory) validateMetadata() error {
 		"internal/app",
 		"internal/cli",
 		"internal/driver",
-		"internal/infra/agentscompatstore",
+		"internal/infra/agentsbootstrapstore",
 		"internal/modules",
 		"internal/webui/handlers",
 	}

@@ -27,6 +27,7 @@ type Dependencies struct {
 	AwaitEvents            AwaitEventNotificationQueuePort
 	RunOutcomes            DriverRunOutcomeQueuePort
 	TerminalWorkRecoveries TerminalDriverRunWorkRecoveryQueuePort
+	OutboxDeliveries       OutboxDeliveryPort
 }
 
 type Service struct {
@@ -172,6 +173,49 @@ func (service *Service) Await(ctx context.Context, auth authority.ExecutionAutho
 		return AwaitResult{}, ErrUnavailable
 	}
 	return service.dependencies.Awaits.Register(ctx, command)
+}
+
+func (service *Service) ListDueOutboxDeliveries(
+	ctx context.Context,
+	auth authority.SystemAuthority,
+	command ListDueOutboxDeliveriesCommand,
+) ([]OutboxDelivery, error) {
+	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
+	if err := service.requireSystem(ActionListDueOutboxDeliveries, command.WorkspaceKey, auth); err != nil {
+		return nil, err
+	}
+	query := OutboxDeliveryQuery(command)
+	if !validOutboxDeliveryQuery(query) {
+		return nil, ErrInvalid
+	}
+	if service.dependencies.OutboxDeliveries == nil {
+		return nil, ErrUnavailable
+	}
+	values, err := service.dependencies.OutboxDeliveries.ListDueOutboxDeliveries(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return append([]OutboxDelivery(nil), values...), nil
+}
+
+func (service *Service) RecordOutboxDeliveryResult(
+	ctx context.Context,
+	auth authority.SystemAuthority,
+	command RecordOutboxDeliveryResultCommand,
+) (*OutboxDelivery, error) {
+	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
+	command.OutboxID = strings.TrimSpace(command.OutboxID)
+	if err := service.requireSystem(ActionRecordOutboxDeliveryResult, command.WorkspaceKey, auth); err != nil {
+		return nil, err
+	}
+	result := OutboxDeliveryResult(command)
+	if !validOutboxDeliveryResult(result) {
+		return nil, ErrInvalid
+	}
+	if service.dependencies.OutboxDeliveries == nil {
+		return nil, ErrUnavailable
+	}
+	return service.dependencies.OutboxDeliveries.RecordOutboxDeliveryResult(ctx, result)
 }
 
 func (service *Service) requireSystem(action authority.Action, workspace string, auth authority.SystemAuthority) error {

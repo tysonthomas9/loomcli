@@ -46,7 +46,10 @@ func TestEmbeddedFleetDBPersistenceSmoke(t *testing.T) {
 	if _, err := client.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "SMOKE", Name: "task"}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := client.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "SMOKE", Name: "worker", RoleName: "task"}); err != nil {
+	if _, err := client.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "SMOKE", ServiceID: "worker", Name: "worker", RoleName: "task",
+		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
+	}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	if err := emb.Stop(); err != nil {
@@ -68,7 +71,7 @@ func TestEmbeddedFleetDBPersistenceSmoke(t *testing.T) {
 	if _, err := client2.Repos().Get(ctx, "SMOKE", "repo"); err != nil {
 		t.Fatalf("repo did not survive restart: %v", err)
 	}
-	if _, err := client2.Agents().Get(ctx, "SMOKE", "worker"); err != nil {
+	if _, err := client2.AgentServices().Get(ctx, "SMOKE", "worker"); err != nil {
 		t.Fatalf("agent did not survive restart: %v", err)
 	}
 }

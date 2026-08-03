@@ -11,29 +11,21 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
-	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	webuterminal "github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
 
-type wsAgentStoreOverride struct {
-	store.Store
-	agents store.AgentStore
-}
-
-func (s wsAgentStoreOverride) Agents() store.AgentStore { return s.agents }
-
-type signalingAgentGetStore struct {
-	store.AgentStore
+type signalingAgentIdentity struct {
+	terminalAgentIdentity
 	once sync.Once
 	got  chan struct{}
 }
 
-func (s *signalingAgentGetStore) Get(ctx context.Context, workspaceKey, name string) (*domain.Agent, error) {
-	agent, err := s.AgentStore.Get(ctx, workspaceKey, name)
+func (s *signalingAgentIdentity) GetAgent(ctx context.Context, workspaceKey, name string) (*agents.Agent, error) {
+	agent, err := s.terminalAgentIdentity.GetAgent(ctx, workspaceKey, name)
 	s.once.Do(func() { close(s.got) })
 	return agent, err
 }
@@ -103,16 +95,16 @@ func TestLaunchSpecKeepsLegacyNamedLeadTabs(t *testing.T) {
 func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "reviewer",
 		RoleName:     "lead",
-		DesiredState: domain.AgentDesiredStopped,
+		DesiredState: agents.DesiredStopped,
 	}); err != nil {
 		t.Fatalf("create interactive agent: %v", err)
 	}
-	stopped := domain.AgentStateStopped
-	if _, err := st.Agents().Update(ctx, "E2E", "reviewer", store.AgentUpdate{
+	stopped := terminalTestAgentStateStopped
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "reviewer", terminalTestAgentUpdate{
 		State: &stopped,
 	}); err != nil {
 		t.Fatalf("stop interactive agent: %v", err)
@@ -143,6 +135,7 @@ func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 		tabMetaStore:    tabStore,
 		interactionNode: "test-node",
 		loomServerURL:   "http://127.0.0.1:8683",
+		agentIdentity:   terminalStoreIdentity{services: st.AgentServices()},
 		interaction: InteractionDependencies{
 			API:                &terminalInteractionAPIStub{},
 			SessionAuthorities: newTerminalSessionResolverStub(),
@@ -161,9 +154,9 @@ func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 		t.Fatal("stopped WebSocket attach spawned a PTY")
 	}
 
-	active := domain.AgentStateActive
-	running := domain.AgentDesiredRunning
-	if _, err := st.Agents().Update(ctx, "E2E", "reviewer", store.AgentUpdate{
+	active := terminalTestAgentStateActive
+	running := agents.DesiredRunning
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "reviewer", terminalTestAgentUpdate{
 		State:        &active,
 		DesiredState: &running,
 	}); err != nil {
@@ -196,17 +189,17 @@ func TestAgentTerminalAttachRequiresStartAfterStop(t *testing.T) {
 func TestAgentTerminalAttachRejectsDaemonSupervisedWorkerStoredLaunch(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "advanced-worker",
 		RoleName:     "task",
-		Mode:         domain.AgentModeService,
-		DesiredState: domain.AgentDesiredRunning,
+		Mode:         "service",
+		DesiredState: agents.DesiredRunning,
 	}); err != nil {
 		t.Fatalf("create worker agent: %v", err)
 	}
-	active := domain.AgentStateActive
-	if _, err := st.Agents().Update(ctx, "E2E", "advanced-worker", store.AgentUpdate{State: &active}); err != nil {
+	active := terminalTestAgentStateActive
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "advanced-worker", terminalTestAgentUpdate{State: &active}); err != nil {
 		t.Fatalf("activate worker agent: %v", err)
 	}
 
@@ -230,9 +223,10 @@ func TestAgentTerminalAttachRejectsDaemonSupervisedWorkerStoredLaunch(t *testing
 	manager := webuterminal.NewPTYManager("/bin/sh", 1, t.TempDir())
 	t.Cleanup(func() { _ = manager.Shutdown() })
 	p := &terminalWSParams{
-		manager:      manager,
-		store:        st,
-		tabMetaStore: tabStore,
+		manager:       manager,
+		store:         st,
+		tabMetaStore:  tabStore,
+		agentIdentity: terminalStoreIdentity{services: st.AgentServices()},
 	}
 	key := webuterminal.SessionKey{Workspace: "E2E", Name: "term_advanced_worker"}
 
@@ -240,8 +234,8 @@ func TestAgentTerminalAttachRejectsDaemonSupervisedWorkerStoredLaunch(t *testing
 	if attachment != nil || reattached {
 		t.Fatalf("worker attach = (%#v, %v), want no attachment", attachment, reattached)
 	}
-	if !errors.Is(err, errDaemonSupervisedWorkerTerminal) {
-		t.Fatalf("worker attach error = %v, want errDaemonSupervisedWorkerTerminal", err)
+	if !errors.Is(err, errBackgroundWorkerTerminal) {
+		t.Fatalf("worker attach error = %v, want errBackgroundWorkerTerminal", err)
 	}
 	if manager.HasSession(key) || manager.SessionCountFor("E2E") != 0 {
 		t.Fatal("stored worker launch spawned a PTY")
@@ -251,16 +245,16 @@ func TestAgentTerminalAttachRejectsDaemonSupervisedWorkerStoredLaunch(t *testing
 func TestAgentTerminalAttachCannotSpawnDuringStopSnapshotGap(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
+	if _, err := terminalTestAgents(st).Create(ctx, terminalTestAgentCreate{
 		WorkspaceKey: "E2E",
 		Name:         "reviewer-race",
 		RoleName:     "lead",
-		DesiredState: domain.AgentDesiredRunning,
+		DesiredState: agents.DesiredRunning,
 	}); err != nil {
 		t.Fatalf("create interactive agent: %v", err)
 	}
-	active := domain.AgentStateActive
-	if _, err := st.Agents().Update(ctx, "E2E", "reviewer-race", store.AgentUpdate{State: &active}); err != nil {
+	active := terminalTestAgentStateActive
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "reviewer-race", terminalTestAgentUpdate{State: &active}); err != nil {
 		t.Fatalf("activate interactive agent: %v", err)
 	}
 
@@ -289,14 +283,15 @@ func TestAgentTerminalAttachCannotSpawnDuringStopSnapshotGap(t *testing.T) {
 		attachCalled: attachCalled,
 	}
 	firstAgentRead := make(chan struct{})
-	agents := &signalingAgentGetStore{
-		AgentStore: st.Agents(),
-		got:        firstAgentRead,
+	agentIdentity := &signalingAgentIdentity{
+		terminalAgentIdentity: terminalStoreIdentity{services: st.AgentServices()},
+		got:                   firstAgentRead,
 	}
 	p := &terminalWSParams{
-		manager:      manager,
-		store:        wsAgentStoreOverride{Store: st, agents: agents},
-		tabMetaStore: tabStore,
+		manager:       manager,
+		store:         st,
+		tabMetaStore:  tabStore,
+		agentIdentity: agentIdentity,
 	}
 	key := webuterminal.SessionKey{Workspace: "E2E", Name: "term_reviewer_race"}
 
@@ -332,9 +327,9 @@ func TestAgentTerminalAttachCannotSpawnDuringStopSnapshotGap(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 
-	stopped := domain.AgentStateStopped
-	desiredStopped := domain.AgentDesiredStopped
-	if _, err := st.Agents().Update(ctx, "E2E", "reviewer-race", store.AgentUpdate{
+	stopped := terminalTestAgentStateStopped
+	desiredStopped := agents.DesiredStopped
+	if _, err := terminalTestAgents(st).Update(ctx, "E2E", "reviewer-race", terminalTestAgentUpdate{
 		State:        &stopped,
 		DesiredState: &desiredStopped,
 	}); err != nil {

@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
-	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 func CollectMonitorData(readyLimit int, branch string) *MonitorData {
@@ -114,12 +112,6 @@ func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, bran
 		}
 	}
 
-	var daemonManaged map[string]DaemonAgentInfo
-	if projectDir, err2 := os.Getwd(); err2 == nil {
-		daemonStatePath := config.ResolveDaemonStatePath(projectDir)
-		daemonManaged = LoadDaemonManagedAgents(daemonStatePath)
-	}
-
 	taskIDToAgents := make(map[string][]string)
 	globalDefaultBranch := cli.GetDefaultBranchForWorktrees(worktrees)
 	githubURL := ""
@@ -129,30 +121,25 @@ func collectAgentStatusDeps(deps *cli.Deps, agentTasks map[string]TaskInfo, bran
 
 	agents := make([]AgentStatus, 0, len(worktrees))
 	for _, wt := range worktrees {
-		agent := buildAgentStatus(deps, wt, daemonManaged, agentTasks, taskIDToAgents, globalDefaultBranch, githubURL, branch)
+		agent := buildAgentStatus(deps, wt, agentTasks, taskIDToAgents, globalDefaultBranch, githubURL, branch)
 		agents = append(agents, agent)
 	}
 	return agents, taskIDToAgents
 }
 
 // buildAgentStatus constructs the status for a single worktree agent.
-func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, daemonManaged map[string]DaemonAgentInfo, agentTasks map[string]TaskInfo, taskIDToAgents map[string][]string, globalDefaultBranch, githubURL, branch string) AgentStatus {
-	daemonInfo := daemonManaged[wt.Name]
+func buildAgentStatus(deps *cli.Deps, wt cli.WorktreeInfo, agentTasks map[string]TaskInfo, taskIDToAgents map[string][]string, globalDefaultBranch, githubURL, branch string) AgentStatus {
 	agent := AgentStatus{
 		Name: wt.Name, Branch: wt.Branch, Workspace: wt.Workspace,
-		Role: daemonInfo.Role, Repo: daemonInfo.Repo, DaemonManaged: daemonInfo.Managed,
-		CurrentTaskID: daemonInfo.CurrentTaskID,
 	}
-	if !daemonInfo.LastActivity.IsZero() {
-		la := daemonInfo.LastActivity
-		agent.LastActivityAt = &la
+	if wt.Repo != nil {
+		agent.Repo = wt.Repo.Name
 	}
 
 	if lockInfo, running, _ := cli.CheckLock(wt.Path); running && lockHasActiveTaskClaim(lockInfo) {
 		taskIDToAgents[lockInfo.TaskID] = append(taskIDToAgents[lockInfo.TaskID], wt.Name)
-		// Daemon state only records CurrentTaskID for daemon-managed agents;
-		// auto/manual agents leave it empty. Fall back to the lock's claimed
-		// task when the lock is actively executing. Idle auto-mode locks may
+		// Fall back to the lock's claimed task when it is actively executing.
+		// Idle auto-mode locks may
 		// retain a stale TaskID for no-progress detection and should not satisfy
 		// the kanban's live-agent join.
 		if agent.CurrentTaskID == "" {

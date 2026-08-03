@@ -24,7 +24,7 @@ var dataRootCmd = &cobra.Command{
 with the configured loom issue backend. When --server or LOOM_SERVER_URL is
 set, commands talk to that loom server over HTTP. Without a server, issue
 commands use the local backend selected by the workspace configuration and
-daemon IPC environment.
+platform runtime environment.
 
 Use 'loom data' commands when:
   • You want a backend-aware command surface for agents and scripts.

@@ -28,7 +28,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** API health check with daemon status */
+    /** API process health check */
     get: operations["getApiHealth"];
     put?: never;
     post?: never;
@@ -1259,17 +1259,16 @@ export interface paths {
     };
     /**
      * List the unified agent collection
-     * @description Returns supervised role assignments, durable prompt-backed and
-     *     scripted agent records, and unattached legacy trigger bindings in one
-     *     collection. The `kind` discriminator selects the response shape.
+     * @description Returns canonical interactive, prompt-backed, and scripted Agent
+     *     identities. The `kind` discriminator selects the response shape.
      */
     get: operations["listAgents"];
     put?: never;
     /**
-     * Create a supervised or prompt-backed agent
-     * @description Creates either a legacy supervised role assignment or a durable
-     *     prompt-backed record with its initial trigger binding. Scripted records
-     *     and unattached binding entries are currently read-only on this route.
+     * Create an interactive or prompt-backed agent
+     * @description Creates either a browser-owned interactive identity or a managed
+     *     prompt-backed identity with its initial trigger binding. Background
+     *     worker identities are created by AgentProvisioning, not this route.
      */
     post: operations["createAgent"];
     delete?: never;
@@ -1290,46 +1289,22 @@ export interface paths {
     put?: never;
     post?: never;
     /**
-     * Delete or archive one unified agent entry
-     * @description Deletes supervised assignments and unattached legacy bindings. Durable
-     *     prompt/scripted records are archived after their bindings are deleted
-     *     and connector grants are revoked.
+     * Archive one canonical agent identity
+     * @description Archives the Agent after its bindings are deleted and connector grants
+     *     are revoked by the Agents-owned lifecycle command.
      */
     delete: operations["deleteAgent"];
     options?: never;
     head?: never;
     /**
      * Update one unified agent entry
-     * @description The accepted fields depend on the stored kind. Supervised assignments
-     *     use assignment fields; prompt/scripted records accept mutable record
-     *     fields, while their behavior role is immutable after creation. A
-     *     prompt/scripted cron record also accepts an exact
+     * @description Canonical records accept mutable identity fields while their behavior
+     *     role is immutable after creation. A cron-backed record also accepts an exact
      *     attached `binding_id` with `schedule` and/or `schedule_timezone`;
      *     schedule fields cannot be combined with record fields
      *     in one request so a failed PATCH never commits a cross-aggregate prefix.
-     *     legacy binding entries only support `name`.
      */
     patch: operations["patchAgent"];
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/agents/{name}/queue": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Get an agent-specific queue
-     * @description This compatibility route is not implemented in fleet-db store mode.
-     */
-    get: operations["getAgentQueue"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
     trace?: never;
   };
   "/api/workspaces/{ws}/agents/{id}/enable": {
@@ -1413,15 +1388,10 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Stop an agent using its runtime owner
-     * @description In store-backed mode, supervised workers durably queue a stop command
-     *     for their daemon and return 202 while desired_state is draining. A
-     *     direct local-daemon deployment waits for the daemon's semantic result
-     *     and returns 200 only after the stop completes. By default the daemon
-     *     requests a cooperative yield before keeping the worker stopped;
-     *     `{"force": true}` skips that yield and terminates directly. Interactive
-     *     agents are owned by the web terminal runtime, so Stop terminates their
-     *     PTY synchronously and returns 200 without enqueueing a daemon command.
+     * Stop an agent
+     * @description Atomically changes canonical desired state to stopped. Interactive
+     *     agents also interrupt their Interaction-owned runtime before the
+     *     settled response is returned.
      */
     post: operations["stopAgent"];
     delete?: never;
@@ -1441,9 +1411,8 @@ export interface paths {
     put?: never;
     /**
      * Start an agent
-     * @description Store-backed supervised workers return 202 after durably queueing the
-     *     start command. Interactive agents and direct local-daemon deployments
-     *     return 200 only after their runtime owner accepts the start.
+     * @description Atomically changes canonical desired state to running and returns only
+     *     after the Agents owner accepts the transition.
      */
     post: operations["startAgent"];
     delete?: never;
@@ -1463,58 +1432,11 @@ export interface paths {
     put?: never;
     /**
      * Restart an agent
-     * @description Store-backed supervised workers return 202 after durably queueing the
-     *     restart command. A direct local-daemon deployment waits through the
-     *     configured cooperative-yield and SIGTERM escalation and returns 200
-     *     only after the daemon reports completion. Interactive agents return
-     *     200 after synchronously terminating the current PTY so a fresh
-     *     terminal can attach.
+     * @description Reasserts canonical running desired state. Interactive agents also
+     *     interrupt their current Interaction-owned runtime so the next terminal
+     *     attachment starts a fresh process.
      */
     post: operations["restartAgent"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/agents/{name}/yield": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Yield an agent (graceful stop at next safe point)
-     * @description Store-backed supervised workers return 202 after durably queueing the
-     *     yield command. A direct local-daemon deployment returns 200 after the
-     *     yield marker is written. Interactive agents reject Yield; use Stop.
-     */
-    post: operations["yieldAgent"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/agents/{name}/lifecycle-commands/{command_id}": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Get durable lifecycle command status
-     * @description Returns the durable status of a lifecycle request. The command must
-     *     belong to the agent named in the route; cross-agent command IDs are
-     *     reported as not found.
-     */
-    get: operations["getAgentLifecycleCommand"];
-    put?: never;
-    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -2724,7 +2646,7 @@ export interface components {
     RuntimeReadyResponse: {
       ready: boolean;
       /** @enum {string} */
-      mode: "daemon" | "fleet";
+      mode: "workflow-catalog";
       workspace: string;
       reason?: string;
     };
@@ -3200,99 +3122,25 @@ export interface components {
       data: components["schemas"]["UnifiedAgent"][];
       total: number;
     };
-    AgentLifecycleRequest: {
-      payload?: {
-        [key: string]: string;
-      };
-      task_id?: string;
-    };
     AgentLifecycleResponse: {
       message: string;
-      /** @description True when a supervised runtime owner accepted the command for asynchronous execution. */
-      pending: boolean;
-      /** @description Durable lifecycle command ID when pending; empty for a synchronous transition. */
-      command_id: string;
       /** @enum {string} */
-      status:
-        | "queued"
-        | "acked"
-        | "running"
-        | "succeeded"
-        | "failed"
-        | "cancelled";
+      status: "succeeded" | "failed" | "cancelled";
     };
-    AgentLifecycleCommandResponse: {
-      command_id: string;
-      /** @enum {string} */
-      action: "start" | "stop" | "restart" | "yield";
-      /** @enum {string} */
-      status:
-        | "queued"
-        | "acked"
-        | "running"
-        | "succeeded"
-        | "failed"
-        | "cancelled";
-      result: string;
-      error_class: string;
-      /** Format: date-time */
-      created_at: string;
-      /** Format: date-time */
-      updated_at: string;
-      /** Format: date-time */
-      acked_at: string | null;
-    };
-    StopAgentRequest: components["schemas"]["AgentLifecycleRequest"] & {
-      /** @default false */
-      force: boolean;
-    };
+    /** @description Canonical durable Agent identity exposed by collection routes. */
     UnifiedAgent:
-      | components["schemas"]["SupervisedAgent"]
       | components["schemas"]["PromptAgentRecord"]
       | components["schemas"]["ScriptedAgentRecord"]
-      | components["schemas"]["LegacyBindingAgent"];
+      | components["schemas"]["InteractiveAgentRecord"];
     /** @description Agent kinds accepted by the collection create route. */
     CreatedUnifiedAgent:
-      | components["schemas"]["SupervisedAgent"]
+      | components["schemas"]["CreatedInteractiveAgent"]
       | components["schemas"]["PromptAgentRecord"];
-    /** @description Durable prompt-backed or scripted AgentService identity. */
+    /** @description Canonical durable Agent identity. */
     DurableAgentRecord:
       | components["schemas"]["PromptAgentRecord"]
-      | components["schemas"]["ScriptedAgentRecord"];
-    /** @description Long-lived role assignment supervised by the Loom daemon. */
-    SupervisedAgent: {
-      /** @description Stable collection identifier; equal to `name` for supervised assignments. */
-      id: string;
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      kind: "supervised";
-      workspace_key: string;
-      name: string;
-      role_name: string;
-      auto?: boolean;
-      backend?: string;
-      fallback_backends?: string[];
-      repos?: string[];
-      repo_groups?: string[];
-      cross_repo?: boolean;
-      parent?: string;
-      state?: string;
-      mode?: string;
-      task_filter?: string;
-      max_concurrency?: number;
-      budget_policy?: string;
-      desired_state?: string;
-      live_status?: string;
-      active_task_id?: string;
-      active_phase?: string;
-      last_error_class?: string;
-      /** Format: date-time */
-      created_at: string;
-      /** Format: date-time */
-      updated_at: string;
-    };
+      | components["schemas"]["ScriptedAgentRecord"]
+      | components["schemas"]["InteractiveAgentRecord"];
     AgentRecordBase: {
       /** @description Durable AgentService identifier. */
       id: string;
@@ -3336,29 +3184,37 @@ export interface components {
        */
       kind: "scripted";
     };
+    InteractiveAgentRecord: components["schemas"]["AgentRecordBase"] & {
+      /** @constant */
+      kind: "interactive";
+      behavior: components["schemas"]["PromptAgentBehavior"];
+    } & {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "interactive";
+    };
+    CreatedInteractiveAgent: {
+      id: string;
+      name: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "interactive";
+      role_name: string;
+      backend?: string;
+      repos: string[];
+      repo_groups: string[];
+      cross_repo: boolean;
+    };
     PromptAgentBehavior: {
       role_name: string;
     };
     ScriptedAgentBehavior: {
       driver_id: string;
       driver_version_id: string;
-    };
-    /** @description Unattached trigger binding exposed as a compatibility agent entry. */
-    LegacyBindingAgent: components["schemas"]["TriggerBinding"] & {
-      /** @description Stable collection identifier; equal to `binding_id`. */
-      id: string;
-      /** @constant */
-      kind: "binding";
-      /** Format: date-time */
-      next_fire_at?: string;
-      last_run_status?: string;
-      consecutive_failures?: number;
-    } & {
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      kind: "binding";
     };
     AgentRecordBinding: components["schemas"]["TriggerBinding"] & {
       /** Format: date-time */
@@ -3404,37 +3260,32 @@ export interface components {
       allow_actors?: string[];
     };
     /**
-     * @description Create either a supervised assignment or a prompt-backed record.
-     *     This request union intentionally has no discriminator because legacy
-     *     supervised clients omit `kind`; the supervised branch constrains every
-     *     supported non-prompt kind so the two branches remain exclusive.
+     * @description Create either an interactive identity or a prompt-backed managed
+     *     identity. The interactive kind may be omitted for browser clients;
+     *     the branches remain exclusive because prompt creation requires the
+     *     nested `behavior` object.
      */
     CreateUnifiedAgentRequest:
-      | components["schemas"]["CreateSupervisedAgentRequest"]
+      | components["schemas"]["CreateInteractiveAgentRequest"]
       | components["schemas"]["CreatePromptAgentRequest"];
-    CreateSupervisedAgentRequest: {
+    CreateInteractiveAgentRequest: {
       workspace_key?: string;
       name: string;
       role_name: string;
       /**
-       * @description `interactive` and `worker` select a role kind. `supervised` is the
-       *     unified collection discriminator and leaves role-kind inference to
-       *     the referenced role. The field may be omitted for legacy clients.
-       * @enum {string}
+       * @description May be omitted; interactive is the collection default.
+       * @constant
        */
-      kind?: "supervised" | "interactive" | "worker";
+      kind?: "interactive";
       /** @description Literal inline prompt text for an interactive role. */
       prompt?: string;
       /** @description Custom path or `builtin:<id>` selector for an interactive role. */
       prompt_file?: string;
-      auto?: boolean;
       backend?: string;
       fallback_backends?: string[];
       repos?: string[];
       repo_groups?: string[];
       cross_repo?: boolean;
-      parent?: string;
-      desired_state?: string;
     };
     CreatePromptAgentRequest: {
       /** @constant */
@@ -3486,10 +3337,9 @@ export interface components {
       grant_id?: string;
     };
     /**
-     * @description Kind-sensitive partial update. Durable records accept `name`,
-     *     `budget_policy`, and agent-owned cron schedule fields; their behavior
-     *     role is immutable after creation. Legacy binding entries accept only
-     *     `name`; supervised assignments accept the remaining assignment fields.
+     * @description Canonical identities accept `name`, `budget_policy`, and agent-owned
+     *     cron schedule fields. Their behavior reference is immutable after
+     *     creation.
      */
     PatchUnifiedAgentRequest: {
       name?: string;
@@ -3498,36 +3348,18 @@ export interface components {
       binding_id?: string;
       schedule?: string;
       schedule_timezone?: string;
-      role_name?: string;
-      auto?: boolean;
-      backend?: string;
-      fallback_backends?: string[];
-      repos?: string[];
-      repo_groups?: string[];
-      cross_repo?: boolean;
-      parent?: string;
-      state?: string;
-      desired_state?: string;
     };
-    DeleteUnifiedAgentResponse:
-      | components["schemas"]["MessageResponse"]
-      | components["schemas"]["DeleteAgentRecordResponse"]
-      | components["schemas"]["DeleteLegacyBindingResponse"];
+    DeleteUnifiedAgentResponse: components["schemas"]["DeleteAgentRecordResponse"];
     DeleteAgentRecordResponse: {
       agent: components["schemas"]["DurableAgentRecord"];
       archived: boolean;
       bindings_deleted: number;
       grants_revoked: number;
     };
-    DeleteLegacyBindingResponse: {
-      binding_id: string;
-      deleted: boolean;
-      grants_revoked: number;
-    };
     AgentRunsResponse: {
       agent_id: string;
       runs: components["schemas"]["DriverRun"][];
-      /** @description Task, terminal, and orchestration sessions for supervised or interactive agents. Durable record and workflow-binding agents return an empty array and use runs instead. */
+      /** @description Reserved empty compatibility member. Interaction owns runtime sessions; canonical Agent history is exposed through `runs`. */
       sessions: components["schemas"]["AgentHistorySession"][];
     };
     AgentHistorySession: {
@@ -3626,12 +3458,6 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
-    };
-    /** @description Agent entry from daemon control socket list */
-    AgentControlEntry: {
-      name: string;
-      role: string;
-      status: string;
     };
     /** @description Session audit record from dto.SessionResponse */
     SessionResponse: {
@@ -3972,7 +3798,6 @@ export interface components {
       role_kind?: "interactive" | "worker";
       repo?: string;
       workspace: string;
-      daemon_managed?: boolean;
       /** @description Active epic assignment for lead/workers. */
       parent?: string;
       /** @description Lead/orchestrator session that spawned or owns the agent. */
@@ -3983,15 +3808,15 @@ export interface components {
       session_id?: string;
       /** @description Assignment mode, such as persistent or ephemeral. */
       mode?: string;
-      /** @description Requested daemon state for the agent. */
+      /** @description Requested durable state for the agent. */
       desired_state?: string;
       commits?: components["schemas"]["MonitorCommitDetail"][];
       changes?: components["schemas"]["MonitorFileChange"][];
-      /** @description Task this daemon-managed agent has currently claimed. Empty between tasks (just spawned, polling, finished). UI joins this against issue.id to render which agent is working each card. */
+      /** @description Task this agent has currently claimed. Empty between tasks (just spawned, polling, finished). UI joins this against issue.id to render which agent is working each card. */
       current_task_id?: string;
       /**
        * Format: date-time
-       * @description Most recent PTY-output observation from the agent's supervised backend (claude/codex/gemini), forwarded over IPC. Compare to "now" to detect stuck agents. Zero/absent when no observation yet or agent isn't daemon-managed.
+       * @description Most recent output observation from the agent runtime. Compare to "now" to detect stuck agents. Zero/absent when no observation has been reported.
        */
       last_activity_at?: string;
       /** @description Fleet-db's DERIVED liveness signal ("working" or "idle"), computed server-side from the running-session + fresh-lease join (never re-derived by loom). "working" means the agent has a live session right now. Absent when liveness was not computed (no fleet-db store). The UI prefers this over the lock-derived status, which stays "idle" for a provably-working agent on serve-only deployments. */
@@ -4209,9 +4034,9 @@ export interface components {
     WorkspaceId: string;
     /** @description Issue identifier */
     IssueId: string;
-    /** @description Unified agent identifier or supervised assignment name */
+    /** @description Canonical Agent identifier or name */
     AgentName: string;
-    /** @description Unified agent, supervised assignment, or legacy binding identifier */
+    /** @description Canonical Agent identifier */
     AgentId: string;
   };
   requestBodies: never;
@@ -4258,6 +4083,7 @@ export interface operations {
           "application/json": {
             /** @example ok */
             status: string;
+            error?: string;
           };
         };
       };
@@ -5885,7 +5711,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -6675,7 +6501,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -6700,7 +6526,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -6729,7 +6555,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -6912,7 +6738,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -6973,7 +6799,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -7034,7 +6860,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -7110,31 +6936,6 @@ export interface operations {
       };
     };
   };
-  getAgentQueue: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
-        name: components["parameters"]["AgentName"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Agent-specific queue is not available */
-      501: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-    };
-  };
   enableAgentRecord: {
     parameters: {
       query?: never;
@@ -7142,7 +6943,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent, supervised assignment, or legacy binding identifier */
+        /** @description Canonical Agent identifier */
         id: components["parameters"]["AgentId"];
       };
       cookie?: never;
@@ -7158,7 +6959,7 @@ export interface operations {
           "application/json": components["schemas"]["DurableAgentRecord"];
         };
       };
-      /** @description Supervised assignments use lifecycle actions instead */
+      /** @description Invalid lifecycle request */
       400: {
         headers: {
           [name: string]: unknown;
@@ -7212,7 +7013,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent, supervised assignment, or legacy binding identifier */
+        /** @description Canonical Agent identifier */
         id: components["parameters"]["AgentId"];
       };
       cookie?: never;
@@ -7228,7 +7029,7 @@ export interface operations {
           "application/json": components["schemas"]["DurableAgentRecord"];
         };
       };
-      /** @description Supervised assignments use lifecycle actions instead */
+      /** @description Invalid lifecycle request */
       400: {
         headers: {
           [name: string]: unknown;
@@ -7284,7 +7085,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent, supervised assignment, or legacy binding identifier */
+        /** @description Canonical Agent identifier */
         id: components["parameters"]["AgentId"];
       };
       cookie?: never;
@@ -7354,7 +7155,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent, supervised assignment, or legacy binding identifier */
+        /** @description Canonical Agent identifier */
         id: components["parameters"]["AgentId"];
         session_id: string;
       };
@@ -7416,28 +7217,15 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
     };
-    requestBody?: {
-      content: {
-        "application/json": components["schemas"]["StopAgentRequest"];
-      };
-    };
+    requestBody?: never;
     responses: {
-      /** @description Interactive or direct local-daemon agent stopped synchronously */
+      /** @description Agent stopped synchronously */
       200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentLifecycleResponse"];
-        };
-      };
-      /** @description Supervised worker stop queued for its runtime owner */
-      202: {
         headers: {
           [name: string]: unknown;
         };
@@ -7454,7 +7242,7 @@ export interface operations {
           "application/json": components["schemas"]["AgentErrorResponse"];
         };
       };
-      /** @description Supervised agent not found */
+      /** @description Agent not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -7499,28 +7287,15 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
     };
-    requestBody?: {
-      content: {
-        "application/json": components["schemas"]["AgentLifecycleRequest"];
-      };
-    };
+    requestBody?: never;
     responses: {
-      /** @description Interactive or direct local-daemon agent started synchronously */
+      /** @description Agent started synchronously */
       200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentLifecycleResponse"];
-        };
-      };
-      /** @description Supervised worker start durably queued */
-      202: {
         headers: {
           [name: string]: unknown;
         };
@@ -7537,7 +7312,7 @@ export interface operations {
           "application/json": components["schemas"]["AgentErrorResponse"];
         };
       };
-      /** @description Supervised agent not found */
+      /** @description Agent not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -7582,190 +7357,23 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
-      };
-      cookie?: never;
-    };
-    requestBody?: {
-      content: {
-        "application/json": components["schemas"]["AgentLifecycleRequest"];
-      };
-    };
-    responses: {
-      /** @description Interactive or direct local-daemon restart completed synchronously */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentLifecycleResponse"];
-        };
-      };
-      /** @description Supervised worker restart durably queued */
-      202: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentLifecycleResponse"];
-        };
-      };
-      /** @description Invalid lifecycle request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-      /** @description Supervised agent not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-      /** @description Lifecycle update conflicts with stored state */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-      /** @description Agent service operation failed */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-      /** @description Agent service unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-    };
-  };
-  yieldAgent: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
-        name: components["parameters"]["AgentName"];
-      };
-      cookie?: never;
-    };
-    requestBody?: {
-      content: {
-        "application/json": components["schemas"]["AgentLifecycleRequest"];
-      };
-    };
-    responses: {
-      /** @description Direct local-daemon yield request completed synchronously */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentLifecycleResponse"];
-        };
-      };
-      /** @description Supervised worker yield durably queued */
-      202: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentLifecycleResponse"];
-        };
-      };
-      /** @description Invalid lifecycle request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-      /** @description Supervised agent not found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-      /** @description Lifecycle update conflicts with stored state */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-      /** @description Agent service operation failed */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-      /** @description Agent service unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AgentErrorResponse"];
-        };
-      };
-    };
-  };
-  getAgentLifecycleCommand: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
-        name: components["parameters"]["AgentName"];
-        command_id: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Durable lifecycle command status */
+      /** @description Agent restart completed synchronously */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["AgentLifecycleCommandResponse"];
+          "application/json": components["schemas"]["AgentLifecycleResponse"];
         };
       };
-      /** @description Invalid agent name or command ID */
+      /** @description Invalid lifecycle request */
       400: {
         headers: {
           [name: string]: unknown;
@@ -7774,7 +7382,7 @@ export interface operations {
           "application/json": components["schemas"]["AgentErrorResponse"];
         };
       };
-      /** @description Lifecycle command not found for this agent */
+      /** @description Agent not found */
       404: {
         headers: {
           [name: string]: unknown;
@@ -7783,7 +7391,16 @@ export interface operations {
           "application/json": components["schemas"]["AgentErrorResponse"];
         };
       };
-      /** @description Agent command store operation failed */
+      /** @description Lifecycle update conflicts with stored state */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentErrorResponse"];
+        };
+      };
+      /** @description Agent service operation failed */
       500: {
         headers: {
           [name: string]: unknown;
@@ -7792,7 +7409,7 @@ export interface operations {
           "application/json": components["schemas"]["AgentErrorResponse"];
         };
       };
-      /** @description Agent command store unavailable */
+      /** @description Agent service unavailable */
       503: {
         headers: {
           [name: string]: unknown;
@@ -7810,7 +7427,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -7835,7 +7452,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -7867,7 +7484,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -7899,7 +7516,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -7924,7 +7541,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -7949,7 +7566,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -7974,7 +7591,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -8467,7 +8084,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -8492,7 +8109,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -8517,7 +8134,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;
@@ -8544,7 +8161,7 @@ export interface operations {
       path: {
         /** @description Workspace identifier */
         ws: components["parameters"]["WorkspaceId"];
-        /** @description Unified agent identifier or supervised assignment name */
+        /** @description Canonical Agent identifier or name */
         name: components["parameters"]["AgentName"];
       };
       cookie?: never;

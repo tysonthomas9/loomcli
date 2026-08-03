@@ -118,7 +118,6 @@ agent      Run a custom worker agent with a user-defined prompt template
 monitor    Live dashboard showing agent status and task progress
 list       List all agents (worktrees) and their status
 recover    Recover agent from error state (clear locks, reset tasks)
-daemon     Supervise multiple agents with auto-restart
 ```
 
 ### Git Operations
@@ -135,8 +134,7 @@ reset      Hard reset worktree to a specific branch
 workspace  Create/list/show workspaces (workspace add|use|show|status)
 repo       Manage repos within a workspace (repo add|remove|list|show)
 role       Manage agent roles (role set|unset|show|list)
-agentdef   Manage agent definitions (agentdef add|remove|start|stop|list|show)
-daemon     Daemon profile + lifecycle (daemon profile show|set|unset)
+agentdef   Manage canonical agent identities (agentdef add|remove|start|stop|list|show)
 init       Guided setup wizard (workspace and worktree creation)
 ```
 
@@ -165,10 +163,9 @@ loom pr falcon                # Create PR from falcon to main
 loom monitor                  # Live terminal dashboard
 loom serve                    # Web UI at http://localhost:8080
 
-# Multi-agent supervision
-loom daemon profile set --max-agents=10   # Configure daemon profile (stored in fleet-db)
-loom daemon                               # Start daemon
-loom daemon status                        # Check daemon status
+# Managed agents
+loom agentdef list              # Inspect durable identities and desired state
+loom serve                      # Host execution, automation, and interaction
 ```
 
 ## Auto Mode
@@ -259,17 +256,14 @@ loom plan falcon --backend codex      # Flag (highest priority)
 LOOM_BACKEND=codex loom plan falcon   # Environment variable
 ```
 
-Or set the workspace daemon profile so agents inherit it:
-```bash
-loom daemon profile set --backend codex
-```
-
-**Resolution order:** `--backend` flag > `LOOM_BACKEND` env > workspace daemon profile > default `claude`
+Managed agents persist backend policy on their Role. Direct CLI runs use this
+resolution order: `--backend` flag > `LOOM_BACKEND` env > default `codex`.
 
 ## Configuration
 
-All loom state lives in fleet-db (workspaces, repos, roles, agent definitions,
-daemon profiles, issues). Edit it via the noun-verb CLI:
+All Loom product state lives in fleet-db (workspaces, repos, roles, agent
+identities, bindings, grants, runs, and issues). Edit it through the noun-verb
+CLI and the `loom serve` management API:
 
 ```bash
 # Workspace lifecycle
@@ -307,10 +301,6 @@ loom worker profile add falcon --role reviewer --repo frontend
 loom agentdef add falcon --role reviewer --profile falcon --auto
 loom agentdef list
 
-# Daemon profile (one per workspace)
-loom daemon profile set --max-agents=20 --log-level=debug
-loom daemon profile show
-loom daemon profile unset --max-agents                   # Clear an int field
 ```
 
 `agentdef` owns durable identity and desired lifecycle only. Put backend and

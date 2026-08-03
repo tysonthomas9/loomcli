@@ -265,9 +265,6 @@ func TestApplyWorkspaceConfig_NilStoreDoesNotWireWorkspaceFns(t *testing.T) {
 	if cfg.WorkspaceCreateFn != nil {
 		t.Fatal("WorkspaceCreateFn should be nil without store")
 	}
-	if cfg.DaemonConfigFn != nil {
-		t.Fatal("DaemonConfigFn should be nil without store")
-	}
 }
 
 func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
@@ -293,9 +290,6 @@ func TestApplyWorkspaceConfig_StoreWiresStoreBackedFns(t *testing.T) {
 	}
 	if cfg.WorkspaceAddReposFn == nil {
 		t.Fatal("WorkspaceAddReposFn was nil")
-	}
-	if cfg.DaemonConfigFn == nil {
-		t.Fatal("DaemonConfigFn was nil")
 	}
 }
 
@@ -914,14 +908,6 @@ func TestServeFlags_Defaults(t *testing.T) {
 	}
 	if port != 8080 {
 		t.Errorf("port default = %d, want %d", port, 8080)
-	}
-
-	webuiSocket, err := f.GetString("webui-socket")
-	if err != nil {
-		t.Fatalf("failed to get webui-socket flag: %v", err)
-	}
-	if webuiSocket != "" {
-		t.Errorf("webui-socket default = %q, want %q", webuiSocket, "")
 	}
 
 	frontendURLs, err := f.GetStringSlice("frontend-url")

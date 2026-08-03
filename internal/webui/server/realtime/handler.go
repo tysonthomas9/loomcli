@@ -15,8 +15,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 )
 
 // tracerName is the instrumentation library name reported on every span
@@ -35,7 +33,7 @@ const (
 // HandlerConfig configures the SSE Handler.
 type HandlerConfig struct {
 	Hub               *Hub
-	GetMutationsSince func(wsID string, since string) []rpc.MutationEvent
+	GetMutationsSince func(wsID string, since string) []MutationEvent
 	WorkspaceFromCtx  func(context.Context) string
 	TokenStore        *TokenStore // nil = open mode (no auth required)
 	// OnAuthenticated runs after the stream request passes handler-level auth.
@@ -45,7 +43,7 @@ type HandlerConfig struct {
 // Handler is an http.Handler for the SSE endpoint with configurable heartbeat.
 type Handler struct {
 	hub               *Hub
-	getMutationsSince func(wsID string, since string) []rpc.MutationEvent
+	getMutationsSince func(wsID string, since string) []MutationEvent
 	heartbeatInterval time.Duration
 	tokenStore        *TokenStore
 	workspaceFromCtx  func(context.Context) string
@@ -184,7 +182,7 @@ func (h *Handler) sendCatchUp(sw *Writer, since string, workspaceID string, sour
 		return nil
 	}
 	for _, m := range h.getMutationsSince(workspaceID, since) {
-		payload := RPCMutationToPayload(m)
+		payload := MutationEventToPayload(m)
 		payload.WorkspaceID = workspaceID
 		if !MatchesSourceRepoFilter(sourceRepos, payload.SourceRepo) {
 			continue
@@ -291,8 +289,8 @@ func (h *Handler) validateAuth(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// RPCMutationToPayload converts an RPC mutation event to a payload.
-func RPCMutationToPayload(m rpc.MutationEvent) *MutationPayload {
+// MutationEventToPayload converts a durable mutation event to its SSE payload.
+func MutationEventToPayload(m MutationEvent) *MutationPayload {
 	return &MutationPayload{
 		Cursor:     m.Cursor,
 		Type:       m.Type,

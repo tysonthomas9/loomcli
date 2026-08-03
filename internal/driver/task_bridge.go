@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	runtimesettings "github.com/tysonthomas9/loomcli/internal/localsettings"
+	"github.com/tysonthomas9/loomcli/internal/driver/runnersettings"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -35,7 +36,7 @@ const (
 	TaskRunnerBackendEnv = "LOOM_TASK_RUNNER_BACKEND"
 
 	// defaultTaskRunnerBackend mirrors service.GetWorkspaceBackend's default
-	// (DaemonProfile.AgentBackend empty -> codex).
+	// (local-node provider unset -> codex).
 	defaultTaskRunnerBackend = "codex"
 )
 
@@ -73,6 +74,9 @@ type HostBridgeTaskExecutor struct {
 	// unblocks successors — so a dependent's resolver reads a durable node. When
 	// nil (the pre-stacking sites and all tests), the barrier is inert.
 	StackStore stackstore.Store
+	// TaskOutcomes is Source Control's narrow finalize-barrier mutation port.
+	// StackStore remains read-only for lineage lookup during Phase 6.
+	TaskOutcomes sourcecontrol.TaskOutcomeRecorder
 	// stackBinding is computed once per ExecuteTask after the worktree resolves:
 	// the task's stack id, canonical output branch, and base ref. When set, it is
 	// exported to a stacked runner so it pushes the canonical branch on the
@@ -740,35 +744,11 @@ func (e HostBridgeTaskExecutor) taskRunnerEnv(req TaskExecRequest, requestJSON s
 }
 
 func (e HostBridgeTaskExecutor) localTaskRunnerSettingsEnv(existing []string) []string {
-	dir := strings.TrimSpace(e.LocalSettingsDir)
-	if dir == "" {
-		return nil
-	}
-	settings, err := runtimesettings.Load(dir)
-	if err != nil {
-		return nil
-	}
-	out := make([]string, 0, 1)
-	if model := strings.TrimSpace(settings.LocalTaskRunner.OpenCodeModel); model != "" &&
-		!envHasAny(existing, "LOOM_OPENCODE_MODEL") {
-		out = append(out, "LOOM_OPENCODE_MODEL="+model)
-	}
-	return out
+	return runnersettings.LocalTaskRunnerEnv(e.LocalSettingsDir, existing)
 }
 
 func envHasAny(env []string, names ...string) bool {
-	for _, entry := range env {
-		name, value, ok := strings.Cut(entry, "=")
-		if !ok || strings.TrimSpace(value) == "" {
-			continue
-		}
-		for _, want := range names {
-			if name == want {
-				return true
-			}
-		}
-	}
-	return false
+	return runnersettings.HasAny(env, names...)
 }
 
 func (e HostBridgeTaskExecutor) taskRunnerBundleEnv(req TaskExecRequest) []string {

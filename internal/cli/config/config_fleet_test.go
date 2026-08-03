@@ -14,7 +14,7 @@ func clearFleetEnv(t *testing.T) {
 func TestResolveFleetConfig_Defaults(t *testing.T) {
 	clearFleetEnv(t)
 
-	cfg := ResolveFleetConfig(&DaemonSettings{})
+	cfg := ResolveFleetConfig()
 
 	if cfg.Workspace != "" {
 		t.Errorf("Workspace = %q, want empty", cfg.Workspace)
@@ -28,7 +28,7 @@ func TestResolveFleetConfig_NormalizesDefaultWorkspace(t *testing.T) {
 	clearFleetEnv(t)
 	t.Setenv("LOOM_WORKSPACE", " default ")
 
-	cfg := ResolveFleetConfig(nil)
+	cfg := ResolveFleetConfig()
 
 	if cfg.Workspace != "DEFAULT" {
 		t.Errorf("Workspace = %q, want DEFAULT", cfg.Workspace)
@@ -42,7 +42,7 @@ func TestResolveFleetConfig_Env(t *testing.T) {
 	t.Setenv("LOOM_FLEET_API_KEY", "secret")
 	t.Setenv("LOOM_FLEET_ACTOR", "operator")
 
-	cfg := ResolveFleetConfig(nil)
+	cfg := ResolveFleetConfig()
 
 	if cfg.URL != "https://fleet.example.com" {
 		t.Errorf("URL = %q, want trimmed fleet URL", cfg.URL)
@@ -56,7 +56,7 @@ func TestResolveFleetConfig_AgentNameActorFallback(t *testing.T) {
 	clearFleetEnv(t)
 	t.Setenv("LOOM_AGENT_NAME", "nova")
 
-	cfg := ResolveFleetConfig(nil)
+	cfg := ResolveFleetConfig()
 
 	if cfg.Actor != "nova" {
 		t.Errorf("Actor = %q, want LOOM_AGENT_NAME fallback", cfg.Actor)

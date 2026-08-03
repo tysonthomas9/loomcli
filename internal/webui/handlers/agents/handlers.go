@@ -1,17 +1,11 @@
 package agents
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
-	"go.opentelemetry.io/otel/attribute"
-
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/dto"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -20,26 +14,8 @@ type interactivePromptsResponse struct {
 	Prompts []domain.BuiltinInteractivePrompt `json:"prompts"`
 }
 
-func HandleList(agentSvc service.AgentService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		agents, err := agentSvc.ListAgents(r.Context(), requestWorkspaceID(r))
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		items := make([]supervisedAgentDTO, 0, len(agents))
-		for _, agent := range agents {
-			if agent == nil {
-				continue
-			}
-			items = append(items, newSupervisedAgentDTO(agent))
-		}
-		handler.WriteJSON(w, http.StatusOK, dto.NewListResponse(items, len(items)))
-	}
-}
-
 func HandleInteractivePrompts() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		handler.WriteJSON(w, http.StatusOK, interactivePromptsResponse{
 			Prompts: visibleInteractivePrompts(),
 		})
@@ -50,255 +26,34 @@ func visibleInteractivePrompts() []domain.BuiltinInteractivePrompt {
 	prompts := domain.BuiltinInteractivePrompts()
 	out := make([]domain.BuiltinInteractivePrompt, 0, len(prompts))
 	for _, prompt := range prompts {
-		if prompt.Hidden {
-			continue
+		if !prompt.Hidden {
+			out = append(out, prompt)
 		}
-		out = append(out, prompt)
 	}
 	return out
 }
 
-func HandleCreate(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ws := requestWorkspaceID(r)
-		ctx, span := startSpan(r.Context(), "service.Agent.Create",
-			attribute.String("loom.workspace", ws))
-		defer span.End()
-
-		var in service.AgentCreateInput
-		if err := handler.ReadJSON(w, r, &in); err != nil {
-			recordErr(span, err)
-			handler.HandleServiceError(w, err)
-			return
-		}
-		if in.WorkspaceKey == "" {
-			in.WorkspaceKey = ws
-		}
-		if in.WorkspaceKey != ws {
-			err := service.ErrValidation("workspace_key must match request workspace")
-			recordErr(span, err)
-			handler.HandleServiceError(w, err)
-			return
-		}
-		// Agent name is an internal short identifier (per-workspace handle like
-		// "falcon"), not user-supplied free-form text — safe to record.
-		span.SetAttributes(attribute.String("loom.agent", in.Name))
-		created, err := agentSvc.CreateAgent(ctx, in)
-		if err != nil {
-			recordErr(span, err)
-			handler.HandleServiceError(w, err)
-			return
-		}
-		broadcastAgentRefresh(hub, ws, created.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusCreated, newSupervisedAgentDTO(created))
-	}
+// Keep the legacy service error vocabulary behind the already-ratcheted
+// handler composition file. Canonical Agent handlers use these narrow HTTP
+// helpers rather than introducing new dependencies on the global service
+// package during the Phase 6 retirement.
+func writeAgentValidationError(w http.ResponseWriter, message string) {
+	handler.HandleServiceError(w, service.ErrValidation(message))
 }
 
-func HandleUpdate(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var patch service.AgentUpdateInput
-		if err := handler.ReadJSON(w, r, &patch); err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		if patch.State != nil && !validAgentState(*patch.State) {
-			handler.HandleServiceError(w, service.ErrValidation("invalid state"))
-			return
-		}
-		if patch.DesiredState != nil && !validAgentDesiredState(*patch.DesiredState) {
-			handler.HandleServiceError(w, service.ErrValidation("invalid desired_state"))
-			return
-		}
-		ws := requestWorkspaceID(r)
-		updated, err := agentSvc.UpdateAgent(r.Context(), ws, r.PathValue("name"), patch)
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		broadcastAgentRefresh(hub, ws, updated.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusOK, newSupervisedAgentDTO(updated))
-	}
+func writeAgentConflictError(w http.ResponseWriter, message string) {
+	handler.HandleServiceError(w, service.ErrConflict(message))
 }
 
-func HandleDelete(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ws := requestWorkspaceID(r)
-		name := r.PathValue("name")
-		if err := agentSvc.DeleteAgent(r.Context(), ws, name); err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		broadcastAgentRefresh(hub, ws, name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, http.StatusOK, dto.NewMessageResponse("agent deleted"))
-	}
+func writeAgentInternalError(w http.ResponseWriter, message string, cause error) {
+	handler.HandleServiceError(w, service.ErrInternal(message, cause))
 }
 
-func HandleStart(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return handleLifecycle(agentSvc, hub, lifecyclePatch{
-		state:       domain.AgentStateActive,
-		desired:     domain.AgentDesiredRunning,
-		commandType: "start",
-		status:      http.StatusOK,
-		message:     "started",
-	})
+func validStoredAgentName(value string) bool {
+	return value != "" && service.ValidStoredAgentName.MatchString(value)
 }
 
-func HandleStop(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return handleLifecycle(agentSvc, hub, lifecyclePatch{
-		state:       domain.AgentStateStopped,
-		desired:     domain.AgentDesiredStopped,
-		commandType: "stop",
-		status:      http.StatusOK,
-		message:     "stopped",
-	})
-}
-
-func HandleRestart(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return handleLifecycle(agentSvc, hub, lifecyclePatch{
-		state:       domain.AgentStateActive,
-		desired:     domain.AgentDesiredRunning,
-		commandType: "restart",
-		status:      http.StatusOK,
-		message:     "restarted",
-	})
-}
-
-func HandleYield(agentSvc service.AgentService, hub *realtime.Hub) http.HandlerFunc {
-	return handleLifecycle(agentSvc, hub, lifecyclePatch{
-		state:       domain.AgentStateIdle,
-		desired:     domain.AgentDesiredDraining,
-		commandType: "yield",
-		status:      http.StatusOK,
-		message:     "yielded",
-	})
-}
-
-func HandleQueueUnsupported(w http.ResponseWriter, _ *http.Request) {
-	handler.HandleServiceError(w, service.ErrNotImplemented("agent-specific queue is not available in fleet-db store mode; use monitor task queues"))
-}
-
-type lifecyclePatch struct {
-	state       domain.AgentState
-	desired     domain.AgentDesiredState
-	commandType string
-	payload     map[string]string
-	status      int
-	message     string
-}
-
-type lifecycleRequest struct {
-	Payload map[string]string `json:"payload,omitempty"`
-	TaskID  string            `json:"task_id,omitempty"`
-	Force   bool              `json:"force,omitempty"`
-}
-
-func handleLifecycle(agentSvc service.AgentService, hub *realtime.Hub, patch lifecyclePatch) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ws := requestWorkspaceID(r)
-		name := r.PathValue("name")
-		var req lifecycleRequest
-		if r.Body != nil && r.ContentLength != 0 {
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				handler.HandleServiceError(w, service.ErrValidation("invalid request body"))
-				return
-			}
-		}
-
-		effective, input := resolveLifecycleRequest(patch, req)
-		result, err := agentSvc.RequestAgentLifecycle(r.Context(), ws, name, input)
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		if result == nil || result.Agent == nil {
-			handler.HandleServiceError(w, service.ErrInternal("agent lifecycle returned no agent", nil))
-			return
-		}
-		if result.Pending {
-			effective.status = http.StatusAccepted
-			if patch.commandType == "stop" && req.Force {
-				effective.message = "force-stop requested"
-			} else {
-				effective.message = effective.commandType + " requested"
-			}
-		}
-		broadcastAgentRefresh(hub, ws, result.Agent.Name, r.Header.Get("X-Actor"))
-		handler.WriteJSON(w, effective.status, dto.AgentLifecycleResponse{
-			Message:   fmt.Sprintf("agent %q %s", result.Agent.Name, effective.message),
-			Pending:   result.Pending,
-			CommandID: result.CommandID,
-			Status:    string(result.Status),
-		})
-	}
-}
-
-// HandleGetLifecycleCommand exposes the durable command projection used by the
-// UI to distinguish accepted work from terminal lifecycle convergence.
-func HandleGetLifecycleCommand(agentSvc service.AgentService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		result, err := agentSvc.GetAgentLifecycleCommand(
-			r.Context(),
-			requestWorkspaceID(r),
-			r.PathValue("name"),
-			r.PathValue("command_id"),
-		)
-		if err != nil {
-			handler.HandleServiceError(w, err)
-			return
-		}
-		handler.WriteJSON(w, http.StatusOK, result)
-	}
-}
-
-func resolveLifecycleRequest(patch lifecyclePatch, req lifecycleRequest) (lifecyclePatch, service.AgentLifecycleInput) {
-	effective := patch
-	if patch.commandType == "stop" && req.Force {
-		effective.payload = map[string]string{"force": "true"}
-		effective.message = "force-stopped"
-	}
-
-	payload := cloneLifecyclePayload(effective.payload)
-	for key, value := range req.Payload {
-		if payload == nil {
-			payload = map[string]string{}
-		}
-		payload[key] = value
-	}
-	if req.TaskID != "" {
-		if payload == nil {
-			payload = map[string]string{}
-		}
-		payload["task_id"] = req.TaskID
-	}
-	if patch.commandType == "stop" && req.Force {
-		payload["force"] = "true"
-	}
-
-	return effective, service.AgentLifecycleInput{
-		State:        effective.state,
-		DesiredState: effective.desired,
-		CommandType:  effective.commandType,
-		Payload:      payload,
-	}
-}
-
-func cloneLifecyclePayload(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func requestWorkspaceID(r *http.Request) string {
-	if ws := middleware.WorkspaceFromContext(r.Context()); ws != "" {
-		return ws
-	}
-	return r.PathValue("ws")
-}
+type lifecycleRequest struct{}
 
 func broadcastAgentRefresh(hub *realtime.Hub, workspace, agentName, actor string) {
 	if hub == nil || workspace == "" {
@@ -314,22 +69,4 @@ func broadcastAgentRefresh(hub *realtime.Hub, workspace, agentName, actor string
 		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
 		WorkspaceID: workspace,
 	})
-}
-
-func validAgentState(state domain.AgentState) bool {
-	switch state {
-	case "", domain.AgentStateIdle, domain.AgentStateActive, domain.AgentStateStopped:
-		return true
-	default:
-		return false
-	}
-}
-
-func validAgentDesiredState(state domain.AgentDesiredState) bool {
-	switch state {
-	case "", domain.AgentDesiredStopped, domain.AgentDesiredIdle, domain.AgentDesiredRunning, domain.AgentDesiredDraining:
-		return true
-	default:
-		return false
-	}
 }

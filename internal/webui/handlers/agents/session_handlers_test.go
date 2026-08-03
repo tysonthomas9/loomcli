@@ -4,37 +4,22 @@ import (
 	"context"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/svcimpl"
 )
 
-type agentLocalHistoryStub struct {
-	items []service.SessionListItem
-}
-
-func (stub agentLocalHistoryStub) ListAgentLocalSessions(
-	context.Context,
-	string,
-	string,
-) ([]service.SessionListItem, error) {
-	return append([]service.SessionListItem(nil), stub.items...), nil
-}
-
-func TestFlueTaskRunUsesSamePublicSessionIDAcrossAgentHistoryAndTaskSessions(t *testing.T) {
+func TestFlueTaskRunIsOwnedByTaskSessionsNotAgentHistory(t *testing.T) {
 	ctx := t.Context()
 	st := newAgentRecordStore(t)
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: agentRecordTestWS,
-		Name:         "flue-worker",
-		RoleName:     "task",
-		Backend:      "codex",
+	seedRole(t, st, "task")
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: agentRecordTestWS, ServiceID: "flue-worker", Name: "flue-worker", RoleName: "task",
+		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create supervised agent: %v", err)
 	}
@@ -62,8 +47,8 @@ func TestFlueTaskRunUsesSamePublicSessionIDAcrossAgentHistoryAndTaskSessions(t *
 	}
 	var history agentRunsResponse
 	decodeJSON(t, rec.Body.Bytes(), &history)
-	if len(history.Sessions) != 1 {
-		t.Fatalf("agent history sessions = %+v, want one", history.Sessions)
+	if len(history.Sessions) != 0 {
+		t.Fatalf("agent history sessions = %+v, want none", history.Sessions)
 	}
 
 	taskSessions, err := svcimpl.NewSessionService(st, nil).ListTaskSessions(
@@ -77,40 +62,22 @@ func TestFlueTaskRunUsesSamePublicSessionIDAcrossAgentHistoryAndTaskSessions(t *
 	if len(taskSessions) != 1 {
 		t.Fatalf("task sessions = %+v, want one", taskSessions)
 	}
-	if history.Sessions[0].SessionID != "flue-task-run-shared-1" ||
-		taskSessions[0].SessionID != history.Sessions[0].SessionID {
-		t.Fatalf(
-			"public session IDs differ: agent history=%q task sessions=%q",
-			history.Sessions[0].SessionID,
-			taskSessions[0].SessionID,
-		)
+	if taskSessions[0].SessionID != "flue-task-run-shared-1" {
+		t.Fatalf("task session ID = %q, want flue-task-run-shared-1", taskSessions[0].SessionID)
 	}
 }
 
-func TestAgentRunsIncludesDaemonLocalSupervisedSession(t *testing.T) {
+func TestAgentRunsDoesNotIncludeDaemonLocalCompatibilitySession(t *testing.T) {
 	ctx := t.Context()
 	st := newAgentRecordStore(t)
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: agentRecordTestWS,
-		Name:         "advanced-planner",
-		RoleName:     "plan",
-		Backend:      "codex",
+	seedRole(t, st, "plan")
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: agentRecordTestWS, ServiceID: "advanced-planner", Name: "advanced-planner", RoleName: "plan",
+		Kind: domain.AgentServiceKindSupport, DesiredState: domain.AgentServiceDesiredRunning, MaxInstances: 1,
 	}); err != nil {
 		t.Fatalf("create supervised agent: %v", err)
 	}
-	startedAt := time.Date(2026, 8, 1, 8, 40, 4, 0, time.UTC)
-	endedAt := startedAt.Add(5 * time.Minute)
 	module := newTestAgentsModule(nil, st, nil, agentRecordTestWS)
-	module.localSessionHistory = agentLocalHistoryStub{
-		items: []service.SessionListItem{{
-			SessionRecord: sessions.SessionRecord{
-				SessionID: "local-advanced-1", TaskID: "TASK-ADV-1",
-				AgentName: "advanced-planner", Backend: "codex", Phase: "planning",
-				StartedAt: startedAt, EndedAt: &endedAt, Status: sessions.StatusCompleted,
-			},
-			HasTranscript: true,
-		}},
-	}
 	mux := http.NewServeMux()
 	module.Register(mux)
 
@@ -126,11 +93,8 @@ func TestAgentRunsIncludesDaemonLocalSupervisedSession(t *testing.T) {
 	}
 	var history agentRunsResponse
 	decodeJSON(t, rec.Body.Bytes(), &history)
-	if len(history.Sessions) != 1 || history.Sessions[0].SessionID != "local-advanced-1" ||
-		history.Sessions[0].TaskID != "TASK-ADV-1" ||
-		history.Sessions[0].AgentID != "advanced-planner" ||
-		history.Sessions[0].Status != domain.AgentSessionCompleted {
-		t.Fatalf("local supervised history = %+v", history.Sessions)
+	if len(history.Sessions) != 0 {
+		t.Fatalf("retired local compatibility history leaked: %+v", history.Sessions)
 	}
 }
 

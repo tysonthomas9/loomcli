@@ -2,19 +2,16 @@ package webui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
-	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentcontrol"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/servercapabilities"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -59,7 +56,6 @@ type ArtifactsCapability = servercapabilities.Artifacts
 
 const (
 	DefaultPort            = 8080
-	DefaultPoolSize        = 100
 	DefaultShutdownTimeout = 5 * time.Second
 	DefaultMaxPortAttempts = 10
 )
@@ -85,9 +81,7 @@ type MonitorHandlers struct {
 type ServerConfig struct {
 	Port                int
 	BindAddress         string // Listen address (default: "127.0.0.1"; use "0.0.0.0" for all interfaces)
-	SocketPath          string
 	FrontendDir         string // Optional built SPA directory served for non-API routes
-	PoolSize            int
 	CORSEnabled         bool
 	CORSOrigins         []string
 	FrontendOrigins     []string // Explicit public frontend origins; used to constrain open local file access
@@ -136,39 +130,34 @@ type ServerConfig struct {
 	WorkspaceAdmissions       service.WorkspaceAdmissionCoordinator
 	InitialWorkspaceID        string                // Stable key of the initial workspace
 	WorkspaceIDResolverFn     WorkspaceIDResolverFn // Resolves workspace name → UUID; nil = no resolution available
-	// Store is the unified state store for workspaces, repos, agents, roles,
-	// and daemon profiles. Local and distributed modes both use this store
-	// as the authoritative workspace/config source.
+	// Store is the transitional unified state store for workspace configuration
+	// not yet migrated behind capability-owned APIs. Local and distributed modes
+	// both use it as the authoritative source for those remaining records.
 	Store                store.Store
-	BackendOps           ops.BackendOps                                    // Backend health operations interface (optional; nil disables backend health endpoint)
-	ScrollbackMaxLines   int                                               // Maximum lines per scrollback buffer (0 = default 10000)
-	NotifyTokenDir       string                                            // Directory to write notify.token (typically runtime dir); empty = token file not written
-	SessionRuntimeDir    string                                            // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
-	LocalSettingsDir     string                                            // Desktop-local settings directory; empty disables /api/local/settings
-	AgentControlFn       agentcontrol.AgentControlFn                       // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
-	DaemonSupervisorFn   func() (*DaemonSupervisorData, error)             // Returns daemon supervisor state from state file; nil = endpoint unavailable
-	DaemonConfigFn       func() (json.RawMessage, error)                   // Returns effective merged daemon config as JSON; nil = endpoint unavailable
-	AgentQueueFn         func(agentName string) ([]AgentQueueEntry, error) // Returns scored work queue for named agent; nil = endpoint unavailable
-	FleetMode            bool                                              // When true, skip local daemon lifecycle hooks; fleet server manages agents
-	FleetClientURL       string                                            // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
-	FleetClientWorkspace string                                            // Explicit fleet server workspace ID; empty = unset.
-	FleetClientAPIKey    string                                            // Pre-shared API key for fleet worker backend auth
-	FleetClientActor     string                                            // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
-	FleetDBBaseURL       string                                            // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
+	BackendOps           ops.BackendOps // Backend health operations interface (optional; nil disables backend health endpoint)
+	ScrollbackMaxLines   int            // Maximum lines per scrollback buffer (0 = default 10000)
+	NotifyTokenDir       string         // Directory to write notify.token (typically runtime dir); empty = token file not written
+	SessionRuntimeDir    string         // Runtime dir searched for local agent sessions; empty = workspace/repo stores only
+	LocalSettingsDir     string         // Desktop-local settings directory; empty disables /api/local/settings
+	FleetMode            bool           // When true, skip local daemon lifecycle hooks; fleet server manages agents
+	FleetClientURL       string         // Fleet server URL for fleet-mode workers (e.g., "http://fleet.example.com"); empty = no fleet client
+	FleetClientWorkspace string         // Explicit fleet server workspace ID; empty = unset.
+	FleetClientAPIKey    string         // Pre-shared API key for fleet worker backend auth
+	FleetClientActor     string         // X-Actor header value for fleet-db --auth-dev-mode (typically the loom agent name)
+	FleetDBBaseURL       string         // fleet-db HTTP base URL backing Store; used by the driver-op API to build issue backends
 	// ExecutionIssueBackends builds the workspace- and actor-scoped FleetDB
 	// clients used behind the run-token-authenticated DriverRun and TaskRun
 	// facades. Embedded mode captures its process-local service credential in
 	// this closure instead of exporting it through environment state.
 	ExecutionIssueBackends func(workspace, actor string) (servercapabilities.IssueBackend, error)
-	DriverAPIToken         string                                               // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
-	DriverAPIBaseURL       string                                               // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
-	DriverRunTokenKey      []byte                                               // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
-	ExecutionCapability    ExecutionCapability                                  // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
-	DaytonaProvider        servercapabilities.DaytonaProviderBroker             // Host-owned, owner-fenced Daytona provider operation; nil fails closed.
-	ArtifactsCapability    ArtifactsCapability                                  // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
-	DaemonStartupFn        func(ctx context.Context, onReady func(wsID string)) // Starts daemons for secondary workspaces; calls onReady(wsID) when each is reachable
-	Logger                 *slog.Logger                                         // Structured logger (optional; nil falls back to slog.Default())
-	SentryDSN              string                                               // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
+	DriverAPIToken         string                                   // Optional shared bearer token required by the driver-op HTTP API (LOOM_DRIVER_API_TOKEN)
+	DriverAPIBaseURL       string                                   // This serve process's own driver/task-run API base URL, required by task runners as LOOM_TASK_RUN_API_URL
+	DriverRunTokenKey      []byte                                   // HS256 signing key for run-scoped driver-op tokens (LOOM_RUN_TOKEN_SIGNING_KEY or ephemeral); nil disables the token auth path
+	ExecutionCapability    ExecutionCapability                      // Active Execution APIs and typed authority resolvers; nil fails mutating execution routes closed
+	DaytonaProvider        servercapabilities.DaytonaProviderBroker // Host-owned, owner-fenced Daytona provider operation; nil fails closed.
+	ArtifactsCapability    ArtifactsCapability                      // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
+	Logger                 *slog.Logger                             // Structured logger (optional; nil falls back to slog.Default())
+	SentryDSN              string                                   // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
 	// IssueBackendFn returns the active backend.IssueBackend used by the
 	// webui issue service for the migrated CRUD operations (Get, Create,
 	// Update/Patch, Close, Claim, Delete, AddComment, AddDependency,
@@ -195,7 +184,6 @@ func DefaultConfig() ServerConfig {
 	return ServerConfig{
 		Port:            DefaultPort,
 		BindAddress:     "127.0.0.1",
-		PoolSize:        DefaultPoolSize,
 		ShutdownTimeout: DefaultShutdownTimeout,
 		MaxPortAttempts: DefaultMaxPortAttempts,
 	}
@@ -216,9 +204,4 @@ func FindAvailablePort(bindAddr string, startPort, maxAttempts int) (net.Listene
 		return listener, port, nil
 	}
 	return nil, 0, fmt.Errorf("no available port found on %s in range %d-%d", bindAddr, startPort, startPort+maxAttempts-1)
-}
-
-// GetCwd returns the current working directory.
-func GetCwd() (string, error) {
-	return os.Getwd()
 }

@@ -8,7 +8,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
@@ -28,8 +27,6 @@ type Handlers struct {
 	ListEditors         http.HandlerFunc
 	OpenEditor          http.HandlerFunc
 	NotifySessionChange http.HandlerFunc // pre-built by caller, may be nil
-	DaemonSupervisor    http.HandlerFunc
-	DaemonConfig        http.HandlerFunc
 
 	// Closers for cleanup
 	ClientErrLimiter Stopper
@@ -43,13 +40,10 @@ type Stopper interface {
 
 // HandlerDeps holds the dependencies for building top-level handlers.
 type HandlerDeps struct {
-	Pool               daemon.Pool
 	Hub                *realtime.Hub // may be nil
 	ExtAuthURL         string
 	BackendsHealthH    http.HandlerFunc // pre-built; nil disables endpoint
 	NotifyToken        string
-	DaemonSupervisor   http.HandlerFunc    // pre-built; nil = disabled
-	DaemonConfig       http.HandlerFunc    // pre-built; nil = disabled
 	FleetTimeoutsFn    func() int64        // nil = no fleet
 	ClaimMetrics       *fleet.ClaimMetrics // nil = no fleet
 	TerminalGraceMS    int64               // 0 = disabled
@@ -64,12 +58,6 @@ type HandlerDeps struct {
 	// route to a per-workspace fleet-db backend; /api/config callers pass
 	// context.Background() since the response is workspace-agnostic.
 	IssueBackendFn func(ctx context.Context) backend.IssueBackend
-	// DaemonExpected is true when this server expects a local issue daemon to
-	// be reachable. False in fleet mode where the IssueBackend
-	// is the canonical issue source and no daemon should exist. Drives
-	// /api/health: when false, daemon checks are skipped entirely so a
-	// missing daemon doesn't false-positive a liveness probe.
-	DaemonExpected bool
 }
 
 // BuildHandlers constructs all top-level HTTP handlers.
@@ -79,13 +67,9 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 
 	editorCache := misc.NewDefaultEditorCache()
 
-	apiHealth := healthhandlers.HandleAPIHealth(deps.Pool)
-	if !deps.DaemonExpected {
-		apiHealth = healthhandlers.HandleAPIHealthNoDaemon()
-	}
 	h := &Handlers{
-		Health:       healthhandlers.HandleHealth(deps.Pool),
-		APIHealth:    apiHealth,
+		Health:       healthhandlers.HandleHealth(),
+		APIHealth:    healthhandlers.HandleAPIHealth(),
 		ClientErrors: misc.HandleClientErrors(clientErrLimiter),
 		AuthConfig:   misc.HandleAuthConfig(deps.ExtAuthURL, authCfgLimiter, deps.IssueBackendFn),
 		Metrics:      healthhandlers.HandleMetrics(deps.Hub, deps.FleetTimeoutsFn, deps.ClaimMetrics),
@@ -96,8 +80,6 @@ func BuildHandlers(deps HandlerDeps) *Handlers {
 		}),
 		ListEditors:      misc.HandleListEditors(editorCache),
 		OpenEditor:       misc.HandleOpenEditorDefault(editorCache),
-		DaemonSupervisor: deps.DaemonSupervisor,
-		DaemonConfig:     deps.DaemonConfig,
 		ClientErrLimiter: clientErrLimiter,
 		AuthCfgLimiter:   authCfgLimiter,
 	}

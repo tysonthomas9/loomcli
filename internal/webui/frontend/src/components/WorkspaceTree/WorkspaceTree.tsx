@@ -58,7 +58,7 @@ export interface WorkspaceTreeProps {
   connectionLost?: boolean;
   /** Timestamp (ms) when disconnection started, null if connected */
   disconnectedSince?: number | null;
-  /** Callback for retry button in daemon prompt */
+  /** Callback for retry button in connection prompt */
   onRetryConnection?: () => void;
   /** Callback when a task is selected in the tree */
   onTreeSelect?: (issueId: string) => void;
@@ -389,11 +389,13 @@ export function WorkspaceTree({
       )}
 
       {!isCollapsed && connectionLost && (
-        <div className={styles.daemonPrompt} role="alert">
-          <span className={styles.daemonPromptIcon}>&#9888;</span>
-          <div className={styles.daemonPromptText}>
-            <span className={styles.daemonPromptTitle}>Connection lost</span>
-            <span className={styles.daemonPromptDesc}>
+        <div className={styles.connectionPrompt} role="alert">
+          <span className={styles.connectionPromptIcon}>&#9888;</span>
+          <div className={styles.connectionPromptText}>
+            <span className={styles.connectionPromptTitle}>
+              Connection lost
+            </span>
+            <span className={styles.connectionPromptDesc}>
               Check that the workspace service is running.
             </span>
           </div>

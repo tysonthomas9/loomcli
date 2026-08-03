@@ -43,7 +43,7 @@ func serveURL(port int, path string) string {
 func startServe(t *testing.T, port int, extraArgs ...string) *exec.Cmd {
 	t.Helper()
 
-	args := []string{"serve", "--no-daemon",
+	args := []string{"serve",
 		"--port", fmt.Sprintf("%d", port),
 		"--bind", "127.0.0.1",
 	}
@@ -70,7 +70,7 @@ func startServe(t *testing.T, port int, extraArgs ...string) *exec.Cmd {
 func startServeNoCleanup(t *testing.T, port int, extraArgs ...string) (*exec.Cmd, *bytes.Buffer) {
 	t.Helper()
 
-	args := []string{"serve", "--no-daemon",
+	args := []string{"serve",
 		"--port", fmt.Sprintf("%d", port),
 		"--bind", "127.0.0.1",
 	}

@@ -78,6 +78,25 @@ func TestExecutionWorkerProfileCreateRetryConvergesAndRejectsDrift(t *testing.T)
 	}
 }
 
+func TestExecutionWorkerProfileQueriesProjectStoreRecords(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	adapter := &executionTaskRunPortsAdapter{dependencies: ExecutionTaskRunPortDependencies{WorkerProfiles: st.WorkerProfiles()}}
+	if _, err := adapter.CreateWorkerProfile(ctx, execution.CreateWorkerProfileCommand{
+		WorkspaceKey: "WS", RequestID: "create-profile", ProfileID: "lead-profile", Role: "lead", ParentEpic: "EPIC-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	profile, err := adapter.GetWorkerProfile(ctx, "WS", "lead-profile")
+	if err != nil || profile.ParentEpic != "EPIC-1" {
+		t.Fatalf("profile/error = %+v/%v", profile, err)
+	}
+	profiles, err := adapter.ListWorkerProfiles(ctx, "WS", execution.WorkerProfileFilter{Role: "lead", Limit: 1})
+	if err != nil || len(profiles) != 1 || profiles[0].ProfileID != "lead-profile" {
+		t.Fatalf("profiles/error = %+v/%v", profiles, err)
+	}
+}
+
 func TestExecutionWorkerProfileUpdateAndDeleteRetriesConverge(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()

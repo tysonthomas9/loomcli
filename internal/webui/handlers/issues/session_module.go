@@ -10,8 +10,7 @@ import (
 // trail routes on a [*http.ServeMux].
 //
 // All routes are unconditional — the SessionService handles nil internal
-// stores gracefully. The module is always constructed when multiPool is
-// available.
+// stores gracefully.
 //
 // The 4 task-scoped session handlers (list, get, transcript, diff) are
 // provided as pre-built HandlerFuncs because they live in a sibling package.

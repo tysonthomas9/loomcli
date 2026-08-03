@@ -1,6 +1,6 @@
 // Package appinfra consolidates infrastructure initialization for the webui/app
 // composition root. The app package imports this single package instead of
-// circuitbreaker, coordinator, daemon, editor, fleet, hooks, and workspace.
+// coordinator, fleet, hooks, and workspace.
 package appinfra
 
 import (
@@ -9,10 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/circuitbreaker"
-	"github.com/tysonthomas9/loomcli/internal/webui"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/coordinator"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/fleet"
 	"github.com/tysonthomas9/loomcli/internal/webui/hooks"
 	"github.com/tysonthomas9/loomcli/internal/webui/subscription"
@@ -28,24 +26,6 @@ type WorkspaceRegistry = coordinator.WorkspaceRegistry
 
 // FleetStoreRegistry is a type alias for fleet.StoreRegistry.
 type FleetStoreRegistry = fleet.StoreRegistry
-
-// Pool is a type alias for daemon.Pool.
-type Pool = daemon.Pool
-
-// MultiPool is a type alias for daemon.MultiPool.
-type MultiPool = daemon.MultiPool
-
-// ConnectionPool is a type alias for daemon.ConnectionPool.
-type ConnectionPool = daemon.ConnectionPool
-
-// NewMultiPool creates a new MultiPool.
-var NewMultiPool = daemon.NewMultiPool
-
-// NewConnectionPool creates a new ConnectionPool.
-var NewConnectionPool = daemon.NewConnectionPool
-
-// NewConnectionPoolAutoDiscover creates a connection pool with auto-discovery.
-var NewConnectionPoolAutoDiscover = daemon.NewConnectionPoolAutoDiscover
 
 // FleetTokenConfig is a type alias for fleet.TokenConfig.
 type FleetTokenConfig = fleet.TokenConfig
@@ -72,28 +52,8 @@ func NewWorkspaceRegistry(logger *slog.Logger) *WorkspaceRegistry {
 	return coordinator.NewWorkspaceRegistry(logger)
 }
 
-// InitProtectedPool creates a daemon connection pool with a circuit breaker.
-// Returns the pool and a nil error on success.
-func InitProtectedPool(rawPool *daemon.ConnectionPool, logger *slog.Logger) daemon.Pool {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	breaker := circuitbreaker.NewBreaker("daemon", circuitbreaker.Config{
-		FailureThreshold:  3,
-		OpenTimeout:       30 * time.Second,
-		HalfOpenMaxProbes: 3,
-		ShouldTrip:        daemon.DaemonShouldTrip,
-		OnStateChange: func(from, to circuitbreaker.State) {
-			logger.Info("circuit breaker state change", "component", "circuit_breaker", "from", from, "to", to)
-		},
-	})
-	return daemon.NewProtectedPool(rawPool, breaker)
-}
-
 // HookConfig holds the dependencies for registering lifecycle hooks.
 type HookConfig struct {
-	MultiPool   *daemon.MultiPool
-	PoolSize    int
 	MultiSub    *subscription.MultiWorkspaceSubscriber
 	TermMgr     *terminal.AgentTmuxManager
 	PTYMultiMgr *terminal.MultiPTYManager
@@ -167,7 +127,6 @@ func ReconcileStoreWorkspaces(
 		logger.Warn("failed to load workspace list for startup reconciliation", "err", err)
 		return
 	}
-	first := true
 	for wsID, wsPath := range workspaces {
 		if initialRegistered && wsID == initialID {
 			continue
@@ -177,11 +136,6 @@ func ReconcileStoreWorkspaces(
 				"workspace", wsID)
 			continue
 		}
-		// Stagger pool creation to avoid thundering-herd on daemon sockets.
-		if !first {
-			time.Sleep(200 * time.Millisecond)
-		}
-		first = false
 		if err := registry.Register(wsID, wsPath); err != nil {
 			logger.Warn("failed to register workspace during startup reconciliation",
 				"workspace", wsID, "err", err)
@@ -310,9 +264,6 @@ func NewRedisClient(address, password string) interface{} {
 }
 
 // GetCwd returns the current working directory (re-export from webui).
-func GetCwd() (string, error) {
-	return webui.GetCwd()
-}
 
 // PTYHook re-exports hooks.PTYHook for type references.
 type PTYHook = hooks.PTYHook
@@ -321,6 +272,6 @@ type PTYHook = hooks.PTYHook
 type FleetModule = fleet.Module
 
 // NewFleetModule creates a new fleet workspace-scoped module.
-func NewFleetModule(registry *FleetStoreRegistry, tokenCfg *FleetTokenConfig, multiPool daemon.Pool, claimMetrics *FleetClaimMetrics, regCfg *FleetRegisterConfig) *FleetModule {
-	return fleet.NewModule(registry.Get, tokenCfg, multiPool, claimMetrics, regCfg)
+func NewFleetModule(registry *FleetStoreRegistry, tokenCfg *FleetTokenConfig, issueBackendFn func(context.Context) backend.IssueBackend, claimMetrics *FleetClaimMetrics, regCfg *FleetRegisterConfig) *FleetModule {
+	return fleet.NewModule(registry.Get, tokenCfg, issueBackendFn, claimMetrics, regCfg)
 }

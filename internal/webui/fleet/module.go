@@ -1,9 +1,10 @@
 package fleet
 
 import (
+	"context"
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -15,11 +16,11 @@ import (
 // FleetAuthMiddleware is conditionally applied to claim, done, and heartbeat
 // routes when a signing key is present.
 type Module struct {
-	fleetStoreFn func(string) (*Store, bool)
-	tokenCfg     *TokenConfig // may be nil — no auth middleware
-	multiPool    daemon.Pool
-	claimMetrics *ClaimMetrics
-	fleetRegCfg  *RegisterConfig
+	fleetStoreFn   func(string) (*Store, bool)
+	tokenCfg       *TokenConfig // may be nil — no auth middleware
+	issueBackendFn func(context.Context) backend.IssueBackend
+	claimMetrics   *ClaimMetrics
+	fleetRegCfg    *RegisterConfig
 }
 
 // NewModule returns a Module. tokenCfg may be nil — fleet auth
@@ -27,16 +28,16 @@ type Module struct {
 func NewModule(
 	fleetStoreFn func(string) (*Store, bool),
 	tokenCfg *TokenConfig,
-	multiPool daemon.Pool,
+	issueBackendFn func(context.Context) backend.IssueBackend,
 	claimMetrics *ClaimMetrics,
 	fleetRegCfg *RegisterConfig,
 ) *Module {
 	return &Module{
-		fleetStoreFn: fleetStoreFn,
-		tokenCfg:     tokenCfg,
-		multiPool:    multiPool,
-		claimMetrics: claimMetrics,
-		fleetRegCfg:  fleetRegCfg,
+		fleetStoreFn:   fleetStoreFn,
+		tokenCfg:       tokenCfg,
+		issueBackendFn: issueBackendFn,
+		claimMetrics:   claimMetrics,
+		fleetRegCfg:    fleetRegCfg,
 	}
 }
 
@@ -58,7 +59,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 
 	// Claim
 	mux.Handle("POST /api/workspaces/{ws}/fleet/claim",
-		wrap(handleFleetClaim(m.multiPool, m.claimMetrics)))
+		wrap(handleFleetClaim(IssueBackendFn(m.issueBackendFn), m.claimMetrics)))
 
 	// Done
 	mux.Handle("POST /api/workspaces/{ws}/fleet/done/{id}",

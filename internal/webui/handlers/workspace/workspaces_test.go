@@ -17,7 +17,7 @@ func TestHandleListWorkspaces(t *testing.T) {
 	svc := &mockWorkspaceService{
 		listWorkspacesFn: func(_ context.Context) ([]service.WorkspaceListItem, error) {
 			return []service.WorkspaceListItem{
-				{ID: "ws-alpha", Name: "ws-alpha", Path: "/path/alpha", Active: true, Pool: &service.PoolStats{Size: 10, Active: 1}},
+				{ID: "ws-alpha", Name: "ws-alpha", Path: "/path/alpha", Active: true},
 				{ID: "ws-beta", Name: "ws-beta", Path: "/path/beta", Active: false},
 			}, nil
 		},

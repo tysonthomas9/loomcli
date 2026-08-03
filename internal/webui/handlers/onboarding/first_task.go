@@ -3,12 +3,15 @@ package onboarding
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -49,9 +52,19 @@ type normalizedRunFirstTaskRequest struct {
 	SourceRepo  string
 }
 
-// HandleRunFirstTask creates the first onboarding task, assigns it to the
-// selected planner, and requests the agent start in one backend operation.
-func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentService) http.HandlerFunc {
+type AgentLifecycleAPI interface {
+	GetAgent(context.Context, string, string) (*agentsmodule.Agent, error)
+	ApplyLifecycle(context.Context, authority.OperatorAuthority, agentsmodule.ApplyLifecycleCommand) (*agentsmodule.LifecycleResult, error)
+}
+
+// HandleRunFirstTask creates the first onboarding task and enables the
+// selected canonical Agent. The task remains unassigned and claimable by the
+// normal Execution path; no daemon command or task payload is emitted.
+func HandleRunFirstTask(
+	issueSvc service.IssueService,
+	agents AgentLifecycleAPI,
+	resolver workflowcataloghttp.OperatorAuthorityResolver,
+) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws := middleware.WorkspaceFromContext(r.Context())
 		if ws == "" {
@@ -69,9 +82,18 @@ func HandleRunFirstTask(issueSvc service.IssueService, agentSvc service.AgentSer
 			return
 		}
 
-		created, err := createAndQueueFirstTask(r.Context(), issueSvc, agentSvc, ws, normalized)
+		if agents == nil || resolver == nil {
+			handler.RespondError(w, http.StatusServiceUnavailable, "canonical Agent lifecycle is unavailable")
+			return
+		}
+		auth, err := resolver.ResolveOperatorAuthority(r, ws, agentsmodule.ActionApplyLifecycle)
 		if err != nil {
-			handler.HandleServiceError(w, err)
+			writeAgentLifecycleError(w, err, "Agent lifecycle authority denied")
+			return
+		}
+		created, err := createAndQueueFirstTask(r.Context(), issueSvc, agents, auth, ws, normalized)
+		if err != nil {
+			writeAgentLifecycleError(w, err, "queue first task failed")
 			return
 		}
 
@@ -120,12 +142,17 @@ func normalizeRunFirstTaskRequest(req runFirstTaskRequest) (normalizedRunFirstTa
 func createAndQueueFirstTask(
 	ctx context.Context,
 	issueSvc service.IssueService,
-	agentSvc service.AgentService,
+	agents AgentLifecycleAPI,
+	auth authority.OperatorAuthority,
 	ws string,
 	req normalizedRunFirstTaskRequest,
 ) (json.RawMessage, error) {
-	if err := ensureAgentExists(ctx, agentSvc, ws, req.AgentName); err != nil {
+	agent, err := agents.GetAgent(ctx, ws, req.AgentName)
+	if err != nil {
 		return nil, err
+	}
+	if agent == nil || agent.DeletedAt != nil {
+		return nil, agentsmodule.ErrNotFound
 	}
 	created, err := issueSvc.CreateIssue(ctx, service.CreateIssueParams{
 		Title:       req.Title,
@@ -142,37 +169,29 @@ func createAndQueueFirstTask(
 	if err != nil {
 		return nil, err
 	}
-	if err := queueFirstTask(ctx, agentSvc, ws, req.AgentName, issueID); err != nil {
+	if err := queueFirstTask(ctx, agents, auth, agent, issueID); err != nil {
 		deleteCreatedFirstTask(issueSvc, issueID)
 		return nil, err
 	}
 	return created, nil
 }
 
-func queueFirstTask(ctx context.Context, agentSvc service.AgentService, ws, agentName, issueID string) error {
-	_, err := agentSvc.RequestAgentLifecycle(ctx, ws, agentName, service.AgentLifecycleInput{
-		State:        domain.AgentStateActive,
-		DesiredState: domain.AgentDesiredRunning,
-		CommandType:  "start",
-		Payload:      map[string]string{"task_id": issueID},
+func queueFirstTask(
+	ctx context.Context,
+	agents AgentLifecycleAPI,
+	auth authority.OperatorAuthority,
+	agent *agentsmodule.Agent,
+	issueID string,
+) error {
+	_, err := agents.ApplyLifecycle(ctx, auth, agentsmodule.ApplyLifecycleCommand{
+		WorkspaceKey:         agent.WorkspaceKey,
+		AgentID:              agent.AgentID,
+		Action:               agentsmodule.LifecycleEnable,
+		ExpectedUpdatedAt:    agent.UpdatedAt,
+		ExpectedGenerationID: agent.GenerationID,
+		IdempotencyKey:       "onboarding-first-task:" + issueID,
 	})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func ensureAgentExists(ctx context.Context, agentSvc service.AgentService, ws, agentName string) error {
-	agents, err := agentSvc.ListAgents(ctx, ws)
-	if err != nil {
-		return err
-	}
-	for _, agent := range agents {
-		if agent != nil && agent.Name == agentName {
-			return nil
-		}
-	}
-	return service.ErrNotFound("agent not found")
+	return err
 }
 
 func decodeIssueID(raw json.RawMessage) (string, error) {
@@ -191,5 +210,32 @@ func deleteCreatedFirstTask(issueSvc service.IssueService, issueID string) {
 	defer cancel()
 	if _, err := issueSvc.DeleteIssue(ctx, issueID); err != nil {
 		slog.Warn("onboarding first task cleanup failed", "issue_id", issueID, "err", err)
+	}
+}
+
+func writeAgentLifecycleError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
+		errors.Is(err, authority.ErrInvalidPrincipal),
+		errors.Is(err, authority.ErrPrincipalExpired):
+		handler.RespondError(w, http.StatusUnauthorized, "authentication required")
+	case errors.Is(err, authority.ErrWorkspaceMismatch),
+		errors.Is(err, authority.ErrActionNotAllowed),
+		errors.Is(err, authority.ErrAdmissionDenied),
+		errors.Is(err, authority.ErrPrincipalClass):
+		handler.RespondError(w, http.StatusForbidden, "forbidden")
+	case errors.Is(err, agentsmodule.ErrNotFound):
+		handler.RespondError(w, http.StatusNotFound, "agent not found")
+	case errors.Is(err, agentsmodule.ErrInvalid):
+		handler.RespondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, agentsmodule.ErrAlreadyExists),
+		errors.Is(err, agentsmodule.ErrConflict),
+		errors.Is(err, agentsmodule.ErrInvalidTransition),
+		errors.Is(err, agentsmodule.ErrNotOwner):
+		handler.RespondError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, agentsmodule.ErrUnavailable):
+		handler.RespondError(w, http.StatusServiceUnavailable, fallback)
+	default:
+		handler.HandleServiceError(w, err)
 	}
 }

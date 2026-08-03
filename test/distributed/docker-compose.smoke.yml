@@ -4,7 +4,7 @@
 #   make test-distributed-smoke
 #
 # The stack intentionally runs without a sidecar issue backend. It exercises one shared fleet-db,
-# two loom serve processes, two local supervisor heartbeat loops, and one
+# two loom serve processes, two worker heartbeat loops, and one
 # smoke runner that validates auth/audit, claim contention, SSE reconnect
 # catch-up across loom instances, and WebUI/API health.
 
@@ -143,7 +143,7 @@ services:
     ports:
       - "8092:8080"
 
-  supervisor-a:
+  worker-a:
     build:
       context: .
       dockerfile: Dockerfile.runtime
@@ -155,12 +155,12 @@ services:
       - -c
       - |
         while true; do
-          curl -fsS -X POST -H "Content-Type: application/json" -H "X-Actor: supervisor-a" --data '{}' \
-            http://fleet-db:8080/api/v1/DIST/workers/supervisor-a/heartbeat >/dev/null || true
+          curl -fsS -X POST -H "Content-Type: application/json" -H "X-Actor: worker-a" --data '{}' \
+            http://fleet-db:8080/api/v1/DIST/workers/worker-a/heartbeat >/dev/null || true
           sleep 5
         done
 
-  supervisor-b:
+  worker-b:
     build:
       context: .
       dockerfile: Dockerfile.runtime
@@ -172,8 +172,8 @@ services:
       - -c
       - |
         while true; do
-          curl -fsS -X POST -H "Content-Type: application/json" -H "X-Actor: supervisor-b" --data '{}' \
-            http://fleet-db:8080/api/v1/DIST/workers/supervisor-b/heartbeat >/dev/null || true
+          curl -fsS -X POST -H "Content-Type: application/json" -H "X-Actor: worker-b" --data '{}' \
+            http://fleet-db:8080/api/v1/DIST/workers/worker-b/heartbeat >/dev/null || true
           sleep 5
         done
 
@@ -213,8 +213,8 @@ services:
       - fleet-db
       - loom-a
       - loom-b
-      - supervisor-a
-      - supervisor-b
+      - worker-a
+      - worker-b
       - ui-a
       - ui-b
     environment:
@@ -224,16 +224,5 @@ services:
       LOOM_B_URL: http://loom-b:8080
       UI_A_URL: http://ui-a:8080
       UI_B_URL: http://ui-b:8080
-      # Fleet env so `loom daemon seed-transcript` (cross-node transcript assertion)
-      # builds a fleet-backed control-plane store, exactly like loom-a/b.
-      LOOM_ISSUE_BACKEND: fleet
-      LOOM_FLEET_URL: http://fleet-db:8080
-      LOOM_WORKSPACE: DIST
-      LOOM_AGENT_NAME: distributed-smoke
-      LOOM_FLEET_ACTOR: distributed-smoke
-      LOOM_FLEET_REQUIRED: "1"
-      LOOM_WORKFLOW_CATALOG_ENABLED: "false"
-    volumes:
-      - ../../tmp/distributed-smoke/bin/loom:/usr/local/bin/loom:ro
     networks: [distributed]
     restart: "no"

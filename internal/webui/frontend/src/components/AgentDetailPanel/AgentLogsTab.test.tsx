@@ -5,7 +5,7 @@
 /**
  * Unit tests for AgentLogsTab.
  *
- * Regression guard: an archive that comes back empty (e.g. a daemon-supervised
+ * Regression guard: an archive that comes back empty (e.g. a background
  * agent whose log file does not exist yet, which getAgentLogArchive turns into
  * an empty line list) must render an explicit "no logs" state — never the
  * misleading "connected" label over a blank viewer.

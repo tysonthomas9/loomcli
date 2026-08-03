@@ -42,11 +42,18 @@ describe("agent template role defaults", () => {
     });
   });
 
-  it("restricts the advanced bug-triage worker to bug cards", () => {
+  it("restricts the canonical bug-triage behavior to read-only bug cards", () => {
     expect(
-      AGENT_TEMPLATES.find((template) => template.id === "legacy-bug-triage")
-        ?.customRole?.taskFilter,
-    ).toBe("bug");
+      AGENT_TEMPLATES.find((template) => template.id === "role-bug-triage")
+        ?.customRole,
+    ).toMatchObject({
+      taskFilter: "bug",
+      readOnly: true,
+    });
+    expect(
+      AGENT_TEMPLATES.find((template) => template.id === "role-bug-triage")
+        ?.roleTrigger,
+    ).toBe("ready");
   });
 
   it("pins review workflows to Codex while bug-fix stays workspace-resolved", () => {

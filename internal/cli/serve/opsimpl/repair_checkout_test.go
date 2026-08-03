@@ -11,8 +11,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/gitbranch"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 type repairFixture struct {
@@ -82,14 +84,7 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS1", Name: "task"}); err != nil {
 		t.Fatalf("create role: %v", err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "nova",
-		RoleName:     "task",
-		RepoGroups:   []string{"backend"},
-	}); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
+	nova := runtimeAgent(t, "WS1", "nova", "task", nil, []string{"backend"})
 	if err := bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
 		sc.LastWorkspace = "WS1"
 		sc.Workspaces["WS1"] = bootstrap.WorkspaceLocalState{
@@ -104,7 +99,10 @@ func setupRepairFixture(t *testing.T, createAgentWorktree bool) repairFixture {
 		t.Fatalf("save state cache: %v", err)
 	}
 
-	return repairFixture{g: NewGitOps().WithStore(st), wsRoot: wsRoot, repoPath: repoPath, agentPath: agentPath}
+	return repairFixture{
+		g:      NewGitOps().WithStore(st).WithAgentQueries(testutil.StaticAgentQueries{Agents: []*agents.Agent{nova}}),
+		wsRoot: wsRoot, repoPath: repoPath, agentPath: agentPath,
+	}
 }
 
 func TestRepairCheckout_DisallowedRepoRejected(t *testing.T) {

@@ -2,11 +2,43 @@ package svcimpl
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
 )
+
+type canonicalInteractiveAgentRuntime struct {
+	runtime InteractiveRuntimeController
+}
+
+// NewCanonicalInteractiveAgentRuntime projects the local PTY controller into
+// the narrow lifecycle port used by canonical Agents HTTP commands.
+func NewCanonicalInteractiveAgentRuntime(runtime InteractiveRuntimeController) service.InteractiveAgentRuntime {
+	return &canonicalInteractiveAgentRuntime{runtime: runtime}
+}
+
+func (runtime *canonicalInteractiveAgentRuntime) StopAgent(
+	ctx context.Context,
+	workspace,
+	agentID string,
+) error {
+	if runtime == nil || runtime.runtime == nil {
+		return nil
+	}
+	sessions, err := runtime.runtime.OwnedAgentSessions(ctx, workspace, agentID)
+	if err != nil {
+		return fmt.Errorf("list owned interactive runtimes: %w", err)
+	}
+	for _, session := range sessions {
+		if err := runtime.runtime.Kill(session.Key); err != nil {
+			return fmt.Errorf("stop owned interactive runtime %s: %w", session.Key.String(), err)
+		}
+	}
+	return nil
+}
 
 // InteractiveRuntimeSession is one process-local terminal placement whose
 // ownership was established from server-owned tab metadata, not from a
@@ -22,7 +54,7 @@ type InteractiveRuntimeSession struct {
 
 // InteractiveRuntimeController is the process-local ownership seam for
 // interactive agent terminals. Interactive agents run in the web terminal's
-// PTY manager, not under the daemon supervisor.
+// PTY manager under Interaction runtime ownership.
 type InteractiveRuntimeController interface {
 	OwnedAgentSessions(ctx context.Context, workspace, agentID string) ([]InteractiveRuntimeSession, error)
 	Kill(key terminal.SessionKey) error

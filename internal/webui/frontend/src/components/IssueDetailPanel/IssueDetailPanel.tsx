@@ -862,7 +862,7 @@ function DefaultContent({
       try {
         // Assigning an agent to an open or review issue starts work, like
         // the old Start Work flow: an open issue moves to in_progress and
-        // the agent daemon claims the task; a review issue keeps its status
+        // Execution claims the ready task; a review issue keeps its status
         // (the PR stays in the review queue while the agent works it).
         const isAgentAssignment =
           newAssignee !== "" &&
@@ -887,7 +887,7 @@ function DefaultContent({
           ...(issue.status === "review" ? {} : { status: "in_progress" }),
         });
         try {
-          await startAgent(workspaceId, newAssignee, { taskId: issue.id });
+          await startAgent(workspaceId, newAssignee);
           onIssueUpdate?.(updatedIssue);
         } catch (err) {
           try {
@@ -957,7 +957,6 @@ function DefaultContent({
           const leadAgent = await createWorkspaceAgent(workspaceId, {
             name: candidate,
             role_name: "lead",
-            auto: false,
             cross_repo: repoNames.length === 0,
             repos: repoNames,
           });

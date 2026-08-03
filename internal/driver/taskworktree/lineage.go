@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -134,54 +133,6 @@ func BindingForTask(
 	}, true, nil
 }
 
-// RecordOutcome maps runner evidence to a stack node state and persists it.
-func RecordOutcome(
-	ctx context.Context,
-	store stackstore.Store,
-	workspaceKey,
-	repoName,
-	taskID string,
-	metadata map[string]string,
-) (bool, error) {
-	state, outputSHA, ok := stackOutcome(metadata)
-	if !ok {
-		return false, nil
-	}
-	return recordStackOutput(ctx, store, workspaceKey, repoName, taskID, state, outputSHA)
-}
-
-func recordStackOutput(
-	ctx context.Context,
-	store stackstore.Store,
-	workspaceKey,
-	repoName,
-	taskID string,
-	state stacklineage.NodeState,
-	outputSHA string,
-) (bool, error) {
-	if store == nil || state == "" {
-		return false, nil
-	}
-	stack, _, _, found, err := findTaskStack(ctx, store, workspaceKey, repoName, taskID)
-	if err != nil || !found {
-		return false, err
-	}
-	now := time.Now().UTC()
-	if err := store.UpdateNode(ctx, workspaceKey, stack.ID, taskID, func(node *stacklineage.Node) error {
-		node.State = state
-		if strings.TrimSpace(outputSHA) != "" {
-			node.OutputSHA = strings.TrimSpace(outputSHA)
-		}
-		if state == stacklineage.NodeStatePublished {
-			node.LastPublishedAt = &now
-		}
-		return nil
-	}); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func findTaskStack(
 	ctx context.Context,
 	store stackstore.Store,
@@ -226,33 +177,4 @@ func findTaskStack(
 		return stacklineage.Stack{}, stacklineage.Node{}, nil, false, nil
 	}
 	return foundStack, foundNode, foundByTask, true, nil
-}
-
-func stackOutcome(metadata map[string]string) (stacklineage.NodeState, string, bool) {
-	if metadata == nil {
-		return "", "", false
-	}
-	outputSHA := firstNonEmpty(
-		metadata["github_commit_sha"],
-		metadata["github_head_sha"],
-		metadata["head_sha"],
-		metadata["output_sha"],
-	)
-	switch {
-	case strings.TrimSpace(metadata["github_branch"]) != "" || metadata["delivery"] == "pull_request":
-		return stacklineage.NodeStatePublished, outputSHA, true
-	case metadata["delivery"] == "pull_request_skipped_no_changes" || metadata["files_changed"] == "0":
-		return stacklineage.NodeStateEmpty, "", true
-	default:
-		return "", "", false
-	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }

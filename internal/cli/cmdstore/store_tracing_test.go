@@ -127,14 +127,12 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 		t.Error("Workspaces accessor unstable")
 	}
 	_ = wrapped.Repos()
-	_ = wrapped.Agents()
 	_ = wrapped.Nodes()
 	_ = wrapped.AgentSessions()
 	_ = wrapped.TerminalSessions()
 	_ = wrapped.Artifacts()
 	_ = wrapped.AgentLeases()
 	_ = wrapped.AgentOwnershipLeases()
-	_ = wrapped.AgentCommands()
 	_ = wrapped.Drivers()
 	_ = wrapped.DriverVersions()
 	_ = wrapped.AgentServices()
@@ -145,7 +143,6 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_ = wrapped.TaskRunEvents()
 	_ = wrapped.Outbox()
 	_ = wrapped.Roles()
-	_ = wrapped.Daemon()
 
 	ctx := context.Background()
 	ws := wrapped.Workspaces()
@@ -166,12 +163,6 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = repos.Get(ctx, "TEST", "repo")
 	_, _ = repos.List(ctx, "TEST")
 	_, _ = repos.Update(ctx, "TEST", "repo", store.RepoUpdate{})
-
-	agents := wrapped.Agents()
-	_, _ = agents.Create(ctx, store.AgentCreate{WorkspaceKey: "TEST", Name: "agent", RoleName: "worker"})
-	_, _ = agents.Get(ctx, "TEST", "agent")
-	_, _ = agents.List(ctx, "TEST")
-	_, _ = agents.Update(ctx, "TEST", "agent", store.AgentUpdate{})
 
 	roles := wrapped.Roles()
 	_, _ = roles.Create(ctx, store.RoleCreate{WorkspaceKey: "TEST", Name: "worker"})
@@ -226,18 +217,6 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	_, _ = owns.List(ctx, "TEST", store.AgentOwnershipLeaseFilter{})
 	_, _ = owns.Heartbeat(ctx, "TEST", "agent", "tok", time.Minute)
 	_, _ = owns.Release(ctx, "TEST", "agent", "tok")
-
-	cmds := wrapped.AgentCommands()
-	_, _ = cmds.Create(ctx, store.AgentCommandCreate{WorkspaceKey: "TEST", CommandID: "cmd-1", TargetAgentID: "agent", Type: "noop"})
-	_, _ = cmds.Get(ctx, "TEST", "cmd-1")
-	_, _ = cmds.List(ctx, "TEST", store.AgentCommandFilter{})
-	_, _ = cmds.Ack(ctx, "TEST", "cmd-1", store.AgentCommandAck{
-		NodeID:  "node-1",
-		OwnerID: "owner-1",
-	})
-	_, _ = cmds.Complete(ctx, "TEST", "cmd-1", store.AgentCommandComplete{
-		NodeID: "node-1", OwnerID: "owner-1", Status: domain.AgentCommandSucceeded,
-	})
 
 	drivers := wrapped.Drivers()
 	_, _ = drivers.Create(ctx, store.DriverCreate{WorkspaceKey: "TEST", DriverID: "driver-1", Name: "epic-runner", OwnerType: domain.DriverOwnerSystem, Status: domain.DriverStatusActive})
@@ -356,14 +335,9 @@ func TestWrapStoreWithTracing_Smoke(t *testing.T) {
 	// Error path on a missing key.
 	_, _ = outbox.Get(ctx, "TEST", "missing")
 
-	daemon := wrapped.Daemon()
-	_, _ = daemon.Get(ctx, "TEST")
-	_, _ = daemon.Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "TEST"})
-
 	// Cleanup paths.
 	_ = roles.Delete(ctx, "TEST", "worker")
 	_ = services.Delete(ctx, "TEST", "lead")
-	_ = agents.Delete(ctx, "TEST", "agent")
 	_ = repos.Delete(ctx, "TEST", "repo")
 	_ = ws.Delete(ctx, "TEST")
 

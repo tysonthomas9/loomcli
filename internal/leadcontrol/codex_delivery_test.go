@@ -249,15 +249,6 @@ func TestDeliverLeadMessageToCodexQueuesBusyThreadAndDrainsWhenIdle(t *testing.T
 func TestDeliverLeadMessageToCodexQueuesBeforeSessionAndDrainsLater(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS",
-		Name:         "nova",
-		RoleName:     "lead",
-		Backend:      "codex",
-		Parent:       "EPIC-1",
-	}); err != nil {
-		t.Fatalf("create lead: %v", err)
-	}
 
 	const message = "Task TASK-1 completed before the lead runtime was ready."
 	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
@@ -303,15 +294,6 @@ func TestDeliverLeadMessageToCodexQueuesBeforeSessionAndDrainsLater(t *testing.T
 func TestDeliverLeadMessageToCodexDoesNotDuplicateSessionlessMessageAfterSessionStarts(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS",
-		Name:         "nova",
-		RoleName:     "lead",
-		Backend:      "codex",
-		Parent:       "EPIC-1",
-	}); err != nil {
-		t.Fatalf("create lead: %v", err)
-	}
 
 	const message = "Task TASK-1 completed before the lead runtime was ready."
 	result, err := deliverLeadMessageOwned(ctx, st, testSessionRuntime(st), "WS", "nova", message)
@@ -400,18 +382,10 @@ func queuedInboxMessagesForTest(t *testing.T, st store.Store, workspace, leadNam
 func createAssignedLeadSession(t *testing.T, st store.Store, label string, metadata map[string]string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS",
-		Name:         "nova",
-		RoleName:     "lead",
-		Backend:      "codex",
-		Parent:       "EPIC-1",
-	}); err != nil {
-		t.Fatalf("%s: create lead: %v", label, err)
-	}
 	if metadata == nil {
 		metadata = map[string]string{"actor": "test"}
 	}
+	seedAssignedLeadIdentity(t, st)
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
 		WorkspaceKey: "WS",
 		SessionID:    "lead-session",
@@ -421,6 +395,25 @@ func createAssignedLeadSession(t *testing.T, st store.Store, label string, metad
 		Metadata:     metadata,
 	}); err != nil {
 		t.Fatalf("%s: create session: %v", label, err)
+	}
+}
+
+func seedAssignedLeadIdentity(t *testing.T, st store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := st.Roles().Create(ctx, store.RoleCreate{WorkspaceKey: "WS", Name: "lead"}); err != nil {
+		t.Fatalf("create lead Role: %v", err)
+	}
+	if _, err := st.WorkerProfiles().Create(ctx, store.WorkerProfileCreate{
+		WorkspaceKey: "WS", ProfileID: "nova-profile", Role: "lead", ParentEpic: "EPIC-1",
+	}); err != nil {
+		t.Fatalf("create lead WorkerProfile: %v", err)
+	}
+	if _, err := st.AgentServices().Create(ctx, store.AgentServiceCreate{
+		WorkspaceKey: "WS", ServiceID: "nova", Kind: domain.AgentServiceKindLead,
+		RoleName: "lead", ProfileName: "nova-profile",
+	}); err != nil {
+		t.Fatalf("create lead Agent: %v", err)
 	}
 }
 

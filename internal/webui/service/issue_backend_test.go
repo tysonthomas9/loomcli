@@ -274,7 +274,7 @@ func (f *fakeIssueBackend) SetIssueRepository(_ context.Context, id, repo string
 // newServiceWithFake constructs an issueServiceImpl wired to a fake backend
 // (no daemon pool). Pool-using paths (ListIssues, MoveIssue) are unaffected.
 func newServiceWithFake(fb *fakeIssueBackend) IssueService {
-	return NewIssueServiceWithBackend(nil, nil, nil, func(_ context.Context) backend.IssueBackend { return fb })
+	return NewIssueServiceWithBackend(nil, func(_ context.Context) backend.IssueBackend { return fb })
 }
 
 func TestSetIssueRepository_ReturnsCanonicalBackendIssue(t *testing.T) {
@@ -315,7 +315,7 @@ func TestSetIssueRepository_ReturnsCanonicalBackendIssue(t *testing.T) {
 func TestSetIssueRepository_UnsupportedBackend(t *testing.T) {
 	fb := &fakeIssueBackend{}
 	coreOnly := struct{ backend.IssueBackend }{IssueBackend: fb}
-	svc := NewIssueServiceWithBackend(nil, nil, nil, func(context.Context) backend.IssueBackend {
+	svc := NewIssueServiceWithBackend(nil, func(context.Context) backend.IssueBackend {
 		return coreOnly
 	}).(IssueRepositoryService)
 
@@ -393,7 +393,7 @@ func TestListEvents_Backend_NotFound_MapsTo404(t *testing.T) {
 }
 
 func TestListEvents_Backend_Unavailable_NilBackend(t *testing.T) {
-	svc := NewIssueServiceWithBackend(nil, nil, nil, func(_ context.Context) backend.IssueBackend { return nil })
+	svc := NewIssueServiceWithBackend(nil, func(_ context.Context) backend.IssueBackend { return nil })
 	_, err := svc.ListEvents(context.Background(), EventListParams{IssueID: "x"})
 	var sErr *ServiceError
 	if !errors.As(err, &sErr) {
@@ -527,7 +527,7 @@ func TestMoveIssue_Backend_Success_UsesBackendWithoutDaemonPool(t *testing.T) {
 		}
 		return source
 	}
-	svc := NewIssueServiceWithBackend(nil, nil, withWorkspace, provider)
+	svc := NewIssueServiceWithBackend(withWorkspace, provider)
 
 	result, err := svc.MoveIssue(context.Background(), MoveIssueParams{
 		IssueID:         "SRC-1",
@@ -959,7 +959,7 @@ func TestCreateIssue_Backend_Success_ReturnsIssueShape(t *testing.T) {
 		t.Errorf("unexpected issue shape: %+v", got)
 	}
 	// Detail-only fields must be present on the create response so the FE
-	// roundtrip matches the previous *rpc.Client behavior.
+	// roundtrip matches the legacy handler behavior.
 	if got["description"] != "body" {
 		t.Errorf("description = %v, want body", got["description"])
 	}
@@ -1092,7 +1092,7 @@ func TestCreateIssue_Backend_RepositoryAdmissionPersistentFailureStaysFailClosed
 func TestCreateIssue_Backend_RepositoryAdmissionUnsupportedFailsBeforeMint(t *testing.T) {
 	fb := &fakeIssueBackend{}
 	coreOnly := struct{ backend.IssueBackend }{IssueBackend: fb}
-	svc := NewIssueServiceWithBackend(nil, nil, nil, func(context.Context) backend.IssueBackend {
+	svc := NewIssueServiceWithBackend(nil, func(context.Context) backend.IssueBackend {
 		return coreOnly
 	})
 
@@ -1345,7 +1345,7 @@ func TestTranslateBackendError_NilReturnsNil(t *testing.T) {
 // --- NewIssueService without a backend returns ErrUnavailable for backend-only paths ---
 
 func TestNewIssueService_NoBackend_ListEvents_Unavailable(t *testing.T) {
-	svc := NewIssueService(nil, nil, nil)
+	svc := NewIssueServiceWithBackend(nil, nil)
 	_, err := svc.ListEvents(context.Background(), EventListParams{IssueID: "x"})
 	var sErr *ServiceError
 	if !errors.As(err, &sErr) || sErr.Kind != KindUnavailable {

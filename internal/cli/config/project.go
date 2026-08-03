@@ -7,62 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 )
-
-// DaemonSettings holds daemon-specific config fields.
-type DaemonSettings struct {
-	PIDFile        string            `yaml:"pid_file,omitempty"`
-	LogDir         string            `yaml:"log_dir,omitempty"`
-	EventsDir      string            `yaml:"events_dir,omitempty"`
-	RestartPolicy  RestartPolicy     `yaml:"restart_policy,omitempty"`
-	MaxAgents      *int              `yaml:"max_agents,omitempty"`
-	RedisURL       string            `yaml:"redis_url,omitempty"` // stale-detector/serve Redis
-	OTel           *OTelDaemonConfig `yaml:"otel,omitempty"`
-	IssueBackend   string            `yaml:"issue_backend,omitempty"`   // "fleetdb", "fleet", or "api"
-	StartupTimeout *int              `yaml:"startup_timeout,omitempty"` // seconds; how long to wait for daemon readiness (default 30)
-}
-
-// GetStartupTimeout returns the configured startup timeout or the given fallback.
-func (d *DaemonSettings) GetStartupTimeout(fallback time.Duration) time.Duration {
-	if d == nil || d.StartupTimeout == nil || *d.StartupTimeout <= 0 {
-		return fallback
-	}
-	return time.Duration(*d.StartupTimeout) * time.Second
-}
-
-// OTelDaemonConfig holds OpenTelemetry export configuration for the daemon.
-type OTelDaemonConfig struct {
-	Enabled         bool    `yaml:"enabled,omitempty"`
-	Endpoint        string  `yaml:"endpoint,omitempty"`
-	Protocol        string  `yaml:"protocol,omitempty"`
-	ServiceName     string  `yaml:"service_name,omitempty"`
-	SampleRate      float64 `yaml:"sample_rate,omitempty"`
-	FlushIntervalMs int     `yaml:"flush_interval_ms,omitempty"`
-	Traces          *bool   `yaml:"traces,omitempty"`
-	Metrics         *bool   `yaml:"metrics,omitempty"`
-}
-
-// RestartPolicy defines how the daemon restarts failed agents.
-type RestartPolicy struct {
-	MaxRetries       *int  `yaml:"max_retries,omitempty"`
-	BackoffInitial   *int  `yaml:"backoff_initial,omitempty"`     // seconds
-	BackoffMax       *int  `yaml:"backoff_max,omitempty"`         // seconds
-	OutputTimeout    *int  `yaml:"output_timeout,omitempty"`      // seconds; kill agent after this long with no output (0 = disabled)
-	RateLimitBackoff *int  `yaml:"rate_limit_backoff,omitempty"`  // seconds (default 30)
-	RateLimitMaxWait *int  `yaml:"rate_limit_max_wait,omitempty"` // seconds (default 300)
-	RateLimitNoCount *bool `yaml:"rate_limit_no_count,omitempty"` // default true: rate-limit retries don't count toward max_retries
-	TimeoutBackoff   *int  `yaml:"timeout_backoff,omitempty"`     // seconds (default 5)
-	NoWorkBackoff    *int  `yaml:"no_work_backoff,omitempty"`     // seconds (default 30); fixed interval when no tasks available
-	IdlePollInterval *int  `yaml:"idle_poll_interval,omitempty"`  // seconds (default 30); polling interval for task availability
-	YieldTimeout     *int  `yaml:"yield_timeout,omitempty"`       // seconds; how long to wait for agent to yield before SIGTERM (default 60)
-	SigtermTimeout   *int  `yaml:"sigterm_timeout,omitempty"`     // seconds; SIGTERM→SIGKILL window (default 300)
-}
 
 // RoleConfig defines an agent role (built-in like "plan"/"task", or custom).
 type RoleConfig struct {
@@ -120,29 +69,28 @@ func (a AgentEntry) Equal(b AgentEntry) bool {
 		slices.Equal(a.Repos, b.Repos) && slices.Equal(a.RepoGroups, b.RepoGroups)
 }
 
-// ShouldSupervise reports whether the local daemon should run this agent.
-// Empty desired_state preserves legacy behavior for existing agent definitions.
-func (a AgentEntry) ShouldSupervise() bool {
+// ShouldRun reports whether durable desired state permits this non-interactive
+// agent to execute.
+func (a AgentEntry) ShouldRun() bool {
 	if domain.IsInteractiveRoleName(a.Role) {
 		return false
 	}
-	return a.shouldSuperviseByDesiredState()
+	return a.shouldRunByDesiredState()
 }
 
-// ShouldSuperviseWithRoles reports whether the local daemon should run this
-// agent, using role kind metadata when the merged daemon config is available.
-func (a AgentEntry) ShouldSuperviseWithRoles(roles map[string]RoleConfig) bool {
+// ShouldRunWithRoles applies role-kind metadata before desired state.
+func (a AgentEntry) ShouldRunWithRoles(roles map[string]RoleConfig) bool {
 	if rc, ok := roles[a.Role]; ok {
 		role := &domain.Role{Kind: domain.RoleKind(rc.Kind)}
 		if domain.ResolveRoleKind(role, a.Role) == domain.RoleKindInteractive {
 			return false
 		}
-		return a.shouldSuperviseByDesiredState()
+		return a.shouldRunByDesiredState()
 	}
-	return a.ShouldSupervise()
+	return a.ShouldRun()
 }
 
-func (a AgentEntry) shouldSuperviseByDesiredState() bool {
+func (a AgentEntry) shouldRunByDesiredState() bool {
 	switch a.DesiredState {
 	case domain.AgentDesiredStopped, domain.AgentDesiredDraining:
 		return false
@@ -151,241 +99,38 @@ func (a AgentEntry) shouldSuperviseByDesiredState() bool {
 	}
 }
 
-// DaemonConfig is the merged, resolved configuration used by callers.
-type DaemonConfig struct {
-	Backend string                `yaml:"backend,omitempty"`
-	Daemon  DaemonSettings        `yaml:"daemon,omitempty"`
-	Roles   map[string]RoleConfig `yaml:"roles,omitempty"`
-	Agents  []AgentEntry          `yaml:"agents,omitempty"`
+// RuntimeConfig is the machine-local runtime selector used during CLI startup.
+// Durable Roles and Agents are owned by the Agents capability and are not
+// projected into process configuration.
+type RuntimeConfig struct {
+	Backend string `yaml:"backend,omitempty"`
 }
 
-// LoadDaemonConfig returns the explicit workspace daemon configuration from
-// FleetDB. If no workspace is set, it returns built-in defaults so first-run
-// commands can still render help and diagnostics.
-func LoadDaemonConfig(projectDir string) (*DaemonConfig, error) {
-	ctx := cmdstore.RootContext()
-	dc := newDefaultDaemonConfig()
-	key, err := bootstrap.ResolveActiveWorkspaceKey(ctx, nil)
+// LoadRuntimeConfig returns the node-local runtime provider for the active
+// workspace. It deliberately does not open FleetDB or read the retired
+// Role/Agent configuration projection.
+func LoadRuntimeConfig(projectDir string) (*RuntimeConfig, error) {
+	_ = projectDir
+	dc := &RuntimeConfig{}
+	key, err := bootstrap.ResolveActiveWorkspaceKey(context.Background(), nil)
 	if err != nil {
 		if errors.Is(err, bootstrap.ErrNoActiveWorkspace) {
 			return dc, nil
 		}
 		return nil, fmt.Errorf("resolve active workspace: %w", err)
 	}
-	if cached, cacheErr, ok := lookupPrimedDaemonConfig(key, projectDir); ok {
-		return cached, cacheErr
-	}
-	dataDir := bootstrap.LoomDir()
-	if dataDir == "" {
-		return nil, errors.New("cannot determine loom data directory")
-	}
-	handle, err := bootstrap.OpenStore(ctx, dataDir, nil)
+	backend, err := localnodeconfig.RuntimeProvider(key)
 	if err != nil {
-		return nil, fmt.Errorf("open fleet-db store: %w", err)
+		return nil, fmt.Errorf("load local node runtime provider: %w", err)
 	}
-	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
-	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
-	defer func() { _ = handle.Close() }()
-
-	return loadDaemonConfigFromStore(ctx, handle.Store, key, dc, projectDir)
-}
-
-// newDefaultDaemonConfig returns a DaemonConfig with sensible defaults.
-func newDefaultDaemonConfig() *DaemonConfig {
-	return &DaemonConfig{
-		Daemon: DaemonSettings{
-			PIDFile:   ".loom/daemon.pid",
-			LogDir:    ".loom/logs",
-			EventsDir: ".loom/events",
-			RestartPolicy: RestartPolicy{
-				MaxRetries:     IntPtr(3),
-				BackoffInitial: IntPtr(2),
-				BackoffMax:     IntPtr(300),
-				OutputTimeout:  IntPtr(900), // 15 minutes
-			},
-			MaxAgents: IntPtr(20),
-		},
-		Roles: make(map[string]RoleConfig),
+	if backend != "" {
+		dc.Backend = backend
 	}
-}
-
-func loadDaemonConfigFromStore(ctx context.Context, st store.Store, wsKey string, dc *DaemonConfig, projectDir string) (*DaemonConfig, error) {
-	if dc == nil {
-		dc = newDefaultDaemonConfig()
-	}
-	profile, err := st.Daemon().Get(ctx, wsKey)
-	if err != nil && !errors.Is(err, domain.ErrNotFound) {
-		return nil, fmt.Errorf("get daemon profile: %w", err)
-	}
-	if profile != nil {
-		OverlayDaemonSettings(&dc.Daemon, daemonSettingsFromDomain(profile))
-		if profile.AgentBackend != "" {
-			dc.Backend = profile.AgentBackend
-		}
-	}
-	if dc.Daemon.IssueBackend == "" {
-		dc.Daemon.IssueBackend = "fleetdb"
-	}
-
-	roles, err := st.Roles().List(ctx, wsKey)
-	if err != nil {
-		return nil, fmt.Errorf("list roles: %w", err)
-	}
-	for _, role := range roles {
-		if role == nil {
-			continue
-		}
-		dc.Roles[role.Name] = roleConfigFromDomain(role)
-	}
-
-	agents, err := st.Agents().List(ctx, wsKey)
-	if err != nil {
-		return nil, fmt.Errorf("list agents: %w", err)
-	}
-	dc.Agents = make([]AgentEntry, 0, len(agents))
-	for _, agent := range agents {
-		if agent == nil {
-			continue
-		}
-		dc.Agents = append(dc.Agents, agentEntryFromDomain(agent))
-	}
-
-	if err := validateAgents(dc.Agents, dc.Daemon.MaxAgents, dc.Roles); err != nil {
-		return nil, err
-	}
-	if err := ValidateAgentRepos(dc.Agents); err != nil {
-		return nil, err
-	}
-	_ = projectDir
 	return dc, nil
 }
 
-func daemonSettingsFromDomain(p *domain.DaemonProfile) *DaemonSettings {
-	if p == nil {
-		return nil
-	}
-	return &DaemonSettings{
-		PIDFile:        p.PIDFile,
-		LogDir:         p.LogDir,
-		EventsDir:      p.EventsDir,
-		RestartPolicy:  restartPolicyFromDomain(p.RestartPolicy),
-		MaxAgents:      cloneIntPtr(p.MaxAgents),
-		IssueBackend:   p.IssueBackend,
-		StartupTimeout: cloneIntPtr(p.StartupTimeout),
-		OTel:           otelFromDomain(p.OTel),
-	}
-}
-
-func restartPolicyFromDomain(r domain.RestartPolicy) RestartPolicy {
-	return RestartPolicy{
-		MaxRetries:       cloneIntPtr(r.MaxRetries),
-		BackoffInitial:   cloneIntPtr(r.BackoffInitial),
-		BackoffMax:       cloneIntPtr(r.BackoffMax),
-		OutputTimeout:    cloneIntPtr(r.OutputTimeout),
-		RateLimitBackoff: cloneIntPtr(r.RateLimitBackoff),
-		RateLimitMaxWait: cloneIntPtr(r.RateLimitMaxWait),
-		RateLimitNoCount: cloneBoolPtr(r.RateLimitNoCount),
-		TimeoutBackoff:   cloneIntPtr(r.TimeoutBackoff),
-		NoWorkBackoff:    cloneIntPtr(r.NoWorkBackoff),
-		IdlePollInterval: cloneIntPtr(r.IdlePollInterval),
-		YieldTimeout:     cloneIntPtr(r.YieldTimeout),
-		SigtermTimeout:   cloneIntPtr(r.SigtermTimeout),
-	}
-}
-
-func roleConfigFromDomain(r *domain.Role) RoleConfig {
-	if r == nil {
-		return RoleConfig{}
-	}
-	promptFile := r.PromptFile
-	if domain.IsBuiltinRole(r.Name) && domain.ResolveRoleKind(r, r.Name) == domain.RoleKindWorker {
-		// plan/task prompt files belong to the shared workflow role record. The
-		// Go daemon runs those built-ins with its embedded command prompts, so do
-		// not project the workflow-only prompt file into daemon configuration.
-		// The stored role remains unchanged for prompt-agent and API consumers.
-		promptFile = ""
-	}
-	return RoleConfig{
-		Kind:           string(r.Kind),
-		Description:    r.Description,
-		Prompt:         r.Prompt,
-		PromptFile:     promptFile,
-		Model:          r.Model,
-		TaskFilter:     r.TaskFilter,
-		Backend:        r.Backend,
-		Effort:         r.Effort,
-		PathPatterns:   append([]string(nil), r.PathPatterns...),
-		Skills:         append([]string(nil), r.Skills...),
-		MaxPriority:    cloneIntPtr(r.MaxPriority),
-		MaxConcurrency: cloneIntPtr(r.MaxConcurrency),
-		ReadOnly:       r.ReadOnly,
-		AllowedTools:   append([]string(nil), r.AllowedTools...),
-		DeniedTools:    append([]string(nil), r.DeniedTools...),
-		MaxBudgetUSD:   cloneFloatPtr(r.MaxBudgetUSD),
-	}
-}
-
-func agentEntryFromDomain(a *domain.Agent) AgentEntry {
-	if a == nil {
-		return AgentEntry{}
-	}
-	return AgentEntry{
-		Worktree:         a.Name,
-		Role:             a.RoleName,
-		Auto:             a.Auto,
-		Backend:          a.Backend,
-		FallbackBackends: append([]string(nil), a.FallbackBackends...),
-		Repos:            append([]string(nil), a.Repos...),
-		RepoGroups:       append([]string(nil), a.RepoGroups...),
-		CrossRepo:        a.CrossRepo,
-		Parent:           a.Parent,
-		Mode:             a.Mode,
-		DesiredState:     a.DesiredState,
-	}
-}
-
-func otelFromDomain(o *domain.OTelSettings) *OTelDaemonConfig {
-	if o == nil {
-		return nil
-	}
-	return &OTelDaemonConfig{
-		Enabled:         o.Enabled,
-		Endpoint:        o.Endpoint,
-		Protocol:        o.Protocol,
-		ServiceName:     o.ServiceName,
-		SampleRate:      o.SampleRate,
-		FlushIntervalMs: o.FlushIntervalMs,
-		Traces:          cloneBoolPtr(o.Traces),
-		Metrics:         cloneBoolPtr(o.Metrics),
-	}
-}
-
-func cloneIntPtr(v *int) *int {
-	if v == nil {
-		return nil
-	}
-	out := *v
-	return &out
-}
-
-func cloneBoolPtr(v *bool) *bool {
-	if v == nil {
-		return nil
-	}
-	out := *v
-	return &out
-}
-
-func cloneFloatPtr(v *float64) *float64 {
-	if v == nil {
-		return nil
-	}
-	out := *v
-	return &out
-}
-
-// validateAgents checks that agent entries and max_agents limits are valid.
-func validateAgents(agents []AgentEntry, maxAgents *int, roles map[string]RoleConfig) error {
+// validateAgents checks that agent entries are valid.
+func validateAgents(agents []AgentEntry) error {
 	for i, a := range agents {
 		if a.Worktree == "" {
 			return fmt.Errorf("agent[%d]: worktree is required", i)
@@ -398,18 +143,6 @@ func validateAgents(agents []AgentEntry, maxAgents *int, roles map[string]RoleCo
 				return fmt.Errorf("agent[%d]: fallback_backends[%d] is empty", i, j)
 			}
 		}
-	}
-	if maxAgents != nil && *maxAgents < 0 {
-		return fmt.Errorf("max_agents must be non-negative, got %d", *maxAgents)
-	}
-	runnable := 0
-	for _, a := range agents {
-		if a.ShouldSuperviseWithRoles(roles) {
-			runnable++
-		}
-	}
-	if maxAgents != nil && *maxAgents > 0 && runnable > *maxAgents {
-		return fmt.Errorf("too many runnable agents configured: %d exceeds max_agents limit of %d", runnable, *maxAgents)
 	}
 	return nil
 }
@@ -487,113 +220,8 @@ func resolveRepoPath(repoName string) (string, error) {
 	return "", fmt.Errorf("repo %q not found in workspace", repoName)
 }
 
-// OverlayDaemonSettings applies explicitly-set values from src onto dst.
-func OverlayDaemonSettings(dst *DaemonSettings, src *DaemonSettings) {
-	if src.PIDFile != "" {
-		dst.PIDFile = src.PIDFile
-	}
-	if src.LogDir != "" {
-		dst.LogDir = src.LogDir
-	}
-	if src.EventsDir != "" {
-		dst.EventsDir = src.EventsDir
-	}
-	overlayRestartPolicy(&dst.RestartPolicy, &src.RestartPolicy)
-	if src.MaxAgents != nil {
-		dst.MaxAgents = src.MaxAgents
-	}
-	if src.RedisURL != "" {
-		dst.RedisURL = src.RedisURL
-	}
-	if src.OTel != nil {
-		if dst.OTel == nil {
-			dst.OTel = &OTelDaemonConfig{}
-		}
-		overlayOTelConfig(dst.OTel, src.OTel)
-	}
-	if src.IssueBackend != "" {
-		dst.IssueBackend = src.IssueBackend
-	}
-	if src.StartupTimeout != nil {
-		dst.StartupTimeout = src.StartupTimeout
-	}
-}
-
-func overlayRestartPolicy(dst, src *RestartPolicy) {
-	if src.MaxRetries != nil {
-		dst.MaxRetries = src.MaxRetries
-	}
-	if src.BackoffInitial != nil {
-		dst.BackoffInitial = src.BackoffInitial
-	}
-	if src.BackoffMax != nil {
-		dst.BackoffMax = src.BackoffMax
-	}
-	if src.OutputTimeout != nil {
-		dst.OutputTimeout = src.OutputTimeout
-	}
-	if src.RateLimitBackoff != nil {
-		dst.RateLimitBackoff = src.RateLimitBackoff
-	}
-	if src.RateLimitMaxWait != nil {
-		dst.RateLimitMaxWait = src.RateLimitMaxWait
-	}
-	if src.RateLimitNoCount != nil {
-		dst.RateLimitNoCount = src.RateLimitNoCount
-	}
-	if src.TimeoutBackoff != nil {
-		dst.TimeoutBackoff = src.TimeoutBackoff
-	}
-	if src.NoWorkBackoff != nil {
-		dst.NoWorkBackoff = src.NoWorkBackoff
-	}
-	if src.IdlePollInterval != nil {
-		dst.IdlePollInterval = src.IdlePollInterval
-	}
-	if src.YieldTimeout != nil {
-		dst.YieldTimeout = src.YieldTimeout
-	}
-	if src.SigtermTimeout != nil {
-		dst.SigtermTimeout = src.SigtermTimeout
-	}
-}
-
-func overlayOTelConfig(dst, src *OTelDaemonConfig) {
-	if src.Enabled {
-		dst.Enabled = true
-	}
-	if src.Endpoint != "" {
-		dst.Endpoint = src.Endpoint
-	}
-	if src.Protocol != "" {
-		dst.Protocol = src.Protocol
-	}
-	if src.ServiceName != "" {
-		dst.ServiceName = src.ServiceName
-	}
-	if src.SampleRate != 0 {
-		dst.SampleRate = src.SampleRate
-	}
-	if src.FlushIntervalMs != 0 {
-		dst.FlushIntervalMs = src.FlushIntervalMs
-	}
-	if src.Traces != nil {
-		dst.Traces = src.Traces
-	}
-	if src.Metrics != nil {
-		dst.Metrics = src.Metrics
-	}
-}
-
 func IntPtr(v int) *int    { return &v }
 func BoolPtr(v bool) *bool { return &v }
-
-// ResolveRole looks up a role by name in the merged config.
-// Returns the RoleConfig and true if found, zero value and false if not.
-func (dc *DaemonConfig) ResolveRole(name string) (RoleConfig, bool) {
-	rc, ok := dc.Roles[name]
-	return rc, ok
-}
 
 // resolvePath resolves a path relative to baseDir, or returns as-is if absolute.
 func resolvePath(baseDir, path string) string {
@@ -601,16 +229,4 @@ func resolvePath(baseDir, path string) string {
 		return path
 	}
 	return filepath.Join(baseDir, path)
-}
-
-// ResolveDaemonStatePath returns the path to daemon-agents.json for the given project directory.
-// It loads the daemon config to determine the PID file location, then returns the state file
-// path adjacent to the PID file. On config load error, falls back to <projectDir>/.loom/daemon-agents.json.
-func ResolveDaemonStatePath(projectDir string) string {
-	config, err := LoadDaemonConfig(projectDir)
-	if err != nil {
-		return filepath.Join(projectDir, ".loom", "daemon-agents.json")
-	}
-	pidFilePath := resolvePath(projectDir, config.Daemon.PIDFile)
-	return filepath.Join(filepath.Dir(pidFilePath), "daemon-agents.json")
 }

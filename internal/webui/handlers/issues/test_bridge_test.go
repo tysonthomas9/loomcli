@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/types"
@@ -48,7 +47,6 @@ var handleMoveIssue = HandleMoveIssue
 var handleGetIssueEvents = HandleGetIssueEvents
 var handleAddDependency = HandleAddDependency
 var handleRemoveDependency = HandleRemoveDependency
-var handleReady = HandleReady
 var handleSearchIssues = HandleSearchIssues
 
 // NewDiffService delegates to the git handlers package.
@@ -143,16 +141,6 @@ func testWorktree() *ops.AgentWorktree {
 // ---------------------------------------------------------------------------
 // Local interfaces for test mocks (were in root webui package)
 // ---------------------------------------------------------------------------
-
-// blockedClient is a local interface for test mocks.
-type blockedClient interface {
-	Blocked(args *rpc.BlockedArgs) (*rpc.Response, error)
-}
-
-// graphClient is a local interface for test mocks.
-type graphClient interface {
-	GetGraphData(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error)
-}
 
 // ---------------------------------------------------------------------------
 // mockIssueService — local copy for handler-level testing
@@ -289,9 +277,6 @@ func (m *mockIssueService) SetIssueRepository(ctx context.Context, params servic
 // BlockedResponse from git handlers package.
 type BlockedResponse = githandlers.BlockedResponse
 
-// handleBlocked → githandlers.HandleBlocked
-var handleBlocked = githandlers.HandleBlocked
-
 // splitAndTrim is a local copy of the unexported git utility function.
 func splitAndTrim(s string) []string {
 	if s == "" {
@@ -308,10 +293,18 @@ func splitAndTrim(s string) []string {
 	return result
 }
 
+type testBlockedFilter struct {
+	ParentID string
+	Assignee string
+	Type     string
+	Priority *int
+	Limit    int
+}
+
 // parseBlockedParams is a local copy of the unexported git utility function.
-func parseBlockedParams(r *http.Request) (*rpc.BlockedArgs, error) {
+func parseBlockedParams(r *http.Request) (*testBlockedFilter, error) {
 	q := r.URL.Query()
-	args := &rpc.BlockedArgs{
+	args := &testBlockedFilter{
 		ParentID: q.Get("parent_id"),
 		Assignee: q.Get("assignee"),
 		Type:     q.Get("type"),

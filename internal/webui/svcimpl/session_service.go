@@ -21,7 +21,6 @@ import (
 // Compile-time check.
 var _ service.SessionService = (*sessionServiceImpl)(nil)
 var _ service.AgentSessionTranscriptService = (*sessionServiceImpl)(nil)
-var _ service.AgentLocalSessionHistoryService = (*sessionServiceImpl)(nil)
 
 var userHomeDir = os.UserHomeDir
 
@@ -298,60 +297,6 @@ func (s *sessionServiceImpl) ListTaskSessions(ctx context.Context, wsID, taskID 
 			items = append(items, item)
 		}
 	}
-	return items, nil
-}
-
-// ListAgentLocalSessions returns the daemon-local compatibility records owned
-// by one supervised agent. The unified agent activity query merges these
-// read-only records after canonical Execution TaskRuns and Interaction
-// AgentSessions, so local evidence never shadows a durable aggregate.
-func (s *sessionServiceImpl) ListAgentLocalSessions(
-	ctx context.Context,
-	wsID, agentID string,
-) ([]service.SessionListItem, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" || !validTaskID.MatchString(agentID) {
-		return nil, service.ErrValidation("invalid agent ID")
-	}
-	stores, err := s.storesForWorkspace(ctx, wsID)
-	if err != nil {
-		return nil, err
-	}
-
-	items := make([]service.SessionListItem, 0)
-	seen := make(map[string]struct{})
-	for _, sessStore := range stores {
-		records, queryErr := sessStore.Query(sessions.Filter{AgentName: agentID})
-		if queryErr != nil {
-			continue
-		}
-		for _, rec := range records {
-			if strings.TrimSpace(rec.SessionID) == "" || rec.AgentName != agentID {
-				continue
-			}
-			if _, duplicate := seen[rec.SessionID]; duplicate {
-				continue
-			}
-			seen[rec.SessionID] = struct{}{}
-			item := service.SessionListItem{
-				SessionRecord: rec,
-				IsActive:      rec.Status == sessions.StatusRunning,
-			}
-			if info, statErr := os.Stat(sessStore.NativeTranscriptPath(rec.SessionID)); statErr == nil && info.Size() > 0 {
-				item.HasTranscript = true
-			}
-			if !item.HasTranscript && eventStoreHasTranscript(sessStore, rec.SessionID) {
-				item.HasTranscript = true
-			}
-			if diff, readErr := sessStore.ReadDiff(rec.SessionID); readErr == nil && diff != "" {
-				item.HasDiff = true
-			}
-			items = append(items, item)
-		}
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].StartedAt.After(items[j].StartedAt)
-	})
 	return items, nil
 }
 

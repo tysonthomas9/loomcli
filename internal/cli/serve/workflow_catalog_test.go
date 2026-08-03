@@ -187,14 +187,6 @@ func TestOpenServeStoreRejectsFleetWithoutRequiredAgentAndInteractionCapabilitie
 		capability string
 	}{
 		{
-			name:       "command fencing",
-			capability: fleetdb.AgentsLifecycleCommandFencingCapability,
-		},
-		{
-			name:       "ownership generation fencing",
-			capability: fleetdb.AgentsLifecycleCommandOwnershipFencingCapability,
-		},
-		{
 			name:       "agent service commands",
 			capability: fleetdb.AgentsServiceCommandsCapability,
 		},

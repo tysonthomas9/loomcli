@@ -158,11 +158,7 @@ func RenderAgentLine(sb *strings.Builder, agent AgentStatus, indent string) {
 		statusIcon = "●"
 	}
 
-	// Build agent name with [D] prefix if daemon-managed
 	displayName := agent.Name
-	if agent.DaemonManaged {
-		displayName = "[D] " + agent.Name
-	}
 
 	// Build sync indicator (↑ahead ↓behind)
 	syncIndicator := ""

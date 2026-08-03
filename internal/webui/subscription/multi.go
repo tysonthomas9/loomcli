@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -207,7 +206,7 @@ func (m *MultiWorkspaceSubscriber) WorkspaceIDs() []string {
 
 // GetMutationsSince retrieves mutations since the given timestamp from all
 // workspace subscribers. Used for SSE client reconnection catch-up.
-func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []rpc.MutationEvent {
+func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []realtime.MutationEvent {
 	m.mu.RLock()
 	entries := make(map[string]*subscriberEntry, len(m.subscribers))
 	for k, v := range m.subscribers {
@@ -215,11 +214,11 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSince(since string) []rpc.Mutatio
 	}
 	m.mu.RUnlock()
 
-	var all []rpc.MutationEvent
+	var all []realtime.MutationEvent
 	for _, entry := range entries {
 		muts := entry.sub.GetMutationDataSince(since)
 		for _, m := range muts {
-			all = append(all, realtime.BackendMutationToRPCEvent(m))
+			all = append(all, realtime.BackendMutationToEvent(m))
 		}
 	}
 	return all
@@ -274,7 +273,7 @@ func (m *MultiWorkspaceSubscriber) idleDeactivationLoop() {
 // GetMutationsSinceForWorkspace retrieves mutations since the given timestamp
 // from a specific workspace's subscriber only. Returns nil if the workspace
 // has no active subscriber.
-func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since string) []rpc.MutationEvent {
+func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, since string) []realtime.MutationEvent {
 	m.mu.RLock()
 	entry, ok := m.subscribers[wsID]
 	m.mu.RUnlock()
@@ -285,9 +284,9 @@ func (m *MultiWorkspaceSubscriber) GetMutationsSinceForWorkspace(wsID string, si
 	if len(muts) == 0 {
 		return nil
 	}
-	out := make([]rpc.MutationEvent, len(muts))
+	out := make([]realtime.MutationEvent, len(muts))
 	for i, m := range muts {
-		out[i] = realtime.BackendMutationToRPCEvent(m)
+		out[i] = realtime.BackendMutationToEvent(m)
 	}
 	return out
 }

@@ -5,7 +5,6 @@ package capabilitycomposition
 import (
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -15,28 +14,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
-
-// AgentServiceCompatibility contains the compatibility APIs needed by the
-// legacy-facing agent service. A nil capability produces a fail-closed zero
-// value.
-type AgentServiceCompatibility struct {
-	API         agents.CompatibilityAPI
-	Managed     agentscompat.ManagedCommands
-	Retirements agentscompat.ManagedRetirements
-}
-
-// ResolveAgentServiceCompatibility projects the public Agents capability into
-// the exact compatibility inputs consumed by the Web UI agent service.
-func ResolveAgentServiceCompatibility(capability webui.AgentsCapability) AgentServiceCompatibility {
-	if capability == nil {
-		return AgentServiceCompatibility{}
-	}
-	return AgentServiceCompatibility{
-		API:         capability.CompatibilityAPI(),
-		Managed:     capability.ManagedCompatibility(),
-		Retirements: capability.ManagedRetirements(),
-	}
-}
 
 // NewTerminalModules adds the identity and Interaction capability projections
 // to an otherwise transport-neutral terminal module dependency set.
@@ -74,7 +51,6 @@ func PopulateUnifiedAgentCapabilityDeps(
 	if capability := config.AgentsCapability; capability != nil {
 		deps.Agents = capability.AgentsAPI()
 		deps.AgentsOperator = capability.OperatorAuthorityResolver()
-		deps.AgentParentBindings = capability.ParentBindingCommands()
 	}
 	if capability := config.AgentProvisioning; capability != nil {
 		deps.AgentProvisioning = capability.AgentProvisioningCommands()
@@ -113,11 +89,9 @@ func NewPRReviewModule(
 	var reviewerChat interaction.ChatAPI
 	var reviewerMessenger interaction.ChatMessenger
 	var reviewerInteractionAuthority workflowcataloghttp.OperatorAuthorityResolver
-	var reviewerRetirements agentscompat.ManagedRetirements
 	if capability := config.AgentsCapability; capability != nil {
 		reviewerProvisioning = capability.PRReviewerProvisioning()
 		reviewerAgents = capability.AgentsAPI()
-		reviewerRetirements = capability.ManagedRetirements()
 	}
 	if capability := config.InteractionCapability; capability != nil {
 		reviewerChat = capability.ChatAPI()
@@ -136,6 +110,5 @@ func NewPRReviewModule(
 		reviewerChat,
 		reviewerMessenger,
 		reviewerInteractionAuthority,
-		reviewerRetirements,
 	)
 }

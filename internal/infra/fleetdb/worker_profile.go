@@ -88,33 +88,35 @@ func (s *workerProfileStore) List(ctx context.Context, ws string, filter store.W
 
 func (s *workerProfileStore) Update(ctx context.Context, ws, profileID string, patch store.WorkerProfileUpdate) (*domain.WorkerProfile, error) {
 	body := struct {
-		Name             *string            `json:"name,omitempty"`
-		Role             *string            `json:"role,omitempty"`
-		Backend          *string            `json:"backend,omitempty"`
-		RuntimePolicy    *map[string]string `json:"runtime_policy,omitempty"`
-		Repos            *[]string          `json:"repos,omitempty"`
-		MaxPriority      *int               `json:"max_priority,omitempty"`
-		MaxParallel      *int               `json:"max_parallel,omitempty"`
-		ClearMaxPriority bool               `json:"clear_max_priority,omitempty"`
-		ParentEpic       *string            `json:"parent_epic,omitempty"`
-		Labels           *[]string          `json:"labels,omitempty"`
-		Capabilities     *[]string          `json:"capabilities,omitempty"`
-		Enabled          *bool              `json:"enabled,omitempty"`
-		Metadata         *map[string]string `json:"metadata,omitempty"`
+		Name               *string            `json:"name,omitempty"`
+		Role               *string            `json:"role,omitempty"`
+		Backend            *string            `json:"backend,omitempty"`
+		RuntimePolicy      *map[string]string `json:"runtime_policy,omitempty"`
+		Repos              *[]string          `json:"repos,omitempty"`
+		MaxPriority        *int               `json:"max_priority,omitempty"`
+		MaxParallel        *int               `json:"max_parallel,omitempty"`
+		ClearMaxPriority   bool               `json:"clear_max_priority,omitempty"`
+		ParentEpic         *string            `json:"parent_epic,omitempty"`
+		ExpectedParentEpic *string            `json:"expected_parent_epic,omitempty"`
+		Labels             *[]string          `json:"labels,omitempty"`
+		Capabilities       *[]string          `json:"capabilities,omitempty"`
+		Enabled            *bool              `json:"enabled,omitempty"`
+		Metadata           *map[string]string `json:"metadata,omitempty"`
 	}{
-		Name:             patch.Name,
-		Role:             patch.Role,
-		Backend:          patch.Backend,
-		RuntimePolicy:    patch.RuntimePolicy,
-		Repos:            patch.Repos,
-		MaxPriority:      patch.MaxPriority,
-		MaxParallel:      patch.MaxParallel,
-		ClearMaxPriority: patch.ClearMaxPriority,
-		ParentEpic:       patch.ParentEpic,
-		Labels:           patch.Labels,
-		Capabilities:     patch.Capabilities,
-		Enabled:          patch.Enabled,
-		Metadata:         patch.Metadata,
+		Name:               patch.Name,
+		Role:               patch.Role,
+		Backend:            patch.Backend,
+		RuntimePolicy:      patch.RuntimePolicy,
+		Repos:              patch.Repos,
+		MaxPriority:        patch.MaxPriority,
+		MaxParallel:        patch.MaxParallel,
+		ClearMaxPriority:   patch.ClearMaxPriority,
+		ParentEpic:         patch.ParentEpic,
+		ExpectedParentEpic: patch.ExpectedParentEpic,
+		Labels:             patch.Labels,
+		Capabilities:       patch.Capabilities,
+		Enabled:            patch.Enabled,
+		Metadata:           patch.Metadata,
 	}
 	var out domain.WorkerProfile
 	path := "/api/v1/" + pathEscape(ws) + "/worker-profiles/" + pathEscape(profileID)

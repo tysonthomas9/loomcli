@@ -104,7 +104,7 @@ func stackBindingForTask(ctx context.Context, store stackstore.Store, workspaceK
 // finalizeStackNode records the completed task's stack node state/SHA before
 // ExecuteTask returns, so dependents read a durable predecessor node.
 func (e HostBridgeTaskExecutor) finalizeStackNode(ctx context.Context, req TaskExecRequest, wt TaskWorktree, result TaskExecResult, runErr error) {
-	if e.StackStore == nil || runErr != nil || result.Status != domain.TaskRunCompleted {
+	if e.TaskOutcomes == nil || runErr != nil || result.Status != domain.TaskRunCompleted {
 		return
 	}
 	taskID := strings.TrimSpace(req.TaskID)
@@ -118,16 +118,22 @@ func (e HostBridgeTaskExecutor) finalizeStackNode(ctx context.Context, req TaskE
 	if repoName == "" {
 		return
 	}
-	if _, err := taskworktree.RecordOutcome(
+	if _, err := e.TaskOutcomes.RecordTaskOutcome(
 		ctx,
-		e.StackStore,
-		req.WorkspaceKey,
-		repoName,
-		taskID,
-		result.RuntimeMetadata,
+		sourcecontrol.TaskOutcomeCommand{
+			WorkspaceKey: req.WorkspaceKey,
+			Repository:   repoName,
+			TaskID:       taskID,
+			Metadata:     result.RuntimeMetadata,
+		},
 	); err != nil {
 		slog.WarnContext(ctx, "stack finalize barrier: record node failed", "task", taskID, "repo", repoName, "err", err)
 	}
+}
+
+func taskOutcomeRecorder(materializer sourcecontrol.Materializer) sourcecontrol.TaskOutcomeRecorder {
+	recorder, _ := materializer.(sourcecontrol.TaskOutcomeRecorder)
+	return recorder
 }
 
 type LocalTaskWorktreeResolver struct {

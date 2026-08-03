@@ -37,7 +37,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
-	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	dependencies "github.com/tysonthomas9/loomcli/internal/webui/driverapidependencies"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/roles"
@@ -79,7 +78,7 @@ type Module struct {
 	eventAwaits          WorkflowEventAwaitDispatcher
 	execution            execution.DriverRunAPI
 	executionAuthorities execution.DriverRunAuthorityResolver
-	agentParentBindings  dependencies.AgentParentBindings
+	agentIdentities      agents.IdentityQueries
 	taskRunRequests      execution.TaskRunRequestAPI
 	taskRunRecovery      execution.TaskRunRecoveryAPI
 	taskRuns             execution.TaskRunAPI
@@ -118,7 +117,7 @@ func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration i
 		eventAwaits:          cfg.EventAwaits,
 		execution:            cfg.Execution,
 		executionAuthorities: cfg.ExecutionAuthorities,
-		agentParentBindings:  cfg.AgentParentBindings,
+		agentIdentities:      cfg.AgentIdentities,
 		taskRunRequests:      cfg.TaskRunRequests,
 		taskRunRecovery:      cfg.TaskRunRecovery,
 		taskRuns:             cfg.TaskRuns,
@@ -320,35 +319,35 @@ type opHandler func(ctx context.Context, ws string, id driverIdentity, body []by
 
 // verifyParent proves the caller owns a running parent DriverRun.
 func (m *Module) verifyParent(ctx context.Context, ws string, id driverIdentity) (*domain.DriverRun, error) {
-	run, _, _, err := m.verifyParentWithAuthority(ctx, ws, id)
+	run, _, err := m.verifyParentWithOwner(ctx, ws, id)
 	return run, err
 }
 
-func (m *Module) verifyParentWithAuthority(
+func (m *Module) verifyParentWithOwner(
 	ctx context.Context,
 	ws string,
 	id driverIdentity,
-) (*domain.DriverRun, authority.ExecutionAuthority, execution.Owner, error) {
+) (*domain.DriverRun, execution.Owner, error) {
 	if m.execution == nil || m.executionAuthorities == nil {
-		return nil, authority.ExecutionAuthority{}, execution.Owner{},
+		return nil, execution.Owner{},
 			fmt.Errorf("execution DriverRun verification capability is unavailable: %w", execution.ErrUnavailable)
 	}
 	owner, err := driverRunExecutionOwner(id, id.RunID)
 	if err != nil {
-		return nil, authority.ExecutionAuthority{}, execution.Owner{}, err
+		return nil, execution.Owner{}, err
 	}
 	auth, err := m.executionAuthorities.ResolveDriverRunAuthority(ctx, ws, execution.ActionHeartbeatDriverRun, owner)
 	if err != nil {
-		return nil, authority.ExecutionAuthority{}, execution.Owner{}, err
+		return nil, execution.Owner{}, err
 	}
 	run, err := m.execution.HeartbeatDriverRun(ctx, auth, execution.DriverRunHeartbeatCommand{
 		WorkspaceKey: ws, Owner: owner, At: time.Now().UTC(),
 	})
 	if err != nil {
-		return nil, authority.ExecutionAuthority{}, execution.Owner{}, err
+		return nil, execution.Owner{}, err
 	}
 	legacy, err := driverpkg.LegacyDriverRunSnapshot(run)
-	return legacy, auth, owner, err
+	return legacy, owner, err
 }
 
 func driverRunExecutionOwner(id driverIdentity, runID string) (execution.Owner, error) {
@@ -657,7 +656,10 @@ func (m *Module) listAgents(ctx context.Context, ws string, id driverIdentity, _
 	if _, err := m.verifyParent(ctx, ws, id); err != nil {
 		return nil, err
 	}
-	agents, err := m.store.Agents().List(ctx, ws)
+	if m.agentIdentities == nil {
+		return nil, fmt.Errorf("canonical Agent identity query is unavailable: %w", agents.ErrUnavailable)
+	}
+	agents, err := m.agentIdentities.ListAgents(ctx, ws, agents.AgentFilter{})
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
 	}
@@ -694,7 +696,7 @@ func (m *Module) updateAgentParent(ctx context.Context, ws string, id driverIden
 	if err != nil {
 		return nil, err
 	}
-	_, executionAuth, owner, err := m.verifyParentWithAuthority(ctx, ws, id)
+	_, owner, err := m.verifyParentWithOwner(ctx, ws, id)
 	if err != nil {
 		return nil, err
 	}
@@ -703,24 +705,31 @@ func (m *Module) updateAgentParent(ctx context.Context, ws string, id driverIden
 	if agentName == "" || parentID == "" {
 		return nil, fmt.Errorf("agent and parent required: %w", domain.ErrInvalid)
 	}
-	if m.agentParentBindings == nil {
-		return nil, fmt.Errorf("agents parent binding workflow is unavailable: %w", agents.ErrUnavailable)
+	if m.agentIdentities == nil || m.execution == nil || m.executionAuthorities == nil {
+		return nil, fmt.Errorf("canonical Agent parent binding is unavailable: %w", execution.ErrUnavailable)
+	}
+	agentIdentity, err := m.agentIdentities.GetAgent(ctx, ws, agentName)
+	if err != nil {
+		return nil, err
+	}
+	if agentIdentity == nil || strings.TrimSpace(agentIdentity.ProfileName) == "" {
+		return nil, fmt.Errorf("agent %q has no WorkerProfile: %w", agentName, execution.ErrConflict)
+	}
+	executionAuth, err := m.executionAuthorities.ResolveDriverRunAuthority(ctx, ws, execution.ActionBindWorkerProfileParent, owner)
+	if err != nil {
+		return nil, err
 	}
 	expectedParent := strings.TrimSpace(params.ExpectParent)
-	updated, err := m.agentParentBindings.BindVerifiedDriverRunParent(
+	updated, err := m.execution.BindWorkerProfileParent(
 		ctx,
 		executionAuth,
-		agents.BindSupervisedAssignmentParentCommand{
+		execution.BindWorkerProfileParentCommand{
 			WorkspaceKey:   ws,
-			AgentName:      agentName,
-			ExpectedParent: &expectedParent,
+			RequestID:      "bind-worker-profile-parent:" + owner.ResourceID + ":" + agentName,
+			ProfileID:      agentIdentity.ProfileName,
+			ExpectedParent: expectedParent,
 			Parent:         parentID,
-			Proof: agents.ParentBindingProof{
-				DriverRunID:  owner.ResourceID,
-				NodeID:       owner.NodeID,
-				LeaseID:      owner.LeaseID,
-				FencingToken: owner.FencingToken,
-			},
+			Owner:          owner,
 		},
 	)
 	if err != nil {

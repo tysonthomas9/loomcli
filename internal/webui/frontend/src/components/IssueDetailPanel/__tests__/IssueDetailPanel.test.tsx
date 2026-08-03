@@ -1475,7 +1475,6 @@ describe("IssueDetailPanel", () => {
         expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
           name: "lead-desktop-qa-epic",
           role_name: "lead",
-          auto: false,
           cross_repo: true,
           repos: [],
         });
@@ -1561,7 +1560,6 @@ describe("IssueDetailPanel", () => {
         expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
           name: "lead-desktop-qa-epic",
           role_name: "lead",
-          auto: false,
           cross_repo: false,
           repos: ["slack-clone"],
         });
@@ -1618,7 +1616,6 @@ describe("IssueDetailPanel", () => {
         expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
           name: "lead-desktop-qa-epic-2",
           role_name: "lead",
-          auto: false,
           cross_repo: true,
           repos: [],
         });

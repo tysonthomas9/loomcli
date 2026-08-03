@@ -28,10 +28,8 @@ rows:
       realness: deterministic
       provisioning: compose
       polarity: positive-and-negative
-      target: loom-serve-ts-plane
+      target: loom-serve-prompt-agent-plane
     env:
-      LOOM_LOCAL_MODE_PLANE: "ts"
-      LOOM_TASK_READY_EVENTS: "1"
       LOCAL_MODE_COMPOSE_FILES: test/local-mode/docker-compose.workflow-build.yml
       LOCAL_MODE_COMPOSE_UP_FLAGS: --build -d
     setup:
@@ -48,13 +46,16 @@ rows:
       - id: deterministic-evidence
         argv: [make, local-mode-verify]
         timeout_seconds: 300
+      - id: phase6-parity
+        argv: [make, test-phase6-parity]
+        timeout_seconds: 900
     teardown:
       - id: cleanup-stack
         argv: [make, local-mode-down]
         timeout_seconds: 180
     assertions:
-      - local-mode-plane-ts
-      - task-ready-events-enabled
+      - prompt-agent-plane-default
+      - task-ready-events-default
       - zero-auto-agentdefs
       - zero-daemon-processes
       - zero-daemon-sockets
@@ -65,6 +66,12 @@ rows:
       - planner-transcript
       - coder-transcript
       - coder-diff
+      - stale-timeout-and-launch-heartbeats
+      - explicit-task-type-arbitration
+      - preflight-retry-recovery-concurrency-epic
+      - periodic-desired-state-reconciliation
+      - canonical-agentdef-migration
+      - legacy-supervisor-paths-retired
 `
 
 type fakeExecutor struct {
@@ -107,8 +114,8 @@ func TestValidateMatrixRejectsMissingRequiredContract(t *testing.T) {
 	}{
 		{
 			name:    "wrong plane",
-			content: strings.Replace(validRedMatrix, `LOOM_LOCAL_MODE_PLANE: "ts"`, `LOOM_LOCAL_MODE_PLANE: "go"`, 1),
-			want:    "LOOM_LOCAL_MODE_PLANE must be \"ts\"",
+			content: strings.Replace(validRedMatrix, "target: loom-serve-prompt-agent-plane", "target: loom-serve-retired-plane", 1),
+			want:    "coordinates drifted",
 		},
 		{
 			name:    "missing assertion",
@@ -164,16 +171,16 @@ func TestValidateMatrixPinsAuthoritativeRowContract(t *testing.T) {
 		{
 			name:    "compose profile removed",
 			content: strings.Replace(validRedMatrix, "      LOCAL_MODE_COMPOSE_FILES: test/local-mode/docker-compose.workflow-build.yml\n", "", 1),
-			want:    "env contract has 3 entries, want exactly 4",
+			want:    "env contract has 1 entries, want exactly 2",
 		},
 		{
 			name:    "extra environment override",
-			content: strings.Replace(validRedMatrix, "      LOOM_LOCAL_MODE_PLANE: \"ts\"\n", "      LOOM_LOCAL_MODE_PLANE: \"ts\"\n      PATH: /tmp/untrusted\n", 1),
+			content: strings.Replace(validRedMatrix, "      LOCAL_MODE_COMPOSE_FILES: test/local-mode/docker-compose.workflow-build.yml\n", "      LOCAL_MODE_COMPOSE_FILES: test/local-mode/docker-compose.workflow-build.yml\n      PATH: /tmp/untrusted\n", 1),
 			want:    `env key "PATH" is not supported by the clean-environment contract`,
 		},
 		{
 			name:    "compose project override added",
-			content: strings.Replace(validRedMatrix, "      LOOM_LOCAL_MODE_PLANE: \"ts\"\n", "      LOOM_LOCAL_MODE_PLANE: \"ts\"\n      LOCAL_MODE_COMPOSE_PROJECT: unrelated-stack\n", 1),
+			content: strings.Replace(validRedMatrix, "      LOCAL_MODE_COMPOSE_FILES: test/local-mode/docker-compose.workflow-build.yml\n", "      LOCAL_MODE_COMPOSE_FILES: test/local-mode/docker-compose.workflow-build.yml\n      LOCAL_MODE_COMPOSE_PROJECT: unrelated-stack\n", 1),
 			want:    `env key "LOCAL_MODE_COMPOSE_PROJECT" is not supported by the clean-environment contract`,
 		},
 	}
@@ -328,8 +335,6 @@ func TestOSExecutorStripsAmbientRuntimeSelectors(t *testing.T) {
 		"LOCAL_MODE_SOURCE_ROOT":      "/tmp/ambient-source",
 		"LOCAL_MODE_UI_PORT":          "61992",
 		"LOOM_CONFIG_DIR":             "/tmp/ambient-loom-config",
-		"LOOM_LOCAL_MODE_PLANE":       "go",
-		"LOOM_TASK_READY_EVENTS":      "0",
 		"LOOM_WORKSPACE":              "AMBIENT",
 	}
 	for key, value := range ambient {
@@ -340,8 +345,6 @@ func TestOSExecutorStripsAmbientRuntimeSelectors(t *testing.T) {
 
 	explicit := map[string]string{
 		"SUPERVISOR_DISABLED_ENV_PROBE": "1",
-		"LOOM_LOCAL_MODE_PLANE":         "ts",
-		"LOOM_TASK_READY_EVENTS":        "1",
 		"LOCAL_MODE_COMPOSE_FILES":      "test/local-mode/docker-compose.workflow-build.yml",
 		"LOCAL_MODE_COMPOSE_UP_FLAGS":   "--build -d",
 	}

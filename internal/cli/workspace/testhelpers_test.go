@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"testing"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
@@ -127,41 +126,6 @@ func createGitRepo(t *testing.T, path string) {
 			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
 	}
-}
-
-type DaemonAgentStateEntry = monitor.DaemonAgentStateEntry
-type DaemonAgentInfo = monitor.DaemonAgentInfo
-type DaemonAgentState = monitor.DaemonAgentState
-
-// DaemonState is defined locally to avoid importing daemon (which would create
-// an import cycle: workspace_test → daemon → daemon/supervisor → workspace).
-type DaemonState struct {
-	PID       int                 `json:"pid"`
-	StartedAt time.Time           `json:"started_at"`
-	Agents    []DaemonAgentStatus `json:"agents"`
-}
-
-// DaemonAgentStatus mirrors daemon.DaemonAgentStatus for test serialization.
-type DaemonAgentStatus struct {
-	Worktree       string    `json:"worktree"`
-	Role           string    `json:"role"`
-	Repo           string    `json:"repo,omitempty"`
-	PID            int       `json:"pid"`
-	Status         string    `json:"status"`
-	TaskID         string    `json:"task_id,omitempty"`
-	EpicID         string    `json:"epic_id,omitempty"`
-	CurrentBackend string    `json:"current_backend,omitempty"`
-	RestartCount   int       `json:"restart_count"`
-	LastStart      time.Time `json:"last_start,omitempty"`
-	LastExit       time.Time `json:"last_exit,omitempty"`
-	LastExitCode   int       `json:"last_exit_code,omitempty"`
-	StopReason     string    `json:"stop_reason,omitempty"`
-	StoppedAt      time.Time `json:"stopped_at,omitempty"`
-	WorktreePath   string    `json:"worktree_path,omitempty"`
-	LastErrorClass string    `json:"last_error_class,omitempty"`
-	NoWorkCount    int       `json:"no_work_count,omitempty"`
-	BackoffUntil   time.Time `json:"backoff_until,omitempty"`
-	RemoteBranch   string    `json:"remote_branch,omitempty"`
 }
 
 // backendFlagPtr points to the real cli.backendFlag for test manipulation.

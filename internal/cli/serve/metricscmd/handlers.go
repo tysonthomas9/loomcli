@@ -378,10 +378,6 @@ func groupAgentsByWorkspace(agents []monitor.AgentStatus) map[string][]monitor.A
 	return groups
 }
 
-func storeAgentsForMonitor(ctx context.Context, st store.Store, workspaceHint string) []monitor.AgentStatus {
-	return collectMonitorStoreData(ctx, st, workspaceHint).Agents
-}
-
 func latestAgentSessionsForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]*domain.AgentSession {
 	out := make(map[string]*domain.AgentSession)
 	if st == nil || st.AgentSessions() == nil || wsKey == "" {
@@ -467,15 +463,6 @@ func monitorSessionActive(status domain.AgentSessionStatus) bool {
 	}
 }
 
-func monitorStatusFromAgentState(state domain.AgentState) string {
-	switch state {
-	case domain.AgentStateActive:
-		return "ready"
-	default:
-		return "idle"
-	}
-}
-
 func mergeStoreAgentsWithRuntime(storeAgents []monitor.AgentStatus, runtimeAgents []monitor.AgentStatus, agentTasks map[string]monitor.TaskInfo) []monitor.AgentStatus {
 	if len(storeAgents) == 0 {
 		return []monitor.AgentStatus{}
@@ -516,7 +503,6 @@ func mergeRuntimeAgentStatus(storeAgent monitor.AgentStatus, runtimeAgent monito
 	}
 	merged.Ahead = runtimeAgent.Ahead
 	merged.Behind = runtimeAgent.Behind
-	merged.DaemonManaged = runtimeAgent.DaemonManaged
 	merged.CurrentTaskID = runtimeAgent.CurrentTaskID
 	merged.LastActivityAt = runtimeAgent.LastActivityAt
 	merged.Commits = runtimeAgent.Commits
@@ -524,16 +510,11 @@ func mergeRuntimeAgentStatus(storeAgent monitor.AgentStatus, runtimeAgent monito
 	return merged
 }
 
-func monitorBranchFromAgent(ws *ops.WorkspaceData, agent *domain.Agent) string {
-	if ws == nil || agent == nil || ws.Path == "" {
+func monitorBranchFromAgent(ws *ops.WorkspaceData, agent ops.WorkspaceAgentInfo) string {
+	if ws == nil || agent.Name == "" || ws.Path == "" {
 		return "unknown"
 	}
-	repo, ok := selectMonitorAgentRepo(ws.Repos, ops.WorkspaceAgentInfo{
-		Name:       agent.Name,
-		Repos:      agent.Repos,
-		RepoGroups: agent.RepoGroups,
-		CrossRepo:  agent.CrossRepo,
-	})
+	repo, ok := selectMonitorAgentRepo(ws.Repos, agent)
 	if !ok || repo.Name == "" {
 		return "unknown"
 	}
@@ -577,8 +558,8 @@ func selectMonitorAgentRepo(repos []ops.WorkspaceRepo, agent ops.WorkspaceAgentI
 	return ops.WorkspaceRepo{}, false
 }
 
-func monitorRepoFromAgent(agent *domain.Agent) string {
-	if agent == nil || agent.CrossRepo || len(agent.Repos) != 1 {
+func monitorRepoFromAgent(agent ops.WorkspaceAgentInfo) string {
+	if agent.CrossRepo || len(agent.Repos) != 1 {
 		return ""
 	}
 	return agent.Repos[0]

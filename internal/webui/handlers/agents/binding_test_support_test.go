@@ -357,6 +357,45 @@ func (api *testAgentRecordAPI) ListAgents(
 	return out, nil
 }
 
+func (api *testAgentRecordAPI) GetRole(
+	ctx context.Context,
+	workspace,
+	roleName string,
+) (*agentsmodule.Role, error) {
+	role, err := api.store.Roles().Get(ctx, workspace, roleName)
+	return canonicalRoleForTest(role), mapTestAgentRecordError(err)
+}
+
+func (api *testAgentRecordAPI) ListRoles(
+	ctx context.Context,
+	workspace string,
+) ([]*agentsmodule.Role, error) {
+	roles, err := api.store.Roles().List(ctx, workspace)
+	if err != nil {
+		return nil, mapTestAgentRecordError(err)
+	}
+	out := make([]*agentsmodule.Role, 0, len(roles))
+	for _, role := range roles {
+		out = append(out, canonicalRoleForTest(role))
+	}
+	return out, nil
+}
+
+func canonicalRoleForTest(role *domain.Role) *agentsmodule.Role {
+	if role == nil {
+		return nil
+	}
+	return &agentsmodule.Role{
+		WorkspaceKey: role.WorkspaceKey, Name: role.Name, Kind: string(role.Kind),
+		Description: role.Description, Prompt: role.Prompt, PromptFile: role.PromptFile,
+		Model: role.Model, TaskFilter: role.TaskFilter, Backend: role.Backend, Effort: role.Effort,
+		PathPatterns: append([]string(nil), role.PathPatterns...), Skills: append([]string(nil), role.Skills...),
+		MaxPriority: role.MaxPriority, MaxConcurrency: role.MaxConcurrency, ReadOnly: role.ReadOnly,
+		AllowedTools: append([]string(nil), role.AllowedTools...), DeniedTools: append([]string(nil), role.DeniedTools...),
+		MaxBudgetUSD: role.MaxBudgetUSD, CreatedAt: role.CreatedAt, UpdatedAt: role.UpdatedAt,
+	}
+}
+
 func (api *testAgentRecordAPI) UpdateAgent(
 	ctx context.Context,
 	_ authority.OperatorAuthority,
@@ -621,7 +660,7 @@ func (c testBindingGrantCompatibility) RevokeBindingGrants(ctx context.Context, 
 
 func newTestAgentsModule(agentSvc service.AgentService, st store.Store, hub *realtime.Hub, workspace string) *Module {
 	config := Config{
-		AgentService: agentSvc, Store: st, Hub: hub,
+		Store: st, Hub: hub,
 		OperatorAuthority: testOperatorAuthorityResolver{}, WorkspaceFromContext: func(context.Context) string { return workspace },
 	}
 	if st != nil {

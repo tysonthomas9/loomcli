@@ -6,10 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type terminalAgentIdentityStub struct {
@@ -28,16 +25,14 @@ func (stub *terminalAgentIdentityStub) GetAgent(
 }
 
 func TestLoadTerminalAgentPrefersCanonicalAgentsProjection(t *testing.T) {
-	st := memstore.New()
-	createTerminalIdentityWorkspace(t, st)
-	if _, err := st.Agents().Create(t.Context(), store.AgentCreate{
-		WorkspaceKey: "WS",
-		Name:         "reviewer",
-		RoleName:     "legacy-role",
-	}); err != nil {
-		t.Fatalf("create legacy collision: %v", err)
-	}
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	metadata, err := agents.WithRuntimeMetadata(nil, agents.RuntimeMetadata{
+		RoleKind: "interactive", Backend: "codex", FallbackBackends: []string{"claude"},
+		Repos: []string{"loom"}, RepoGroups: []string{"core"}, CrossRepo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	identity := &terminalAgentIdentityStub{record: &agents.Agent{
 		WorkspaceKey: "WS",
 		AgentID:      "reviewer",
@@ -47,68 +42,59 @@ func TestLoadTerminalAgentPrefersCanonicalAgentsProjection(t *testing.T) {
 		DesiredState: agents.DesiredRunning,
 		MaxInstances: 1,
 		BudgetPolicy: "bounded",
+		Metadata:     metadata,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}}
 
-	got, err := loadTerminalAgent(t.Context(), st.Agents(), "WS", "reviewer", identity)
+	got, err := loadTerminalAgent(t.Context(), "WS", "reviewer", identity)
 	if err != nil {
 		t.Fatalf("loadTerminalAgent: %v", err)
 	}
-	if got.Name != "reviewer" ||
+	if got.AgentID != "reviewer" ||
 		got.RoleName != "pr-reviewer" ||
-		got.DesiredState != domain.AgentDesiredRunning ||
-		got.MaxConcurrency != 1 ||
-		got.BudgetPolicy != "bounded" {
+		got.DesiredState != agents.DesiredRunning ||
+		got.MaxInstances != 1 ||
+		got.BudgetPolicy != "bounded" || got.Backend != "codex" ||
+		len(got.FallbackBackends) != 1 || got.FallbackBackends[0] != "claude" ||
+		len(got.Repos) != 1 || got.Repos[0] != "loom" ||
+		len(got.RepoGroups) != 1 || got.RepoGroups[0] != "core" || !got.CrossRepo {
 		t.Fatalf("canonical projection = %+v", got)
 	}
 }
 
-func TestLoadTerminalAgentUsesBoundedLegacyReadOnlyCompatibility(t *testing.T) {
-	st := memstore.New()
-	createTerminalIdentityWorkspace(t, st)
-	if _, err := st.Agents().Create(t.Context(), store.AgentCreate{
-		WorkspaceKey: "WS",
-		Name:         "legacy",
-		RoleName:     "lead",
-	}); err != nil {
-		t.Fatalf("create legacy agent: %v", err)
-	}
+func TestLoadTerminalAgentDoesNotFallbackWhenCanonicalIdentityIsMissing(t *testing.T) {
 	identity := &terminalAgentIdentityStub{err: agents.ErrNotFound}
 
-	got, err := loadTerminalAgent(t.Context(), st.Agents(), "WS", "legacy", identity)
-	if err != nil {
-		t.Fatalf("loadTerminalAgent: %v", err)
-	}
-	if got.Name != "legacy" || got.RoleName != "lead" || identity.calls != 1 {
-		t.Fatalf("legacy projection = %+v, calls = %d", got, identity.calls)
+	_, err := loadTerminalAgent(t.Context(), "WS", "legacy", identity)
+	if err == nil || !errors.Is(err, agents.ErrNotFound) || identity.calls != 1 {
+		t.Fatalf("loadTerminalAgent error = %v, calls = %d", err, identity.calls)
 	}
 }
 
 func TestLoadTerminalAgentDoesNotBypassCanonicalFailure(t *testing.T) {
-	st := memstore.New()
-	createTerminalIdentityWorkspace(t, st)
-	if _, err := st.Agents().Create(t.Context(), store.AgentCreate{
-		WorkspaceKey: "WS",
-		Name:         "legacy",
-		RoleName:     "lead",
-	}); err != nil {
-		t.Fatalf("create legacy agent: %v", err)
-	}
 	identity := &terminalAgentIdentityStub{err: agents.ErrUnavailable}
 
-	_, err := loadTerminalAgent(t.Context(), st.Agents(), "WS", "legacy", identity)
+	_, err := loadTerminalAgent(t.Context(), "WS", "legacy", identity)
 	if err == nil || !errors.Is(err, agents.ErrUnavailable) {
 		t.Fatalf("loadTerminalAgent error = %v, want canonical unavailable", err)
 	}
 }
 
-func createTerminalIdentityWorkspace(t *testing.T, st *memstore.Store) {
-	t.Helper()
-	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{
-		Key:  "WS",
-		Name: "Workspace",
-	}); err != nil {
-		t.Fatalf("create workspace: %v", err)
+func TestLoadTerminalAgentRejectsMalformedCanonicalRuntimeMetadata(t *testing.T) {
+	identity := &terminalAgentIdentityStub{record: &agents.Agent{
+		WorkspaceKey: "WS", AgentID: "reviewer", Name: "Reviewer",
+		Kind: agents.AgentKindLead, Behavior: agents.BehaviorReference{RoleName: "lead"},
+		DesiredState: agents.DesiredRunning, Metadata: map[string]string{
+			agents.MetadataRoleKind:         "interactive",
+			agents.MetadataRepos:            "not-json",
+			agents.MetadataRepoGroups:       "[]",
+			agents.MetadataFallbackBackends: "[]",
+			agents.MetadataCrossRepo:        "false", agents.MetadataAuto: "false",
+		},
+	}}
+	_, err := loadTerminalAgent(t.Context(), "WS", "reviewer", identity)
+	if err == nil || !errors.Is(err, agents.ErrInvalidPersistedState) {
+		t.Fatalf("loadTerminalAgent error = %v, want invalid persisted state", err)
 	}
 }

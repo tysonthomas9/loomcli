@@ -3,6 +3,8 @@ package execution
 import (
 	"context"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -26,15 +28,17 @@ var (
 )
 
 const (
-	ActionPreflight            authority.Action = "execution.preflight"
-	ActionClaimAndLaunch       authority.Action = "execution.claim-and-launch"
-	ActionHeartbeat            authority.Action = "execution.heartbeat"
-	ActionAppendLog            authority.Action = "execution.append-log"
-	ActionClassify             authority.Action = "execution.classify"
-	ActionFinalize             authority.Action = "execution.finalize"
-	ActionRecover              authority.Action = "execution.recover"
-	ActionAwait                authority.Action = "execution.await"
-	ActionResolveTrustedRunner authority.Action = "execution.resolve-trusted-runner"
+	ActionPreflight                  authority.Action = "execution.preflight"
+	ActionClaimAndLaunch             authority.Action = "execution.claim-and-launch"
+	ActionHeartbeat                  authority.Action = "execution.heartbeat"
+	ActionAppendLog                  authority.Action = "execution.append-log"
+	ActionClassify                   authority.Action = "execution.classify"
+	ActionFinalize                   authority.Action = "execution.finalize"
+	ActionRecover                    authority.Action = "execution.recover"
+	ActionAwait                      authority.Action = "execution.await"
+	ActionResolveTrustedRunner       authority.Action = "execution.resolve-trusted-runner"
+	ActionListDueOutboxDeliveries    authority.Action = "execution.list-due-outbox-deliveries"
+	ActionRecordOutboxDeliveryResult authority.Action = "execution.record-outbox-delivery-result"
 
 	ActionClaimAwaitEventNotifications          authority.Action = "execution.claim-await-event-notifications"
 	ActionCompleteAwaitEventNotification        authority.Action = "execution.complete-await-event-notification"
@@ -46,6 +50,97 @@ const (
 	ActionCompleteTerminalDriverRunWorkRecovery authority.Action = "execution.complete-terminal-driver-run-work-recovery"
 	ActionRetryTerminalDriverRunWorkRecovery    authority.Action = "execution.retry-terminal-driver-run-work-recovery"
 )
+
+type OutboxKind string
+
+const (
+	OutboxKindLeadAssignment  OutboxKind = "leadAssignment"
+	OutboxKindLeadTaskMessage OutboxKind = "leadTaskMessage"
+)
+
+type OutboxDeliveryStatus string
+
+const (
+	OutboxDeliveryStatusPending     OutboxDeliveryStatus = "pending"
+	OutboxDeliveryStatusDelivered   OutboxDeliveryStatus = "delivered"
+	OutboxDeliveryStatusUnsupported OutboxDeliveryStatus = "unsupported"
+	OutboxDeliveryStatusFailed      OutboxDeliveryStatus = "failed"
+)
+
+type ListDueOutboxDeliveriesCommand struct {
+	WorkspaceKey string
+	Now          time.Time
+	Limit        int
+}
+
+type RecordOutboxDeliveryResultCommand struct {
+	WorkspaceKey   string
+	OutboxID       string
+	Status         OutboxDeliveryStatus
+	Attempt        int
+	NextRetryAt    *time.Time
+	LastError      string
+	InboxMessageID string
+}
+
+type OutboxDeliveryQuery struct {
+	WorkspaceKey string
+	Now          time.Time
+	Limit        int
+}
+
+type OutboxDeliveryResult struct {
+	WorkspaceKey   string
+	OutboxID       string
+	Status         OutboxDeliveryStatus
+	Attempt        int
+	NextRetryAt    *time.Time
+	LastError      string
+	InboxMessageID string
+}
+
+// OutboxDelivery is the immutable runtime view needed to attempt one delivery.
+type OutboxDelivery struct {
+	WorkspaceKey   string
+	OutboxID       string
+	Kind           OutboxKind
+	DriverRunID    string
+	TaskRunID      string
+	TargetAgent    string
+	Body           string
+	DedupeKey      string
+	Status         OutboxDeliveryStatus
+	Attempt        int
+	NextRetryAt    *time.Time
+	LastError      string
+	InboxMessageID string
+}
+
+// OutboxDeliveryPort is Execution's owner-private persistence boundary.
+type OutboxDeliveryPort interface {
+	ListDueOutboxDeliveries(context.Context, OutboxDeliveryQuery) ([]OutboxDelivery, error)
+	RecordOutboxDeliveryResult(context.Context, OutboxDeliveryResult) (*OutboxDelivery, error)
+}
+
+func validOutboxDeliveryQuery(query OutboxDeliveryQuery) bool {
+	return strings.TrimSpace(query.WorkspaceKey) != "" && !query.Now.IsZero() && query.Limit > 0
+}
+
+func validOutboxDeliveryResult(result OutboxDeliveryResult) bool {
+	if strings.TrimSpace(result.WorkspaceKey) == "" || strings.TrimSpace(result.OutboxID) == "" || result.Attempt < 1 {
+		return false
+	}
+	validStatus := result.Status == OutboxDeliveryStatusPending || result.Status == OutboxDeliveryStatusDelivered ||
+		result.Status == OutboxDeliveryStatusUnsupported || result.Status == OutboxDeliveryStatusFailed
+	return validStatus && (result.Status != OutboxDeliveryStatusPending || result.NextRetryAt != nil)
+}
+
+// OutboxDeliveryAPI is Execution's system-only runtime surface for draining
+// durable agent-notification delivery work.
+type OutboxDeliveryAPI interface {
+	ListDueOutboxDeliveries(context.Context, authority.SystemAuthority, ListDueOutboxDeliveriesCommand) ([]OutboxDelivery, error)
+	RecordOutboxDeliveryResult(context.Context, authority.SystemAuthority, RecordOutboxDeliveryResultCommand) (*OutboxDelivery, error)
+}
 
 const (
 	DaytonaProviderSchemaV1 = "daytona-task-run-execution.v1"
@@ -88,6 +183,8 @@ func OperationRules() []authority.OperationRule {
 		authority.Allow(ActionClaimTerminalDriverRunWorkRecoveries, authority.ClassSystem),
 		authority.Allow(ActionCompleteTerminalDriverRunWorkRecovery, authority.ClassSystem),
 		authority.Allow(ActionRetryTerminalDriverRunWorkRecovery, authority.ClassSystem),
+		authority.Allow(ActionListDueOutboxDeliveries, authority.ClassSystem),
+		authority.Allow(ActionRecordOutboxDeliveryResult, authority.ClassSystem),
 	}
 }
 

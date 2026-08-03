@@ -189,7 +189,7 @@ describe("issueStore", () => {
     });
 
     it("surfaces ApiError.body.error instead of the generic status text", async () => {
-      // Reproduces the fix for the daemon-loading UX: IssueViewGuard decides
+      // Reproduces the fix for the runtime-loading UX: IssueViewGuard decides
       // between the "loading" and "fetch-error" variants by checking the
       // error string for the server's phrase. Prior to the fix the store
       // surfaced ApiError.message ("API Error: 503 Service Unavailable"),

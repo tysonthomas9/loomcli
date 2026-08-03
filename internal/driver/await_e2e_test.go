@@ -50,6 +50,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 	"github.com/tysonthomas9/loomcli/internal/trigger"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/approvals"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/driverapi"
@@ -242,7 +243,7 @@ func newAwaitFlowsServer(t *testing.T, st store.Store, runTokenKey []byte) (*htt
 	executionCapability, err := appserve.NewExecutionCapability(appserve.ExecutionDependencies{
 		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
-		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(), Workspaces: st.Workspaces(),
+		WorkerProfiles: st.WorkerProfiles(), AgentQueries: testutil.StaticAgentQueries{}, Outbox: st.Outbox(), Awaits: st.Awaits(), TriggerEvents: st.TriggerEvents(), Workspaces: st.Workspaces(),
 		AtomicTaskRunRequests: awaitE2EClaimPort{}, AtomicTaskRunClaims: awaitE2EClaimPort{},
 		AtomicTaskRunWorkItemDesign: awaitE2EClaimPort{},
 		AtomicTaskRunRequeues:       awaitE2EClaimPort{}, AtomicTaskRunRetryExhaustion: awaitE2EClaimPort{},

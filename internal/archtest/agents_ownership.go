@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	legacyAgentStoreReceiver         = "github.com/tysonthomas9/loomcli/internal/store.AgentStore"
 	legacyAgentServiceStoreReceiver  = "github.com/tysonthomas9/loomcli/internal/store.AgentServiceStore"
 	legacyRoleStoreReceiver          = "github.com/tysonthomas9/loomcli/internal/store.RoleStore"
 	agentsAgentIdentityStoreReceiver = "github.com/tysonthomas9/loomcli/internal/modules/agents.AgentIdentityStore"
@@ -30,11 +29,6 @@ const (
 )
 
 var phase5AgentsMutationMethods = map[string]map[string]struct{}{
-	legacyAgentStoreReceiver: {
-		"Create": {},
-		"Delete": {},
-		"Update": {},
-	},
 	legacyAgentServiceStoreReceiver: {
 		"Create": {},
 		"Delete": {},
@@ -79,10 +73,6 @@ var phase5AgentsMutationMethods = map[string]map[string]struct{}{
 // mutator whose name is absent from phase5AgentsMutationMethods would evade the
 // candidate scan entirely.
 var phase5AgentsReadMethods = map[string]map[string]struct{}{
-	legacyAgentStoreReceiver: {
-		"Get":  {},
-		"List": {},
-	},
 	legacyAgentServiceStoreReceiver: {
 		"Get":  {},
 		"List": {},
@@ -399,32 +389,24 @@ func isPhase5AgentsMutationAllowed(mutation phase5AgentsMutation) bool {
 		return mutation.file == "internal/modules/agents/provisioning.go" ||
 			mutation.file == "internal/modules/agents/service.go"
 	case agentsDesiredStateStoreReceiver,
-		agentsLifecycleStoreReceiver,
 		agentsOwnershipStoreReceiver:
 		// Desired-state, aggregate-lifecycle, and ownership mutations are
 		// admitted and validated by the Agents service itself.
 		return mutation.file == "internal/modules/agents/service.go"
+	case agentsLifecycleStoreReceiver:
+		return mutation.file == "internal/modules/agents/service.go" ||
+			mutation.file == "internal/modules/agents/desired_state_reconciliation.go"
 	case agentsRolePromptStoreReceiver:
 		// Startup prompt repair is a deliberately narrow owner-private
 		// compatibility adapter around one atomic repair primitive.
-		return mutation.file == "internal/infra/agentscompatstore/adapter.go"
-	case legacyAgentStoreReceiver:
-		// The transitional domain.Agent aggregate is reachable only through
-		// the Agents-owned compatibility command service. The two concrete
-		// persistence adapters implement the store, while cmdstore's exact
-		// file is a transparent telemetry decorator that forwards an already
-		// authorized call.
-		return mutation.file == "internal/infra/agentscompatstore/legacy_assignments.go" ||
-			mutation.file == "internal/infra/fleetdb/agent.go" ||
-			mutation.file == "internal/infra/memstore/agent.go" ||
-			mutation.file == "internal/cli/cmdstore/store_tracing_core_entities.go"
+		return mutation.file == "internal/infra/agentsbootstrapstore/adapter.go"
 	case legacyAgentServiceStoreReceiver, legacyRoleStoreReceiver:
-		// agentscompatstore is the explicitly bounded legacy-store adapter retained
-		// for startup/local ensure flows. FleetDB adapters remain owner-side
+		// agentsbootstrapstore is the bounded role/service bootstrap adapter.
+		// FleetDB adapters remain owner-side
 		// transport implementations. cmdstore's exact files are transparent
 		// telemetry decorators: they forward an already-authorized call and do
 		// not originate an aggregate mutation.
-		return mutation.file == "internal/infra/agentscompatstore/adapter.go" ||
+		return mutation.file == "internal/infra/agentsbootstrapstore/adapter.go" ||
 			strings.HasPrefix(mutation.file, "internal/modules/agents/fleetdb/") ||
 			strings.HasPrefix(mutation.file, "internal/infra/fleetdb/") ||
 			mutation.file == "internal/cli/cmdstore/store_tracing_core_entities.go" ||
@@ -435,12 +417,11 @@ func isPhase5AgentsMutationAllowed(mutation phase5AgentsMutation) bool {
 }
 
 const (
-	phase5AgentsCompatibilityStoreImport = "github.com/tysonthomas9/loomcli/internal/infra/agentscompatstore"
+	phase5AgentsCompatibilityStoreImport = "github.com/tysonthomas9/loomcli/internal/infra/agentsbootstrapstore"
 )
 
 var phase5AgentsCompatibilityCompositions = map[string]struct{}{
-	"internal/app/serve/agentcomposition/agents.go":           {},
-	"internal/cli/serve/workspacemgr/agents_compatibility.go": {},
+	"internal/cli/serve/workspacemgr/agents_bootstrap.go": {},
 }
 
 // snapshotPhase5AgentsCompatibilityImportBlockers enforces agentscompatstore

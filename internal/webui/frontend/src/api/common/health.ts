@@ -8,13 +8,7 @@ import { api, apiErrorFromResponse } from "./client";
 /** Health endpoint response shape (matches Go HealthStatus struct). */
 export interface HealthResponse {
   status: "ok" | "degraded" | "unhealthy" | "starting";
-  daemon: {
-    connected: boolean;
-    status?: string;
-    uptime?: number;
-    version?: string;
-    error?: string;
-  };
+  error?: string;
 }
 
 /**

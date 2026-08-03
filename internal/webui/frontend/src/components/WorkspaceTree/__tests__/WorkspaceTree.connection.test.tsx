@@ -4,7 +4,7 @@
 
 /**
  * Unit tests for WorkspaceTree connection status indicator feature.
- * Covers daemon prompt rendering, retry button, collapsed badge
+ * Covers connection prompt rendering, retry button, collapsed badge
  * disconnected state, and existing behavior when props are omitted.
  */
 
@@ -207,7 +207,7 @@ describe("WorkspaceTree connection status", () => {
     agentOverride = {};
   });
 
-  describe("daemon prompt", () => {
+  describe("connection prompt", () => {
     it("is NOT shown when connectionLost is false", () => {
       reposOverride = { repos: oneRepo };
 
@@ -251,7 +251,7 @@ describe("WorkspaceTree connection status", () => {
         screen.getByText("Check that the workspace service is running."),
       ).toBeInTheDocument();
 
-      // Retry button inside the daemon prompt
+      // Retry button inside the connection prompt
       const retryButton = screen.getByRole("button", { name: /retry/i });
       expect(retryButton).toBeInTheDocument();
     });
@@ -382,7 +382,7 @@ describe("WorkspaceTree connection status", () => {
       const alphaElements = screen.getAllByText("alpha");
       expect(alphaElements.length).toBeGreaterThanOrEqual(1);
 
-      // No daemon prompt
+      // No connection prompt
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       expect(screen.queryByText("Connection lost")).not.toBeInTheDocument();
     });

@@ -56,7 +56,7 @@ func NewRunOutcomeRuntimeRegistrationWithExecution(
 	if awaits == nil || triggerEvents == nil || workspacesStore == nil {
 		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: required dependency is unavailable")
 	}
-	journal, ok := triggerEvents.(store.TriggerEventAppender)
+	journal, ok := triggerEvents.(driver.RunOutcomeJournal)
 	if !ok {
 		return platformruntime.Registration{}, fmt.Errorf("compose driver run outcome runtime: TriggerEvent store lacks base event journal capability")
 	}

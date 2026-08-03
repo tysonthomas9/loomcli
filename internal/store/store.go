@@ -21,14 +21,12 @@ import "io"
 type Store interface {
 	Workspaces() WorkspaceStore
 	Repos() RepoStore
-	Agents() AgentStore
 	Nodes() NodeStore
 	AgentSessions() AgentSessionStore
 	TerminalSessions() TerminalSessionStore
 	Artifacts() ArtifactStore
 	AgentLeases() AgentLeaseStore
 	AgentOwnershipLeases() AgentOwnershipLeaseStore
-	AgentCommands() AgentCommandStore
 	AgentInboxMessages() AgentInboxMessageStore
 	Drivers() DriverStore
 	DriverVersions() DriverVersionStore
@@ -49,6 +47,5 @@ type Store interface {
 	ConnectorCalls() ConnectorAuditStore
 	Workers() WorkerStore
 	Roles() RoleStore
-	Daemon() DaemonProfileStore
 	io.Closer
 }

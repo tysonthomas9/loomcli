@@ -116,6 +116,10 @@ func (workflow *Workflow) EnsureReviewer(
 	}
 
 	result := &EnsureResult{RoleCommitted: true}
+	metadata, err := agents.WithRuntimeMetadata(nil, agents.RuntimeMetadata{RoleKind: "interactive"})
+	if err != nil {
+		return result, fmt.Errorf("build pr reviewer Agent runtime metadata: %w", err)
+	}
 	agentReason := "ensure PR reviewer Agent " + agentID
 	agentAuth, err := workflow.authorities.AuthorityForReviewerAgent(ctx, workspace, agentReason)
 	if err != nil {
@@ -131,6 +135,7 @@ func (workflow *Workflow) EnsureReviewer(
 			Behavior:     agents.BehaviorReference{RoleName: RoleName},
 			DesiredState: agents.DesiredRunning,
 			MaxInstances: 1,
+			Metadata:     metadata,
 		},
 	})
 	if err != nil {

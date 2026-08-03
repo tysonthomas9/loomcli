@@ -17,6 +17,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -66,7 +67,7 @@ func TestGroupAgentsByWorkspace_AllSameWorkspace(t *testing.T) {
 	}
 }
 
-func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
+func TestHandleAgents_UsesCanonicalAgentsAsSourceOfTruth(t *testing.T) {
 	t.Setenv("LOOM_WORKSPACE", "WS1")
 	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
@@ -83,16 +84,19 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "falcon",
-		RoleName:     "task",
-		Repos:        []string{"repo-a"},
-		Parent:       "EPIC-1",
-		Mode:         domain.AgentModeEphemeral,
-		DesiredState: domain.AgentDesiredStopped,
-	}); err != nil {
-		t.Fatal(err)
+	directory := &monitorAgentDirectoryStub{
+		agents: map[string][]*agentsmodule.Agent{"WS1": {
+			monitorCanonicalAgent(t, "WS1", "falcon", "task", agentsmodule.DesiredStopped, agentsmodule.RuntimeMetadata{
+				RoleKind: string(domain.RoleKindWorker), Repos: []string{"repo-a"},
+			}),
+			monitorCanonicalAgent(t, "WS1", "nova", "plan", agentsmodule.DesiredStopped, agentsmodule.RuntimeMetadata{
+				RoleKind: string(domain.RoleKindWorker), CrossRepo: true,
+			}),
+		}},
+		roles: map[string][]*agentsmodule.Role{"WS1": {
+			{WorkspaceKey: "WS1", Name: "task", Kind: string(domain.RoleKindWorker)},
+			{WorkspaceKey: "WS1", Name: "plan", Kind: string(domain.RoleKindWorker)},
+		}},
 	}
 	// Seed the orchestration AgentSession row — the monitor data source
 	// reads attribution via OrchestrationSessionIDFor.
@@ -103,18 +107,6 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 		Kind:         domain.AgentSessionKindOrchestration,
 		Status:       domain.AgentSessionRunning,
 	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "nova",
-		RoleName:     "plan",
-		CrossRepo:    true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	active := domain.AgentStateActive
-	if _, err := st.Agents().Update(ctx, "WS1", "falcon", store.AgentUpdate{State: &active}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.AgentSessions().Create(ctx, store.AgentSessionCreate{
@@ -150,7 +142,6 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 				Branch:         "runtime/stale",
 				Status:         "planning: HELLO-WORLD-1",
 				Ahead:          1,
-				DaemonManaged:  true,
 				CurrentTaskID:  "HELLO-WORLD-1",
 				LastActivityAt: &lastActivity,
 			},
@@ -160,7 +151,10 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents", nil)
 	rr := httptest.NewRecorder()
 
-	HandleAgents(func() *monitor.MonitorData { return data }, st).ServeHTTP(rr, req)
+	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData { return data }, nil, time.Minute)
+	storeDataSource := NewMonitorStoreDataSourceWithTTL(st, time.Minute)
+	storeDataSource.SetAgentDirectory(directory)
+	HandleAgentsWithSources(monitorDataSource, storeDataSource).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
@@ -183,23 +177,20 @@ func TestHandleAgents_UsesStoreAgentsAsSourceOfTruth(t *testing.T) {
 	if falcon.Role != "task" || falcon.Repo != "repo-a" || falcon.Workspace != "Test" || falcon.Status != "planning: HELLO-WORLD-1" || falcon.Branch != "feature/falcon" {
 		t.Fatalf("falcon not sourced from store: %+v", falcon)
 	}
-	if !falcon.DaemonManaged {
-		t.Fatalf("falcon DaemonManaged = false, want true")
-	}
 	if falcon.CurrentTaskID != "HELLO-WORLD-1" {
 		t.Fatalf("falcon CurrentTaskID = %q, want HELLO-WORLD-1", falcon.CurrentTaskID)
 	}
 	if falcon.LastActivityAt == nil || !falcon.LastActivityAt.Equal(lastActivity) {
 		t.Fatalf("falcon LastActivityAt = %v, want %v", falcon.LastActivityAt, lastActivity)
 	}
-	if got := byName["falcon"]; got.Parent != "EPIC-1" || got.OrchestratorSessionID != "lead-session" || got.Mode != "ephemeral" || got.DesiredState != "stopped" {
-		t.Fatalf("falcon orchestration fields not sourced from store: %+v", got)
+	if got := byName["falcon"]; got.OrchestratorSessionID != "lead-session" || got.DesiredState != "stopped" {
+		t.Fatalf("falcon orchestration fields not sourced from canonical identity and Interaction: %+v", got)
 	}
 	if got := byName["falcon"]; got.TaskID != "TASK-1" || got.SessionID != "session-falcon" {
 		t.Fatalf("falcon session fields not sourced from agent sessions: %+v", got)
 	}
-	if got := byName["nova"]; got.Role != "plan" || got.Status != "idle" || got.Workspace != "Test" {
-		t.Fatalf("nova not sourced from store: %+v", got)
+	if got := byName["nova"]; got.Role != "plan" || got.Status != "stopped" || got.Workspace != "Test" {
+		t.Fatalf("nova not sourced from canonical Agents: %+v", got)
 	}
 	if len(resp.ByWorkspace["Test"]) != 2 {
 		t.Fatalf("by_workspace[Test] = %+v, want both agents", resp.ByWorkspace["Test"])
@@ -213,23 +204,16 @@ func TestHandleStatus_ActiveStoreAgentWithoutWorkIsReady(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "planner",
-		RoleName:     "plan",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	active := domain.AgentStateActive
-	if _, err := st.Agents().Update(ctx, "WS1", "planner", store.AgentUpdate{State: &active}); err != nil {
-		t.Fatal(err)
-	}
+	directory := monitorSingleAgentDirectory(t, "WS1", "planner", "plan", agentsmodule.DesiredRunning, string(domain.RoleKindWorker))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status", nil)
 	rr := httptest.NewRecorder()
-	HandleStatus(func() *monitor.MonitorData {
+	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
 		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
-	}, st).ServeHTTP(rr, req)
+	}, nil, time.Minute)
+	storeDataSource := NewMonitorStoreDataSourceWithTTL(st, time.Minute)
+	storeDataSource.SetAgentDirectory(directory)
+	HandleStatusWithSources(monitorDataSource, storeDataSource).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
@@ -253,28 +237,21 @@ func TestHandleStatus_DerivesPlanningFromInProgressTaskWithoutRuntimeAgent(t *te
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Test"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS1",
-		Name:         "planner",
-		RoleName:     "plan",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	active := domain.AgentStateActive
-	if _, err := st.Agents().Update(ctx, "WS1", "planner", store.AgentUpdate{State: &active}); err != nil {
-		t.Fatal(err)
-	}
+	directory := monitorSingleAgentDirectory(t, "WS1", "planner", "plan", agentsmodule.DesiredRunning, string(domain.RoleKindWorker))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/status", nil)
 	rr := httptest.NewRecorder()
-	HandleStatus(func() *monitor.MonitorData {
+	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
 		return &monitor.MonitorData{
 			Timestamp: time.Unix(1, 0).UTC(),
 			AgentTasks: map[string]monitor.TaskInfo{
 				"planner": {ID: "HELLO-WORLD-1", Title: "Explore", Status: "in_progress"},
 			},
 		}
-	}, st).ServeHTTP(rr, req)
+	}, nil, time.Minute)
+	storeDataSource := NewMonitorStoreDataSourceWithTTL(st, time.Minute)
+	storeDataSource.SetAgentDirectory(directory)
+	HandleStatusWithSources(monitorDataSource, storeDataSource).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
@@ -317,14 +294,17 @@ func TestHandleAgents_EmptyWorkspaceDoesNotLeakRuntimeAgents(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents?workspace=WS1", nil)
 	rr := httptest.NewRecorder()
-	HandleAgents(func() *monitor.MonitorData {
+	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
 		return &monitor.MonitorData{
 			Timestamp: time.Unix(1, 0).UTC(),
 			Agents: []monitor.AgentStatus{
 				{Name: "local-only", Branch: "main", Status: "ready", Workspace: "Test"},
 			},
 		}
-	}, st).ServeHTTP(rr, req)
+	}, nil, time.Minute)
+	storeDataSource := NewMonitorStoreDataSourceWithTTL(st, time.Minute)
+	storeDataSource.SetAgentDirectory(&monitorAgentDirectoryStub{})
+	HandleAgentsWithSources(monitorDataSource, storeDataSource).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
@@ -348,19 +328,16 @@ func TestHandleAgents_UsesWorkspaceQueryOverActiveWorkspace(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS2", Name: "Second"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS2",
-		Name:         "nova",
-		RoleName:     "task",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	directory := monitorSingleAgentDirectory(t, "WS2", "nova", "task", agentsmodule.DesiredRunning, string(domain.RoleKindWorker))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/monitor/agents?workspace=WS2", nil)
 	rr := httptest.NewRecorder()
-	HandleAgents(func() *monitor.MonitorData {
+	monitorDataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
 		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
-	}, st).ServeHTTP(rr, req)
+	}, nil, time.Minute)
+	storeDataSource := NewMonitorStoreDataSourceWithTTL(st, time.Minute)
+	storeDataSource.SetAgentDirectory(directory)
+	HandleAgentsWithSources(monitorDataSource, storeDataSource).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
@@ -527,20 +504,17 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "WS2", Name: "repo-b", Groups: []string{"backend"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.Agents().Create(ctx, store.AgentCreate{
-		WorkspaceKey: "WS2",
-		Name:         "nova",
-		RoleName:     "task",
-		RepoGroups:   []string{"backend"},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	directory := monitorSingleAgentDirectory(t, "WS2", "nova", "task", agentsmodule.DesiredRunning, string(domain.RoleKindWorker))
+	directory.agents["WS2"][0].Metadata = mustMonitorRuntimeMetadata(t, agentsmodule.RuntimeMetadata{
+		RoleKind: string(domain.RoleKindWorker), RepoGroups: []string{"backend"},
+	})
 
 	counted := newCountingStore(base)
 	dataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
 		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
 	}, nil, time.Minute)
 	storeDataSource := NewMonitorStoreDataSourceWithTTL(counted, time.Minute)
+	storeDataSource.SetAgentDirectory(directory)
 
 	for _, handler := range []http.HandlerFunc{
 		HandleStatusWithSources(dataSource, storeDataSource),
@@ -560,8 +534,8 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 	if got := counted.workspaces.getCalls; got != 0 {
 		t.Fatalf("workspace Get calls = %d, want 0 when request workspace is resolved from List", got)
 	}
-	if got := counted.agents.listCalls; got != 1 {
-		t.Fatalf("agent List calls = %d, want 1 shared store metadata read", got)
+	if got := directory.listAgentCalls; got != 1 {
+		t.Fatalf("canonical Agent List calls = %d, want 1 shared identity read", got)
 	}
 	if got := counted.repos.listCalls; got != 1 {
 		t.Fatalf("repo List calls = %d, want only selected workspace repos once", got)
@@ -572,9 +546,6 @@ func TestMonitorStoreDataSource_CachesWorkspaceMetadataAcrossEndpoints(t *testin
 	if got := counted.repos.listByWorkspace["WS2"]; got != 1 {
 		t.Fatalf("WS2 repo List calls = %d, want 1", got)
 	}
-	if got := counted.daemon.getCalls; got != 0 {
-		t.Fatalf("daemon Get calls = %d, want no workspace summary daemon reads", got)
-	}
 }
 
 func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
@@ -583,24 +554,20 @@ func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Roles().Create(ctx, store.RoleCreate{
-		WorkspaceKey: "WS1",
-		Name:         "operator",
-		Kind:         string(domain.RoleKindInteractive),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	for _, agent := range []store.AgentCreate{
-		{WorkspaceKey: "WS1", Name: "lead-a", RoleName: "lead"},
-		{WorkspaceKey: "WS1", Name: "operator-a", RoleName: "operator"},
-		{WorkspaceKey: "WS1", Name: "task-a", RoleName: "task"},
-	} {
-		if _, err := st.Agents().Create(ctx, agent); err != nil {
-			t.Fatal(err)
-		}
+	directory := &monitorAgentDirectoryStub{
+		agents: map[string][]*agentsmodule.Agent{"WS1": {
+			monitorCanonicalAgent(t, "WS1", "lead-a", "lead", agentsmodule.DesiredRunning, agentsmodule.RuntimeMetadata{}),
+			monitorCanonicalAgent(t, "WS1", "operator-a", "operator", agentsmodule.DesiredRunning, agentsmodule.RuntimeMetadata{}),
+			monitorCanonicalAgent(t, "WS1", "task-a", "task", agentsmodule.DesiredRunning, agentsmodule.RuntimeMetadata{}),
+		}},
+		roles: map[string][]*agentsmodule.Role{"WS1": {
+			{WorkspaceKey: "WS1", Name: "lead", Kind: string(domain.RoleKindInteractive)},
+			{WorkspaceKey: "WS1", Name: "operator", Kind: string(domain.RoleKindInteractive)},
+			{WorkspaceKey: "WS1", Name: "task", Kind: string(domain.RoleKindWorker)},
+		}},
 	}
 
-	data := collectMonitorStoreData(ctx, st, "WS1")
+	data := collectMonitorStoreData(ctx, st, directory, "WS1")
 	got := map[string]string{}
 	for _, agent := range data.Agents {
 		got[agent.Name] = agent.RoleKind
@@ -616,12 +583,93 @@ func TestMonitorStoreDataSourcePopulatesRoleKind(t *testing.T) {
 	}
 }
 
+type monitorAgentDirectoryStub struct {
+	agents         map[string][]*agentsmodule.Agent
+	roles          map[string][]*agentsmodule.Role
+	listAgentCalls int
+	listRoleCalls  int
+}
+
+func (stub *monitorAgentDirectoryStub) GetAgent(_ context.Context, workspace, agentID string) (*agentsmodule.Agent, error) {
+	for _, agent := range stub.agents[workspace] {
+		if agent != nil && agent.AgentID == agentID {
+			return agent, nil
+		}
+	}
+	return nil, agentsmodule.ErrNotFound
+}
+
+func (stub *monitorAgentDirectoryStub) ListAgents(_ context.Context, workspace string, _ agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error) {
+	stub.listAgentCalls++
+	return append([]*agentsmodule.Agent(nil), stub.agents[workspace]...), nil
+}
+
+func (stub *monitorAgentDirectoryStub) GetRole(_ context.Context, workspace, roleName string) (*agentsmodule.Role, error) {
+	for _, role := range stub.roles[workspace] {
+		if role != nil && role.Name == roleName {
+			return role, nil
+		}
+	}
+	return nil, agentsmodule.ErrNotFound
+}
+
+func (stub *monitorAgentDirectoryStub) ListRoles(_ context.Context, workspace string) ([]*agentsmodule.Role, error) {
+	stub.listRoleCalls++
+	return append([]*agentsmodule.Role(nil), stub.roles[workspace]...), nil
+}
+
+func monitorSingleAgentDirectory(
+	t *testing.T,
+	workspace string,
+	agentID string,
+	roleName string,
+	desired agentsmodule.DesiredState,
+	roleKind string,
+) *monitorAgentDirectoryStub {
+	t.Helper()
+	return &monitorAgentDirectoryStub{
+		agents: map[string][]*agentsmodule.Agent{workspace: {
+			monitorCanonicalAgent(t, workspace, agentID, roleName, desired, agentsmodule.RuntimeMetadata{RoleKind: roleKind}),
+		}},
+		roles: map[string][]*agentsmodule.Role{workspace: {
+			{WorkspaceKey: workspace, Name: roleName, Kind: roleKind},
+		}},
+	}
+}
+
+func monitorCanonicalAgent(
+	t *testing.T,
+	workspace string,
+	agentID string,
+	roleName string,
+	desired agentsmodule.DesiredState,
+	runtime agentsmodule.RuntimeMetadata,
+) *agentsmodule.Agent {
+	t.Helper()
+	return &agentsmodule.Agent{
+		WorkspaceKey: workspace,
+		AgentID:      agentID,
+		Name:         agentID,
+		Kind:         agentsmodule.AgentKindAlwaysOn,
+		Behavior:     agentsmodule.BehaviorReference{RoleName: roleName},
+		DesiredState: desired,
+		Metadata:     mustMonitorRuntimeMetadata(t, runtime),
+	}
+}
+
+func mustMonitorRuntimeMetadata(t *testing.T, runtime agentsmodule.RuntimeMetadata) map[string]string {
+	t.Helper()
+	metadata, err := agentsmodule.WithRuntimeMetadata(nil, runtime)
+	if err != nil {
+		t.Fatalf("runtime metadata: %v", err)
+	}
+	return metadata
+}
+
 type countingStore struct {
 	store.Store
 	workspaces *countingWorkspaceStore
 	repos      *countingRepoStore
-	agents     *countingAgentStore
-	daemon     *countingDaemonStore
 }
 
 func newCountingStore(base store.Store) *countingStore {
@@ -629,15 +677,11 @@ func newCountingStore(base store.Store) *countingStore {
 		Store:      base,
 		workspaces: &countingWorkspaceStore{WorkspaceStore: base.Workspaces()},
 		repos:      &countingRepoStore{RepoStore: base.Repos(), listByWorkspace: make(map[string]int)},
-		agents:     &countingAgentStore{AgentStore: base.Agents()},
-		daemon:     &countingDaemonStore{DaemonProfileStore: base.Daemon()},
 	}
 }
 
 func (s *countingStore) Workspaces() store.WorkspaceStore { return s.workspaces }
 func (s *countingStore) Repos() store.RepoStore           { return s.repos }
-func (s *countingStore) Agents() store.AgentStore         { return s.agents }
-func (s *countingStore) Daemon() store.DaemonProfileStore { return s.daemon }
 
 type countingWorkspaceStore struct {
 	store.WorkspaceStore
@@ -671,26 +715,6 @@ func (s *countingRepoStore) List(ctx context.Context, workspaceKey string) ([]*d
 	s.listCalls++
 	s.listByWorkspace[workspaceKey]++
 	return s.RepoStore.List(ctx, workspaceKey)
-}
-
-type countingAgentStore struct {
-	store.AgentStore
-	listCalls int
-}
-
-func (s *countingAgentStore) List(ctx context.Context, workspaceKey string) ([]*domain.Agent, error) {
-	s.listCalls++
-	return s.AgentStore.List(ctx, workspaceKey)
-}
-
-type countingDaemonStore struct {
-	store.DaemonProfileStore
-	getCalls int
-}
-
-func (s *countingDaemonStore) Get(ctx context.Context, workspaceKey string) (*domain.DaemonProfile, error) {
-	s.getCalls++
-	return s.DaemonProfileStore.Get(ctx, workspaceKey)
 }
 
 func TestWriteJSON_Coverage(t *testing.T) {

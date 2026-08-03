@@ -6,8 +6,8 @@ import { orderAgentsForEpicRunner } from "./agentRole";
 /**
  * Merge live monitor rows with workspace-configured agents.
  *
- * Workspace agents remain selectable before their supervisor has produced a
- * live monitor row. Keep this resolution shared between the sidebar and the
+ * Workspace agents remain selectable before their runtime has produced a live
+ * monitor row. Keep this resolution shared between the sidebar and the
  * full agent page so a route cannot be visible in one surface and unresolved
  * in the other.
  */

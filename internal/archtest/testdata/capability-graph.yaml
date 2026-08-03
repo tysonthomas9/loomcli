@@ -1,6 +1,6 @@
 schema_version: 1
 status: approved
-completed_phase: 5
+completed_phase: 6
 decision_dependencies:
   - MM-1
   - MM-2
@@ -71,10 +71,7 @@ aggregate_ownership:
   - record: Agent, Role, desired state, AgentOwnershipLease
     owner: agents
     cross_capability_rule: Other capabilities retain IDs or immutable projections only. Agent enable, disable, and delete use the Agents-owned FleetDB atomic lifecycle command to converge the Agent with Automation-owned managed bindings and Connectors-owned binding grants without transferring aggregate ownership or exposing partial authority.
-  - record: AgentCommand
-    owner: interaction
-    cross_capability_rule: Transitional only and removed after lead and session daemon dependencies retire.
-  - record: AgentSession, TerminalSession, AgentLease, inbox, lead-delivery Outbox
+  - record: AgentSession, TerminalSession, AgentLease, inbox
     owner: interaction
     cross_capability_rule: Session records remain distinct from batch execution; NodeID is an opaque reference. Non-Interaction delivery callers receive only an InboxEnqueuer whose registered serve-interaction-inbox-delivery component derives one exact system authority per enqueue and never exposes the issuer.
   - record: Artifact
@@ -83,13 +80,10 @@ aggregate_ownership:
   - record: Connector, Grant, secret and audit state
     owner: connectors
     cross_capability_rule: Callers request granted actions and never receive plaintext credentials.
-  - record: DaemonProfile
-    owner: legacy_tombstone
-    cross_capability_rule: No target module; delete with the daemon after parity proof.
   - record: Driver, DriverVersion, trust state
     owner: workflowcatalog
     cross_capability_rule: Automation resolves only activated versions through the catalog API.
-  - record: DriverRun, DriverStep, TaskRun, TaskRunEvent, Node, Worker, WorkerProfile, Await
+  - record: DriverRun, DriverStep, TaskRun, TaskRunEvent, Node, Worker, WorkerProfile, Await, lead-delivery Outbox
     owner: execution
     cross_capability_rule: Automation requests execution and consumes durable outcomes; Execution never imports Automation.
   - record: Generic fleet-db Lease
@@ -124,10 +118,6 @@ legacy_paths:
     owner: architecture-guardrail-lane
     removal_issue: MM-LEGACY-DOMAIN
     expires_after_phase: 7
-  - path: internal/driver
-    owner: execution-reliability-lane
-    removal_issue: MM-LEGACY-DRIVER
-    expires_after_phase: 6
   - path: internal/store
     owner: architecture-guardrail-lane
     removal_issue: MM-LEGACY-STORE

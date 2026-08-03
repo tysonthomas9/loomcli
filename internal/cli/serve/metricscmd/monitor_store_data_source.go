@@ -11,7 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/epicrunner"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -22,9 +22,17 @@ import (
 // do not each re-read workspace metadata and agent assignments.
 type MonitorStoreDataSource struct {
 	st      store.Store
+	agents  MonitorAgentDirectory
 	ttl     time.Duration
 	mu      sync.Mutex
 	entries map[string]*monitorStoreCacheEntry
+}
+
+// MonitorAgentDirectory is the canonical identity and Role read surface used
+// by monitor endpoints. Interaction session evidence is joined by AgentID.
+type MonitorAgentDirectory interface {
+	agentsmodule.IdentityQueries
+	agentsmodule.RoleQueries
 }
 
 type monitorStoreData struct {
@@ -63,6 +71,18 @@ func NewMonitorStoreDataSourceWithTTL(st store.Store, ttl time.Duration) *Monito
 	}
 }
 
+// SetAgentDirectory completes startup composition before the HTTP listener is
+// exposed and drops any pre-composition empty-roster cache entry.
+func (s *MonitorStoreDataSource) SetAgentDirectory(directory MonitorAgentDirectory) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.agents = directory
+	s.entries = make(map[string]*monitorStoreCacheEntry)
+	s.mu.Unlock()
+}
+
 // Resolve returns cached store-backed monitor metadata for workspaceHint.
 func (s *MonitorStoreDataSource) Resolve(ctx context.Context, workspaceHint string) monitorStoreData {
 	if s == nil || s.st == nil {
@@ -78,7 +98,10 @@ func (s *MonitorStoreDataSource) Resolve(ctx context.Context, workspaceHint stri
 		return entry.data
 	}
 
-	data := collectMonitorStoreData(ctx, s.st, workspaceHint)
+	s.mu.Lock()
+	directory := s.agents
+	s.mu.Unlock()
+	data := collectMonitorStoreData(ctx, s.st, directory, workspaceHint)
 	entry.data = data
 	entry.cachedAt = now
 	return data
@@ -114,7 +137,12 @@ func emptyMonitorStoreData() monitorStoreData {
 	}
 }
 
-func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint string) monitorStoreData {
+func collectMonitorStoreData(
+	ctx context.Context,
+	st store.Store,
+	directory MonitorAgentDirectory,
+	workspaceHint string,
+) monitorStoreData {
 	data := emptyMonitorStoreData()
 	if st == nil {
 		return data
@@ -131,93 +159,139 @@ func collectMonitorStoreData(ctx context.Context, st store.Store, workspaceHint 
 	}
 	data.Workspace.Name = wsName
 
-	assignments, err := st.Agents().List(ctx, wsKey)
+	if directory == nil {
+		slog.Warn("monitor: canonical Agents directory is unavailable", "workspace", wsKey)
+		return data
+	}
+	identities, err := directory.ListAgents(ctx, wsKey, agentsmodule.AgentFilter{})
 	if err != nil {
-		slog.Warn("monitor: list store agents failed", "workspace", wsKey, "err", err)
+		slog.Warn("monitor: list canonical Agents failed", "workspace", wsKey, "err", err)
+		return data
+	}
+	roles, err := directory.ListRoles(ctx, wsKey)
+	if err != nil {
+		slog.Warn("monitor: list canonical Roles failed", "workspace", wsKey, "err", err)
 		return data
 	}
 
 	workspaceData := monitorWorkspaceDataForAgents(ctx, st, wsKey, wsName)
-	rolesByName := monitorRolesByName(ctx, st, wsKey)
+	rolesByName := monitorCanonicalRolesByName(roles, wsKey)
 	latestSessions := latestAgentSessionsForMonitor(ctx, st, wsKey)
 	orchestrationByAgent := latestOrchestrationSessionsForMonitor(ctx, st, wsKey)
 	inboxByAgent := agentInboxSummariesForMonitor(ctx, st, wsKey)
-	data.Agents = monitorAgentStatuses(assignments, rolesByName, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, wsName)
+	data.Agents = monitorAgentStatuses(identities, rolesByName, workspaceData, latestSessions, orchestrationByAgent, inboxByAgent, wsName)
 	return data
 }
 
 func monitorAgentStatuses(
-	assignments []*domain.Agent,
-	rolesByName map[string]*domain.Role,
+	identities []*agentsmodule.Agent,
+	rolesByName map[string]*agentsmodule.Role,
 	workspaceData *ops.WorkspaceData,
 	latestSessions map[string]*domain.AgentSession,
 	orchestrationByAgent map[string]*domain.AgentSession,
 	inboxByAgent map[string]agentInboxSummary,
 	wsName string,
 ) []monitor.AgentStatus {
-	agents := []monitor.AgentStatus{}
-	for _, assignment := range assignments {
-		if assignment == nil {
-			continue
+	statuses := []monitor.AgentStatus{}
+	for _, identity := range identities {
+		status, ok := monitorAgentStatus(identity, rolesByName, workspaceData, latestSessions,
+			orchestrationByAgent, inboxByAgent, wsName)
+		if ok {
+			statuses = append(statuses, status)
 		}
-		var taskID, sessionID string
-		if session := latestSessions[assignment.Name]; session != nil {
-			taskID = session.TaskID
-			sessionID = session.SessionID
-		}
-		var orchID string
-		if sess := orchestrationByAgent[assignment.Name]; sess != nil {
-			orchID = sess.SessionID
-		}
-		inboxSummary := inboxByAgent[assignment.Name]
-		agents = append(agents, monitor.AgentStatus{
-			Name:                  assignment.Name,
-			Branch:                monitorBranchFromAgent(workspaceData, assignment),
-			Status:                monitorStatusFromAgentState(assignment.State),
-			Role:                  assignment.RoleName,
-			RoleKind:              string(domain.ResolveRoleKind(rolesByName[assignment.RoleName], assignment.RoleName)),
-			Repo:                  monitorRepoFromAgent(assignment),
-			Workspace:             wsName,
-			DaemonManaged:         assignment.Auto,
-			Parent:                assignment.Parent,
-			DeliveryState:         monitorLeadDeliveryState(assignment, orchestrationByAgent[assignment.Name]),
-			InboxQueuedCount:      inboxSummary.QueuedCount,
-			InboxFailedCount:      inboxSummary.FailedCount,
-			InboxLatestMessage:    inboxSummary.LatestMessage,
-			OrchestratorSessionID: orchID,
-			TaskID:                taskID,
-			SessionID:             sessionID,
-			Mode:                  string(assignment.Mode),
-			DesiredState:          string(assignment.DesiredState),
-			// Carry fleet-db's derived liveness through unchanged. The lock-derived
-			// Status above never advances to "working" on the store-only serve path,
-			// so the UI reads live_status to flip a provably-working agent off "idle".
-			LiveStatus:     string(assignment.LiveStatus),
-			ActiveTaskID:   assignment.ActiveTaskID,
-			ActivePhase:    assignment.ActivePhase,
-			LastErrorClass: assignment.LastErrorClass,
-		})
 	}
-	return agents
+	return statuses
 }
 
-func monitorRolesByName(ctx context.Context, st store.Store, wsKey string) map[string]*domain.Role {
-	out := make(map[string]*domain.Role)
-	if st == nil || wsKey == "" {
-		return out
+type monitorAgentSessionState struct {
+	taskID, sessionID, liveStatus, activePhase, lastErrorClass string
+}
+
+func monitorAgentStatus(
+	identity *agentsmodule.Agent,
+	rolesByName map[string]*agentsmodule.Role,
+	workspaceData *ops.WorkspaceData,
+	latestSessions map[string]*domain.AgentSession,
+	orchestrationByAgent map[string]*domain.AgentSession,
+	inboxByAgent map[string]agentInboxSummary,
+	wsName string,
+) (monitor.AgentStatus, bool) {
+	if identity == nil {
+		return monitor.AgentStatus{}, false
 	}
-	roles, err := st.Roles().List(ctx, wsKey)
+	runtime, roleKind, ok := monitorAgentRuntime(identity, rolesByName)
+	if !ok {
+		return monitor.AgentStatus{}, false
+	}
+	placement := ops.WorkspaceAgentInfo{
+		Name: identity.AgentID, Kind: roleKind, RoleName: identity.Behavior.RoleName,
+		Backend: runtime.Backend, Repos: runtime.Repos,
+		RepoGroups: runtime.RepoGroups, CrossRepo: runtime.CrossRepo,
+	}
+	session := monitorAgentSession(latestSessions[identity.AgentID])
+	orchestrationID := ""
+	if orchestration := orchestrationByAgent[identity.AgentID]; orchestration != nil {
+		orchestrationID = orchestration.SessionID
+	}
+	inbox := inboxByAgent[identity.AgentID]
+	return monitor.AgentStatus{
+		Name: identity.AgentID, Branch: monitorBranchFromAgent(workspaceData, placement),
+		Status: monitorStatusFromDesiredState(identity.DesiredState), Role: identity.Behavior.RoleName,
+		RoleKind: roleKind, Repo: monitorRepoFromAgent(placement), Workspace: wsName,
+		InboxQueuedCount: inbox.QueuedCount, InboxFailedCount: inbox.FailedCount,
+		InboxLatestMessage: inbox.LatestMessage, OrchestratorSessionID: orchestrationID,
+		TaskID: session.taskID, SessionID: session.sessionID, DesiredState: string(identity.DesiredState),
+		LiveStatus: session.liveStatus, ActiveTaskID: session.taskID, ActivePhase: session.activePhase,
+		LastErrorClass: session.lastErrorClass,
+	}, true
+}
+
+func monitorAgentRuntime(
+	identity *agentsmodule.Agent,
+	rolesByName map[string]*agentsmodule.Role,
+) (agentsmodule.RuntimeMetadata, string, bool) {
+	runtime, err := agentsmodule.ParseRuntimeMetadata(identity.Metadata)
 	if err != nil {
-		slog.Warn("monitor: list roles failed", "workspace", wsKey, "err", err)
-		return out
+		slog.Warn("monitor: reject malformed canonical Agent metadata", "agent", identity.AgentID, "err", err)
+		return agentsmodule.RuntimeMetadata{}, "", false
 	}
+	roleKind := runtime.RoleKind
+	if roleKind == "" && rolesByName[identity.Behavior.RoleName] != nil {
+		roleKind = strings.TrimSpace(rolesByName[identity.Behavior.RoleName].Kind)
+	}
+	return runtime, roleKind, true
+}
+
+func monitorAgentSession(session *domain.AgentSession) monitorAgentSessionState {
+	if session == nil {
+		return monitorAgentSessionState{}
+	}
+	state := monitorAgentSessionState{
+		taskID: session.TaskID, sessionID: session.SessionID,
+		activePhase: session.Phase, lastErrorClass: session.ErrorClass,
+	}
+	if monitorSessionActive(session.Status) && session.FinishedAt == nil {
+		state.liveStatus = "working"
+	}
+	return state
+}
+
+func monitorCanonicalRolesByName(roles []*agentsmodule.Role, workspace string) map[string]*agentsmodule.Role {
+	out := make(map[string]*agentsmodule.Role, len(roles))
 	for _, role := range roles {
-		if role == nil {
+		if role == nil || role.WorkspaceKey != workspace || role.Name == "" {
 			continue
 		}
 		out[role.Name] = role
 	}
 	return out
+}
+
+func monitorStatusFromDesiredState(state agentsmodule.DesiredState) string {
+	if state == agentsmodule.DesiredRunning {
+		return "ready"
+	}
+	return "stopped"
 }
 
 func agentInboxSummariesForMonitor(ctx context.Context, st store.Store, wsKey string) map[string]agentInboxSummary {
@@ -249,40 +323,6 @@ func agentInboxSummariesForMonitor(ctx context.Context, st store.Store, wsKey st
 		}
 	}
 	return out
-}
-
-func monitorLeadDeliveryState(agent *domain.Agent, session *domain.AgentSession) string {
-	if agent == nil || !epicrunner.IsLeadRole(agent.RoleName) || strings.TrimSpace(agent.Parent) == "" {
-		return ""
-	}
-	version := monitorLeadAssignmentVersion(agent)
-	if version == "" {
-		return "pending"
-	}
-	if monitorSessionMetadataVersionMatches(session, "lead_assignment_acknowledged_version", version) {
-		return "acknowledged"
-	}
-	if monitorSessionMetadataVersionMatches(session, "lead_assignment_delivered_version", version) {
-		return "delivered"
-	}
-	return "pending"
-}
-
-func monitorLeadAssignmentVersion(agent *domain.Agent) string {
-	if agent == nil {
-		return ""
-	}
-	if !agent.UpdatedAt.IsZero() {
-		return agent.UpdatedAt.UTC().Format(time.RFC3339Nano)
-	}
-	return strings.TrimSpace(agent.Parent)
-}
-
-func monitorSessionMetadataVersionMatches(session *domain.AgentSession, key, version string) bool {
-	if session == nil || session.Metadata == nil || version == "" {
-		return false
-	}
-	return strings.TrimSpace(session.Metadata[key]) == version
 }
 
 func workspaceNames(workspaces []*domain.Workspace) []string {

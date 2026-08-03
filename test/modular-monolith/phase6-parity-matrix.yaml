@@ -1,0 +1,104 @@
+schema_version: 1
+suite: modular-monolith-phase6-parity
+description: >-
+  Exact, no-disabled-row proof of the Phase 6 Agents and Interaction cutover,
+  supervisor retirement, runtime defaults, recovery, and prompt-agent arbitration.
+rows:
+  - id: architecture-retirement
+    package: ./internal/archtest
+    test_regex: '^Test(CheckedInPhase6ArchitectureContracts|CheckedInSnapshotViolations|CheckedInRuntimeInventoryMatchesRepository|CheckedInDirectWriteInventoryStrictCounts|Phase6SupervisorRuntimePathsCannotReturn|CapabilityGraphPinsApprovedOwnershipContract|CapabilityGraphAllowsZeroLegacyPathsAtMigrationCompletion)$'
+    expected_tests:
+      - TestCheckedInPhase6ArchitectureContracts
+      - TestCheckedInSnapshotViolations
+      - TestCheckedInRuntimeInventoryMatchesRepository
+      - TestCheckedInDirectWriteInventoryStrictCounts
+      - TestPhase6SupervisorRuntimePathsCannotReturn
+      - TestCapabilityGraphPinsApprovedOwnershipContract
+      - TestCapabilityGraphAllowsZeroLegacyPathsAtMigrationCompletion
+    timeout: 5m
+    expected_behavior:
+      - The approved Phase 6 capability, mutation, direct-write, runtime, and goroutine inventories match the repository.
+      - Retired daemon, RPC, agent IPC, and web daemon runtime paths cannot return.
+
+  - id: canonical-agent-reconciliation
+    package: ./internal/modules/agents
+    test_regex: '^Test(DesiredStateRuntimeUsesExactAuthorityAndAgentRevision|DesiredStateRuntimeContinuesAfterWorkspaceAndAgentFailures|DesiredStateRuntimeRejectsInvalidCompositionAndWorkspaceState|ReconcileDesiredStateNoOpsWhenBindingsMatch|ReconcileDesiredStateRepairsDriftWithoutChangingIntent)$'
+    expected_tests:
+      - TestDesiredStateRuntimeUsesExactAuthorityAndAgentRevision
+      - TestDesiredStateRuntimeContinuesAfterWorkspaceAndAgentFailures
+      - TestDesiredStateRuntimeRejectsInvalidCompositionAndWorkspaceState
+      - TestReconcileDesiredStateNoOpsWhenBindingsMatch
+      - TestReconcileDesiredStateRepairsDriftWithoutChangingIntent
+    timeout: 2m
+    expected_behavior:
+      - Periodic reconciliation uses exact canonical Agent authority and revisions while isolating per-workspace failures.
+      - Drift repair preserves declared intent and matching bindings are a no-op.
+
+  - id: canonical-agentdef-boundary
+    package: ./internal/cli/agentdef
+    test_regex: '^Test(RunAgentAddRoutesCanonicalIdentityThroughBoundary|RunAgentStartStopAndRemoveUseAtomicLifecycleBoundary|RetiredCrossCapabilityFlagsAreAbsentAndDocumented|AgentdefRuntimeRequiresExplicitManagementEndpoint)$'
+    expected_tests:
+      - TestRunAgentAddRoutesCanonicalIdentityThroughBoundary
+      - TestRunAgentStartStopAndRemoveUseAtomicLifecycleBoundary
+      - TestRetiredCrossCapabilityFlagsAreAbsentAndDocumented
+      - TestAgentdefRuntimeRequiresExplicitManagementEndpoint
+    timeout: 2m
+    expected_behavior:
+      - Agent-definition commands use canonical Agent identity and atomic lifecycle commands.
+      - Retired flags remain absent and management mutations fail closed without an explicit endpoint.
+
+  - id: runtime-defaults
+    package: ./internal/cli/serve
+    test_regex: '^Test(DriverStaleTaskMaxAgeMatchesSweeperDefault|BuildIssueJournalBridgeAlwaysEnablesTaskReviewEvents|DriverTaskWorkerConcurrency|DriverTaskRunMaxAttempts)$'
+    expected_tests:
+      - TestDriverStaleTaskMaxAgeMatchesSweeperDefault
+      - TestBuildIssueJournalBridgeAlwaysEnablesTaskReviewEvents
+      - TestDriverTaskWorkerConcurrency
+      - TestDriverTaskRunMaxAttempts
+    timeout: 2m
+    expected_behavior:
+      - Stale-task timing matches the sweeper and task-ready plus task-review eventing are platform defaults.
+      - Concurrency and retry limits remain explicit bounded runtime policy.
+
+  - id: heartbeats-and-recovery
+    package: ./internal/driver
+    test_regex: '^Test(RequestTaskRunHeartbeatsChildDuringExecution|ExecutorPeriodicallyRecoversStaleChildrenOnlyDuringOwnedRun|ExecutorCancelsRunnerWhenStaleChildRecoveryLosesParentFence|ExecutorCancelsRunnerWhenParentHeartbeatLosesFence|StaleTaskSweeperUsesMonotonicElapsedTimeAcrossWallClockJumps)$'
+    expected_tests:
+      - TestRequestTaskRunHeartbeatsChildDuringExecution
+      - TestExecutorPeriodicallyRecoversStaleChildrenOnlyDuringOwnedRun
+      - TestExecutorCancelsRunnerWhenStaleChildRecoveryLosesParentFence
+      - TestExecutorCancelsRunnerWhenParentHeartbeatLosesFence
+      - TestStaleTaskSweeperUsesMonotonicElapsedTimeAcrossWallClockJumps
+    timeout: 3m
+    expected_behavior:
+      - Every launched child is heartbeated and stale recovery runs only while the exact parent lease remains owned.
+      - Lost fences cancel execution and monotonic time prevents wall-clock jumps from corrupting stale detection.
+
+  - id: retry-concurrency-and-epics
+    package: ./internal/driver
+    test_regex: '^Test(TaskWorkerUnscopedIdleLifecycleIsBoundedAcrossConcurrencySlots|TaskWorkerRunOnceRetriesThenBlocksFailedTaskRun|TaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes|TaskWorkerRunOnceFailsClosedWithoutConvergence|TaskWorkerRunOnceFailsClosedWithoutArtifacts|LoadEpicSnapshotCountsOnlyOpenChildren|ResolveEpicLead)$'
+    expected_tests:
+      - TestTaskWorkerUnscopedIdleLifecycleIsBoundedAcrossConcurrencySlots
+      - TestTaskWorkerRunOnceRetriesThenBlocksFailedTaskRun
+      - TestTaskWorkerRetryPersistsDistinctAttemptTranscriptsAndCompletes
+      - TestTaskWorkerRunOnceFailsClosedWithoutConvergence
+      - TestTaskWorkerRunOnceFailsClosedWithoutArtifacts
+      - TestLoadEpicSnapshotCountsOnlyOpenChildren
+      - TestResolveEpicLead
+    timeout: 3m
+    expected_behavior:
+      - Concurrent workers remain bounded, retries retain distinct evidence, and exhaustion converges to Blocked.
+      - Missing convergence or artifacts fail closed and epic snapshots plus lead selection use canonical state.
+
+  - id: prompt-agent-arbitration
+    package: ./internal/infra/workflowdistribution
+    test_regex: '^TestPromptAgent(WorkflowBehavior|WorkflowSourceContract|DropsStaleGapNotes|WorkflowSourceParsesAsJavaScript)$'
+    expected_tests:
+      - TestPromptAgentWorkflowBehavior
+      - TestPromptAgentWorkflowSourceContract
+      - TestPromptAgentDropsStaleGapNotes
+      - TestPromptAgentWorkflowSourceParsesAsJavaScript
+    timeout: 2m
+    expected_behavior:
+      - Role task filters explicitly arbitrate planner, coder, review, and read-only bug work before claim and again against canonical card state.
+      - Unsupported filters fail closed, targeted claims remain exact, and the embedded workflow executes in the deterministic Node harness.

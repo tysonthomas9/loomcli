@@ -7,14 +7,16 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
 )
 
@@ -30,7 +32,6 @@ var workspaceBackendOptions = []string{"claude", defaultWorkspaceBackend, "openc
 // WorkspaceServiceConfig holds the dependencies for workspace service construction.
 type WorkspaceServiceConfig struct {
 	Store                store.Store                   // FleetDB-backed store; authoritative workspace source
-	MultiPool            *daemon.MultiPool             // For daemon-pool stats when local daemons are running
 	CreateFn             WorkspaceCreateFn             // Already wrapped with registry hooks
 	AddReposFn           WorkspaceAddReposFn           // Store-backed repo attachment
 	DeleteFn             func(string) error            // Already wrapped with cleanup hooks
@@ -38,11 +39,20 @@ type WorkspaceServiceConfig struct {
 	AdmissionCoordinator WorkspaceAdmissionCoordinator // Optional durable admission seam for async mutations
 	SetDefaultFn         func(string) error            // Deprecated compatibility hook; default workspace selection is disabled.
 	ClearDefaultFn       func() error                  // Deprecated compatibility hook; default workspace selection is disabled.
+	AgentDirectory       WorkspaceAgentDirectory       // Canonical Agents/Role read surface; nil fails closed to an empty roster.
+}
+
+// WorkspaceAgentDirectory is the canonical read surface needed to project
+// repository-scoped Agents into the workspace shell. The workspace cache never
+// stores this projection, so an Agent create/archive is visible on the next
+// read without a cache invalidation side channel.
+type WorkspaceAgentDirectory interface {
+	ListAgents(context.Context, string, agentsmodule.AgentFilter) ([]*agentsmodule.Agent, error)
+	ListRoles(context.Context, string) ([]*agentsmodule.Role, error)
 }
 
 type workspaceServiceImpl struct {
 	store                store.Store
-	multiPool            *daemon.MultiPool
 	createFn             WorkspaceCreateFn
 	addReposFn           WorkspaceAddReposFn
 	deleteFn             func(string) error
@@ -50,6 +60,7 @@ type workspaceServiceImpl struct {
 	admissionCoordinator WorkspaceAdmissionCoordinator
 	setDefaultFn         func(string) error
 	clearDefaultFn       func() error
+	agentDirectory       WorkspaceAgentDirectory
 	workspaceCache       *workspaceDataCache
 }
 
@@ -57,7 +68,6 @@ type workspaceServiceImpl struct {
 func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 	return &workspaceServiceImpl{
 		store:                cfg.Store,
-		multiPool:            cfg.MultiPool,
 		createFn:             cfg.CreateFn,
 		addReposFn:           cfg.AddReposFn,
 		deleteFn:             cfg.DeleteFn,
@@ -65,6 +75,7 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 		admissionCoordinator: cfg.AdmissionCoordinator,
 		setDefaultFn:         cfg.SetDefaultFn,
 		clearDefaultFn:       cfg.ClearDefaultFn,
+		agentDirectory:       cfg.AgentDirectory,
 		workspaceCache:       newWorkspaceDataCache(defaultWorkspaceDataCacheTTL),
 	}
 }
@@ -147,7 +158,14 @@ func (s *workspaceServiceImpl) StartAsyncAddRepos(ctx context.Context, req Works
 // loadActiveWorkspace returns the active workspace topology from FleetDB.
 func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
 	if s.store != nil {
-		return storeadapter.BuildActiveWorkspaceData(ctx, s.store)
+		data, err := storeadapter.BuildActiveWorkspaceData(ctx, s.store)
+		if err != nil || data == nil {
+			return data, err
+		}
+		if err := s.projectCanonicalAgents(ctx, data); err != nil {
+			return nil, err
+		}
+		return data, nil
 	}
 	return nil, nil
 }
@@ -155,11 +173,71 @@ func (s *workspaceServiceImpl) loadActiveWorkspace(ctx context.Context) (*ops.Wo
 // loadWorkspaceByID returns a specific workspace's topology from FleetDB.
 func (s *workspaceServiceImpl) loadWorkspaceByID(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
 	if s.store != nil {
-		return s.workspaceCache.get(ctx, wsID, func(ctx context.Context, key string) (*ops.WorkspaceData, error) {
+		data, err := s.workspaceCache.get(ctx, wsID, func(ctx context.Context, key string) (*ops.WorkspaceData, error) {
 			return storeadapter.BuildWorkspaceDataForKey(ctx, s.store, key)
 		})
+		if err != nil || data == nil {
+			return data, err
+		}
+		if err := s.projectCanonicalAgents(ctx, data); err != nil {
+			return nil, err
+		}
+		return data, nil
 	}
 	return nil, nil
+}
+
+func (s *workspaceServiceImpl) projectCanonicalAgents(ctx context.Context, data *ops.WorkspaceData) error {
+	data.Agents = []ops.WorkspaceAgentInfo{}
+	if s.agentDirectory == nil {
+		return nil
+	}
+	agents, err := s.agentDirectory.ListAgents(ctx, data.ID, agentsmodule.AgentFilter{})
+	if err != nil {
+		return fmt.Errorf("list canonical workspace agents: %w", err)
+	}
+	roles, err := s.agentDirectory.ListRoles(ctx, data.ID)
+	if err != nil {
+		return fmt.Errorf("list canonical workspace roles: %w", err)
+	}
+	rolesByName := make(map[string]*agentsmodule.Role, len(roles))
+	for _, role := range roles {
+		if role == nil || role.WorkspaceKey != data.ID || role.Name == "" {
+			return fmt.Errorf("invalid canonical workspace Role: %w", agentsmodule.ErrInvalidPersistedState)
+		}
+		rolesByName[role.Name] = role
+	}
+	for _, agent := range agents {
+		if agent == nil || agent.WorkspaceKey != data.ID || agent.AgentID == "" {
+			return fmt.Errorf("invalid canonical workspace Agent: %w", agentsmodule.ErrInvalidPersistedState)
+		}
+		if agent.Behavior.RoleName == "" {
+			continue
+		}
+		role := rolesByName[agent.Behavior.RoleName]
+		if role == nil {
+			return fmt.Errorf("canonical Agent %q references missing Role %q: %w", agent.AgentID, agent.Behavior.RoleName, agentsmodule.ErrInvalidPersistedState)
+		}
+		runtime, parseErr := agentsmodule.ParseRuntimeMetadata(agent.Metadata)
+		if parseErr != nil {
+			return fmt.Errorf("canonical Agent %q runtime metadata: %w", agent.AgentID, parseErr)
+		}
+		roleKind := runtime.RoleKind
+		if roleKind == "" {
+			roleKind = role.Kind
+		}
+		backend := runtime.Backend
+		if backend == "" {
+			backend = role.Backend
+		}
+		data.Agents = append(data.Agents, ops.WorkspaceAgentInfo{
+			Name: agent.AgentID, Kind: roleKind, RoleName: agent.Behavior.RoleName,
+			Backend: backend, Repos: append([]string{}, runtime.Repos...),
+			RepoGroups: append([]string{}, runtime.RepoGroups...), CrossRepo: runtime.CrossRepo,
+		})
+	}
+	sort.Slice(data.Agents, func(i, j int) bool { return data.Agents[i].Name < data.Agents[j].Name })
+	return nil
 }
 
 func (s *workspaceServiceImpl) GetActiveWorkspace(ctx context.Context) (*ops.WorkspaceData, error) {
@@ -204,8 +282,7 @@ func readGitHeadBranch(repoPath string) string {
 
 //nolint:gocognit,cyclop,funlen // Aggregates workspace, repo, agent, and local-state views for the UI.
 func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceListItem, error) {
-	// Store is authoritative: list FleetDB workspaces directly. The multiPool
-	// is consulted only to enrich items with daemon-pool stats.
+	// Store is authoritative for workspace discovery.
 	if s.store != nil {
 		wsList, err := s.store.Workspaces().List(ctx)
 		if err == nil {
@@ -219,12 +296,6 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 					Active:    ws.Key == activeKey,
 					IsDefault: false,
 				}
-				if s.multiPool != nil {
-					if p := s.multiPool.PoolForWorkspace(ws.Key); p != nil {
-						ps := poolStatsFromDaemon(p.Stats())
-						item.Pool = &ps
-					}
-				}
 				items = append(items, item)
 			}
 			return items, nil
@@ -232,56 +303,16 @@ func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceL
 		return nil, ErrInternal("failed to list workspaces from store", err)
 	}
 
-	if s.multiPool != nil {
-		ids := s.multiPool.WorkspaceIDs()
-		items := make([]WorkspaceListItem, 0, len(ids))
-		for _, id := range ids {
-			item := WorkspaceListItem{
-				ID:   id,
-				Name: id,
-			}
-			if p := s.multiPool.PoolForWorkspace(id); p != nil {
-				ps := poolStatsFromDaemon(p.Stats())
-				item.Pool = &ps
-			}
-			items = append(items, item)
-		}
-		return items, nil
-	}
-
 	return []WorkspaceListItem{}, nil
 }
 
 func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
-	// Primary existence check: the multiPool registry. In daemon-backed mode the
-	// pool owns the authoritative list of live workspaces. In fleet mode the
-	// multiPool is intentionally empty (no local issue daemon), so the lookup
-	// path below resolves against the store/config data source.
-	poolKnown := s.multiPool != nil && s.multiPool.PoolForWorkspace(wsID) != nil
-	if !poolKnown {
-		if data, ok, err := s.lookupWorkspace(ctx, wsID); err != nil {
-			return nil, err
-		} else if ok {
-			return data, nil
-		}
-		return nil, ErrNotFound("workspace not found: " + wsID)
+	if data, ok, err := s.lookupWorkspace(ctx, wsID); err != nil {
+		return nil, err
+	} else if ok {
+		return data, nil
 	}
-
-	data, err := s.loadWorkspaceByID(ctx, wsID)
-	if err != nil || data == nil {
-		return nil, ErrInternal("failed to load workspace data", err)
-	}
-
-	normalizeWorkspaceData(data)
-	for i := range data.Repos {
-		if b := readGitHeadBranch(data.Repos[i].Path); b != "" {
-			data.Repos[i].CurrentBranch = b
-		}
-	}
-	for i := range data.Workspaces {
-		data.Workspaces[i].Active = data.Workspaces[i].ID == wsID
-	}
-	return data, nil
+	return nil, ErrNotFound("workspace not found: " + wsID)
 }
 
 // lookupWorkspace resolves a workspace UUID via the store. Returns
@@ -553,32 +584,40 @@ func (s *workspaceServiceImpl) GetWorkspaceBackend(ctx context.Context, wsID str
 	if serr != nil {
 		return nil, serr
 	}
-	profile, err := s.store.Daemon().Get(ctx, ws.Key)
-	if err != nil {
-		return nil, ErrInternal("failed to load workspace backend config", err)
-	}
-
 	backend := ""
 	source := "default"
-	if profile != nil && strings.TrimSpace(profile.AgentBackend) != "" {
-		backend = strings.TrimSpace(profile.AgentBackend)
-		source = "fleetdb"
+	backend, err := localnodeconfig.RuntimeProvider(ws.Key)
+	if err != nil {
+		return nil, ErrInternal("failed to load local node backend config", err)
+	}
+	if backend != "" {
+		source = "local_node"
 	}
 	if backend == "" {
 		backend = defaultWorkspaceBackend
 	}
 
-	agents, err := s.store.Agents().List(ctx, ws.Key)
-	if err != nil {
-		return nil, ErrInternal("failed to load agent backend overrides", err)
-	}
-	overrides := make([]AgentBackendOverride, 0, len(agents))
-	for _, agent := range agents {
-		overrides = append(overrides, AgentBackendOverride{
-			Worktree: agent.Name,
-			Role:     agent.RoleName,
-			Backend:  agent.Backend,
-		})
+	overrides := []AgentBackendOverride{}
+	if s.agentDirectory != nil {
+		agents, err := s.agentDirectory.ListAgents(ctx, ws.Key, agentsmodule.AgentFilter{})
+		if err != nil {
+			return nil, ErrInternal("failed to load canonical agent backend overrides", err)
+		}
+		overrides = make([]AgentBackendOverride, 0, len(agents))
+		for _, agent := range agents {
+			if agent == nil {
+				continue
+			}
+			runtime, err := agentsmodule.ParseRuntimeMetadata(agent.Metadata)
+			if err != nil {
+				return nil, ErrInternal("failed to load canonical agent runtime metadata", err)
+			}
+			overrides = append(overrides, AgentBackendOverride{
+				Worktree: agent.AgentID,
+				Role:     agent.Behavior.RoleName,
+				Backend:  runtime.Backend,
+			})
+		}
 	}
 
 	available := append([]string(nil), workspaceBackendOptions...)
@@ -598,17 +637,8 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(ctx context.Context, wsID s
 	if serr != nil {
 		return nil, serr
 	}
-	profile, err := s.store.Daemon().Get(ctx, ws.Key)
-	if err != nil {
-		return nil, ErrInternal("failed to load workspace backend config", err)
-	}
-	if profile == nil {
-		profile = &domain.DaemonProfile{WorkspaceKey: ws.Key}
-	}
-	profile.WorkspaceKey = ws.Key
-	profile.AgentBackend = backend
-	if _, err := s.store.Daemon().Upsert(ctx, profile); err != nil {
-		return nil, ErrInternal("failed to save workspace backend config", err)
+	if err := localnodeconfig.SetRuntimeProvider(ws.Key, backend); err != nil {
+		return nil, ErrInternal("failed to save local node backend config", err)
 	}
 	s.invalidateWorkspaceCache()
 	data, err := s.loadWorkspaceByID(ctx, ws.Key)
@@ -645,16 +675,6 @@ func (s *workspaceServiceImpl) PatchWorkspaceDesignFormat(ctx context.Context, w
 func (s *workspaceServiceImpl) invalidateWorkspaceCache() {
 	if s.workspaceCache != nil {
 		s.workspaceCache.invalidateAll()
-	}
-}
-
-func poolStatsFromDaemon(d daemon.PoolStats) PoolStats {
-	return PoolStats{
-		Size:      d.Size,
-		Created:   d.Created,
-		Active:    d.Active,
-		Available: d.Available,
-		Closed:    d.Closed,
 	}
 }
 

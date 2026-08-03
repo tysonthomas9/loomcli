@@ -6,8 +6,6 @@ import (
 	"os"
 	"sync"
 
-	"github.com/olesho/harness-wrapper/pkg/wrapper"
-
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/api"
 	"github.com/tysonthomas9/loomcli/internal/httpclient"
@@ -94,20 +92,7 @@ func DefaultIssueBackend() backend.IssueBackend {
 	trackerMu.Lock()
 	defer trackerMu.Unlock()
 	if trackerInst == nil {
-		// In fleet mode, use the fleet backend directly — skip IPC wrapping
-		// since the fleet server (not a local daemon) manages issues.
-		if IsFleetActive() {
-			trackerInst = resolveDirectIssueBackend()
-		} else if sock := os.Getenv("LOOM_DAEMON_SOCKET"); sock != "" {
-			agentName := os.Getenv("LOOM_AGENT_NAME")
-			direct := resolveDirectIssueBackend()
-			ipcClient := NewAgentIPCClient(sock, agentName)
-			ipcClient.SessionID = os.Getenv("LOOM_SESSION_ID")
-			ipcClient.AuthToken = os.Getenv("LOOM_AGENT_IPC_AUTH_TOKEN")
-			trackerInst = newIPCIssueBackend(ipcClient, direct)
-		} else {
-			trackerInst = resolveDirectIssueBackend()
-		}
+		trackerInst = resolveDirectIssueBackend()
 	}
 	return trackerInst
 }
@@ -126,40 +111,13 @@ func ResetDefaultIssueBackend() {
 	trackerInst = nil
 }
 
-// DaemonActivityObserver returns a harness.RetryPolicy-compatible OnActivity
-// callback that forwards wrapper PTY-output timestamps to the daemon via the
-// active AgentIPCClient. It returns nil when the agent is not running under a
-// daemon (no LOOM_DAEMON_SOCKET, fleet mode, etc.) — harness.RetryPolicy
-// treats a nil callback as "no observer", so callers can pass through
-// unconditionally.
-//
-// The returned function is safe to invoke concurrently; AgentIPCClient is
-// stateless modulo its mutex-protected lastActivityAt.
-func DaemonActivityObserver() func(wrapper.Snapshot) {
-	client := agentIPCClientFromDefaultBackend()
-	if client == nil {
-		return nil
+// resolveDirectIssueBackend returns the configured issue backend without any
+// legacy daemon IPC decoration.
+func resolveDirectIssueBackend() backend.IssueBackend {
+	if t := ensureDefaultDeps().IssueBackend; t != nil {
+		return t
 	}
-	return func(snap wrapper.Snapshot) {
-		if snap.LastOutputAt.IsZero() {
-			return
-		}
-		if err := client.Heartbeat(snap.LastOutputAt); err != nil {
-			slog.Debug("agent IPC heartbeat failed", "err", err)
-		}
-	}
-}
-
-// agentIPCClientFromDefaultBackend returns the active AgentIPCClient when the
-// global issue backend is an ipcIssueBackend wrapping one, else nil.
-func agentIPCClientFromDefaultBackend() *AgentIPCClient {
-	b := DefaultIssueBackend()
-	ipcb, ok := b.(*ipcIssueBackend)
-	if !ok {
-		return nil
-	}
-	client, _ := ipcb.ipc.(*AgentIPCClient)
-	return client
+	return newFleetDBIssueBackend()
 }
 
 // --- API backend factory (remote --server mode) ---

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Verify role-based task routing for UI-registered plan/task agents.
 
-Runs against a live local-mode stack (ideally `LOOM_DAEMON_LEAF=ts make
-local-mode-codex-up`) and proves the routing the UI promises maps to the TS
-execution approach:
+Runs against a live local-mode stack and proves the routing the UI promises
+maps to the default Execution-owned worker:
 
   * a task WITHOUT a design is claimed by the PLAN agent (role=plan), and never
     by a task agent while it has no design;

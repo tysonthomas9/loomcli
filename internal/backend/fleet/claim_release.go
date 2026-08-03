@@ -69,7 +69,7 @@ func (b *FleetBackend) releaseIssueLock(ctx context.Context, op, id, actor strin
 }
 
 // ReleaseIssueAsActor releases the claim lock on an issue, overriding the
-// configured FleetDB actor for this request. Used by the daemon supervisor
+// configured FleetDB actor for this request. Used by the Execution runtime
 // to symmetrically free a claim it acquired in claimIssueForAgent when the
 // agent process exits, rather than waiting for the lock's TTL to expire.
 func (b *FleetBackend) ReleaseIssueAsActor(ctx context.Context, id string, actor string) error {

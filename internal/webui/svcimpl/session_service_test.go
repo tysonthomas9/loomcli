@@ -443,7 +443,7 @@ func TestSessionServiceTranscriptUsesRuntimeStoreBeforeWorkspaceTopology(t *test
 	}
 }
 
-func TestSessionServiceAgentLocalHistoryAndTranscriptEnforceOwnership(t *testing.T) {
+func TestSessionServiceAgentTranscriptEnforcesOwnership(t *testing.T) {
 	ctx := t.Context()
 	rootDir := t.TempDir()
 	runtimeDir := filepath.Join(rootDir, "workspaces", "LOCALMODE")
@@ -492,16 +492,6 @@ func TestSessionServiceAgentLocalHistoryAndTranscriptEnforceOwnership(t *testing
 	}
 
 	svc := NewSessionServiceWithRuntimeDir(memstore.New(), nil, runtimeDir)
-	history := svc.(service.AgentLocalSessionHistoryService)
-	items, err := history.ListAgentLocalSessions(ctx, "WS", "advanced-planner")
-	if err != nil {
-		t.Fatalf("ListAgentLocalSessions: %v", err)
-	}
-	if len(items) != 1 || items[0].SessionID != sess.SessionID() ||
-		items[0].TaskID != "TASK-LOCAL-1" || !items[0].HasTranscript {
-		t.Fatalf("local history = %+v, want one transcript-bearing task session", items)
-	}
-
 	transcripts := svc.(service.AgentSessionTranscriptService)
 	events, err := transcripts.GetAgentSessionTranscript(ctx, "WS", "advanced-planner", sess.SessionID())
 	if err != nil {

@@ -132,6 +132,7 @@ func driverRunExecutionAction(action authority.Action) bool {
 		execution.ActionStartChildDriverRun, execution.ActionCascadeChildDriverRuns,
 		execution.ActionClaimDriverRunWorkItem, execution.ActionReleaseDriverRunWorkItem,
 		execution.ActionHandoffDriverRunReviewWorkItem,
+		execution.ActionBindWorkerProfileParent,
 		execution.ActionRequestTaskRun, execution.ActionRecoverStaleChildTaskRuns:
 		return true
 	default:
@@ -186,9 +187,16 @@ func registeredExecutionSystemComponent(componentID string, action authority.Act
 		return driverRunOutcomeSystemAction(action)
 	case string(execution.TaskRunConvergenceComponentID):
 		return taskRunConvergenceSystemAction(action)
+	case string(execution.OutboxDeliveryComponentID):
+		return outboxDeliverySystemAction(action)
 	default:
 		return registeredTaskRunWorkerComponent(componentID) && taskRunWorkerSystemAction(action)
 	}
+}
+
+func outboxDeliverySystemAction(action authority.Action) bool {
+	return action == execution.ActionListDueOutboxDeliveries ||
+		action == execution.ActionRecordOutboxDeliveryResult
 }
 
 func driverExecutorSystemAction(action authority.Action) bool {

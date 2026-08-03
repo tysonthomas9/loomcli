@@ -50,7 +50,7 @@ func TestAgentModuleRoutesAreDocumented(t *testing.T) {
 func TestUnifiedAgentDiscriminatorContract(t *testing.T) {
 	doc := readOpenAPI(t)
 
-	wantKinds := []string{"binding", "prompt", "scripted", "supervised"}
+	wantKinds := []string{"interactive", "prompt", "scripted"}
 	gotKinds := discriminatorKinds(t, doc.Components.Schemas["UnifiedAgent"])
 	if !slices.Equal(gotKinds, wantKinds) {
 		t.Fatalf("UnifiedAgent discriminator kinds = %v, want %v", gotKinds, wantKinds)
@@ -73,16 +73,16 @@ func TestUnifiedAgentDiscriminatorContract(t *testing.T) {
 	}
 }
 
-func TestCreateUnifiedAgentRequestPreservesLegacyOmittedKind(t *testing.T) {
+func TestCreateUnifiedAgentRequestDefaultsOmittedKindToInteractive(t *testing.T) {
 	doc := readOpenAPI(t)
 	request := doc.Components.Schemas["CreateUnifiedAgentRequest"]
 	if _, ok := request["discriminator"]; ok {
-		t.Fatal("CreateUnifiedAgentRequest must not require a discriminator because legacy supervised requests omit kind")
+		t.Fatal("CreateUnifiedAgentRequest must not require a discriminator because interactive browser requests may omit kind")
 	}
 	refs := schemaRefs(t, request, "oneOf")
 	wantRefs := []string{
+		"#/components/schemas/CreateInteractiveAgentRequest",
 		"#/components/schemas/CreatePromptAgentRequest",
-		"#/components/schemas/CreateSupervisedAgentRequest",
 	}
 	slices.Sort(refs)
 	slices.Sort(wantRefs)
@@ -90,17 +90,14 @@ func TestCreateUnifiedAgentRequestPreservesLegacyOmittedKind(t *testing.T) {
 		t.Fatalf("CreateUnifiedAgentRequest oneOf refs = %v, want %v", refs, wantRefs)
 	}
 
-	supervised := doc.Components.Schemas["CreateSupervisedAgentRequest"]
-	if slices.Contains(stringSlice(t, supervised, "required"), "kind") {
-		t.Fatal("CreateSupervisedAgentRequest.kind is required, want legacy-compatible optional field")
+	interactive := doc.Components.Schemas["CreateInteractiveAgentRequest"]
+	if slices.Contains(stringSlice(t, interactive, "required"), "kind") {
+		t.Fatal("CreateInteractiveAgentRequest.kind is required, want browser-compatible optional field")
 	}
-	properties := childMap(t, supervised, "properties")
+	properties := childMap(t, interactive, "properties")
 	kind := childMap(t, properties, "kind")
-	gotKinds := stringSlice(t, kind, "enum")
-	slices.Sort(gotKinds)
-	wantKinds := []string{"interactive", "supervised", "worker"}
-	if !slices.Equal(gotKinds, wantKinds) {
-		t.Fatalf("CreateSupervisedAgentRequest.kind enum = %v, want %v", gotKinds, wantKinds)
+	if got, _ := kind["const"].(string); got != "interactive" {
+		t.Fatalf("CreateInteractiveAgentRequest.kind const = %q, want interactive", got)
 	}
 }
 
@@ -128,14 +125,12 @@ func TestAgentOperationsDocumentActualErrorEnvelopeAndStatuses(t *testing.T) {
 		{agentItemPath, "get", []string{"404", "409", "500", "503"}},
 		{agentItemPath, "patch", []string{"400", "404", "409", "413", "500", "503"}},
 		{agentItemPath, "delete", []string{"404", "409", "500", "503"}},
-		{"/api/workspaces/{ws}/agents/{name}/queue", "get", []string{"501"}},
 		{"/api/workspaces/{ws}/agents/{id}/enable", "post", []string{"400", "404", "409", "500", "503"}},
 		{"/api/workspaces/{ws}/agents/{id}/disable", "post", []string{"400", "404", "409", "500", "503"}},
 		{"/api/workspaces/{ws}/agents/{id}/runs", "get", []string{"400", "404", "409", "500", "503"}},
 		{"/api/workspaces/{ws}/agents/{name}/stop", "post", []string{"400", "404", "409", "500", "503"}},
 		{"/api/workspaces/{ws}/agents/{name}/start", "post", []string{"400", "404", "409", "500", "503"}},
 		{"/api/workspaces/{ws}/agents/{name}/restart", "post", []string{"400", "404", "409", "500", "503"}},
-		{"/api/workspaces/{ws}/agents/{name}/yield", "post", []string{"400", "404", "409", "500", "503"}},
 	}
 	for _, tt := range tests {
 		for _, status := range tt.statuses {

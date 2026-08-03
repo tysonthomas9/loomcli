@@ -1,6 +1,6 @@
 // Package agentpolicy is the single source of truth for "what do we DO
-// about this error" across loom's three decision layers (in-invocation
-// retry, the auto-loop, and the daemon supervisor). It maps an
+// about this error" across Loom's decision layers (in-invocation retry,
+// automated execution, and runtime recovery). It maps an
 // agenterr.Outcome (a wrapper harness class OR a loom-domain outcome) to a
 // Disposition. The layers keep their own attempt counters and configured
 // backoff values; they consult this table only for the verdict + the

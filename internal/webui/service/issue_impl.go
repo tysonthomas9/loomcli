@@ -12,9 +12,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/entity"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
 // validIssueTypes defines the valid issue types for validation.
@@ -48,47 +46,21 @@ const (
 type IssueBackendProvider func(ctx context.Context) backend.IssueBackend
 
 type issueServiceImpl struct {
-	pool            daemon.Pool
-	multiPool       *daemon.MultiPool
 	withWorkspaceFn func(ctx context.Context, wsID string) context.Context
-	// backendFn returns the active IssueBackend used by methods that have
-	// migrated off the direct rpc.Client path. The pool/multiPool fields
-	// remain to back ListIssues/ListKanban and the cross-workspace MoveIssue
-	// path which have not yet been migrated.
-	backendFn IssueBackendProvider
+	backendFn       IssueBackendProvider
 
 	labelMutationMu sync.Mutex
 }
 
-// NewIssueService creates a new IssueService implementation backed by the
-// daemon connection pool only. Methods that have been migrated to use
-// backend.IssueBackend will fall back to returning ErrUnavailable when
-// invoked through this constructor.
-//
-// withWorkspaceFn injects the workspace ID into the context for MultiPool
-// routing (avoids import cycle with the webui package where the context key
-// is defined).
-//
-// Prefer NewIssueServiceWithBackend when an IssueBackend is available; this
-// constructor is retained for tests and call sites that have not yet been
-// updated to thread the backend through.
-func NewIssueService(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context) IssueService {
-	return &issueServiceImpl{pool: pool, multiPool: multiPool, withWorkspaceFn: withWorkspaceFn}
-}
-
-// NewIssueServiceWithBackend creates a new IssueService implementation that
-// dispatches CRUD operations through the supplied IssueBackend provider while
-// retaining the daemon connection pools for the not-yet-migrated paths
-// (ListIssues / ListKanban / MoveIssue).
+// NewIssueServiceWithBackend creates a service that dispatches every issue
+// operation through the supplied IssueBackend provider.
 //
 // backendFn is a closure rather than a direct backend instance so the cli
 // package can resolve the backend lazily without webui taking an import on
 // internal/cli. backendFn may be nil; methods that need the backend then
 // behave as if the backend were unavailable.
-func NewIssueServiceWithBackend(pool daemon.Pool, multiPool *daemon.MultiPool, withWorkspaceFn func(ctx context.Context, wsID string) context.Context, backendFn IssueBackendProvider) IssueService {
+func NewIssueServiceWithBackend(withWorkspaceFn func(ctx context.Context, wsID string) context.Context, backendFn IssueBackendProvider) IssueService {
 	return &issueServiceImpl{
-		pool:            pool,
-		multiPool:       multiPool,
 		withWorkspaceFn: withWorkspaceFn,
 		backendFn:       backendFn,
 	}
@@ -140,43 +112,6 @@ func translateBackendError(err error) *ServiceError {
 		return ErrNotImplemented(be.Message)
 	default:
 		return ErrInternal(be.Message, be.Cause)
-	}
-}
-
-func (s *issueServiceImpl) acquireClient(ctx context.Context) (*rpc.Client, error) {
-	if s.pool == nil {
-		return nil, ErrUnavailable("connection pool not initialized")
-	}
-	client, err := s.pool.Get(ctx)
-	if err != nil {
-		if errors.Is(err, daemon.ErrDaemonStarting) {
-			return nil, ErrStarting("workspace is loading")
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ErrTimeout("timeout connecting to issue backend")
-		}
-		return nil, ErrUnavailable("issue backend unavailable")
-	}
-	return client, nil
-}
-
-// releaseClient returns the connection to the pool when *ok is true, or
-// closes (Discards) it when *ok is false. Use the conditional defer pattern:
-//
-//	rpcOK := false
-//	defer s.releaseClient(client, &rpcOK)
-//	... resp, err := client.Foo(...)
-//	if err != nil { return err }
-//	rpcOK = true
-//
-// On RPC error, the connection's read buffer may retain stale bytes that
-// would corrupt the next borrower. Discarding closes the connection so a
-// fresh one is opened next time.
-func (s *issueServiceImpl) releaseClient(client *rpc.Client, ok *bool) {
-	if *ok {
-		s.pool.Put(client)
-	} else {
-		s.pool.Discard(client)
 	}
 }
 

@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT="${RESULT_ROOT:-$(mktemp -d /tmp/loom-real-epic.XXXXXX)}"
 ARTIFACTS_OUT="${ARTIFACTS_OUT:-}"
-DAEMON_PID=""
 EPIC_RUNNER_TIMEOUT="${EPIC_RUNNER_TIMEOUT:-900s}"
 CODEX_CLI_VERSION="${CODEX_CLI_VERSION:-latest}"
 WORKSPACE_PATH="$ROOT/workspace"
@@ -24,10 +23,6 @@ cleanup() {
             echo "---- runner.log ----" >&2
             cat "$ROOT/runner.log" >&2
         fi
-        if [[ -f "$ROOT/daemon.log" ]]; then
-            echo "---- daemon important lines ----" >&2
-            grep -E 'agent command|agent-commands|agent started|failed to start|config changed|skipping add|desired_state|worktree|claimed task|spawned subprocess|exited' "$ROOT/daemon.log" >&2 || true
-        fi
         if [[ -d "$WORKSPACE_PATH/.loom/logs" ]]; then
             while IFS= read -r log; do
                 [[ -f "$log" ]] || continue
@@ -38,10 +33,6 @@ cleanup() {
         if command -v loom >/dev/null 2>&1; then
             loom workspace show --json "$LOOM_WORKSPACE" >&2 || true
         fi
-    fi
-    if [[ -n "$DAEMON_PID" ]] && kill -0 "$DAEMON_PID" 2>/dev/null; then
-        kill "$DAEMON_PID" 2>/dev/null || true
-        wait "$DAEMON_PID" 2>/dev/null || true
     fi
     exit "$status"
 }
@@ -110,22 +101,7 @@ if ! loom workspace show --json "$LOOM_WORKSPACE" >/dev/null 2>&1; then
 fi
 cd "$WORKSPACE_PATH"
 
-loom daemon > "$ROOT/daemon.log" 2>&1 &
-DAEMON_PID="$!"
-NODE_ID="loom-supervisor-$(hostname)-$DAEMON_PID"
-
-for _ in {1..80}; do
-    if loom daemon status >/dev/null 2>&1; then
-        break
-    fi
-    sleep 0.5
-done
-
-if ! loom daemon status >/dev/null 2>&1; then
-    echo "daemon did not become ready" >&2
-    cat "$ROOT/daemon.log" >&2 || true
-    exit 1
-fi
+NODE_ID="loom-epic-runner-$(hostname)-$$"
 
 REPO_NAME="$(loom workspace show --json "$LOOM_WORKSPACE" | jq -r '.repos[0].name')"
 

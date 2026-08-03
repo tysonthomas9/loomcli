@@ -26,7 +26,6 @@ type Deps struct {
 	AwaitResolver   store.AtomicAwaitStore
 	TriggerBindings store.TriggerBindingStore
 	ConnectorGrants store.ConnectorGrantStore
-	Agents          store.AgentStore
 	AgentServices   store.AgentServiceStore
 }
 
@@ -58,7 +57,7 @@ func New(deps Deps) Modules {
 		eventAwaits = trigger.NewAwaitMatcherWithResolver(deps.Awaits, deps.DriverRuns, deps.AwaitResolver)
 	}
 	connectorCompatibility := newStoreConnectorCompatibility(deps.TriggerBindings, deps.ConnectorGrants)
-	agentIdentityCompatibility := newStoreAgentIdentityCompatibility(deps.Agents, deps.AgentServices)
+	agentIdentityCompatibility := newStoreAgentIdentityCompatibility(deps.AgentServices)
 
 	return Modules{
 		Webhooks: webhooks.New(webhooks.Config{

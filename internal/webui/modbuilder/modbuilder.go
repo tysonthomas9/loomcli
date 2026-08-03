@@ -5,7 +5,6 @@ package modbuilder
 import (
 	"net/http"
 
-	"github.com/tysonthomas9/loomcli/internal/app/agentscompat"
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -80,7 +79,6 @@ func NewPRReviewModule(
 	interactionChat interaction.ChatAPI,
 	interactionMessenger interaction.ChatMessenger,
 	interactionAuthority workflowcataloghttp.OperatorAuthorityResolver,
-	managedRetirements agentscompat.ManagedRetirements,
 ) PRReviewModule {
 	return reviewcomposition.NewPRReviewModule(
 		st,
@@ -94,7 +92,6 @@ func NewPRReviewModule(
 		interactionChat,
 		interactionMessenger,
 		interactionAuthority,
-		managedRetirements,
 	)
 }
 

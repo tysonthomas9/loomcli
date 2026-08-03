@@ -40,7 +40,7 @@ export interface WorkspaceAgentInfo {
    * Creation-time role placement. Older workspace snapshots omit this field,
    * so callers must continue to tolerate it being absent.
    */
-  kind?: "interactive" | "worker" | "supervised";
+  kind?: "interactive" | "worker";
   role_name?: string;
   backend?: string;
 }
@@ -48,10 +48,9 @@ export interface WorkspaceAgentInfo {
 export interface CreateAgentRequest {
   name: string;
   role_name: string;
-  kind?: "interactive" | "worker" | "supervised";
+  kind?: "interactive";
   prompt?: string;
   prompt_file?: string;
-  auto?: boolean;
   backend?: string;
   repos?: string[];
   repo_groups?: string[];
@@ -434,7 +433,7 @@ export interface CreateRoleRequest {
 
 /**
  * Ensure a custom agent Role exists (idempotent). Used by the create-agent
- * gallery to provision custom supervised templates (e.g. bug triage) before
+ * gallery to provision fixed role-backed templates (e.g. bug triage) before
  * the agent row is created with that role.
  */
 export async function createWorkspaceRole(

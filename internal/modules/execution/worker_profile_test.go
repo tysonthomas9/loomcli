@@ -10,9 +10,43 @@ import (
 )
 
 type workerProfilePortStub struct {
-	creates int
-	updates int
-	deletes int
+	gets       int
+	lists      int
+	creates    int
+	updates    int
+	deletes    int
+	lastUpdate UpdateWorkerProfileCommand
+}
+
+func (stub *workerProfilePortStub) GetWorkerProfile(_ context.Context, workspace, profileID string) (*WorkerProfile, error) {
+	stub.gets++
+	now := time.Now().UTC()
+	return &WorkerProfile{WorkspaceKey: workspace, ProfileID: profileID, Name: profileID, Role: "lead", Enabled: true, CreatedAt: now, UpdatedAt: now}, nil
+}
+
+func (stub *workerProfilePortStub) ListWorkerProfiles(_ context.Context, workspace string, _ WorkerProfileFilter) ([]*WorkerProfile, error) {
+	stub.lists++
+	now := time.Now().UTC()
+	return []*WorkerProfile{{WorkspaceKey: workspace, ProfileID: "lead-profile", Name: "lead-profile", Role: "lead", Enabled: true, CreatedAt: now, UpdatedAt: now}}, nil
+}
+
+func TestWorkerProfileQueriesValidateAndClone(t *testing.T) {
+	port := &workerProfilePortStub{}
+	service, _ := newTestService(t, Dependencies{Workers: WorkerDependencies{Profiles: port}})
+	profile, err := service.GetWorkerProfile(context.Background(), " WS ", "lead-profile")
+	if err != nil || profile.WorkspaceKey != "WS" || port.gets != 1 {
+		t.Fatalf("profile/calls/error = %+v/%d/%v", profile, port.gets, err)
+	}
+	profiles, err := service.ListWorkerProfiles(context.Background(), "WS", WorkerProfileFilter{Role: " lead ", Limit: 1})
+	if err != nil || len(profiles) != 1 || port.lists != 1 {
+		t.Fatalf("profiles/calls/error = %+v/%d/%v", profiles, port.lists, err)
+	}
+	if _, err := service.GetWorkerProfile(context.Background(), "", "lead-profile"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("empty workspace error = %v, want ErrInvalid", err)
+	}
+	if _, err := service.ListWorkerProfiles(context.Background(), "WS", WorkerProfileFilter{Limit: -1}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("negative limit error = %v, want ErrInvalid", err)
+	}
 }
 
 func (stub *workerProfilePortStub) CreateWorkerProfile(_ context.Context, command CreateWorkerProfileCommand) (*WorkerProfile, error) {
@@ -30,15 +64,20 @@ func (stub *workerProfilePortStub) CreateWorkerProfile(_ context.Context, comman
 
 func (stub *workerProfilePortStub) UpdateWorkerProfile(_ context.Context, command UpdateWorkerProfileCommand) (*WorkerProfile, error) {
 	stub.updates++
+	stub.lastUpdate = command
 	now := time.Now().UTC()
 	role := "task"
 	if command.Patch.Role != nil {
 		role = *command.Patch.Role
 	}
-	return &WorkerProfile{
+	profile := &WorkerProfile{
 		WorkspaceKey: command.WorkspaceKey, ProfileID: command.ProfileID, Name: command.ProfileID,
 		Role: role, Enabled: true, CreatedAt: now, UpdatedAt: now,
-	}, nil
+	}
+	if command.Patch.ParentEpic != nil {
+		profile.ParentEpic = *command.Patch.ParentEpic
+	}
+	return profile, nil
 }
 
 func (stub *workerProfilePortStub) DeleteWorkerProfile(_ context.Context, _ DeleteWorkerProfileCommand) error {
@@ -95,6 +134,42 @@ func TestWorkerProfileUpdateAndDeleteValidateBeforePort(t *testing.T) {
 	})
 	if err != nil || result.ProfileID != "falcon" || port.deletes != 1 {
 		t.Fatalf("result/calls/error = %+v/%d/%v", result, port.deletes, err)
+	}
+}
+
+func TestBindWorkerProfileParentRequiresExactDriverRunOwnerAndCAS(t *testing.T) {
+	port := &workerProfilePortStub{}
+	service, issuer := newTestService(t, Dependencies{Workers: WorkerDependencies{Profiles: port}})
+	owner := Owner{
+		ResourceKind: ResourceDriverRun,
+		ResourceID:   "run-1",
+		NodeID:       "node-1",
+		LeaseID:      "lease-1",
+		LeaseToken:   "lease-token",
+		FencingToken: 7,
+	}
+	auth := issueExecution(t, issuer, ActionBindWorkerProfileParent, owner)
+	profile, err := service.BindWorkerProfileParent(context.Background(), auth, BindWorkerProfileParentCommand{
+		WorkspaceKey:   "TEST",
+		RequestID:      "bind-1",
+		ProfileID:      "lead-profile",
+		ExpectedParent: "",
+		Parent:         "EPIC-1",
+		Owner:          owner,
+	})
+	if err != nil || profile.ParentEpic != "EPIC-1" || port.updates != 1 {
+		t.Fatalf("profile/calls/error = %+v/%d/%v", profile, port.updates, err)
+	}
+	if port.lastUpdate.ExpectedParentEpic == nil || *port.lastUpdate.ExpectedParentEpic != "" {
+		t.Fatalf("expected parent guard = %#v, want empty", port.lastUpdate.ExpectedParentEpic)
+	}
+	wrongOwner := owner
+	wrongOwner.FencingToken++
+	if _, err := service.BindWorkerProfileParent(context.Background(), auth, BindWorkerProfileParentCommand{
+		WorkspaceKey: "TEST", RequestID: "bind-2", ProfileID: "lead-profile",
+		Parent: "EPIC-2", Owner: wrongOwner,
+	}); !errors.Is(err, ErrFenceConflict) || port.updates != 1 {
+		t.Fatalf("wrong owner error/calls = %v/%d, want fence conflict/1", err, port.updates)
 	}
 }
 

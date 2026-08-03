@@ -24,14 +24,12 @@ import (
 type Store struct {
 	workspaces *workspaceStore
 	repos      *repoStore
-	agents     *agentStore
 	nodes      *nodeStore
 	sessions   *agentSessionStore
 	terminals  *terminalSessionStore
 	artifacts  *artifactStore
 	leases     *agentLeaseStore
 	ownership  *agentOwnershipLeaseStore
-	commands   *agentCommandStore
 	inbox      *agentInboxMessageStore
 	drivers    *driverStore
 	versions   *driverVersionStore
@@ -49,7 +47,6 @@ type Store struct {
 	awaits     *awaitStore
 	workers    *workerStore
 	roles      *roleStore
-	daemon     *daemonStore
 	conns      *connectorStore
 	grants     *connectorGrantStore
 	audits     *connectorAuditStore
@@ -79,22 +76,18 @@ func New() *Store { //nolint:funlen // Constructor wiring is deliberately explic
 	awaits := newAwaitStore(events)
 	awaits.runs = runs
 	ownership := newAgentOwnershipLeaseStore()
-	commands := newAgentCommandStore(ownership)
-	ownership.commands = commands
 	// ResumeAwaiting's security gate: only a resolved (satisfied/timed_out)
 	// await releases its suspended run.
 	runs.setAwaitResumeEligible(awaits.resumeEligible)
 	return &Store{
 		workspaces: newWorkspaceStore(),
 		repos:      newRepoStore(),
-		agents:     newAgentStore(),
 		nodes:      nodes,
 		sessions:   newAgentSessionStore(),
 		terminals:  newTerminalSessionStore(),
 		artifacts:  artifacts,
 		leases:     newAgentLeaseStore(),
 		ownership:  ownership,
-		commands:   commands,
 		inbox:      newAgentInboxMessageStore(),
 		drivers:    drivers,
 		versions:   versions,
@@ -112,7 +105,6 @@ func New() *Store { //nolint:funlen // Constructor wiring is deliberately explic
 		awaits:     awaits,
 		workers:    newWorkerStore(),
 		roles:      roles,
-		daemon:     newDaemonStore(),
 		conns:      newConnectorStore(),
 		grants:     newConnectorGrantStore(),
 		audits:     newConnectorAuditStore(),
@@ -165,9 +157,6 @@ func (s *Store) Workspaces() store.WorkspaceStore { return s.workspaces }
 // Repos returns the RepoStore.
 func (s *Store) Repos() store.RepoStore { return s.repos }
 
-// Agents returns the AgentStore.
-func (s *Store) Agents() store.AgentStore { return s.agents }
-
 // Nodes returns the NodeStore.
 func (s *Store) Nodes() store.NodeStore { return s.nodes }
 
@@ -181,8 +170,6 @@ func (s *Store) Artifacts() store.ArtifactStore { return s.artifacts }
 func (s *Store) AgentLeases() store.AgentLeaseStore { return s.leases }
 
 func (s *Store) AgentOwnershipLeases() store.AgentOwnershipLeaseStore { return s.ownership }
-
-func (s *Store) AgentCommands() store.AgentCommandStore { return s.commands }
 
 func (s *Store) AgentInboxMessages() store.AgentInboxMessageStore { return s.inbox }
 
@@ -229,9 +216,6 @@ func (s *Store) Workers() store.WorkerStore { return s.workers }
 
 // Roles returns the RoleStore.
 func (s *Store) Roles() store.RoleStore { return s.roles }
-
-// Daemon returns the DaemonProfileStore.
-func (s *Store) Daemon() store.DaemonProfileStore { return s.daemon }
 
 // Close is a no-op — memory has no resources to release.
 func (s *Store) Close() error { return nil }

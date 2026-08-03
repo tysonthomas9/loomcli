@@ -303,9 +303,9 @@ export function createIssueStore(
         }
         // Prefer the server's original error text (from ApiError.body.error)
         // over the generic HTTP status text baked into ApiError.message. This
-        // lets IssueViewGuard distinguish "workspace is loading" (daemon
-        // starting, 503+kind=starting) from other 503s like "daemon
-        // unavailable" and route to the loading-variant UX accordingly.
+        // lets IssueViewGuard distinguish "workspace is loading" (runtime
+        // starting, 503+kind=starting) from other 503s such as service
+        // unavailability and route to the loading-variant UX accordingly.
         const message = extractErrorMessage(err);
 
         // Schedule exponential-backoff auto-retry if we haven't exhausted

@@ -1,20 +1,13 @@
 package workspace
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/local"
 	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
-	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 func clearRuntimeRoutingEnv(t *testing.T) {
@@ -25,130 +18,26 @@ func clearRuntimeRoutingEnv(t *testing.T) {
 	t.Setenv(envLocalRuntimeMode, "")
 }
 
-func TestWaitForWorkspaceOpsDaemonUsesCallerContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	calls := 0
-	initial := &WorkspaceOpsStatus{
-		Daemon: WorkspaceOpsDaemon{
-			AppData: DaemonInfo{Running: false},
-		},
-		Agents: []WorkspaceOpsAgent{
-			{Name: "planner", Runnable: true},
-		},
-	}
-
-	status, err := waitForWorkspaceOpsDaemon(ctx, "TEST", initial, func(context.Context, string) (*WorkspaceOpsStatus, error) {
-		calls++
-		return initial, nil
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("waitForWorkspaceOpsDaemon error = %v, want context.Canceled", err)
-	}
-	if status != initial {
-		t.Fatalf("status = %#v, want initial status", status)
-	}
-	if calls != 0 {
-		t.Fatalf("loader calls = %d, want 0 after canceled context", calls)
-	}
-}
-
-func TestWaitForWorkspaceOpsDaemonDoesNotReturnStaleStatusOnLoaderError(t *testing.T) {
-	initial := &WorkspaceOpsStatus{
-		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
-		Daemon: WorkspaceOpsDaemon{
-			AppData: DaemonInfo{Running: false},
-		},
-		Agents: []WorkspaceOpsAgent{
-			{Name: "planner", Runnable: true},
-		},
-	}
-	loadErr := errors.New("load failed")
-
-	status, err := waitForWorkspaceOpsDaemon(context.Background(), "TEST", initial, func(context.Context, string) (*WorkspaceOpsStatus, error) {
-		return nil, loadErr
-	})
-	if !errors.Is(err, loadErr) {
-		t.Fatalf("waitForWorkspaceOpsDaemon error = %v, want loadErr", err)
-	}
-	if status != nil {
-		t.Fatalf("status = %#v, want nil on loader error", status)
-	}
-}
-
-func TestWaitForWorkspaceOpsDaemonAcceptsWorkspaceLocalDaemon(t *testing.T) {
-	initial := &WorkspaceOpsStatus{
-		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
-		Daemon: WorkspaceOpsDaemon{
-			AppData: DaemonInfo{Running: false},
-		},
-		Agents: []WorkspaceOpsAgent{
-			{Name: "planner", Runnable: true},
-		},
-	}
-	ready := &WorkspaceOpsStatus{
-		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
-		Daemon: WorkspaceOpsDaemon{
-			AppData:        DaemonInfo{Running: false},
-			WorkspaceLocal: DaemonInfo{Running: true, PID: 42},
-		},
-		Agents: []WorkspaceOpsAgent{
-			{Name: "planner", Runnable: true},
-		},
-	}
-
-	calls := 0
-	status, err := waitForWorkspaceOpsDaemon(context.Background(), "TEST", initial, func(context.Context, string) (*WorkspaceOpsStatus, error) {
-		calls++
-		return ready, nil
-	})
-	if err != nil {
-		t.Fatalf("waitForWorkspaceOpsDaemon returned error: %v", err)
-	}
-	if status != ready {
-		t.Fatalf("status = %#v, want ready status", status)
-	}
-	if calls != 1 {
-		t.Fatalf("loader calls = %d, want 1", calls)
-	}
-}
-
 func TestAgentDesiredRunnable(t *testing.T) {
 	tests := []struct {
 		name  string
-		agent *domain.Agent
+		agent *domain.AgentService
 		want  bool
 	}{
 		{
-			name: "running without explicit desired state is runnable",
-			agent: &domain.Agent{
-				State: domain.AgentStateActive,
-			},
-			want: true,
+			name:  "desired running is runnable",
+			agent: &domain.AgentService{DesiredState: domain.AgentServiceDesiredRunning},
+			want:  true,
 		},
 		{
-			name: "stopped actual state is not runnable",
-			agent: &domain.Agent{
-				State: domain.AgentStateStopped,
-			},
-			want: false,
+			name:  "desired paused is not runnable",
+			agent: &domain.AgentService{DesiredState: domain.AgentServiceDesiredPaused},
+			want:  false,
 		},
 		{
-			name: "desired stopped is not runnable",
-			agent: &domain.Agent{
-				State:        domain.AgentStateActive,
-				DesiredState: domain.AgentDesiredStopped,
-			},
-			want: false,
-		},
-		{
-			name: "desired draining is not runnable",
-			agent: &domain.Agent{
-				State:        domain.AgentStateActive,
-				DesiredState: domain.AgentDesiredDraining,
-			},
-			want: false,
+			name:  "desired stopped is not runnable",
+			agent: &domain.AgentService{DesiredState: domain.AgentServiceDesiredStopped},
+			want:  false,
 		},
 	}
 
@@ -158,47 +47,6 @@ func TestAgentDesiredRunnable(t *testing.T) {
 				t.Fatalf("agentDesiredRunnable() = %t, want %t", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestWorkspaceOpsGlobalProblemsAcceptsWorkspaceLocalDaemon(t *testing.T) {
-	status := &WorkspaceOpsStatus{
-		Daemon: WorkspaceOpsDaemon{
-			AppData:        DaemonInfo{Running: false},
-			WorkspaceLocal: DaemonInfo{Running: true, PID: 202},
-		},
-		Repos: []WorkspaceOpsRepo{{Name: "app"}},
-		Agents: []WorkspaceOpsAgent{
-			{Name: "planner", Runnable: true},
-		},
-	}
-
-	problems := workspaceOpsGlobalProblems(status)
-	for _, problem := range problems {
-		if problem.Code == "daemon_not_running" {
-			t.Fatalf("problems = %#v, did not expect daemon_not_running", problems)
-		}
-	}
-}
-
-func TestWorkspaceOpsGlobalProblemsDetectsDuplicateDaemonOwnership(t *testing.T) {
-	status := &WorkspaceOpsStatus{
-		Daemon: WorkspaceOpsDaemon{
-			AppData:        DaemonInfo{Running: true, PID: 101},
-			WorkspaceLocal: DaemonInfo{Running: true, PID: 202},
-		},
-		Repos: []WorkspaceOpsRepo{{Name: "app"}},
-		Agents: []WorkspaceOpsAgent{
-			{Name: "planner", Runnable: false},
-		},
-	}
-
-	problems := workspaceOpsGlobalProblems(status)
-	if len(problems) != 1 {
-		t.Fatalf("problems = %#v, want exactly duplicate daemon warning", problems)
-	}
-	if problems[0].Code != "duplicate_daemon_ownership" || problems[0].Severity != "warning" {
-		t.Fatalf("problem = %#v, want duplicate_daemon_ownership warning", problems[0])
 	}
 }
 
@@ -337,17 +185,6 @@ func TestShouldEnsureLocalRuntimeSkipsDisabledDeployment(t *testing.T) {
 	}
 }
 
-func TestDaemonNotRunningFixRespectsNotApplicableRuntime(t *testing.T) {
-	status := &WorkspaceOpsStatus{
-		LocalRuntime: &WorkspaceOpsLocalRuntime{Applicable: false},
-	}
-
-	got := daemonNotRunningFix(status)
-	if strings.Contains(got, "ensure-runtime") {
-		t.Fatalf("daemonNotRunningFix = %q, should not suggest ensure-runtime when local runtime is not applicable", got)
-	}
-}
-
 func TestBuildLocalRuntimeDesktopModeHealthy(t *testing.T) {
 	clearRuntimeRoutingEnv(t)
 
@@ -414,11 +251,10 @@ func TestWorkspaceOpsAgentStatusFlagsUnknownRole(t *testing.T) {
 		"plan": {Name: "plan"},
 		"task": {Name: "task"},
 	}
-	agent := &domain.Agent{
-		Name:         "rogue",
+	agent := &domain.AgentService{
+		ServiceID:    "rogue",
 		RoleName:     "missing",
-		State:        domain.AgentStateActive,
-		DesiredState: domain.AgentDesiredRunning,
+		DesiredState: domain.AgentServiceDesiredRunning,
 	}
 
 	item, problems := workspaceOpsAgentStatus(bootstrap.WorkspaceLocalState{}, nil, rolesByName, agent)
@@ -448,11 +284,10 @@ func TestWorkspaceOpsAgentStatusFlagsMissingWorktree(t *testing.T) {
 			"planner": {Worktree: "/nonexistent/path/that/has/no/dot-git"},
 		},
 	}
-	agent := &domain.Agent{
-		Name:         "planner",
+	agent := &domain.AgentService{
+		ServiceID:    "planner",
 		RoleName:     "plan",
-		State:        domain.AgentStateActive,
-		DesiredState: domain.AgentDesiredRunning,
+		DesiredState: domain.AgentServiceDesiredRunning,
 	}
 
 	item, problems := workspaceOpsAgentStatus(localState, nil, rolesByName, agent)
@@ -482,11 +317,10 @@ func TestWorkspaceOpsAgentStatusDoesNotRequireInteractiveWorktree(t *testing.T) 
 		},
 	}
 	localState := bootstrap.WorkspaceLocalState{Path: "/some/workspace"}
-	agent := &domain.Agent{
-		Name:         "reviewer",
+	agent := &domain.AgentService{
+		ServiceID:    "reviewer",
 		RoleName:     "pr-review",
-		State:        domain.AgentStateActive,
-		DesiredState: domain.AgentDesiredRunning,
+		DesiredState: domain.AgentServiceDesiredRunning,
 	}
 
 	item, problems := workspaceOpsAgentStatus(localState, nil, rolesByName, agent)
@@ -500,198 +334,6 @@ func TestWorkspaceOpsAgentStatusDoesNotRequireInteractiveWorktree(t *testing.T) 
 	for _, problem := range problems {
 		if problem.Code == "agent_missing_worktree" {
 			t.Fatalf("interactive agent got false-positive worktree problem: %+v", problem)
-		}
-	}
-}
-
-func TestWorkspaceOpsGlobalProblemsDetectsDaemonNotRunningWithRunnableAgent(t *testing.T) {
-	status := &WorkspaceOpsStatus{
-		Daemon: WorkspaceOpsDaemon{
-			AppData:        DaemonInfo{Running: false},
-			WorkspaceLocal: DaemonInfo{Running: false},
-		},
-		Repos:  []WorkspaceOpsRepo{{Name: "app"}},
-		Agents: []WorkspaceOpsAgent{{Name: "planner", Runnable: true}},
-	}
-
-	problems := workspaceOpsGlobalProblems(status)
-
-	var got *WorkspaceOpsProblem
-	for i, p := range problems {
-		if p.Code == "daemon_not_running" {
-			got = &problems[i]
-			break
-		}
-	}
-	if got == nil {
-		t.Fatalf("expected daemon_not_running problem, got %+v", problems)
-	}
-	if got.Severity != "error" {
-		t.Errorf("severity = %q, want error", got.Severity)
-	}
-	if !strings.Contains(got.Fix, "ensure-runtime") {
-		t.Errorf("fix = %q, want it to suggest ensure-runtime", got.Fix)
-	}
-}
-
-func TestWorkspaceOpsGlobalProblemsSilentWhenDaemonRunningOrNoRunnableAgents(t *testing.T) {
-	cases := []struct {
-		name   string
-		status *WorkspaceOpsStatus
-	}{
-		{
-			name: "daemon running, agent runnable",
-			status: &WorkspaceOpsStatus{
-				Daemon: WorkspaceOpsDaemon{AppData: DaemonInfo{Running: true, PID: 42}},
-				Repos:  []WorkspaceOpsRepo{{Name: "app"}},
-				Agents: []WorkspaceOpsAgent{{Name: "planner", Runnable: true}},
-			},
-		},
-		{
-			name: "daemon down, no runnable agents",
-			status: &WorkspaceOpsStatus{
-				Daemon: WorkspaceOpsDaemon{AppData: DaemonInfo{Running: false}},
-				Repos:  []WorkspaceOpsRepo{{Name: "app"}},
-				Agents: []WorkspaceOpsAgent{{Name: "stopped", Runnable: false}},
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, p := range workspaceOpsGlobalProblems(tc.status) {
-				if p.Code == "daemon_not_running" {
-					t.Errorf("unexpected daemon_not_running problem: %+v", p)
-				}
-			}
-		})
-	}
-}
-
-// TestWorkspaceOpsGlobalProblemsAcceptsRegisteredDaemon mirrors the
-// WorkspaceLocal variant: when the supervisor publishes itself via the
-// fleet-db Node registry, diagnose must NOT emit daemon_not_running even
-// if the path-based detection (AppData / WorkspaceLocal) found nothing.
-// This is the LOOM-3 false-positive case.
-func TestWorkspaceOpsGlobalProblemsAcceptsRegisteredDaemon(t *testing.T) {
-	status := &WorkspaceOpsStatus{
-		Daemon: WorkspaceOpsDaemon{
-			AppData:        DaemonInfo{Running: false},
-			WorkspaceLocal: DaemonInfo{Running: false},
-			Registered:     DaemonInfo{Running: true, PID: 31337, Cwd: "/some/cwd"},
-		},
-		Repos: []WorkspaceOpsRepo{{Name: "app"}},
-		Agents: []WorkspaceOpsAgent{
-			{Name: "planner", Runnable: true},
-		},
-	}
-
-	problems := workspaceOpsGlobalProblems(status)
-	for _, problem := range problems {
-		if problem.Code == "daemon_not_running" {
-			t.Fatalf("problems = %#v, did not expect daemon_not_running (Registered daemon is alive)", problems)
-		}
-	}
-}
-
-func TestWaitForWorkspaceOpsDaemonAcceptsRegisteredDaemon(t *testing.T) {
-	initial := &WorkspaceOpsStatus{
-		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
-		Daemon: WorkspaceOpsDaemon{
-			AppData: DaemonInfo{Running: false},
-		},
-		Agents: []WorkspaceOpsAgent{
-			{Name: "planner", Runnable: true},
-		},
-	}
-	ready := &WorkspaceOpsStatus{
-		Workspace: WorkspaceOpsWorkspace{Key: "TEST"},
-		Daemon: WorkspaceOpsDaemon{
-			AppData:    DaemonInfo{Running: false},
-			Registered: DaemonInfo{Running: true, PID: 42},
-		},
-		Agents: []WorkspaceOpsAgent{
-			{Name: "planner", Runnable: true},
-		},
-	}
-
-	calls := 0
-	status, err := waitForWorkspaceOpsDaemon(context.Background(), "TEST", initial, func(context.Context, string) (*WorkspaceOpsStatus, error) {
-		calls++
-		return ready, nil
-	})
-	if err != nil {
-		t.Fatalf("waitForWorkspaceOpsDaemon returned error: %v", err)
-	}
-	if status != ready {
-		t.Fatalf("status = %#v, want ready status", status)
-	}
-	if calls != 1 {
-		t.Fatalf("loader calls = %d, want 1", calls)
-	}
-}
-
-// TestBuildWorkspaceOpsStatusUsesNodeRegistry verifies the end-to-end
-// behavior: a workspace with a runnable agent and a live supervisor Node
-// in the fleet-db registry should NOT report daemon_not_running, even
-// when the agent's path-based AppData/WorkspaceLocal lookups come up
-// empty (the LOOM-3 cwd-mismatch scenario).
-func TestBuildWorkspaceOpsStatusUsesNodeRegistry(t *testing.T) {
-	t.Setenv("LOOM_ISSUE_BACKEND", "fleet") // skip local-runtime probe
-	st := memstore.New()
-	ctx := context.Background()
-
-	ws := &domain.Workspace{Key: "WS-NODE"}
-	repo := &domain.Repo{Name: "app", Groups: []string{}}
-	agent := &domain.Agent{
-		Name:         "planner",
-		RoleName:     "plan",
-		State:        domain.AgentStateActive,
-		DesiredState: domain.AgentDesiredRunning,
-	}
-	roles := []*domain.Role{{Name: "plan"}}
-
-	// Register a fresh local supervisor Node with PID/Cwd labels for
-	// the current process. lockfile.IsProcessRunning will report it
-	// alive since it's our own PID.
-	livePID := os.Getpid()
-	hostname, _ := os.Hostname()
-	if hostname == "" {
-		hostname = "unknown-host"
-	}
-	nodeID := fmt.Sprintf("loom-supervisor-%s-%d", hostname, livePID)
-	_, err := st.Nodes().Create(ctx, store.NodeCreate{
-		WorkspaceKey:    ws.Key,
-		NodeID:          nodeID,
-		OwnerActor:      "local",
-		RuntimeProvider: domain.RuntimeProviderLocal,
-		Labels: []string{
-			"loom.daemon.pid=" + strconv.Itoa(livePID),
-			"loom.daemon.cwd=/tmp/registered-cwd",
-		},
-		Capabilities: []string{"local-supervisor"},
-		DrainState:   domain.NodeDrainActive,
-		TTL:          2 * time.Minute,
-	})
-	if err != nil {
-		t.Fatalf("create node: %v", err)
-	}
-
-	status, err := buildWorkspaceOpsStatus(ctx, st, ws, []*domain.Repo{repo}, []*domain.Agent{agent}, roles)
-	if err != nil {
-		t.Fatalf("buildWorkspaceOpsStatus: %v", err)
-	}
-	if !status.Daemon.Registered.Running {
-		t.Fatalf("status.Daemon.Registered.Running = false, want true (live local Node should mark daemon as registered)")
-	}
-	if status.Daemon.Registered.PID != livePID {
-		t.Fatalf("status.Daemon.Registered.PID = %d, want %d", status.Daemon.Registered.PID, livePID)
-	}
-	if status.Daemon.Registered.Cwd != "/tmp/registered-cwd" {
-		t.Fatalf("status.Daemon.Registered.Cwd = %q, want /tmp/registered-cwd", status.Daemon.Registered.Cwd)
-	}
-	for _, problem := range status.Problems {
-		if problem.Code == "daemon_not_running" {
-			t.Fatalf("expected no daemon_not_running, got problems %#v", status.Problems)
 		}
 	}
 }

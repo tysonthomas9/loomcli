@@ -12,7 +12,6 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/agent/tsruntime"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -25,7 +24,6 @@ import (
 
 var (
 	planAutoMode    bool
-	planDaemonMode  bool // Hidden: for internal tmux session use
 	planInterval    int
 	planMaxTasks    int
 	planIdleTimeout int
@@ -69,8 +67,6 @@ Examples:
 
 func init() {
 	planCmd.Flags().BoolVarP(&planAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
-	planCmd.Flags().BoolVar(&planDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
-	_ = planCmd.Flags().MarkHidden("daemon-mode")
 	planCmd.Flags().IntVarP(&planInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	planCmd.Flags().IntVarP(&planMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	planCmd.Flags().IntVarP(&planIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
@@ -94,11 +90,6 @@ func runPlan(cmd *cobra.Command, args []string) {
 
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
-
-	if planDaemonMode {
-		runPlanDaemon(deps, worktreePath, agentName)
-		return
-	}
 
 	routerCheck := cli.RouterTaskCheckFromEnv(planParentID)
 
@@ -124,59 +115,6 @@ func runPlan(cmd *cobra.Command, args []string) {
 	}
 
 	runPlanSingleTask(deps, worktreePath, agentName, routerCheck)
-}
-
-// runPlanDaemon handles daemon mode: acquire lock, invoke agent, finalize session.
-func runPlanDaemon(deps *cli.Deps, worktreePath, agentName string) {
-	if err := cli.AcquireLock(worktreePath, "plan", agentName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		cli.ExitWithFlush(1)
-	}
-	if err := cli.UpdateLockState(worktreePath, cli.StateActive); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
-	}
-
-	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
-	// P4: arm same-task resume (guarded) BEFORE building the prompt, so prompt
-	// generation skips the redundant checkpoint context when resuming.
-	maybeResumeDaemonSession(worktreePath, assignedTaskID)
-	// Record the assigned task on the worktree lock (AFTER the resume decision)
-	// so a crash leaves a resumable remnant for the next restart's
-	// detectRecovery — the agent's own `loom claim` is CWD-dependent (planners
-	// run it from the workspace root) and can't be relied on to set this.
-	persistAssignedTaskToLock(worktreePath, assignedTaskID)
-
-	ws, _ := config.ResolveActiveWorkspace()
-	prompt := GeneratePlanningPrompt(agentName, ws, planParentID)
-	if assignedTaskID != "" {
-		prompt = GenerateFleetPlanningPrompt(agentName, assignedTaskID, ws)
-	}
-	sess := adoptOrCreateSession(agentName, planParentID, prompt, "planning")
-
-	emitTaskClaimedFromEnv(agentName, assignedTaskID)
-
-	beforeRef := automode.CaptureHEADRef(worktreePath)
-	startedAt := time.Now()
-
-	// Daemon-spawned subprocesses have no controlling TTY. InvokeInteractive
-	// inherits the daemon's stdin/stdout, which makes backend TUIs render
-	// nothing — the supervisor watchdog then times the silent run out at
-	// 15 min. Use the wrapper-backed non-interactive path: PTY + stream-json
-	// → log mtime advances per turn.
-	shutdown := automode.SetupSignalHandler()
-	collector := usage.NewCollector(cli.GetBackendName(), agentName)
-	invokeErr := tsruntime.Invoker(deps.Agent).InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
-	if invokeErr == nil {
-		clearDaemonResumeOnSuccess(worktreePath)
-	}
-
-	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
-	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, planParentID)
-
-	if invokeErr != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
-		cli.ExitWithFlush(1)
-	}
 }
 
 // runPlanAutoFallback handles auto mode without tmux.
@@ -241,24 +179,6 @@ func runPlanSingleTask(deps *cli.Deps, worktreePath, agentName string, routerChe
 	}
 }
 
-// adoptOrCreateSession either inherits a parent session or creates a new one.
-func adoptOrCreateSession(agentName, parentID, prompt, phase string) *sessions.Session {
-	if inheritedSID := os.Getenv("LOOM_SESSION_ID"); inheritedSID != "" {
-		inheritedRuntimeDir := os.Getenv("LOOM_WORKSPACE_RUNTIME_DIR")
-		if inheritedRuntimeDir == "" {
-			inheritedRuntimeDir = cli.GetWorkspaceRuntimeDir()
-		}
-		if prompt != "" {
-			if sessStore, err := sessions.NewStore(inheritedRuntimeDir); err == nil {
-				_ = sessStore.UpdatePrompt(inheritedSID, prompt)
-			}
-		}
-		backends.SetActiveSessionRuntimeEnv(inheritedRuntimeDir, inheritedSID)
-		return nil
-	}
-	return createAgentSession(agentName, parentID, prompt, phase)
-}
-
 // createAgentSession creates a new session for tracking.
 func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Session {
 	sessStore, sessErr := sessions.NewStore(cli.GetWorkspaceRuntimeDir())
@@ -276,13 +196,7 @@ func createAgentSession(agentName, parentID, prompt, phase string) *sessions.Ses
 	return sess
 }
 
-// finalizeAgentSession finalizes a session after agent invocation: computes
-// diff stats and mirrors the backend's native transcript (via WithWorktree),
-// and — for self-created sessions with no Claude Code hooks (the fleet /
-// daemon-mode path) — records token usage from the live collector into both
-// the session metadata and the workspace usage.jsonl. A nil collector
-// (interactive single-task mode) still finalizes; the transcript is mirrored
-// via the WithWorktree backend branch.
+// finalizeAgentSession finalizes a compatibility CLI session after invocation.
 func finalizeAgentSession(sess *sessions.Session, worktreePath, beforeRef string, invokeErr error, collector *usage.Collector, startedAt time.Time, epicID string) {
 	if sess == nil {
 		return
@@ -329,9 +243,7 @@ func exitCodeFromErr(invokeErr error) int {
 	return 1
 }
 
-// appendUsageRecord persists a usage record to the workspace usage.jsonl so the
-// cost-aggregation UI reflects daemon-mode runs, which bypass the auto-mode
-// loop's own recordSessionUsage. Best-effort: failures are logged, not fatal.
+// appendUsageRecord persists a usage record to the workspace usage.jsonl.
 func appendUsageRecord(rec usage.SessionUsage) {
 	store, err := usage.NewStore(cli.GetWorkspaceRuntimeDir())
 	if err != nil {
@@ -343,15 +255,7 @@ func appendUsageRecord(rec usage.SessionUsage) {
 	}
 }
 
-// emitTaskClaimedFromEnv emits a TaskClaimed event before InvokeInteractive
-// so a loom.task span starts under the active trace. Used by single-task and
-// daemon-mode plan/task paths that bypass the auto-mode loop.
-//
-// In daemon mode the assigned task ID comes from LOOM_ASSIGNED_TASK_ID. In
-// single-task mode the agent self-claims the task during the run, so the ID
-// is unknown at this point and we emit with TaskID="" — otelexport accepts
-// the empty string and the followup TaskCompleted/TaskFailed will carry the
-// resolved ID read from the lock file.
+// emitTaskClaimedFromEnv emits TaskClaimed before a compatibility CLI run.
 //
 // Best-effort: if AgentEventBus is unavailable (mkdir failure on first use)
 // or NewEvent fails we skip silently. Per the trace contract §6 the prompt
@@ -374,9 +278,8 @@ func emitTaskClaimedFromEnv(agentName, taskID string) {
 // error. Pairs with emitTaskClaimedFromEnv to close out the loom.task span
 // regardless of how InvokeInteractive returned.
 //
-// taskID is read from the lock file at finalize time so single-task mode (no
-// LOOM_ASSIGNED_TASK_ID) still records the ID the agent self-claimed during
-// the run.
+// taskID is read from the lock file at finalize time so the event records the
+// ID the agent self-claimed during the run.
 //
 // Per the trace contract §6 invokeErr.Error() is included in TaskFailedData
 // only because the otelexport classifier needs the message text to bucket

@@ -91,7 +91,7 @@ export function resolveDiffAgentForIssue(
   return linked[0];
 }
 
-/** Only supervised worker roles can accept an immediate task start. */
+/** Only background worker roles can accept an immediate task start. */
 export function isReviewAgentStartable(agent: LoomAgentStatus): boolean {
   if (isInteractiveAgent(agent)) return false;
   const roleKind = (agent.role_kind ?? "").trim().toLowerCase();
@@ -290,7 +290,7 @@ export function PRReviewWorkspace({
       // Keep the issue in review — the reviewer joins; the PR stays queued.
       await updateIssue(workspaceId, issue.id, { assignee: agentName });
       try {
-        await startAgent(workspaceId, agentName, { taskId: issue.id });
+        await startAgent(workspaceId, agentName);
       } catch {
         // The agent may not be startable right now (e.g. backend cold);
         // assignment itself succeeded, so just surface a soft note.
@@ -589,7 +589,7 @@ export function PRReviewWorkspace({
           workspaceId={workspaceId}
           repos={repos}
           defaultName={`review-${issue.id.toLowerCase()}`}
-          supervisedRole="task"
+          requiredRole="task"
           onClose={() => setCreateOpen(false)}
           onSuccess={(agent) => {
             setCreateOpen(false);

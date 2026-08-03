@@ -193,7 +193,12 @@ func deliverCurrentAssignmentOwned(
 	inbox ...interaction.InboxEnqueuer,
 ) (*DeliveryResult, error) {
 	enqueuer := firstInboxEnqueuer(runtime, inbox)
-	assignment, err := epicrunner.LoadLeadAssignmentContext(ctx, st, workspace, leadName)
+	assignment, err := epicrunner.LoadLeadAssignmentContext(
+		ctx,
+		epicrunner.NewStoreLeadAssignmentSource(st),
+		workspace,
+		leadName,
+	)
 	if err != nil || assignment == nil {
 		return &DeliveryResult{State: DeliveryStateNone}, err
 	}

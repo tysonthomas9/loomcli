@@ -4,8 +4,6 @@ import (
 	"context"
 
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -60,15 +58,3 @@ func (m *mockWorkspaceService) PatchWorkspaceBackend(_ context.Context, _ string
 func (m *mockWorkspaceService) PatchWorkspaceDesignFormat(_ context.Context, _ string, _ string) (*ops.WorkspaceData, error) {
 	return nil, service.ErrUnavailable("not available")
 }
-
-// stubErrorPool implements daemon.Pool, returning errors from Get.
-type stubErrorPool struct{}
-
-func (s *stubErrorPool) Get(_ context.Context) (*rpc.Client, error) {
-	return nil, context.DeadlineExceeded
-}
-func (s *stubErrorPool) Put(_ *rpc.Client)           {}
-func (s *stubErrorPool) PutAfterError(_ *rpc.Client) {}
-func (s *stubErrorPool) Discard(_ *rpc.Client)       {}
-func (s *stubErrorPool) Stats() daemon.PoolStats     { return daemon.PoolStats{} }
-func (s *stubErrorPool) Close() error                { return nil }

@@ -17,6 +17,14 @@ type canonicalWorkspaceWorkerProfiles struct {
 	create execution.CreateWorkerProfileCommand
 }
 
+func (*canonicalWorkspaceWorkerProfiles) GetWorkerProfile(context.Context, string, string) (*execution.WorkerProfile, error) {
+	panic("unexpected worker-profile get")
+}
+
+func (*canonicalWorkspaceWorkerProfiles) ListWorkerProfiles(context.Context, string, execution.WorkerProfileFilter) ([]*execution.WorkerProfile, error) {
+	panic("unexpected worker-profile list")
+}
+
 func (stub *canonicalWorkspaceWorkerProfiles) CreateWorkerProfile(
 	_ context.Context,
 	_ authority.OperatorAuthority,

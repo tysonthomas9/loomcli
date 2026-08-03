@@ -3,12 +3,54 @@
 package testutil
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 )
+
+// StaticAgentQueries is a canonical, mutation-free Agents query fixture. It
+// keeps tests from composing the retired supervised-assignment Store merely to
+// satisfy a consumer port.
+type StaticAgentQueries struct {
+	Agents []*agents.Agent
+	Err    error
+}
+
+func (queries StaticAgentQueries) GetAgent(_ context.Context, workspace, agentID string) (*agents.Agent, error) {
+	if queries.Err != nil {
+		return nil, queries.Err
+	}
+	for _, agent := range queries.Agents {
+		if agent != nil && agent.WorkspaceKey == workspace && agent.AgentID == agentID {
+			copy := *agent
+			return &copy, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (queries StaticAgentQueries) ListAgents(_ context.Context, workspace string, _ agents.AgentFilter) ([]*agents.Agent, error) {
+	if queries.Err != nil {
+		return nil, queries.Err
+	}
+	out := make([]*agents.Agent, 0, len(queries.Agents))
+	for _, agent := range queries.Agents {
+		if agent == nil || agent.WorkspaceKey != workspace {
+			continue
+		}
+		copy := *agent
+		out = append(out, &copy)
+	}
+	return out, nil
+}
+
+var _ agents.IdentityQueries = StaticAgentQueries{}
 
 var loomDesktopEnvKeys = []string{
 	"LOOM_WORKSPACE",

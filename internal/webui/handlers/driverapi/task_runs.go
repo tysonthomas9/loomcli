@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 )
 
 // execTaskParams is the exec-task request body.
@@ -104,8 +105,14 @@ func (m *Module) taskRequestExecutor() driverpkg.HostBridgeTaskExecutor {
 			Lineage:       driverpkg.DefaultStackLineageLookup(),
 			SourceControl: m.sourceControl,
 		},
-		StackStore: driverpkg.DefaultStackStore(),
+		StackStore:   driverpkg.DefaultStackStore(),
+		TaskOutcomes: taskOutcomeRecorder(m.sourceControl),
 	}
+}
+
+func taskOutcomeRecorder(materializer sourcecontrol.Materializer) sourcecontrol.TaskOutcomeRecorder {
+	recorder, _ := materializer.(sourcecontrol.TaskOutcomeRecorder)
+	return recorder
 }
 
 func taskRunRequestCommand(ws string, parent *domain.DriverRun, owner execution.Owner, opts driverpkg.TaskRunRequestOptions) execution.RequestTaskRunCommand {
@@ -239,7 +246,7 @@ func (m *Module) resolveManagedAgentPolicy(
 	if err != nil {
 		return managedAgentPolicyInput{}, fmt.Errorf("resolve managed TaskRun role %q: %w", roleName, err)
 	}
-	backend := m.resolveManagedAgentBackend(ctx, ws, service, role)
+	backend := resolveManagedAgentBackend(ws, service, role)
 	policy := managedAgentPolicyInput{
 		Version: 1, AgentServiceID: agentServiceID, RoleName: roleName, Backend: backend,
 		Model: strings.TrimSpace(role.Model), Effort: strings.TrimSpace(role.Effort), ReadOnly: role.ReadOnly,
@@ -252,17 +259,14 @@ func (m *Module) resolveManagedAgentPolicy(
 	return policy, nil
 }
 
-func (m *Module) resolveManagedAgentBackend(
-	ctx context.Context,
+func resolveManagedAgentBackend(
 	ws string,
 	service *domain.AgentService,
 	role *domain.Role,
 ) string {
 	backend := firstNonEmpty(strings.TrimSpace(service.Metadata["backend"]), strings.TrimSpace(role.Backend))
 	if backend == "" {
-		if profile, profileErr := m.store.Daemon().Get(ctx, ws); profileErr == nil && profile != nil {
-			backend = strings.TrimSpace(profile.AgentBackend)
-		}
+		backend = driverpkg.RuntimeProviderForWorkspace(ws)
 	}
 	if backend == "" {
 		backend = "codex"

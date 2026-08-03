@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Loom CLI API
   description: |
-    REST API for the Loom CLI web UI and daemon. Covers workspace management,
+    REST API for the Loom platform runtime. Covers workspace management,
     issue tracking, agent lifecycle, terminal sessions, git operations, fleet
     coordination, monitoring, and observability.
   version: 0.1.0
@@ -51,7 +51,7 @@ tags:
   - name: agent-terminal
     description: Per-agent terminal info and WebSocket
   - name: agent-control
-    description: Agent lifecycle (start/stop/restart/yield)
+    description: Canonical Agent lifecycle (start/stop/restart)
   - name: git
     description: Git operations (status, push, pull, sync, PR, reset)
   - name: pull-requests
@@ -69,7 +69,7 @@ tags:
   - name: issue-tabs
     description: Issue detail tab state (Redis-backed)
   - name: monitor
-    description: Daemon monitor dashboard and metrics
+    description: Runtime monitor dashboard and metrics
   - name: observability
     description: Event metrics and paginated event log
 
@@ -97,7 +97,7 @@ paths:
     get:
       operationId: getApiHealth
       tags: [health]
-      summary: API health check with daemon status
+      summary: API process health check
       security: []
       responses:
         "200":
@@ -111,6 +111,8 @@ paths:
                   status:
                     type: string
                     example: ok
+                  error:
+                    type: string
 
   /api/metrics:
     get:
@@ -2375,9 +2377,8 @@ paths:
       tags: [agent-control]
       summary: List the unified agent collection
       description: |
-        Returns supervised role assignments, durable prompt-backed and
-        scripted agent records, and unattached legacy trigger bindings in one
-        collection. The `kind` discriminator selects the response shape.
+        Returns canonical interactive, prompt-backed, and scripted Agent
+        identities. The `kind` discriminator selects the response shape.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: include
@@ -2414,11 +2415,11 @@ paths:
     post:
       operationId: createAgent
       tags: [agent-control]
-      summary: Create a supervised or prompt-backed agent
+      summary: Create an interactive or prompt-backed agent
       description: |
-        Creates either a legacy supervised role assignment or a durable
-        prompt-backed record with its initial trigger binding. Scripted records
-        and unattached binding entries are currently read-only on this route.
+        Creates either a browser-owned interactive identity or a managed
+        prompt-backed identity with its initial trigger binding. Background
+        worker identities are created by AgentProvisioning, not this route.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
       requestBody:
@@ -2509,14 +2510,11 @@ paths:
       tags: [agent-control]
       summary: Update one unified agent entry
       description: |
-        The accepted fields depend on the stored kind. Supervised assignments
-        use assignment fields; prompt/scripted records accept mutable record
-        fields, while their behavior role is immutable after creation. A
-        prompt/scripted cron record also accepts an exact
+        Canonical records accept mutable identity fields while their behavior
+        role is immutable after creation. A cron-backed record also accepts an exact
         attached `binding_id` with `schedule` and/or `schedule_timezone`;
         schedule fields cannot be combined with record fields
         in one request so a failed PATCH never commits a cross-aggregate prefix.
-        legacy binding entries only support `name`.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2572,11 +2570,10 @@ paths:
     delete:
       operationId: deleteAgent
       tags: [agent-control]
-      summary: Delete or archive one unified agent entry
+      summary: Archive one canonical agent identity
       description: |
-        Deletes supervised assignments and unattached legacy bindings. Durable
-        prompt/scripted records are archived after their bindings are deleted
-        and connector grants are revoked.
+        Archives the Agent after its bindings are deleted and connector grants
+        are revoked by the Agents-owned lifecycle command.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
@@ -2612,23 +2609,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentErrorResponse"
 
-  /api/workspaces/{ws}/agents/{name}/queue:
-    get:
-      operationId: getAgentQueue
-      tags: [agent-control]
-      summary: Get an agent-specific queue
-      description: This compatibility route is not implemented in fleet-db store mode.
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - $ref: "#/components/parameters/AgentName"
-      responses:
-        "501":
-          description: Agent-specific queue is not available
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-
   /api/workspaces/{ws}/agents/{id}/enable:
     post:
       operationId: enableAgentRecord
@@ -2645,7 +2625,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/DurableAgentRecord"
         "400":
-          description: Supervised assignments use lifecycle actions instead
+          description: Invalid lifecycle request
           content:
             application/json:
               schema:
@@ -2691,7 +2671,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/DurableAgentRecord"
         "400":
-          description: Supervised assignments use lifecycle actions instead
+          description: Invalid lifecycle request
           content:
             application/json:
               schema:
@@ -2825,33 +2805,17 @@ paths:
     post:
       operationId: stopAgent
       tags: [agent-control]
-      summary: Stop an agent using its runtime owner
+      summary: Stop an agent
       description: |
-        In store-backed mode, supervised workers durably queue a stop command
-        for their daemon and return 202 while desired_state is draining. A
-        direct local-daemon deployment waits for the daemon's semantic result
-        and returns 200 only after the stop completes. By default the daemon
-        requests a cooperative yield before keeping the worker stopped;
-        `{"force": true}` skips that yield and terminates directly. Interactive
-        agents are owned by the web terminal runtime, so Stop terminates their
-        PTY synchronously and returns 200 without enqueueing a daemon command.
+        Atomically changes canonical desired state to stopped. Interactive
+        agents also interrupt their Interaction-owned runtime before the
+        settled response is returned.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/StopAgentRequest"
       responses:
         "200":
-          description: Interactive or direct local-daemon agent stopped synchronously
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentLifecycleResponse"
-        "202":
-          description: Supervised worker stop queued for its runtime owner
+          description: Agent stopped synchronously
           content:
             application/json:
               schema:
@@ -2863,7 +2827,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentErrorResponse"
         "404":
-          description: Supervised agent not found
+          description: Agent not found
           content:
             application/json:
               schema:
@@ -2893,26 +2857,14 @@ paths:
       tags: [agent-control]
       summary: Start an agent
       description: |
-        Store-backed supervised workers return 202 after durably queueing the
-        start command. Interactive agents and direct local-daemon deployments
-        return 200 only after their runtime owner accepts the start.
+        Atomically changes canonical desired state to running and returns only
+        after the Agents owner accepts the transition.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
         "200":
-          description: Interactive or direct local-daemon agent started synchronously
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentLifecycleResponse"
-        "202":
-          description: Supervised worker start durably queued
+          description: Agent started synchronously
           content:
             application/json:
               schema:
@@ -2924,7 +2876,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentErrorResponse"
         "404":
-          description: Supervised agent not found
+          description: Agent not found
           content:
             application/json:
               schema:
@@ -2954,29 +2906,15 @@ paths:
       tags: [agent-control]
       summary: Restart an agent
       description: |
-        Store-backed supervised workers return 202 after durably queueing the
-        restart command. A direct local-daemon deployment waits through the
-        configured cooperative-yield and SIGTERM escalation and returns 200
-        only after the daemon reports completion. Interactive agents return
-        200 after synchronously terminating the current PTY so a fresh
-        terminal can attach.
+        Reasserts canonical running desired state. Interactive agents also
+        interrupt their current Interaction-owned runtime so the next terminal
+        attachment starts a fresh process.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/AgentName"
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AgentLifecycleRequest"
       responses:
         "200":
-          description: Interactive or direct local-daemon restart completed synchronously
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentLifecycleResponse"
-        "202":
-          description: Supervised worker restart durably queued
+          description: Agent restart completed synchronously
           content:
             application/json:
               schema:
@@ -2988,7 +2926,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/AgentErrorResponse"
         "404":
-          description: Supervised agent not found
+          description: Agent not found
           content:
             application/json:
               schema:
@@ -3007,117 +2945,6 @@ paths:
                 $ref: "#/components/schemas/AgentErrorResponse"
         "503":
           description: Agent service unavailable
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-
-  /api/workspaces/{ws}/agents/{name}/yield:
-    post:
-      operationId: yieldAgent
-      tags: [agent-control]
-      summary: Yield an agent (graceful stop at next safe point)
-      description: |
-        Store-backed supervised workers return 202 after durably queueing the
-        yield command. A direct local-daemon deployment returns 200 after the
-        yield marker is written. Interactive agents reject Yield; use Stop.
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - $ref: "#/components/parameters/AgentName"
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AgentLifecycleRequest"
-      responses:
-        "200":
-          description: Direct local-daemon yield request completed synchronously
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentLifecycleResponse"
-        "202":
-          description: Supervised worker yield durably queued
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentLifecycleResponse"
-        "400":
-          description: Invalid lifecycle request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-        "404":
-          description: Supervised agent not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-        "409":
-          description: Lifecycle update conflicts with stored state
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-        "500":
-          description: Agent service operation failed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-        "503":
-          description: Agent service unavailable
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-
-  /api/workspaces/{ws}/agents/{name}/lifecycle-commands/{command_id}:
-    get:
-      operationId: getAgentLifecycleCommand
-      tags: [agent-control]
-      summary: Get durable lifecycle command status
-      description: |
-        Returns the durable status of a lifecycle request. The command must
-        belong to the agent named in the route; cross-agent command IDs are
-        reported as not found.
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - $ref: "#/components/parameters/AgentName"
-        - name: command_id
-          in: path
-          required: true
-          schema:
-            type: string
-            minLength: 1
-      responses:
-        "200":
-          description: Durable lifecycle command status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentLifecycleCommandResponse"
-        "400":
-          description: Invalid agent name or command ID
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-        "404":
-          description: Lifecycle command not found for this agent
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-        "500":
-          description: Agent command store operation failed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentErrorResponse"
-        "503":
-          description: Agent command store unavailable
           content:
             application/json:
               schema:
@@ -4994,7 +4821,7 @@ components:
       name: name
       in: path
       required: true
-      description: Unified agent identifier or supervised assignment name
+      description: Canonical Agent identifier or name
       schema:
         type: string
 
@@ -5002,7 +4829,7 @@ components:
       name: id
       in: path
       required: true
-      description: Unified agent, supervised assignment, or legacy binding identifier
+      description: Canonical Agent identifier
       schema:
         type: string
 
@@ -5443,7 +5270,7 @@ components:
           type: boolean
         mode:
           type: string
-          enum: [daemon, fleet]
+          enum: [workflow-catalog]
         workspace:
           type: string
         reason:
@@ -6362,167 +6189,52 @@ components:
           type: integer
           minimum: 0
 
-    AgentLifecycleRequest:
-      type: object
-      properties:
-        payload:
-          type: object
-          additionalProperties:
-            type: string
-        task_id:
-          type: string
-
     AgentLifecycleResponse:
       type: object
-      required: [message, pending, command_id, status]
+      required: [message, status]
       properties:
         message:
           type: string
-        pending:
-          type: boolean
-          description: True when a supervised runtime owner accepted the command for asynchronous execution.
-        command_id:
-          type: string
-          description: Durable lifecycle command ID when pending; empty for a synchronous transition.
         status:
           type: string
-          enum: [queued, acked, running, succeeded, failed, cancelled]
-
-    AgentLifecycleCommandResponse:
-      type: object
-      required: [command_id, action, status, result, error_class, created_at, updated_at, acked_at]
-      properties:
-        command_id:
-          type: string
-        action:
-          type: string
-          enum: [start, stop, restart, yield]
-        status:
-          type: string
-          enum: [queued, acked, running, succeeded, failed, cancelled]
-        result:
-          type: string
-        error_class:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-        acked_at:
-          type: string
-          format: date-time
-          nullable: true
-
-    StopAgentRequest:
-      allOf:
-        - $ref: "#/components/schemas/AgentLifecycleRequest"
-        - type: object
-          properties:
-            force:
-              type: boolean
-              default: false
+          enum: [succeeded, failed, cancelled]
 
     UnifiedAgent:
+      description: Canonical durable Agent identity exposed by collection routes.
       oneOf:
-        - $ref: "#/components/schemas/SupervisedAgent"
         - $ref: "#/components/schemas/PromptAgentRecord"
         - $ref: "#/components/schemas/ScriptedAgentRecord"
-        - $ref: "#/components/schemas/LegacyBindingAgent"
+        - $ref: "#/components/schemas/InteractiveAgentRecord"
       discriminator:
         propertyName: kind
         mapping:
-          supervised: "#/components/schemas/SupervisedAgent"
           prompt: "#/components/schemas/PromptAgentRecord"
           scripted: "#/components/schemas/ScriptedAgentRecord"
-          binding: "#/components/schemas/LegacyBindingAgent"
+          interactive: "#/components/schemas/InteractiveAgentRecord"
 
     CreatedUnifiedAgent:
       description: Agent kinds accepted by the collection create route.
       oneOf:
-        - $ref: "#/components/schemas/SupervisedAgent"
+        - $ref: "#/components/schemas/CreatedInteractiveAgent"
         - $ref: "#/components/schemas/PromptAgentRecord"
       discriminator:
         propertyName: kind
         mapping:
-          supervised: "#/components/schemas/SupervisedAgent"
+          interactive: "#/components/schemas/CreatedInteractiveAgent"
           prompt: "#/components/schemas/PromptAgentRecord"
 
     DurableAgentRecord:
-      description: Durable prompt-backed or scripted AgentService identity.
+      description: Canonical durable Agent identity.
       oneOf:
         - $ref: "#/components/schemas/PromptAgentRecord"
         - $ref: "#/components/schemas/ScriptedAgentRecord"
+        - $ref: "#/components/schemas/InteractiveAgentRecord"
       discriminator:
         propertyName: kind
         mapping:
           prompt: "#/components/schemas/PromptAgentRecord"
           scripted: "#/components/schemas/ScriptedAgentRecord"
-
-    SupervisedAgent:
-      type: object
-      description: Long-lived role assignment supervised by the Loom daemon.
-      required: [id, kind, workspace_key, name, role_name, created_at, updated_at]
-      properties:
-        id:
-          type: string
-          description: Stable collection identifier; equal to `name` for supervised assignments.
-        kind:
-          type: string
-          const: supervised
-        workspace_key:
-          type: string
-        name:
-          type: string
-        role_name:
-          type: string
-        auto:
-          type: boolean
-        backend:
-          type: string
-        fallback_backends:
-          type: array
-          items:
-            type: string
-        repos:
-          type: array
-          items:
-            type: string
-        repo_groups:
-          type: array
-          items:
-            type: string
-        cross_repo:
-          type: boolean
-        parent:
-          type: string
-        state:
-          type: string
-        mode:
-          type: string
-        task_filter:
-          type: string
-        max_concurrency:
-          type: integer
-        budget_policy:
-          type: string
-        desired_state:
-          type: string
-        live_status:
-          type: string
-        active_task_id:
-          type: string
-        active_phase:
-          type: string
-        last_error_class:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
+          interactive: "#/components/schemas/InteractiveAgentRecord"
 
     AgentRecordBase:
       type: object
@@ -6587,6 +6299,44 @@ components:
             behavior:
               $ref: "#/components/schemas/ScriptedAgentBehavior"
 
+    InteractiveAgentRecord:
+      allOf:
+        - $ref: "#/components/schemas/AgentRecordBase"
+        - type: object
+          required: [kind, behavior]
+          properties:
+            kind:
+              type: string
+              const: interactive
+            behavior:
+              $ref: "#/components/schemas/PromptAgentBehavior"
+
+    CreatedInteractiveAgent:
+      type: object
+      required: [id, name, kind, role_name, repos, repo_groups, cross_repo]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          const: interactive
+        role_name:
+          type: string
+        backend:
+          type: string
+        repos:
+          type: array
+          items:
+            type: string
+        repo_groups:
+          type: array
+          items:
+            type: string
+        cross_repo:
+          type: boolean
+
     PromptAgentBehavior:
       type: object
       required: [role_name]
@@ -6602,28 +6352,6 @@ components:
           type: string
         driver_version_id:
           type: string
-
-    LegacyBindingAgent:
-      description: Unattached trigger binding exposed as a compatibility agent entry.
-      allOf:
-        - $ref: "#/components/schemas/TriggerBinding"
-        - type: object
-          required: [id, kind]
-          properties:
-            id:
-              type: string
-              description: Stable collection identifier; equal to `binding_id`.
-            kind:
-              type: string
-              const: binding
-            next_fire_at:
-              type: string
-              format: date-time
-            last_run_status:
-              type: string
-            consecutive_failures:
-              type: integer
-              minimum: 0
 
     AgentRecordBinding:
       allOf:
@@ -6732,16 +6460,17 @@ components:
 
     CreateUnifiedAgentRequest:
       description: |
-        Create either a supervised assignment or a prompt-backed record.
-        This request union intentionally has no discriminator because legacy
-        supervised clients omit `kind`; the supervised branch constrains every
-        supported non-prompt kind so the two branches remain exclusive.
+        Create either an interactive identity or a prompt-backed managed
+        identity. The interactive kind may be omitted for browser clients;
+        the branches remain exclusive because prompt creation requires the
+        nested `behavior` object.
       oneOf:
-        - $ref: "#/components/schemas/CreateSupervisedAgentRequest"
+        - $ref: "#/components/schemas/CreateInteractiveAgentRequest"
         - $ref: "#/components/schemas/CreatePromptAgentRequest"
 
-    CreateSupervisedAgentRequest:
+    CreateInteractiveAgentRequest:
       type: object
+      additionalProperties: false
       required: [name, role_name]
       properties:
         workspace_key:
@@ -6752,19 +6481,14 @@ components:
           type: string
         kind:
           type: string
-          enum: [supervised, interactive, worker]
-          description: |
-            `interactive` and `worker` select a role kind. `supervised` is the
-            unified collection discriminator and leaves role-kind inference to
-            the referenced role. The field may be omitted for legacy clients.
+          const: interactive
+          description: May be omitted; interactive is the collection default.
         prompt:
           type: string
           description: Literal inline prompt text for an interactive role.
         prompt_file:
           type: string
           description: Custom path or `builtin:<id>` selector for an interactive role.
-        auto:
-          type: boolean
         backend:
           type: string
         fallback_backends:
@@ -6781,10 +6505,6 @@ components:
             type: string
         cross_repo:
           type: boolean
-        parent:
-          type: string
-        desired_state:
-          type: string
 
     CreatePromptAgentRequest:
       type: object
@@ -6893,10 +6613,9 @@ components:
       minProperties: 1
       additionalProperties: false
       description: |
-        Kind-sensitive partial update. Durable records accept `name`,
-        `budget_policy`, and agent-owned cron schedule fields; their behavior
-        role is immutable after creation. Legacy binding entries accept only
-        `name`; supervised assignments accept the remaining assignment fields.
+        Canonical identities accept `name`, `budget_policy`, and agent-owned
+        cron schedule fields. Their behavior reference is immutable after
+        creation.
       properties:
         name:
           type: string
@@ -6911,38 +6630,9 @@ components:
           type: string
         schedule_timezone:
           type: string
-        role_name:
-          type: string
-        auto:
-          type: boolean
-        backend:
-          type: string
-        fallback_backends:
-          type: array
-          items:
-            type: string
-        repos:
-          type: array
-          items:
-            type: string
-        repo_groups:
-          type: array
-          items:
-            type: string
-        cross_repo:
-          type: boolean
-        parent:
-          type: string
-        state:
-          type: string
-        desired_state:
-          type: string
 
     DeleteUnifiedAgentResponse:
-      oneOf:
-        - $ref: "#/components/schemas/MessageResponse"
-        - $ref: "#/components/schemas/DeleteAgentRecordResponse"
-        - $ref: "#/components/schemas/DeleteLegacyBindingResponse"
+      $ref: "#/components/schemas/DeleteAgentRecordResponse"
 
     DeleteAgentRecordResponse:
       type: object
@@ -6955,18 +6645,6 @@ components:
         bindings_deleted:
           type: integer
           minimum: 0
-        grants_revoked:
-          type: integer
-          minimum: 0
-
-    DeleteLegacyBindingResponse:
-      type: object
-      required: [binding_id, deleted, grants_revoked]
-      properties:
-        binding_id:
-          type: string
-        deleted:
-          type: boolean
         grants_revoked:
           type: integer
           minimum: 0
@@ -6984,9 +6662,8 @@ components:
         sessions:
           type: array
           description: >-
-            Task, terminal, and orchestration sessions for supervised or
-            interactive agents. Durable record and workflow-binding agents
-            return an empty array and use runs instead.
+            Reserved empty compatibility member. Interaction owns runtime
+            sessions; canonical Agent history is exposed through `runs`.
           items:
             $ref: "#/components/schemas/AgentHistorySession"
 
@@ -7151,18 +6828,6 @@ components:
         updated_at:
           type: string
           format: date-time
-
-    AgentControlEntry:
-      type: object
-      description: Agent entry from daemon control socket list
-      required: [name, role, status]
-      properties:
-        name:
-          type: string
-        role:
-          type: string
-        status:
-          type: string
 
     # ── Session Schemas ─────────────────────────────────────────────────
     SessionResponse:
@@ -7829,8 +7494,6 @@ components:
           type: string
         workspace:
           type: string
-        daemon_managed:
-          type: boolean
         parent:
           type: string
           description: Active epic assignment for lead/workers.
@@ -7848,7 +7511,7 @@ components:
           description: Assignment mode, such as persistent or ephemeral.
         desired_state:
           type: string
-          description: Requested daemon state for the agent.
+          description: Requested durable state for the agent.
         commits:
           type: array
           items:
@@ -7860,17 +7523,16 @@ components:
         current_task_id:
           type: string
           description: >-
-            Task this daemon-managed agent has currently claimed. Empty
+            Task this agent has currently claimed. Empty
             between tasks (just spawned, polling, finished). UI joins this
             against issue.id to render which agent is working each card.
         last_activity_at:
           type: string
           format: date-time
           description: >-
-            Most recent PTY-output observation from the agent's supervised
-            backend (claude/codex/gemini), forwarded over IPC. Compare to
+            Most recent output observation from the agent runtime. Compare to
             "now" to detect stuck agents. Zero/absent when no observation
-            yet or agent isn't daemon-managed.
+            has been reported.
         live_status:
           type: string
           description: >-

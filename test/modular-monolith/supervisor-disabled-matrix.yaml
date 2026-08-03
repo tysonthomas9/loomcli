@@ -11,10 +11,8 @@ rows:
       realness: deterministic
       provisioning: compose
       polarity: positive-and-negative
-      target: loom-serve-ts-plane
+      target: loom-serve-prompt-agent-plane
     env:
-      LOOM_LOCAL_MODE_PLANE: "ts"
-      LOOM_TASK_READY_EVENTS: "1"
       LOCAL_MODE_COMPOSE_FILES: test/local-mode/docker-compose.workflow-build.yml
       LOCAL_MODE_COMPOSE_UP_FLAGS: --build -d
     setup:
@@ -31,13 +29,16 @@ rows:
       - id: deterministic-evidence
         argv: [make, local-mode-verify]
         timeout_seconds: 300
+      - id: phase6-parity
+        argv: [make, test-phase6-parity]
+        timeout_seconds: 900
     teardown:
       - id: cleanup-stack
         argv: [make, local-mode-down]
         timeout_seconds: 180
     assertions:
-      - local-mode-plane-ts
-      - task-ready-events-enabled
+      - prompt-agent-plane-default
+      - task-ready-events-default
       - zero-auto-agentdefs
       - zero-daemon-processes
       - zero-daemon-sockets
@@ -48,3 +49,9 @@ rows:
       - planner-transcript
       - coder-transcript
       - coder-diff
+      - stale-timeout-and-launch-heartbeats
+      - explicit-task-type-arbitration
+      - preflight-retry-recovery-concurrency-epic
+      - periodic-desired-state-reconciliation
+      - canonical-agentdef-migration
+      - legacy-supervisor-paths-retired

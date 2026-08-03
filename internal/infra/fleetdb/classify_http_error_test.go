@@ -103,11 +103,11 @@ func TestClientTransportFailureIsControlPlaneUnavailable(t *testing.T) {
 	}
 }
 
-func TestClassifyHTTPError_AgentCommandForbiddenMapsToNotOwner(t *testing.T) {
+func TestClassifyHTTPError_AgentOwnershipForbiddenMapsToNotOwner(t *testing.T) {
 	t.Parallel()
 	err := classifyHTTPError(
 		http.MethodPost,
-		"/api/v1/WS/agent-commands/cmd-1/complete",
+		"/api/v1/WS/agent-ownership-leases/agent-1/heartbeat",
 		http.StatusForbidden,
 		[]byte(`{"error":{"code":"forbidden","message":"ownership proof rejected"}}`),
 	)

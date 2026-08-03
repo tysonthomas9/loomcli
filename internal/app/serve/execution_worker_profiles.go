@@ -15,6 +15,28 @@ import (
 
 // Worker-profile persistence is an outbound Execution port. Inbound HTTP and
 // CLI adapters see only execution.WorkerProfileAPI and cannot reach Store.
+func (adapter *executionTaskRunPortsAdapter) GetWorkerProfile(ctx context.Context, workspace, profileID string) (*execution.WorkerProfile, error) {
+	profile, err := adapter.dependencies.WorkerProfiles.Get(ctx, workspace, profileID)
+	if err != nil {
+		return nil, err
+	}
+	return executionWorkerProfileSnapshot(profile), nil
+}
+
+func (adapter *executionTaskRunPortsAdapter) ListWorkerProfiles(ctx context.Context, workspace string, filter execution.WorkerProfileFilter) ([]*execution.WorkerProfile, error) {
+	profiles, err := adapter.dependencies.WorkerProfiles.List(ctx, workspace, store.WorkerProfileFilter{
+		Role: filter.Role, Backend: filter.Backend, Enabled: cloneExecutionBool(filter.Enabled), Limit: filter.Limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*execution.WorkerProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		out = append(out, executionWorkerProfileSnapshot(profile))
+	}
+	return out, nil
+}
+
 func (adapter *executionTaskRunPortsAdapter) CreateWorkerProfile(ctx context.Context, command execution.CreateWorkerProfileCommand) (*execution.WorkerProfile, error) {
 	profile, err := adapter.dependencies.WorkerProfiles.Create(ctx, store.WorkerProfileCreate{
 		WorkspaceKey: command.WorkspaceKey, ProfileID: command.ProfileID, Name: command.Name, Role: command.Role,
@@ -49,7 +71,8 @@ func (adapter *executionTaskRunPortsAdapter) UpdateWorkerProfile(ctx context.Con
 		RuntimePolicy: cloneExecutionStringMapPtr(patch.RuntimePolicy), Repos: cloneExecutionStrings(patch.Repos),
 		MaxPriority: cloneExecutionInt(patch.MaxPriority), MaxParallel: cloneExecutionInt(patch.MaxParallel),
 		ClearMaxPriority: patch.ClearMaxPriority, ParentEpic: cloneExecutionString(patch.ParentEpic),
-		Labels: cloneExecutionStrings(patch.Labels), Capabilities: cloneExecutionStrings(patch.Capabilities),
+		ExpectedParentEpic: cloneExecutionString(command.ExpectedParentEpic),
+		Labels:             cloneExecutionStrings(patch.Labels), Capabilities: cloneExecutionStrings(patch.Capabilities),
 		Enabled: cloneExecutionBool(patch.Enabled), Metadata: cloneExecutionStringMapPtr(patch.Metadata),
 	})
 	if err != nil {

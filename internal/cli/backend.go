@@ -76,9 +76,9 @@ func listBackendsLocked() []string {
 }
 
 // ResolveBackendName returns the backend name using the precedence chain:
-// --backend flag > LOOM_BACKEND env > default backend. Persistent backend
-// settings now live in FleetDB daemon profiles and are applied by the daemon,
-// not read from local YAML during CLI startup.
+// --backend flag > LOOM_BACKEND env > default backend. Managed agents persist
+// their backend policy on their Role rather than inheriting process-local CLI
+// state.
 func ResolveBackendName() string {
 	// 1. --backend flag (highest priority)
 	if backendFlag != "" {

@@ -2,11 +2,13 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -16,18 +18,19 @@ import (
 // journal append, DriverStep projection, lead lookup, and notification enqueue
 // remain explicit consumer ports.
 type ExecutionTaskRunConvergenceDependencies struct {
-	TaskRuns    store.TaskRunStore
-	Checkpoints store.TaskRunTerminalConvergenceStore
-	DriverRuns  store.DriverRunStore
-	DriverSteps store.TerminalDriverStepRepairStore
-	Events      store.TaskRunEventStore
-	Agents      store.AgentStore
-	Outbox      store.OutboxStore
+	TaskRuns       store.TaskRunStore
+	Checkpoints    store.TaskRunTerminalConvergenceStore
+	DriverRuns     store.DriverRunStore
+	DriverSteps    store.TerminalDriverStepRepairStore
+	Events         store.TaskRunEventStore
+	AgentQueries   agentsmodule.IdentityQueries
+	WorkerProfiles store.WorkerProfileStore
+	Outbox         store.OutboxStore
 }
 
 func NewExecutionTaskRunConvergenceDependencies(dependencies ExecutionTaskRunConvergenceDependencies) (execution.TaskRunConvergenceDependencies, error) {
 	if dependencies.TaskRuns == nil || dependencies.Checkpoints == nil || dependencies.DriverRuns == nil || dependencies.DriverSteps == nil ||
-		dependencies.Events == nil || dependencies.Agents == nil || dependencies.Outbox == nil {
+		dependencies.Events == nil || dependencies.AgentQueries == nil || dependencies.WorkerProfiles == nil || dependencies.Outbox == nil {
 		return execution.TaskRunConvergenceDependencies{}, fmt.Errorf("compose TaskRun convergence: all narrow ports are required")
 	}
 	adapter := &executionTaskRunConvergenceAdapter{dependencies: dependencies}
@@ -146,20 +149,38 @@ func (adapter *executionTaskRunConvergenceAdapter) RepairTerminalDriverStep(ctx 
 }
 
 func (adapter *executionTaskRunConvergenceAdapter) ResolveEpicLead(ctx context.Context, workspace, epicID string) (string, error) {
-	agents, err := adapter.dependencies.Agents.List(ctx, workspace)
+	agents, err := adapter.dependencies.AgentQueries.ListAgents(ctx, workspace, agentsmodule.AgentFilter{})
 	if err != nil {
 		return "", err
 	}
 	for _, agent := range agents {
-		if agent == nil || strings.TrimSpace(agent.Parent) != epicID {
+		if agent == nil || strings.TrimSpace(agent.ProfileName) == "" || !canonicalEpicLead(agent) {
 			continue
 		}
-		switch strings.ToLower(strings.TrimSpace(agent.RoleName)) {
-		case "lead", "orchestrator":
-			return agent.Name, nil
+		profile, err := adapter.dependencies.WorkerProfiles.Get(ctx, workspace, agent.ProfileName)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			return "", err
+		}
+		if profile != nil && strings.TrimSpace(profile.ParentEpic) == epicID {
+			return agent.AgentID, nil
 		}
 	}
 	return "", nil
+}
+
+func canonicalEpicLead(agent *agentsmodule.Agent) bool {
+	if agent == nil {
+		return false
+	}
+	switch agent.Kind {
+	case agentsmodule.AgentKindLead, agentsmodule.AgentKindOrchestrator, agentsmodule.AgentKindCampaignOrchestrator:
+		return true
+	}
+	roleName := strings.ToLower(strings.TrimSpace(agent.Behavior.RoleName))
+	return roleName == "lead" || roleName == "orchestrator"
 }
 
 func (adapter *executionTaskRunConvergenceAdapter) EnsureLeadTaskNotification(ctx context.Context, notification execution.LeadTaskNotification) error {

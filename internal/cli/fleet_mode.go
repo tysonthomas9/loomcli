@@ -21,12 +21,12 @@ const fleetModeEnvVar = "LOOM_ISSUE_BACKEND"
 
 // isFleetMode returns true when the effective issue backend is "fleet",
 // indicating that a remote fleet server manages agent orchestration and the
-// local daemon should suppress local issue-daemon subsystems.
+// local runtime should route issue operations to the remote fleet server.
 //
 // Detection precedence:
 //  1. LOOM_ISSUE_BACKEND=fleet env var
-//  2. cfg.Backend == "fleet" from the active FleetDB daemon profile
-func IsFleetMode(cfg *config.DaemonConfig) bool {
+//  2. cfg.Backend == "fleet" from the active runtime projection
+func IsFleetMode(cfg *config.RuntimeConfig) bool {
 	if os.Getenv(fleetModeEnvVar) == BackendFleet {
 		return true
 	}
@@ -36,28 +36,6 @@ func IsFleetMode(cfg *config.DaemonConfig) bool {
 	return false
 }
 
-// printDaemonBanner prints the startup banner for the daemon, varying the
-// output for fleet mode (no agent list) vs normal mode (shows agents).
-func PrintDaemonBanner(config *config.DaemonConfig, projectDir string) {
-	fmt.Println("═══════════════════════════════════════════════════════════════")
-	if IsFleetMode(config) {
-		fmt.Println("Loom Agent Supervisor — Fleet Mode")
-		fmt.Printf("PID: %d\n", os.Getpid())
-		fmt.Printf("Workspace: %s\n", projectDir)
-		fmt.Println("Agent supervision disabled — agents managed by fleet server")
-	} else {
-		fmt.Println("Loom Agent Supervisor")
-		fmt.Printf("PID: %d\n", os.Getpid())
-		fmt.Printf("Workspace: %s\n", projectDir)
-		fmt.Printf("Agents: %d\n", len(config.Agents))
-		for _, a := range config.Agents {
-			fmt.Printf("  - %s (%s)\n", a.Worktree, a.Role)
-		}
-	}
-	fmt.Println("Press Ctrl+C to stop")
-	fmt.Println("═══════════════════════════════════════════════════════════════")
-}
-
 // isFleetModeFromEnv checks fleet mode without a loaded config.
 func IsFleetModeFromEnv() bool {
 	return os.Getenv(fleetModeEnvVar) == BackendFleet
@@ -65,11 +43,11 @@ func IsFleetModeFromEnv() bool {
 
 // --- Fleet backend adapter (merged from cli_fleet_adapter.go) ---
 
-// createFleetIssueBackend resolves fleet config from daemon settings and env
-// vars, then constructs a FleetBackend. Returns an error if the fleet URL is
+// createFleetIssueBackend resolves fleet config from environment, then
+// constructs a FleetBackend. Returns an error if the fleet URL is
 // not configured.
 func createFleetIssueBackend() (backend.IssueBackend, error) {
-	cfg := config.ResolveFleetConfig(nil)
+	cfg := config.ResolveFleetConfig()
 	return createFleetIssueBackendFromConfig(cfg)
 }
 

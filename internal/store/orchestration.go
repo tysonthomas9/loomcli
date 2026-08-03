@@ -12,13 +12,10 @@ import (
 // used kind=orchestration, so the lookup falls back to that legacy kind only
 // when no active kind=interactive record exists.
 //
-// This is the join that replaces direct reads of
-// domain.Agent.OrchestratorSessionID - the cached field on the agent
-// record was a denormalization of the relationship represented natively
-// by AgentSession{Kind=interactive, AgentID=<lead-name>}. Reading via
+// This join is the only durable representation of the relationship:
+// AgentSession{Kind=interactive, AgentID=<lead-name>}. Reading via
 // the join makes AgentSession the single source of truth and avoids the
-// half-deprecation that arose when commit 9aef2ae5 stopped writing the
-// cache field on FleetDB.
+// a join avoids a second identity-owned cache.
 //
 // Returns (nil, nil) when no active session exists for the agent.
 // Returns the most-recently-updated session when multiple match - which

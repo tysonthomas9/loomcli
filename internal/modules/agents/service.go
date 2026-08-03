@@ -18,6 +18,7 @@ type Service struct {
 	identity  AgentIdentityStore
 	desired   DesiredStateStore
 	lifecycle LifecycleStore
+	bindings  DesiredStateBindingSource
 	ownership OwnershipStore
 	admission *authority.Admission
 }
@@ -33,16 +34,18 @@ func NewWithLifecycle(
 	desired DesiredStateStore,
 	ownership OwnershipStore,
 	lifecycle LifecycleStore,
+	bindings DesiredStateBindingSource,
 	admission *authority.Admission,
 ) (*Service, error) {
-	if lifecycle == nil {
-		return nil, fmt.Errorf("compose Agents lifecycle: atomic lifecycle store is required: %w", ErrUnavailable)
+	if lifecycle == nil || bindings == nil {
+		return nil, fmt.Errorf("compose Agents lifecycle: atomic lifecycle store and binding-state source are required: %w", ErrUnavailable)
 	}
 	service, err := New(reader, roles, roleStore, identity, desired, ownership, admission)
 	if err != nil {
 		return nil, err
 	}
 	service.lifecycle = lifecycle
+	service.bindings = bindings
 	return service, nil
 }
 

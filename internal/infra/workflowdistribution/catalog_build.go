@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -213,6 +214,10 @@ func BuildBuiltinBundle(ctx context.Context, name, destDir string) (string, stri
 		}
 		return "", "", err
 	}
+	if err := stageFlueRuntimeDependencies(destDir); err != nil {
+		_ = os.RemoveAll(destDir)
+		return "", output, err
+	}
 	serverPath := filepath.Join(destDir, "server.mjs")
 	if _, err := os.Stat(serverPath); err != nil {
 		return "", output, fmt.Errorf("flue build missing dist/server.mjs: %w", err)
@@ -283,6 +288,10 @@ func Build(ctx context.Context, opts BuildOptions) (*BuiltBundle, string, error)
 			return nil, redacted, redactedFlueBuildError(err, redacted)
 		}
 		return nil, "", err
+	}
+	if err := stageFlueRuntimeDependencies(outputDir); err != nil {
+		_ = os.RemoveAll(buildRoot)
+		return nil, RedactBuildDiagnostics(output), err
 	}
 	output = RedactBuildDiagnostics(output)
 	return &BuiltBundle{
@@ -552,6 +561,85 @@ func linkFlueBuildDependencies(root string) error {
 
 func LinkFlueBuildDependencies(root string) error {
 	return linkFlueBuildDependencies(root)
+}
+
+// flueRuntimePackages are dependencies that Flue deliberately leaves as bare
+// imports in its Node target. They must travel with dist: the source build's
+// node_modules tree is temporary, and Driver staging copies only dist.
+var flueRuntimePackages = []string{"valibot"}
+
+func stageFlueRuntimeDependencies(outputDir string) error {
+	runtimeRoot, err := flueRuntimeRoot()
+	if err != nil {
+		return err
+	}
+	for _, packageName := range flueRuntimePackages {
+		sourceLink := filepath.Join(runtimeRoot, "node_modules", filepath.FromSlash(packageName))
+		source, err := filepath.EvalSymlinks(sourceLink)
+		if err != nil {
+			return fmt.Errorf("%w: resolve Flue runtime dependency %s: %v", ErrBuildToolchainUnavailable, packageName, err)
+		}
+		dest := filepath.Join(outputDir, "node_modules", filepath.FromSlash(packageName))
+		if err := copyPortableDirectory(source, dest); err != nil {
+			return fmt.Errorf("stage Flue runtime dependency %s: %w", packageName, err)
+		}
+	}
+	return nil
+}
+
+// copyPortableDirectory materializes a dependency without retaining symlinks
+// into a host pnpm store. Nested links are rejected rather than allowing a
+// bundle build to copy files outside the resolved package root.
+func copyPortableDirectory(source, dest string) error {
+	info, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("source %s is not a directory", source)
+	}
+	if err := os.RemoveAll(dest); err != nil {
+		return err
+	}
+	return filepath.WalkDir(source, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(source, current)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dest, rel)
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entryInfo.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("nested symlink %s is not portable", current)
+		}
+		if entry.IsDir() {
+			return os.MkdirAll(target, entryInfo.Mode().Perm())
+		}
+		if !entryInfo.Mode().IsRegular() {
+			return fmt.Errorf("unsupported file type %s", current)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		input, err := os.Open(current) //nolint:gosec // source is beneath the resolved local package root.
+		if err != nil {
+			return err
+		}
+		output, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, entryInfo.Mode().Perm()) //nolint:gosec
+		if err != nil {
+			_ = input.Close()
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		closeOutputErr := output.Close()
+		closeInputErr := input.Close()
+		return errors.Join(copyErr, closeOutputErr, closeInputErr)
+	})
 }
 
 func loomSDKRoot() (string, error) {

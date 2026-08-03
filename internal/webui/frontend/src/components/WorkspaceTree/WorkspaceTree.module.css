@@ -866,7 +866,7 @@
 }
 
 /* Daemon disconnection prompt banner */
-.daemonPrompt {
+.connectionPrompt {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -876,12 +876,12 @@
     color-mix(in srgb, var(--color-warning, #f59e0b) 25%, transparent);
 }
 
-.daemonPromptIcon {
+.connectionPromptIcon {
   flex-shrink: 0;
   font-size: 0.875rem;
 }
 
-.daemonPromptText {
+.connectionPromptText {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
@@ -889,13 +889,13 @@
   min-width: 0;
 }
 
-.daemonPromptTitle {
+.connectionPromptTitle {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
-.daemonPromptDesc {
+.connectionPromptDesc {
   font-size: 0.6875rem;
   color: var(--color-text-tertiary);
 }

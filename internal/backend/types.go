@@ -152,9 +152,8 @@ type CloseResult struct {
 // MutationData represents a mutation event for real-time subscriptions.
 // Used by GetMutations and WaitForMutations.
 //
-// MutationData mirrors rpc.MutationEvent but is backend-agnostic. The
-// BeadsBackend subscription layer (task .11) maps rpc.MutationEvent to
-// MutationData. Other backends produce MutationData directly.
+// MutationData is the backend-agnostic durable mutation projection. Backends
+// produce it directly and the realtime adapter maps it to the SSE wire shape.
 type MutationData struct {
 	Cursor     string    `json:"cursor,omitempty"`
 	Type       string    `json:"type"`
@@ -563,8 +562,7 @@ type BatchResult struct {
 // Section 4: Mutation type constants
 // ---------------------------------------------------------------------------
 
-// Mutation event type constants. These mirror rpc.Mutation* values
-// so that backends producing MutationData use consistent labels.
+// Mutation event type constants shared by backend adapters.
 const (
 	MutationCreate        = "create"
 	MutationUpdate        = "update"

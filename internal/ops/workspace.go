@@ -43,7 +43,9 @@ type WorkspaceRepo struct {
 // WorkspaceAgentInfo represents an agent's repo/group assignments.
 type WorkspaceAgentInfo struct {
 	Name       string   `json:"name"`
+	Kind       string   `json:"kind,omitempty"`
 	RoleName   string   `json:"role_name,omitempty"`
+	Backend    string   `json:"backend,omitempty"`
 	Repos      []string `json:"repos"`
 	RepoGroups []string `json:"repo_groups"`
 	CrossRepo  bool     `json:"cross_repo"`

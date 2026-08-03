@@ -27,14 +27,14 @@ import (
 //
 //nolint:funlen // This ordered composition table keeps route precedence and one-pass dependency wiring auditable together.
 func New(deps routecontracts.Deps, automationModules automationroutes.Modules) []interface{ Register(*http.ServeMux) } {
-	onboardingModule := supportroutes.New(deps.IssueSvc, deps.AgentSvc)
+	onboardingModule := supportroutes.New(deps.IssueSvc, deps.Agents, deps.AgentsOperator)
 	taskWorkflowRuns := newTaskWorkflowRunReader(deps)
 
 	return []interface{ Register(*http.ServeMux) }{
 		agents.New(agents.Config{
-			AgentService: deps.AgentSvc, SessionTranscripts: deps.AgentSessionTranscripts,
-			LocalSessionHistory: deps.AgentLocalSessionHistory,
-			AgentRecords:        deps.Agents, AgentRecordAuthority: deps.AgentsOperator,
+			SessionTranscripts: deps.AgentSessionTranscripts,
+			InteractiveRuntime: deps.InteractiveAgentRuntime,
+			AgentRecords:       deps.Agents, AgentRecordAuthority: deps.AgentsOperator,
 			Store: deps.Store, Hub: deps.Hub,
 			Bindings: deps.AutomationBindings, OperatorAuthority: deps.AutomationOperator,
 			Provisioning: deps.AgentProvisioning, ProvisioningAuthority: deps.AgentProvisioningOperator,
@@ -82,8 +82,8 @@ func New(deps routecontracts.Deps, automationModules automationroutes.Modules) [
 			Dispatcher:       deps.Dispatcher,
 			WorkflowEventing: deps.AutomationEventing, EventAwaits: automationModules.EventAwaits,
 			Execution: deps.ExecutionDriverRuns, ExecutionAuthorities: deps.ExecutionDriverRunAuthorities,
-			AgentParentBindings: deps.AgentParentBindings,
-			TaskRunRequests:     deps.ExecutionTaskRunRequests, TaskRunRecovery: deps.ExecutionTaskRunRecovery,
+			AgentIdentities: deps.Agents,
+			TaskRunRequests: deps.ExecutionTaskRunRequests, TaskRunRecovery: deps.ExecutionTaskRunRecovery,
 			TaskRuns: deps.ExecutionTaskRuns, TaskRunAuthorities: deps.ExecutionTaskRunAuthorities,
 			WorkflowCatalog: deps.WorkflowCatalog, Artifacts: deps.Artifacts,
 			InteractionChat: deps.InteractionChat,

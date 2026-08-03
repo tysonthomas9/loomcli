@@ -1,7 +1,6 @@
 package monitor
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -9,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/lockfile"
 )
 
 const (
@@ -52,39 +50,6 @@ func init() {
 	monitorCmd.Flags().BoolVarP(&monitorNoWatch, "no-watch", "n", false, "Disable auto-refresh (one-shot mode)")
 	monitorCmd.Flags().IntVarP(&monitorInterval, "interval", "i", 5, "Refresh interval in seconds")
 	cli.RegisterCommand(monitorCmd)
-}
-
-// LoadDaemonManagedAgents reads the daemon state file and returns metadata for
-// worktrees under daemon supervision. Returns nil if unavailable or daemon died.
-func LoadDaemonManagedAgents(stateFilePath string) map[string]DaemonAgentInfo {
-	data, err := os.ReadFile(stateFilePath)
-	if err != nil {
-		return nil // File doesn't exist or can't be read
-	}
-
-	var state DaemonAgentState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil // Invalid JSON
-	}
-
-	// Check if daemon process is still running (PID must be valid and process alive)
-	if state.PID <= 0 || !lockfile.IsProcessRunning(state.PID) {
-		return nil // Invalid PID or daemon died, don't show stale [D] markers
-	}
-
-	result := make(map[string]DaemonAgentInfo)
-	for _, agent := range state.Agents {
-		if agent.Worktree != "" {
-			result[agent.Worktree] = DaemonAgentInfo{
-				Managed:       true,
-				Role:          agent.Role,
-				Repo:          agent.Repo,
-				CurrentTaskID: agent.TaskID,
-				LastActivity:  agent.LastActivity,
-			}
-		}
-	}
-	return result
 }
 
 func runMonitor(cmd *cobra.Command, args []string) {

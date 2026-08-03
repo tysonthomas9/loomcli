@@ -2,138 +2,24 @@ package service
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
 func (s *issueServiceImpl) ListIssues(ctx context.Context, params ListIssuesParams) (*ListIssuesResult, error) {
-	// Pool-less fleet mode: there is no daemon to connect to, so go
-	// directly through the IssueBackend. The pool path below only runs
-	// when multiPool/pool is wired.
-	if s.pool == nil {
-		if be, _ := s.resolveBackend(ctx); be != nil {
-			return s.listIssuesViaBackend(ctx, be, params)
-		}
-		return nil, ErrUnavailable("connection pool not initialized")
-	}
-
-	// Mixed deployment: a pool exists for the local workspace, but other
-	// workspaces (fleet-db-only) won't have one. When the request's
-	// workspace isn't in the pool registry, route to the IssueBackend
-	// instead of opening a daemon connection that would return the wrong
-	// workspace's data.
-	if wsID := middleware.WorkspaceFromContext(ctx); wsID != "" && s.multiPool != nil {
-		if s.multiPool.PoolForWorkspace(wsID) == nil {
-			if be, _ := s.resolveBackend(ctx); be != nil {
-				return s.listIssuesViaBackend(ctx, be, params)
-			}
-		}
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-
-	client, err := s.pool.Get(ctx)
-	if err != nil {
-		// Pool acquisition failed. In fleet mode the pool is intentionally
-		// non-functional (no local issue daemon at all), so before bubbling
-		// "issue backend unavailable" up to the FE, see whether a backend is
-		// wired and serve the list from there.
-		if be, _ := s.resolveBackend(ctx); be != nil {
-			return s.listIssuesViaBackend(ctx, be, params)
-		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			return nil, ErrTimeout("timeout connecting to issue backend")
-		}
-		slog.Error("connection pool error", "err", err)
-		return nil, ErrUnavailable("issue backend unavailable")
+	be, svcErr := s.resolveBackend(ctx)
+	if svcErr != nil {
+		return nil, svcErr
 	}
-	rpcOK := false
-	defer s.releaseClient(client, &rpcOK)
-
-	// Try the composite ListKanban RPC first — 1 round-trip instead of 3.
-	kanbanArgs := &rpc.ListKanbanArgs{
-		ListArgs:       *params.Args,
-		IncludeBlocked: params.IncludeBlocked,
-		ExcludeStatus:  params.ExcludeStatus,
-	}
-	kanbanResp, kanbanErr := client.ListKanban(kanbanArgs)
-	if kanbanErr == nil {
-		rpcOK = true
-		return buildResultFromKanbanRPC(kanbanResp, params.IncludeBlocked), nil
-	}
-	slog.Error("ListKanban RPC error", "err", kanbanErr)
-	return nil, ErrInternal("failed to list issues", kanbanErr)
+	return s.listIssuesViaBackend(ctx, be, params)
 }
 
-// buildResultFromKanbanRPC converts the composite RPC response into the
-// service-layer result shape. Kanban state flags are passed through from the
-// RPC response; this layer does not rebuild computed queues from raw issue data.
-func buildResultFromKanbanRPC(resp *rpc.ListKanbanResponse, includeBlocked bool) *ListIssuesResult {
-	if !includeBlocked {
-		issuesWithParent := make([]IssueWithParent, len(resp.Issues))
-		for i, ki := range resp.Issues {
-			issuesWithParent[i] = kanbanRPCToIssueWithParent(ki)
-		}
-		return &ListIssuesResult{Issues: issuesWithParent}
-	}
-
-	kanbanIssues := make([]KanbanIssue, len(resp.Issues))
-	for i, ki := range resp.Issues {
-		kanbanIssues[i] = kanbanRPCToKanbanIssue(ki)
-	}
-	return &ListIssuesResult{KanbanIssues: kanbanIssues}
-}
-
-func kanbanRPCToIssueWithParent(ki *rpc.KanbanIssueRPC) IssueWithParent {
-	iwp := IssueWithParent{IssueWithCounts: ki.IssueWithCounts}
-	if ki.ParentID != "" {
-		pid, pt := ki.ParentID, ki.ParentTitle
-		iwp.Parent = &pid
-		iwp.ParentTitle = &pt
-	}
-	if ki.Repo != "" {
-		repo := ki.Repo
-		iwp.Repo = &repo
-	}
-	return iwp
-}
-
-func kanbanRPCToKanbanIssue(ki *rpc.KanbanIssueRPC) KanbanIssue {
-	out := KanbanIssue{IssueWithCounts: ki.IssueWithCounts}
-	if ki.ParentID != "" {
-		pid, pt := ki.ParentID, ki.ParentTitle
-		out.Parent = &pid
-		out.ParentTitle = &pt
-	}
-	if ki.Repo != "" {
-		repo := ki.Repo
-		out.Repo = &repo
-	}
-	out.IsReady = ki.IsReady
-	out.IsDeferred = ki.IsDeferred
-	if ki.IsBlocked || ki.BlockedByCount > 0 || len(ki.BlockedBy) > 0 || len(ki.BlockedByDetails) > 0 {
-		out.IsBlocked = true
-		out.BlockedByCount = ki.BlockedByCount
-		out.BlockedBy = ki.BlockedBy
-		out.BlockedByDetails = ki.BlockedByDetails
-		if out.BlockedByCount == 0 {
-			out.BlockedByCount = len(out.BlockedBy)
-		}
-	}
-	return out
-}
-
-// listIssuesViaBackend serves a list request through the IssueBackend
-// abstraction. Used when there is no daemon connection pool to talk to —
-// most importantly, in fleet mode where the local issue daemon is intentionally
-// absent and every list query has to hit the fleet HTTP API instead.
+// listIssuesViaBackend serves a list request through the IssueBackend port.
 //
 // This port covers the standard (non-kanban) list shape and enriches kanban
 // blocked state from IssueBackend.Blocked. Parent-title enrichment requires
@@ -297,7 +183,7 @@ func applyBlockedSummary(ki *KanbanIssue, blocked backend.IssueData) {
 func (s *issueServiceImpl) blockedIssueMap(
 	ctx context.Context,
 	be backend.IssueBackend,
-	args *rpc.ListArgs,
+	args *ListFilter,
 ) (map[string]backend.IssueData, error) {
 	blocked, err := be.Blocked(ctx, blockedOptsFromListArgs(args))
 	if err != nil {
@@ -314,7 +200,7 @@ func (s *issueServiceImpl) blockedIssueMap(
 func (s *issueServiceImpl) readyIssueIDMap(
 	ctx context.Context,
 	be backend.IssueBackend,
-	args *rpc.ListArgs,
+	args *ListFilter,
 ) (map[string]bool, error) {
 	ready, err := be.Ready(ctx, readyOptsFromListArgs(args))
 	if err != nil {
@@ -327,7 +213,7 @@ func (s *issueServiceImpl) readyIssueIDMap(
 func (s *issueServiceImpl) deferredIssueMap(
 	ctx context.Context,
 	be backend.IssueBackend,
-	args *rpc.ListArgs,
+	args *ListFilter,
 ) (map[string]backend.IssueData, error) {
 	deferredBackend, ok := be.(backend.DeferredIssueBackend)
 	if !ok {
@@ -357,7 +243,7 @@ func issueDataMap(issues []backend.IssueData) map[string]backend.IssueData {
 	return out
 }
 
-func readyOptsFromListArgs(args *rpc.ListArgs) backend.ReadyOpts {
+func readyOptsFromListArgs(args *ListFilter) backend.ReadyOpts {
 	if args == nil {
 		return backend.ReadyOpts{}
 	}
@@ -371,7 +257,7 @@ func readyOptsFromListArgs(args *rpc.ListArgs) backend.ReadyOpts {
 	}
 }
 
-func deferredOptsFromListArgs(args *rpc.ListArgs) backend.DeferredOpts {
+func deferredOptsFromListArgs(args *ListFilter) backend.DeferredOpts {
 	if args == nil {
 		return backend.DeferredOpts{}
 	}
@@ -385,7 +271,7 @@ func deferredOptsFromListArgs(args *rpc.ListArgs) backend.DeferredOpts {
 	}
 }
 
-func blockedOptsFromListArgs(args *rpc.ListArgs) backend.BlockedOpts {
+func blockedOptsFromListArgs(args *ListFilter) backend.BlockedOpts {
 	if args == nil {
 		return backend.BlockedOpts{}
 	}
@@ -448,13 +334,13 @@ func backendIssueDataToWithCounts(d *backend.IssueData) *types.IssueWithCounts {
 // TestBackendIssueDataToWithCounts_CarriesNotes — so the kanban board can
 // compute the "blocked with notes" needs-attention state.)
 
-// listArgsToBackendOpts converts the rpc.ListArgs the webui handler
-// composes for the daemon path into the backend.ListOpts shape. We map
+// listArgsToBackendOpts converts the Web UI query contract into the
+// backend.ListOpts shape. We map
 // only fields that backend.IssueBackend.List accepts uniformly across
 // drivers — fleet-db rejects several optional filters (see ListOpts
 // "fleet-db: unsupported" comments), so passing them through would
 // surface as runtime errors instead of being silently ignored.
-func listArgsToBackendOpts(a *rpc.ListArgs) backend.ListOpts {
+func listArgsToBackendOpts(a *ListFilter) backend.ListOpts {
 	if a == nil {
 		return backend.ListOpts{}
 	}

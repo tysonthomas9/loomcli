@@ -2,13 +2,12 @@
 # End-to-end epic runner smoke test.
 #
 # This runs inside the e2e Podman image and exercises:
-#   workspace create -> daemon node -> epic runner -> ephemeral task agents
+#   workspace create -> epic runner -> ephemeral task agents
 #   -> Codex backend CLI -> commit -> loom push -> close -> dependent unblock.
 
 set -euo pipefail
 
 ROOT="$(mktemp -d /tmp/loom-epic-runner.XXXXXX)"
-DAEMON_PID=""
 EPIC_RUNNER_TIMEOUT="${EPIC_RUNNER_TIMEOUT:-120s}"
 WORKSPACE_PATH=""
 
@@ -32,10 +31,6 @@ cleanup() {
                 echo >&2
             fi
         fi
-        if [[ -f "$ROOT/daemon.log" ]]; then
-            echo "---- daemon command/start log lines ----" >&2
-            grep -E 'agent command|agent-commands|agent started|failed to start|config changed|skipping add|desired_state|worktree' "$ROOT/daemon.log" >&2 || true
-        fi
         if [[ -d "$WORKSPACE_PATH/.loom/logs" ]]; then
             while IFS= read -r log; do
                 [[ -f "$log" ]] || continue
@@ -47,10 +42,6 @@ cleanup() {
             echo "---- codex invocations ----" >&2
             cat "$STUB_CODEX_INVOCATIONS" >&2
         fi
-    fi
-    if [[ -n "$DAEMON_PID" ]] && kill -0 "$DAEMON_PID" 2>/dev/null; then
-        kill "$DAEMON_PID" 2>/dev/null || true
-        wait "$DAEMON_PID" 2>/dev/null || true
     fi
     return "$status"
 }
@@ -110,22 +101,7 @@ if ! loom workspace show --json "$LOOM_WORKSPACE" >/dev/null 2>&1; then
 fi
 cd "$WORKSPACE_PATH"
 
-loom daemon > "$ROOT/daemon.log" 2>&1 &
-DAEMON_PID="$!"
-NODE_ID="loom-supervisor-$(hostname)-$DAEMON_PID"
-
-for _ in {1..60}; do
-    if loom daemon status >/dev/null 2>&1; then
-        break
-    fi
-    sleep 0.5
-done
-
-if ! loom daemon status >/dev/null 2>&1; then
-    echo "daemon did not become ready" >&2
-    cat "$ROOT/daemon.log" >&2 || true
-    exit 1
-fi
+NODE_ID="loom-epic-runner-$(hostname)-$$"
 
 create_issue() {
     loom data --output json create "$@" | jq -r '.id'

@@ -1,26 +1,21 @@
 package backends
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/harness"
 	"github.com/tysonthomas9/loomcli/internal/usage"
 )
@@ -75,53 +70,6 @@ func requireBinaryOnPath(t *testing.T, name string) {
 		t.Fatalf("write fake %s binary: %v", name, err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
-func shortBackendSocketDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "loom-sock-")
-	if err != nil {
-		t.Fatalf("creating short socket dir: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
-}
-
-func startBackendIPCServer(t *testing.T, socketPath string, handler func(cli.AgentIPCRequest) cli.AgentIPCResponse) {
-	t.Helper()
-	ln, err := net.Listen("unix", socketPath)
-	if err != nil {
-		t.Fatalf("listen on %s: %v", socketPath, err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer func() { _ = c.Close() }()
-
-				_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-				scanner := bufio.NewScanner(c)
-				if !scanner.Scan() {
-					return
-				}
-
-				var req cli.AgentIPCRequest
-				if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
-					return
-				}
-
-				resp := handler(req)
-				data, _ := json.Marshal(resp)
-				data = append(data, '\n')
-				_, _ = c.Write(data)
-			}(conn)
-		}
-	}()
 }
 
 func TestRunHarness_PipesPromptAndCallsWrapper(t *testing.T) {
@@ -460,62 +408,6 @@ func TestRunHarness_RetryablePolicyPassedThrough(t *testing.T) {
 	// retry/backoff fields are the actual contract under test here.
 	if got.Max != want.Max || got.BaseBackoff != want.BaseBackoff || got.MaxBackoff != want.MaxBackoff {
 		t.Errorf("RetryPolicy: got %+v, want %+v", got, want)
-	}
-}
-
-func TestRunHarness_AutoAttachesDaemonActivityObserver(t *testing.T) {
-	requireBinaryOnPath(t, "fake-tool")
-
-	socketPath := filepath.Join(shortBackendSocketDir(t), "ipc.sock")
-	captured := make(chan cli.AgentIPCRequest, 1)
-	startBackendIPCServer(t, socketPath, func(req cli.AgentIPCRequest) cli.AgentIPCResponse {
-		captured <- req
-		return cli.AgentIPCResponse{Success: true}
-	})
-
-	t.Setenv("LOOM_DAEMON_SOCKET", socketPath)
-	t.Setenv("LOOM_AGENT_NAME", "worker-1")
-	t.Setenv("LOOM_SESSION_ID", "session-1")
-	t.Setenv("LOOM_AGENT_IPC_AUTH_TOKEN", "token-1")
-	t.Setenv("LOOM_SERVER_URL", "")
-	t.Setenv("LOOM_ISSUE_BACKEND", "")
-
-	cli.ResetDefaultIssueBackend()
-	t.Cleanup(cli.ResetDefaultIssueBackend)
-
-	activityAt := time.Unix(1700000000, 123456000).UTC()
-	installWrapperRunMock(t, func(ctx context.Context, cfg hwharness.Config, p harness.RetryPolicy) (hwharness.Result, error) {
-		if p.OnActivity == nil {
-			t.Fatal("runHarness did not auto-attach a daemon activity observer")
-		}
-		p.OnActivity(wrapper.Snapshot{LastOutputAt: activityAt})
-		return hwharness.Result{Result: wrapper.Result{Status: wrapper.StatusIdle}}, nil
-	})
-
-	if err := runHarness(context.Background(), nil, harnessInvocation{
-		BinaryName:  "fake-tool",
-		LineHandler: func(string) {},
-		RetryPolicy: harness.RetryPolicy{Max: 0, BaseBackoff: 1, MaxBackoff: 1},
-	}); err != nil {
-		t.Fatalf("runHarness err: %v", err)
-	}
-
-	select {
-	case req := <-captured:
-		if req.Operation != cli.IPCOpHeartbeat {
-			t.Errorf("operation = %q, want %q", req.Operation, cli.IPCOpHeartbeat)
-		}
-		if req.AgentName != "worker-1" {
-			t.Errorf("agent_name = %q, want worker-1", req.AgentName)
-		}
-		if req.SessionID != "session-1" || req.AuthToken != "token-1" {
-			t.Errorf("IPC/session metadata = session:%q token:%q", req.SessionID, req.AuthToken)
-		}
-		if !req.LastActivityAt.Equal(activityAt) {
-			t.Errorf("last_activity_at = %v, want %v", req.LastActivityAt, activityAt)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for auto-attached heartbeat")
 	}
 }
 

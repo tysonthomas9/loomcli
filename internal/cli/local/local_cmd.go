@@ -34,8 +34,6 @@ var (
 	localServiceStartServe      = startServeProcess
 	localServiceAwaitServe      = awaitServeHealthy
 	localServiceWaitServe       = waitServeExit
-	localServiceStartDaemon     = startLocalDaemonSupervisor
-	localServiceAwaitDaemon     = awaitLocalDaemonSupervisor
 	localServiceRestartDelay    = time.Second
 	localServiceMaxRestartDelay = 30 * time.Second
 )
@@ -156,9 +154,9 @@ func runService(cmd *cobra.Command, _ []string) error {
 }
 
 // superviseLocalServe keeps the packaged runtime alive after an unexpected
-// `loom serve` exit. A successful generation owns one daemon supervisor; the
-// daemon is stopped before the next generation starts so it never retains a
-// dead FleetDB URL. Initial startup errors remain synchronous so Desktop can
+// `loom serve` exit. Execution, Automation, Agents, and Interaction all run in
+// the serve process, so each generation has exactly one runtime process and no
+// companion supervisor. Initial startup errors remain synchronous so Desktop can
 // surface packaging or compatibility failures instead of hiding them in an
 // endless retry loop.
 func superviseLocalServe(ctx context.Context, cfg *localServiceConfig, logFile *os.File, info *runtimeInfo, out io.Writer) error {
@@ -181,12 +179,8 @@ func superviseLocalServe(ctx context.Context, cfg *localServiceConfig, logFile *
 		}
 
 		everHealthy = true
-		generationCtx, stopGeneration := context.WithCancel(ctx)
-		daemonDone := localServiceStartDaemon(generationCtx, cfg.dataDir, cfg.exe, cfg.port, cfg.url)
 		_, _ = fmt.Fprintf(out, "Loom local runtime: %s\n", info.URL)
 		waitErr := localServiceWaitServe(ctx, serveCmd, cfg.dataDir, info)
-		stopGeneration()
-		localServiceAwaitDaemon(cfg.dataDir, daemonDone)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -201,7 +195,6 @@ func startLocalServeGeneration(ctx context.Context, cfg *localServiceConfig, log
 	info.Status = "starting"
 	info.Error = ""
 	info.ServePID = 0
-	info.DaemonPID = 0
 	if err := writeRuntime(cfg.dataDir, info); err != nil {
 		return nil, err
 	}
@@ -225,6 +218,17 @@ func waitForLocalServeRestart(ctx context.Context, out io.Writer, cause error, d
 	}
 	_, _ = fmt.Fprintln(out, message)
 	return sleepOrDone(ctx, delay)
+}
+
+func sleepOrDone(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func nextLocalServeRestartDelay(current time.Duration) time.Duration {
@@ -743,7 +747,7 @@ func runtimePIDs(info *runtimeInfo) []int {
 	}
 	pids := make([]int, 0, 3)
 	seen := map[int]struct{}{}
-	for _, pid := range []int{info.PID, info.ServePID, info.DaemonPID} {
+	for _, pid := range []int{info.PID, info.ServePID} {
 		if pid <= 0 {
 			continue
 		}

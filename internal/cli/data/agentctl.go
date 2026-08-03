@@ -1,7 +1,6 @@
 package data
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,22 +20,19 @@ type agentMessageEnvelope struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// agentStopForce holds the --force flag for `loom data agent stop`.
-var agentStopForce bool
-
 // agentCmd is the `loom data agent` parent command (manage individual
 // agents by name).
 var agentCmd = &cobra.Command{
 	Use:   "agent",
-	Short: "Control a single agent on the loom server (stop/start/restart/yield)",
+	Short: "Control a single agent on the Loom server (stop/start/restart)",
 }
 
 var agentStopCmd = &cobra.Command{
 	Use:   "stop <agent-name>",
-	Short: "Yield the agent (or force-stop with --force)",
+	Short: "Stop an agent",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentControl(cmd.Context(), args[0], "stop", agentStopForce, !agentStopForce)
+		return runAgentControl(cmd.Context(), args[0], "stop")
 	},
 }
 
@@ -45,7 +41,7 @@ var agentStartCmd = &cobra.Command{
 	Short: "Start a stopped agent",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentControl(cmd.Context(), args[0], "start", false, false)
+		return runAgentControl(cmd.Context(), args[0], "start")
 	},
 }
 
@@ -54,29 +50,16 @@ var agentRestartCmd = &cobra.Command{
 	Short: "Restart an agent",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentControl(cmd.Context(), args[0], "restart", false, false)
-	},
-}
-
-var agentYieldCmd = &cobra.Command{
-	Use:   "yield <agent-name>",
-	Short: "Request that the agent yield after its current task",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAgentControl(cmd.Context(), args[0], "yield", false, true)
+		return runAgentControl(cmd.Context(), args[0], "restart")
 	},
 }
 
 func init() {
-	agentStopCmd.Flags().BoolVar(&agentStopForce, "force", false, "Force-stop immediately instead of yielding")
-	agentCmd.AddCommand(agentStopCmd, agentStartCmd, agentRestartCmd, agentYieldCmd)
+	agentCmd.AddCommand(agentStopCmd, agentStartCmd, agentRestartCmd)
 }
 
 // runAgentControl POSTs to /api/workspaces/{ws}/agents/{name}/{action}.
-// Setting force=true sends {"force": true} in the body (used by `stop`).
-// expectAccepted indicates the server typically returns 202 on success
-// (used by yield and non-force stop).
-func runAgentControl(ctx context.Context, name, action string, force, expectAccepted bool) error {
+func runAgentControl(ctx context.Context, name, action string) error {
 	cli, baseURL, err := getHTTPClient()
 	if err != nil {
 		return err
@@ -87,7 +70,7 @@ func runAgentControl(ctx context.Context, name, action string, force, expectAcce
 	}
 
 	path := baseURL + "/api/workspaces/" + url.PathEscape(wsID) + "/agents/" + url.PathEscape(name) + "/" + url.PathEscape(action)
-	raw, err := postAgentAction(ctx, cli, path, action, force)
+	raw, err := postAgentAction(ctx, cli, path, action)
 	if err != nil {
 		return err
 	}
@@ -97,32 +80,20 @@ func runAgentControl(ctx context.Context, name, action string, force, expectAcce
 		return err
 	}
 	if msg == "" {
-		if expectAccepted {
-			msg = fmt.Sprintf("agent %q %s requested", name, action)
-		} else {
-			msg = fmt.Sprintf("agent %q %s", name, action)
-		}
+		msg = fmt.Sprintf("agent %q %s", name, action)
 	}
 	return printMessageResult(os.Stdout, msg, outputFormat)
 }
 
-// postAgentAction sends the control POST and returns the raw response body,
-// mapping HTTP status codes to error values. 200 and 202 are both treated
-// as success (see internal/webui/handlers/agentcontrol).
-func postAgentAction(ctx context.Context, cli *http.Client, path, action string, force bool) ([]byte, error) {
-	var body io.Reader
-	if force {
-		b, _ := json.Marshal(map[string]bool{"force": true})
-		body = bytes.NewReader(b)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, path, body)
+// postAgentAction sends the canonical lifecycle POST and requires a settled
+// 200 response. The retired daemon command path used 202; accepting it here
+// would hide a server/client version mismatch.
+func postAgentAction(ctx context.Context, cli *http.Client, path, action string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, path, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/json")
-	if force {
-		req.Header.Set("Content-Type", "application/json")
-	}
 	resp, err := cli.Do(req)
 	if err != nil {
 		return nil, err
@@ -130,10 +101,10 @@ func postAgentAction(ctx context.Context, cli *http.Client, path, action string,
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusServiceUnavailable {
-		return nil, fmt.Errorf("daemon unavailable on server")
+		return nil, fmt.Errorf("agent runtime unavailable on server")
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("agent %s: HTTP %d: %s", action, resp.StatusCode, string(raw))
 	}
 	return raw, nil

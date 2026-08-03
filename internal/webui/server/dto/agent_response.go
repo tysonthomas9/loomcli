@@ -31,12 +31,8 @@ type AgentStatusResponse struct {
 	Labels []string `json:"labels"`
 }
 
-// AgentLifecycleResponse is the common wire contract returned by every agent
-// lifecycle route, whether the transition completed synchronously or was
-// durably queued for a supervised runtime owner.
+// AgentLifecycleResponse is returned after Agents owns the desired-state write.
 type AgentLifecycleResponse struct {
-	Message   string `json:"message"`
-	Pending   bool   `json:"pending"`
-	CommandID string `json:"command_id"`
-	Status    string `json:"status"`
+	Message string `json:"message"`
+	Status  string `json:"status"`
 }

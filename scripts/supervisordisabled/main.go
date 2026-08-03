@@ -25,16 +25,10 @@ const (
 )
 
 var (
-	errProofFailed = errors.New("supervisor-disabled proof failed")
-	requiredEnv    = map[string]string{
-		"LOOM_LOCAL_MODE_PLANE":  "ts",
-		"LOOM_TASK_READY_EVENTS": "1",
-	}
+	errProofFailed     = errors.New("supervisor-disabled proof failed")
 	rowEnvironmentKeys = []string{
 		"LOCAL_MODE_COMPOSE_FILES",
 		"LOCAL_MODE_COMPOSE_UP_FLAGS",
-		"LOOM_LOCAL_MODE_PLANE",
-		"LOOM_TASK_READY_EVENTS",
 	}
 	// hostEnvironmentAllowlist is the complete ambient environment inherited by
 	// proof commands. Runtime selectors such as LOOM_*, LOCAL_MODE_*, COMPOSE_*,
@@ -63,8 +57,8 @@ var (
 		"XDG_RUNTIME_DIR",
 	}
 	requiredAssertions = []string{
-		"local-mode-plane-ts",
-		"task-ready-events-enabled",
+		"prompt-agent-plane-default",
+		"task-ready-events-default",
 		"zero-auto-agentdefs",
 		"zero-daemon-processes",
 		"zero-daemon-sockets",
@@ -75,6 +69,12 @@ var (
 		"planner-transcript",
 		"coder-transcript",
 		"coder-diff",
+		"stale-timeout-and-launch-heartbeats",
+		"explicit-task-type-arbitration",
+		"preflight-retry-recovery-concurrency-epic",
+		"periodic-desired-state-reconciliation",
+		"canonical-agentdef-migration",
+		"legacy-supervisor-paths-retired",
 	}
 )
 
@@ -288,14 +288,12 @@ func validateDeterministicPlanCoderContract(candidate row) error {
 	}
 	wantCoordinates := coordinates{
 		Depth: "end-to-end", Realness: "deterministic", Provisioning: "compose",
-		Polarity: "positive-and-negative", Target: "loom-serve-ts-plane",
+		Polarity: "positive-and-negative", Target: "loom-serve-prompt-agent-plane",
 	}
 	if candidate.Coordinates != wantCoordinates {
 		return fmt.Errorf("%s coordinates drifted: got %+v, want %+v", label, candidate.Coordinates, wantCoordinates)
 	}
 	wantEnv := map[string]string{
-		"LOOM_LOCAL_MODE_PLANE":       "ts",
-		"LOOM_TASK_READY_EVENTS":      "1",
 		"LOCAL_MODE_COMPOSE_FILES":    "test/local-mode/docker-compose.workflow-build.yml",
 		"LOCAL_MODE_COMPOSE_UP_FLAGS": "--build -d",
 	}
@@ -316,6 +314,7 @@ func validateDeterministicPlanCoderContract(candidate row) error {
 	}
 	if err := validateExactStage(label, "verify", candidate.Verify, []step{
 		{ID: "deterministic-evidence", Argv: []string{"make", "local-mode-verify"}, TimeoutSeconds: 300},
+		{ID: "phase6-parity", Argv: []string{"make", "test-phase6-parity"}, TimeoutSeconds: 900},
 	}); err != nil {
 		return err
 	}
@@ -359,12 +358,6 @@ func validateRow(candidate row) error {
 	}
 	if err := validateExplicitEnvironment(label, candidate.Env); err != nil {
 		return err
-	}
-	for _, key := range []string{"LOOM_LOCAL_MODE_PLANE", "LOOM_TASK_READY_EVENTS"} {
-		want := requiredEnv[key]
-		if got := candidate.Env[key]; got != want {
-			return fmt.Errorf("%s env %s must be %q, got %q", label, key, want, got)
-		}
 	}
 	if err := validateAssertions(label, candidate.Assertions); err != nil {
 		return err

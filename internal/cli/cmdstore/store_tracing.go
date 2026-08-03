@@ -40,14 +40,12 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		inner:                inner,
 		workspaces:           &tracedWorkspaceStore{inner: inner.Workspaces()},
 		repos:                &tracedRepoStore{inner: inner.Repos()},
-		agents:               &tracedAgentStore{inner: inner.Agents()},
 		nodes:                &tracedNodeStore{inner: inner.Nodes()},
 		agentSessions:        &tracedAgentSessionStore{inner: inner.AgentSessions()},
 		terminalSessions:     &tracedTerminalSessionStore{inner: inner.TerminalSessions()},
 		artifacts:            &tracedArtifactStore{inner: inner.Artifacts()},
 		agentLeases:          &tracedAgentLeaseStore{inner: inner.AgentLeases()},
 		agentOwnershipLeases: &tracedAgentOwnershipLeaseStore{inner: inner.AgentOwnershipLeases()},
-		agentCommands:        &tracedAgentCommandStore{inner: inner.AgentCommands()},
 		agentInboxMessages:   &tracedAgentInboxMessageStore{inner: inner.AgentInboxMessages()},
 		drivers:              &tracedDriverStore{inner: inner.Drivers()},
 		driverVersions:       &tracedDriverVersionStore{inner: inner.DriverVersions()},
@@ -62,7 +60,6 @@ func WrapStoreWithTracing(inner store.Store) store.Store {
 		awaits:               &tracedAwaitStore{inner: inner.Awaits()},
 		workers:              &tracedWorkerStore{inner: inner.Workers()},
 		roles:                &tracedRoleStore{inner: inner.Roles()},
-		daemon:               &tracedDaemonStore{inner: inner.Daemon()},
 		connectors:           &tracedConnectorStore{inner: inner.Connectors()},
 		connectorGrants:      &tracedConnectorGrantStore{inner: inner.ConnectorGrants()},
 		connectorCalls:       &tracedConnectorAuditStore{inner: inner.ConnectorCalls()},
@@ -73,14 +70,12 @@ type tracedStore struct {
 	inner                store.Store
 	workspaces           *tracedWorkspaceStore
 	repos                *tracedRepoStore
-	agents               *tracedAgentStore
 	nodes                *tracedNodeStore
 	agentSessions        *tracedAgentSessionStore
 	terminalSessions     *tracedTerminalSessionStore
 	artifacts            *tracedArtifactStore
 	agentLeases          *tracedAgentLeaseStore
 	agentOwnershipLeases *tracedAgentOwnershipLeaseStore
-	agentCommands        *tracedAgentCommandStore
 	agentInboxMessages   *tracedAgentInboxMessageStore
 	drivers              *tracedDriverStore
 	driverVersions       *tracedDriverVersionStore
@@ -95,7 +90,6 @@ type tracedStore struct {
 	awaits               *tracedAwaitStore
 	workers              *tracedWorkerStore
 	roles                *tracedRoleStore
-	daemon               *tracedDaemonStore
 	connectors           *tracedConnectorStore
 	connectorGrants      *tracedConnectorGrantStore
 	connectorCalls       *tracedConnectorAuditStore
@@ -103,7 +97,6 @@ type tracedStore struct {
 
 func (t *tracedStore) Workspaces() store.WorkspaceStore       { return t.workspaces }
 func (t *tracedStore) Repos() store.RepoStore                 { return t.repos }
-func (t *tracedStore) Agents() store.AgentStore               { return t.agents }
 func (t *tracedStore) Nodes() store.NodeStore                 { return t.nodes }
 func (t *tracedStore) AgentSessions() store.AgentSessionStore { return t.agentSessions }
 func (t *tracedStore) TerminalSessions() store.TerminalSessionStore {
@@ -115,9 +108,6 @@ func (t *tracedStore) AgentLeases() store.AgentLeaseStore {
 }
 func (t *tracedStore) AgentOwnershipLeases() store.AgentOwnershipLeaseStore {
 	return t.agentOwnershipLeases
-}
-func (t *tracedStore) AgentCommands() store.AgentCommandStore {
-	return t.agentCommands
 }
 func (t *tracedStore) AgentInboxMessages() store.AgentInboxMessageStore {
 	return t.agentInboxMessages
@@ -155,9 +145,8 @@ func (t *tracedStore) TaskRunEvents() store.TaskRunEventStore {
 func (t *tracedStore) Outbox() store.OutboxStore {
 	return t.outbox
 }
-func (t *tracedStore) Workers() store.WorkerStore       { return t.workers }
-func (t *tracedStore) Roles() store.RoleStore           { return t.roles }
-func (t *tracedStore) Daemon() store.DaemonProfileStore { return t.daemon }
+func (t *tracedStore) Workers() store.WorkerStore { return t.workers }
+func (t *tracedStore) Roles() store.RoleStore     { return t.roles }
 
 // Awaits returns the traced await wrapper (chunk AW5): spans per call with
 // workspace / instance / run / pattern attributes.

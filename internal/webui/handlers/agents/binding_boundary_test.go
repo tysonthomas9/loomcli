@@ -47,7 +47,7 @@ func TestPromptAgentCreateRequiresManagedBindingAuthorityBeforeMutation(t *testi
 	}
 }
 
-func TestLegacyBindingPatchRejectsWrongWorkspaceAuthority(t *testing.T) {
+func TestLegacyBindingPatchIsNotAnAgentRoute(t *testing.T) {
 	st := newAgentRecordStore(t)
 	if _, err := st.TriggerBindings().Create(context.Background(), store.TriggerBindingCreate{
 		WorkspaceKey: agentRecordTestWS, BindingID: "legacy", Name: "Legacy", SourceKind: store.InternalSourceKind,
@@ -60,10 +60,8 @@ func TestLegacyBindingPatchRejectsWrongWorkspaceAuthority(t *testing.T) {
 		Store: st, Bindings: bindings, AgentRecords: &testAgentRecordAPI{store: st},
 		AgentRecordAuthority: testOperatorAuthorityResolver{},
 		OperatorAuthority: boundaryOperatorResolverFunc(func(_ *http.Request, workspace string, action authority.Action) (authority.OperatorAuthority, error) {
-			if workspace != agentRecordTestWS || action != automation.ActionUpdateBinding {
-				t.Fatalf("authority scope = %q/%q", workspace, action)
-			}
-			return authority.OperatorAuthority{}, authority.ErrWorkspaceMismatch
+			t.Fatalf("retired legacy binding route requested authority for %q/%q", workspace, action)
+			return authority.OperatorAuthority{}, nil
 		}),
 		WorkspaceFromContext: func(context.Context) string { return agentRecordTestWS },
 		BindingGrants:        testBindingGrantCompatibility{grants: st.ConnectorGrants()},
@@ -74,8 +72,8 @@ func TestLegacyBindingPatchRejectsWrongWorkspaceAuthority(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer wrong-workspace")
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body=%s", response.Code, response.Body.String())
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", response.Code, response.Body.String())
 	}
 	binding, err := st.TriggerBindings().Get(context.Background(), agentRecordTestWS, "legacy")
 	if err != nil || binding.Name != "Legacy" {

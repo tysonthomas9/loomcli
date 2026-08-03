@@ -196,6 +196,15 @@ issue_status_closed() {
     '(.data.status // .status // "") as $status | $status == "closed" or $status == "done"' >/dev/null
 }
 
+issue_has_local_branch_review_ref() {
+  task_id="$1"
+  issue_json "$task_id" | jq -e --arg task_id "$task_id" '
+    (.data // .) as $issue |
+    $issue.status == "review" and
+    (($issue.external_ref // "") | test("^local-branch:loom/" + $task_id + "@[0-9a-f]{40}$"))
+  ' >/dev/null
+}
+
 issue_is_unassigned() {
   task_id="$1"
   json="$(issue_json "$task_id")"
@@ -340,7 +349,13 @@ wait_for "planner used ${BACKEND} and exited zero" task_has_expected_backend_exi
 wait_for "planner transcript flag is set" task_has_transcript_flag "$PLAN_TASK_ID"
 wait_for "planner transcript has entries" transcript_has_entries "$PLAN_TASK_ID"
 
-wait_for "coder task is closed" issue_status_closed "$CODE_TASK_ID"
+if [ "$PLANE" = "ts" ]; then
+  wait_for "coder task moved to review" issue_status_is "$CODE_TASK_ID" review
+  wait_for "coder task released its assignee" issue_is_unassigned "$CODE_TASK_ID"
+  wait_for "coder task has a local-branch review reference" issue_has_local_branch_review_ref "$CODE_TASK_ID"
+else
+  wait_for "coder task is closed" issue_status_closed "$CODE_TASK_ID"
+fi
 wait_for "coder completed session exists" task_has_completed_session "$CODE_TASK_ID"
 wait_for "coder used ${BACKEND} and exited zero" task_has_expected_backend_exit_zero "$CODE_TASK_ID"
 wait_for "coder transcript flag is set" task_has_transcript_flag "$CODE_TASK_ID"

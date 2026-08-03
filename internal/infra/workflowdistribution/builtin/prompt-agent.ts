@@ -57,7 +57,7 @@ const BUG_TRIAGE_LABEL_SLUG_MAX_CHARS = 48;
 //      worktree and fails closed — there is no synthetic completion;
 //   4. await the task-run and report its outcome.
 //
-// There is NO daemon supervisor involved: this is a DriverRun executed by the
+// This is a DriverRun executed by the
 // driver-run executor, dispatching a TaskRun executed by the serve task worker.
 // The role poll-loop / Go execution leaf are never touched. This same source is
 // registerable as a CUSTOM (untrusted) workflow driver: it dispatches the

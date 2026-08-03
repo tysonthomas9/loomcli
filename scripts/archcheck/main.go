@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -40,8 +41,8 @@ func run(args []string, out io.Writer) error {
 }
 
 func runWithRepositoryCheck(args []string, out io.Writer, checkRepository repositoryCheckFunc) error {
-	if len(args) != 1 || (args[0] != "check" && args[0] != "snapshot-direct-writes") {
-		return fmt.Errorf("usage: archcheck check|snapshot-direct-writes")
+	if len(args) != 1 || (args[0] != "check" && args[0] != "snapshot-direct-writes" && args[0] != "refresh-direct-writes") {
+		return fmt.Errorf("usage: archcheck check|snapshot-direct-writes|refresh-direct-writes")
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -51,32 +52,119 @@ func runWithRepositoryCheck(args []string, out io.Writer, checkRepository reposi
 	if args[0] == "snapshot-direct-writes" {
 		return runDirectWriteSnapshot(root, manifestDir, out)
 	}
+	if args[0] == "refresh-direct-writes" {
+		return runDirectWriteRefresh(root, manifestDir, out)
+	}
 	return runRepositoryCheck(root, manifestDir, out, checkRepository)
 }
 
 func runDirectWriteSnapshot(root, manifestDir string, out io.Writer) error {
-	matrix, err := archtest.LoadAnalysisMatrix(filepath.Join(manifestDir, "analysis-matrix.yaml"))
+	snapshot, _, err := buildDirectWriteSnapshot(root, manifestDir)
 	if err != nil {
 		return err
 	}
-	inventory, err := archtest.LoadDirectWriteInventory(filepath.Join(manifestDir, "direct-writes.yaml"))
+	return encodeDirectWriteSnapshot(out, snapshot)
+}
+
+func buildDirectWriteSnapshot(root, manifestDir string) (directWriteSnapshot, archtest.DirectWriteInventory, error) {
+	matrix, err := archtest.LoadAnalysisMatrix(filepath.Join(manifestDir, "analysis-matrix.yaml"))
 	if err != nil {
-		return err
+		return directWriteSnapshot{}, archtest.DirectWriteInventory{}, err
+	}
+	inventory, err := archtest.LoadDirectWriteSnapshotPolicy(filepath.Join(manifestDir, "direct-writes.yaml"))
+	if err != nil {
+		return directWriteSnapshot{}, archtest.DirectWriteInventory{}, err
 	}
 	writes, err := archtest.SnapshotDirectWrites(root, matrix, inventory)
 	if err != nil {
-		return err
+		return directWriteSnapshot{}, archtest.DirectWriteInventory{}, err
 	}
 	provenance, err := gitSourceProvenance(root)
 	if err != nil {
-		return err
+		return directWriteSnapshot{}, archtest.DirectWriteInventory{}, err
 	}
-	return encodeDirectWriteSnapshot(out, directWriteSnapshot{
+	return directWriteSnapshot{
 		SourceHead:       provenance.SourceHead,
 		SourceDirty:      provenance.SourceDirty,
 		AnalysisProfiles: inventory.AnalysisProfiles,
 		Writes:           writes,
-	})
+	}, inventory, nil
+}
+
+func runDirectWriteRefresh(root, manifestDir string, out io.Writer) error {
+	snapshot, inventory, err := buildDirectWriteSnapshot(root, manifestDir)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(manifestDir, "direct-writes.yaml")
+	// #nosec G304 -- manifestDir is the repository-owned architecture fixture directory.
+	source, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read direct-write inventory for refresh: %w", err)
+	}
+	refreshed, legacyRemoved, err := refreshDirectWriteInventory(source, snapshot, inventory.LegacyDriver)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, refreshed, 0o644); err != nil {
+		return fmt.Errorf("write refreshed direct-write inventory: %w", err)
+	}
+	_, err = fmt.Fprintf(out, "Refreshed direct-write inventory: %d rows; legacy baseline removed=%t; source_dirty=%t\n", len(snapshot.Writes), legacyRemoved, snapshot.SourceDirty)
+	return err
+}
+
+func refreshDirectWriteInventory(source []byte, snapshot directWriteSnapshot, legacy *archtest.LegacyDirectWriteBaseline) ([]byte, bool, error) {
+	const writesMarker = "writes:\n"
+	const mechanismsMarker = "generic_mechanisms:\n"
+	writesStart := bytes.Index(source, []byte(writesMarker))
+	mechanismsStart := bytes.Index(source, []byte(mechanismsMarker))
+	if writesStart < 0 || mechanismsStart < 0 || mechanismsStart <= writesStart {
+		return nil, false, errors.New("direct-write inventory is missing ordered writes and generic_mechanisms blocks")
+	}
+	prefix := string(source[:writesStart])
+	lines := strings.Split(prefix, "\n")
+	foundHead := false
+	for index, line := range lines {
+		if strings.HasPrefix(line, "source_head: ") {
+			lines[index] = "source_head: " + snapshot.SourceHead
+			foundHead = true
+			break
+		}
+	}
+	if !foundHead {
+		return nil, false, errors.New("direct-write inventory is missing source_head")
+	}
+	prefix = strings.Join(lines, "\n")
+	renderedWrites, err := yaml.Marshal(struct {
+		Writes []archtest.DirectWriteUse `yaml:"writes"`
+	}{Writes: snapshot.Writes})
+	if err != nil {
+		return nil, false, fmt.Errorf("render refreshed direct writes: %w", err)
+	}
+	suffix := source[mechanismsStart:]
+	legacyRemoved := false
+	if legacy != nil && !snapshotContainsRoot(snapshot.Writes, legacy.Root) {
+		if legacyStart := bytes.Index(suffix, []byte("legacy_driver:\n")); legacyStart >= 0 {
+			suffix = bytes.TrimRight(suffix[:legacyStart], "\n")
+			suffix = append(suffix, '\n')
+			legacyRemoved = true
+		}
+	}
+	result := make([]byte, 0, len(prefix)+len(renderedWrites)+len(suffix))
+	result = append(result, prefix...)
+	result = append(result, renderedWrites...)
+	result = append(result, suffix...)
+	return result, legacyRemoved, nil
+}
+
+func snapshotContainsRoot(writes []archtest.DirectWriteUse, root string) bool {
+	root = strings.TrimSuffix(root, "/") + "/"
+	for _, write := range writes {
+		if strings.HasPrefix(write.File, root) {
+			return true
+		}
+	}
+	return false
 }
 
 func runRepositoryCheck(root, manifestDir string, out io.Writer, checkRepository repositoryCheckFunc) error {

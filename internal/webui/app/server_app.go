@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/app/capabilitycomposition"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -30,9 +29,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// Apply defaults for zero values
 	if config.Port == 0 {
 		config.Port = webui.DefaultPort
-	}
-	if config.PoolSize == 0 {
-		config.PoolSize = webui.DefaultPoolSize
 	}
 	if config.ShutdownTimeout == 0 {
 		config.ShutdownTimeout = webui.DefaultShutdownTimeout
@@ -77,15 +73,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 
 	// Log configuration
-	logger.Info("starting web UI server", "port", config.Port, "pool_size", config.PoolSize, "bind_address", config.BindAddress)
-	daemonExpected := !config.FleetClient
-	if config.SocketPath != "" && daemonExpected {
-		logger.Info("daemon socket configured", "socket", config.SocketPath)
-	} else if daemonExpected {
-		logger.Info("daemon socket: auto-detect")
-	} else {
-		logger.Info("issue daemon disabled; using FleetDB-backed issue service")
-	}
+	logger.Info("starting web UI server", "port", config.Port, "bind_address", config.BindAddress)
+	logger.Info("workflow catalog issue backend enabled")
 	if app.corsConfig.Enabled {
 		logger.Info("CORS enabled", "origins", app.corsConfig.AllowedOrigins)
 	}
@@ -119,66 +108,13 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 	addBundledLoopbackFrontendOrigins(&app.config, app.actualPort)
 
-	// MultiPool for workspace-aware connection routing.
-	app.multiPool = appinfra.NewMultiPool(middleware.WorkspaceFromContext, config.PoolSize)
-	cleanups = append(cleanups, func() { _ = app.multiPool.Close() })
-
-	// Initialize the initial workspace connection pool only for daemon-backed
-	// deployments. Store-backed local/cloud modes route issue traffic through
-	// FleetDB and must not probe or trip a local daemon circuit breaker.
 	app.initialWorkspaceID = config.InitialWorkspaceID
-	var rawPool *appinfra.ConnectionPool
-	var poolErr error
 
-	if daemonExpected {
-		if config.SocketPath != "" {
-			rawPool, poolErr = appinfra.NewConnectionPool(config.SocketPath, config.PoolSize)
-		} else {
-			cwd, err := appinfra.GetCwd()
-			if err != nil {
-				logger.Warn("failed to get current directory", "err", err)
-			} else {
-				rawPool, poolErr = appinfra.NewConnectionPoolAutoDiscover(cwd, config.PoolSize)
-			}
-		}
-
-		if poolErr != nil {
-			logger.Warn("failed to initialize daemon connection pool", "err", poolErr)
-			logger.Info("web UI will start but API endpoints may not work until daemon is available")
-		} else {
-			app.pool = appinfra.InitProtectedPool(rawPool, config.Logger)
-			logger.Info("daemon connection pool initialized with circuit breaker")
-
-			func() {
-				testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				client, err := app.pool.Get(testCtx)
-				if err != nil {
-					logger.Warn("daemon not available at startup", "err", err)
-					logger.Info("API endpoints will attempt to connect when called")
-				} else {
-					app.pool.Put(client)
-					logger.Info("daemon connection verified")
-				}
-			}()
-		}
-	}
-
-	// Initialize issue service layer.
-	//
-	// When the cli wiring supplies an IssueBackend factory, prefer the
-	// backend-aware constructor so migrated CRUD methods route through
-	// backend.IssueBackend. The pool
-	// stays around to back the not-yet-migrated paths (ListIssues/Kanban
-	// and the cross-workspace MoveIssue helper).
-	if config.IssueBackendFn != nil {
-		app.issueSvc = service.NewIssueServiceWithBackend(
-			app.pool, app.multiPool, middleware.WithWorkspace,
-			service.IssueBackendProvider(config.IssueBackendFn),
-		)
-	} else {
-		app.issueSvc = service.NewIssueService(app.pool, app.multiPool, middleware.WithWorkspace)
-	}
+	// Initialize the issue service through the workflow-catalog port.
+	app.issueSvc = service.NewIssueServiceWithBackend(
+		middleware.WithWorkspace,
+		service.IssueBackendProvider(config.IssueBackendFn),
+	)
 
 	// Create SSE hub for real-time push notifications
 	app.hub = appstores.NewHub()
@@ -271,8 +207,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	cleanups = append(cleanups, func() { _ = app.registry.Close() })
 
 	appinfra.RegisterHooks(app.registry, appinfra.HookConfig{
-		MultiPool:   app.multiPool,
-		PoolSize:    config.PoolSize,
 		MultiSub:    app.multiSub,
 		TermMgr:     app.agentTmuxMgr,
 		PTYMultiMgr: app.ptyMgr,
@@ -287,22 +221,9 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	workspacePathsFn := storeWorkspacePathsFn(ctx, config)
 
-	// Register the initial workspace.
-	if app.pool != nil && shouldRegisterInitialWorkspace(workspacePathsFn, app.initialWorkspaceID) {
-		var initialWSPath string
-		if workspacePathsFn != nil {
-			if wsMap, listErr := workspacePathsFn(); listErr == nil {
-				initialWSPath = wsMap[app.initialWorkspaceID]
-			}
-		}
-		if err := app.registry.Register(app.initialWorkspaceID, initialWSPath); err != nil {
-			logger.Warn("failed to register initial workspace", "err", err)
-		}
-	}
-
 	// Reconcile all store workspaces. Subscribers for secondary workspaces
 	// activate lazily via the workspace SSE token/stream routes.
-	appinfra.ReconcileStoreWorkspaces(workspacePathsFn, app.initialWorkspaceID, app.pool != nil, app.registry, config.Logger)
+	appinfra.ReconcileStoreWorkspaces(workspacePathsFn, app.initialWorkspaceID, false, app.registry, config.Logger)
 
 	// Periodic re-reconcile: workspaces created out-of-band (CLI
 	// `loom workspace create` while serve is running, or another
@@ -310,17 +231,6 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	// without a serve restart. Without this, terminal attach for those
 	// workspaces fails with "workspace not registered" until restart.
 	appinfra.StartPeriodicWorkspaceReconcile(ctx, workspacePathsFn, app.registry, 15*time.Second, config.Logger)
-
-	if config.DaemonStartupFn != nil {
-		onReady := func(string) {}
-		go config.DaemonStartupFn(ctx, onReady)
-	}
-
-	// Start health doctor to auto-restart daemons with stuck circuit breakers.
-	if daemonExpected && workspacePathsFn != nil {
-		doctor := daemon.NewHealthDoctor(app.multiPool, workspacePathsFn, config.Logger, daemon.DefaultHealthDoctorConfig())
-		go doctor.Run(ctx)
-	}
 
 	// Build fleet registration config.
 	if config.FleetAPIKey != "" && app.fleetRegistry != nil {
@@ -409,9 +319,12 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Initialize workspace service layer. FleetDB Store is the authoritative
 	// workspace source in both local and distributed modes.
+	var workspaceAgents service.WorkspaceAgentDirectory
+	if config.AgentsCapability != nil {
+		workspaceAgents = config.AgentsCapability.AgentsAPI()
+	}
 	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
 		Store:                config.Store,
-		MultiPool:            app.multiPool,
 		CreateFn:             app.wrappedCreateFn,
 		AddReposFn:           config.WorkspaceAddReposFn,
 		DeleteFn:             app.wrappedDeleteFn,
@@ -419,6 +332,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		AdmissionCoordinator: config.WorkspaceAdmissions,
 		SetDefaultFn:         config.SetDefaultWorkspaceFn,
 		ClearDefaultFn:       config.ClearDefaultWorkspaceFn,
+		AgentDirectory:       workspaceAgents,
 	})
 
 	// Generate and persist notify token for session change endpoint auth.
@@ -443,26 +357,18 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		app.tabMetaStore,
 		capabilitycomposition.InteractionForceInterrupter(config.InteractionCapability),
 	))
+	interactiveController := svcimpl.NewInteractiveRuntimeController(
+		interactiveRuntimeTabSource{terminalService: app.termSvc},
+		app.ptyMgr,
+	)
+	app.agentRuntime = svcimpl.NewCanonicalInteractiveAgentRuntime(interactiveController)
 	if config.GitOps != nil {
-		compatibility := capabilitycomposition.ResolveAgentServiceCompatibility(config.AgentsCapability)
-		app.agentSvc = svcimpl.NewAgentServiceWithCompatibility(
-			config.GitOps,
-			app.agentTmuxMgr,
-			app.termAuth,
-			config.Store,
-			svcimpl.NewInteractiveRuntimeController(
-				interactiveRuntimeTabSource{terminalService: app.termSvc},
-				app.ptyMgr,
-			),
-			compatibility.API,
-			compatibility.Managed,
-			compatibility.Retirements,
-		)
+		app.agentSvc = svcimpl.NewAgentService(config.GitOps, app.agentTmuxMgr, app.termAuth)
 	}
 
 	// Initialize diff service layer (requires ops.GitOps)
 	if config.GitOps != nil {
-		app.diffSvc = githandlers.NewDiffService(config.GitOps, app.multiPool)
+		app.diffSvc = githandlers.NewDiffService(config.GitOps, service.IssueBackendProvider(config.IssueBackendFn))
 	}
 
 	// Initialize file service layer (requires ops.FileOps)

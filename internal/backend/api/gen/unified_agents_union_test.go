@@ -11,10 +11,9 @@ func TestUnifiedAgentDiscriminatorDecodesEveryCollectionKind(t *testing.T) {
 		kind string
 		want any
 	}{
-		{kind: "supervised", want: SupervisedAgent{}},
+		{kind: "interactive", want: InteractiveAgentRecord{}},
 		{kind: "prompt", want: PromptAgentRecord{}},
 		{kind: "scripted", want: ScriptedAgentRecord{}},
-		{kind: "binding", want: LegacyBindingAgent{}},
 	}
 
 	for _, tt := range tests {
@@ -34,14 +33,14 @@ func TestUnifiedAgentDiscriminatorDecodesEveryCollectionKind(t *testing.T) {
 	}
 }
 
-func TestCreateUnifiedAgentUnionRepresentsLegacyOmittedKind(t *testing.T) {
-	legacy := CreateSupervisedAgentRequest{
-		Name:     "legacy-worker",
-		RoleName: "task",
+func TestCreateUnifiedAgentUnionRepresentsInteractiveOmittedKind(t *testing.T) {
+	interactive := CreateInteractiveAgentRequest{
+		Name:     "reviewer",
+		RoleName: "review",
 	}
 	var request CreateUnifiedAgentRequest
-	if err := request.FromCreateSupervisedAgentRequest(legacy); err != nil {
-		t.Fatalf("build legacy supervised request: %v", err)
+	if err := request.FromCreateInteractiveAgentRequest(interactive); err != nil {
+		t.Fatalf("build interactive request: %v", err)
 	}
 	wire, err := json.Marshal(request)
 	if err != nil {
@@ -52,33 +51,27 @@ func TestCreateUnifiedAgentUnionRepresentsLegacyOmittedKind(t *testing.T) {
 		t.Fatalf("decode legacy supervised request JSON: %v", err)
 	}
 	if _, ok := object["kind"]; ok {
-		t.Fatalf("legacy supervised request unexpectedly gained kind: %s", wire)
+		t.Fatalf("default interactive request unexpectedly gained kind: %s", wire)
 	}
 
 	var decoded CreateUnifiedAgentRequest
 	if err := json.Unmarshal(wire, &decoded); err != nil {
 		t.Fatalf("unmarshal legacy supervised request: %v", err)
 	}
-	got, err := decoded.AsCreateSupervisedAgentRequest()
+	got, err := decoded.AsCreateInteractiveAgentRequest()
 	if err != nil {
-		t.Fatalf("read legacy supervised branch: %v", err)
+		t.Fatalf("read interactive branch: %v", err)
 	}
-	if got.Kind != nil || got.Name != legacy.Name || got.RoleName != legacy.RoleName {
-		t.Fatalf("legacy supervised round trip = %+v, want %+v with nil kind", got, legacy)
+	if got.Kind != nil || got.Name != interactive.Name || got.RoleName != interactive.RoleName {
+		t.Fatalf("interactive round trip = %+v, want %+v with nil kind", got, interactive)
 	}
 }
 
-func TestCreateSupervisedAgentKindEnumMatchesHandlerDispatch(t *testing.T) {
-	for _, kind := range []CreateSupervisedAgentRequestKind{
-		CreateSupervisedAgentRequestKindInteractive,
-		CreateSupervisedAgentRequestKindSupervised,
-		CreateSupervisedAgentRequestKindWorker,
-	} {
-		if !kind.Valid() {
-			t.Errorf("supported create kind %q is not valid", kind)
-		}
+func TestCreateInteractiveAgentKindEnumMatchesHandlerDispatch(t *testing.T) {
+	if !CreateInteractiveAgentRequestKindInteractive.Valid() {
+		t.Fatal("interactive create kind is not valid")
 	}
-	if CreateSupervisedAgentRequestKind("prompt").Valid() || CreateSupervisedAgentRequestKind("mystery").Valid() {
-		t.Fatal("prompt or unknown kind unexpectedly validates as a supervised create kind")
+	if CreateInteractiveAgentRequestKind("worker").Valid() || CreateInteractiveAgentRequestKind("supervised").Valid() {
+		t.Fatal("retired background assignment kind unexpectedly validates as interactive")
 	}
 }

@@ -91,7 +91,7 @@ describe("CreateAgentModal", () => {
     });
   });
 
-  it("creates the Lead interactive card with the legacy lead payload", async () => {
+  it("creates the Lead interactive card with the canonical payload", async () => {
     const onSuccess = vi.fn();
 
     render(
@@ -123,7 +123,6 @@ describe("CreateAgentModal", () => {
       expect(mockCreateAgent).toHaveBeenCalledWith({
         name: "lead-nova",
         role_name: "lead",
-        auto: false,
         cross_repo: false,
         repos: ["hello-world"],
         backend: "codex",

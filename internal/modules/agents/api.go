@@ -8,20 +8,22 @@ import (
 )
 
 const (
-	ActionCreateAgent          authority.Action = "agents.create-agent"
-	ActionUpdateAgent          authority.Action = "agents.update-agent"
-	ActionArchiveAgent         authority.Action = "agents.archive-agent"
-	ActionSetDesiredState      authority.Action = "agents.set-desired-state"
-	ActionCreateRole           authority.Action = "agents.create-role"
-	ActionUpdateRole           authority.Action = "agents.update-role"
-	ActionDeleteRole           authority.Action = "agents.delete-role"
-	ActionEnsureManagedRole    authority.Action = "agents.ensure-managed-role"
-	ActionEnsureManagedAgent   authority.Action = "agents.ensure-managed-agent"
-	ActionAcquireOwnership     authority.Action = "agents.acquire-ownership"
-	ActionRenewOwnership       authority.Action = "agents.renew-ownership"
-	ActionReleaseOwnership     authority.Action = "agents.release-ownership"
-	ActionSetDesiredStateOwned authority.Action = "agents.set-desired-state-owned"
-	ActionApplyLifecycle       authority.Action = "agents.apply-lifecycle"
+	ActionCreateAgent                 authority.Action = "agents.create-agent"
+	ActionUpdateAgent                 authority.Action = "agents.update-agent"
+	ActionArchiveAgent                authority.Action = "agents.archive-agent"
+	ActionSetDesiredState             authority.Action = "agents.set-desired-state"
+	ActionCreateRole                  authority.Action = "agents.create-role"
+	ActionUpdateRole                  authority.Action = "agents.update-role"
+	ActionDeleteRole                  authority.Action = "agents.delete-role"
+	ActionEnsureManagedRole           authority.Action = "agents.ensure-managed-role"
+	ActionEnsureManagedAgent          authority.Action = "agents.ensure-managed-agent"
+	ActionRepairManagedRolePromptFile authority.Action = "agents.repair-managed-role-prompt-file"
+	ActionAcquireOwnership            authority.Action = "agents.acquire-ownership"
+	ActionRenewOwnership              authority.Action = "agents.renew-ownership"
+	ActionReleaseOwnership            authority.Action = "agents.release-ownership"
+	ActionSetDesiredStateOwned        authority.Action = "agents.set-desired-state-owned"
+	ActionApplyLifecycle              authority.Action = "agents.apply-lifecycle"
+	ActionReconcileDesiredState       authority.Action = "agents.reconcile-desired-state"
 )
 
 // OperationRules is the complete default-deny registry for Agents commands.
@@ -36,17 +38,13 @@ func OperationRules() []authority.OperationRule {
 		authority.OperatorOnly(ActionDeleteRole),
 		authority.Allow(ActionEnsureManagedRole, authority.ClassSystem),
 		authority.Allow(ActionEnsureManagedAgent, authority.ClassSystem),
+		authority.Allow(ActionRepairManagedRolePromptFile, authority.ClassSystem),
 		authority.Allow(ActionAcquireOwnership, authority.ClassSystem),
 		authority.Allow(ActionRenewOwnership, authority.ClassSystem),
 		authority.Allow(ActionReleaseOwnership, authority.ClassSystem),
 		authority.Allow(ActionSetDesiredStateOwned, authority.ClassSystem),
 		authority.OperatorOnly(ActionApplyLifecycle),
-		authority.OperatorOnly(ActionCreateSupervisedAssignment),
-		authority.OperatorOnly(ActionUpdateSupervisedAssignmentIntent),
-		authority.OperatorOnly(ActionRetireSupervisedAssignment),
-		authority.Allow(ActionRetireManagedAssignment, authority.ClassSystem),
-		authority.Allow(ActionBindSupervisedAssignmentParent, authority.ClassSystem),
-		authority.Allow(ActionRepairManagedRolePromptFile, authority.ClassSystem),
+		authority.Allow(ActionReconcileDesiredState, authority.ClassSystem),
 	}
 }
 
@@ -63,6 +61,7 @@ type API interface {
 	OwnershipQueries
 	OwnershipCommands
 	LifecycleCommands
+	DesiredStateReconciliationCommands
 }
 
 // LifecycleCommands atomically converge Agent desired state, every attached
@@ -72,12 +71,31 @@ type LifecycleCommands interface {
 	ApplyLifecycle(context.Context, authority.OperatorAuthority, ApplyLifecycleCommand) (*LifecycleResult, error)
 }
 
+type DesiredStateReconciliationCommands interface {
+	ReconcileDesiredState(context.Context, authority.SystemAuthority, ReconcileDesiredStateCommand) (ReconcileDesiredStateResult, error)
+}
+
+type ReconcileDesiredStateCommand struct {
+	WorkspaceKey      string    `json:"workspace_key"`
+	AgentID           string    `json:"agent_id"`
+	ExpectedUpdatedAt time.Time `json:"expected_updated_at"`
+	GenerationID      string    `json:"generation_id"`
+}
+
+type ReconcileDesiredStateResult struct {
+	WorkspaceKey string `json:"workspace_key"`
+	AgentID      string `json:"agent_id"`
+	Converged    bool   `json:"converged"`
+	Repaired     bool   `json:"repaired"`
+}
+
 type LifecycleAction string
 
 const (
-	LifecycleEnable  LifecycleAction = "enable"
-	LifecycleDisable LifecycleAction = "disable"
-	LifecycleDelete  LifecycleAction = "delete"
+	LifecycleEnable    LifecycleAction = "enable"
+	LifecycleDisable   LifecycleAction = "disable"
+	LifecycleDelete    LifecycleAction = "delete"
+	LifecycleReconcile LifecycleAction = "reconcile"
 )
 
 type ApplyLifecycleCommand struct {

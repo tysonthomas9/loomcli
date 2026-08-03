@@ -10,9 +10,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/ops"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -172,12 +170,6 @@ var handleGitStatus = HandleGitStatus
 // handleGitTargetUpdate → HandleGitTargetUpdate
 var handleGitTargetUpdate = HandleGitTargetUpdate
 
-// handleBlockedWithPool → HandleBlockedWithPool
-var handleBlockedWithPool = HandleBlockedWithPool
-
-// handleGraphWithPool → HandleGraphWithPool
-var handleGraphWithPool = HandleGraphWithPool
-
 // AgentDiffStatResult → service.AgentDiffStatResult
 type AgentDiffStatResult = service.AgentDiffStatResult
 
@@ -210,86 +202,6 @@ func (s *stubDiffService) DiffFilePatch(_ context.Context, _, _, _, _, _ string)
 }
 func (s *stubDiffService) GetIssueDiffStat(_ context.Context, _, _ string) (*service.IssueDiffStatResult, error) {
 	return &service.IssueDiffStatResult{}, nil
-}
-
-// ---------------------------------------------------------------------------
-// Mock types for graph_test.go
-// ---------------------------------------------------------------------------
-
-// mockBlockedClient implements BlockedClient for testing.
-type mockBlockedClient struct {
-	blockedFunc func(args *rpc.BlockedArgs) (*rpc.Response, error)
-}
-
-func (m *mockBlockedClient) Blocked(args *rpc.BlockedArgs) (*rpc.Response, error) {
-	if m.blockedFunc != nil {
-		return m.blockedFunc(args)
-	}
-	return nil, fmt.Errorf("blockedFunc not implemented")
-}
-
-// mockBlockedPool implements BlockedConnectionGetter for testing.
-type mockBlockedPool struct {
-	getFunc     func(ctx context.Context) (BlockedClient, error)
-	putFunc     func(c BlockedClient)
-	discardFunc func(c BlockedClient)
-}
-
-func (m *mockBlockedPool) Get(ctx context.Context) (BlockedClient, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, fmt.Errorf("getFunc not implemented")
-}
-
-func (m *mockBlockedPool) Put(c BlockedClient) {
-	if m.putFunc != nil {
-		m.putFunc(c)
-	}
-}
-
-func (m *mockBlockedPool) Discard(c BlockedClient) {
-	if m.discardFunc != nil {
-		m.discardFunc(c)
-	}
-}
-
-// mockGraphClient implements GraphClient for testing.
-type mockGraphClient struct {
-	getGraphDataFunc func(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error)
-}
-
-func (m *mockGraphClient) GetGraphData(args *rpc.GetGraphDataArgs) (*rpc.GetGraphDataResponse, error) {
-	if m.getGraphDataFunc != nil {
-		return m.getGraphDataFunc(args)
-	}
-	return nil, fmt.Errorf("getGraphDataFunc not implemented")
-}
-
-// mockGraphPool implements GraphConnectionGetter for testing.
-type mockGraphPool struct {
-	getFunc     func(ctx context.Context) (GraphClient, error)
-	putFunc     func(c GraphClient)
-	discardFunc func(c GraphClient)
-}
-
-func (m *mockGraphPool) Get(ctx context.Context) (GraphClient, error) {
-	if m.getFunc != nil {
-		return m.getFunc(ctx)
-	}
-	return nil, fmt.Errorf("getFunc not implemented")
-}
-
-func (m *mockGraphPool) Put(c GraphClient) {
-	if m.putFunc != nil {
-		m.putFunc(c)
-	}
-}
-
-func (m *mockGraphPool) Discard(c GraphClient) {
-	if m.discardFunc != nil {
-		m.discardFunc(c)
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -402,23 +314,6 @@ func (m *mockAgentService) SetTargetBranch(ctx context.Context, wsID, agentName,
 	}
 	return nil
 }
-
-func (m *mockAgentService) ListAgents(_ context.Context, _ string) ([]*domain.Agent, error) {
-	return nil, nil
-}
-func (m *mockAgentService) CreateAgent(_ context.Context, _ service.AgentCreateInput) (*domain.Agent, error) {
-	return nil, nil
-}
-func (m *mockAgentService) UpdateAgent(_ context.Context, _, _ string, _ service.AgentUpdateInput) (*domain.Agent, error) {
-	return nil, nil
-}
-func (m *mockAgentService) RequestAgentLifecycle(_ context.Context, _, _ string, _ service.AgentLifecycleInput) (*service.AgentLifecycleResult, error) {
-	return nil, nil
-}
-func (m *mockAgentService) GetAgentLifecycleCommand(_ context.Context, _, _, _ string) (*service.AgentLifecycleCommandResult, error) {
-	return nil, nil
-}
-func (m *mockAgentService) DeleteAgent(_ context.Context, _, _ string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // Test helpers (duplicated from root webui contract_test.go)

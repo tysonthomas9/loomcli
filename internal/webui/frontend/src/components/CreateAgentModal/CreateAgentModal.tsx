@@ -14,19 +14,13 @@ import {
 } from "@/api/agents"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import type {
-  CreateRoleRequest,
   InteractivePromptInfo,
   RepoInfo,
-  RoleWithPrompt,
   WorkspaceAgentInfo,
   WorkspaceRole,
 } from "@/api/workspace";
 import { getWorkspaceRole, listWorkspaceRoles } from "@/api/workspace"; // eslint-disable-line boundaries/dependencies -- Pending hook migration.
-import {
-  useCreateWorkspaceAgent,
-  useEnsureWorkspaceRole,
-  useInteractivePrompts,
-} from "@/hooks/agents";
+import { useCreateWorkspaceAgent, useInteractivePrompts } from "@/hooks/agents";
 import {
   GITHUB_CONNECTOR_ID,
   dispatchBindingsChanged,
@@ -44,9 +38,6 @@ import {
 import { AgentTemplateCard } from "./AgentTemplateCard";
 import {
   BUILTIN_ROLE_TEMPLATES,
-  LEGACY_BUG_TRIAGE_PROMPT,
-  LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME,
-  LEGACY_DAEMON_TEMPLATES,
   NEW_ROLE_TEMPLATE,
   ROLE_TRIGGER_OPTIONS,
   SCRIPTED_WORKFLOW_TEMPLATES,
@@ -54,13 +45,13 @@ import {
   grantsForRepo,
   roleTriggerOption,
   rolePromptFilename,
-  supervisedTemplateForRole,
+  requiredTemplateForRole,
   templateForRole,
   TEMPLATE_SECTIONS,
   type AgentTemplate,
   type DefaultRole,
   type RoleTrigger,
-  type SupervisedRole,
+  type RequiredRole,
 } from "./agentTemplates";
 import styles from "./CreateAgentModal.module.css";
 
@@ -73,14 +64,9 @@ const CADENCE_OPTIONS = [
 
 const DEFAULT_CADENCE = CADENCE_OPTIONS[0].value;
 
-const BUILTIN_ROLE_NAMES = new Set(["lead", "plan", "task"]);
+const BUILTIN_ROLE_NAMES = new Set(["lead", "plan", "task", "bug-triage"]);
 
 const CUSTOM_PROMPT_ID = "custom";
-
-const BUG_TRIAGE_ROLE_NAME = "bug-triage";
-const BUG_TRIAGE_FALLBACK_ROLE_NAME = "loom-bug-triage-v2";
-const LEGACY_BUG_TRIAGE_DESCRIPTION =
-  "Reproduces and triages ready tickets; does not write fixes.";
 
 const INTERACTIVE_ACCENTS = {
   lead: "#db2777",
@@ -166,83 +152,6 @@ function isCustomPromptAgentRoleCandidate(role: WorkspaceRole): boolean {
   );
 }
 
-function isEmptyRoleList(value: string[] | undefined): boolean {
-  return value === undefined || value.length === 0;
-}
-
-function isLegacyBugTriagePromptFile(promptFile: string | undefined): boolean {
-  const normalized = promptFile?.replace(/\\/g, "/") ?? "";
-  return ["bug-triage.md", LEGACY_BUG_TRIAGE_PROMPT_FILE_BASENAME].some(
-    (basename) =>
-      normalized === `.loom/prompts/${basename}` ||
-      normalized.endsWith(`/.loom/prompts/${basename}`),
-  );
-}
-
-/**
- * Recognize only the exact role definition shipped by the previous built-in
- * bug-triage card. This accepts both its original mutable prompt path and the
- * later immutable path. A 409 for anything else is shared user authority and
- * must remain a conflict rather than being bypassed by template provisioning.
- */
-function isExactLegacyBugTriageRole(current: RoleWithPrompt): boolean {
-  const role = current.role;
-  const kind = role.kind?.trim() ?? "";
-  return (
-    role.name === BUG_TRIAGE_ROLE_NAME &&
-    (kind === "" || kind === "worker") &&
-    role.description === LEGACY_BUG_TRIAGE_DESCRIPTION &&
-    (role.prompt?.trim() ?? "") === "" &&
-    isLegacyBugTriagePromptFile(role.prompt_file) &&
-    role.task_filter === "any" &&
-    role.read_only === true &&
-    (role.model?.trim() ?? "") === "" &&
-    (role.backend?.trim() ?? "") === "" &&
-    (role.effort?.trim() ?? "") === "" &&
-    isEmptyRoleList(role.path_patterns) &&
-    isEmptyRoleList(role.skills) &&
-    isEmptyRoleList(role.allowed_tools) &&
-    isEmptyRoleList(role.denied_tools) &&
-    role.max_priority === undefined &&
-    role.max_concurrency === undefined &&
-    role.max_budget_usd === undefined &&
-    current.prompt === LEGACY_BUG_TRIAGE_PROMPT
-  );
-}
-
-async function ensureTemplateRole(
-  workspaceId: string,
-  request: CreateRoleRequest,
-  ensureRole: (req: CreateRoleRequest) => Promise<WorkspaceRole>,
-): Promise<WorkspaceRole> {
-  try {
-    return await ensureRole(request);
-  } catch (error) {
-    if (
-      !(error instanceof ApiError) ||
-      error.status !== 409 ||
-      request.name !== BUG_TRIAGE_ROLE_NAME
-    ) {
-      throw error;
-    }
-
-    const current = await getWorkspaceRole(workspaceId, request.name);
-    if (!isExactLegacyBugTriageRole(current)) {
-      throw error;
-    }
-
-    // Never rewrite the shared legacy name from the browser: role PATCH has no
-    // compare-and-swap precondition, so an operator edit racing this request
-    // could otherwise be lost. Exact-ensure a reserved successor instead. The
-    // server rejects an incompatible fallback collision, while an identical
-    // existing successor remains idempotent.
-    return ensureRole({
-      ...request,
-      name: BUG_TRIAGE_FALLBACK_ROLE_NAME,
-    });
-  }
-}
-
 /** Details of a workflow activation, surfaced to the caller on success. */
 export interface WorkflowActivationResult {
   /** The display name the user gave the trigger binding. */
@@ -286,18 +195,16 @@ export interface CreateAgentModalProps {
   defaultBackend?: string;
   defaultName?: string;
   /**
-   * Pre-selected template, keyed by role. Collapses the legacy
-   * `defaultRoleName` + `defaultKind` pair into one prop: "lead" selects the
-   * Lead card, "plan"/"task" select the matching background worker.
+   * Pre-selected template keyed by role: "lead" selects the interactive Lead
+   * card, while "plan" and "task" select the matching background behavior.
    */
   defaultRole?: DefaultRole;
   /**
-   * Constrain creation to one daemon-supervised role. This is intentionally
-   * stronger than a default selection: onboarding and PR assignment require a
-   * workspace-agent result through `onSuccess` and cannot accept a role-backed
-   * prompt-agent binding or an interactive terminal agent.
+   * Constrain creation to one role-backed behavior. Onboarding and PR
+   * assignment use this to receive the created Automation agent through
+   * `onSuccess` while keeping every background run on Execution.
    */
-  supervisedRole?: SupervisedRole;
+  requiredRole?: RequiredRole;
   /**
    * Deep-link to Settings, used by the review-loop template when the GitHub
    * runtime credential it reuses is not configured yet.
@@ -320,7 +227,7 @@ export function CreateAgentModal({
   defaultBackend,
   defaultName,
   defaultRole,
-  supervisedRole,
+  requiredRole,
   onOpenSettings,
   onClose,
   onSuccess,
@@ -329,8 +236,8 @@ export function CreateAgentModal({
   const navigate = useNavigate();
   const resolvedDefaultBackend = defaultBackend?.trim() || "codex";
   const resolvedDefaultName = defaultName?.trim() ?? "";
-  const initialTemplate = supervisedRole
-    ? supervisedTemplateForRole(supervisedRole)
+  const initialTemplate = requiredRole
+    ? requiredTemplateForRole(requiredRole)
     : templateForRole(defaultRole);
 
   const [name, setName] = useState(resolvedDefaultName);
@@ -346,14 +253,13 @@ export function CreateAgentModal({
   const [existingRoles, setExistingRoles] = useState<WorkspaceRole[]>([]);
   const [selectedBuiltinPromptID, setSelectedBuiltinPromptID] = useState<
     string | null
-  >(supervisedRole ? null : defaultRole === "lead" ? "lead" : null);
+  >(requiredRole ? null : defaultRole === "lead" ? "lead" : null);
   const [customPrompt, setCustomPrompt] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wasOpenRef = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
-  const ensureRole = useEnsureWorkspaceRole(workspaceId);
   const {
     backends,
     isLoading: backendsLoading,
@@ -387,44 +293,29 @@ export function CreateAgentModal({
   );
   const behaviorTemplates = useMemo(
     () =>
-      supervisedRole
-        ? []
+      requiredRole
+        ? [requiredTemplateForRole(requiredRole)]
         : [
             ...BUILTIN_ROLE_TEMPLATES,
             ...customRoleTemplates,
             NEW_ROLE_TEMPLATE,
             ...SCRIPTED_WORKFLOW_TEMPLATES,
           ],
-    [customRoleTemplates, supervisedRole],
+    [customRoleTemplates, requiredRole],
   );
-  // Lead is rendered with the v5 interactive prompts. Its payload remains the
-  // legacy lead payload, so keeping the old advanced card would be a duplicate.
-  const legacyDaemonTemplates = useMemo(() => {
-    if (supervisedRole) return [supervisedTemplateForRole(supervisedRole)];
-    return LEGACY_DAEMON_TEMPLATES.filter(
-      (template) => template.kind !== "lead",
-    );
-  }, [supervisedRole]);
-  const allTemplates = useMemo(
-    () => [...behaviorTemplates, ...legacyDaemonTemplates],
-    [behaviorTemplates, legacyDaemonTemplates],
-  );
+  const allTemplates = behaviorTemplates;
   const selectedTemplate: AgentTemplate =
     allTemplates.find((t) => t.id === selectedTemplateId) ?? initialTemplate;
 
   const isInteractive =
-    supervisedRole === undefined && selectedBuiltinPromptID !== null;
+    requiredRole === undefined && selectedBuiltinPromptID !== null;
   const isRoleBehavior =
     !isInteractive &&
     (selectedTemplate.kind === "role" ||
-      selectedTemplate.kind === "role-create");
+      selectedTemplate.kind === "role-create" ||
+      selectedTemplate.kind === "custom-role");
   const isRoleCreate =
     !isInteractive && selectedTemplate.kind === "role-create";
-  const isLegacyDaemon =
-    !isInteractive &&
-    (selectedTemplate.kind === "lead" ||
-      selectedTemplate.kind === "builtin-role" ||
-      selectedTemplate.kind === "custom-role");
   const isWorkflow = !isInteractive && selectedTemplate.kind === "workflow";
   const selectedRoleTrigger = isRoleCreate
     ? newRoleTrigger
@@ -435,9 +326,9 @@ export function CreateAgentModal({
   const needsGitHub = workflowSpec?.requiresGitHub === true;
   const showCadence = isWorkflow;
   const isActivation = isWorkflow || isRoleBehavior;
-  const showBackend = isInteractive || isRoleBehavior || isLegacyDaemon;
-  // Interactive agents use the same explicit repository-scope contract as
-  // supervised agents: selected chips scope the agent to those repositories,
+  const showBackend = isInteractive || isRoleBehavior;
+  // Interactive agents use an explicit repository-scope contract: selected
+  // chips scope the agent to those repositories,
   // while an empty selection grants workspace-wide scope. Keeping these
   // controls visible prevents the default first repository from becoming an
   // invisible, immutable choice.
@@ -474,7 +365,6 @@ export function CreateAgentModal({
     ? normalizeStoredAgentName(newRoleName)
     : selectedTemplate.roleName.trim();
   const behaviorSection = TEMPLATE_SECTIONS[0]!;
-  const advancedSection = TEMPLATE_SECTIONS[1]!;
 
   const interactivePrompts = useMemo(
     () =>
@@ -562,8 +452,8 @@ export function CreateAgentModal({
   const resetToDefaults = useCallback((): void => {
     setName(resolvedDefaultName);
     setSelectedTemplateId(
-      supervisedRole
-        ? supervisedTemplateForRole(supervisedRole).id
+      requiredRole
+        ? requiredTemplateForRole(requiredRole).id
         : templateForRole(defaultRole).id,
     );
     setBackend(resolvedDefaultBackend);
@@ -573,7 +463,7 @@ export function CreateAgentModal({
     setRolePrompt("");
     setNewRoleTrigger("ready");
     setSelectedBuiltinPromptID(
-      supervisedRole ? null : defaultRole === "lead" ? "lead" : null,
+      requiredRole ? null : defaultRole === "lead" ? "lead" : null,
     );
     setCustomPrompt("");
   }, [
@@ -581,7 +471,7 @@ export function CreateAgentModal({
     resolvedDefaultBackend,
     defaultRepos,
     defaultRole,
-    supervisedRole,
+    requiredRole,
   ]);
 
   // Fetch roles while the modal is open, then hydrate each candidate through
@@ -591,7 +481,7 @@ export function CreateAgentModal({
   // observable preconditions so every selectable behavior can be activated.
   // Failure still leaves builtin cards usable.
   useEffect(() => {
-    if (!isOpen || supervisedRole) return;
+    if (!isOpen || requiredRole) return;
     let cancelled = false;
     // Never carry a previously hydrated role across workspace/open
     // transitions while the new workspace's eligibility checks are pending.
@@ -609,8 +499,7 @@ export function CreateAgentModal({
               const role = detail.role ?? listedRole;
               if (
                 !isCustomPromptAgentRoleCandidate(role) ||
-                detail.prompt.trim() === "" ||
-                isExactLegacyBugTriageRole(detail)
+                detail.prompt.trim() === ""
               ) {
                 return null;
               }
@@ -634,7 +523,7 @@ export function CreateAgentModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, supervisedRole, workspaceId]);
+  }, [isOpen, requiredRole, workspaceId]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -650,7 +539,7 @@ export function CreateAgentModal({
   }, [isOpen, resetToDefaults]);
 
   // Run after the open-transition reset above. If a configured/default backend
-  // is unavailable, move interactive, role-backed, and legacy-agent creation
+  // is unavailable, move interactive and role-backed creation
   // to the first healthy option. Workflows never take this fallback: their
   // backend is explicitly required or remains the workspace/default backend.
   useEffect(() => {
@@ -695,14 +584,12 @@ export function CreateAgentModal({
     (selectedBuiltinPromptID === CUSTOM_PROMPT_ID
       ? customPrompt.trim() !== ""
       : (selectedBuiltinPromptID?.trim() ?? "") !== "");
-  const legacyRepoReady = !isLegacyDaemon || repoOptions.length > 0;
   const workflowRepoReady =
     !isWorkflow || (selectedRepos.length === 1 && targetRepo !== undefined);
   const canSubmit =
     nameError === null &&
     roleCreateReady &&
     hasPromptSelection &&
-    legacyRepoReady &&
     workflowRepoReady &&
     backendReadinessMessage === null &&
     !isSubmitting;
@@ -770,7 +657,45 @@ export function CreateAgentModal({
                     ...(trimmedBackend ? { backend: trimmedBackend } : {}),
                   },
                 }
-              : {}),
+              : selectedTemplate.kind === "custom-role" &&
+                  selectedTemplate.customRole
+                ? {
+                    role_create: {
+                      prompt: selectedTemplate.customRole.promptContent,
+                      prompt_filename:
+                        selectedTemplate.customRole.promptFilename,
+                      ...(selectedTemplate.customRole.description
+                        ? {
+                            description:
+                              selectedTemplate.customRole.description,
+                          }
+                        : {}),
+                      ...(selectedTemplate.customRole.taskFilter
+                        ? {
+                            task_filter: selectedTemplate.customRole.taskFilter,
+                          }
+                        : {}),
+                      ...(selectedTemplate.customRole.readOnly !== undefined
+                        ? {
+                            read_only: selectedTemplate.customRole.readOnly,
+                          }
+                        : {}),
+                      ...(selectedTemplate.customRole.allowedTools
+                        ? {
+                            allowed_tools:
+                              selectedTemplate.customRole.allowedTools,
+                          }
+                        : {}),
+                      ...(selectedTemplate.customRole.deniedTools
+                        ? {
+                            denied_tools:
+                              selectedTemplate.customRole.deniedTools,
+                          }
+                        : {}),
+                      ...(trimmedBackend ? { backend: trimmedBackend } : {}),
+                    },
+                  }
+                : {}),
           },
           trigger: {
             source_kind: "internal",
@@ -790,6 +715,19 @@ export function CreateAgentModal({
         // be nudged explicitly or navigation below resolves against a stale
         // list and renders an empty shell.
         dispatchBindingsChanged(workspaceId);
+        if (requiredRole) {
+          onSuccess({
+            name: agentRecord.name,
+            repos: [],
+            repo_groups: [],
+            cross_repo: true,
+            kind: "worker",
+            role_name: selectedRoleName,
+            ...(trimmedBackend ? { backend: trimmedBackend } : {}),
+          });
+          resetToDefaults();
+          return;
+        }
         onClose();
         resetToDefaults();
         // Route by the durable AgentService identity so its Runs tab can
@@ -928,33 +866,7 @@ export function CreateAgentModal({
         return;
       }
 
-      // Custom-role templates provision their Role (and seed its prompt file)
-      // on first use, before the agent that references the role is created.
-      // The endpoint is idempotent, so re-creating the same template is safe.
       let roleName = selectedTemplate.roleName;
-      if (
-        !isInteractive &&
-        selectedTemplate.kind === "custom-role" &&
-        selectedTemplate.customRole
-      ) {
-        const cr = selectedTemplate.customRole;
-        const roleRequest: CreateRoleRequest = {
-          name: cr.roleName,
-          prompt: cr.promptContent,
-          prompt_filename: cr.promptFilename,
-          ...(cr.description ? { description: cr.description } : {}),
-          ...(cr.taskFilter ? { task_filter: cr.taskFilter } : {}),
-          ...(cr.readOnly !== undefined ? { read_only: cr.readOnly } : {}),
-          ...(cr.allowedTools ? { allowed_tools: cr.allowedTools } : {}),
-          ...(cr.deniedTools ? { denied_tools: cr.deniedTools } : {}),
-        };
-        const ensuredRole = await ensureTemplateRole(
-          workspaceId,
-          roleRequest,
-          ensureRole,
-        );
-        roleName = ensuredRole.name;
-      }
       let interactiveFields: {
         kind?: "interactive";
         prompt?: string;
@@ -984,11 +896,6 @@ export function CreateAgentModal({
         // Non-interactive templates keep their canonical role name. Interactive
         // prompts use the built-in prompt id (or the agent name for inline text).
         role_name: roleName,
-        // Advanced workers have no browser-owned terminal or manual Start
-        // control: the local-mode daemon manager discovers their workspace
-        // only when at least one assignment is marked auto. Interactive agents
-        // remain browser-launched and must never be daemon-supervised.
-        auto: !isInteractive,
         cross_repo: crossRepo,
         repos: crossRepo ? [] : selectedRepos,
         ...interactiveFields,
@@ -997,13 +904,11 @@ export function CreateAgentModal({
         ...request,
         ...(trimmedBackend ? { backend: trimmedBackend } : {}),
       });
-      // The workspace-agent response predates role kinds and may omit them.
-      // Preserve the kind selected in this modal so the shell can immediately
-      // place every interactive template (not just legacy role names) in its
-      // Terminal without waiting for a workspace refetch.
+      // Preserve the selected interactive kind so the shell can place the
+      // newly created Agent in its Terminal without waiting for a refetch.
       onSuccess({
         ...agent,
-        kind: isInteractive ? "interactive" : (agent.kind ?? "worker"),
+        kind: "interactive",
       });
       resetToDefaults();
     } catch (err) {
@@ -1070,24 +975,24 @@ export function CreateAgentModal({
         <div className={styles.panel}>
           <h3 className={styles.panelHeader}>Agent type</h3>
 
-          {supervisedRole ? (
+          {requiredRole ? (
             <div
               className={styles.group}
               role="group"
-              aria-labelledby="create-agent-supervised-label"
-              data-testid="create-agent-supervised-mode"
+              aria-labelledby="create-agent-required-role-label"
+              data-testid="create-agent-required-role-mode"
             >
               <span
                 className={styles.groupLabel}
-                id="create-agent-supervised-label"
+                id="create-agent-required-role-label"
               >
-                Supervised agent
+                Required behavior
               </span>
               <p className={styles.groupHint}>
-                This flow requires a daemon-supervised {supervisedRole} agent.
+                This flow requires the {requiredRole} behavior.
               </p>
               <div className={styles.templateList}>
-                {legacyDaemonTemplates.map((template) => (
+                {behaviorTemplates.map((template) => (
                   <AgentTemplateCard
                     key={template.id}
                     title={template.title}
@@ -1096,7 +1001,7 @@ export function CreateAgentModal({
                     accentColor={template.accentColor}
                     selected={selectedTemplateId === template.id}
                     disabled={isSubmitting}
-                    ariaLabel={`${template.title}, supervised agent`}
+                    ariaLabel={`${template.title}, required behavior`}
                     testId={template.testId}
                     onSelect={() => selectTemplate(template.id)}
                   />
@@ -1193,42 +1098,6 @@ export function CreateAgentModal({
                   </p>
                 )}
               </div>
-
-              <details className={styles.advancedGroup} open={isLegacyDaemon}>
-                <summary className={styles.advancedSummary}>
-                  <span
-                    className={styles.groupLabel}
-                    id={advancedSection.labelId}
-                  >
-                    {advancedSection.label}
-                  </span>
-                  <span className={styles.groupHint}>
-                    {advancedSection.hint}
-                  </span>
-                </summary>
-                <div
-                  className={styles.templateList}
-                  role="group"
-                  aria-labelledby={advancedSection.labelId}
-                >
-                  {legacyDaemonTemplates.map((template) => (
-                    <AgentTemplateCard
-                      key={template.id}
-                      title={template.title}
-                      description={template.description}
-                      glyph={template.glyph}
-                      accentColor={template.accentColor}
-                      selected={
-                        !isInteractive && selectedTemplateId === template.id
-                      }
-                      disabled={isSubmitting}
-                      ariaLabel={`${template.title}, ${advancedSection.label}`}
-                      testId={template.testId}
-                      onSelect={() => selectTemplate(template.id)}
-                    />
-                  ))}
-                </div>
-              </details>
             </>
           )}
         </div>
@@ -1456,9 +1325,8 @@ export function CreateAgentModal({
                   className={styles.emptyHint}
                   data-testid="create-agent-no-repos"
                 >
-                  {isLegacyDaemon
-                    ? "No repos yet — add one from the sidebar before creating a legacy supervised agent."
-                    : "No repos yet — add one from the sidebar to give this agent repository scope."}
+                  No repos yet — add one from the sidebar to give this agent
+                  repository scope.
                 </p>
               ) : (
                 <div

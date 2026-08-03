@@ -110,14 +110,18 @@ func buildExecutionRuntimePasses(
 func StartOutboxDispatcher(
 	ctx context.Context,
 	st store.Store,
+	executionCapability webui.ExecutionCapability,
 	chat interaction.ChatMessenger,
 	workspaceScope string,
 ) {
-	if st == nil || chat == nil {
+	if st == nil || executionCapability == nil || executionCapability.OutboxDeliveryAPI() == nil ||
+		executionCapability.SystemAuthorityResolver() == nil || chat == nil {
 		return
 	}
 	dispatcher := &driverexecutor.OutboxDispatcher{
-		Store:        st,
+		Delivery:     executionCapability.OutboxDeliveryAPI(),
+		Authorities:  executionCapability.SystemAuthorityResolver(),
+		Workspaces:   outboxWorkspaceLister{store: st.Workspaces()},
 		WorkspaceKey: workspaceScope,
 		Chat:         chat,
 	}
@@ -138,6 +142,24 @@ func StartOutboxDispatcher(
 			}
 		}
 	}()
+}
+
+type outboxWorkspaceLister struct {
+	store store.WorkspaceStore
+}
+
+func (lister outboxWorkspaceLister) ListWorkspaceKeys(ctx context.Context) ([]string, error) {
+	values, err := lister.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != nil {
+			keys = append(keys, value.Key)
+		}
+	}
+	return keys, nil
 }
 
 // startIssueJournalBridge launches the A4 always-on issue-journal bridge: it
@@ -162,8 +184,8 @@ func StartOutboxDispatcher(
 // matching the sweepers, capped at one hour); LOOM_ISSUE_BRIDGE_STATE_PATH
 // overrides the cursor file; LOOM_ISSUE_BRIDGE_REPLAY=1 opts into
 // replay-from-zero on first observation (handled inside the bridge);
-// LOOM_TASK_READY_EVENTS and LOOM_TASK_REVIEW_EVENTS independently opt their
-// specialized lanes out with 0/false/off/no.
+// Task-ready and task-review are generic platform event lanes and are always
+// enabled whenever the issue-journal bridge is enabled.
 func StartIssueJournalBridge(
 	ctx context.Context,
 	st store.Store,

@@ -14,15 +14,12 @@ import (
 func (app *Server) registerRoutes() {
 	h := app.handlers
 	app.registerCoreAPIRoutes(h)
-	app.registerDaemonRoutes(h)
 	app.registerMonitorHandlers()
 	app.registerEditorAndNotifyRoutes(h)
 	app.registerAuthProxy()
 
-	// Workspace management and workspace-scoped API routes
-	if app.multiPool != nil {
-		app.registerWorkspaceRoutes()
-	}
+	// Workspace management and workspace-scoped API routes.
+	app.registerWorkspaceRoutes()
 
 	// Unregistered /api/* paths return JSON 404. Must run after all specific
 	// /api/... routes are registered so Go 1.22+ longest-match prefers real
@@ -56,16 +53,6 @@ func (app *Server) registerCoreAPIRoutes(h *handlermux.Handlers) {
 	}
 	if h.GetBackendsHealth != nil {
 		app.mux.HandleFunc("GET /api/backends", h.GetBackendsHealth)
-	}
-}
-
-// registerDaemonRoutes registers daemon supervisor and config endpoints.
-func (app *Server) registerDaemonRoutes(h *handlermux.Handlers) {
-	if h.DaemonSupervisor != nil {
-		app.mux.HandleFunc("GET /api/daemon/supervisor", h.DaemonSupervisor)
-	}
-	if h.DaemonConfig != nil {
-		app.mux.HandleFunc("GET /api/daemon/config", h.DaemonConfig)
 	}
 }
 

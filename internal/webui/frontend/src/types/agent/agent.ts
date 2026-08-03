@@ -100,7 +100,7 @@ export type LoomAgentStatus = Omit<
   components["schemas"]["MonitorAgentStatus"],
   "workspace"
 > & {
-  /** Workspace name from daemon config, when assigned */
+  /** Workspace name from the canonical Agent record, when assigned */
   workspace?: string;
   /** Whether agent works across multiple repos */
   cross_repo?: boolean;
@@ -269,7 +269,7 @@ export function parseLoomStatus(status: string): ParsedLoomStatus {
  * On serve-only deployments the lock-derived `status` stays "idle"/"ready" even
  * while an agent is provably working, but fleet-db's live_status (carried on the
  * monitor response, computed there from the session+lease join) knows the truth.
- * When the raw status already encodes working/planning (daemon mode, often with a
+ * When the raw status already encodes working/planning (runtime mode, often with a
  * duration we want to keep) it is returned verbatim. Otherwise, when live_status
  * is "working" *and* the lock-derived status is only idle-like (idle/ready/empty),
  * a "working: <task>" / "planning: <task>" string is synthesized so the existing
@@ -326,7 +326,7 @@ export function isAgentActive(agent: LoomAgentStatus): boolean {
  * lock-holder — the live one must win. Two ordered finds (active first) make the
  * precedence deterministic regardless of array order; the original one-pass
  * `find(current || active)` let array order decide. The current_task_id fallback
- * covers the daemon path where fleet-db liveness wasn't computed (active absent).
+ * covers runtime rows where FleetDB liveness was not computed (active absent).
  *
  * Single-claimant invariant: a loom task is claimed via a single lease/lock at a
  * time, so at most one agent should match. If two ever held active_task_id === T

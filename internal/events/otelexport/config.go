@@ -3,7 +3,7 @@ package otelexport
 import "time"
 
 // Config holds OpenTelemetry export configuration.
-// Matches the daemon.otel section in loom.yaml.
+// It is shared by the platform runtime and short-lived command processes.
 type Config struct {
 	Enabled         bool          `yaml:"enabled,omitempty"`
 	Endpoint        string        `yaml:"endpoint,omitempty"`

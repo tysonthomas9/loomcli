@@ -8,16 +8,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
-	"github.com/tysonthomas9/loomcli/internal/cli/agent/tsruntime"
 	"github.com/tysonthomas9/loomcli/internal/cli/automode"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/workspace"
-	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 var (
 	taskAutoMode    bool
-	taskDaemonMode  bool // Hidden: for internal tmux session use
 	taskInterval    int
 	taskMaxTasks    int
 	taskIdleTimeout int
@@ -61,8 +58,6 @@ Examples:
 
 func init() {
 	taskCmd.Flags().BoolVarP(&taskAutoMode, "auto", "a", false, "Enable continuous mode (process multiple tasks)")
-	taskCmd.Flags().BoolVar(&taskDaemonMode, "daemon-mode", false, "Internal: single task mode for daemon")
-	_ = taskCmd.Flags().MarkHidden("daemon-mode")
 	taskCmd.Flags().IntVarP(&taskInterval, "interval", "i", 30, "Polling interval in seconds when no tasks available")
 	taskCmd.Flags().IntVarP(&taskMaxTasks, "max-tasks", "m", 0, "Maximum tasks to process (0 = unlimited)")
 	taskCmd.Flags().IntVarP(&taskIdleTimeout, "idle-timeout", "t", 0, "Exit after N minutes with no tasks (0 = none)")
@@ -86,11 +81,6 @@ func runTask(cmd *cobra.Command, args []string) {
 
 	worktreePath := target.WorkDir
 	agentName := target.AgentName
-
-	if taskDaemonMode {
-		runTaskDaemon(deps, worktreePath, agentName)
-		return
-	}
 
 	routerCheck := cli.RouterTaskCheckFromEnv(taskParentID)
 
@@ -116,62 +106,6 @@ func runTask(cmd *cobra.Command, args []string) {
 	}
 
 	runTaskSingleTask(deps, worktreePath, agentName, routerCheck)
-}
-
-// runTaskDaemon handles daemon mode for the task agent.
-func runTaskDaemon(deps *cli.Deps, worktreePath, agentName string) {
-	if err := cli.AcquireLock(worktreePath, "task", agentName); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		cli.ExitWithFlush(1)
-	}
-	if err := cli.UpdateLockState(worktreePath, cli.StateActive); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not update lock state: %v\n", err)
-	}
-
-	assignedTaskID := os.Getenv("LOOM_ASSIGNED_TASK_ID")
-	// P4: if this is a same-task daemon restart, resume the prior Claude session
-	// carried forward in the lock instead of cold-starting (guarded). Done BEFORE
-	// building the prompt so it can skip the redundant checkpoint context.
-	maybeResumeDaemonSession(worktreePath, assignedTaskID)
-	// Record the assigned task on the worktree lock (AFTER the resume decision)
-	// so a crash leaves a resumable remnant for the next restart's
-	// detectRecovery — the agent's own `loom claim` is CWD-dependent and can't be
-	// relied on to set this.
-	persistAssignedTaskToLock(worktreePath, assignedTaskID)
-
-	ws, _ := config.ResolveActiveWorkspace()
-	prompt := GenerateTaskPrompt(agentName, ws, taskParentID, cli.GetBackendName())
-	if assignedTaskID != "" {
-		prompt = GenerateFleetTaskPrompt(agentName, assignedTaskID, ws, cli.GetBackendName())
-	}
-	sess := adoptOrCreateSession(agentName, taskParentID, prompt, "implementation")
-
-	emitTaskClaimedFromEnv(agentName, assignedTaskID)
-
-	beforeRef := automode.CaptureHEADRef(worktreePath)
-	startedAt := time.Now()
-
-	// Daemon-spawned subprocesses have no controlling TTY. InvokeInteractive
-	// inherits the daemon's stdin/stdout, which makes backend TUIs render
-	// nothing — the supervisor watchdog then times the silent run out at
-	// 15 min (see runTaskDaemon/runPlanDaemon notes). Use the wrapper-backed
-	// non-interactive path: PTY + stream-json → log mtime advances per turn.
-	shutdown := automode.SetupSignalHandler()
-	collector := usage.NewCollector(cli.GetBackendName(), agentName)
-	invokeErr := tsruntime.Invoker(deps.Agent).InvokeNonInteractive(worktreePath, prompt, agentName, shutdown, collector)
-	if invokeErr == nil {
-		// Success: drop the carried session so the next restart starts the next
-		// task fresh. On failure we KEEP it (carry-forward → resume on respawn).
-		clearDaemonResumeOnSuccess(worktreePath)
-	}
-
-	emitTaskLifecycleResult(agentName, worktreePath, startedAt, invokeErr)
-	finalizeAgentSession(sess, worktreePath, beforeRef, invokeErr, collector, startedAt, taskParentID)
-
-	if invokeErr != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", invokeErr)
-		cli.ExitWithFlush(1)
-	}
 }
 
 // runTaskAutoFallback handles auto mode without tmux for the task agent.

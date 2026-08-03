@@ -91,10 +91,6 @@ ast_all_files:
   include_tests: true
   exclude_generated: true
   ignore:
-    - path: internal/cli/daemon/daemon_yield_test.go
-      reason: Historical yield-file tests are deliberately excluded until the daemon retirement path either restores or deletes them.
-      owner: execution-reliability-lane
-      expiry: "2026-12-31"
     - path: internal/webui/app/sse_push_test.go
       reason: Historical SSE mutation tests require server-side RPC packages that are not present in this module.
       owner: web-runtime-lane

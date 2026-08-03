@@ -26,6 +26,7 @@ const stateCacheVersion = 1
 //   - where each workspace's checkout lives on this machine
 //   - where each repo within a workspace is checked out on this machine
 //   - where each agent's git worktree lives on this machine
+//   - which runtime provider this node uses by default for the workspace
 //
 // All of these are regenerable: a missing state.json is recoverable by
 // re-cloning + re-running `loom workspace use <name>`. The cache is a
@@ -40,9 +41,10 @@ type StateCache struct {
 // machine. Path is the workspace's root directory on this machine.
 // Repos and Agents map their workspace-scoped names to local paths.
 type WorkspaceLocalState struct {
-	Path   string                     `json:"path,omitempty"`
-	Repos  map[string]string          `json:"repos,omitempty"`
-	Agents map[string]AgentLocalState `json:"agents,omitempty"`
+	Path                   string                     `json:"path,omitempty"`
+	DefaultRuntimeProvider string                     `json:"default_runtime_provider,omitempty"`
+	Repos                  map[string]string          `json:"repos,omitempty"`
+	Agents                 map[string]AgentLocalState `json:"agents,omitempty"`
 }
 
 // AgentLocalState holds an agent's local-machine attributes. Worktree

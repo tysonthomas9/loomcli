@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/sessions/transcript"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
@@ -214,7 +213,7 @@ func HandleNotifySessionChange(hub *realtime.Hub, notifyToken string) http.Handl
 			slog.Warn("session notify missing workspace_id, mutation will be dropped", "task_id", req.TaskID)
 		}
 		hub.Broadcast(&realtime.MutationPayload{
-			Type:        rpc.MutationSessionChange,
+			Type:        realtime.MutationSessionChange,
 			EntityType:  "session",
 			EntityID:    req.SessionID,
 			Action:      "session.change",

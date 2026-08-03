@@ -189,7 +189,7 @@ func Execute() error {
 	// derives its context from there.
 	tracer := tracing.Tracer("github.com/tysonthomas9/loomcli/internal/cli")
 	// BootstrapContext consumes LOOM_TRACE_PARENT (set by a parent loom
-	// process — daemon spawning agent, or loom spawning embedded fleet-db)
+	// process — platform runtime spawning an agent, or loom spawning embedded fleet-db)
 	// so this process's root span inherits the spawner's trace ID. Returns
 	// context.Background unchanged when no env var is set.
 	bootstrapCtx := tracing.BootstrapContext(context.Background())
@@ -209,7 +209,7 @@ func Execute() error {
 	}
 
 	// Trace-flush on signal: SIGINT/SIGTERM (sent by `timeout`, Ctrl-C,
-	// supervisor kill) bypass deferred span.End. End the root span here
+	// runtime termination) bypass deferred span.End. End the root span here
 	// so it exports under sync mode. Do NOT shut down the TracerProvider
 	// in the signal handler — that would prevent in-flight spans (e.g.,
 	// a backend.invoke span deeper in the call stack) from flushing as
@@ -247,7 +247,7 @@ func initCLITracing() tracing.Shutdown {
 	serviceName := resolveCLIServiceName()
 	// Sync mode for short-lived CLI/agent runs: every span.End() blocks until
 	// export completes, so spans land in Jaeger even when the process exits
-	// via os.Exit. Long-running serve/daemon use the batcher.
+	// via os.Exit. Long-running serve processes use the batcher.
 	syncExport := serviceName == "loom-cli" || serviceName == "loom-agent"
 	shutdown, _, err := tracing.Init(context.Background(), tracing.Config{
 		ServiceName:    serviceName,
@@ -273,8 +273,8 @@ func initCLITracing() tracing.Shutdown {
 }
 
 // resolveCLIServiceName maps the top-level subcommand to a service name so
-// dashboards can filter long-running daemons separately from agent runs and
-// short-lived CLI invocations. Trace contract §1.
+// dashboards can filter the long-running runtime separately from agent runs
+// and short-lived CLI invocations. Trace contract §1.
 func resolveCLIServiceName() string {
 	if len(os.Args) <= 1 {
 		return "loom-cli"
@@ -282,8 +282,6 @@ func resolveCLIServiceName() string {
 	switch os.Args[1] {
 	case "serve":
 		return "loom-serve"
-	case "daemon":
-		return "loom-daemon"
 	case "plan", "task", "agent", "lead":
 		return "loom-agent"
 	}

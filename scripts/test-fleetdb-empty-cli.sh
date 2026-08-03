@@ -10,10 +10,8 @@
 #   5. empty --workspace="" falls back to LOOM_WORKSPACE
 #   6. invalid workspace key surfaces server-side validation_error
 #   7. no workspace anywhere yields the canonical "WorkspaceID is required"
-#   8. killing the workspace daemon flips `workspace ops diagnose` ok→false
-#      and surfaces daemon_not_running
-#   9. `loom doctor` PASS on the fleet check when fleet-db is reachable
-#  10. `loom doctor` FAIL on the fleet check when fleet URL is unreachable
+#   8. `loom doctor` PASS on the fleet check when fleet-db is reachable
+#   9. `loom doctor` FAIL on the fleet check when fleet URL is unreachable
 #
 # Usage:
 #   scripts/test-fleetdb-empty-cli.sh
@@ -96,13 +94,14 @@ curl -fsS -X POST -H 'content-type: application/json' \
     --data "$ws_payload" \
     "http://localhost:$HOST_PORT/api/workspaces" >/dev/null 2>&1 || true
 
-# Wait until the workspace is registered AND its daemon is alive.
-yellow "==> waiting for HELLO-WORLD workspace + daemon"
+# Wait until the workspace is registered and the single runtime reports that
+# the workspace capability set is ready.
+yellow "==> waiting for HELLO-WORLD workspace runtime"
 for _ in $(seq 1 60); do
     if curl -fsS "http://localhost:$HOST_PORT/api/workspaces" 2>/dev/null \
          | grep -q '"id":"HELLO-WORLD"'; then
-        if $CTL exec "$LOOM_NAME" cat /loom-config/workspaces/Hello-World/.loom/daemon.pid 2>/dev/null \
-             | grep -qE '^[0-9]+$'; then
+        if curl -fsS "http://localhost:$HOST_PORT/api/workspaces/HELLO-WORLD/readyz" 2>/dev/null \
+             | grep -q '"ready":true'; then
             break
         fi
     fi
@@ -167,18 +166,6 @@ expect_contains "invalid workspace key rejected" "invalid workspace key" "$out"
 out=$(run_in_container 'unset LOOM_WORKSPACE; loom data blocked --output json')
 expect_contains "no workspace yields canonical error" "WorkspaceID is required" "$out"
 
-# NOTE: The daemon_not_running detection is covered by the pure-function
-# unit test TestWorkspaceOpsGlobalProblemsDetectsDaemonNotRunningWithRunnableAgent
-# in internal/cli/workspace/ops_cmd_test.go. We intentionally do NOT try to
-# reproduce that scenario at the container level here — the empty stack's
-# loom-empty-daemon-manager has a 2s reconcile loop that races every
-# attempt to kill the daemon from outside, and the orchestration to pause
-# the manager reliably across podman exec sessions is fragile enough that
-# it produces more false negatives than real regressions. The wiring from
-# WorkspaceOpsStatus.Daemon.Running to the problem code is exercised by the
-# unit test; the integration test focuses on behaviors that genuinely need
-# a running fleet-db and HTTP stack.
-
 # Compact JSON for substring matching regardless of pretty-print whitespace.
 # `loom doctor` exits non-zero when checks fail, so swallow the status here
 # (we assert on the JSON content, not the exit code).
@@ -215,7 +202,7 @@ expect_contains "doctor text output ends with summary" "checks passed"        "$
 text_out=$($CTL exec "$LOOM_NAME" \
     loom workspace ops diagnose HELLO-WORLD 2>/dev/null || true)
 expect_contains "diagnose text output names workspace" "Workspace: HELLO-WORLD" "$text_out"
-expect_contains "diagnose text output reports daemon" "Daemon:"                 "$text_out"
+expect_contains "diagnose text output reports runtime" "Runtime:"               "$text_out"
 expect_contains "diagnose text output lists repos"    "Repos:"                  "$text_out"
 expect_contains "diagnose text output lists agents"   "Agents:"                 "$text_out"
 expect_contains "diagnose text marks runtime not applicable in fleet mode" \

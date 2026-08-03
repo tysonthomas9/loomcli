@@ -19,11 +19,11 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/cli/serve/daemonwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/monitorwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/opsimpl"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimecomposition"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/runtimewire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/workspacemgr"
 	driverexecutor "github.com/tysonthomas9/loomcli/internal/driver"
@@ -53,8 +53,6 @@ const envLoomAwaitSweepBatch = "LOOM_AWAIT_SWEEP_BATCH"
 const envLoomIssueBridgeInterval = "LOOM_ISSUE_BRIDGE_INTERVAL"
 const envLoomIssueBridgeDisabled = "LOOM_ISSUE_BRIDGE_DISABLED"
 const envLoomIssueBridgeStatePath = "LOOM_ISSUE_BRIDGE_STATE_PATH"
-const envLoomTaskReadyEvents = "LOOM_TASK_READY_EVENTS"
-const envLoomTaskReviewEvents = "LOOM_TASK_REVIEW_EVENTS"
 
 const monitorCollectionCacheTTL = 10 * time.Second
 
@@ -72,8 +70,6 @@ var (
 	serveCorsOrigin        string
 	serveFrontendURLs      []string
 	serveFrontendDir       string
-	serveWebUISocket       string
-	serveNoDaemon          bool
 	serveRedisAddr         string
 	serveRedisPassword     string
 	serveFleetMode         bool
@@ -115,7 +111,7 @@ The frontend is served externally (reverse proxy, CDN, Vite preview, etc.).
 Use --frontend-url (repeatable) to allow cross-origin frontend deployments
 via CORS.
 
-Starts/opens fleet-db for issue and workspace data unless --no-daemon is set.
+Starts/opens fleet-db for issue and workspace data.
 
 ENVIRONMENT VARIABLES
   LOOM_SERVER_PORT     Server port (default: 8080)
@@ -134,9 +130,6 @@ ENVIRONMENT VARIABLES
   LOOM_ISSUE_BRIDGE_DISABLED            Disable the issue-journal bridge loop (set 1/true)
   LOOM_ISSUE_BRIDGE_STATE_PATH          Bridge cursor state file (default: <state dir>/issue-bridge-cursor.json)
   LOOM_ISSUE_BRIDGE_REPLAY              Replay journal from zero on first observation (set 1/true)
-  LOOM_TASK_READY_EVENTS                Task-ready internal event toggle (default: on; set 0/false/off/no to disable)
-  LOOM_TASK_REVIEW_EVENTS               Task-review internal event toggle (default: on; set 0/false/off/no to disable)
-
 EXAMPLES
   loom serve                                              # Default port 8080
   loom serve --bind 0.0.0.0 --auth-url https://auth.co   # Exposed with JWT auth
@@ -170,8 +163,6 @@ func registerServeFlags() {
 	serveCmd.Flags().StringVar(&serveCorsOrigin, "cors", os.Getenv("LOOM_CORS_ORIGIN"), "CORS allowed origin")
 	serveCmd.Flags().StringSliceVar(&serveFrontendURLs, "frontend-url", parseFrontendURLsEnv(), "Allowed frontend origin(s) for CORS. Repeatable or comma-separated. Env: LOOM_FRONTEND_URL")
 	serveCmd.Flags().StringVar(&serveFrontendDir, "frontend-dir", os.Getenv("LOOM_FRONTEND_DIR"), "Built web UI directory to serve for non-API routes. Env: LOOM_FRONTEND_DIR")
-	serveCmd.Flags().StringVar(&serveWebUISocket, "webui-socket", "", "Daemon socket path for webui (auto-detect if empty)")
-	serveCmd.Flags().BoolVar(&serveNoDaemon, "no-daemon", false, "Skip issue backend startup")
 	serveCmd.Flags().StringVar(&serveRedisAddr, "redis-addr", os.Getenv("LOOM_REDIS_ADDR"), "Redis address for fleet coordination (enables stale detector)")
 	serveCmd.Flags().StringVar(&serveRedisPassword, "redis-password", os.Getenv("LOOM_REDIS_PASSWORD"), "Redis password (prefer LOOM_REDIS_PASSWORD env var to avoid leaking in process list)")
 	serveCmd.Flags().BoolVar(&serveFleetMode, "fleet-mode", os.Getenv(envLoomFleetMode) == "true", "Enable fleet coordination features (stale detector, task claims, fleet routes). Default off for local dev. Env: "+envLoomFleetMode)
@@ -199,11 +190,6 @@ func runServe(cmd *cobra.Command, args []string) {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(stop)
 
-	daemonWeStarted := ensureIssueBackend()
-	if daemonWeStarted {
-		defer stopIssueBackend()
-	}
-
 	fleetState := resolveFleetState(ctx)
 
 	// When no external Redis address is configured, run an in-process
@@ -211,8 +197,8 @@ func runServe(cmd *cobra.Command, args []string) {
 	// sessionhistory, terminal:ui-state) keep working. State is snapshotted
 	// to ~/.loom/terminal-state/snapshot.json every 30s and on shutdown.
 	if serveRedisAddr == "" {
-		if mgr := daemonwire.StartLocalRedis(ctx, serveFleetMode); mgr != nil {
-			fleetState.redisConfig = &daemonwire.FleetRedisConfig{Address: mgr.Addr()}
+		if mgr := runtimewire.StartLocalRedis(ctx, serveFleetMode); mgr != nil {
+			fleetState.redisConfig = &runtimewire.FleetRedisConfig{Address: mgr.Addr()}
 		}
 	} else {
 		slog.Info("Redis: using external server", "addr", serveRedisAddr)
@@ -226,7 +212,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	// stale). When either is missing, the /stale-detector endpoint returns 404.
 	var staleDetectorHandler http.HandlerFunc
 	if serveFleetMode && serveRedisAddr != "" {
-		staleDetectorHandler = daemonwire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
+		staleDetectorHandler = runtimewire.InitStaleDetectorHandler(ctx, serveRedisAddr, serveRedisPassword)
 	}
 	initUsageStore()
 
@@ -243,9 +229,6 @@ func runServe(cmd *cobra.Command, args []string) {
 	if err := workspacemgr.EnsureBuiltinRolePrompts(ctx, storeHandle.Store); err != nil {
 		slog.Warn("builtin role prompt backfill failed", "err", err)
 	}
-	if err := workspacemgr.EnsurePromptAgentIdentityRecords(ctx, storeHandle.Store); err != nil {
-		slog.Warn("prompt-agent identity backfill failed", "err", err)
-	}
 	issueBackendFn := cli.WorkspaceAwareIssueBackendForConfig(
 		storeHandle.URL(),
 		storeHandle.FleetDBClientAPIKey(),
@@ -257,11 +240,23 @@ func runServe(cmd *cobra.Command, args []string) {
 	)
 	monitorDefaultWorkspace := resolveMonitorCollectorWorkspace(storeHandle.Store, fleetState.clientCfg.Workspace)
 	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, issueBackendFn)
-	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)
+	monitorStoreDataSource := metricscmd.NewMonitorStoreDataSource(storeHandle.Store)
+	monitorHandlers := buildMonitorHandlers(
+		collectDataFn,
+		staleDetectorHandler,
+		storeHandle.Store,
+		issueBackendFn,
+		monitorDefaultWorkspace,
+		monitorStoreDataSource,
+	)
 	cfg, capabilities, err := buildServerConfig(monitorHandlers, fleetState, storeHandle)
 	if err != nil {
 		log.Fatalf("failed to compose serve capabilities: %v", err)
 	}
+	if cfg.AgentsCapability == nil || cfg.AgentsCapability.AgentsAPI() == nil {
+		log.Fatal("failed to compose monitor: canonical Agents directory is required")
+	}
+	monitorStoreDataSource.SetAgentDirectory(cfg.AgentsCapability.AgentsAPI())
 	if capabilities.interaction == nil ||
 		capabilities.interaction.ChatMessenger() == nil {
 		log.Fatal("failed to compose outbox dispatcher: Interaction chat commands are required")
@@ -270,6 +265,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	runtimecomposition.StartOutboxDispatcher(
 		ctx,
 		storeHandle.Store,
+		cfg.ExecutionCapability,
 		capabilities.interaction.ChatMessenger(),
 		runtimeConfig.WorkspaceScope,
 	)
@@ -317,9 +313,6 @@ func runServe(cmd *cobra.Command, args []string) {
 	if serveErr != nil {
 		cmd.PrintErrf("Server error: %v\n", serveErr)
 		_ = storeHandle.Close()
-		if daemonWeStarted {
-			stopIssueBackend()
-		}
 		os.Exit(1)
 	}
 }
@@ -552,43 +545,22 @@ func ensureFleetStoreEnv(cfg config.FleetClientConfig) {
 	}
 }
 
-func ensureIssueBackend() bool {
-	if serveNoDaemon {
-		return false
-	}
-	started, err := cli.EnsureIssueBackendRunning(cli.GetDeps(nil), 5*time.Second)
-	if err != nil {
-		log.Printf("Warning: issue backend readiness check failed: %v", err)
-		return false
-	}
-	return started
-}
-
-func stopIssueBackend() {
-	// FleetDB mode does not start a per-workspace issue daemon.
-}
-
 // fleetState bundles fleet-related configuration resolved during startup.
 type fleetState struct {
-	modeDetected   bool
-	clientCfg      config.FleetClientConfig
-	jwtKey         []byte
-	redisConfig    *daemonwire.FleetRedisConfig
-	daemonSettings *config.DaemonSettings
+	modeDetected bool
+	clientCfg    config.FleetClientConfig
+	jwtKey       []byte
+	redisConfig  *runtimewire.FleetRedisConfig
 }
 
 func resolveFleetState(ctx context.Context) fleetState {
 	fs := fleetState{}
-	if dc, dcErr := config.LoadDaemonConfig("."); dcErr == nil {
-		if serveRedisAddr == "" && dc.Daemon.RedisURL != "" {
-			serveRedisAddr = dc.Daemon.RedisURL
-		}
+	if dc, dcErr := config.LoadRuntimeConfig("."); dcErr == nil {
 		fs.modeDetected = cli.IsFleetMode(dc)
-		fs.daemonSettings = &dc.Daemon
 	} else {
 		fs.modeDetected = cli.IsFleetModeFromEnv()
 	}
-	fs.clientCfg = config.ResolveFleetConfig(fs.daemonSettings)
+	fs.clientCfg = config.ResolveFleetConfig()
 	if fs.clientCfg.URL == "" {
 		fs.clientCfg.URL = os.Getenv(bootstrap.EnvFleetDBURL)
 	}
@@ -596,7 +568,7 @@ func resolveFleetState(ctx context.Context) fleetState {
 		fs.clientCfg.Actor = resolveFleetClientActorFallback()
 	}
 
-	fs.jwtKey, fs.redisConfig = daemonwire.ResolveFleetJWTKey(ctx, serveRedisAddr, serveRedisPassword)
+	fs.jwtKey, fs.redisConfig = runtimewire.ResolveFleetJWTKey(ctx, serveRedisAddr, serveRedisPassword)
 	return fs
 }
 
@@ -633,10 +605,17 @@ func initUsageStore() {
 	usageHandler = monitorwire.BuildUsageHandler(cli.GetWorkspaceRuntimeDir())
 }
 
-func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorHandler http.HandlerFunc, st store.Store, issueBackendFn metricscmd.IssueBackendFn, defaultWorkspace string) webui.MonitorHandlers {
+func buildMonitorHandlers(
+	collectDataFn metricscmd.CollectDataFn,
+	staleDetectorHandler http.HandlerFunc,
+	st store.Store,
+	issueBackendFn metricscmd.IssueBackendFn,
+	defaultWorkspace string,
+	monitorStoreDataSource *metricscmd.MonitorStoreDataSource,
+) webui.MonitorHandlers {
 	return monitorwire.BuildHandlers(
 		collectDataFn, staleDetectorHandler, issueBackendFn, defaultWorkspace, usageHandler,
-		metricscmd.NewMonitorStoreDataSource(st), metricscmd.HandleWorkspaces(st),
+		monitorStoreDataSource, metricscmd.HandleWorkspaces(st),
 	)
 }
 
@@ -736,6 +715,7 @@ func buildServerConfig(
 			return webui.ServerConfig{}, serveCapabilitySet{}, agentsErr
 		}
 		cfg.AgentsCapability = agentsCapability
+		gitOps.WithAgentQueries(agentsCapability.AgentsAPI())
 		cfg.SourceControl = agentsCapability.SourceControlMaterializer()
 		cfg.WorkspaceSourceControl = agentsCapability.RepositoryAdmissionMaterializer()
 		if agentsCapability.AgentProvisioningCommands() != nil {
@@ -758,7 +738,11 @@ func buildServerConfig(
 		cfg.InteractionCapability = interactionCapability
 		capabilities.interaction = interactionCapability
 		capabilities.runtime = append(capabilities.runtime, interactionCapability)
-		executionCapability, artifactsCapability, capabilityErr := serveadapter.BuildExecutionAndArtifactsCapabilities(module, storeHandle)
+		executionCapability, artifactsCapability, capabilityErr := serveadapter.BuildExecutionAndArtifactsCapabilities(
+			module,
+			storeHandle,
+			agentsCapability.AgentsAPI(),
+		)
 		if capabilityErr != nil {
 			return webui.ServerConfig{}, serveCapabilitySet{}, capabilityErr
 		}
@@ -809,13 +793,8 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 	return webui.ServerConfig{
 		Port:                 servePort,
 		BindAddress:          serveBindAddr,
-		SocketPath:           serveWebUISocket,
 		FrontendDir:          serveFrontendDir,
 		MonitorHandlers:      monitorHandlers,
-		AgentControlFn:       daemonwire.BuildAgentControlFn(),
-		DaemonSupervisorFn:   daemonwire.BuildDaemonSupervisorFn(),
-		DaemonConfigFn:       daemonwire.BuildDaemonConfigFn(),
-		AgentQueueFn:         daemonwire.BuildAgentQueueFn(),
 		TerminalCmd:          fmt.Sprintf("loom lead --backend %s", backend),
 		HSTSEnabled:          serveHSTS,
 		ExtAuthURL:           serveAuthURL,
@@ -832,7 +811,7 @@ func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimp
 		SentryDSN:            serveSentryDSN,
 		// Wire the active IssueBackend (fleet / fleet-db / api) into
 		// the webui service layer so the migrated CRUD endpoints don't
-		// hardcode the rpc.Client path. The closure lets the backend resolve
+		// hardcode a retired transport path. The closure lets the backend resolve
 		// lazily — important because in fleet mode the backend is created on
 		// first call, after the serve command has finished its early-startup
 		// configuration.
@@ -910,7 +889,6 @@ func applyWorkspaceConfigWithAdmission(
 	if len(operations.RuntimeRegistrations()) > 0 {
 		cfg.WorkspaceAdmissions = operations
 	}
-	cfg.DaemonConfigFn = daemonwire.BuildStoreBackedDaemonConfigFn(cfg.Store)
 	if cfg.WorkspaceAdmissions == nil {
 		return nil
 	}

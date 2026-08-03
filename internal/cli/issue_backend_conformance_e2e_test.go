@@ -221,7 +221,7 @@ func startLoomAPIServerForIssueBackendConformance(t *testing.T, loomBin, configD
 	t.Helper()
 	port := freeLoopbackPort(t)
 	serverURL := "http://127.0.0.1:" + strconv.Itoa(port)
-	cmd := exec.Command(loomBin, "serve", "--no-daemon", "--bind", "127.0.0.1", "--port", strconv.Itoa(port))
+	cmd := exec.Command(loomBin, "serve", "--bind", "127.0.0.1", "--port", strconv.Itoa(port))
 	cmd.Env = backendModeEnv(map[string]string{
 		"LOOM_CONFIG_DIR":       configDir,
 		"LOOM_WORKSPACE":        workspace,

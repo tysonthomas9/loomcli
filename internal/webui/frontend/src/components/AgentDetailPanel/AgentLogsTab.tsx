@@ -19,7 +19,7 @@ interface AgentLogsTabProps {
 // LogViewState widens ConnectionState with "empty": an archive fetch that
 // succeeded (or 404'd — see getAgentLogArchive) but returned no lines. We
 // surface that distinctly instead of showing the misleading "connected" label
-// over a blank viewer, which is what a daemon-mode agent with no archived log
+// over a blank viewer, which is what a background agent with no archived log
 // used to render.
 type LogViewState = ConnectionState | "empty";
 

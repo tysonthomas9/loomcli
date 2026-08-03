@@ -72,10 +72,20 @@ type WorkerProfilePatch struct {
 }
 
 type UpdateWorkerProfileCommand struct {
-	WorkspaceKey string
-	RequestID    string
-	ProfileID    string
-	Patch        WorkerProfilePatch
+	WorkspaceKey       string
+	RequestID          string
+	ProfileID          string
+	ExpectedParentEpic *string
+	Patch              WorkerProfilePatch
+}
+
+type BindWorkerProfileParentCommand struct {
+	WorkspaceKey   string
+	RequestID      string
+	ProfileID      string
+	ExpectedParent string
+	Parent         string
+	Owner          Owner
 }
 
 type DeleteWorkerProfileCommand struct {
@@ -89,16 +99,113 @@ type DeleteWorkerProfileResult struct {
 	ProfileID    string `json:"profile_id"`
 }
 
+type WorkerProfileFilter struct {
+	Role    string `json:"role,omitempty"`
+	Backend string `json:"backend,omitempty"`
+	Enabled *bool  `json:"enabled,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+}
+
 type WorkerProfileAPI interface {
+	GetWorkerProfile(context.Context, string, string) (*WorkerProfile, error)
+	ListWorkerProfiles(context.Context, string, WorkerProfileFilter) ([]*WorkerProfile, error)
 	CreateWorkerProfile(context.Context, authority.OperatorAuthority, CreateWorkerProfileCommand) (*WorkerProfile, error)
 	UpdateWorkerProfile(context.Context, authority.OperatorAuthority, UpdateWorkerProfileCommand) (*WorkerProfile, error)
 	DeleteWorkerProfile(context.Context, authority.OperatorAuthority, DeleteWorkerProfileCommand) (DeleteWorkerProfileResult, error)
+}
+
+func (service *Service) GetWorkerProfile(ctx context.Context, workspace, profileID string) (*WorkerProfile, error) {
+	workspace = strings.TrimSpace(workspace)
+	profileID = strings.TrimSpace(profileID)
+	if workspace == "" || profileID == "" {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.Workers.Profiles
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	profile, err := port.GetWorkerProfile(ctx, workspace, profileID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateWorkerProfile(workspace, profileID, profile); err != nil {
+		return nil, err
+	}
+	return cloneWorkerProfile(profile), nil
+}
+
+func (service *Service) ListWorkerProfiles(ctx context.Context, workspace string, filter WorkerProfileFilter) ([]*WorkerProfile, error) {
+	workspace = strings.TrimSpace(workspace)
+	filter.Role = strings.TrimSpace(filter.Role)
+	filter.Backend = strings.TrimSpace(filter.Backend)
+	filter.Enabled = cloneWorkerProfileBool(filter.Enabled)
+	if workspace == "" || filter.Limit < 0 {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.Workers.Profiles
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	profiles, err := port.ListWorkerProfiles(ctx, workspace, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*WorkerProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile == nil || profile.WorkspaceKey != workspace {
+			return nil, fmt.Errorf("%w: worker profile query escaped requested workspace", ErrConflict)
+		}
+		if err := validateWorkerProfile(workspace, profile.ProfileID, profile); err != nil {
+			return nil, err
+		}
+		out = append(out, cloneWorkerProfile(profile))
+	}
+	return out, nil
 }
 
 type WorkerProfileMutationPort interface {
 	CreateWorkerProfile(context.Context, CreateWorkerProfileCommand) (*WorkerProfile, error)
 	UpdateWorkerProfile(context.Context, UpdateWorkerProfileCommand) (*WorkerProfile, error)
 	DeleteWorkerProfile(context.Context, DeleteWorkerProfileCommand) error
+}
+
+func (service *Service) BindWorkerProfileParent(
+	ctx context.Context,
+	auth authority.ExecutionAuthority,
+	command BindWorkerProfileParentCommand,
+) (*WorkerProfile, error) {
+	if err := service.requireOwner(ActionBindWorkerProfileParent, command.WorkspaceKey, command.Owner, auth); err != nil {
+		return nil, err
+	}
+	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
+	command.RequestID = strings.TrimSpace(command.RequestID)
+	command.ProfileID = strings.TrimSpace(command.ProfileID)
+	command.ExpectedParent = strings.TrimSpace(command.ExpectedParent)
+	command.Parent = strings.TrimSpace(command.Parent)
+	if command.RequestID == "" || command.ProfileID == "" || command.Parent == "" {
+		return nil, ErrInvalid
+	}
+	port := service.dependencies.Workers.Profiles
+	if port == nil {
+		return nil, ErrUnavailable
+	}
+	profile, err := port.UpdateWorkerProfile(ctx, UpdateWorkerProfileCommand{
+		WorkspaceKey:       command.WorkspaceKey,
+		RequestID:          command.RequestID,
+		ProfileID:          command.ProfileID,
+		ExpectedParentEpic: &command.ExpectedParent,
+		Patch:              WorkerProfilePatch{ParentEpic: &command.Parent},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := validateWorkerProfile(command.WorkspaceKey, command.ProfileID, profile); err != nil {
+		return nil, err
+	}
+	if profile.ParentEpic != command.Parent {
+		return nil, fmt.Errorf("%w: worker profile parent did not converge", ErrConflict)
+	}
+	return cloneWorkerProfile(profile), nil
 }
 
 func (service *Service) CreateWorkerProfile(ctx context.Context, auth authority.OperatorAuthority, command CreateWorkerProfileCommand) (*WorkerProfile, error) {
@@ -215,6 +322,7 @@ func cloneUpdateWorkerProfileCommand(command UpdateWorkerProfileCommand) UpdateW
 	command.WorkspaceKey = strings.TrimSpace(command.WorkspaceKey)
 	command.RequestID = strings.TrimSpace(command.RequestID)
 	command.ProfileID = strings.TrimSpace(command.ProfileID)
+	command.ExpectedParentEpic = cloneWorkerProfileString(command.ExpectedParentEpic)
 	command.Patch = cloneWorkerProfilePatch(command.Patch)
 	return command
 }

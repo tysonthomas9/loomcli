@@ -32,7 +32,7 @@ interface AgentHistoryState {
   error: Error | null;
 }
 
-/** Fetch unified workflow-run or supervised-session history for one agent. */
+/** Fetch unified workflow-run or interactive-session history for one agent. */
 export function useAgentHistory(
   workspaceId: string,
   agentId: string | null,

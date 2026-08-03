@@ -18,6 +18,7 @@ import (
 	connectorsfleetdb "github.com/tysonthomas9/loomcli/internal/modules/connectors/fleetdb"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/stackstore"
 )
 
 const (
@@ -28,10 +29,11 @@ const (
 // Phase 5 checkout materializer. Consumers receive only the Source Control API;
 // the credential source and Connectors broker remain private.
 type SourceControlCapability struct {
-	api    sourcecontrol.API
-	grants connectors.GrantCommands
-	issuer *authority.Issuer
-	now    func() time.Time
+	api     sourcecontrol.API
+	grants  connectors.GrantCommands
+	issuer  *authority.Issuer
+	now     func() time.Time
+	lineage stackstore.Store
 }
 
 type API = sourcecontrol.API
@@ -340,13 +342,17 @@ func NewSourceControlCapability(
 	if issuer == nil {
 		return nil, fmt.Errorf("compose Source Control authority: Workflow Catalog authority is unavailable")
 	}
-	return newSourceControlCapability(
+	capability, err := newSourceControlCapability(
 		issuer,
 		gitauth.NewLocalSettingsSource(localSettingsDir),
 		repositories,
 		infralocalgit.Inspector{},
 		time.Now,
 	)
+	if capability != nil {
+		capability.lineage, _ = stackstore.Default()
+	}
+	return capability, err
 }
 
 // NewSourceControlCapabilityWithFleetDB composes the complete Phase 5
@@ -366,7 +372,7 @@ func NewSourceControlCapabilityWithFleetDB(
 	if err != nil {
 		return nil, fmt.Errorf("compose Connectors grant adapter: %w", err)
 	}
-	return newSourceControlCapabilityWithGrants(
+	capability, err := newSourceControlCapabilityWithGrants(
 		issuer,
 		gitauth.NewLocalSettingsSource(localSettingsDir),
 		repositories,
@@ -374,6 +380,10 @@ func NewSourceControlCapabilityWithFleetDB(
 		grantAdapter,
 		time.Now,
 	)
+	if capability != nil {
+		capability.lineage, _ = stackstore.Default()
+	}
+	return capability, err
 }
 
 func newSourceControlCapability(

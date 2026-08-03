@@ -81,7 +81,6 @@ const mocks = vi.hoisted(() => {
       name: string;
       role?: string;
       role_kind?: string;
-      daemon_managed?: boolean;
       repo?: string;
       status?: string;
       branch?: string;
@@ -828,14 +827,13 @@ describe("AgentsPage", () => {
     });
   });
 
-  it("does not expose or seed Terminal for a daemon-supervised advanced worker", async () => {
+  it("does not expose or seed Terminal for a background advanced worker", async () => {
     mocks.routeAgentName = "triage-1";
     mocks.agents = [
       {
         name: "triage-1",
         role: "bug-triage",
         role_kind: "worker",
-        daemon_managed: true,
         status: "ready",
         branch: "agent/triage-1",
         repo: "loomcli",

@@ -321,10 +321,10 @@ type AgentOwnershipLeaseProof struct {
 	FencingToken    int64
 }
 
-// AgentOwnershipLeaseOwnedStore is the narrow compatibility seam used by the
-// transitional daemon supervisor when FleetDB publishes owner-fenced Phase 5
-// ownership commands. Implementations validate the complete proof atomically;
-// callers may fall back to AgentOwnershipLeaseStore only for legacy backends.
+// AgentOwnershipLeaseOwnedStore validates an exact ownership generation for
+// the Agents desired-state runtime. Implementations validate the complete proof
+// atomically; callers may use AgentOwnershipLeaseStore only when no proof is
+// available yet.
 type AgentOwnershipLeaseOwnedStore interface {
 	HeartbeatOwned(ctx context.Context, proof AgentOwnershipLeaseProof, ttl time.Duration) (*domain.AgentOwnershipLease, error)
 	ReleaseOwned(ctx context.Context, proof AgentOwnershipLeaseProof) (*domain.AgentOwnershipLease, error)
@@ -336,57 +336,6 @@ type AgentOwnershipLeaseStore interface {
 	List(ctx context.Context, workspaceKey string, filter AgentOwnershipLeaseFilter) ([]*domain.AgentOwnershipLease, error)
 	Heartbeat(ctx context.Context, workspaceKey, agentID, token string, ttl time.Duration) (*domain.AgentOwnershipLease, error)
 	Release(ctx context.Context, workspaceKey, agentID, token string) (*domain.AgentOwnershipLease, error)
-}
-
-type AgentCommandCreate struct {
-	WorkspaceKey  string
-	CommandID     string
-	TargetAgentID string
-	TargetNodeID  string
-	SessionID     string
-	Type          string
-	Payload       map[string]string
-}
-
-type AgentCommandFilter struct {
-	TargetAgentID string
-	TargetNodeID  string
-	Status        domain.AgentCommandStatus
-	AfterCursor   int64
-	Limit         int
-}
-
-// AgentCommandOwnershipProof is a request-only proof that the daemon
-// acknowledging or completing a lifecycle command currently owns the target
-// Agent aggregate. OwnershipToken is a bearer secret: callers must source it
-// from the in-memory AgentProcess and stores must never persist or return it.
-type AgentCommandOwnershipProof struct {
-	OwnershipLeaseID      string `json:"ownership_lease_id,omitempty"`
-	OwnershipToken        string `json:"ownership_token,omitempty"`
-	OwnershipFencingToken int64  `json:"ownership_fencing_token,omitempty"`
-}
-
-type AgentCommandAck struct {
-	NodeID  string `json:"node_id"`
-	OwnerID string `json:"owner_id"`
-	AgentCommandOwnershipProof
-}
-
-type AgentCommandComplete struct {
-	NodeID     string                    `json:"node_id"`
-	OwnerID    string                    `json:"owner_id"`
-	Status     domain.AgentCommandStatus `json:"status"`
-	Result     string                    `json:"result,omitempty"`
-	ErrorClass string                    `json:"error_class,omitempty"`
-	AgentCommandOwnershipProof
-}
-
-type AgentCommandStore interface {
-	Create(ctx context.Context, in AgentCommandCreate) (*domain.AgentCommand, error)
-	Get(ctx context.Context, workspaceKey, commandID string) (*domain.AgentCommand, error)
-	List(ctx context.Context, workspaceKey string, filter AgentCommandFilter) ([]*domain.AgentCommand, error)
-	Ack(ctx context.Context, workspaceKey, commandID string, ack AgentCommandAck) (*domain.AgentCommand, error)
-	Complete(ctx context.Context, workspaceKey, commandID string, update AgentCommandComplete) (*domain.AgentCommand, error)
 }
 
 type AgentInboxMessageCreate struct {

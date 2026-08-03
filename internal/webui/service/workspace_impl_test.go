@@ -9,55 +9,88 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
+	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/daemon"
 )
 
-func TestPoolStatsFromDaemon(t *testing.T) {
-	input := daemon.PoolStats{
-		Size:      10,
-		Created:   7,
-		Active:    3,
-		Available: 4,
-		Closed:    true,
+type workspaceAgentDirectoryStub struct {
+	agents    []*agentsmodule.Agent
+	roles     []*agentsmodule.Role
+	listCalls int
+}
+
+func (stub *workspaceAgentDirectoryStub) ListAgents(
+	_ context.Context,
+	_ string,
+	_ agentsmodule.AgentFilter,
+) ([]*agentsmodule.Agent, error) {
+	stub.listCalls++
+	return stub.agents, nil
+}
+
+func (stub *workspaceAgentDirectoryStub) ListRoles(context.Context, string) ([]*agentsmodule.Role, error) {
+	return stub.roles, nil
+}
+
+func TestGetWorkspaceProjectsCanonicalAgentsOutsideTopologyCache(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := agentsmodule.WithRuntimeMetadata(nil, agentsmodule.RuntimeMetadata{
+		RoleKind: "interactive", Backend: "codex", Repos: []string{"loomcli"},
+		RepoGroups: []string{"core"}, CrossRepo: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := &workspaceAgentDirectoryStub{
+		agents: []*agentsmodule.Agent{{
+			WorkspaceKey: "ALPHA", AgentID: "reviewer", Name: "reviewer",
+			Behavior: agentsmodule.BehaviorReference{RoleName: "review"}, Metadata: metadata,
+		}},
+		roles: []*agentsmodule.Role{{WorkspaceKey: "ALPHA", Name: "review", Kind: "interactive", Backend: "claude"}},
+	}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st, AgentDirectory: directory})
+
+	first, err := svc.GetWorkspace(ctx, "ALPHA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Agents) != 1 {
+		t.Fatalf("workspace agents = %#v", first.Agents)
+	}
+	got := first.Agents[0]
+	if got.Name != "reviewer" || got.Kind != "interactive" || got.RoleName != "review" ||
+		got.Backend != "codex" || len(got.Repos) != 1 || got.Repos[0] != "loomcli" ||
+		len(got.RepoGroups) != 1 || got.RepoGroups[0] != "core" || !got.CrossRepo {
+		t.Fatalf("workspace agent = %#v", got)
 	}
 
-	got := poolStatsFromDaemon(input)
-
-	if got.Size != input.Size {
-		t.Errorf("Size = %d, want %d", got.Size, input.Size)
+	directory.agents = nil
+	second, err := svc.GetWorkspace(ctx, "ALPHA")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got.Created != input.Created {
-		t.Errorf("Created = %d, want %d", got.Created, input.Created)
-	}
-	if got.Active != input.Active {
-		t.Errorf("Active = %d, want %d", got.Active, input.Active)
-	}
-	if got.Available != input.Available {
-		t.Errorf("Available = %d, want %d", got.Available, input.Available)
-	}
-	if got.Closed != input.Closed {
-		t.Errorf("Closed = %v, want %v", got.Closed, input.Closed)
+	if len(second.Agents) != 0 || directory.listCalls != 2 {
+		t.Fatalf("second workspace agents = %#v, list calls = %d", second.Agents, directory.listCalls)
 	}
 }
 
-func TestPoolStatsFromDaemon_Zero(t *testing.T) {
-	got := poolStatsFromDaemon(daemon.PoolStats{})
-
-	if got.Size != 0 {
-		t.Errorf("Size = %d, want 0", got.Size)
+func TestGetWorkspaceRejectsCanonicalAgentWithMissingRole(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+		t.Fatal(err)
 	}
-	if got.Created != 0 {
-		t.Errorf("Created = %d, want 0", got.Created)
-	}
-	if got.Active != 0 {
-		t.Errorf("Active = %d, want 0", got.Active)
-	}
-	if got.Available != 0 {
-		t.Errorf("Available = %d, want 0", got.Available)
-	}
-	if got.Closed != false {
-		t.Errorf("Closed = %v, want false", got.Closed)
+	directory := &workspaceAgentDirectoryStub{agents: []*agentsmodule.Agent{{
+		WorkspaceKey: "ALPHA", AgentID: "orphan", Behavior: agentsmodule.BehaviorReference{RoleName: "missing"},
+	}}}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st, AgentDirectory: directory})
+	if _, err := svc.GetWorkspace(ctx, "ALPHA"); err == nil {
+		t.Fatal("GetWorkspace succeeded with an orphan canonical Agent")
 	}
 }
 
@@ -408,10 +441,6 @@ func TestGetWorkspace_StoreBackedCachesTopologyAcrossRepeatedCalls(t *testing.T)
 	if _, err := base.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "BETA", Name: "repo-b"}); err != nil {
 		t.Fatalf("create beta repo: %v", err)
 	}
-	if _, err := base.Daemon().Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "BETA", AgentBackend: "codex"}); err != nil {
-		t.Fatalf("upsert beta daemon: %v", err)
-	}
-
 	counted := newWorkspaceCountingStore(base)
 	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: counted})
 
@@ -446,19 +475,17 @@ func TestGetWorkspace_StoreBackedCachesTopologyAcrossRepeatedCalls(t *testing.T)
 	if got := counted.repos.listByWorkspace["BETA"]; got != 1 {
 		t.Fatalf("BETA repo List calls = %d, want one cross-workspace summary read", got)
 	}
-	if got := counted.daemon.getByWorkspace["BETA"]; got != 1 {
-		t.Fatalf("BETA daemon Get calls = %d, want one cross-workspace summary read", got)
-	}
 }
 
-func TestGetWorkspaceBackend_StoreBackedReadsDaemonProfile(t *testing.T) {
+func TestGetWorkspaceBackend_ReadsLocalNodeConfig(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
-	if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "ALPHA", AgentBackend: "codex"}); err != nil {
-		t.Fatalf("upsert daemon profile: %v", err)
+	if err := localnodeconfig.SetRuntimeProvider("ALPHA", "codex"); err != nil {
+		t.Fatalf("set runtime provider: %v", err)
 	}
 
 	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
@@ -469,12 +496,13 @@ func TestGetWorkspaceBackend_StoreBackedReadsDaemonProfile(t *testing.T) {
 	if cfg.Backend != "codex" {
 		t.Fatalf("Backend = %q, want codex", cfg.Backend)
 	}
-	if cfg.Source != "fleetdb" {
-		t.Fatalf("Source = %q, want fleetdb", cfg.Source)
+	if cfg.Source != "local_node" {
+		t.Fatalf("Source = %q, want local_node", cfg.Source)
 	}
 }
 
 func TestGetWorkspaceBackend_StoreBackedDefaultsToCodex(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
@@ -494,7 +522,8 @@ func TestGetWorkspaceBackend_StoreBackedDefaultsToCodex(t *testing.T) {
 	}
 }
 
-func TestPatchWorkspaceBackend_StoreBackedWritesDaemonProfile(t *testing.T) {
+func TestPatchWorkspaceBackend_WritesLocalNodeConfig(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
 	st := memstore.New()
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
@@ -509,12 +538,12 @@ func TestPatchWorkspaceBackend_StoreBackedWritesDaemonProfile(t *testing.T) {
 	if data.ID != "ALPHA" {
 		t.Fatalf("data.ID = %q, want ALPHA", data.ID)
 	}
-	profile, err := st.Daemon().Get(ctx, "ALPHA")
+	provider, err := localnodeconfig.RuntimeProvider("ALPHA")
 	if err != nil {
-		t.Fatalf("get daemon profile: %v", err)
+		t.Fatalf("get runtime provider: %v", err)
 	}
-	if profile.AgentBackend != "codex" {
-		t.Fatalf("AgentBackend = %q, want codex", profile.AgentBackend)
+	if provider != "codex" {
+		t.Fatalf("runtime provider = %q, want codex", provider)
 	}
 }
 
@@ -755,7 +784,6 @@ type workspaceCountingStore struct {
 	store.Store
 	workspaces *workspaceCountingWorkspaceStore
 	repos      *workspaceCountingRepoStore
-	daemon     *workspaceCountingDaemonStore
 }
 
 func newWorkspaceCountingStore(base store.Store) *workspaceCountingStore {
@@ -763,13 +791,11 @@ func newWorkspaceCountingStore(base store.Store) *workspaceCountingStore {
 		Store:      base,
 		workspaces: &workspaceCountingWorkspaceStore{WorkspaceStore: base.Workspaces()},
 		repos:      &workspaceCountingRepoStore{RepoStore: base.Repos(), listByWorkspace: make(map[string]int)},
-		daemon:     &workspaceCountingDaemonStore{DaemonProfileStore: base.Daemon(), getByWorkspace: make(map[string]int)},
 	}
 }
 
 func (s *workspaceCountingStore) Workspaces() store.WorkspaceStore { return s.workspaces }
 func (s *workspaceCountingStore) Repos() store.RepoStore           { return s.repos }
-func (s *workspaceCountingStore) Daemon() store.DaemonProfileStore { return s.daemon }
 
 type workspaceCountingWorkspaceStore struct {
 	store.WorkspaceStore
@@ -795,14 +821,4 @@ type workspaceCountingRepoStore struct {
 func (s *workspaceCountingRepoStore) List(ctx context.Context, workspaceKey string) ([]*domain.Repo, error) {
 	s.listByWorkspace[workspaceKey]++
 	return s.RepoStore.List(ctx, workspaceKey)
-}
-
-type workspaceCountingDaemonStore struct {
-	store.DaemonProfileStore
-	getByWorkspace map[string]int
-}
-
-func (s *workspaceCountingDaemonStore) Get(ctx context.Context, workspaceKey string) (*domain.DaemonProfile, error) {
-	s.getByWorkspace[workspaceKey]++
-	return s.DaemonProfileStore.Get(ctx, workspaceKey)
 }

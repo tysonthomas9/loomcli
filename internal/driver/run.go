@@ -361,7 +361,7 @@ func emitRunFinishedEventWithExecution(
 			"runID", run.RunID, "status", string(run.Status))
 		return
 	}
-	journal, ok := s.TriggerEvents().(store.TriggerEventAppender)
+	journal, ok := s.TriggerEvents().(RunOutcomeJournal)
 	if !ok {
 		slog.WarnContext(ctx, "Execution run.finished journal port is unavailable",
 			"runID", run.RunID, "status", string(run.Status))

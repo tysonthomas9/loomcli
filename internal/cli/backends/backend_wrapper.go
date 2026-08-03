@@ -8,7 +8,6 @@ import (
 	hwharness "github.com/olesho/harness-wrapper/pkg/harness"
 	"github.com/olesho/harness-wrapper/pkg/wrapper"
 
-	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/harness"
 )
 
@@ -77,7 +76,7 @@ func runHarness(parent context.Context, shutdown <-chan struct{}, inv harnessInv
 	// no-op; under daemon supervision it ticks wrapper.Snapshot.LastOutputAt
 	// over IPC so the daemon can surface per-agent liveness in the UI.
 	if inv.RetryPolicy.OnActivity == nil {
-		inv.RetryPolicy.OnActivity = cli.DaemonActivityObserver()
+		inv.RetryPolicy.OnActivity = nil
 	}
 
 	hwCfg := hwharness.Config{

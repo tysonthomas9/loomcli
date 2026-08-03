@@ -50,7 +50,9 @@ type WorkspaceRepo struct {
 // WorkspaceAgentInfo represents agent repo/group assignments within a workspace.
 type WorkspaceAgentInfo struct {
 	Name     string `json:"name"`
+	Kind     string `json:"kind,omitempty"`
 	RoleName string `json:"role_name,omitempty"`
+	Backend  string `json:"backend,omitempty"`
 	// Initialized to empty slice by mapper; must serialize as [] not null.
 	Repos []string `json:"repos"`
 	// Initialized to empty slice by mapper; must serialize as [] not null.

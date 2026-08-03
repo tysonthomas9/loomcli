@@ -82,8 +82,8 @@ claim_issue="$(json_post claim-seed "$FLEET_URL/api/v1/$WORKSPACE/issues" \
 claim_issue_id="$(printf '%s\n' "$claim_issue" | jq -r '.id')"
 [ -n "$claim_issue_id" ] && [ "$claim_issue_id" != "null" ] || fail "claim issue create did not return an id"
 
-(http_post_status supervisor-a "$FLEET_URL/api/v1/$WORKSPACE/issues/$claim_issue_id/claim" '{"lock_ttl":60}' > /tmp/claim-a.status) &
-(http_post_status supervisor-b "$FLEET_URL/api/v1/$WORKSPACE/issues/$claim_issue_id/claim" '{"lock_ttl":60}' > /tmp/claim-b.status) &
+(http_post_status worker-a "$FLEET_URL/api/v1/$WORKSPACE/issues/$claim_issue_id/claim" '{"lock_ttl":60}' > /tmp/claim-a.status) &
+(http_post_status worker-b "$FLEET_URL/api/v1/$WORKSPACE/issues/$claim_issue_id/claim" '{"lock_ttl":60}' > /tmp/claim-b.status) &
 wait
 claim_a="$(cat /tmp/claim-a.status)"
 claim_b="$(cat /tmp/claim-b.status)"
@@ -92,10 +92,10 @@ case "$claim_a:$claim_b" in
   *) fail "claim contention returned unexpected statuses a=$claim_a b=$claim_b" ;;
 esac
 
-heartbeat="$(curl -fsS -H "Content-Type: application/json" -H "X-Actor: supervisor-a" -X POST --data '{}' "$FLEET_URL/api/v1/$WORKSPACE/workers/supervisor-a/heartbeat")"
+heartbeat="$(curl -fsS -H "Content-Type: application/json" -H "X-Actor: worker-a" -X POST --data '{}' "$FLEET_URL/api/v1/$WORKSPACE/workers/worker-a/heartbeat")"
 printf '%s\n' "$heartbeat" | jq -e '.success == true or .error == "no_active_session"' >/dev/null ||
-  fail "supervisor heartbeat returned unexpected body: $heartbeat"
-pass "local supervisor heartbeat endpoint is reachable"
+  fail "worker heartbeat returned unexpected body: $heartbeat"
+pass "worker heartbeat endpoint is reachable"
 
 baseline="$(curl -fsS -H "X-Actor: observer" "$FLEET_URL/api/v1/$WORKSPACE/events/mutations?since=0&limit=100")"
 cursor="$(printf '%s\n' "$baseline" | jq -r '.cursor')"
@@ -112,20 +112,41 @@ printf '%s\n' "$sse_body" | grep -q "$gap_issue_id" ||
   fail "SSE reconnect catch-up from loom-b did not include $gap_issue_id; body: $sse_body; err: $(cat /tmp/sse.err)"
 pass "SSE reconnect catch-up works across loom instances"
 
-# Cross-node transcript: seed an agent session + transcript artifact + transcript_ref via the control
-# plane (loom seed-transcript -> fleet-db), then assert the NON-owning node (loom-b), which owns no local
-# copy of the session, surfaces the transcript end-to-end. This exercises the full daemon-leaf
-# transcript_ref path (WS1b): node-b resolves the session + transcript_ref from fleet-db AND reads the
-# artifact bytes back via fleet-db's GET /artifacts/{id}/content, then parses the canonical entries.
+# Cross-node transcript: start an owner-fenced Interaction session through
+# FleetDB, publish its transcript through Loom's Interaction command, then
+# assert that the other Loom node resolves the session and reads the durable
+# artifact bytes. This proves the public owner path without a test-only control
+# command or process-local session copy.
 tx_session="dist-smoke-tx-$stamp"
-tx_task="dist-smoke-task-$stamp"
+tx_issue="$(json_post tx-seed "$FLEET_URL/api/v1/$WORKSPACE/issues" \
+  "{\"title\":\"distributed-smoke-transcript-$stamp\",\"type\":\"task\",\"priority\":1,\"repo\":\"smoke-org/smoke-repo\"}")"
+tx_task="$(printf '%s\n' "$tx_issue" | jq -r '.id')"
+[ -n "$tx_task" ] && [ "$tx_task" != "null" ] || fail "transcript issue create did not return an id"
+tx_agent="distributed-smoke"
+tx_node="distributed-smoke-node"
+tx_lease="dist-smoke-lease-$stamp"
+tx_start="$(json_post distributed-smoke "$FLEET_URL/api/v1/$WORKSPACE/interaction/sessions" \
+  "{\"session_id\":\"$tx_session\",\"agent_id\":\"$tx_agent\",\"node_id\":\"$tx_node\",\"kind\":\"task\",\"task_id\":\"$tx_task\",\"lease_id\":\"$tx_lease\",\"lease_ttl_seconds\":300}")" \
+  || fail "start transcript Interaction session failed"
+tx_token="$(printf '%s\n' "$tx_start" | jq -r '.token')"
+tx_fence="$(printf '%s\n' "$tx_start" | jq -r '.lease.fencing_token')"
+[ -n "$tx_token" ] && [ "$tx_token" != "null" ] || fail "Interaction start did not return a lease token"
+[ -n "$tx_fence" ] && [ "$tx_fence" != "null" ] || fail "Interaction start did not return a fence"
 printf '%s\n%s\n%s\n' \
   '{"role":"system","type":"session_meta","text":"distributed-smoke seeded transcript"}' \
   '{"role":"assistant","type":"text","text":"cross-node transcript probe"}' \
   '{"role":"system","type":"result","text":"completed","output":"{\"input_tokens\":1,\"output_tokens\":1}"}' \
   > /tmp/tx.jsonl
-loom daemon seed-transcript --workspace "$WORKSPACE" --session "$tx_session" --task "$tx_task" --content /tmp/tx.jsonl \
-  || fail "seed-transcript failed"
+curl -fsS -X POST \
+  -H "Content-Type: application/x-ndjson" \
+  -H "X-Loom-Session-Token: $tx_token" \
+  -H "X-Loom-Session-Agent-ID: $tx_agent" \
+  -H "X-Loom-Session-Node-ID: $tx_node" \
+  -H "X-Loom-Session-Lease-ID: $tx_lease" \
+  -H "X-Loom-Session-Fencing-Token: $tx_fence" \
+  --data-binary @/tmp/tx.jsonl \
+  "$LOOM_A_URL/api/workspaces/$WORKSPACE/interaction/sessions/$tx_session/transcript" >/tmp/tx-publish.json \
+  || fail "publish transcript through Interaction failed: $(cat /tmp/tx-publish.json 2>/dev/null || true)"
 
 # (a) Resolution: node-b lists the seeded session (from fleet-db) with has_transcript=true.
 sess_body="$(curl -fsS "$LOOM_B_URL/api/workspaces/$WORKSPACE/tasks/$tx_task/sessions" 2>/tmp/tx.err || true)"

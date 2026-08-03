@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/testutil"
 )
 
 type executionClaimPortStub struct{}
@@ -99,7 +100,7 @@ func executionDependenciesForTaskRunAPITest(
 	return appserve.ExecutionDependencies{
 		TaskRuns: st.TaskRuns(), DriverRuns: st.DriverRuns(), DriverSteps: st.DriverSteps(),
 		TerminalStepRepairs: repairs, TaskRunEvents: st.TaskRunEvents(), Nodes: st.Nodes(),
-		WorkerProfiles: st.WorkerProfiles(), Agents: st.Agents(), Outbox: st.Outbox(), Awaits: st.Awaits(),
+		WorkerProfiles: st.WorkerProfiles(), AgentQueries: testutil.StaticAgentQueries{}, Outbox: st.Outbox(), Awaits: st.Awaits(),
 		TriggerEvents: st.TriggerEvents(), Workspaces: st.Workspaces(),
 		AtomicTaskRunRequests: executionClaimPortStub{}, AtomicTaskRunClaims: executionClaimPortStub{},
 		AtomicTaskRunWorkItemDesign: designs,

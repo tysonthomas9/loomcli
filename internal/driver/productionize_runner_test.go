@@ -13,6 +13,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -225,39 +226,38 @@ func TestLocalTaskRunnerBackendEnvResolution(t *testing.T) {
 		}
 	})
 
-	t.Run("uses workspace daemon profile backend", func(t *testing.T) {
+	t.Run("uses workspace local runtime provider", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 		st := memstore.New()
 		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 			t.Fatalf("create workspace: %v", err)
 		}
-		if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "WS", AgentBackend: "claude"}); err != nil {
-			t.Fatalf("upsert daemon profile: %v", err)
+		if err := localnodeconfig.SetRuntimeProvider("WS", "claude"); err != nil {
+			t.Fatalf("set runtime provider: %v", err)
 		}
 		req := hostBridgeTaskExecRequest()
 		req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
 		env := envMap(HostBridgeTaskExecutor{Store: st}.taskRunnerEnv(req, "{}"))
 		if env[TaskRunnerBackendEnv] != "claude" {
-			t.Fatalf("%s = %q, want claude from daemon profile", TaskRunnerBackendEnv, env[TaskRunnerBackendEnv])
+			t.Fatalf("%s = %q, want claude from local node config", TaskRunnerBackendEnv, env[TaskRunnerBackendEnv])
 		}
 	})
 
-	t.Run("per-agent override wins", func(t *testing.T) {
+	t.Run("retired supervised-agent override is ignored", func(t *testing.T) {
+		t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
 		st := memstore.New()
 		if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS", Name: "ws"}); err != nil {
 			t.Fatalf("create workspace: %v", err)
 		}
-		if _, err := st.Daemon().Upsert(ctx, &domain.DaemonProfile{WorkspaceKey: "WS", AgentBackend: "claude"}); err != nil {
-			t.Fatalf("upsert daemon profile: %v", err)
-		}
-		if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "WS", Name: "worker-a", RoleName: "impl", Backend: "gemini"}); err != nil {
-			t.Fatalf("create agent: %v", err)
+		if err := localnodeconfig.SetRuntimeProvider("WS", "claude"); err != nil {
+			t.Fatalf("set runtime provider: %v", err)
 		}
 		req := hostBridgeTaskExecRequest()
 		req.RunnerEntrypoint = LocalTaskRunnerEntrypoint
 		req.WorkerProfileID = "worker-a"
 		env := envMap(HostBridgeTaskExecutor{Store: st}.taskRunnerEnv(req, "{}"))
-		if env[TaskRunnerBackendEnv] != "gemini" {
-			t.Fatalf("%s = %q, want gemini from per-agent override", TaskRunnerBackendEnv, env[TaskRunnerBackendEnv])
+		if env[TaskRunnerBackendEnv] != "claude" {
+			t.Fatalf("%s = %q, want claude from local node config", TaskRunnerBackendEnv, env[TaskRunnerBackendEnv])
 		}
 	})
 

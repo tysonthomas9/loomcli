@@ -64,13 +64,13 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(report.CompositeStoreFiles), 78; got != want {
+	if got, want := len(report.CompositeStoreFiles), 67; got != want {
 		t.Fatalf("composite Store file count = %d, want %d; files = %v", got, want, report.CompositeStoreFiles)
 	}
-	if got, want := len(report.CompositeStoreOutside), 66; got != want {
+	if got, want := len(report.CompositeStoreOutside), 57; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 87; got != want {
+	if got, want := len(report.LegacyHandlerImports), 82; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
 	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {
@@ -82,16 +82,16 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := report.AnalysisProfilesEnforced, 11; got != want {
 		t.Fatalf("enforced analysis profiles = %d, want %d", got, want)
 	}
-	if got, want := report.MutationCommands, 102; got != want {
+	if got, want := report.MutationCommands, 105; got != want {
 		t.Fatalf("mutation commands = %d, want %d", got, want)
 	}
-	if got, want := report.DirectPersistenceWrites, 260; got != want {
+	if got, want := report.DirectPersistenceWrites, 225; got != want {
 		t.Fatalf("direct persistence-write rows = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeComponents, 90; got != want {
+	if got, want := report.RuntimeComponents, 71; got != want {
 		t.Fatalf("runtime components = %d, want %d", got, want)
 	}
-	if got, want := report.RuntimeGoroutineLaunches, 105; got != want {
+	if got, want := report.RuntimeGoroutineLaunches, 80; got != want {
 		t.Fatalf("runtime goroutine launches = %d, want %d", got, want)
 	}
 	if got, want := report.PerformanceMetrics, 6; got != want {
@@ -164,9 +164,10 @@ func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T)
 	// port contract explicitly forbids claiming product state, and Classifier
 	// only returns an ExitClassification value; neither has a durable command.
 	nonMutationEvidence := map[authority.Action]string{
-		execution.ActionPreflight:            "PreflightPort validates readiness without claiming product state",
-		execution.ActionClassify:             "Classifier returns only an ExitClassification value",
-		execution.ActionResolveTrustedRunner: "TrustedRunnerResolver returns only a validated catalog projection",
+		execution.ActionPreflight:               "PreflightPort validates readiness without claiming product state",
+		execution.ActionClassify:                "Classifier returns only an ExitClassification value",
+		execution.ActionResolveTrustedRunner:    "TrustedRunnerResolver returns only a validated catalog projection",
+		execution.ActionListDueOutboxDeliveries: "Outbox delivery listing is a read-only due-row query",
 	}
 	// These original generic API actions remain compatibility scaffolds and are
 	// not wired by the production Phase 4 composition. Their exact composed
@@ -204,7 +205,7 @@ func TestMutationLedgerMatchesProductionExecutionMutationInventory(t *testing.T)
 		t.Fatalf("Execution action exclusions observed = %v, want all documented exclusions %v", observedExclusions, exclusions)
 	}
 	slices.Sort(want)
-	if gotCount, wantCount := len(got), 40; gotCount != wantCount {
+	if gotCount, wantCount := len(got), 42; gotCount != wantCount {
 		t.Fatalf("Execution mutation commands = %d, want %d; commands = %v", gotCount, wantCount, got)
 	}
 	if !slices.Equal(got, want) {
@@ -462,13 +463,13 @@ func TestPhase5InteractionLedgerPinsDeliveryAuthorityAndAttemptFencing(t *testin
 	}
 }
 
-func TestCheckedInPhase5ArchitectureContracts(t *testing.T) {
+func TestCheckedInPhase6ArchitectureContracts(t *testing.T) {
 	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if graph.CompletedPhase != 5 {
-		t.Fatalf("completed phase = %d, want 5", graph.CompletedPhase)
+	if graph.CompletedPhase != 6 {
+		t.Fatalf("completed phase = %d, want 6", graph.CompletedPhase)
 	}
 	statusByCapability := make(map[string]string, len(graph.Capabilities))
 	for _, capability := range graph.Capabilities {
@@ -493,8 +494,8 @@ func TestCheckedInPhase5ArchitectureContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ledger.Commands) != 102 {
-		t.Fatalf("mutation commands = %d, want 102", len(ledger.Commands))
+	if len(ledger.Commands) != 105 {
+		t.Fatalf("mutation commands = %d, want 105", len(ledger.Commands))
 	}
 }
 
@@ -510,9 +511,7 @@ func TestPhase5InteractionOwnershipBlockerRatchet(t *testing.T) {
 
 	// These legacy composite-store calls are semantic writes, not persistence
 	// adapters. Target architecture assigns all four aggregates exclusively to
-	// Interaction in Phase 5. AgentCommand is deliberately absent here: its
-	// lead/session/interactive daemon delivery remains transitional until
-	// Phase 6, and is audited separately from session ownership.
+	// Interaction in Phase 5. The retired AgentCommand aggregate is absent.
 	mutation := regexp.MustCompile(`\.(AgentSessions|TerminalSessions|AgentLeases|AgentInboxMessages)\(\)\.(Create|Update|Heartbeat|Release|ClaimNext|Complete)\(`)
 	counts := map[string]int{}
 	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
@@ -558,8 +557,8 @@ func TestPhase5InteractionOwnershipBlockerRatchet(t *testing.T) {
 			observed,
 		)
 	}
-	if graph.CompletedPhase != 5 {
-		t.Fatalf("completed_phase = %d after zero direct Interaction aggregate mutation blockers, want 5", graph.CompletedPhase)
+	if graph.CompletedPhase != 6 {
+		t.Fatalf("completed_phase = %d after zero direct Interaction aggregate mutation blockers, want 6", graph.CompletedPhase)
 	}
 }
 
@@ -625,6 +624,34 @@ func TestRetiredLegacyWorkflowsPathCannotReturn(t *testing.T) {
 	slices.Sort(observed)
 	if len(observed) != 0 {
 		t.Fatalf("retired internal/workflows callers = %v, want none", observed)
+	}
+}
+
+func TestPhase6SupervisorRuntimePathsCannotReturn(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := []string{
+		"internal/backend/agentipc",
+		"internal/cli/daemon",
+		"internal/cli/serve/daemonwire",
+		"internal/rpc",
+		"internal/webui/daemon",
+	}
+	for _, relative := range retired {
+		err := filepath.WalkDir(filepath.Join(root, filepath.FromSlash(relative)), func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if !entry.IsDir() {
+				t.Errorf("retired Phase 6 runtime path contains %s", path)
+			}
+			return nil
+		})
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
 	}
 }
 

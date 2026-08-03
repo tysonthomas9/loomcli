@@ -2,56 +2,28 @@ package runtimepreflight
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
-	"github.com/tysonthomas9/loomcli/internal/domain"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 )
 
-// fakeDaemonStore implements store.DaemonProfileStore for resolving the
-// workspace AgentBackend without a full store.
-type fakeDaemonStore struct {
-	profile *domain.DaemonProfile
-	err     error
-}
-
-func (f fakeDaemonStore) Get(context.Context, string) (*domain.DaemonProfile, error) {
-	return f.profile, f.err
-}
-
-func (f fakeDaemonStore) Upsert(context.Context, *domain.DaemonProfile) (*domain.DaemonProfile, error) {
-	return f.profile, nil
-}
-
-// fakeGetter implements the minimal daemonGetter surface preflight needs.
-type fakeGetter struct{ ds store.DaemonProfileStore }
-
-func (g fakeGetter) Daemon() store.DaemonProfileStore { return g.ds }
-
-func getterWithBackend(backend string) fakeGetter {
-	return fakeGetter{ds: fakeDaemonStore{profile: &domain.DaemonProfile{AgentBackend: backend}}}
+func setRuntimeProvider(t *testing.T, backend string) {
+	t.Helper()
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	if err := localnodeconfig.SetRuntimeProvider("TEST", backend); err != nil {
+		t.Fatalf("set runtime provider: %v", err)
+	}
 }
 
 func TestResolveLocalBackend(t *testing.T) {
-	ctx := context.Background()
-
-	if got := ResolveLocalBackend(ctx, getterWithBackend("claude"), "TEST"); got != "claude" {
-		t.Fatalf("explicit AgentBackend = %q, want claude", got)
+	setRuntimeProvider(t, "claude")
+	if got := ResolveLocalBackend("TEST"); got != "claude" {
+		t.Fatalf("explicit runtime provider = %q, want claude", got)
 	}
-	if got := ResolveLocalBackend(ctx, getterWithBackend("  "), "TEST"); got != DefaultBackend {
-		t.Fatalf("blank AgentBackend = %q, want default %q", got, DefaultBackend)
-	}
-	if got := ResolveLocalBackend(ctx, fakeGetter{ds: fakeDaemonStore{profile: nil}}, "TEST"); got != DefaultBackend {
-		t.Fatalf("nil profile = %q, want default %q", got, DefaultBackend)
-	}
-	if got := ResolveLocalBackend(ctx, fakeGetter{ds: fakeDaemonStore{err: errors.New("boom")}}, "TEST"); got != DefaultBackend {
-		t.Fatalf("store error = %q, want default %q", got, DefaultBackend)
-	}
-	if got := ResolveLocalBackend(ctx, nil, "TEST"); got != DefaultBackend {
-		t.Fatalf("nil getter = %q, want default %q", got, DefaultBackend)
+	if got := ResolveLocalBackend("OTHER"); got != DefaultBackend {
+		t.Fatalf("unset runtime provider = %q, want default %q", got, DefaultBackend)
 	}
 }
 
@@ -64,7 +36,8 @@ func TestPreflightLocalTaskRunnerHealthy(t *testing.T) {
 	})
 	defer restore()
 
-	if err := PreflightLocalTaskRunner(context.Background(), getterWithBackend(""), "TEST"); err != nil {
+	setRuntimeProvider(t, "")
+	if err := PreflightLocalTaskRunner(context.Background(), "TEST"); err != nil {
 		t.Fatalf("healthy backend should pass preflight, got %v", err)
 	}
 }
@@ -75,7 +48,8 @@ func TestPreflightLocalTaskRunnerBinaryMissing(t *testing.T) {
 	})
 	defer restore()
 
-	err := PreflightLocalTaskRunner(context.Background(), getterWithBackend("codex"), "TEST")
+	setRuntimeProvider(t, "codex")
+	err := PreflightLocalTaskRunner(context.Background(), "TEST")
 	if err == nil {
 		t.Fatal("missing binary must fail preflight (fail-closed)")
 	}
@@ -93,7 +67,8 @@ func TestPreflightLocalTaskRunnerAuthMissing(t *testing.T) {
 	})
 	defer restore()
 
-	err := PreflightLocalTaskRunner(context.Background(), getterWithBackend("codex"), "TEST")
+	setRuntimeProvider(t, "codex")
+	err := PreflightLocalTaskRunner(context.Background(), "TEST")
 	if err == nil {
 		t.Fatal("missing auth must fail preflight (fail-closed)")
 	}
@@ -109,7 +84,8 @@ func TestPreflightLocalTaskRunnerUnknownBackend(t *testing.T) {
 	})
 	defer restore()
 
-	err := PreflightLocalTaskRunner(context.Background(), getterWithBackend("made-up"), "TEST")
+	setRuntimeProvider(t, "made-up")
+	err := PreflightLocalTaskRunner(context.Background(), "TEST")
 	if err == nil {
 		t.Fatal("unknown backend must fail closed")
 	}
@@ -126,7 +102,8 @@ func TestPreflightResolvesConfiguredBackend(t *testing.T) {
 	})
 	defer restore()
 
-	if err := PreflightLocalTaskRunner(context.Background(), getterWithBackend("gemini"), "TEST"); err != nil {
+	setRuntimeProvider(t, "gemini")
+	if err := PreflightLocalTaskRunner(context.Background(), "TEST"); err != nil {
 		t.Fatalf("preflight error: %v", err)
 	}
 	if checked != "gemini" {

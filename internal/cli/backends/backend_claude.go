@@ -298,7 +298,7 @@ func defaultClaudeNonInteractiveInvoker(workDir, prompt, agentName string, shutd
 	defer cancel()
 
 	res, err := runClaudeTurnWithRetry(ctx, func() (claudeRunTurnResult, error) {
-		return invokeClaudeRunTurn(ctx, workDir, prompt, agentName, resumeID, cli.DaemonActivityObserver(), collector)
+		return invokeClaudeRunTurn(ctx, workDir, prompt, agentName, resumeID, nil, collector)
 	})
 	outputTail := claudeRunTurnEvidence(res, "")
 	if err != nil {

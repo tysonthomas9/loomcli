@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,12 +13,24 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/serve/operatorauth"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	infrafleetdb "github.com/tysonthomas9/loomcli/internal/infra/fleetdb"
-	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
+	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
 type agentsRoundTripFunc func(*http.Request) (*http.Response, error)
+
+type agentsTriggerBindingStoreStub struct {
+	store.TriggerBindingStore
+}
+
+func (*agentsTriggerBindingStoreStub) List(
+	context.Context,
+	string,
+	store.TriggerBindingFilter,
+) ([]*domain.TriggerBinding, error) {
+	return nil, nil
+}
 
 func (function agentsRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return function(request)
@@ -71,18 +84,14 @@ func TestAgentsCompositionUsesPublicAPIAndTrustedOperatorAttribution(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	capability, err := NewAgentsCapability(AgentsConfig{FleetDBClient: client})
+	capability, err := NewAgentsCapability(AgentsConfig{
+		FleetDBClient: client, TriggerBindings: &agentsTriggerBindingStoreStub{}, WorkspaceKey: "WS",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if capability.PRReviewerProvisioning() == nil {
 		t.Fatal("Agents composition omitted the PR reviewer application workflow")
-	}
-	if capability.CompatibilityAPI() != nil ||
-		capability.ManagedCompatibility() != nil ||
-		capability.ParentBindingCommands() != nil ||
-		capability.ManagedRetirements() != nil {
-		t.Fatal("Agents composition exposed compatibility workflows without a compatibility store")
 	}
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://loom.invalid/agents", nil)
 	if err != nil {
@@ -110,22 +119,6 @@ func TestAgentsCompositionUsesPublicAPIAndTrustedOperatorAttribution(t *testing.
 	if calls != 2 {
 		t.Fatalf("Fleet calls = %d, want 2", calls)
 	}
-	compatibilityStore := memstore.New()
-	compatibilityCapability, err := NewAgentsCapability(AgentsConfig{
-		FleetDBClient:              client,
-		CompatibilityRoles:         compatibilityStore.Roles(),
-		CompatibilityAgentServices: compatibilityStore.AgentServices(),
-		CompatibilityAssignments:   compatibilityStore.Agents(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if compatibilityCapability.CompatibilityAPI() == nil ||
-		compatibilityCapability.ManagedCompatibility() == nil ||
-		compatibilityCapability.ParentBindingCommands() == nil ||
-		compatibilityCapability.ManagedRetirements() == nil {
-		t.Fatal("Agents composition omitted bounded compatibility workflows")
-	}
 	if _, err := capability.OperatorAuthorityResolver().ResolveOperatorAuthority(
 		request,
 		"WS",
@@ -151,10 +144,6 @@ func TestAgentsCompositionFailsClosedWithoutFleetOrExternalIdentityResolver(t *t
 	}
 	var capability *AgentsCapability
 	if capability.AgentsAPI() != nil ||
-		capability.CompatibilityAPI() != nil ||
-		capability.ManagedCompatibility() != nil ||
-		capability.ParentBindingCommands() != nil ||
-		capability.ManagedRetirements() != nil ||
 		capability.OperatorAuthorityResolver() != nil ||
 		capability.PRReviewerProvisioning() != nil {
 		t.Fatal("nil Agents capability exposed an API")

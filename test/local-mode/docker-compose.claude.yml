@@ -27,9 +27,5 @@ services:
       LOOM_LOCAL_MODE_BACKEND: claude
       LOOM_LOCAL_MODE_PLAN_AGENT: claude-planner
       LOOM_LOCAL_MODE_CODE_AGENT: claude-coder
-      # Phase U (opt-in): route the daemon execution leaf through the bundled TS
-      # runner. Default empty = the Go path. Enable with:
-      #   LOOM_DAEMON_LEAF=ts make local-mode-claude-up
-      LOOM_DAEMON_LEAF: "${LOOM_DAEMON_LEAF:-}"
     volumes:
       - ${LOCAL_MODE_CLAUDE_HOME:-${HOME}/.claude}:/claude-host:ro

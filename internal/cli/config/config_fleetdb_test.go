@@ -12,11 +12,7 @@ func clearFleetDBEnv(t *testing.T) {
 func TestResolveFleetDBConfig_Defaults(t *testing.T) {
 	clearFleetDBEnv(t)
 
-	cfg, enabled := ResolveFleetDBConfig(&DaemonSettings{})
-
-	if enabled {
-		t.Error("enabled should default to false")
-	}
+	cfg := ResolveFleetDBConfig()
 	if cfg.Workspace != "" {
 		t.Errorf("Workspace = %q, want empty", cfg.Workspace)
 	}
@@ -29,7 +25,7 @@ func TestResolveFleetDBConfig_NormalizesDefaultWorkspace(t *testing.T) {
 	clearFleetDBEnv(t)
 	t.Setenv("LOOM_FLEETDB_WORKSPACE", " default ")
 
-	cfg, _ := ResolveFleetDBConfig(nil)
+	cfg := ResolveFleetDBConfig()
 
 	if cfg.Workspace != "DEFAULT" {
 		t.Errorf("Workspace = %q, want DEFAULT", cfg.Workspace)
@@ -42,11 +38,7 @@ func TestResolveFleetDBConfig_Env(t *testing.T) {
 	t.Setenv("LOOM_FLEETDB_WORKSPACE", "prod")
 	t.Setenv("LOOM_FLEETDB_AUTO_START", "true")
 
-	cfg, enabled := ResolveFleetDBConfig(nil)
-
-	if enabled {
-		t.Error("enabled should remain false; FleetDB is the default store and no longer toggled by YAML")
-	}
+	cfg := ResolveFleetDBConfig()
 	if cfg.RedisURL != "redis://env:6379" || cfg.Workspace != "prod" || !cfg.AutoStart {
 		t.Errorf("env FleetDB config = %+v", cfg)
 	}

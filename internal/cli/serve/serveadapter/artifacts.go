@@ -5,6 +5,7 @@ import (
 
 	appserve "github.com/tysonthomas9/loomcli/internal/app/serve"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/serveadapter/catalogcomposition"
 )
 
 // BuildArtifactsCapability composes Artifacts from the StoreHandle's one
@@ -25,11 +26,12 @@ func BuildArtifactsCapability(execution *appserve.ExecutionCapability, handle *b
 func BuildExecutionAndArtifactsCapabilities(
 	module *WorkflowCatalogModule,
 	handle *bootstrap.StoreHandle,
+	agentQueries catalogcomposition.AgentIdentityQueries,
 ) (*appserve.ExecutionCapability, *appserve.ArtifactsCapability, error) {
 	var execution *appserve.ExecutionCapability
 	if handle != nil && handle.Store != nil {
 		var err error
-		execution, err = BuildExecutionCapability(module, handle)
+		execution, err = BuildExecutionCapability(module, handle, agentQueries)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/rpc"
 	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
@@ -32,7 +31,7 @@ func TestListIssues_Backend_StandardListFiltersExcludedStatus(t *testing.T) {
 	svc := newServiceWithFake(fb)
 
 	result, err := svc.ListIssues(context.Background(), ListIssuesParams{
-		Args: &rpc.ListArgs{
+		Args: &ListFilter{
 			Status:    string(types.StatusOpen),
 			IssueType: string(types.TypeTask),
 			Assignee:  "alice",
@@ -103,7 +102,7 @@ func TestListIssues_Backend_KanbanMergesBlockedIssues(t *testing.T) {
 	svc := newServiceWithFake(fb)
 
 	result, err := svc.ListIssues(context.Background(), ListIssuesParams{
-		Args: &rpc.ListArgs{
+		Args: &ListFilter{
 			ParentID:  "epic-1",
 			Assignee:  "alice",
 			Priority:  intPtr(2),
@@ -186,7 +185,7 @@ func TestListIssues_Backend_KanbanUsesCanonicalReadyAndDeferred(t *testing.T) {
 	svc := newServiceWithFake(fb)
 
 	result, err := svc.ListIssues(context.Background(), ListIssuesParams{
-		Args:           &rpc.ListArgs{},
+		Args:           &ListFilter{},
 		IncludeBlocked: true,
 	})
 	if err != nil {
@@ -235,7 +234,7 @@ func TestListIssues_Backend_KanbanAppendsDeferredOnlyItems(t *testing.T) {
 	svc := newServiceWithFake(fb)
 
 	result, err := svc.ListIssues(context.Background(), ListIssuesParams{
-		Args:           &rpc.ListArgs{},
+		Args:           &ListFilter{},
 		IncludeBlocked: true,
 	})
 	if err != nil {
