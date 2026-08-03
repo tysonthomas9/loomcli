@@ -31,6 +31,16 @@ if ! go list -f '{{.ImportPath}} {{join .Imports ","}}' ./internal/... > "$GOLIS
     exit 2
 fi
 
+# Per-package allowances: packages listed in import-fanout-allow.txt may exceed
+# the global threshold up to their recorded ceiling. The file is a ratchet for
+# packages that legitimately grew past the default — shrink or remove entries
+# when the coupling is paid down; never raise one without a reason in the file.
+ALLOW_FILE="$SCRIPT_DIR/import-fanout-allow.txt"
+allowance_for() {
+    [[ -f "$ALLOW_FILE" ]] || return 0
+    awk -v p="$1" '$1 == p && $2 ~ /^[0-9]+$/ { print $2; exit }' "$ALLOW_FILE"
+}
+
 # Count module-internal imports per package.
 violations=""
 while IFS= read -r line; do
@@ -44,9 +54,13 @@ while IFS= read -r line; do
         count=$(echo "$imports" | tr ',' '\n' | grep "^${MODULE}/" | grep -cv "^${pkg}$" || true)
     fi
 
-    if (( count > THRESHOLD )); then
-        rel="${pkg#"${MODULE}/"}"
-        violations+="$(printf '%d\t%s' "$count" "$rel")"$'\n'
+    rel="${pkg#"${MODULE}/"}"
+    limit="$THRESHOLD"
+    allow="$(allowance_for "$rel")"
+    [[ -n "$allow" ]] && limit="$allow"
+
+    if (( count > limit )); then
+        violations+="$(printf '%d (limit %d)\t%s' "$count" "$limit" "$rel")"$'\n'
     fi
 done < "$GOLIST_OUTPUT"
 
