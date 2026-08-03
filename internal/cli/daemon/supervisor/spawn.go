@@ -153,6 +153,9 @@ func appendRoleEnv(env []string, ap *AgentProcess) []string {
 	if ap.RoleConfig.MaxBudgetUSD != nil {
 		env = append(env, fmt.Sprintf("LOOM_MAX_BUDGET_USD=%.2f", *ap.RoleConfig.MaxBudgetUSD))
 	}
+	if ap.RoleConfig.Executor != "" {
+		env = append(env, fmt.Sprintf("LOOM_ROLE_EXECUTOR=%s", ap.RoleConfig.Executor))
+	}
 	if ap.RoleConfig.Effort != "" {
 		env = append(env,
 			fmt.Sprintf("LOOM_AGENT_EFFORT=%s", ap.RoleConfig.Effort),
