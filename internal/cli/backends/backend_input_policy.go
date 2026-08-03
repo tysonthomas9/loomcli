@@ -123,15 +123,36 @@ func answerInputRequest(policy *domain.RoleInputPolicy, req chat.InputRequest) (
 		return chat.InputAnswer{}, false
 
 	case domain.RoleInputAsk:
-		// "ask" means hand it to a human, and there is no human wired to this
-		// run yet — nothing consumes chat's EventInputRequest. Treating it as
-		// allow would be the permissive reading of an unfinished feature, and
-		// resolving it silently would let an operator believe a prompt reached
-		// someone. So it degrades to deny and says which kind it degraded, in
-		// the same voice read_only uses when it degrades to a prompt preamble.
-		fmt.Fprintf(os.Stderr,
-			"[loom] input_policy: kind %q is set to \"ask\" but no human is attached to this run; denying it\n",
-			req.Kind)
+		// "ask" hands the prompt to a person: publish it on the daemon's
+		// pending-input registry and wait for `loom daemon answer` (or the web
+		// UI) to resolve it. The surrounding BeginDaemonInputWait edges keep
+		// the watchdog off for the duration, and the wait bounds itself below
+		// the daemon's ceiling so an unanswered prompt ends in a clean deny
+		// here rather than the watchdog's kill. Every no-answer path — no
+		// daemon attached, timeout, superseded — degrades to deny and says so
+		// on stderr, in the same voice read_only uses when it degrades.
+		if answer, ok := awaitHumanAnswer(cli.HumanAnswerRequest{
+			Kind:    req.Kind,
+			Prompt:  req.Prompt,
+			Options: ipcOptionsFromChat(req.Options),
+		}); ok {
+			if answer.Decline {
+				fmt.Fprintf(os.Stderr, "[loom] input_policy: a human declined the %q prompt\n", req.Kind)
+				return denyInputRequest(req)
+			}
+			if answer.OptionID != "" {
+				if opt := optionByID(req, answer.OptionID); opt != nil {
+					return chat.InputAnswer{OptionID: opt.ID}, true
+				}
+				fmt.Fprintf(os.Stderr,
+					"[loom] input_policy: the human answer named option %q but the prompt no longer offers it; denying\n",
+					answer.OptionID)
+				return denyInputRequest(req)
+			}
+			if answer.Text != "" {
+				return chat.InputAnswer{Text: answer.Text}, true
+			}
+		}
 		return denyInputRequest(req)
 
 	default:
@@ -142,6 +163,30 @@ func answerInputRequest(policy *domain.RoleInputPolicy, req chat.InputRequest) (
 		// restrictive side, never fall through to allow.
 		return denyInputRequest(req)
 	}
+}
+
+// awaitHumanAnswer is the seam between the policy decision and the daemon
+// round trip, a variable so tests can stand in a scripted human.
+var awaitHumanAnswer = cli.AwaitHumanAnswer
+
+// ipcOptionsFromChat converts the harness's typed options to the wire shape
+// the daemon shows an operator.
+func ipcOptionsFromChat(opts []chat.InputOption) []cli.IPCInputOption {
+	out := make([]cli.IPCInputOption, len(opts))
+	for i, o := range opts {
+		out[i] = cli.IPCInputOption{ID: o.ID, Label: o.Label}
+	}
+	return out
+}
+
+// optionByID returns the request option with the given ID, nil when absent.
+func optionByID(req chat.InputRequest, id string) *chat.InputOption {
+	for i := range req.Options {
+		if req.Options[i].ID == id {
+			return &req.Options[i]
+		}
+	}
+	return nil
 }
 
 // denyInputRequest answers the prompt negatively when it offers a way to say

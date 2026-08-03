@@ -47,6 +47,9 @@ const (
 	ipcOpHeartbeat    = "heartbeat"
 	ipcOpReleaseLock  = "release_lock"
 	ipcOpReleaseClaim = "release_claim"
+	ipcOpInputOpen    = "input_open"
+	ipcOpInputPoll    = "input_poll"
+	ipcOpInputClose   = "input_close"
 )
 
 // Interactive-input-wait phases carried in AgentIPCRequest.InputWait.
@@ -196,6 +199,12 @@ func (d *Daemon) dispatchIPCOperation(req AgentIPCRequest) AgentIPCResponse {
 		resp = d.handleIPCReleaseLock(req)
 	case ipcOpReleaseClaim:
 		resp = d.handleIPCReleaseClaim(req)
+	case ipcOpInputOpen:
+		resp = d.handleIPCInputOpen(req)
+	case ipcOpInputPoll:
+		resp = d.handleIPCInputPoll(req)
+	case ipcOpInputClose:
+		resp = d.handleIPCInputClose(req)
 	}
 	if resp.Success {
 		// Every successful op also advances per-agent liveness when a
