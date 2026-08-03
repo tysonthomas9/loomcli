@@ -228,51 +228,63 @@ func runRoleShow(_ *cobra.Command, args []string) error {
 		}
 		fmt.Printf("Workspace:    %s\n", r.WorkspaceKey)
 		fmt.Printf("Name:         %s\n", r.Name)
-		if r.Description != "" {
-			fmt.Printf("Description:  %s\n", r.Description)
-		}
-		if r.Kind != "" {
-			fmt.Printf("Kind:         %s\n", r.Kind)
-		}
-		if r.Model != "" {
-			fmt.Printf("Model:        %s\n", r.Model)
-		}
-		if r.Backend != "" {
-			fmt.Printf("Backend:      %s\n", r.Backend)
-		}
-		if r.Effort != "" {
-			fmt.Printf("Effort:       %s\n", r.Effort)
-		}
-		if r.Prompt != "" {
-			fmt.Printf("Prompt:       %s\n", r.Prompt)
-		}
-		if r.PromptFile != "" {
-			fmt.Printf("Prompt file:  %s\n", r.PromptFile)
-		}
-		if len(r.Skills) > 0 {
-			fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
-		}
-		if len(r.Labels) > 0 {
-			fmt.Printf("Labels:       %s\n", strings.Join(r.Labels, ", "))
-		}
-		if len(r.ExcludeLabels) > 0 {
-			fmt.Printf("Exclude labels: %s\n", strings.Join(r.ExcludeLabels, ", "))
-		}
-		if r.MaxConcurrency != nil {
-			fmt.Printf("Max concurrency: %d\n", *r.MaxConcurrency)
-		}
-		if r.ReadOnly {
-			fmt.Printf("Read-only:    true\n")
-		}
-		// Printed only when set. A role with no policy denies every prompt,
-		// which is also what the whole rest of the fleet does, so a line on
-		// every role would be noise; the interesting state is a role that has
-		// opted something in.
-		if r.InputPolicy != nil {
-			fmt.Printf("Input policy: %s\n", formatInputPolicy(r.InputPolicy))
-		}
+		printRoleDefinition(r)
+		printRoleControls(r)
 		return nil
 	})
+}
+
+// printRoleDefinition prints the definition fields of a role: what it is,
+// how it prompts, and which backend runs it. Empty fields are omitted.
+func printRoleDefinition(r *domain.Role) {
+	if r.Description != "" {
+		fmt.Printf("Description:  %s\n", r.Description)
+	}
+	if r.Kind != "" {
+		fmt.Printf("Kind:         %s\n", r.Kind)
+	}
+	if r.Model != "" {
+		fmt.Printf("Model:        %s\n", r.Model)
+	}
+	if r.Backend != "" {
+		fmt.Printf("Backend:      %s\n", r.Backend)
+	}
+	if r.Effort != "" {
+		fmt.Printf("Effort:       %s\n", r.Effort)
+	}
+	if r.Prompt != "" {
+		fmt.Printf("Prompt:       %s\n", r.Prompt)
+	}
+	if r.PromptFile != "" {
+		fmt.Printf("Prompt file:  %s\n", r.PromptFile)
+	}
+	if len(r.Skills) > 0 {
+		fmt.Printf("Skills:       %s\n", strings.Join(r.Skills, ", "))
+	}
+}
+
+// printRoleControls prints the routing and safety fields of a role. Empty
+// fields are omitted.
+func printRoleControls(r *domain.Role) {
+	if len(r.Labels) > 0 {
+		fmt.Printf("Labels:       %s\n", strings.Join(r.Labels, ", "))
+	}
+	if len(r.ExcludeLabels) > 0 {
+		fmt.Printf("Exclude labels: %s\n", strings.Join(r.ExcludeLabels, ", "))
+	}
+	if r.MaxConcurrency != nil {
+		fmt.Printf("Max concurrency: %d\n", *r.MaxConcurrency)
+	}
+	if r.ReadOnly {
+		fmt.Printf("Read-only:    true\n")
+	}
+	// Printed only when set. A role with no policy denies every prompt,
+	// which is also what the whole rest of the fleet does, so a line on
+	// every role would be noise; the interesting state is a role that has
+	// opted something in.
+	if r.InputPolicy != nil {
+		fmt.Printf("Input policy: %s\n", formatInputPolicy(r.InputPolicy))
+	}
 }
 
 func runRoleRemove(_ *cobra.Command, args []string) error {
