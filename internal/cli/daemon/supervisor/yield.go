@@ -183,13 +183,22 @@ func IsNoWorkReported(dir string) bool {
 // "reported, no reason" (with a warning logged) rather than "not reported" —
 // a malformed marker must never mask a legitimate no-work signal or fail the
 // exit path.
+// noWorkFreshnessSlack absorbs filesystem timestamp granularity: on Linux a
+// file's mtime comes from the kernel's coarse clock, so a marker written
+// microseconds after a time.Now() reading can carry an mtime a few
+// milliseconds before it and look stale when it is not. Real stale markers
+// come from a previous agent cycle, minutes older, so a small backward
+// tolerance keeps the guard while never rejecting an honest same-instant
+// write (an agent that reports no-work immediately after spawn).
+const noWorkFreshnessSlack = 2 * time.Second
+
 func NoWorkReportedAfter(dir string, since time.Time) (*NoWorkReport, bool) {
 	noWorkPath := filepath.Join(dir, NoWorkFileName)
 	info, err := os.Stat(noWorkPath)
 	if err != nil {
 		return nil, false
 	}
-	if info.ModTime().Before(since) {
+	if info.ModTime().Before(since.Add(-noWorkFreshnessSlack)) {
 		return nil, false
 	}
 	report, err := ReadNoWorkFile(dir)
