@@ -27,6 +27,7 @@ type roleWire struct {
 	PromptFile     string                  `json:"prompt_file,omitempty"`
 	Model          string                  `json:"model,omitempty"`
 	TaskFilter     string                  `json:"task_filter,omitempty"`
+	Executor       string                  `json:"executor,omitempty"`
 	Backend        string                  `json:"backend,omitempty"`
 	Effort         string                  `json:"effort,omitempty"`
 	PathPatterns   []string                `json:"path_patterns,omitempty"`
@@ -53,6 +54,7 @@ func (r roleWire) toDomain() *domain.Role {
 		PromptFile:     r.PromptFile,
 		Model:          r.Model,
 		TaskFilter:     r.TaskFilter,
+		Executor:       r.Executor,
 		Backend:        r.Backend,
 		Effort:         r.Effort,
 		PathPatterns:   r.PathPatterns,
@@ -79,6 +81,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		PromptFile     string                  `json:"prompt_file,omitempty"`
 		Model          string                  `json:"model,omitempty"`
 		TaskFilter     string                  `json:"task_filter,omitempty"`
+		Executor       string                  `json:"executor,omitempty"`
 		Backend        string                  `json:"backend,omitempty"`
 		Effort         string                  `json:"effort,omitempty"`
 		PathPatterns   []string                `json:"path_patterns,omitempty"`
@@ -99,6 +102,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		PromptFile:     in.PromptFile,
 		Model:          in.Model,
 		TaskFilter:     in.TaskFilter,
+		Executor:       in.Executor,
 		Backend:        in.Backend,
 		Effort:         in.Effort,
 		PathPatterns:   in.PathPatterns,
@@ -155,6 +159,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		PromptFile          *string                 `json:"prompt_file,omitempty"`
 		Model               *string                 `json:"model,omitempty"`
 		TaskFilter          *string                 `json:"task_filter,omitempty"`
+		Executor            *string                 `json:"executor,omitempty"`
 		Backend             *string                 `json:"backend,omitempty"`
 		Effort              *string                 `json:"effort,omitempty"`
 		PathPatterns        *[]string               `json:"path_patterns,omitempty"`
@@ -179,6 +184,7 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 		PromptFile:   patch.PromptFile,
 		Model:        patch.Model,
 		TaskFilter:   patch.TaskFilter,
+		Executor:     patch.Executor,
 		Backend:      patch.Backend,
 		Effort:       patch.Effort,
 		PathPatterns: patch.PathPatterns,

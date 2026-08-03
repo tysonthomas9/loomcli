@@ -72,6 +72,7 @@ type RoleConfig struct {
 	PromptFile   string   `yaml:"prompt_file,omitempty"`
 	Model        string   `yaml:"model,omitempty"`
 	TaskFilter   string   `yaml:"task_filter,omitempty"`
+	Executor     string   `yaml:"executor,omitempty"`
 	Backend      string   `yaml:"backend,omitempty"`
 	Effort       string   `yaml:"effort,omitempty"`
 	PathPatterns []string `yaml:"path_patterns,omitempty"`
@@ -312,6 +313,7 @@ func roleConfigFromDomain(r *domain.Role) RoleConfig {
 		PromptFile:     r.PromptFile,
 		Model:          r.Model,
 		TaskFilter:     r.TaskFilter,
+		Executor:       r.Executor,
 		Backend:        r.Backend,
 		Effort:         r.Effort,
 		PathPatterns:   append([]string(nil), r.PathPatterns...),
