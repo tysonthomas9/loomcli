@@ -50,7 +50,9 @@ describe("PendingInputBanner", () => {
     fetchAgentPendingInput.mockResolvedValue([]);
     render(<PendingInputBanner agentName="critic" />);
     await waitFor(() => expect(fetchAgentPendingInput).toHaveBeenCalled());
-    expect(screen.queryByTestId("pending-input-banner")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("pending-input-banner"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the prompt with its typed options and delivers the click with the request id", async () => {
