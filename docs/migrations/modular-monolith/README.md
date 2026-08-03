@@ -1,11 +1,9 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 5 source ownership is complete and the checked-in graph is
-  ratcheted to `completed_phase: 5`; the exact Loom and FleetDB gates pass.
-  Twenty local packaged-Desktop real-Codex rows are accepted, four GitHub rows
-  are operator-waived, and the repaired-package crash, fail-closed, restart,
-  transcript, task-panel, and active-delete regressions pass
-- **Date:** 2026-08-01
+- **Status:** Phase 6 source and daemon-free runtime acceptance are complete at
+  `completed_phase: 6`; the fresh packaged-Desktop UI and real-Codex canary
+  await macOS unlock
+- **Date:** 2026-08-03
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
 - **Related:** [Unified agent UX](../../design/2026-07-01-unified-agent-ux-proposal.md) · [Durable agent identity](../../design/2026-07-07-agent-identity-record.md) · [Workflow driver authoring](../../design/workflow-driver-authoring-guide.md)
@@ -41,6 +39,7 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 | [10-local-open-mode-authority-revision.md](10-local-open-mode-authority-revision.md) | How does local open mode work without operator credential ceremony while OIDC remains authoritative for shared deployments? |
 | [11-phase-5-decisions-and-evidence.md](11-phase-5-decisions-and-evidence.md) | Which Phase 5 seams, ownership invariants, gates, and exact-head acceptance proofs closed the phase? |
 | [12-phase-5-real-codex-proof.md](12-phase-5-real-codex-proof.md) | How did the packaged-Desktop real-Codex matrix close with 20 local passes and four operator waivers? |
+| [13-phase-6-decisions-and-evidence.md](13-phase-6-decisions-and-evidence.md) | Which supervisor paths were deleted, what replaced them, and which exact gates prove Phase 6? |
 
 ## Scope boundaries
 
@@ -57,7 +56,7 @@ This is not a package-count project. The pre-guardrail source snapshot already h
 
 The migration does **not** introduce microservices, multiple `go.mod` files, feature npm packages, microfrontends, or a generic in-process event bus.
 
-## Phase 0 through current Phase 5 status
+## Phase 0 through current Phase 6 status
 
 The required base integration is complete and its validated code heads are pushed. The Phase 1 branch starts from Loom `122d4d79`, where `origin/v5` at `95e97289` is an ancestor; companion FleetDB is `8120c788`. The original divergence counts, semantic conflict ledger, gate results, and local-mode proof remain frozen in the [Phase 0 baseline](00-phase-0-baseline.md), while the machine-readable baseline records the refreshed heads and structural ratchets.
 
@@ -148,6 +147,19 @@ proof, the passing exact-head architecture checks, and the bounded-memory Loom
 aggregate gate rather than inferring any result from the prior UI-independent
 gate.
 
+Phase 6 source and daemon-free runtime acceptance are complete at Loom
+`02daec339` with FleetDB `51b8a493`. The legacy supervisor, daemon IPC/control,
+RPC, WebUI daemon integration, AgentCommand, DaemonProfile, and compatibility
+paths are physically retired. Canonical Agents desired state, Agent lifecycle,
+WorkerProfile placement, Execution recovery, Interaction sessions, and explicit
+prompt-agent arbitration replace them. The exact 7-row matrix rejects disabled
+or skipped tests and passes inside the fresh supervisor-disabled Podman proof,
+which also verifies planner/coder designs, transcripts, diff, and zero daemon
+artifacts. Both full gates pass and the paired contract hashes to
+`816b0b0c…7ef0`. The signed exact-head package passes binary verification; its
+fresh UI/real-Codex canary is the sole remaining acceptance item because macOS
+is locked. See the [Phase 6 record](13-phase-6-decisions-and-evidence.md).
+
 ## Approved architecture decisions
 
 | ID | Outcome |
@@ -169,4 +181,4 @@ historical Phase 1 through Phase 4 evidence remains immutable.
 
 ---
 
-[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 5 evidence](11-phase-5-decisions-and-evidence.md)
+[All migrations](../README.md) · Next: [Current-state evidence](01-current-state.md) · [Phase 6 evidence](13-phase-6-decisions-and-evidence.md)

@@ -1,8 +1,7 @@
 # Migration Plan
 
-- **Status:** Phase 5 source ownership and exact-head paired gates complete;
-  twenty local packaged-Desktop rows are accepted, four GitHub rows remain
-  authorization-fenced, and repaired-package UI regression awaits macOS unlock
+- **Status:** Phase 6 source, paired-service, and daemon-free acceptance are
+  complete; the fresh packaged-Desktop UI/real-Codex canary awaits macOS unlock
 - **Strategy:** Incremental vertical extraction aligned with active product work; no standalone big-bang reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -193,15 +192,14 @@ Do not move the supervisor into `internal/modules`. Characterize it, implement r
 
 ## Phase 5 — Agents and Interaction
 
-**Source implementation complete; final acceptance pending.** Agents,
+**Complete.** Agents,
 Interaction, AgentProvisioning, and the minimal Source Control and Connectors
 seams are active. The dedicated all-`internal` sole-writer scan finds zero
 direct AgentSession, TerminalSession, AgentLease, or inbox mutations outside
 Interaction and persistence adapters, and the graph is ratcheted to
 `completed_phase: 5`. See the
 [Phase 5 evidence](11-phase-5-decisions-and-evidence.md) for the exact
-authority/retry contracts, green paired gates, and remaining packaged-product
-proof.
+authority/retry contracts and green paired/package gates.
 
 Begin only after the post-`v5` identity/Role model is stable. First establish the minimal Source Control materialization API and Connectors credential-broker API needed by this phase; leave their remaining UI/query/provider scope for Phase 7.
 
@@ -216,6 +214,15 @@ Begin only after the post-`v5` identity/Role model is stable. First establish th
 - Move private-repository checkout/materialization behind the Source Control + Connector credential-broker seam before removing credentials from interactive/task environments.
 
 ## Phase 6 — final supervisor deletion gate
+
+**Source and daemon-free runtime acceptance complete; packaged UI canary
+pending macOS unlock.** Loom `02daec339` and FleetDB `51b8a493` physically
+retire the enumerated paths and pass their full gates. The authoritative
+seven-row Phase 6 matrix runs with exact test discovery plus mandatory
+`run`/`pass` evidence and rejects every skip. The fresh supervisor-disabled
+stack passes planner/coder design, transcript, diff, zero-agentdef, zero-daemon,
+and zero-socket assertions. See the
+[Phase 6 evidence](13-phase-6-decisions-and-evidence.md).
 
 Delete the supervisor only after Phases 4 and 5 are green. The parity ledger explicitly enumerates and retires:
 
