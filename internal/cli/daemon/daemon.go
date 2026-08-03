@@ -59,6 +59,10 @@ type Daemon struct {
 	// profile data.
 	store       store.Store
 	storeHandle *bootstrap.StoreHandle
+
+	// inputs holds each agent's outstanding interactive prompt so an operator
+	// can see and answer it (see daemon_input.go).
+	inputs *inputRegistry
 }
 
 // configSnapshot returns a snapshot of the current config pointer under RLock.
@@ -93,6 +97,7 @@ func NewDaemon(config *cfgpkg.DaemonConfig, projectDir string, eventBus events.E
 		notifyBus:    notify.NopPublisher{},
 		issueBackend: issueBackend,
 		store:        st,
+		inputs:       newInputRegistry(),
 	}
 
 	// Build the supervisor

@@ -167,14 +167,19 @@ func ValidateRoleInputPolicy(p *RoleInputPolicy) error {
 // Workspace-scoped: every Workspace gets its own Role definitions
 // (built-in "plan" and "task" are auto-seeded on workspace creation).
 type Role struct {
-	WorkspaceKey  string   `json:"workspace_key"`
-	Name          string   `json:"name"`
-	Kind          RoleKind `json:"kind,omitempty"`
-	Description   string   `json:"description,omitempty"`
-	Prompt        string   `json:"prompt,omitempty"`
-	PromptFile    string   `json:"prompt_file,omitempty"`
-	Model         string   `json:"model,omitempty"`
-	TaskFilter    string   `json:"task_filter,omitempty"`
+	WorkspaceKey string   `json:"workspace_key"`
+	Name         string   `json:"name"`
+	Kind         RoleKind `json:"kind,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Prompt       string   `json:"prompt,omitempty"`
+	PromptFile   string   `json:"prompt_file,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	TaskFilter   string   `json:"task_filter,omitempty"`
+	// Executor selects how the daemon runs an agent in this role: "turn"
+	// (default, one-shot harness turn per run) or "conversation" (a held
+	// chat conversation: surfaced input requests, bounded follow-up turns,
+	// session resume). Mirrors the server's closed vocabulary.
+	Executor      string   `json:"executor,omitempty"`
 	Backend       string   `json:"backend,omitempty"`
 	Effort        string   `json:"effort,omitempty"`
 	PathPatterns  []string `json:"path_patterns,omitempty"`
