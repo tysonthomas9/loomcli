@@ -1,8 +1,7 @@
 # Phase 6 Decisions and Evidence
 
-- **Status:** Source, paired-service, container, supervisor-disabled, and
-  packaged-binary acceptance complete; fresh packaged-Desktop UI and real-Codex
-  canary pending macOS unlock
+- **Status:** Complete: source, paired-service, container,
+  supervisor-disabled, signed packaged-Desktop UI, and real-Codex acceptance
 - **Date:** 2026-08-03
 - **Loom implementation:** `02daec3395636748992a48551b83d3fedfe6ec1e`
 - **FleetDB implementation:** `51b8a493e3fce0845ccd56da64c6c1f39383ccd0`
@@ -100,11 +99,45 @@ Loom sidecar reports `dev (02daec339)`, packaged Node retains
 | Desktop | `6cb6e6ff3a95a5e0198985c7fc8839014f7fba1b86faa6161ac7e5d7ea4e0194` |
 | Node | `34c0af7cb2ba9eeb14e0675695e3f6da15fa5e98901e62149cf4fc1d594c8fa0` |
 
-The fresh UI and real-Codex canary remain pending because macOS was locked and
-Computer Use could not acquire the app. This is an external acceptance blocker,
-not a source, package-build, signing, or deterministic-runtime failure. Phase 5's
-20 accepted real-Codex rows remain historical evidence and are not relabeled as
-a fresh Phase 6 package run.
+## Fresh packaged Desktop real-Codex acceptance
+
+Computer Use launched the exact signed Phase 6 package above. Its packaged Loom
+sidecars ran directly from that app bundle and served the UI on
+`127.0.0.1:58782`; no development server or browser-only harness substituted
+for the product. Through the Desktop UI, the proof selected workspace
+`PHASE5-REPAIRED-20260801`, repository `phase5-repaired-proof-repo`, and created
+these enabled Codex agents:
+
+- planner `agt-phase6-final-codex-planner-20260-114c5850`;
+- coder `agt-phase6-final-codex-coder-2026080-65a2fe0a`.
+
+The UI then created task `PHASE5-REPAIRED-20260801-23`, **Phase 6 signed
+Desktop Codex canary**. The first dispatch correctly selected the planner while
+the coder skipped `has_design=false`. The planner completed with exit 0 in
+3m28s, persisted a repository-grounded design, left the worktree unchanged, and
+moved the task to Review. After the task was moved back to Open through the UI,
+the planner skipped `hasDesign=true` and the coder was the sole active worker.
+It completed with exit 0 in 1m33s and returned the task to Review, unassigned.
+Both real-Codex transcripts remained readable in the task side panel.
+
+The coder delivered local branch `loom/PHASE5-REPAIRED-20260801-23` at
+`c629ddf52270`. The UI diff and an independent post-run `git show` both contain
+exactly one new file, `phase6-final-desktop-canary.md`, with these two lines:
+
+```markdown
+# Phase 6 Desktop Canary
+Verified through the signed Phase 6 packaged Desktop on 2026-08-03.
+```
+
+The coder's transcript records exact-byte, UTF-8/LF, scope, and protected-file
+checks, `npm test` at 2/2 passing, a clean worktree, and no push or PR action.
+The detached run worktree readback was clean, the branch ref resolved to the
+same commit and diff, and a workspace-wide search found no built-in-runner fake
+completion sentinel. The captured Desktop diff screenshot at
+`/tmp/phase6-final-desktop-codex-diff.jpeg` has SHA-256
+`d5a60d38d08ff15e12ca11b1338200e56e792effd0bacf265cda949469a53eaf`.
+This is fresh Phase 6 package evidence; it does not relabel Phase 5's historical
+20-row matrix.
 
 ## Scope disposition
 

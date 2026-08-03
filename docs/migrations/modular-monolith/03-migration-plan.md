@@ -1,7 +1,7 @@
 # Migration Plan
 
-- **Status:** Phase 6 source, paired-service, and daemon-free acceptance are
-  complete; the fresh packaged-Desktop UI/real-Codex canary awaits macOS unlock
+- **Status:** Phase 6 complete, including source, paired-service, daemon-free,
+  signed packaged-Desktop UI, and fresh real-Codex acceptance
 - **Strategy:** Incremental vertical extraction aligned with active product work; no standalone big-bang reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -215,13 +215,14 @@ Begin only after the post-`v5` identity/Role model is stable. First establish th
 
 ## Phase 6 — final supervisor deletion gate
 
-**Source and daemon-free runtime acceptance complete; packaged UI canary
-pending macOS unlock.** Loom `02daec339` and FleetDB `51b8a493` physically
+**Complete.** Loom `02daec339` and FleetDB `51b8a493` physically
 retire the enumerated paths and pass their full gates. The authoritative
 seven-row Phase 6 matrix runs with exact test discovery plus mandatory
 `run`/`pass` evidence and rejects every skip. The fresh supervisor-disabled
 stack passes planner/coder design, transcript, diff, zero-agentdef, zero-daemon,
-and zero-socket assertions. See the
+and zero-socket assertions. The exact signed package separately completed a
+UI-created real-Codex planner/coder task with both transcripts, local-branch
+delivery, a one-file diff, and Review convergence. See the
 [Phase 6 evidence](13-phase-6-decisions-and-evidence.md).
 
 Delete the supervisor only after Phases 4 and 5 are green. The parity ledger explicitly enumerates and retires:

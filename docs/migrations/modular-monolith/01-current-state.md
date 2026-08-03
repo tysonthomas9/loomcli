@@ -1,8 +1,8 @@
 # Current-State Evidence
 
 - **Status:** Historical Phase 1 through Phase 5 evidence remains immutable;
-  Phase 6 source and daemon-free runtime acceptance are complete at
-  `completed_phase: 6`; the fresh packaged-Desktop UI canary remains pending
+  Phase 6 is complete at `completed_phase: 6`, including fresh signed
+  packaged-Desktop UI and real-Codex planner/coder acceptance
 - **Snapshot:** 2026-07-15, pre-guardrail Loom code head `122d4d79` after refreshing `origin/v5`
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -140,7 +140,10 @@ rows to 225, runtime components to 71, and goroutine launches to 80. The
 complete mutation ledger has 105 commands. All 11 profiles, the all-files AST
 pass, the seven-row no-skip parity matrix, both full gates, and the fresh
 supervisor-disabled stack pass at Loom `02daec339` with FleetDB `51b8a493`.
-The paired OpenAPI checksum is `816b0b0c…7ef0`. See the
+The paired OpenAPI checksum is `816b0b0c…7ef0`. The exact signed package also
+completed UI-created real-Codex task `PHASE5-REPAIRED-20260801-23` with a
+persisted plan, readable planner and coder transcripts, exit-0 local-branch
+delivery, an exact one-file diff, and Review convergence. See the
 [Phase 6 evidence](13-phase-6-decisions-and-evidence.md).
 
 ---

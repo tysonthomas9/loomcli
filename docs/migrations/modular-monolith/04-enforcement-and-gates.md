@@ -1,8 +1,8 @@
 # Enforcement, Validation, and Stop Conditions
 
-- **Status:** Phase 6 source architecture and daemon-free runtime proof are
-  complete at `completed_phase: 6`; the fresh packaged-Desktop UI/real-Codex
-  canary awaits macOS unlock
+- **Status:** Phase 6 complete at `completed_phase: 6`, including source
+  architecture, daemon-free runtime, signed packaged-Desktop UI, and fresh
+  real-Codex acceptance
 - **Purpose:** Define the fitness functions that distinguish a real modular monolith from a folder reorganization
 - **Migration:** [Modular Monolith Migration](README.md)
 
@@ -25,7 +25,10 @@ components, and 80 goroutine-launch definitions across all 11 profiles plus
 the all-files AST pass. The seven authoritative Phase 6 rows reject discovery
 drift, disabled rows, and `t.Skip`; all seven pass. Physical supervisor, daemon
 IPC/control, RPC, agent IPC, and WebUI daemon paths have zero allowances and
-cannot return. See the [Phase 6 evidence](13-phase-6-decisions-and-evidence.md).
+cannot return. The exact signed package also passes a UI-created real-Codex
+planner/coder canary with both transcripts, exit-0 local-branch delivery, an
+exact one-file diff, and Review convergence. See the
+[Phase 6 evidence](13-phase-6-decisions-and-evidence.md).
 
 ## Architecture source of truth
 

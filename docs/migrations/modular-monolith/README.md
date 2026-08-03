@@ -1,8 +1,8 @@
 # Modular Monolith Migration
 
-- **Status:** Phase 6 source and daemon-free runtime acceptance are complete at
-  `completed_phase: 6`; the fresh packaged-Desktop UI and real-Codex canary
-  await macOS unlock
+- **Status:** Phase 6 complete at `completed_phase: 6`, including source,
+  paired-service, daemon-free runtime, signed packaged-Desktop UI, and fresh
+  real-Codex planner/coder acceptance
 - **Date:** 2026-08-03
 - **Scope:** `loom serve`, the operator CLI entry surfaces, the Vite frontend counterpart, and the fleet-db contracts those capabilities depend on
 - **Provenance:** [Phase 0 integration baseline](00-phase-0-baseline.md), final [Phase 1 evidence](06-phase-1-decisions-and-evidence.md) at Loom `7e8a6dd2`, [Phase 2 evidence](07-phase-2-decisions-and-evidence.md) at Loom `84cccb761` with FleetDB `430dce8d9`, [Phase 3 evidence](08-phase-3-decisions-and-evidence.md) at core implementation commits Loom `7f95b9bf1` and FleetDB `f1c4e1119`, final [Phase 4 evidence](09-phase-4-decisions-and-evidence.md) at Loom `53cbe2577` with FleetDB `afb688768`, and the appended reliability-validation record at Loom `67c45972f` with FleetDB `9ffa69f60`
@@ -156,9 +156,11 @@ prompt-agent arbitration replace them. The exact 7-row matrix rejects disabled
 or skipped tests and passes inside the fresh supervisor-disabled Podman proof,
 which also verifies planner/coder designs, transcripts, diff, and zero daemon
 artifacts. Both full gates pass and the paired contract hashes to
-`816b0b0c…7ef0`. The signed exact-head package passes binary verification; its
-fresh UI/real-Codex canary is the sole remaining acceptance item because macOS
-is locked. See the [Phase 6 record](13-phase-6-decisions-and-evidence.md).
+`816b0b0c…7ef0`. The signed exact-head package passes binary verification and
+completed a fresh UI-created real-Codex planner/coder canary: task
+`PHASE5-REPAIRED-20260801-23` persisted its design, both transcripts, one-file
+diff, local branch, exit-0 runs, and Review convergence without a GitHub
+mutation. See the [Phase 6 record](13-phase-6-decisions-and-evidence.md).
 
 ## Approved architecture decisions
 
