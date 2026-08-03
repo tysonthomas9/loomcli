@@ -96,6 +96,9 @@ func codexSessionWalkRoots(root string, since, now time.Time) []string {
 	if root == "" {
 		return nil
 	}
+	// The host zone is taken from `now` (time.Now() in production) rather than
+	// time.Local so the zone-spanning behavior below is testable under any TZ.
+	local := now.Location()
 	cutoff := since.Add(-1 * time.Minute)
 	if now.Before(cutoff) {
 		now = cutoff
@@ -110,7 +113,7 @@ func codexSessionWalkRoots(root string, since, now time.Time) []string {
 	// no rollout at all. Walk the span in both zones, deduped and ordered.
 	var roots []string
 	seen := make(map[string]bool)
-	for _, loc := range []*time.Location{time.Local, time.UTC} {
+	for _, loc := range []*time.Location{local, time.UTC} {
 		end := dateOnly(now.In(loc))
 		for day := dateOnly(cutoff.In(loc)); !day.After(end); day = day.AddDate(0, 0, 1) {
 			dir := filepath.Join(root, fmt.Sprintf("%04d", day.Year()), fmt.Sprintf("%02d", int(day.Month())), fmt.Sprintf("%02d", day.Day()))
