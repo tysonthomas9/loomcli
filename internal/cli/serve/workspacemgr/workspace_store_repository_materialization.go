@@ -223,7 +223,7 @@ func classifyStoreRepoCreateError(name string, err error) error {
 		return workspaceerrors.New(
 			workspaceerrors.AlreadyExists,
 			fmt.Sprintf(
-				"repository name %q is already registered; repository names must be unique across workspaces",
+				"repository name %q is already registered in this workspace",
 				name,
 			),
 			err,
@@ -302,7 +302,7 @@ func createStoreRepo(ctx context.Context, s admissionstore.Store, key, branch st
 		if errors.Is(err, domain.ErrAlreadyExists) {
 			return workspaceerrors.New(
 				workspaceerrors.AlreadyExists,
-				fmt.Sprintf("repository name %q is already registered; repository names must be unique across workspaces", r.Name),
+				fmt.Sprintf("repository name %q is already registered in this workspace", r.Name),
 				err,
 			)
 		}

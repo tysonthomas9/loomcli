@@ -217,6 +217,16 @@ func (process *repositoryAdmissionProcess) prepare(
 					local.Intent.OperationID,
 				)
 				if errors.Is(err, infrafleetdb.ErrRepositoryAdmissionNotFound) {
+					// A definitive 409 plus an operation miss proves that this
+					// machine's intent never acquired durable coordinates. Keeping
+					// the unbound receipt would make recovery repeatedly replay a
+					// conflict that it can never own.
+					if removeErr := process.journal.Remove(
+						ctx,
+						local.Intent.OperationID,
+					); removeErr != nil {
+						return nil, errors.Join(beginErr, removeErr)
+					}
 					return nil, beginErr
 				}
 			}

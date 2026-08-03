@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/store"
+	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
 
 type workspaceAgentDirectoryStub struct {
@@ -394,6 +395,62 @@ func TestStartAsyncAddReposPreparesNormalizedAdmissionAndUsesExactJobID(t *testi
 	}
 }
 
+func TestStartAsyncCreateClassifiesAdmissionConflict(t *testing.T) {
+	coordinator := &testWorkspaceAdmissionCoordinator{
+		prepareCreate: func(context.Context, WorkspaceCreateRequest) (string, error) {
+			return "", workspaceerrors.New(
+				workspaceerrors.AlreadyExists,
+				"workspace already exists",
+				errors.New("repository admission conflict"),
+			)
+		},
+	}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		CreateFn: func(context.Context, WorkspaceCreateRequest) (WorkspaceCreateResult, error) {
+			return WorkspaceCreateResult{}, nil
+		},
+		JobStore:             &recordingWorkspaceJobStore{},
+		AdmissionCoordinator: coordinator,
+	})
+
+	_, err := svc.StartAsyncCreate(context.Background(), WorkspaceCreateRequest{
+		Name: "clone_ws", Type: "clone",
+		CloneURLs: []string{"https://github.com/acme/clone.git"},
+	})
+	var serviceErr *ServiceError
+	if !errors.As(err, &serviceErr) || serviceErr.Kind != KindConflict {
+		t.Fatalf("error = %v, want conflict", err)
+	}
+}
+
+func TestStartAsyncAddReposClassifiesAdmissionConflict(t *testing.T) {
+	coordinator := &testWorkspaceAdmissionCoordinator{
+		prepareAddRepos: func(context.Context, WorkspaceAddReposRequest) (string, error) {
+			return "", workspaceerrors.New(
+				workspaceerrors.AlreadyExists,
+				"repository already exists in workspace",
+				errors.New("repository admission conflict"),
+			)
+		},
+	}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		AddReposFn: func(context.Context, WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
+			return WorkspaceCreateResult{}, nil
+		},
+		JobStore:             &recordingWorkspaceJobStore{},
+		AdmissionCoordinator: coordinator,
+	})
+
+	_, err := svc.StartAsyncAddRepos(context.Background(), WorkspaceAddReposRequest{
+		WorkspaceID: "ALPHA",
+		CloneURLs:   []string{"https://github.com/acme/clone.git"},
+	})
+	var serviceErr *ServiceError
+	if !errors.As(err, &serviceErr) || serviceErr.Kind != KindConflict {
+		t.Fatalf("error = %v, want conflict", err)
+	}
+}
+
 func TestStartAsyncAddReposRejectsLocalOnlyRequest(t *testing.T) {
 	svc := NewWorkspaceService(WorkspaceServiceConfig{
 		AddReposFn: func(context.Context, WorkspaceAddReposRequest) (WorkspaceCreateResult, error) {
@@ -422,6 +479,24 @@ func TestGetWorkspace_StoreBackedMissReturnsNotFound(t *testing.T) {
 	var se *ServiceError
 	if !errors.As(err, &se) || se.Kind != KindNotFound {
 		t.Fatalf("err = %v, want NotFound", err)
+	}
+}
+
+func TestGetWorkspace_StoreBackedCanonicalizesDisplayNameRoute(t *testing.T) {
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(context.Background(), store.WorkspaceCreate{
+		Key: "LOOM-P61", Name: "Loom-P61",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+
+	workspace, err := svc.GetWorkspace(context.Background(), "Loom-P61")
+	if err != nil {
+		t.Fatalf("GetWorkspace display route: %v", err)
+	}
+	if workspace.ID != "LOOM-P61" {
+		t.Fatalf("workspace ID = %q, want LOOM-P61", workspace.ID)
 	}
 }
 

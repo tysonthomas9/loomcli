@@ -219,7 +219,7 @@ func TestHandleAddWorkspaceRepos_LocalPathRemainsSynchronous(t *testing.T) {
 }
 
 func TestHandleAddWorkspaceRepos_NameCollisionReturnsConflict(t *testing.T) {
-	const message = `repository name "source-repo" is already registered; repository names must be unique across workspaces`
+	const message = `repository name "source-repo" is already registered in this workspace`
 	svc := service.NewWorkspaceService(service.WorkspaceServiceConfig{
 		AddReposFn: func(_ context.Context, _ service.WorkspaceAddReposRequest) (service.WorkspaceCreateResult, error) {
 			return service.WorkspaceCreateResult{}, workspaceerrors.New(workspaceerrors.AlreadyExists, message, nil)

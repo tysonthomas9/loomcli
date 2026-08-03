@@ -46,6 +46,8 @@ interface TranscriptState extends UseSessionTranscriptResult {
 
 /** Poll interval when session is active (ms). */
 const POLL_INTERVAL_ACTIVE = 3_000;
+/** Cap missing active-session transcript polling at one request per 30s. */
+const POLL_INTERVAL_ACTIVE_MAX = 30_000;
 /** Bound recovery retries for a completed session to 15 seconds. */
 const MAX_TRANSCRIPT_RETRIES = 5;
 
@@ -113,6 +115,8 @@ export function useSessionTranscript(
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let latestRequest = 0;
     let retryAttempts = 0;
+    let activePollDelay = POLL_INTERVAL_ACTIVE;
+    let backoffActivePoll = false;
 
     setState((current) => ({
       requestKey,
@@ -168,6 +172,8 @@ export function useSessionTranscript(
               );
         if (!cancelled && request === latestRequest) {
           retryAttempts = 0;
+          activePollDelay = POLL_INTERVAL_ACTIVE;
+          backoffActivePoll = false;
           setState({
             requestKey,
             entries: result,
@@ -180,6 +186,7 @@ export function useSessionTranscript(
         if (!cancelled && request === latestRequest) {
           const unavailable = err instanceof ApiError && err.status === 404;
           const transient = isTransientTranscriptError(err);
+          backoffActivePoll = unavailable || transient;
           // retryUnavailable retains its existing projection-catchup behavior
           // for any one-shot failure. A transient API failure retries even for
           // canonical completed sessions, whose callers do not opt into that
@@ -208,10 +215,17 @@ export function useSessionTranscript(
 
     const scheduleActivePoll = () => {
       if (cancelled || !isActive) return;
+      const delay = activePollDelay;
+      if (backoffActivePoll) {
+        activePollDelay = Math.min(
+          activePollDelay * 2,
+          POLL_INTERVAL_ACTIVE_MAX,
+        );
+      }
       activeTimer = setTimeout(() => {
         activeTimer = null;
         void fetchTranscript().finally(scheduleActivePoll);
-      }, POLL_INTERVAL_ACTIVE);
+      }, delay);
     };
 
     // Chain active polling from request completion so a slow server never

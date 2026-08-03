@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"testing"
 )
@@ -26,7 +25,7 @@ func TestSuperviseLocalServeRestartsAfterHealthyChildExit(t *testing.T) {
 	defer cancel()
 	starts := 0
 	localServiceRestartDelay = 0
-	localServiceStartServe = func(context.Context, *localServiceConfig, *os.File, *runtimeInfo) (*exec.Cmd, error) {
+	localServiceStartServe = func(context.Context, *localServiceConfig, io.Writer, *runtimeInfo) (*exec.Cmd, error) {
 		starts++
 		return &exec.Cmd{}, nil
 	}
@@ -66,7 +65,7 @@ func TestSuperviseLocalServeReturnsInitialHealthFailure(t *testing.T) {
 
 	starts := 0
 	wantErr := errors.New("fleet compatibility failure")
-	localServiceStartServe = func(context.Context, *localServiceConfig, *os.File, *runtimeInfo) (*exec.Cmd, error) {
+	localServiceStartServe = func(context.Context, *localServiceConfig, io.Writer, *runtimeInfo) (*exec.Cmd, error) {
 		starts++
 		return &exec.Cmd{}, nil
 	}

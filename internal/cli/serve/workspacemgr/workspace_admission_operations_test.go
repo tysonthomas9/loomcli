@@ -47,6 +47,16 @@ func TestWorkspaceAdmissionCoordinatorPreparesDurablyBeforeMaterialization(t *te
 	if _, err := normalizeLocalRepositoryAdmissionID(jobID); err != nil {
 		t.Fatalf("job ID %q is not the exact durable admission ID: %v", jobID, err)
 	}
+	preparedWorkspace, err := st.Workspaces().Get(t.Context(), "DURABLE-PREPARE")
+	if err != nil {
+		t.Fatalf("get prepared workspace: %v", err)
+	}
+	if preparedWorkspace.DefaultBranch != "" {
+		t.Fatalf(
+			"prepared workspace default branch = %q, want unresolved until clone commit",
+			preparedWorkspace.DefaultBranch,
+		)
+	}
 	if len(transport.commands) != 0 {
 		t.Fatalf("prepare issued materialization commands: %#v", transport.commands)
 	}

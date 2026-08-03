@@ -468,6 +468,34 @@ describe("useSessionTranscript", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
+    it("backs off repeated missing active transcript polls", async () => {
+      mockGetTranscript.mockRejectedValue(
+        new ApiError(404, "Transcript not found"),
+      );
+
+      renderHook(() => useSessionTranscript("task-1", "sess-1", true));
+      await flushPromises();
+      expect(mockGetTranscript).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(3_000);
+        await Promise.resolve();
+      });
+      expect(mockGetTranscript).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        vi.advanceTimersByTime(3_000);
+        await Promise.resolve();
+      });
+      expect(mockGetTranscript).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        vi.advanceTimersByTime(3_000);
+        await Promise.resolve();
+      });
+      expect(mockGetTranscript).toHaveBeenCalledTimes(3);
+    });
+
     it("does not poll when isActive is false", async () => {
       mockGetTranscript.mockResolvedValueOnce([createMockEntry()]);
 

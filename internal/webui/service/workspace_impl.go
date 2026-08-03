@@ -143,7 +143,7 @@ func (s *workspaceServiceImpl) StartAsyncAddRepos(ctx context.Context, req Works
 		var err error
 		jobID, err = s.admissionCoordinator.PrepareAddRepos(ctx, req)
 		if err != nil {
-			return "", err
+			return "", classifyWorkspaceCreateError(err)
 		}
 		if strings.TrimSpace(jobID) == "" {
 			return "", ErrInternal("workspace admission coordinator returned an empty job ID", nil)
@@ -320,7 +320,12 @@ func (s *workspaceServiceImpl) GetWorkspace(ctx context.Context, wsID string) (*
 // unknown, or (nil, false, err) on a load error.
 func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, bool, error) {
 	if s.store != nil {
-		data, err := s.loadWorkspaceByID(ctx, wsID)
+		// FleetDB workspace keys are canonical uppercase identifiers. Routes may
+		// still receive a display name immediately after creation or from a
+		// hand-authored URL, so never pass that unvalidated value into a storage
+		// key builder.
+		key := WorkspaceKeyFromName(wsID)
+		data, err := s.loadWorkspaceByID(ctx, key)
 		if err == nil && data != nil {
 			normalizeWorkspaceData(data)
 			for i := range data.Repos {
@@ -329,7 +334,7 @@ func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string)
 				}
 			}
 			for i := range data.Workspaces {
-				data.Workspaces[i].Active = data.Workspaces[i].ID == wsID
+				data.Workspaces[i].Active = data.Workspaces[i].ID == key
 			}
 			return data, true, nil
 		}
@@ -395,7 +400,7 @@ func (s *workspaceServiceImpl) StartAsyncCreate(ctx context.Context, req Workspa
 		var err error
 		jobID, err = s.admissionCoordinator.PrepareCreate(ctx, req)
 		if err != nil {
-			return "", err
+			return "", classifyWorkspaceCreateError(err)
 		}
 		if strings.TrimSpace(jobID) == "" {
 			return "", ErrInternal("workspace admission coordinator returned an empty job ID", nil)

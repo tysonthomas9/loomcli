@@ -139,7 +139,7 @@ func runService(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	logFile, err := os.OpenFile(serveLogPath(cfg.dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	logFile, err := openBoundedServeLog(serveLogPath(cfg.dataDir))
 	if err != nil {
 		return fmt.Errorf("open serve log: %w", err)
 	}
@@ -159,7 +159,7 @@ func runService(cmd *cobra.Command, _ []string) error {
 // companion supervisor. Initial startup errors remain synchronous so Desktop can
 // surface packaging or compatibility failures instead of hiding them in an
 // endless retry loop.
-func superviseLocalServe(ctx context.Context, cfg *localServiceConfig, logFile *os.File, info *runtimeInfo, out io.Writer) error {
+func superviseLocalServe(ctx context.Context, cfg *localServiceConfig, logFile io.Writer, info *runtimeInfo, out io.Writer) error {
 	restartDelay := localServiceRestartDelay
 	everHealthy := false
 	for {
@@ -191,7 +191,7 @@ func superviseLocalServe(ctx context.Context, cfg *localServiceConfig, logFile *
 	}
 }
 
-func startLocalServeGeneration(ctx context.Context, cfg *localServiceConfig, logFile *os.File, info *runtimeInfo) (*exec.Cmd, error) {
+func startLocalServeGeneration(ctx context.Context, cfg *localServiceConfig, logFile io.Writer, info *runtimeInfo) (*exec.Cmd, error) {
 	info.Status = "starting"
 	info.Error = ""
 	info.ServePID = 0
@@ -316,7 +316,7 @@ func newRuntimeInfo(cfg *localServiceConfig) *runtimeInfo {
 
 // startServeProcess spawns `loom serve` as a child, records its PID in
 // runtime.json, and returns the running *exec.Cmd. Caller owns Wait().
-func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile *os.File, info *runtimeInfo) (*exec.Cmd, error) {
+func startServeProcess(ctx context.Context, cfg *localServiceConfig, logFile io.Writer, info *runtimeInfo) (*exec.Cmd, error) {
 	// exe is this process's resolved binary path; args are fixed subcommand +
 	// CLI-validated bindFlag / port. The guard refuses to re-exec a *.test
 	// binary (fork-bomb protection; see reexec_guard.go).
