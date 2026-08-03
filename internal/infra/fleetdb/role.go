@@ -40,6 +40,7 @@ type roleWire struct {
 	AllowedTools   []string                `json:"allowed_tools,omitempty"`
 	DeniedTools    []string                `json:"denied_tools,omitempty"`
 	MaxBudgetUSD   *float64                `json:"max_budget_usd,omitempty"`
+	MaxRunDuration *int                    `json:"max_run_duration,omitempty"`
 	CreatedAt      time.Time               `json:"created_at"`
 	UpdatedAt      time.Time               `json:"updated_at"`
 }
@@ -67,6 +68,7 @@ func (r roleWire) toDomain() *domain.Role {
 		AllowedTools:   r.AllowedTools,
 		DeniedTools:    r.DeniedTools,
 		MaxBudgetUSD:   r.MaxBudgetUSD,
+		MaxRunDuration: r.MaxRunDuration,
 		CreatedAt:      r.CreatedAt,
 		UpdatedAt:      r.UpdatedAt,
 	}
@@ -94,6 +96,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		AllowedTools   []string                `json:"allowed_tools,omitempty"`
 		DeniedTools    []string                `json:"denied_tools,omitempty"`
 		MaxBudgetUSD   *float64                `json:"max_budget_usd,omitempty"`
+		MaxRunDuration *int                    `json:"max_run_duration,omitempty"`
 	}{
 		Name:           in.Name,
 		Kind:           in.Kind,
@@ -115,6 +118,7 @@ func (s *roleStore) Create(ctx context.Context, in store.RoleCreate) (*domain.Ro
 		AllowedTools:   in.AllowedTools,
 		DeniedTools:    in.DeniedTools,
 		MaxBudgetUSD:   in.MaxBudgetUSD,
+		MaxRunDuration: in.MaxRunDuration,
 	}
 	var resp roleWire
 	if err := s.client.do(ctx, "POST", "/api/v1/"+pathEscape(in.WorkspaceKey)+"/roles", body, &resp); err != nil {
@@ -153,29 +157,31 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 	// "clear", **int = &&value signals "set", and nil signals "leave
 	// alone") into that wire shape.
 	body := struct {
-		Description       *string                 `json:"description,omitempty"`
-		Kind              *string                 `json:"kind,omitempty"`
-		Prompt            *string                 `json:"prompt,omitempty"`
-		PromptFile        *string                 `json:"prompt_file,omitempty"`
-		Model             *string                 `json:"model,omitempty"`
-		TaskFilter        *string                 `json:"task_filter,omitempty"`
-		Backend           *string                 `json:"backend,omitempty"`
-		Effort            *string                 `json:"effort,omitempty"`
-		PathPatterns      *[]string               `json:"path_patterns,omitempty"`
-		Skills            *[]string               `json:"skills,omitempty"`
-		Labels            *[]string               `json:"labels,omitempty"`
-		ExcludeLabels     *[]string               `json:"exclude_labels,omitempty"`
-		InputPolicy       *domain.RoleInputPolicy `json:"input_policy,omitempty"`
-		ClearInputPolicy  bool                    `json:"clear_input_policy,omitempty"`
-		MaxPriority       *int                    `json:"max_priority,omitempty"`
-		ClearMaxPriority  bool                    `json:"clear_max_priority,omitempty"`
-		MaxConcurrency    *int                    `json:"max_concurrency,omitempty"`
-		ClearConcurrency  bool                    `json:"clear_concurrency,omitempty"`
-		ReadOnly          *bool                   `json:"read_only,omitempty"`
-		AllowedTools      *[]string               `json:"allowed_tools,omitempty"`
-		DeniedTools       *[]string               `json:"denied_tools,omitempty"`
-		MaxBudgetUSD      *float64                `json:"max_budget_usd,omitempty"`
-		ClearMaxBudgetUSD bool                    `json:"clear_max_budget_usd,omitempty"`
+		Description         *string                 `json:"description,omitempty"`
+		Kind                *string                 `json:"kind,omitempty"`
+		Prompt              *string                 `json:"prompt,omitempty"`
+		PromptFile          *string                 `json:"prompt_file,omitempty"`
+		Model               *string                 `json:"model,omitempty"`
+		TaskFilter          *string                 `json:"task_filter,omitempty"`
+		Backend             *string                 `json:"backend,omitempty"`
+		Effort              *string                 `json:"effort,omitempty"`
+		PathPatterns        *[]string               `json:"path_patterns,omitempty"`
+		Skills              *[]string               `json:"skills,omitempty"`
+		Labels              *[]string               `json:"labels,omitempty"`
+		ExcludeLabels       *[]string               `json:"exclude_labels,omitempty"`
+		InputPolicy         *domain.RoleInputPolicy `json:"input_policy,omitempty"`
+		ClearInputPolicy    bool                    `json:"clear_input_policy,omitempty"`
+		MaxPriority         *int                    `json:"max_priority,omitempty"`
+		ClearMaxPriority    bool                    `json:"clear_max_priority,omitempty"`
+		MaxConcurrency      *int                    `json:"max_concurrency,omitempty"`
+		ClearConcurrency    bool                    `json:"clear_concurrency,omitempty"`
+		ReadOnly            *bool                   `json:"read_only,omitempty"`
+		AllowedTools        *[]string               `json:"allowed_tools,omitempty"`
+		DeniedTools         *[]string               `json:"denied_tools,omitempty"`
+		MaxBudgetUSD        *float64                `json:"max_budget_usd,omitempty"`
+		ClearMaxBudgetUSD   bool                    `json:"clear_max_budget_usd,omitempty"`
+		MaxRunDuration      *int                    `json:"max_run_duration,omitempty"`
+		ClearMaxRunDuration bool                    `json:"clear_max_run_duration,omitempty"`
 	}{
 		Description:   patch.Description,
 		Kind:          patch.Kind,
@@ -224,6 +230,17 @@ func (s *roleStore) Update(ctx context.Context, ws, name string, patch store.Rol
 			body.ClearMaxBudgetUSD = true
 		} else {
 			body.MaxBudgetUSD = *patch.MaxBudgetUSD
+		}
+	}
+	// Zero is MEANINGFUL for the run cap — it disables it — so it cannot double
+	// as "unset" the way an absent field does. That is the whole reason for the
+	// clear flag here: without it, clearing the cap and disabling it would
+	// serialize identically and the server could not tell them apart.
+	if patch.MaxRunDuration != nil {
+		if *patch.MaxRunDuration == nil {
+			body.ClearMaxRunDuration = true
+		} else {
+			body.MaxRunDuration = *patch.MaxRunDuration
 		}
 	}
 	var resp roleWire
