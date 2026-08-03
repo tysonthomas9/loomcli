@@ -227,13 +227,16 @@ same once-normalized configured node capacity; registration order cannot
 downgrade the process node to one slot.
 
 First-class Repo create now commits the Repo projection, audit event, workspace
-set/list membership, and global admission mapping in one Redis script or
+set/list membership, and the then-global admission mapping in one Redis script or
 Postgres transaction. Update and delete atomically reject any change that
 would orphan an Issue reference, pending Issue projection, current TaskRun
 placement, or immutable TaskRun origin. Deleting the sole implicit fallback is
 also rejected while an open repo-less non-epic task is dispatch-ready. Replay
 and recovery rebuild or remove mappings with compare-and-set ownership, and
 cross-workspace name collisions fail closed without partial projection writes.
+Phase 6 later superseded only that global-name policy: repository identity is
+now workspace-scoped, while same-workspace collision and atomicity guarantees
+remain unchanged. See the Phase 6 post-completion correction evidence.
 Workspace resolution accepts both first-class local handles and retained
 legacy `org/repo` aliases.
 

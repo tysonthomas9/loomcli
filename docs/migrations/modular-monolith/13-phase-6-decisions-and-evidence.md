@@ -139,6 +139,48 @@ completion sentinel. The captured Desktop diff screenshot at
 This is fresh Phase 6 package evidence; it does not relabel Phase 5's historical
 20-row matrix.
 
+## Post-completion repository scoping correction
+
+Repository display names are workspace-scoped. The same checkout may be
+cloned or attached independently in any number of workspaces; explicit
+workspace routes remain authoritative. A legacy repo-only lookup succeeds only
+when there is exactly one owner and otherwise fails closed with HTTP 409 and
+`REPO_AMBIGUOUS`. FleetDB enforces the contract in Redis, PostgreSQL,
+repository admission, replay/projection, and disaster-recovery paths. The
+PostgreSQL admission alias primary key is now `(workspace, repository_name)`.
+
+Loom maps definitive admission collisions to HTTP 409 instead of a generic
+500, removes unbound local recovery receipts after a definitive conflict, and
+canonicalizes mixed-case workspace routes before constructing FleetDB keys.
+The packaged service log now retains a 50 MiB active file and two bounded
+backups; startup compacts an older oversized active file. Missing active
+transcripts back off from three seconds to a 30-second ceiling and reset after
+success.
+
+The paired source tests passed Redis and PostgreSQL storage contracts,
+resolution middleware, replay/projector recovery, the complete FleetDB
+container integration target, and Loom's full Go/frontend gate against the
+exact companion FleetDB binary. Packaged UI acceptance then proved all of the
+following on 2026-08-03:
+
+- pre-existing `Loom-P6` and `Loom-P61` both expose `loomcli`;
+- UI Add Repo completed independently in `SHARED-REPO-PROOF-A` and
+  `SHARED-REPO-PROOF-B`, with both workspaces exposing `loomcli`;
+- a second same-origin checkout in one workspace was assigned the distinct
+  local display name `loomcli-2` instead of returning HTTP 500;
+- `SHARED-REPO-PROOF-C` was created from the prefilled
+  `octocat/Hello-World` remote and finalized with detected
+  `default_branch=master` and `current_branch=master`; Loom no longer assumes
+  `main` before clone discovery;
+- the rebuilt sidecar SHA-256 was
+  `792db915a875910b57b89207c0439b640c93d0924e91c558876890ba35b80609`,
+  paired FleetDB was
+  `5d2f1d0c54627d241d30d6b50a7717abe2aa2921a7cfe86ae42005897cad50f7`,
+  and the UI screenshot at `/tmp/phase6-shared-repository-proof.png` was
+  `dd3619207764f2836019c19d43ee4ba769116437c5255db55935941c1f9dfcf7`;
+- after restart the active service log was 114 KiB with one 50 MiB backup,
+  replacing the earlier multi-gigabyte active log.
+
 ## Scope disposition
 
 The operator waived GitHub mutations for this phase. No push, PR, review,
