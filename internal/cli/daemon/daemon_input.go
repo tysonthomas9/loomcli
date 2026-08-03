@@ -30,7 +30,7 @@ import (
 // The registry is deliberately memory-only. A pending question is meaningful
 // exactly while the asking process is alive and waiting; persisting it would
 // invite answering a prompt whose agent is long dead. Crash recovery is
-// ageing: entries older than the input-wait bound are invisible to readers and
+// aging: entries older than the input-wait bound are invisible to readers and
 // rejected for answering, so a slot orphaned by a child crash cannot trap a
 // later operator's click.
 
@@ -86,7 +86,7 @@ func (r *inputRegistry) open(p *PendingInput) {
 
 // get returns the agent's live pending prompt, treating entries older than
 // maxAge as absent. Age, not deletion, is the crash-recovery story: only the
-// child may retire its own slot (poll-consume or close), so a reader ageing an
+// child may retire its own slot (poll-consume or close), so a reader aging an
 // entry out must not delete what a live-but-slow child still polls.
 func (r *inputRegistry) get(agent string, maxAge time.Duration) *PendingInput {
 	r.mu.Lock()
