@@ -100,7 +100,7 @@ func runClaudeConversation(ctx context.Context, workDir, prompt, agentName, resu
 	}
 	defer release()
 
-	turn, err := runConversationTurn(ctx, conv, policy, prompt)
+	turn, err := runConversationTurn(ctx, conv, prompt)
 
 	// Session id and usage are read the same way as the one-shot path —
 	// best-effort, never failing the run — so resume and accounting behave
@@ -124,7 +124,7 @@ func runClaudeConversation(ctx context.Context, workDir, prompt, agentName, resu
 // turn's terminal state. It is deliberately shaped as "one bounded turn" so a
 // follow-up policy (reprompt on an unfinished verdict, a critic round inside
 // the same session) is a loop around this call.
-func runConversationTurn(ctx context.Context, conv *chat.Conversation, policy *domain.RoleInputPolicy, prompt string) (chat.Turn, error) {
+func runConversationTurn(ctx context.Context, conv *chat.Conversation, prompt string) (chat.Turn, error) {
 	if t := conversationTurnTimeout(); t > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, t)
@@ -149,7 +149,7 @@ func runConversationTurn(ctx context.Context, conv *chat.Conversation, policy *d
 			case chat.EventInputRequest:
 				if ev.Input != nil {
 					// The human wait runs beside the pump, not inside it.
-					go answerSurfacedRequest(ctx, conv, policy, *ev.Input)
+					go answerSurfacedRequest(ctx, conv, *ev.Input)
 				}
 			case chat.EventTurn:
 				if ev.Turn.Role != chat.RoleAssistant {
@@ -170,10 +170,12 @@ func runConversationTurn(ctx context.Context, conv *chat.Conversation, policy *d
 
 // answerSurfacedRequest resolves one surfaced prompt: hand it to a human via
 // the daemon (the same pending-input registry the one-shot path uses), and
-// deliver the decision with Conversation.Answer. Every no-answer path falls
+// deliver the decision with Conversation.Answer. The role input policy has
+// already run in conversationInputResolver — a request only surfaces when its
+// disposition is ask — so no policy re-check happens here. Every no-answer path falls
 // back to the request's own negative option; a prompt with no way to say no
 // is left surfaced, and the daemon-side wait bound is what ends the stall.
-func answerSurfacedRequest(ctx context.Context, conv *chat.Conversation, policy *domain.RoleInputPolicy, req chat.InputRequest) {
+func answerSurfacedRequest(ctx context.Context, conv *chat.Conversation, req chat.InputRequest) {
 	done := cli.BeginDaemonInputWait()
 	defer done()
 
