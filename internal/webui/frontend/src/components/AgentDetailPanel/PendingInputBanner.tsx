@@ -55,11 +55,7 @@ export function PendingInputBanner({ agentName }: PendingInputBannerProps) {
   }, [refresh]);
 
   const deliver = useCallback(
-    async (body: {
-      option_id?: string;
-      text?: string;
-      decline?: boolean;
-    }) => {
+    async (body: { option_id?: string; text?: string; decline?: boolean }) => {
       if (!workspaceId || !pending) return;
       setBusy(true);
       setError(null);
