@@ -2,7 +2,10 @@ package dto
 
 import (
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/tysonthomas9/loomcli/internal/types"
 )
 
 // Compile-time check: ValidationError implements error.
@@ -67,6 +70,55 @@ func TestValidationError_ErrorsAs(t *testing.T) {
 	}
 	if len(ve.Errors) != 1 {
 		t.Errorf("extracted ValidationError has %d errors, want 1", len(ve.Errors))
+	}
+}
+
+// isAPIStatus used to carry its own copy of the six user-facing statuses. It now
+// reads types.UserFacingStatuses, and this is what says the derivation still
+// answers the way the hand-written switch did: yes to those six, no to the three
+// the server sets, no to "" and no to anything outside the vocabulary.
+func TestIsAPIStatus_MatchesUserFacingStatuses(t *testing.T) {
+	for _, s := range types.UserFacingStatuses() {
+		if !isAPIStatus(string(s)) {
+			t.Errorf("isAPIStatus(%q) = false, want true — it is a user-facing status", s)
+		}
+	}
+
+	for _, s := range types.BuiltinStatuses() {
+		if !s.IsSystemManaged() {
+			continue
+		}
+		if isAPIStatus(string(s)) {
+			t.Errorf("isAPIStatus(%q) = true, want false — the server sets it, not the client", s)
+		}
+	}
+
+	// "" reaches here as an explicit `"status": ""` in the PATCH body, which is a
+	// caller mistake rather than "leave it alone" (that is the field being absent).
+	// entity.IssueStatus tolerates "" mid-construction; this layer must not.
+	for _, s := range []string{"", "banana", "OPEN", " open", "triaged"} {
+		if isAPIStatus(s) {
+			t.Errorf("isAPIStatus(%q) = true, want false", s)
+		}
+	}
+}
+
+// The message names the statuses the caller may use, so it has to name the ones
+// the check actually accepts — in order, and all of them.
+func TestAPIStatusList_MatchesWhatIsAPIStatusAccepts(t *testing.T) {
+	got := apiStatusList()
+	if want := "open, in_progress, blocked, deferred, review, closed"; got != want {
+		t.Errorf("apiStatusList() = %q, want %q", got, want)
+	}
+	for _, name := range strings.Split(got, ", ") {
+		if !isAPIStatus(name) {
+			t.Errorf("apiStatusList() offers %q, which isAPIStatus rejects", name)
+		}
+	}
+	for _, s := range types.UserFacingStatuses() {
+		if !strings.Contains(got, string(s)) {
+			t.Errorf("apiStatusList() = %q, missing accepted status %q", got, s)
+		}
 	}
 }
 

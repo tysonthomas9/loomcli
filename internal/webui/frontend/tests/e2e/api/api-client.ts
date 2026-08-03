@@ -15,6 +15,10 @@
 
 import { test as base, expect, APIRequestContext } from '@playwright/test'
 
+// Straight at the module, not the src/types/issue barrel: status.ts imports
+// nothing, so this edge can never drag app code into a Playwright worker.
+import type { KnownStatus } from '../../../src/types/issue/status'
+
 // =============================================================================
 // Type Definitions - Request/Response interfaces matching Go backend
 // =============================================================================
@@ -22,8 +26,15 @@ import { test as base, expect, APIRequestContext } from '@playwright/test'
 /** Issue type enum matching backend */
 export type IssueType = 'bug' | 'feature' | 'task' | 'epic' | 'chore'
 
-/** Issue status enum matching backend */
-export type IssueStatus = 'open' | 'in_progress' | 'blocked' | 'deferred' | 'review' | 'closed' | 'tombstone' | 'pinned' | 'hooked'
+/**
+ * Issue status enum matching backend.
+ *
+ * Aliased to the app's own KnownStatus rather than re-listed: this client types
+ * the same API the app types, so a fourth copy of the nine statuses could only
+ * ever be a way to disagree with it. src/types/issue/status.ts is in turn pinned
+ * to Go's list by a parity test, which makes this alias correct by construction.
+ */
+export type IssueStatus = KnownStatus
 
 /** Issue priority (0-4, where 0 is P0/critical) */
 export type Priority = 0 | 1 | 2 | 3 | 4
