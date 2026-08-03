@@ -83,6 +83,7 @@ tests:
         intent: "Wait until the second codex lead tab is labelled lead-codex-2"
       - run: |
           set -e
+          # budget: terminal-launch (40s) - PTY spawn and terminal tab metadata can lag the UI label.
           for i in $(seq 1 20); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d10-tabs.json" &&
             python3 - "$AFT_WORK_DIR/lead-d10-tabs.json" "$AFT_WORK_DIR" <<'PY' && exit 0
@@ -138,6 +139,7 @@ tests:
         intent: "Wait until the active shell pane renders a terminal grid and proves it is not rendering the lead startup banner"
       - run: |
           set -e
+          # budget: terminal-launch (40s) - shell PTY tab metadata arrives after launch.
           for i in $(seq 1 20); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d11-tabs.json" &&
             python3 - "$AFT_WORK_DIR/lead-d11-tabs.json" "$AFT_WORK_DIR/leadSession-terminal-shell" <<'PY' && exit 0
@@ -165,7 +167,7 @@ tests:
     steps:
       - open: /ws/E2E-WS-LEAD/agents
       - wait:
-          fn: >-
+          fn: &agentsPageReady >-
             (() => {
               const page = document.querySelector('[data-testid=agents-page]');
               const add = Array.from(document.querySelectorAll('button'))
@@ -188,7 +190,7 @@ tests:
         intent: "Wait until the agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
+          fn: &createAgentDialogOpen >-
             (() => {
               const overlay = document.querySelector('[data-testid=create-agent-overlay]');
               if (overlay) {
@@ -217,6 +219,7 @@ tests:
       - run: |
           set -e
           name="atlas-${RUN_ID:-local}"
+          # budget: db-persist (10s) - modal submit writes the lead agent row before readback.
           for i in $(seq 1 10); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d1-agents.json" &&
             python3 - "$AFT_WORK_DIR/lead-d1-agents.json" "$name" <<'PY' && exit 0
@@ -267,46 +270,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-LEAD/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the agents page is ready for backend selection"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-lead }
       - fill: { testid: create-agent-name, value: "atlas-cl-${RUN_ID:-local}" }
@@ -324,6 +292,7 @@ tests:
       - run: |
           set -e
           name="atlas-cl-${RUN_ID:-local}"
+          # budget: db-persist (10s) - modal submit writes the claude lead row before readback.
           for i in $(seq 1 10); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d2-agents.json" &&
             python3 - "$AFT_WORK_DIR/lead-d2-agents.json" "$name" <<'PY' && exit 0
@@ -348,6 +317,7 @@ tests:
       - run: |
           set -e
           name="atlas-cl-${RUN_ID:-local}"
+          # budget: terminal-launch (40s) - terminal/session must return the persisted launch spec.
           for i in $(seq 1 20); do
             curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents/$name/terminal/session" > "$AFT_WORK_DIR/lead-d2-terminal.json" &&
             python3 - "$AFT_WORK_DIR/lead-d2-terminal.json" "$AFT_WORK_DIR/leadSession-atlas-cl" "$name" <<'PY' && exit 0
@@ -379,46 +349,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-LEAD/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the agents page is ready for workspace-wide lead creation"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-lead }
       - fill: { testid: create-agent-name, value: "atlas-all-${RUN_ID:-local}" }
@@ -439,23 +374,7 @@ tests:
         intent: "Wait until the workspace-wide lead appears after submit"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open for the pinned lead"
       - click: { testid: create-agent-template-lead }
       - fill: { testid: create-agent-name, value: "atlas-pin-${RUN_ID:-local}" }
@@ -494,46 +413,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-LEAD/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the agents page is ready for lead name validation"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-lead }
       - expect: { enabled: { testid: create-agent-submit, equals: false } }
@@ -551,46 +435,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-LEAD/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the agents page is ready for duplicate lead creation"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-lead }
       - fill: { testid: create-agent-name, value: "atlas-${RUN_ID:-local}" }
@@ -622,46 +471,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-LEAD/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the agents page is ready for the second lead"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-lead }
       - fill: { testid: create-agent-name, value: "atlas-b-${RUN_ID:-local}" }
@@ -706,26 +520,7 @@ tests:
     steps:
       - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the unassigned lead detail page is ready"
       - wait:
           fn: >-
@@ -803,26 +598,7 @@ tests:
     steps:
       - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the lead detail page is ready"
       - wait:
           fn: >-
@@ -839,6 +615,7 @@ tests:
       - run: |
           set -e
           name="atlas-${RUN_ID:-local}"
+          # budget: terminal-launch (60s) - PTY launch and startup banner metadata must settle.
           for i in $(seq 1 30); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d8-tabs.json" &&
             python3 - "$AFT_WORK_DIR/lead-d8-tabs.json" "$AFT_WORK_DIR/leadSession-atlas" "$name" <<'PY' && exit 0
@@ -899,6 +676,7 @@ tests:
       - run: |
           set -e
           name="atlas-${RUN_ID:-local}"
+          # budget: monitor-cache (20s) - monitor cache must join the terminal launch env.
           for i in $(seq 1 20); do
             curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-LEAD" > "$AFT_WORK_DIR/lead-d9-monitor.json" &&
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d9-tabs.json" &&
@@ -1001,6 +779,7 @@ tests:
           set -e
           name="atlas-${RUN_ID:-local}"
           old="$(cat "$AFT_WORK_DIR/leadSession-atlas")"
+          # budget: terminal-launch (40s) - backend switch replaces session metadata after launch.
           for i in $(seq 1 20); do
             curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents/$name/terminal/session" > "$AFT_WORK_DIR/lead-d13-session.json" &&
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d13-after-tabs.json" &&
@@ -1082,6 +861,7 @@ tests:
       - run: |
           set -e
           name="doomed-${RUN_ID:-local}"
+          # budget: terminal-launch (40s) - disposable lead tab must appear before deletion.
           for i in $(seq 1 20); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d15-tabs-before.json" &&
             python3 - "$AFT_WORK_DIR/lead-d15-tabs-before.json" "$AFT_WORK_DIR/leadSession-doomed" "$name" <<'PY' && exit 0
@@ -1135,7 +915,9 @@ tests:
           curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/terminal/tabs" > "$AFT_WORK_DIR/lead-d15-tabs-cleanup.json"
           python3 - "$AFT_WORK_DIR/lead-d15-tabs-cleanup.json" "$session" <<'PY'
           import json, sys
-          tabs = json.load(open(sys.argv[1])).get("data") or []
+          d = json.load(open(sys.argv[1]))
+          tabs = d.get("data")
+          assert isinstance(tabs, list), d
           assert not [t for t in tabs if t.get("session_name") == sys.argv[2]], tabs
           PY
         intent: "An operator reclaims the orphaned terminal tab so the disposable lead leaves no live PTY behind"
@@ -1176,6 +958,7 @@ tests:
           expected_file="$AFT_WORK_DIR/lead-d17-header-text"
           found=0
           # delivery_state pending is transient; pinning it deterministically needs a hold-delivery seam.
+          # budget: context-delivery (45s) - epic delivery state crosses monitor cache and UI state.
           for i in $(seq 1 45); do
             curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-LEAD" > "$AFT_WORK_DIR/lead-d17-monitor.json" &&
             python3 - "$AFT_WORK_DIR/lead-d17-monitor.json" "$name" "$epic" "$state_file" "$expected_file" <<'PY' && { found=1; break; }
@@ -1387,6 +1170,7 @@ tests:
       - run: |
           set -e
           want="$(cat "$AFT_WORK_DIR/d20bExpectedLead")"
+          # budget: db-persist (20s) - Run action may create the purpose-named lead row asynchronously.
           for i in $(seq 1 20); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d20b-agents.json" &&
             python3 - "$AFT_WORK_DIR/lead-d20b-agents.json" "$want" <<'PY' && exit 0
@@ -1496,7 +1280,7 @@ tests:
           forbidden = sys.argv[3]
           data = d.get("data", d)
           agents = data.get("agents") if isinstance(data, dict) else data
-          agents = agents or []
+          assert isinstance(agents, list), d
           assert len(agents) == before, (before, len(agents), agents)
           assert not [a for a in agents if a.get("name") == forbidden], agents
           selected = [a for a in agents if a.get("name") == "atlas-b-" + (__import__("os").environ.get("RUN_ID") or "local")]

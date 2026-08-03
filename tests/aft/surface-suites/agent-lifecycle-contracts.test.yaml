@@ -102,7 +102,7 @@ tests:
         intent: "An API client confirms the failed repo-less create left no agent row behind"
       - open: /ws/E2E-WS-TASK-NOREPO/agents
       - wait:
-          fn: >-
+          fn: &agentsPageReady >-
             (() => {
               const page = document.querySelector('[data-testid=agents-page]');
               const add = Array.from(document.querySelectorAll('button'))
@@ -125,7 +125,7 @@ tests:
         intent: "Wait until the repo-less workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
+          fn: &createAgentDialogOpen >-
             (() => {
               const overlay = document.querySelector('[data-testid=create-agent-overlay]');
               if (overlay) {
@@ -185,46 +185,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK-CTL/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the lifecycle-control agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-task }
       - fill: { testid: create-agent-name, value: "delete-${RUN_ID:-local}" }
@@ -256,6 +221,7 @@ tests:
           set -e
           run="${RUN_ID:-local}"
           name="delete-$run"
+          # budget: db-persist (10s) - fleet-db delete must disappear from list readback.
           for i in $(seq 1 10); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK-CTL/agents" > "$AFT_WORK_DIR/tsk-d14-agents.json" &&
             python3 - "$AFT_WORK_DIR/tsk-d14-agents.json" "$name" <<'PY' && exit 0
@@ -263,6 +229,7 @@ tests:
           d = json.load(open(sys.argv[1]))
           name = sys.argv[2]
           agents = d.get("data") if isinstance(d, dict) else []
+          assert isinstance(agents, list), d
           assert not any(a.get("name") == name for a in agents or []), agents
           PY
             sleep 1
@@ -305,12 +272,15 @@ tests:
           set -e
           run="${RUN_ID:-local}"
           name="delete-$run"
+          # budget: monitor-cache (16s) - monitor/status can lag fleet-db deletion.
           for i in $(seq 1 16); do
             curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-TASK-CTL" > "$AFT_WORK_DIR/tsk-d14-monitor.json" &&
             python3 - "$AFT_WORK_DIR/tsk-d14-monitor.json" "$name" <<'PY' && exit 0
           import json, sys
           d = json.load(open(sys.argv[1]))
-          assert not any(a.get("name") == sys.argv[2] for a in d.get("agents", [])), d.get("agents")
+          agents = d.get("agents")
+          assert isinstance(agents, list), d
+          assert not any(a.get("name") == sys.argv[2] for a in agents), agents
           PY
             sleep 1
           done
@@ -549,46 +519,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK-CTL/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the lifecycle-control agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-task }
       - fill: { testid: create-agent-name, value: "health-${RUN_ID:-local}" }

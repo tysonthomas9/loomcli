@@ -88,6 +88,7 @@ tests:
           d = json.load(open(agents_path))
           data = d.get("data", d)
           agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
           assert not [a for a in agents or [] if a.get("name") == name], agents
           PY
           code="$(post_agent d7b-huge)"
@@ -136,6 +137,7 @@ tests:
           d = json.load(open(agents_path))
           data = d.get("data", d)
           agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
           assert not [a for a in agents or [] if a.get("name") == name], agents
           PY
         intent: "An API client posts a mixed-case role_name and filters the agent list to prove the rejected agent was not persisted"

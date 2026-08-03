@@ -115,7 +115,7 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK/agents
       - wait:
-          fn: >-
+          fn: &agentsPageReady >-
             (() => {
               const page = document.querySelector('[data-testid=agents-page]');
               const add = Array.from(document.querySelectorAll('button'))
@@ -138,7 +138,7 @@ tests:
         intent: "Wait until the Task Runner workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
+          fn: &createAgentDialogOpen >-
             (() => {
               const overlay = document.querySelector('[data-testid=create-agent-overlay]');
               if (overlay) {
@@ -170,6 +170,7 @@ tests:
           run="${RUN_ID:-local}"
           name="worker-modal-a-$run"
           repo_a="$(cat "$AFT_WORK_DIR/task-repo-a.name")"
+          # budget: db-persist (10s) - modal submit writes the agent row before readback.
           for i in $(seq 1 10); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK/agents" > "$AFT_WORK_DIR/tsk-d1-agents.json" &&
             python3 - "$AFT_WORK_DIR/tsk-d1-agents.json" "$name" "$repo_a" <<'PY' && exit 0
@@ -199,6 +200,7 @@ tests:
           repo_a="$(cat "$AFT_WORK_DIR/task-repo-a.name")"
           ws_path="$(cat "$AFT_WORK_DIR/task-workspace.path")"
           wt="$ws_path/worktrees/$repo_a/$name"
+          # budget: worktree-materialization (10s) - local agent worktree is created after the row.
           for i in $(seq 1 10); do
             [ -e "$wt/.git" ] && git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1 && break
             sleep 1
@@ -214,46 +216,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the Task Runner workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-task }
       - fill: { testid: create-agent-name, value: "worker-cross-${RUN_ID:-local}" }
@@ -278,6 +245,7 @@ tests:
           set -e
           run="${RUN_ID:-local}"
           name="worker-cross-$run"
+          # budget: db-persist (10s) - modal submit writes the cross-repo agent row.
           for i in $(seq 1 10); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK/agents" > "$AFT_WORK_DIR/tsk-d2-agents.json" &&
             python3 - "$AFT_WORK_DIR/tsk-d2-agents.json" "$name" <<'PY' && exit 0
@@ -320,46 +288,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the Task Runner workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-task }
       - fill: { testid: create-agent-name, value: "worker-claude-${RUN_ID:-local}" }
@@ -403,46 +336,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the Task Runner workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-task }
       - expect: { enabled: { testid: create-agent-submit, equals: false } }
@@ -480,46 +378,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the Task Runner workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-task }
       - fill: { testid: create-agent-name, value: "worker-a-${RUN_ID:-local}" }
@@ -580,6 +443,7 @@ tests:
       - run: |
           set -e
           run="${RUN_ID:-local}"
+          # budget: ui-click-retry (3s) - popover mount can lag the trigger click.
           for i in 1 2 3; do
             agent-browser --session "$AFT_SESSION" find testid assignee-dropdown-trigger click || true
             sleep 1
@@ -604,6 +468,7 @@ tests:
           set -e
           run="${RUN_ID:-local}"
           task="$(cat "$AFT_WORK_DIR/tskD7IssueId")"
+          # budget: db-persist (10s) - assignment and in-progress status persist through fleet-db.
           for i in $(seq 1 10); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK/issues/$task" > "$AFT_WORK_DIR/tsk-d7-issue.json" &&
             python3 - "$AFT_WORK_DIR/tsk-d7-issue.json" "worker-a-$run" <<'PY' && exit 0
@@ -622,6 +487,7 @@ tests:
           set -e
           run="${RUN_ID:-local}"
           name="worker-a-$run"
+          # budget: db-persist (10s) - lifecycle start updates state and desired_state.
           for i in $(seq 1 10); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-TASK/agents" > "$AFT_WORK_DIR/tsk-d7-agents.json" &&
             python3 - "$AFT_WORK_DIR/tsk-d7-agents.json" "$name" <<'PY' && exit 0
@@ -684,46 +550,11 @@ tests:
         intent: "An API client creates an open task without a design to prove the has_design gate"
       - open: /ws/E2E-WS-TASK/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the Task Runner workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-task }
       - fill: { testid: create-agent-name, value: "idle-${RUN_ID:-local}" }
@@ -792,46 +623,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the Task Runner workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-task }
       - fill: { testid: create-agent-name, value: "scoped-${RUN_ID:-local}" }
@@ -924,26 +720,7 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK/agents/worker-a-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the worker-a agent detail page is ready"
       - click: { role: button, name: Logs, exact: true }
       - wait:
@@ -975,26 +752,7 @@ tests:
     steps:
       - open: /ws/E2E-WS-TASK/agents/worker-a-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the worker-a agent detail page is ready"
       - expect: { url: "**/ws/*/agents/worker-a-${RUN_ID:-local}**" }
       - expect: { visible: { selector: "[aria-label='Agent: worker-a-${RUN_ID:-local}']" } }
@@ -1019,6 +777,7 @@ tests:
       - run: |
           set -e
           name="worker-a-${RUN_ID:-local}"
+          # budget: monitor-cache (16s) - monitor/status can lag seeded log visibility.
           for i in $(seq 1 16); do
             curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-TASK" > "$AFT_WORK_DIR/tsk-d17-monitor.json" &&
             python3 - "$AFT_WORK_DIR/tsk-d17-monitor.json" "$name" <<'PY' && exit 0

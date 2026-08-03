@@ -82,6 +82,9 @@ tests:
               return !!row && row.textContent.includes('Plan review');
             })()
         intent: "Wait until the review queue labels the fabricated issue as a Plan review"
+      # budget: ui-click-retry (3s) - row click can race route navigation.
+      # NOTE: this is a folded (>-) scalar — a comment INSIDE it would fold onto one
+      # line and swallow the whole command, so the budget note stays out here.
       - run: >-
           for i in 1 2 3; do
           agent-browser --session "$AFT_SESSION" find role button click --name "planner-pr-approve ${RUN_ID:-local}" || true;
@@ -240,6 +243,7 @@ tests:
       - run: |
           set -e
           run="${RUN_ID:-local}"
+          # budget: ui-click-retry (3s) - popover mount can lag the trigger click.
           for i in 1 2 3; do
             agent-browser --session "$AFT_SESSION" find testid assignee-dropdown-trigger click || true
             sleep 1

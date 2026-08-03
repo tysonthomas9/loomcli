@@ -47,7 +47,7 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
+          fn: &agentsPageReady >-
             (() => {
               const page = document.querySelector('[data-testid=agents-page]');
               const add = Array.from(document.querySelectorAll('button'))
@@ -70,7 +70,7 @@ tests:
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
+          fn: &createAgentDialogOpen >-
             (() => {
               const overlay = document.querySelector('[data-testid=create-agent-overlay]');
               if (overlay) {
@@ -121,6 +121,7 @@ tests:
           set -e
           run="${RUN_ID:-local}"
           name="cust-$run"
+          # budget: monitor-cache (16s) - monitor/status must expose the new custom agent.
           for i in $(seq 1 16); do
             curl -sf "$AFT_BASE_URL/api/monitor/status?workspace=E2E-WS-CUSTOM" > "$AFT_WORK_DIR/d1-monitor.json" &&
             python3 - "$AFT_WORK_DIR/d1-monitor.json" "$name" <<'PY' && exit 0
@@ -162,46 +163,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-empty-${RUN_ID:-local}" }
@@ -219,46 +185,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-ws-${RUN_ID:-local}" }
@@ -288,46 +219,11 @@ tests:
         intent: "An operator prepares the exact multiline prompt fixture without a trailing newline"
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-multi-${RUN_ID:-local}" }
@@ -369,46 +265,11 @@ tests:
         intent: "An operator prepares the template-looking prompt fixture without a trailing newline"
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-tmpl-${RUN_ID:-local}" }
@@ -533,46 +394,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-xss-${RUN_ID:-local}" }
@@ -590,26 +416,7 @@ tests:
         intent: "Wait until the xss-shaped custom agent appears after submit"
       - open: /ws/E2E-WS-CUSTOM/agents/cust-xss-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom agent detail page is ready"
       - click: { role: button, name: Info, exact: true }
       - click: { role: button, name: Logs, exact: true }
@@ -623,26 +430,7 @@ tests:
       - expect: { notText: "onerror" }
       - reload: true
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the reloaded custom agent detail page is ready"
       - wait:
           fn: >-
@@ -676,46 +464,11 @@ tests:
         intent: "An operator prepares the 32KB custom prompt fixture with printf and no trailing newline"
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-long-${RUN_ID:-local}" }
@@ -749,46 +502,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: task }
@@ -809,6 +527,7 @@ tests:
           d = json.load(open(sys.argv[1]))
           data = d.get("data", d)
           agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
           assert not [a for a in agents or [] if a.get("name") == "task"], agents
           PY
         intent: "An operator's readback confirms the rejected task-named agent was not created"
@@ -819,46 +538,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: plan }
@@ -879,6 +563,7 @@ tests:
           d = json.load(open(sys.argv[1]))
           data = d.get("data", d)
           agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
           assert not [a for a in agents or [] if a.get("name") == "plan"], agents
           PY
         intent: "An operator's readback confirms the rejected plan-named agent was not created"
@@ -889,46 +574,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: lead }
@@ -949,6 +599,7 @@ tests:
           d = json.load(open(sys.argv[1]))
           data = d.get("data", d)
           agents = data.get("agents") if isinstance(data, dict) else data
+          assert isinstance(agents, list), d
           assert not [a for a in agents or [] if a.get("name") == "lead"], agents
           PY
         intent: "An operator's readback confirms the rejected lead-named agent was not created"
@@ -959,46 +610,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: orchestrator }
@@ -1042,26 +658,7 @@ tests:
         intent: "An operator's CLI readback confirms the orchestrator role prompt and legacy description"
       - open: /ws/E2E-WS-CUSTOM/agents/orchestrator
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the orchestrator agent detail page is ready"
       - wait:
           fn: >-
@@ -1069,6 +666,7 @@ tests:
         intent: "Wait until the orchestrator terminal surface is mounted"
       - run: |
           set -e
+          # budget: terminal-launch (120s) - orchestrator terminal launch spec can lag PTY spawn.
           for i in $(seq 1 60); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d8d-tabs.json" &&
             python3 - "$AFT_WORK_DIR/d8d-tabs.json" <<'PY' && exit 0
@@ -1094,46 +692,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-trim-${RUN_ID:-local}" }
@@ -1164,46 +727,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-be-${RUN_ID:-local}" }
@@ -1221,46 +749,11 @@ tests:
         intent: "Wait until the claude-backed custom agent appears after submit"
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready for the default backend companion"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open for the default backend companion"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-be-default-${RUN_ID:-local}" }
@@ -1288,26 +781,7 @@ tests:
         intent: "An operator confirms the registered backend list includes every first-class backend"
       - open: /ws/E2E-WS-CUSTOM/agents/cust-be-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the claude-backed custom agent detail page is ready"
       - wait:
           fn: >-
@@ -1328,6 +802,7 @@ tests:
           assert by_name[sys.argv[2]].get("backend") == "claude", by_name[sys.argv[2]]
           assert by_name[sys.argv[3]].get("backend") == "codex", by_name[sys.argv[3]]
           PY
+          # budget: terminal-launch (120s) - backend-specific launch argv appears after tab creation.
           for i in $(seq 1 60); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d10-tabs.json" &&
             python3 - "$AFT_WORK_DIR/d10-tabs.json" "$name" <<'PY' && exit 0
@@ -1366,46 +841,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-repo-${RUN_ID:-local}" }
@@ -1423,46 +863,11 @@ tests:
         intent: "Wait until the repo-scoped custom agent appears after submit"
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready for workspace-wide scope"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open for workspace-wide scope"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-cross-${RUN_ID:-local}" }
@@ -1501,26 +906,7 @@ tests:
         intent: "Wait until the workspace-wide custom agent appears after submit"
       - open: /ws/E2E-WS-CUSTOM/agents/cust-repo-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the repo-scoped custom agent detail page is ready"
       - wait:
           fn: >-
@@ -1528,26 +914,7 @@ tests:
         intent: "Wait until the repo-scoped custom agent terminal surface is mounted"
       - open: /ws/E2E-WS-CUSTOM/agents/cust-cross-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the workspace-wide custom agent detail page is ready"
       - wait:
           fn: >-
@@ -1580,6 +947,7 @@ tests:
               assert not path.exists(), str(path)
           PY
           for agent in "$repo_agent" "$cross_agent"; do
+            # budget: terminal-launch (120s) - each terminal tab must persist its launch env.
             for i in $(seq 1 60); do
               curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d11-tabs-$agent.json" &&
               python3 - "$AFT_WORK_DIR/d11-tabs-$agent.json" "$agent" <<'PY' && break
@@ -1612,26 +980,7 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents/cust-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the previously created custom agent detail page is ready"
       - wait:
           fn: >-
@@ -1669,46 +1018,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-recycle-${RUN_ID:-local}" }
@@ -1726,23 +1040,7 @@ tests:
         intent: "An operator deletes the custom agent while its role remains in the workspace"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog reopens for the different prompt attempt"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-recycle-${RUN_ID:-local}" }
@@ -1785,46 +1083,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-sse-${RUN_ID:-local}" }
@@ -1842,46 +1105,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-dup-${RUN_ID:-local}" }
@@ -1894,23 +1122,7 @@ tests:
         intent: "Wait until the first duplicate-name candidate appears after submit"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog reopens for the duplicate attempt"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "cust-dup-${RUN_ID:-local}" }
@@ -1946,46 +1158,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-name, value: "CustMix-${RUN_ID:-local}" }
@@ -2003,26 +1180,7 @@ tests:
         intent: "Wait until the mixed-case custom agent appears under its normalized name"
       - open: /ws/E2E-WS-CUSTOM/agents/custmix-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the normalized custom agent route renders"
       - wait:
           fn: >-
@@ -2046,6 +1204,7 @@ tests:
           r = json.load(open(sys.argv[2]))
           assert r.get("name") == name, r
           PY
+          # budget: terminal-launch (120s) - API-created agent launch argv appears after terminal tab creation.
           for i in $(seq 1 60); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM/terminal/tabs" > "$AFT_WORK_DIR/d17a-tabs.json" &&
             python3 - "$AFT_WORK_DIR/d17a-tabs.json" "$name" <<'PY' && exit 0
@@ -2070,46 +1229,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the custom workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-custom-prompt }
       - fill: { testid: create-agent-interactive-prompt, value: "AFT-VALID-NAME-PROMPT-${RUN_ID:-local}" }
@@ -2141,46 +1265,11 @@ tests:
     steps:
       - open: /ws/E2E-WS-CUSTOM-CTL/agents
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the clean control workspace agents page is ready"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
-          fn: >-
-            (() => {
-              const overlay = document.querySelector('[data-testid=create-agent-overlay]');
-              if (overlay) {
-                window.__aftCreateAgentOverlayWaitStartedAt = 0;
-                return true;
-              }
-              if (!window.__aftCreateAgentOverlayWaitStartedAt) {
-                window.__aftCreateAgentOverlayWaitStartedAt = Date.now();
-              }
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              if (Date.now() - window.__aftCreateAgentOverlayWaitStartedAt > 1000 && add && (location.pathname.endsWith("/agents") || location.pathname.includes("/agents/"))) {
-                throw new Error('create-agent-overlay disappeared or never opened after + Add agent; agents page may have remounted during auto-select');
-              }
-              return false;
-            })()
+          fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open in the clean control workspace"
       - click: { testid: create-agent-template-interactive-pr-review }
       - expect: { count: { testid: create-agent-interactive-prompt, equals: 0 } }
@@ -2219,26 +1308,7 @@ tests:
         intent: "An operator's readback confirms the PR Review agent and built-in role prompt_file"
       - open: /ws/E2E-WS-CUSTOM-CTL/agents/rev-${RUN_ID:-local}
       - wait:
-          fn: >-
-            (() => {
-              const page = document.querySelector('[data-testid=agents-page]');
-              const add = Array.from(document.querySelectorAll('button'))
-                .some((b) => (b.textContent || '').trim() === '+ Add agent');
-              const agentCards = document.querySelectorAll('[aria-label^="Agent: "]');
-              const settled = (location.pathname.split("/agents/")[1] || "").length > 0 || (add && agentCards.length === 0);
-              const sig = [location.pathname, agentCards.length, add ? "add" : "no-add"].join("|");
-              if (!page || !settled) {
-                window.__aftAgentsPageStableSig = null;
-                window.__aftAgentsPageStableAt = 0;
-                return false;
-              }
-              if (window.__aftAgentsPageStableSig !== sig) {
-                window.__aftAgentsPageStableSig = sig;
-                window.__aftAgentsPageStableAt = Date.now();
-                return false;
-              }
-              return Date.now() - window.__aftAgentsPageStableAt >= 300;
-            })()
+          fn: *agentsPageReady
         intent: "Wait until the PR Review agent detail page is ready"
       - wait:
           fn: >-
@@ -2247,6 +1317,7 @@ tests:
       - run: |
           set -e
           name="rev-${RUN_ID:-local}"
+          # budget: terminal-launch (120s) - built-in PR Review launch spec can lag PTY spawn.
           for i in $(seq 1 60); do
             curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-CUSTOM-CTL/terminal/tabs" > "$AFT_WORK_DIR/d19-tabs.json" &&
             python3 - "$AFT_WORK_DIR/d19-tabs.json" "$name" <<'PY' && exit 0

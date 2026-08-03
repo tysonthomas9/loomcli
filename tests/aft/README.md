@@ -9,6 +9,14 @@ These complement the mocked Playwright suite: they run against the **real v5 sta
 so they cover what mocks can't — above all that server-side mutations reach the UI via
 SSE.
 
+Poll-loop comments use these budget classes: `ui-click-retry` (3s) for browser clicks
+that can race route or popover mounting; `db-persist` (10-20s) for direct fleet-db/API
+write propagation and asynchronous action-created rows; `worktree-materialization`
+(10s) for local agent worktree creation after a row exists; `monitor-cache` (16-20s)
+for `/api/monitor/status` cache and join propagation; `context-delivery` (45s) for
+epic assignment delivery state crossing monitor/UI boundaries; and `terminal-launch`
+(40-120s) for PTY spawn plus terminal tab/session launch metadata.
+
 ## Run
 
 ```bash
