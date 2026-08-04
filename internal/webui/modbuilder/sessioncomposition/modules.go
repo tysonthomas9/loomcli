@@ -17,7 +17,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/misc"
 	hterminal "github.com/tysonthomas9/loomcli/internal/webui/handlers/terminal"
-	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
@@ -76,12 +75,13 @@ func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.Ser
 			hterminal.InteractionDependencies{
 				API: deps.Interaction, Operator: deps.Operator,
 				SessionAuthorities: deps.SessionAuthorities,
+				TerminalIdentities: deps.TermSvc,
 			},
 			deps.Agents),
 	}
 }
 
 // NewIssueTabModule creates the issue tab module.
-func NewIssueTabModule(issueTabStore *issuetabs.Store, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
-	return issues.NewIssueTabModule(issueTabStore, hub)
+func NewIssueTabModule(issueTabs interaction.IssueTabStateAPI, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
+	return issues.NewIssueTabModule(issueTabs, hub)
 }

@@ -30,6 +30,9 @@ func (s *stubTerminalService) PatchTab(_ context.Context, _, _ string, _ map[str
 func (s *stubTerminalService) PutTab(_ context.Context, _ string, _ *tabmeta.TabMetadata) error {
 	return nil
 }
+func (s *stubTerminalService) PersistInteractionTabIdentity(_ context.Context, _ string, _ *tabmeta.TabMetadata) error {
+	return nil
+}
 func (s *stubTerminalService) DeleteTab(_ context.Context, _, _ string) error { return nil }
 func (s *stubTerminalService) ListSessionsByIssue(_ context.Context) (map[string][]string, error) {
 	return nil, nil

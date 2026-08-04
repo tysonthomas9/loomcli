@@ -6,6 +6,12 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 )
 
+// InteractionTerminalIdentityWriter is the narrow owner-bound persistence
+// surface used only after an Interaction session and terminal are established.
+type InteractionTerminalIdentityWriter interface {
+	PersistInteractionTabIdentity(ctx context.Context, wsID string, meta *tabmeta.TabMetadata) error
+}
+
 // TerminalService defines the surviving terminal-related business logic after
 // the tmux backend was removed. What remains is the WebSocket auth token
 // endpoint, tab metadata CRUD (Redis-backed, not tmux-backed), and the
@@ -13,6 +19,8 @@ import (
 // scrollback, seed, lead-session, export, close-all) is gone — each
 // WebSocket now owns a fresh PTY managed directly by PTYManager.
 type TerminalService interface {
+	InteractionTerminalIdentityWriter
+
 	// --- WebSocket auth ---
 	GenerateToken(ctx context.Context, wsID, session, userID string) (string, error)
 

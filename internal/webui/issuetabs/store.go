@@ -10,37 +10,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 )
-
-// validIssueID matches issue IDs like "loomcli-fghge.1" — alphanumeric, hyphens, underscores, dots.
-var validIssueID = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
 const (
 	keyPrefix = "issue:tabs:"
 	ttl       = 24 * time.Hour
 )
 
-// IssueTab represents a single tab within an issue's detail view.
-type IssueTab struct {
-	ID          string `json:"id"`   // "details", "logs", "terminal-{session}"
-	Type        string `json:"type"` // "details", "logs", "terminal"
-	Label       string `json:"label"`
-	SessionName string `json:"session_name,omitempty"` // for terminal tabs only
-	Backend     string `json:"backend,omitempty"`      // for terminal tabs only
-	SortOrder   int    `json:"sort_order"`
-}
-
-// IssueTabState represents the full persisted tab state for an issue.
-type IssueTabState struct {
-	IssueID     string     `json:"issue_id"`
-	Tabs        []IssueTab `json:"tabs"`
-	ActiveTabID string     `json:"active_tab_id"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-}
+// Compatibility aliases keep existing WebUI callers source-compatible while
+// Interaction owns the canonical tab vocabulary.
+type IssueTab = interaction.IssueTab
+type IssueTabState = interaction.IssueTabState
 
 // Store provides Redis-backed persistence for issue tab state.
 // Workspace identity is passed per-operation (matching the tabmeta pattern),
@@ -49,6 +33,8 @@ type Store struct {
 	client *redis.Client
 	logger *slog.Logger
 }
+
+var _ interaction.IssueTabStateAPI = (*Store)(nil)
 
 // NewStore creates a new issue tab state store.
 func NewStore(client *redis.Client, logger *slog.Logger) *Store {
@@ -69,13 +55,7 @@ func issueKey(workspaceID, issueID string) string {
 
 // ValidateIssueID returns an error if the issue ID is invalid.
 func ValidateIssueID(id string) error {
-	if id == "" {
-		return fmt.Errorf("issue ID is required")
-	}
-	if !validIssueID.MatchString(id) {
-		return fmt.Errorf("invalid issue ID %q: must match [a-zA-Z0-9._-]+", id)
-	}
-	return nil
+	return interaction.ValidateIssueTabIssueID(id)
 }
 
 // Get retrieves the tab state for an issue. Returns nil if no saved state.
@@ -100,8 +80,12 @@ func (s *Store) Get(ctx context.Context, workspaceID, issueID string) (*IssueTab
 	return &state, nil
 }
 
-// Save writes the full tab state for an issue with a 24-hour TTL.
-func (s *Store) Save(ctx context.Context, workspaceID string, state *IssueTabState) error {
+func (s *Store) GetIssueTabs(ctx context.Context, workspaceID, issueID string) (*interaction.IssueTabState, error) {
+	return s.Get(ctx, workspaceID, issueID)
+}
+
+// ReplaceIssueTabs writes the full tab state for an issue with a 24-hour TTL.
+func (s *Store) ReplaceIssueTabs(ctx context.Context, workspaceID string, state *interaction.IssueTabState) error {
 	if err := ValidateIssueID(state.IssueID); err != nil {
 		return err
 	}
@@ -120,8 +104,8 @@ func (s *Store) Save(ctx context.Context, workspaceID string, state *IssueTabSta
 	return nil
 }
 
-// Delete removes the tab state for an issue.
-func (s *Store) Delete(ctx context.Context, workspaceID, issueID string) error {
+// ClearIssueTabs removes the tab state for an issue.
+func (s *Store) ClearIssueTabs(ctx context.Context, workspaceID, issueID string) error {
 	if err := ValidateIssueID(issueID); err != nil {
 		return err
 	}

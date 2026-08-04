@@ -33,7 +33,7 @@ func TestSaveAndGet_RoundTrip(t *testing.T) {
 		ActiveTabID: "terminal-sess1",
 	}
 
-	if err := store.Save(ctx, testWorkspaceID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, testWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -83,7 +83,7 @@ func TestSaveAndGet_BackendRoundTrip(t *testing.T) {
 		ActiveTabID: "terminal-sess1",
 	}
 
-	if err := store.Save(ctx, testWorkspaceID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, testWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestGet_EmptyIssueID(t *testing.T) {
 
 func TestSave_EmptyIssueID(t *testing.T) {
 	store, _ := setupTest(t)
-	err := store.Save(context.Background(), testWorkspaceID, &IssueTabState{
+	err := store.ReplaceIssueTabs(context.Background(), testWorkspaceID, &IssueTabState{
 		IssueID: "",
 		Tabs:    []IssueTab{},
 	})
@@ -146,7 +146,7 @@ func TestSave_SetsTTL(t *testing.T) {
 		ActiveTabID: "details",
 	}
 
-	if err := store.Save(ctx, testWorkspaceID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, testWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -168,11 +168,11 @@ func TestDelete(t *testing.T) {
 		ActiveTabID: "details",
 	}
 
-	if err := store.Save(ctx, testWorkspaceID, state); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, testWorkspaceID, state); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := store.Delete(ctx, testWorkspaceID, "DEL-TEST"); err != nil {
+	if err := store.ClearIssueTabs(ctx, testWorkspaceID, "DEL-TEST"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestDelete(t *testing.T) {
 
 func TestDelete_EmptyIssueID(t *testing.T) {
 	store, _ := setupTest(t)
-	err := store.Delete(context.Background(), testWorkspaceID, "")
+	err := store.ClearIssueTabs(context.Background(), testWorkspaceID, "")
 	if err == nil {
 		t.Fatal("expected error for empty issue ID")
 	}
@@ -339,10 +339,10 @@ func TestIsolation_DifferentWorkspaces(t *testing.T) {
 		ActiveTabID: "logs",
 	}
 
-	if err := store.Save(ctx, "ws-A", stateA); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, "ws-A", stateA); err != nil {
 		t.Fatalf("Save ws-A: %v", err)
 	}
-	if err := store.Save(ctx, "ws-B", stateB); err != nil {
+	if err := store.ReplaceIssueTabs(ctx, "ws-B", stateB); err != nil {
 		t.Fatalf("Save ws-B: %v", err)
 	}
 

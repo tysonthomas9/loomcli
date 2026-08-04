@@ -14,7 +14,6 @@ import (
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
-	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder/agentcomposition"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder/reviewcomposition"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder/sessioncomposition"
@@ -50,8 +49,8 @@ func NewTerminalModules(deps TerminalModuleDeps) []interface{ Register(*http.Ser
 }
 
 // NewIssueTabModule creates the issue tab module.
-func NewIssueTabModule(issueTabStore *issuetabs.Store, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
-	return sessioncomposition.NewIssueTabModule(issueTabStore, hub)
+func NewIssueTabModule(issueTabs interaction.IssueTabStateAPI, hub *realtime.Hub) interface{ Register(*http.ServeMux) } {
+	return sessioncomposition.NewIssueTabModule(issueTabs, hub)
 }
 
 // NewDiffModule creates the git diff module.

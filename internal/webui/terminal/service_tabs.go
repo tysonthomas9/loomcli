@@ -152,6 +152,36 @@ func (s *terminalServiceImpl) PutTab(ctx context.Context, wsID string, meta *tab
 	return nil
 }
 
+// PersistInteractionTabIdentity is the narrow server-owned write used after
+// Interaction has atomically started a session and opened its terminal. It
+// cannot be used as generic tab replacement: all canonical owner identities
+// must be present and match the requested workspace before persistence.
+func (s *terminalServiceImpl) PersistInteractionTabIdentity(
+	ctx context.Context,
+	wsID string,
+	meta *tabmeta.TabMetadata,
+) error {
+	if s.tabStore == nil {
+		return service.ErrUnavailable("tab metadata not available (no Redis)")
+	}
+	if meta == nil || strings.TrimSpace(wsID) == "" || meta.Workspace != wsID ||
+		meta.Kind != "agent" || strings.TrimSpace(meta.AgentID) == "" ||
+		strings.TrimSpace(meta.InteractionSessionID) == "" ||
+		strings.TrimSpace(meta.InteractionTerminalID) == "" ||
+		strings.TrimSpace(meta.InteractionLeaseID) == "" ||
+		meta.InteractionLeaseFencingToken <= 0 {
+		return service.ErrValidation("complete Interaction terminal identity is required")
+	}
+	if err := tabmeta.ValidateSessionName(meta.SessionName); err != nil {
+		return service.ErrValidation(err.Error())
+	}
+	meta.UpdatedAt = time.Now().UTC()
+	if err := s.tabStore.Set(ctx, meta); err != nil {
+		return service.ErrInternal("failed to persist Interaction terminal identity", err)
+	}
+	return nil
+}
+
 func (s *terminalServiceImpl) DeleteTab(ctx context.Context, wsID, session string) error {
 	if s.tabStore == nil {
 		return service.ErrUnavailable("tab metadata not available (no Redis)")

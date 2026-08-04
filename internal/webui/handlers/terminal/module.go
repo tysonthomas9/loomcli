@@ -27,6 +27,7 @@ type InteractionDependencies struct {
 	API                interaction.API
 	Operator           workflowcataloghttp.OperatorAuthorityResolver
 	SessionAuthorities InteractionSessionAuthorityResolver
+	TerminalIdentities service.InteractionTerminalIdentityWriter
 }
 
 // Module registers the surviving workspace-scoped terminal routes: the

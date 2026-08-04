@@ -328,6 +328,9 @@ func TestPrepareTerminalInteractionLaunchConvergesPersistedPriorGeneration(t *te
 		loomServerURL: "http://loom", interactionNode: "node",
 		interaction: InteractionDependencies{
 			API: api, SessionAuthorities: newTerminalSessionResolverStub(),
+			TerminalIdentities: webuterminal.NewTerminalService(
+				nil, tabs, nil, nil, nil, time.Now(),
+			),
 		},
 	}
 	_, lifecycle, err := prepareTerminalInteractionLaunch(

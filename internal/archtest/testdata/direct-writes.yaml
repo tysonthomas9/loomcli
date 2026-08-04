@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 2ccb739d81f79063347de72e3687670321af2184
+source_head: 7ee8d477abaaa11b5d6bd07e9d7e4b80e3244829
 adapter_roots:
   - internal/app
   - internal/cli
@@ -990,6 +990,10 @@ function_surfaces:
     function: SessionEnvelope
     access: read-only
     capability_owner: interaction
+  - package: github.com/tysonthomas9/loomcli/internal/modules/interaction
+    function: ValidateIssueTabIssueID
+    access: read-only
+    capability_owner: interaction
   - package: github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol
     function: New
     access: read-only
@@ -1848,24 +1852,6 @@ writes:
       method: Update
       count: 3
       aggregate_owner: workspace
-      expires_after_phase: 7
-    - file: internal/webui/handlers/issues/tabs.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/webui/issuetabs.Store'
-      method: Delete
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/webui/handlers/issues/tabs.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/webui/issuetabs.Store'
-      method: Save
-      count: 1
-      aggregate_owner: interaction
-      expires_after_phase: 7
-    - file: internal/webui/handlers/terminal/ws_interaction.go
-      receiver: '*github.com/tysonthomas9/loomcli/internal/webui/tabmeta.Store'
-      method: Set
-      count: 1
-      aggregate_owner: interaction
       expires_after_phase: 7
 generic_mechanisms:
   - mechanism: action_ledger
