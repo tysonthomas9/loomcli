@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 8a872e1f687120655ce18b28110165bd3d192f42
+source_head: e6c8dadcb23268dd6fbff4df63a36210386eea5c
 adapter_roots:
   - internal/app
   - internal/cli
@@ -856,6 +856,10 @@ function_surfaces:
     function: WithRuntimePorts
     access: read-only
     capability_owner: automation
+  - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
+    function: DispatcherAvailable
+    access: read-only
+    capability_owner: connectors
   - package: github.com/tysonthomas9/loomcli/internal/modules/connectors
     function: New
     access: read-only

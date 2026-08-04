@@ -7,8 +7,8 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
@@ -71,7 +71,7 @@ func NewFileModule(fileSvc service.FileService, accessCfg ...middleware.FileAcce
 // reviewer conversation reads and message delivery.
 func NewPRReviewModule(
 	st store.Store,
-	dispatcher *connector.Dispatcher,
+	dispatcher connectorsmodule.Dispatcher,
 	agentSvc service.AgentService,
 	terminalSvc service.TerminalService,
 	localSettingsDir string,

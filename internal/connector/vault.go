@@ -20,12 +20,13 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 // VaultKeyEnvVar names the environment variable holding the serve-held vault
 // key: the standard base64 encoding of exactly 32 random bytes. Only the
 // control plane (loomcli serve) ever reads it; stores hold ciphertext only.
-const VaultKeyEnvVar = "LOOM_CONNECTOR_VAULT_KEY"
+const VaultKeyEnvVar = connectorsmodule.VaultKeyEnvVar
 
 const vaultKeyFileName = "connector-vault-key" //nolint:gosec // fixed filename, not credential material
 

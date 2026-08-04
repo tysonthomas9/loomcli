@@ -11,9 +11,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/backend/fleet"
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	artifactsmodule "github.com/tysonthomas9/loomcli/internal/modules/artifacts"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
@@ -45,7 +45,7 @@ type Config struct {
 	SourceControl    SourceControl
 	LocalRepoPath    func(workspaceKey, repoName string) string
 	IssueBackends    IssueBackendFactory
-	Dispatcher       *connector.Dispatcher
+	Dispatcher       connectorsmodule.Dispatcher
 	WorkflowEventing *workfloweventing.Workflow
 	EventAwaits      WorkflowEventAwaitDispatcher
 

@@ -22,9 +22,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -32,7 +32,7 @@ import (
 // Dispatcher: the server was started without a usable
 // LOOM_CONNECTOR_VAULT_KEY, so connector egress fails closed.
 var errConnectorEgressUnavailable = errors.New(
-	"connector egress is not configured on this server (set " + connector.VaultKeyEnvVar + ")")
+	"connector egress is not configured on this server (set " + connectorsmodule.VaultKeyEnvVar + ")")
 
 // connectorDispatchParams is the camelCase connector-dispatch request body.
 // BindingID is deliberately absent: it is resolved from the verified parent
@@ -64,8 +64,8 @@ type connectorDispatchParams struct {
 // preconditions maps the camelCase wire fields onto the provider-layer
 // Preconditions pair (ExpectedHeadSha for git subjects, ExpectedRevision for
 // everything else).
-func (p connectorDispatchParams) preconditions() providers.Preconditions {
-	return providers.Preconditions{
+func (p connectorDispatchParams) preconditions() connectorsmodule.DispatchPreconditions {
+	return connectorsmodule.DispatchPreconditions{
 		ExpectedHeadSha: strings.TrimSpace(p.Preconditions.ExpectedHeadSha),
 		ExpectedRevision: firstNonEmpty(
 			p.Preconditions.ExpectedIssueRevision,
@@ -106,7 +106,7 @@ func (m *Module) connectorDispatch(ctx context.Context, ws string, id driverIden
 	if err != nil {
 		return nil, err
 	}
-	res, err := m.dispatcher.Dispatch(ctx, connector.Request{
+	res, err := m.dispatcher.Dispatch(ctx, connectorsmodule.DispatchCommand{
 		WorkspaceKey:  ws,
 		RunID:         parent.RunID,
 		BindingID:     bindingID,

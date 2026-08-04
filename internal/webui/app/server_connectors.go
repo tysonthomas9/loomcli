@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 // Connector egress wiring for the driver-op HTTP API (CV9). Kept out of
@@ -31,7 +32,7 @@ const (
 // "unavailable" error — when serve has no store or no usable vault key:
 // without the key sealed credentials can never be opened, so refusing every
 // dispatch up front is strictly safer than failing per-call mid-flow.
-func (app *Server) buildConnectorDispatcher() *connector.Dispatcher {
+func (app *Server) buildConnectorDispatcher() connectorsmodule.Dispatcher {
 	if app.config.Store == nil {
 		return nil
 	}

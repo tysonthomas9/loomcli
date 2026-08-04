@@ -589,3 +589,20 @@ func issueGitReadAuthority(
 	}
 	return auth
 }
+
+type dispatcherStub struct{}
+
+func (*dispatcherStub) Dispatch(context.Context, DispatchCommand) (DispatchResult, error) {
+	return DispatchResult{}, nil
+}
+
+func TestDispatcherAvailableRejectsTypedNil(t *testing.T) {
+	t.Parallel()
+	var typedNil *dispatcherStub
+	if DispatcherAvailable(nil) || DispatcherAvailable(typedNil) {
+		t.Fatal("nil dispatcher was reported available")
+	}
+	if !DispatcherAvailable(&dispatcherStub{}) {
+		t.Fatal("non-nil dispatcher was reported unavailable")
+	}
+}

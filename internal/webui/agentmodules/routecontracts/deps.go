@@ -11,10 +11,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/app/workflowbinding"
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/artifacts"
 	"github.com/tysonthomas9/loomcli/internal/modules/automation"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
@@ -40,7 +40,7 @@ type Deps struct {
 	DriverRunTokenKey             []byte
 	LocalSettingsDir              string
 	SourceControl                 sourcecontrol.Materializer
-	Dispatcher                    *connector.Dispatcher
+	Dispatcher                    connectorsmodule.Dispatcher
 	AutomationBindings            automation.BindingOperations
 	WorkflowBinding               *workflowbinding.Workflow
 	AutomationAudit               automation.AuditQueries

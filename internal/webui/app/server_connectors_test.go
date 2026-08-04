@@ -17,10 +17,10 @@ func TestBuildConnectorDispatcherUsesPersistedVaultFallback(t *testing.T) {
 		Store:            memstore.New(),
 		LocalSettingsDir: dataDir,
 	}}
-	if dispatcher := server.buildConnectorDispatcher(); dispatcher == nil || dispatcher.Vault == nil {
+	if dispatcher := legacyConnectorDispatcher(server.buildConnectorDispatcher()); dispatcher == nil || dispatcher.Vault == nil {
 		t.Fatal("buildConnectorDispatcher returned nil without env key despite configured data dir")
 	}
-	if dispatcher := server.buildConnectorDispatcher(); dispatcher == nil || dispatcher.Vault == nil {
+	if dispatcher := legacyConnectorDispatcher(server.buildConnectorDispatcher()); dispatcher == nil || dispatcher.Vault == nil {
 		t.Fatal("second buildConnectorDispatcher did not reuse persisted vault key")
 	}
 }
@@ -30,7 +30,7 @@ func TestBuildConnectorDispatcherVaultSourcePrecedence(t *testing.T) {
 		key := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32))
 		t.Setenv(connector.VaultKeyEnvVar, key)
 		server := &Server{config: webui.ServerConfig{Store: memstore.New()}}
-		if dispatcher := server.buildConnectorDispatcher(); dispatcher == nil || dispatcher.Vault == nil {
+		if dispatcher := legacyConnectorDispatcher(server.buildConnectorDispatcher()); dispatcher == nil || dispatcher.Vault == nil {
 			t.Fatal("buildConnectorDispatcher ignored env vault key")
 		}
 	})
@@ -42,4 +42,9 @@ func TestBuildConnectorDispatcherVaultSourcePrecedence(t *testing.T) {
 			t.Fatal("buildConnectorDispatcher enabled egress without a vault source")
 		}
 	})
+}
+
+func legacyConnectorDispatcher(value any) *connector.Dispatcher {
+	dispatcher, _ := value.(*connector.Dispatcher)
+	return dispatcher
 }

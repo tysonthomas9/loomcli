@@ -30,10 +30,10 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/app/workfloweventing"
 	"github.com/tysonthomas9/loomcli/internal/backend"
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/execution"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
@@ -73,7 +73,7 @@ type Module struct {
 	sourceControl        dependencies.SourceControl
 	localRepoPath        func(workspaceKey, repoName string) string
 	issueBackends        IssueBackendFactory
-	dispatcher           *connector.Dispatcher
+	dispatcher           connectorsmodule.Dispatcher
 	workflowEventing     *workfloweventing.Workflow
 	eventAwaits          WorkflowEventAwaitDispatcher
 	execution            execution.DriverRunAPI
@@ -102,6 +102,9 @@ type Module struct {
 // NewModule constructs the driver API module. Returns nil-safe behavior: with
 // a nil store, Register registers nothing.
 func NewModule(cfg Config) *Module { //nolint:funlen // Operation registration is an explicit capability table.
+	if !connectorsmodule.DispatcherAvailable(cfg.Dispatcher) {
+		cfg.Dispatcher = nil
+	}
 	m := &Module{
 		store:                cfg.Store,
 		apiToken:             strings.TrimSpace(cfg.APIToken),

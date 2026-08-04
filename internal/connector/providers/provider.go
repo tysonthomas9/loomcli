@@ -27,23 +27,14 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 )
 
 // Preconditions carries the freshness assertions an egress call must hold.
 // The dispatch layer (CV8) refuses irreversible actions missing their
 // registered fields with decision precondition_required; providers enforce
 // the same contract again as defense in depth.
-type Preconditions struct {
-	// ExpectedHeadSha pins a git ref subject (e.g. a PR head). For
-	// github.merge it is forwarded as GitHub's native server-side sha
-	// precondition; for github.review.post it gates the pre-egress
-	// liveness read.
-	ExpectedHeadSha string
-	// ExpectedRevision pins a non-git subject revision (issue revision,
-	// monitor revision, message ts) for providers with best-effort
-	// pre-egress reads.
-	ExpectedRevision string
-}
+type Preconditions = connectorsmodule.DispatchPreconditions
 
 // CallSpec describes one egress call. Args keys are camelCase per the wire
 // convention; adapters translate to upstream field names.

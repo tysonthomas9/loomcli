@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
 	"github.com/tysonthomas9/loomcli/internal/webui"
@@ -80,7 +80,7 @@ func PopulateUnifiedAgentCapabilityDeps(
 // so the module retains its existing fail-closed behavior.
 func NewPRReviewModule(
 	config webui.ServerConfig,
-	dispatcher *connector.Dispatcher,
+	dispatcher connectorsmodule.Dispatcher,
 	agentService service.AgentService,
 	terminalService service.TerminalService,
 ) modbuilder.PRReviewModule {

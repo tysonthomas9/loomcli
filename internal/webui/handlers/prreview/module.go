@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/app/prreviewer"
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
@@ -36,7 +35,7 @@ type Module struct {
 	store                    store.Store
 	connectorManagement      connectorsmodule.Management
 	connectorManagementStore connectorsmodule.ManagementStore
-	dispatcher               *connector.Dispatcher
+	dispatcher               connectorsmodule.Dispatcher
 	agentSvc                 service.AgentService
 	terminalSvc              service.TerminalService
 	reviewerProvisioning     prreviewer.Commands
@@ -66,7 +65,7 @@ type Module struct {
 // reads and message delivery; missing dependencies fail those routes closed.
 func NewModule(
 	st store.Store,
-	disp *connector.Dispatcher,
+	disp connectorsmodule.Dispatcher,
 	agentSvc service.AgentService,
 	terminalSvc service.TerminalService,
 	localSettingsDir string,
@@ -77,6 +76,9 @@ func NewModule(
 	interactionMessenger interaction.ChatMessenger,
 	interactionAuthority workflowcataloghttp.OperatorAuthorityResolver,
 ) *Module {
+	if !connectorsmodule.DispatcherAvailable(disp) {
+		disp = nil
+	}
 	module := &Module{
 		store:                   st,
 		dispatcher:              disp,

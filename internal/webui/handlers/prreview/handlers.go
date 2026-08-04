@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/backend/api/gen"
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -50,7 +50,7 @@ func (m *Module) getPullRequest(w http.ResponseWriter, r *http.Request) {
 		writePRReviewError(w, err)
 		return
 	}
-	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+	res, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey: ws,
 		RunID:        syntheticRunID(r, params, providers.ActionGitHubPullRequestRead),
 		BindingID:    bindingID,
@@ -77,7 +77,7 @@ func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID := syntheticRunID(r, params, providers.ActionGitHubCompareRead)
-	detail, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+	detail, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey: ws,
 		RunID:        runID,
 		BindingID:    bindingID,
@@ -93,7 +93,7 @@ func (m *Module) getPullRequestDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	baseRef := stringValue(detail.Body["baseRef"])
 	headSha := stringValue(detail.Body["headSha"])
-	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+	res, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey: ws,
 		RunID:        runID,
 		BindingID:    bindingID,
@@ -141,7 +141,7 @@ func (m *Module) postReview(w http.ResponseWriter, r *http.Request) {
 		writePRReviewErrorCode(w, http.StatusInternalServerError, "internal", "failed to prepare the review request", false)
 		return
 	}
-	res, err := m.dispatcher.Dispatch(r.Context(), connector.Request{
+	res, err := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 		WorkspaceKey:  ws,
 		RunID:         runID,
 		BindingID:     bindingID,

@@ -173,7 +173,11 @@ func TestSettingsCredentialResealsAfterVaultKeyChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
 	}
-	if _, err := h.module.dispatcher.Vault.Unseal(
+	dispatcher, ok := h.module.dispatcher.(*connector.Dispatcher)
+	if !ok || dispatcher.Vault == nil {
+		t.Fatalf("dispatcher = %T, want composed legacy connector adapter", h.module.dispatcher)
+	}
+	if _, err := dispatcher.Vault.Unseal(
 		sealed, connector.CredentialAAD(prReviewTestWorkspace, connectorID),
 	); err != nil {
 		t.Fatalf("credential was not re-sealed under the replacement vault key: %v", err)
@@ -215,7 +219,11 @@ func TestCredentialInvalidationDuringEnsureUsesNewToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveOutboundCredentialSealed: %v", err)
 	}
-	plain, err := h.module.dispatcher.Vault.Unseal(
+	dispatcher, ok := h.module.dispatcher.(*connector.Dispatcher)
+	if !ok || dispatcher.Vault == nil {
+		t.Fatalf("dispatcher = %T, want composed legacy connector adapter", h.module.dispatcher)
+	}
+	plain, err := dispatcher.Vault.Unseal(
 		sealed, connector.CredentialAAD(prReviewTestWorkspace, connectorID),
 	)
 	if err != nil {

@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
@@ -120,7 +120,7 @@ func (m *Module) connectorListPullRequestsForRepo(
 ) (prs []ops.GitPullRequest, truncated bool, err error) {
 	prs = []ops.GitPullRequest{}
 	for page := 1; page <= maxPullsListPages; page++ {
-		res, dispatchErr := m.dispatcher.Dispatch(r.Context(), connector.Request{
+		res, dispatchErr := m.dispatcher.Dispatch(r.Context(), connectorsmodule.DispatchCommand{
 			WorkspaceKey: ws,
 			RunID:        listRunID(r, owner, repo),
 			BindingID:    bindingID,

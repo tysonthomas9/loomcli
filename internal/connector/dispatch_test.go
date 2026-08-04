@@ -12,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -181,7 +182,7 @@ func TestDispatchAllowPathWritesGrantedAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	if res.Decision != domain.ConnectorCallGranted || res.Status != 200 {
+	if res.Decision != connectorsmodule.ConnectorCallGranted || res.Status != 200 {
 		t.Fatalf("result = %+v, want granted/200", res)
 	}
 	wantID := domain.ConnectorCallID(dispatchRun, "github.review.post", 0)
@@ -277,7 +278,7 @@ func TestDispatchDenyPaths(t *testing.T) {
 					t.Fatalf("err = %v, want errors.Is %v", err, want)
 				}
 			}
-			if res.Decision != domain.ConnectorCallDenied {
+			if res.Decision != connectorsmodule.ConnectorCallDenied {
 				t.Fatalf("Decision = %q, want denied", res.Decision)
 			}
 			// Deny is journaled BEFORE return and never touches the
@@ -319,7 +320,7 @@ func TestDispatchIrreversibleWithoutPreconditionRefused(t *testing.T) {
 	if len(pre.Fields) != 1 || pre.Fields[0] != "expectedHeadSha" {
 		t.Fatalf("missing fields = %v, want [expectedHeadSha]", pre.Fields)
 	}
-	if res.Decision != domain.ConnectorCallPreconditionRequired {
+	if res.Decision != connectorsmodule.ConnectorCallPreconditionRequired {
 		t.Fatalf("Decision = %q, want precondition_required", res.Decision)
 	}
 	recs := h.auditRecords(t)
@@ -363,7 +364,7 @@ func TestDispatchStaleSubjectAudited(t *testing.T) {
 	if !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("err = %v, want errors.Is ErrConflict", err)
 	}
-	if res.Decision != domain.ConnectorCallStaleSubject || res.Status != 409 {
+	if res.Decision != connectorsmodule.ConnectorCallStaleSubject || res.Status != 409 {
 		t.Fatalf("result = %+v, want stale_subject/409", res)
 	}
 	recs := h.auditRecords(t)
@@ -387,7 +388,7 @@ func TestDispatchUpstreamErrorAudited(t *testing.T) {
 	if !providers.Retryable(err) {
 		t.Fatal("server error should signal retryable upward")
 	}
-	if res.Decision != domain.ConnectorCallUpstreamError {
+	if res.Decision != connectorsmodule.ConnectorCallUpstreamError {
 		t.Fatalf("Decision = %q, want upstream_error", res.Decision)
 	}
 	recs := h.auditRecords(t)
@@ -473,7 +474,7 @@ func TestDispatchDisabledConnectorRefused(t *testing.T) {
 	if !errors.Is(err, ErrConnectorDisabled) || !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("err = %v, want ErrConnectorDisabled wrapping ErrInvalid", err)
 	}
-	if res.Decision != domain.ConnectorCallDenied {
+	if res.Decision != connectorsmodule.ConnectorCallDenied {
 		t.Fatalf("Decision = %q, want denied", res.Decision)
 	}
 	if recs := h.auditRecords(t); len(recs) != 1 || recs[0].Decision != domain.ConnectorCallDenied {

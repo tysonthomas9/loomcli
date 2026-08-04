@@ -1,13 +1,72 @@
 package connectors
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 const (
+	VaultKeyEnvVar                = "LOOM_CONNECTOR_VAULT_KEY"
 	DefaultConnectorSecretOverlap = 15 * time.Minute
 	MaxConnectorSecretOverlap     = 24 * time.Hour
 	RotationAuditBindingID        = "connector-rotation"
 	RotationAuditAction           = "connector.rotate"
 )
+
+type DispatchPreconditions struct {
+	ExpectedHeadSha  string
+	ExpectedRevision string
+}
+
+// DispatchCommand contains only the authorized operation coordinates and
+// sanitized provider arguments. Credentials and source kind are resolved by
+// Connectors and never appear on this public command.
+type DispatchCommand struct {
+	WorkspaceKey  string
+	RunID         string
+	BindingID     string
+	ConnectorID   string
+	Action        string
+	Resource      string
+	Args          map[string]any
+	Preconditions DispatchPreconditions
+	CallSeq       int
+}
+
+func (command DispatchCommand) Validate() error {
+	if command.WorkspaceKey == "" {
+		return fmt.Errorf("connector dispatch workspace_key required: %w", ErrInvalid)
+	}
+	if command.RunID == "" {
+		return fmt.Errorf("connector dispatch run_id required: %w", ErrInvalid)
+	}
+	if command.BindingID == "" {
+		return fmt.Errorf("connector dispatch binding_id required: %w", ErrInvalid)
+	}
+	if command.ConnectorID == "" {
+		return fmt.Errorf("connector dispatch connector_id required: %w", ErrInvalid)
+	}
+	if normalized, err := normalizeConnectorAction(command.Action); err != nil || normalized != command.Action {
+		if err == nil {
+			err = ErrInvalid
+		}
+		return fmt.Errorf("invalid connector dispatch action %q: %w", command.Action, err)
+	}
+	if command.Resource == "" {
+		return fmt.Errorf("connector dispatch resource required: %w", ErrInvalid)
+	}
+	if command.CallSeq < 0 {
+		return fmt.Errorf("connector dispatch call_seq %d negative: %w", command.CallSeq, ErrInvalid)
+	}
+	return nil
+}
+
+type DispatchResult struct {
+	CallID   string
+	Decision ConnectorCallDecision
+	Status   int
+	Body     map[string]any
+}
 
 type ConnectorSourceKind string
 

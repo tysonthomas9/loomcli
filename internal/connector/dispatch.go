@@ -8,6 +8,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -49,69 +50,12 @@ const maxSummaryLen = 240
 // workspace holds multiple named connectors per source kind, so the request
 // references its connector explicitly by ConnectorID (the source kind is
 // derived from the resolved connector record, never trusted from callers).
-type Request struct {
-	WorkspaceKey string
-	RunID        string
-	BindingID    string
-	// ConnectorID names the connector this binding was granted against.
-	ConnectorID string
-	// Action is the dotted connector action, e.g. "github.merge".
-	Action string
-	// Resource is the grant-resource identifier, e.g. "repo:octocat/hello".
-	Resource string
-	// Args holds the camelCase provider arguments.
-	Args map[string]any
-	// Preconditions carries the freshness assertions; irreversible actions
-	// are refused before egress when their registered field is missing.
-	Preconditions providers.Preconditions
-	// CallSeq is the run-scoped call sequence number. Together with RunID
-	// and Action it derives the deterministic CallID, which doubles as the
-	// provider Idempotency-Key and makes the audit append idempotent.
-	CallSeq int
-}
-
-// validate checks request shape before any store access. Violations wrap
-// domain.ErrInvalid and are NOT journaled: a malformed request cannot produce
-// a valid ConnectorCallRecord in the first place.
-func (r Request) validate() error {
-	if r.WorkspaceKey == "" {
-		return fmt.Errorf("connector dispatch workspace_key required: %w", domain.ErrInvalid)
-	}
-	if r.RunID == "" {
-		return fmt.Errorf("connector dispatch run_id required: %w", domain.ErrInvalid)
-	}
-	if r.BindingID == "" {
-		return fmt.Errorf("connector dispatch binding_id required: %w", domain.ErrInvalid)
-	}
-	if r.ConnectorID == "" {
-		return fmt.Errorf("connector dispatch connector_id required: %w", domain.ErrInvalid)
-	}
-	if err := domain.ValidateConnectorAction(r.Action); err != nil {
-		return err
-	}
-	if r.Resource == "" {
-		return fmt.Errorf("connector dispatch resource required: %w", domain.ErrInvalid)
-	}
-	if r.CallSeq < 0 {
-		return fmt.Errorf("connector dispatch call_seq %d negative: %w", r.CallSeq, domain.ErrInvalid)
-	}
-	return nil
-}
+type Request = connectorsmodule.DispatchCommand
 
 // Result is the sanitized dispatch outcome. It is populated as far as the
 // flow progressed even when an error is returned, so callers can surface the
 // decision without re-deriving it.
-type Result struct {
-	// CallID is the deterministic audit/idempotency id runID#action#seq.
-	CallID string
-	// Decision is the journaled audit decision; empty when the call failed
-	// before a decision was reached (e.g. connector not found).
-	Decision domain.ConnectorCallDecision
-	// Status is the upstream HTTP status, zero when no egress happened.
-	Status int
-	// Body is the provider's sanitized, camelCase-keyed result subset.
-	Body map[string]any
-}
+type Result = connectorsmodule.DispatchResult
 
 // Dispatcher wires the connector stores, the vault sealer, and the provider
 // registry into the egress choke point. All fields are required except Now,
@@ -152,8 +96,8 @@ func (d *Dispatcher) now() time.Time {
 // Grants and connector state are re-read from the stores on every invocation;
 // nothing is cached across retries.
 func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) {
-	if err := req.validate(); err != nil {
-		return Result{}, err
+	if err := req.Validate(); err != nil {
+		return Result{}, errors.Join(domain.ErrInvalid, err)
 	}
 	res := Result{CallID: domain.ConnectorCallID(req.RunID, req.Action, req.CallSeq)}
 
@@ -277,7 +221,7 @@ func (d *Dispatcher) journalOutcome(ctx context.Context, req Request, res Result
 			decision = domain.ConnectorCallGranted
 		}
 	}
-	res.Decision = decision
+	res.Decision = connectorsmodule.ConnectorCallDecision(decision)
 	res.Status = callRes.Status
 	res.Body = callRes.Body
 	summary := ""
@@ -297,7 +241,7 @@ func (d *Dispatcher) journalOutcome(ctx context.Context, req Request, res Result
 // append happens BEFORE the return so a denied probe is always recorded; an
 // audit failure is joined onto the refusal rather than masking it.
 func (d *Dispatcher) refuse(ctx context.Context, req Request, res Result, kind domain.ConnectorSourceKind, decision domain.ConnectorCallDecision, cause error) (Result, error) {
-	res.Decision = decision
+	res.Decision = connectorsmodule.ConnectorCallDecision(decision)
 	if aerr := d.appendAudit(ctx, req, kind, decision, 0, "", cause.Error()); aerr != nil {
 		return res, errors.Join(cause, aerr)
 	}

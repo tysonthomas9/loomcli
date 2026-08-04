@@ -16,7 +16,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/tysonthomas9/loomcli/internal/app/workitemmove"
-	"github.com/tysonthomas9/loomcli/internal/connector"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -53,7 +53,7 @@ type Server struct {
 	// HTTP routing
 	mux                 *http.ServeMux
 	wsModules           []wsModule // workspace-scoped route modules (registered on wsMux)
-	connectorDispatcher *connector.Dispatcher
+	connectorDispatcher connectorsmodule.Dispatcher
 
 	// Service layer
 	issueSvc         service.IssueService

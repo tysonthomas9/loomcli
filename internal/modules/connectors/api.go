@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 )
@@ -56,4 +57,26 @@ type Management interface {
 	RevokeGrant(context.Context, RevokeGrantCommand) error
 	ListGrants(context.Context, ListGrantsQuery) ([]*ConnectorGrant, error)
 	ListCalls(context.Context, ListCallsQuery) ([]*ConnectorCallRecord, error)
+}
+
+// Dispatcher is the credential-free public egress API. Implementations own
+// grant evaluation, just-in-time credential use, provider dispatch, and audit.
+type Dispatcher interface {
+	Dispatch(context.Context, DispatchCommand) (DispatchResult, error)
+}
+
+// DispatcherAvailable rejects both a nil interface and an interface holding a
+// typed nil implementation. Inbound adapters use it to preserve fail-closed
+// behavior while the legacy pointer implementation sits behind this port.
+func DispatcherAvailable(dispatcher Dispatcher) bool {
+	if dispatcher == nil {
+		return false
+	}
+	value := reflect.ValueOf(dispatcher)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return !value.IsNil()
+	default:
+		return true
+	}
 }
