@@ -7,6 +7,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
+	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -93,6 +94,25 @@ func HandleWorkItemsError(w http.ResponseWriter, err error) {
 		status = http.StatusNotImplemented
 	}
 	slog.Error("work items error", "status", status, "err", err)
+	WriteJSON(w, status, map[string]string{"error": message})
+}
+
+// HandleWorkspaceError maps the Workspace capability's public failure
+// vocabulary without translating it through the legacy Web UI service.
+func HandleWorkspaceError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	message := workspace.PublicErrorMessage(err)
+	switch {
+	case errors.Is(err, workspace.ErrInvalid):
+		status = http.StatusBadRequest
+	case errors.Is(err, workspace.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, workspace.ErrConflict):
+		status = http.StatusConflict
+	case errors.Is(err, workspace.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+	}
+	slog.Error("workspace error", "status", status, "err", err)
 	WriteJSON(w, status, map[string]string{"error": message})
 }
 

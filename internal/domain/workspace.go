@@ -1,17 +1,17 @@
 package domain
 
-import "time"
+import "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 // WorkspaceState is the lifecycle state of a workspace from creation
 // through readiness.
-type WorkspaceState string
+type WorkspaceState = workspace.State
 
 const (
-	WorkspaceStateCreating     WorkspaceState = "creating"
-	WorkspaceStateCloning      WorkspaceState = "cloning"
-	WorkspaceStateInitializing WorkspaceState = "initializing"
-	WorkspaceStateReady        WorkspaceState = "ready"
-	WorkspaceStateError        WorkspaceState = "error"
+	WorkspaceStateCreating     = workspace.StateCreating
+	WorkspaceStateCloning      = workspace.StateCloning
+	WorkspaceStateInitializing = workspace.StateInitializing
+	WorkspaceStateReady        = workspace.StateReady
+	WorkspaceStateError        = workspace.StateError
 )
 
 // Workspace is the top-level container for a multi-repo project.
@@ -23,14 +23,4 @@ const (
 // Local-machine-specific data (filesystem path of checkouts, etc.) does
 // NOT live here — see the bootstrap state cache. Workspace is shared
 // across users in cloud mode and must stay machine-agnostic.
-type Workspace struct {
-	Key           string         `json:"key"`
-	Name          string         `json:"name"`
-	Description   string         `json:"description,omitempty"`
-	State         WorkspaceState `json:"state,omitempty"`
-	ErrorMessage  string         `json:"error_message,omitempty"`
-	DefaultBranch string         `json:"default_branch,omitempty"`
-	DesignFormat  string         `json:"design_format,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-}
+type Workspace = workspace.Workspace

@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/workspaceerrors"
 )
@@ -19,6 +20,29 @@ type workspaceAgentDirectoryStub struct {
 	agents    []*agentsmodule.Agent
 	roles     []*agentsmodule.Role
 	listCalls int
+}
+
+type workspaceCapabilityStub struct {
+	setDesignFormatFn func(context.Context, workspacemodule.SetDesignFormatCommand) (*workspacemodule.Reference, error)
+}
+
+func (stub *workspaceCapabilityStub) Resolve(context.Context, workspacemodule.ResolveQuery) (*workspacemodule.Reference, error) {
+	return nil, workspacemodule.ErrNotFound
+}
+
+func (stub *workspaceCapabilityStub) List(context.Context, workspacemodule.ListQuery) ([]workspacemodule.Reference, error) {
+	return nil, nil
+}
+
+func (stub *workspaceCapabilityStub) Rename(context.Context, workspacemodule.RenameCommand) (*workspacemodule.Reference, error) {
+	return nil, workspacemodule.ErrUnavailable
+}
+
+func (stub *workspaceCapabilityStub) SetDesignFormat(ctx context.Context, command workspacemodule.SetDesignFormatCommand) (*workspacemodule.Reference, error) {
+	if stub.setDesignFormatFn == nil {
+		return nil, workspacemodule.ErrInvalid
+	}
+	return stub.setDesignFormatFn(ctx, command)
 }
 
 func (stub *workspaceAgentDirectoryStub) ListAgents(
@@ -629,7 +653,13 @@ func TestPatchWorkspaceDesignFormat_StoreBackedUpdatesWorkspace(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 
-	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: st})
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store: st,
+		Workspace: &workspaceCapabilityStub{setDesignFormatFn: func(ctx context.Context, command workspacemodule.SetDesignFormatCommand) (*workspacemodule.Reference, error) {
+			updated, err := st.Workspaces().Update(ctx, command.Reference, store.WorkspaceUpdate{DesignFormat: &command.Format})
+			return updated, err
+		}},
+	})
 	data, err := svc.PatchWorkspaceDesignFormat(ctx, "ALPHA", "html")
 	if err != nil {
 		t.Fatalf("PatchWorkspaceDesignFormat: %v", err)
@@ -647,7 +677,7 @@ func TestPatchWorkspaceDesignFormat_StoreBackedUpdatesWorkspace(t *testing.T) {
 }
 
 func TestPatchWorkspaceDesignFormat_RejectsInvalidFormat(t *testing.T) {
-	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: memstore.New()})
+	svc := NewWorkspaceService(WorkspaceServiceConfig{Store: memstore.New(), Workspace: &workspaceCapabilityStub{}})
 	if _, err := svc.PatchWorkspaceDesignFormat(context.Background(), "ALPHA", "svg"); err == nil {
 		t.Fatal("expected validation error")
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	githandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/git"
 	healthhandlers "github.com/tysonthomas9/loomcli/internal/webui/handlers/health"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
@@ -118,6 +119,22 @@ func HandleWorkspaceDesignFormatPatch(svc service.WorkspaceService) http.Handler
 }
 func HandleActiveWorkspace(svc service.WorkspaceService) http.HandlerFunc {
 	return workspace.HandleActiveWorkspace(svc)
+}
+
+func HandleWorkspaceCatalogList(api workspacemodule.API, projection workspace.CatalogProjection) http.HandlerFunc {
+	return workspace.HandleCatalogList(api, projection)
+}
+
+func HandleWorkspaceCatalogGet(api workspacemodule.API, projection workspace.CatalogProjection) http.HandlerFunc {
+	return workspace.HandleCatalogGet(api, projection)
+}
+
+func HandleWorkspaceCatalogRename(api workspacemodule.API, projection workspace.CatalogProjection) http.HandlerFunc {
+	return workspace.HandleCatalogRename(api, projection)
+}
+
+func HandleWorkspaceCatalogDesignFormatPatch(api workspacemodule.API, projection workspace.CatalogProjection) http.HandlerFunc {
+	return workspace.HandleCatalogDesignFormatPatch(api, projection)
 }
 
 // SetupWorkerAPIRoutes re-exports misc.SetupWorkerAPIRoutes.

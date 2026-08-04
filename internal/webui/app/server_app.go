@@ -121,7 +121,8 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		return nil, fmt.Errorf("compose Work Items capability: %w", err)
 	}
 	if config.Store != nil {
-		app.workspaceCatalog, err = capabilitycomposition.NewWorkspaceCatalog(config.Store.Workspaces())
+		app.workspaceStore = config.Store.Workspaces()
+		app.workspaceCatalog, err = capabilitycomposition.NewWorkspaceCatalog(app.workspaceStore)
 		if err != nil {
 			return nil, fmt.Errorf("compose Workspace capability: %w", err)
 		}
@@ -342,6 +343,7 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 	}
 	app.workspaceSvc = service.NewWorkspaceService(service.WorkspaceServiceConfig{
 		Store:                config.Store,
+		Workspace:            app.workspaceCatalog,
 		CreateFn:             app.wrappedCreateFn,
 		AddReposFn:           config.WorkspaceAddReposFn,
 		DeleteFn:             app.wrappedDeleteFn,

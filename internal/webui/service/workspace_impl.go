@@ -15,6 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localnodeconfig"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/storeadapter"
@@ -32,6 +33,7 @@ var workspaceBackendOptions = []string{"claude", defaultWorkspaceBackend, "openc
 // WorkspaceServiceConfig holds the dependencies for workspace service construction.
 type WorkspaceServiceConfig struct {
 	Store                store.Store                   // FleetDB-backed store; authoritative workspace source
+	Workspace            workspacemodule.API           // Workspace-owned catalog commands and queries
 	CreateFn             WorkspaceCreateFn             // Already wrapped with registry hooks
 	AddReposFn           WorkspaceAddReposFn           // Store-backed repo attachment
 	DeleteFn             func(string) error            // Already wrapped with cleanup hooks
@@ -53,6 +55,7 @@ type WorkspaceAgentDirectory interface {
 
 type workspaceServiceImpl struct {
 	store                store.Store
+	workspace            workspacemodule.API
 	createFn             WorkspaceCreateFn
 	addReposFn           WorkspaceAddReposFn
 	deleteFn             func(string) error
@@ -68,6 +71,7 @@ type workspaceServiceImpl struct {
 func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 	return &workspaceServiceImpl{
 		store:                cfg.Store,
+		workspace:            cfg.Workspace,
 		createFn:             cfg.CreateFn,
 		addReposFn:           cfg.AddReposFn,
 		deleteFn:             cfg.DeleteFn,
@@ -282,6 +286,24 @@ func readGitHeadBranch(repoPath string) string {
 
 //nolint:gocognit,cyclop,funlen // Aggregates workspace, repo, agent, and local-state views for the UI.
 func (s *workspaceServiceImpl) ListWorkspaces(ctx context.Context) ([]WorkspaceListItem, error) {
+	if s.workspace != nil {
+		values, err := s.workspace.List(ctx, workspacemodule.ListQuery{})
+		if err != nil {
+			return nil, classifyWorkspaceCapabilityError("failed to list workspaces", err)
+		}
+		activeKey := ""
+		if s.store != nil {
+			activeKey, _ = bootstrap.ResolveActiveWorkspaceKey(ctx, s.store.Workspaces())
+		}
+		items := make([]WorkspaceListItem, 0, len(values))
+		for _, value := range values {
+			items = append(items, WorkspaceListItem{
+				ID: value.Key, Name: value.Name, Path: storeadapter.ResolveWorkspacePath(value.Key),
+				Active: value.Key == activeKey, IsDefault: false,
+			})
+		}
+		return items, nil
+	}
 	// Store is authoritative for workspace discovery.
 	if s.store != nil {
 		wsList, err := s.store.Workspaces().List(ctx)
@@ -325,6 +347,16 @@ func (s *workspaceServiceImpl) lookupWorkspace(ctx context.Context, wsID string)
 		// hand-authored URL, so never pass that unvalidated value into a storage
 		// key builder.
 		key := WorkspaceKeyFromName(wsID)
+		if s.workspace != nil {
+			resolved, err := s.workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: wsID})
+			if errors.Is(err, workspacemodule.ErrNotFound) {
+				return nil, false, nil
+			}
+			if err != nil {
+				return nil, false, classifyWorkspaceCapabilityError("failed to resolve workspace", err)
+			}
+			key = resolved.Key
+		}
 		data, err := s.loadWorkspaceByID(ctx, key)
 		if err == nil && data != nil {
 			normalizeWorkspaceData(data)
@@ -509,30 +541,12 @@ func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string)
 }
 
 func (s *workspaceServiceImpl) RenameWorkspace(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error) {
-	if err := validateWorkspaceName(newName); err != nil {
-		return nil, err
+	if s.workspace == nil {
+		return nil, ErrUnavailable("Workspace capability unavailable")
 	}
-	if s.store == nil {
-		return nil, ErrUnavailable("workspace store unavailable")
-	}
-	ws, serr := s.resolveStoreWorkspaceForDefault(ctx, wsID)
-	if serr != nil {
-		return nil, serr
-	}
-	if ws.Name == newName {
-		data, err := s.loadWorkspaceByID(ctx, ws.Key)
-		if err != nil {
-			return nil, ErrInternal("failed to load workspace data", err)
-		}
-		normalizeWorkspaceData(data)
-		return data, nil
-	}
-	if existing, err := s.store.Workspaces().GetByName(ctx, newName); err == nil && existing.Key != ws.Key {
-		return nil, ErrConflict("workspace name already exists")
-	}
-	updated, err := s.store.Workspaces().Update(ctx, ws.Key, store.WorkspaceUpdate{Name: &newName})
+	updated, err := s.workspace.Rename(ctx, workspacemodule.RenameCommand{Reference: wsID, Name: newName})
 	if err != nil {
-		return nil, ErrInternal("failed to rename workspace", err)
+		return nil, classifyWorkspaceCapabilityError("failed to rename workspace", err)
 	}
 	s.invalidateWorkspaceCache()
 	data, err := s.loadWorkspaceByID(ctx, updated.Key)
@@ -655,26 +669,38 @@ func (s *workspaceServiceImpl) PatchWorkspaceBackend(ctx context.Context, wsID s
 }
 
 func (s *workspaceServiceImpl) PatchWorkspaceDesignFormat(ctx context.Context, wsID string, designFormat string) (*ops.WorkspaceData, error) {
-	if !ValidWorkspaceDesignFormat(designFormat) {
-		return nil, ErrValidation("design format must be markdown or html")
+	if s.workspace == nil {
+		return nil, ErrUnavailable("Workspace capability unavailable")
 	}
-	if s.store == nil {
-		return nil, ErrUnavailable("workspace store unavailable")
-	}
-	ws, serr := s.resolveStoreWorkspaceForDefault(ctx, wsID)
-	if serr != nil {
-		return nil, serr
-	}
-	if _, err := s.store.Workspaces().Update(ctx, ws.Key, store.WorkspaceUpdate{DesignFormat: &designFormat}); err != nil {
-		return nil, ErrInternal("failed to save workspace design format", err)
+	updated, err := s.workspace.SetDesignFormat(ctx, workspacemodule.SetDesignFormatCommand{
+		Reference: wsID,
+		Format:    designFormat,
+	})
+	if err != nil {
+		return nil, classifyWorkspaceCapabilityError("failed to save workspace design format", err)
 	}
 	s.invalidateWorkspaceCache()
-	data, err := s.loadWorkspaceByID(ctx, ws.Key)
+	data, err := s.loadWorkspaceByID(ctx, updated.Key)
 	if err != nil {
 		return nil, ErrInternal("failed to load workspace data", err)
 	}
 	normalizeWorkspaceData(data)
 	return data, nil
+}
+
+func classifyWorkspaceCapabilityError(message string, err error) *ServiceError {
+	switch {
+	case errors.Is(err, workspacemodule.ErrNotFound):
+		return ErrNotFound(err.Error())
+	case errors.Is(err, workspacemodule.ErrInvalid):
+		return ErrValidation(err.Error())
+	case errors.Is(err, workspacemodule.ErrConflict):
+		return ErrConflict(err.Error())
+	case errors.Is(err, workspacemodule.ErrUnavailable):
+		return ErrUnavailable(err.Error())
+	default:
+		return ErrInternal(message, err)
+	}
 }
 
 func (s *workspaceServiceImpl) invalidateWorkspaceCache() {

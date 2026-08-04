@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
@@ -58,6 +59,7 @@ type Server struct {
 	issueSvc         service.IssueService
 	workItems        workitems.API
 	workspaceCatalog workspace.API
+	workspaceStore   store.WorkspaceStore
 	workItemMover    workitemmove.Commands
 	agentSvc         service.AgentService
 	agentRuntime     service.InteractiveAgentRuntime

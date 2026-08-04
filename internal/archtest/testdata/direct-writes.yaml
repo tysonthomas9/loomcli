@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: a387de47c396fa7eb0628da66bbf9255d6e9beac
+source_head: bf010ca91e48ffd718efd4b2855e5b4f59cbf44f
 adapter_roots:
   - internal/app
   - internal/cli
@@ -357,8 +357,8 @@ method_sets:
     read_only: [AgentServices, Agents, Repos, Roles, Workspaces]
     mutating: []
   - name: workspace_catalog
-    read_only: [GetByKey, GetByName]
-    mutating: []
+    read_only: [GetByKey, GetByName, List]
+    mutating: [Rename, SetDesignFormat]
 receiver_surfaces:
   - receiver: "*github.com/tysonthomas9/loomcli/internal/events.MetricsStore"
     package: github.com/tysonthomas9/loomcli/internal/events
