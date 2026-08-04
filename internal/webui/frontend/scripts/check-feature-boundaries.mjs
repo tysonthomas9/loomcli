@@ -13,14 +13,6 @@ function featureOf(path) {
   return /^src\/features\/([^/]+)(?:\/|$)/.exec(slash(path))?.[1] ?? null;
 }
 
-function isTest(path) {
-  const normalized = slash(path);
-  return (
-    normalized.includes("/__tests__/") ||
-    /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(normalized)
-  );
-}
-
 function moduleSpecifier(node) {
   if (
     (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
@@ -108,7 +100,7 @@ function collectFiles(directory, root) {
       continue;
     }
     const path = slash(relative(root, absolute));
-    if (!isTest(path)) files.push({ absolute, path });
+    files.push({ absolute, path });
   }
   return files;
 }

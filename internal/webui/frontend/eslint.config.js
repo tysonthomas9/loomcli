@@ -11,8 +11,8 @@
  *
  * | Layer      | Pattern                      | Allowed runtime imports from           |
  * |------------|------------------------------|----------------------------------------|
- * | app        | src/*.{ts,tsx}               | app (intra), views, components,        |
- * |            | (App, main, router, fixtures)|  features, contexts, hooks, stores,    |
+ * | app        | src/*.{ts,tsx}, src/app/**    | app (intra), views, components,        |
+ * |            | (App, main, router, shell)    |  features, contexts, hooks, stores,    |
  * |            |                              |  styles, types                         |
  * | features   | src/features/<feature>/**    | same feature, shared components, api,  |
  * |            |                              |  utils, styles, and types              |
@@ -100,6 +100,7 @@ export default tseslint.config(
       },
       "boundaries/elements": [
         { type: "app", pattern: "src/*.{ts,tsx}", mode: "file" },
+        { type: "app", pattern: "src/app/**/*.{ts,tsx}", mode: "file" },
         {
           type: "features",
           pattern: "src/features/(*)/**/*.{ts,tsx}",

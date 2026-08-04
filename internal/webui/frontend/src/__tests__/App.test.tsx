@@ -38,6 +38,7 @@ const mockNavigate = vi.fn();
 const mockUseParams = vi.hoisted(() =>
   vi.fn(() => ({ workspaceId: "test-ws-id" })),
 );
+const mockOutletContext = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock("react-router-dom", () => ({
   useParams: mockUseParams,
   useNavigate: vi.fn(() => mockNavigate),
@@ -49,7 +50,9 @@ vi.mock("react-router-dom", () => ({
     state: null,
     key: "default",
   })),
-  Outlet: () => {
+  useOutletContext: () => mockOutletContext.current,
+  Outlet: ({ context }: { context?: unknown }) => {
+    mockOutletContext.current = context;
     const view = mockUseRouteView()?.view ?? "kanban";
     return viewRegistry[view]?.() ?? null;
   },
