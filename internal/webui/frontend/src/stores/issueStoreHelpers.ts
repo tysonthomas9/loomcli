@@ -116,6 +116,7 @@ export interface IssueStoreActions {
   refetch: () => Promise<void>;
   connectToEvents: (subscribe: SubscribeFn) => () => void;
   applyMutation: (mutation: MutationPayload) => void;
+  reconcileIssue: (issue: Issue) => void;
   updateIssueStatus: (
     issueId: string,
     newStatus: Status,

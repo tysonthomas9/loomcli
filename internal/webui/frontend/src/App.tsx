@@ -1448,7 +1448,9 @@ function App() {
       <SearchTermProvider value={activeSearchTerm}>
         <AppLayout
           title={headerTitle}
-          onTitleClick={() => navigateToView("kanban")}
+          {...(!showBoardToolbar && {
+            onTitleClick: () => navigateToView("kanban"),
+          })}
           actions={headerActions}
           navRail={
             <NavRail

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentRecordSummary, TriggerBinding } from "@/api";
+import type { LoomAgentStatus } from "@/types";
 
 import {
   buildAgentAutomationRows,
   durableRecordCadence,
   durableRecordDotState,
   selectedDurableRecordID,
+  withoutDurableAgentProjections,
 } from "../agentSectionAutomationRows";
 
 function record(id: string, name: string, enabled = true): AgentRecordSummary {
@@ -35,6 +37,20 @@ function binding(bindingId: string, targetAgentId?: string): TriggerBinding {
 }
 
 describe("agent-section automation rows", () => {
+  it("removes only legacy roster projections whose names equal durable record IDs", () => {
+    const agents = [
+      { name: "lead", status: "ready", role: "lead" },
+      { name: "agent-record-1", status: "ready", role: "plan" },
+      { name: "standalone-worker", status: "ready", role: "task" },
+    ] as LoomAgentStatus[];
+
+    expect(
+      withoutDurableAgentProjections(agents, [
+        record("agent-record-1", "Planner"),
+      ]).map((agent) => agent.name),
+    ).toEqual(["lead", "standalone-worker"]);
+  });
+
   it("uses each durable record ID once, retains orphans, and separates only legacy bindings", () => {
     const rows = buildAgentAutomationRows(
       [

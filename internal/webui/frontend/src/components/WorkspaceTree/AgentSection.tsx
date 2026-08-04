@@ -36,6 +36,7 @@ import {
   durableRecordDotState,
   durableRecordTooltip,
   selectedDurableRecordID,
+  withoutDurableAgentProjections,
 } from "./agentSectionAutomationRows";
 
 export interface AgentSectionProps {
@@ -75,12 +76,15 @@ export function AgentSection({
 
   const agents = useMemo<LoomAgentStatus[]>(
     () =>
-      mergeAgentRoster(
-        fleetAgents,
-        workspaceConfigAgents,
-        workspace?.name ?? "",
+      withoutDurableAgentProjections(
+        mergeAgentRoster(
+          fleetAgents,
+          workspaceConfigAgents,
+          workspace?.name ?? "",
+        ),
+        agentRecords,
       ),
-    [fleetAgents, workspaceConfigAgents, workspace?.name],
+    [agentRecords, fleetAgents, workspaceConfigAgents, workspace?.name],
   );
 
   const agentNames = useMemo(() => agents.map((agent) => agent.name), [agents]);

@@ -28,6 +28,7 @@ import {
   deleteWorkspaceAgent,
 } from "@/api";
 import { createAgentStore } from "@/stores/agentStore";
+import { createIssueStore } from "@/stores/issueStore";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
 
@@ -40,6 +41,7 @@ const {
   mockUseLocalSettings,
   mockUseWorkspaceContext,
   mockUseAgentStoreInstance,
+  mockUseIssueStoreInstance,
   mockGetTaskSessions,
   mockShowToast,
   mockUseToast,
@@ -96,6 +98,7 @@ const {
     setDefaultWorkspace: () => Promise.resolve(),
   })),
   mockUseAgentStoreInstance: vi.fn(),
+  mockUseIssueStoreInstance: vi.fn(),
   mockGetTaskSessions: vi.fn(() => Promise.resolve([])),
   mockShowToast: vi.fn(),
   mockUseToast: vi.fn(() => ({
@@ -167,7 +170,11 @@ vi.mock("@/hooks/workspace", async () => {
 vi.mock("@/hooks/common", async () => {
   const actual =
     await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
-  return { ...actual, useAgentStoreInstance: mockUseAgentStoreInstance };
+  return {
+    ...actual,
+    useAgentStoreInstance: mockUseAgentStoreInstance,
+    useIssueStoreInstance: mockUseIssueStoreInstance,
+  };
 });
 
 vi.mock("@/hooks", async (importOriginal) => {
@@ -326,10 +333,15 @@ function createLocalSettingsHookReturn(
 }
 
 describe("IssueDetailPanel", () => {
+  let issueStore: ReturnType<typeof createIssueStore>;
+
   beforeEach(() => {
     const agentStore = createAgentStore();
+    issueStore = createIssueStore();
     mockUseAgentStoreInstance.mockReset();
     mockUseAgentStoreInstance.mockReturnValue(agentStore);
+    mockUseIssueStoreInstance.mockReset();
+    mockUseIssueStoreInstance.mockReturnValue(issueStore);
     mockUseLocalSettings.mockReset();
     mockUseLocalSettings.mockImplementation(() =>
       createLocalSettingsHookReturn(),
@@ -384,6 +396,8 @@ describe("IssueDetailPanel", () => {
     >;
     mockDeleteWorkspaceAgent.mockReset();
     mockDeleteWorkspaceAgent.mockResolvedValue(undefined);
+    const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+    mockUpdateIssue.mockReset();
     const mockSetIssueRepository = setIssueRepository as ReturnType<
       typeof vi.fn
     >;
@@ -405,6 +419,40 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
       expect(screen.getByTestId("issue-detail-panel")).toBeInTheDocument();
+    });
+
+    it("reconciles a confirmed status change into the shared kanban store", async () => {
+      const currentIssue = createTestIssue({
+        id: "TASK-STATUS",
+        status: "open",
+      });
+      const updatedIssue = createTestIssue({
+        id: "TASK-STATUS",
+        status: "in_progress",
+        updated_at: "2026-01-23T00:01:00Z",
+      });
+      issueStore.setState({
+        issuesMap: new Map([[currentIssue.id, currentIssue]]),
+      });
+      vi.mocked(updateIssue).mockResolvedValueOnce(updatedIssue);
+
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={currentIssue}
+          onClose={() => {}}
+        />,
+      );
+
+      fireEvent.change(screen.getByLabelText("Change issue status"), {
+        target: { value: "in_progress" },
+      });
+
+      await waitFor(() => {
+        expect(
+          issueStore.getState().issuesMap.get(currentIssue.id)?.status,
+        ).toBe("in_progress");
+      });
     });
 
     it("confirms and deletes an unclaimed issue", async () => {
@@ -970,6 +1018,35 @@ describe("IssueDetailPanel", () => {
         "assignee-dropdown-trigger",
       )[0];
       expect(assigneeTrigger).toHaveTextContent("jane-smith");
+    });
+
+    it("shows the real active agent instead of a synthetic driver-run assignee", async () => {
+      mockGetTaskSessions.mockResolvedValue([
+        createTestSession({
+          agent_name: "agt-planner-9f3a955d",
+          status: "running",
+          is_active: true,
+          ended_at: undefined,
+        }),
+      ]);
+      const mockIssue = createTestIssueDetails({
+        issue_type: "task",
+        status: "in_progress",
+        assignee: "driver-run:automation-run-1",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getAllByTestId("assignee-dropdown-trigger")[0],
+        ).toHaveTextContent("agt-planner-9f3a955d");
+      });
+      expect(
+        screen.getAllByTestId("assignee-dropdown-trigger")[0],
+      ).not.toHaveTextContent("driver-run:");
     });
 
     it("renders assignee dropdown with 'Unassigned' when not provided", () => {

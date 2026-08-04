@@ -55,6 +55,7 @@ import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
 import { isLiveAgentRailVisible } from "@/components/AgentIconRail/AgentIconRail";
 import { IssueDetailPanel } from "@/components/IssueDetailPanel/IssueDetailPanel";
+import { withoutDurableAgentProjections } from "@/components/WorkspaceTree/agentSectionAutomationRows";
 import {
   EPIC_RUNNER_WORKFLOW_NAME,
   isTerminalWorkflowRunStatus,
@@ -159,7 +160,7 @@ function AgentsPageInner(): JSX.Element {
   // Auto-select an agent when URL is bare /agents: honor a legacy
   // ?agent=<name> deep link first, else fall back to the first rail agent.
   const queryAgent = searchParams.get("agent");
-  const agents = useMemo(
+  const rosterAgents = useMemo(
     () =>
       mergeAgentRoster(
         fleetAgents,
@@ -168,13 +169,6 @@ function AgentsPageInner(): JSX.Element {
       ),
     [fleetAgents, workspaceConfigAgents, workspace?.name],
   );
-  const firstAgentName = useMemo(
-    () =>
-      agents.find(isLiveAgentRailVisible)?.name ??
-      agents.find((agent) => agent.status === "configured")?.name,
-    [agents],
-  );
-
   const selectedFleetAgent = useMemo(
     () =>
       agentName
@@ -182,14 +176,10 @@ function AgentsPageInner(): JSX.Element {
         : undefined,
     [agentName, fleetAgents],
   );
-  const selected = useMemo(
-    () => (agentName ? agents.find((a) => a.name === agentName) : undefined),
-    [agents, agentName],
-  );
 
-  // Route resolution (Decision: agent-store name first, then binding id). When
-  // the URL segment is not a role agent, it may be a trigger-binding "agent";
-  // resolve it from the automations list and render the workflow-agent detail.
+  // Durable records are the canonical identity for prompt/scripted agents.
+  // The legacy live roster can still contain the same stable ID, so resolve
+  // automation ownership before interpreting the remaining roster routes.
   const {
     agentRecords,
     bindings,
@@ -201,6 +191,20 @@ function AgentsPageInner(): JSX.Element {
     deleteBinding,
     runBinding,
   } = useAutomations(workspaceId, !!workspaceId);
+  const agents = useMemo(
+    () => withoutDurableAgentProjections(rosterAgents, agentRecords),
+    [agentRecords, rosterAgents],
+  );
+  const selected = useMemo(
+    () => (agentName ? agents.find((a) => a.name === agentName) : undefined),
+    [agents, agentName],
+  );
+  const firstAgentName = useMemo(
+    () =>
+      agents.find(isLiveAgentRailVisible)?.name ??
+      agents.find((agent) => agent.status === "configured")?.name,
+    [agents],
+  );
   useEffect(() => {
     if (agentName) return;
     const firstRecordID = agentRecords[0]?.id;

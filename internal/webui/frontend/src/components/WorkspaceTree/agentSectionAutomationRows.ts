@@ -1,4 +1,5 @@
 import type { AgentRecordSummary, TriggerBinding } from "@/api";
+import type { LoomAgentStatus } from "@/types";
 import {
   bindingCadenceLabel,
   formatFireTime,
@@ -14,6 +15,25 @@ export interface DurableRecordRow {
 export interface LegacyBindingRow {
   id: string;
   binding: TriggerBinding;
+}
+
+/**
+ * The live-agent endpoint still projects prompt/scripted AgentServices into the
+ * legacy roster so older monitor consumers can see their runtime status. The
+ * durable AgentService collection is the canonical UI identity, though. When
+ * both responses contain the same stable ID, keep only the durable record row;
+ * otherwise the rail renders two names for one agent and the legacy projection
+ * shadows the record's aggregate run-history route.
+ */
+export function withoutDurableAgentProjections(
+  agents: LoomAgentStatus[],
+  records: AgentRecordSummary[],
+): LoomAgentStatus[] {
+  if (records.length === 0) return agents;
+  const durableIDs = new Set(
+    records.map((record) => record.id.trim()).filter(Boolean),
+  );
+  return agents.filter((agent) => !durableIDs.has(agent.name.trim()));
 }
 
 export function buildAgentAutomationRows(

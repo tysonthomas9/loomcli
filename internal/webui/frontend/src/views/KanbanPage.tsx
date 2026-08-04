@@ -1,10 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useStore } from "zustand";
 
 import { ErrorBoundary, SwimLaneBoard, AssigneePrompt } from "@/components";
 import { IssueViewGuard } from "@/components/IssueViewGuard";
 import type { Status } from "@/types";
 import { updateIssue } from "@/api";
 import { useRecentAssignees } from "@/hooks";
+import { useIssueStoreInstance } from "@/hooks/common";
 import { useRunEpicWorkflow } from "@/hooks/workspace";
 import {
   useWorkspaceViewData,
@@ -33,6 +35,8 @@ export function KanbanPage() {
 
   const { handleIssueClick, updateIssueStatus, refetch, showToast } =
     useWorkspaceViewActions();
+  const issueStore = useIssueStoreInstance();
+  const reconcileIssue = useStore(issueStore, (s) => s.reconcileIssue);
   const { runEpic, isRunningEpic } = useRunEpicWorkflow({ showToast });
 
   // Assignee prompt state for Ready -> In Progress drag
@@ -77,10 +81,11 @@ export function KanbanPage() {
       addRecentAssignee(nameWithoutPrefix);
 
       try {
-        await updateIssue(workspaceId, issueId, {
+        const updatedIssue = await updateIssue(workspaceId, issueId, {
           status: newStatus,
           assignee,
         });
+        reconcileIssue(updatedIssue);
       } catch (err) {
         if (!mountedRef.current) return;
         const message =
@@ -88,7 +93,13 @@ export function KanbanPage() {
         showToast(message, { type: "error" });
       }
     },
-    [pendingDragData, addRecentAssignee, workspaceId, showToast],
+    [
+      pendingDragData,
+      addRecentAssignee,
+      workspaceId,
+      showToast,
+      reconcileIssue,
+    ],
   );
 
   const handleAssigneeSkip = useCallback(async () => {

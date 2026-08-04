@@ -419,6 +419,30 @@ export function createIssueStore(
       applyMutationToStore(mutation, set, get);
     },
 
+    reconcileIssue(issue: Issue): void {
+      const currentMap = get().issuesMap;
+      const existingIssue = currentMap.get(issue.id);
+
+      // Detail-only records may sit outside the active list projection. Do not
+      // insert them blindly, because that can violate active repo/status
+      // filters; the scheduled projection refresh will decide membership.
+      if (!existingIssue) {
+        scheduleProjectionRefresh(get);
+        return;
+      }
+
+      // Update endpoints return the canonical issue, while list projections
+      // may carry extra Kanban-only fields. Preserve those enrichment fields
+      // until the scheduled projection refresh replaces them authoritatively.
+      const reconciledIssue = { ...existingIssue, ...issue };
+      if (!issuesAreEqual(existingIssue, reconciledIssue)) {
+        const newMap = new Map(currentMap);
+        newMap.set(issue.id, reconciledIssue);
+        set({ issuesMap: newMap });
+      }
+      scheduleProjectionRefresh(get);
+    },
+
     async updateIssueStatus(
       issueId: string,
       newStatus: Status,

@@ -3,6 +3,7 @@ package svcimpl
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -224,6 +225,30 @@ func TestSessionRecordFromTaskRunMapsExecutionLifecycle(t *testing.T) {
 				t.Fatalf("mapping = record %+v active=%v", record, isActiveTaskRun(run.Status))
 			}
 		})
+	}
+}
+
+func TestSessionRecordFromTaskRunAttributesManagedAgent(t *testing.T) {
+	run := &domain.TaskRun{
+		TaskRunID:       "task-run-managed",
+		TaskID:          "TASK-MANAGED",
+		WorkerProfileID: "loom-serve-task-worker-1",
+		RunnerKind:      "flue-workflow",
+		Status:          domain.TaskRunRunning,
+		CreatedAt:       time.Now().UTC(),
+		Input: json.RawMessage(`{
+			"loomAgentPolicy": {
+				"version": 1,
+				"agentServiceId": "agt-planner-1",
+				"roleName": "plan",
+				"backend": "codex"
+			}
+		}`),
+	}
+
+	record := sessionRecordFromTaskRun(run)
+	if record.AgentName != "agt-planner-1" {
+		t.Fatalf("agent name = %q, want managed product agent", record.AgentName)
 	}
 }
 

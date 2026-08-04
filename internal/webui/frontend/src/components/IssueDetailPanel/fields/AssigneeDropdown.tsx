@@ -23,6 +23,12 @@ const BUSY_TYPES = new Set(["working", "planning", "review"]);
 export interface AssigneeDropdownProps {
   /** Current assignee value (may include [H] prefix) */
   assignee: string | undefined;
+  /**
+   * User-facing label for a system-owned assignee, such as the real agent
+   * behind a driver-run claim. The persisted assignee remains the mutation
+   * value; this affects only the closed trigger's display.
+   */
+  assigneeDisplayName?: string;
   /** Callback when assignee changes - receives new assignee, should throw on error */
   onSave: (newAssignee: string) => Promise<void>;
   /** Whether saving is in progress */
@@ -83,6 +89,7 @@ function getAgentStatusLabel(type: string): string {
  */
 export function AssigneeDropdown({
   assignee,
+  assigneeDisplayName,
   onSave,
   isSaving,
   disabled,
@@ -295,9 +302,12 @@ export function AssigneeDropdown({
     [handleInputSubmit],
   );
 
-  const displayName = optimisticAssignee
-    ? stripHumanPrefix(optimisticAssignee)
-    : "Unassigned";
+  const displayName =
+    optimisticAssignee === assignee && assigneeDisplayName?.trim()
+      ? assigneeDisplayName.trim()
+      : optimisticAssignee
+        ? stripHumanPrefix(optimisticAssignee)
+        : "Unassigned";
   const hasAssignee = Boolean(optimisticAssignee);
   const isDisabled = disabled || isSaving;
   const rootClassName = [styles.assigneeDropdown, className]

@@ -555,6 +555,39 @@ describe("AgentsPage", () => {
     );
   });
 
+  it("prefers a durable record over its same-id legacy roster projection", async () => {
+    mocks.routeAgentName = "agent-record-1";
+    mocks.agents = [
+      {
+        name: "agent-record-1",
+        role: "plan",
+        status: "ready",
+        branch: "main",
+        repo: "sandbox",
+        worktree_path: "/tmp/legacy-projection",
+      },
+    ];
+    mocks.agentRecords = [durableRecord()];
+    mocks.useAgentHistory.mockReturnValue({
+      runs: [],
+      sessions: [],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<AgentsPage />);
+
+    expect(await screen.findByTestId("agent-record-header")).toBeTruthy();
+    expect(mocks.useAgentHistory).toHaveBeenCalledWith(
+      "DESKTOP-QA",
+      "agent-record-1",
+      true,
+    );
+    expect(screen.queryByTestId("agent-lifecycle-controls")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Git" })).toBeNull();
+  });
+
   it("opens a durable-agent run task in the inline right pane without leaving the agent route", async () => {
     mocks.routeAgentName = "agent-record-1";
     mocks.agents = [];

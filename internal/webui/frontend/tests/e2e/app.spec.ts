@@ -170,13 +170,10 @@ test.describe("App", () => {
     await expect(page.locator("h1")).toBeVisible({ timeout: 10000 })
   })
 
-  test("displays connection status", async ({ page }) => {
+  test("renders the connected application shell", async ({ page }) => {
     await page.goto("/")
-    // The app now shows a connection status indicator in the header
-    // Use data-state attribute to find ConnectionStatus specifically (dnd-kit adds other status elements)
-    await expect(page.locator('[data-state]').first()).toBeVisible({
-      timeout: 10000,
-    })
+    await expect(page.getByRole("main")).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole("button", { name: "New Issue" })).toBeVisible()
   })
 
   test("has no console errors on load", async ({ page }) => {
