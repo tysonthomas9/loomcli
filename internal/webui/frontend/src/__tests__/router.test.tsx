@@ -32,7 +32,7 @@ const MonitorPage = () => null;
 vi.mock("@/views/MonitorPage", () => ({ MonitorPage }));
 
 const ObservabilityPage = () => null;
-vi.mock("@/views/ObservabilityPage", () => ({ ObservabilityPage }));
+vi.mock("@/features/observability", () => ({ ObservabilityPage }));
 
 const SettingsPage = () => null;
 vi.mock("@/views/SettingsPage", () => ({ SettingsPage }));

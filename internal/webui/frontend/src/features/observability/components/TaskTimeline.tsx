@@ -1,4 +1,4 @@
-import type { HourlyBucket } from "@/types";
+import type { HourlyBucket } from "../types";
 
 import styles from "./TaskTimeline.module.css";
 

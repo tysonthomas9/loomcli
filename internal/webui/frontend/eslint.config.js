@@ -12,8 +12,10 @@
  * | Layer      | Pattern                      | Allowed runtime imports from           |
  * |------------|------------------------------|----------------------------------------|
  * | app        | src/*.{ts,tsx}               | app (intra), views, components,        |
- * |            | (App, main, router, fixtures)|  contexts, hooks, stores, api, utils,  |
+ * |            | (App, main, router, fixtures)|  features, contexts, hooks, stores,    |
  * |            |                              |  styles, types                         |
+ * | features   | src/features/<feature>/**    | same feature, shared components, api,  |
+ * |            |                              |  utils, styles, and types              |
  * | views      | src/views/**                 | views (intra), components, contexts,   |
  * |            |                              |  hooks, stores, api, utils, styles,    |
  * |            |                              |  types                                 |
@@ -57,6 +59,7 @@ import prettier from "eslint-config-prettier";
 // Every layer in the DAG, for the type-only escape hatch.
 const ALL_LAYERS = [
   "app",
+  "features",
   "views",
   "contexts",
   "components",
@@ -97,9 +100,23 @@ export default tseslint.config(
       },
       "boundaries/elements": [
         { type: "app", pattern: "src/*.{ts,tsx}", mode: "file" },
+        {
+          type: "features",
+          pattern: "src/features/(*)/**/*.{ts,tsx}",
+          capture: ["feature"],
+          mode: "full",
+        },
         { type: "views", pattern: "src/views/**/*.{ts,tsx}", mode: "file" },
-        { type: "contexts", pattern: "src/contexts/**/*.{ts,tsx}", mode: "file" },
-        { type: "components", pattern: "src/components/**/*.{ts,tsx}", mode: "file" },
+        {
+          type: "contexts",
+          pattern: "src/contexts/**/*.{ts,tsx}",
+          mode: "file",
+        },
+        {
+          type: "components",
+          pattern: "src/components/**/*.{ts,tsx}",
+          mode: "file",
+        },
         { type: "hooks", pattern: "src/hooks/**/*.{ts,tsx}", mode: "file" },
         { type: "stores", pattern: "src/stores/**/*.{ts,tsx}", mode: "file" },
         { type: "api", pattern: "src/api/**/*.{ts,tsx}", mode: "file" },
@@ -194,6 +211,7 @@ export default tseslint.config(
                     {
                       type: [
                         "app",
+                        "features",
                         "views",
                         "components",
                         "contexts",
@@ -204,6 +222,22 @@ export default tseslint.config(
                         "styles",
                         "types",
                       ],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              from: [{ type: "features" }],
+              allow: [
+                {
+                  to: [
+                    {
+                      type: "features",
+                      captured: { feature: "{{from.feature}}" },
+                    },
+                    {
+                      type: ["components", "api", "utils", "styles", "types"],
                     },
                   ],
                 },
@@ -356,6 +390,22 @@ export default tseslint.config(
           ],
         },
       ],
+
+      // A feature is consumed only through src/features/<feature>/index.ts.
+      // Internal feature imports use relative paths and are separately bounded
+      // to the same captured feature name above.
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/features/*/*"],
+              message:
+                "Import a frontend feature through its public @/features/<feature> entry.",
+            },
+          ],
+        },
+      ],
     },
   },
   {
@@ -368,5 +418,5 @@ export default tseslint.config(
       "test-results/**",
     ],
   },
-  prettier
+  prettier,
 );

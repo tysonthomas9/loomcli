@@ -41,6 +41,14 @@ describe("isExcluded", () => {
     expect(isExcluded("src/api/__tests__/client.test.ts")).toBe(true);
   });
 
+  it("excludes only feature-owned API adapters", () => {
+    expect(isExcluded("src/features/observability/api.ts")).toBe(true);
+    expect(isExcluded("src/features/work-items/api/issues.ts")).toBe(true);
+    expect(isExcluded("src/features/observability/components/Card.tsx")).toBe(
+      false,
+    );
+  });
+
   it("excludes test files", () => {
     expect(isExcluded("src/hooks/useSSE.test.ts")).toBe(true);
     expect(isExcluded("src/components/Foo.test.tsx")).toBe(true);

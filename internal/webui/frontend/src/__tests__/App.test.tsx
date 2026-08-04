@@ -681,7 +681,7 @@ import { KanbanPage } from "@/views/KanbanPage";
 import { TablePage } from "@/views/TablePage";
 import { GraphPage } from "@/views/GraphPage";
 import { MonitorPage } from "@/views/MonitorPage";
-import { ObservabilityPage } from "@/views/ObservabilityPage";
+import { ObservabilityPage } from "@/features/observability";
 import { SettingsPage } from "@/views/SettingsPage";
 import { WorkspacePage } from "@/views/WorkspacePage";
 import { FilesPage } from "@/views/FilesPage";

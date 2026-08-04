@@ -3,9 +3,10 @@
  * Fetches metrics via useObservabilityMetrics and renders 5 presentational panels.
  */
 
-import { ErrorDisplay, LoadingSkeleton } from "@/components";
-import { useObservabilityMetrics } from "@/hooks";
+import { ErrorDisplay } from "@/components/ErrorDisplay";
+import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 
+import { useObservabilityMetrics } from "../useObservabilityMetrics";
 import { AgentUtilizationBars } from "./AgentUtilizationBars";
 import { EpicProgress } from "./EpicProgress";
 import { ErrorIndicators } from "./ErrorIndicators";

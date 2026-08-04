@@ -10,7 +10,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { HourlyBucket } from "@/types";
+import type { HourlyBucket } from "../../types";
 
 import { TaskTimeline } from "../TaskTimeline";
 

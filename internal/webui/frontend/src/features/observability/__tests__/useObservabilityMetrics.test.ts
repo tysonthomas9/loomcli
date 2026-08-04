@@ -10,12 +10,12 @@
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import { fetchObservabilityMetrics } from "@/api";
-import type { MetricsSnapshot } from "@/types";
+import { fetchObservabilityMetrics } from "../api";
+import type { MetricsSnapshot } from "../types";
 
 import { useObservabilityMetrics } from "../useObservabilityMetrics";
 
-vi.mock("@/api", () => ({
+vi.mock("../api", () => ({
   fetchObservabilityMetrics: vi.fn(),
 }));
 

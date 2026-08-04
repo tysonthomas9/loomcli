@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Regex-based linter that prevents hardcoded API paths and localhost URLs
-// in frontend source code outside their proper locations (src/api/, tests).
+// in frontend source code outside their proper locations (shared src/api/,
+// feature-owned API adapters, and tests).
 
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, extname, sep } from "path";
@@ -26,6 +27,17 @@ export function isExcluded(relPath) {
 
   // src/api/ directory — expected to contain /api/ paths
   if (parts[0] === "src" && parts[1] === "api") return true;
+
+  // A vertical frontend feature owns its API mapping. Keep the exception
+  // narrow: only <feature>/api.ts or files below <feature>/api/ may contain
+  // transport paths, not arbitrary feature components or state.
+  if (
+    parts[0] === "src" &&
+    parts[1] === "features" &&
+    (parts[3] === "api.ts" || parts[3] === "api")
+  ) {
+    return true;
+  }
 
   // Test files
   if (base.endsWith(".test.ts") || base.endsWith(".test.tsx")) return true;
@@ -164,7 +176,10 @@ export function scanAll(frontendDir) {
   try {
     srcStat = statSync(srcDir);
   } catch {
-    return { error: `Error: src/ directory not found at ${srcDir}`, exitCode: 2 };
+    return {
+      error: `Error: src/ directory not found at ${srcDir}`,
+      exitCode: 2,
+    };
   }
   if (!srcStat.isDirectory()) {
     return { error: `Error: ${srcDir} is not a directory`, exitCode: 2 };

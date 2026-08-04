@@ -3,6 +3,5 @@
  */
 
 export * from "./agent";
-export * from "./observability";
 export * from "./session";
 export * from "./usage";

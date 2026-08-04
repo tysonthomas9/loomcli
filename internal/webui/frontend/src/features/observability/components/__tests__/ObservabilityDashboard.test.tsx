@@ -10,8 +10,8 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { MetricsSnapshot } from "@/types";
-import type { UseObservabilityMetricsResult } from "@/hooks/agents";
+import type { MetricsSnapshot } from "../../types";
+import type { UseObservabilityMetricsResult } from "../../useObservabilityMetrics";
 
 // vi.mock() is hoisted by Vitest above all imports, so the mock is guaranteed
 // to be in place before ObservabilityDashboard resolves its dependencies.
@@ -61,23 +61,8 @@ function createMetrics(
 
 let mockHookResult: UseObservabilityMetricsResult;
 
-vi.mock("@/hooks", () => ({
+vi.mock("../../useObservabilityMetrics", () => ({
   useObservabilityMetrics: () => mockHookResult,
-  useRegisterEscapeLayer: vi.fn(),
-  useKeyboardShortcuts: vi.fn(() => ({
-    isCheatsheetOpen: false,
-    toggleCheatsheet: vi.fn(),
-    closeCheatsheet: vi.fn(),
-  })),
-  KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
-    children,
-  LAYER_CONFIRM_DIALOG: 60,
-  LAYER_TOAST: 50,
-  LAYER_CHEATSHEET: 45,
-  LAYER_MODAL: 40,
-  LAYER_TERMINAL_PANEL: 30,
-  LAYER_AGENT_PANEL: 20,
-  LAYER_ISSUE_PANEL: 10,
 }));
 
 describe("ObservabilityDashboard", () => {

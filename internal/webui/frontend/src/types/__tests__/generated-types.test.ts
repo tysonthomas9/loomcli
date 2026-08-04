@@ -24,7 +24,7 @@ import type {
   HourlyBucket,
   MetricsSnapshot,
   ObservabilityMetricsResponse,
-} from "@/types/agent";
+} from "@/features/observability";
 import type { Dependency } from "@/types/issue";
 import type { Event } from "@/types/workspace";
 import type { Issue, BlockerRef } from "@/types/issue";

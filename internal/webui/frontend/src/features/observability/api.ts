@@ -3,8 +3,9 @@
  * Uses openapi-fetch generated client (monitor endpoints are in the spec).
  */
 
-import type { MetricsSnapshot } from "@/types";
 import { api, apiErrorFromResponse } from "@/api/common";
+
+import type { MetricsSnapshot } from "./types";
 
 /**
  * Fetch observability metrics from the loom server.

@@ -114,7 +114,7 @@ const viewRoutes = [
   {
     path: "observability",
     lazy: () =>
-      import("@/views/ObservabilityPage").then((m) => ({
+      import("@/features/observability").then((m) => ({
         Component: m.ObservabilityPage,
       })),
   },

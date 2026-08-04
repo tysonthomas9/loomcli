@@ -5,8 +5,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 
-import { fetchObservabilityMetrics } from "@/api";
-import type { MetricsSnapshot } from "@/types";
+import { fetchObservabilityMetrics } from "./api";
+import type { MetricsSnapshot } from "./types";
 
 export interface UseObservabilityMetricsOptions {
   /** Poll interval in ms (default: 30000) */
