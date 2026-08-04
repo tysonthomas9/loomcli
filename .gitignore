@@ -59,3 +59,11 @@ worktrees/
 .agent.yield
 node_modules/
 *.agent.lock.flock
+
+# SWE-Marathon harness: run evidence lives in the private trials repo; bundles are build artifacts
+harbor/trials/
+harbor/test/jobs/
+harbor/bundle/dist/
+harbor/bundle/dist/
+/fleet-db
+harbor/cmd/leadmsg/leadmsg

@@ -285,9 +285,25 @@ func (r leadSessionRegistration) Store() store.Store {
 func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSessionRegistration {
 	noop := func() {}
 	empty := leadSessionRegistration{finalize: noop}
-	handle, ws, ok := openLeadSessionStore(ctx)
-	if !ok {
-		return empty
+	// Transient embedded-store contention (another CLI mid-spawn holding the
+	// embedded lock) must not silently cost the registration: an unregistered
+	// controlled lead is undiscoverable and undeliverable for its whole
+	// lifetime. Retry briefly before falling back to unregistered mode.
+	var (
+		handle *bootstrap.StoreHandle
+		ws     string
+	)
+	for attempt := 1; ; attempt++ {
+		var ok bool
+		handle, ws, ok = openLeadSessionStore(ctx)
+		if ok {
+			break
+		}
+		if attempt >= 3 {
+			slog.Warn("lead orchestrator session: store unavailable after retries, continuing without registration")
+			return empty
+		}
+		time.Sleep(2 * time.Second)
 	}
 
 	sid := resolveLeadOrchestratorSessionID()
@@ -313,13 +329,13 @@ func registerLeadOrchestratorSession(ctx context.Context, workDir string) leadSe
 func openLeadSessionStore(ctx context.Context) (*bootstrap.StoreHandle, string, bool) {
 	handle, err := cmdstore.OpenStore(ctx)
 	if err != nil {
-		slog.Debug("lead orchestrator session: store unavailable, continuing without registration", "err", err)
+		slog.Warn("lead orchestrator session: store unavailable", "err", err)
 		return nil, "", false
 	}
 	ws, err := bootstrap.ResolveActiveWorkspaceKey(ctx, handle.Store.Workspaces())
 	if err != nil {
 		_ = handle.Close()
-		slog.Debug("lead orchestrator session: no active workspace, continuing without registration", "err", err)
+		slog.Warn("lead orchestrator session: no active workspace", "err", err)
 		return nil, "", false
 	}
 	return handle, ws, true

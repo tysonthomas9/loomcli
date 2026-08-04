@@ -1,3 +1,7 @@
+<!-- GENERIC bundle: STOCK loom fleet_task.md with ONLY the delivery ending
+     swapped to the local completion protocol (no GitHub in-container) — the
+     minimal fork permitted by EXPERIMENTS.md rule 2. Regenerate from
+     internal/cli/agent/prompts/fleet_task.md when upstream changes. -->
 ## WORKFLOW: Implementation Task (Code, Test, Commit)
 
 You are a disciplined software engineer. Follow this workflow EXACTLY for ONE task.
@@ -70,9 +74,8 @@ Procedure:
    loom data update <id> --status blocked --notes "BLOCKED: <detailed external reason + any blocking task ID>"
 2. Commit any partial work (if meaningful):
    git add <files> && git commit -m "WIP: <task-id> - blocked on <reason>"
-5. If you committed partial work, publish it with the stacked PR commands in Step 9.
-6. Signal completion: loom complete
-7. EXIT immediately
+5. Signal completion: loom complete
+6. EXIT immediately
 
 Blocked tasks DO NOT get re-claimed by any agent; they sit until a human reviews.
 
@@ -95,8 +98,7 @@ Procedure:
 2. Commit any salvageable infrastructure (tests, helpers, params) with
    feature flags OFF so a future implementation can re-enable them:
    git add <files> && git commit -m "WIP: <task-id> - design revision pending"
-3. If you committed salvageable work, publish it with the stacked PR commands in Step 9.
-4. Flip the task back to the planner:
+3. Flip the task back to the planner:
    loom data update <id> --status open --add-label needs-revision
 5. Signal completion: loom complete
 6. EXIT immediately
@@ -115,22 +117,13 @@ the planner is cheaper to re-engage than a human, and 8b is non-terminal
 - If the gate or manual test fails, fix ALL failures and re-run until it passes
 - Do NOT commit or push with failing tests
 - Stage and commit: git add <files> && git commit -m "<brief description> (<task-id>)"
-- Publish through Loom stacked PR delivery (MANDATORY):
-  - Determine the stack id: use `epic:<epic-id>` for child tasks; use `task:<task-id>` for standalone tasks.
-  - Determine the repo name and base branch from the task `source_repo`, the parent epic, or the workspace repo table. If they are ambiguous, add task notes explaining the missing stack inputs, do not close the task, and run `loom complete`.
-  - Ensure the stack exists:
-    `loom stack show <stack-id> --json` or `loom stack init <stack-id> --repo <repo-name> --base <base-branch> --commit-mode agent_commit`
-  - Ensure this task is registered in that stack. If it is absent, run:
-    `loom stack add <task-id> --stack <stack-id> --commit-mode agent_commit`
-  - Read this task's `outputBranch` from `loom stack show <stack-id> --json`.
-  - Materialize your committed HEAD onto that output branch without switching branches:
-    `git branch -f <output-branch> HEAD`
-  - Dry-run first:
-    `loom stack publish <stack-id> --repo-path <repo-path> --dry-run --json`
-  - If the dry-run succeeds, publish:
-    `loom stack publish <stack-id> --repo-path <repo-path> --json`
-  - Do not use direct integration or direct branch pushes as the completion path.
-- Run 'loom data close <id> --reason "Completed with tests and code review"'
+- Determine your attempt number: count existing comments containing `IMPL-DONE`
+  on this task (from 'loom data show <id> --output json') and add 1
+- Record the completion signal (REQUIRED, exact shape):
+  loom data comment <id> "IMPL-DONE attempt=<n> commit=$(git rev-parse HEAD)"
+- Move the task to review and release it:
+  loom data update <id> --status review --assignee ""
+- NEVER run 'loom data close' — a harness gate integrates and closes
 - Signal completion: loom complete
 
 ### CRITICAL: STOP
