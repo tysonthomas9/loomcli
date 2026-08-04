@@ -149,6 +149,17 @@ func (s repositoryCatalogStore) List(ctx context.Context, workspaceKey string) (
 	return out, nil
 }
 
+func (s repositoryCatalogStore) Update(ctx context.Context, workspaceKey, name string, update workspace.RepositoryUpdate) (*workspace.Repository, error) {
+	value, err := s.store.Update(ctx, workspaceKey, name, store.RepoUpdate{
+		RemoteURL: update.RemoteURL, Remote: update.Remote, DefaultBranch: update.DefaultBranch,
+		Groups: update.Groups, SourceRepoID: update.SourceRepoID,
+	})
+	if err != nil {
+		return nil, translateError(err)
+	}
+	return repository(value), nil
+}
+
 func (s repositoryCatalogStore) Delete(ctx context.Context, workspaceKey, name string) error {
 	return translateError(s.store.Delete(ctx, workspaceKey, name))
 }

@@ -37,6 +37,7 @@ type fakeRepositoryCatalog struct {
 	workspaceKey string
 	name         string
 	created      RepositoryInput
+	updated      RepositoryUpdate
 	deleted      string
 }
 
@@ -53,6 +54,11 @@ func (f *fakeRepositoryCatalog) Get(_ context.Context, workspaceKey, name string
 func (f *fakeRepositoryCatalog) List(_ context.Context, workspaceKey string) ([]Repository, error) {
 	f.workspaceKey = workspaceKey
 	return f.values, f.err
+}
+
+func (f *fakeRepositoryCatalog) Update(_ context.Context, workspaceKey, name string, update RepositoryUpdate) (*Repository, error) {
+	f.workspaceKey, f.name, f.updated = workspaceKey, name, update
+	return f.value, f.err
 }
 
 func (f *fakeRepositoryCatalog) Delete(_ context.Context, workspaceKey, name string) error {
@@ -235,6 +241,13 @@ func TestSetDesignFormatOwnsValidationAndNoOp(t *testing.T) {
 	}
 
 	store.byKey.DesignFormat = DesignFormatHTML
+	store.updated.DesignFormat = ""
+	value, err = service.SetDesignFormat(context.Background(), SetDesignFormatCommand{Reference: "HELLO", Format: ""})
+	if err != nil || value.DesignFormat != "" || store.formatTo != "" {
+		t.Fatalf("clear format value=%#v err=%v store=%#v", value, err, store)
+	}
+
+	store.byKey.DesignFormat = DesignFormatHTML
 	store.formatKey = ""
 	if _, err := service.SetDesignFormat(context.Background(), SetDesignFormatCommand{Reference: "HELLO", Format: DesignFormatHTML}); err != nil {
 		t.Fatal(err)
@@ -351,10 +364,41 @@ func TestRepositoryCommandsResolveWorkspaceAndOwnDefensiveInputs(t *testing.T) {
 		repositories.created.Groups[0] != "core" || repositories.created.RemoteURL != "git@example" {
 		t.Fatalf("repository input=%#v", repositories.created)
 	}
+	branch := " trunk "
+	updatedGroups := []string{"docs"}
+	updated, err := service.UpdateRepository(context.Background(), UpdateRepositoryCommand{
+		WorkspaceReference: "HELLO", Name: " loom ", DefaultBranch: &branch, Groups: &updatedGroups,
+	})
+	if err != nil || updated.Name != "loom" {
+		t.Fatalf("update value=%#v err=%v", updated, err)
+	}
+	updatedGroups[0] = "mutated"
+	if repositories.updated.DefaultBranch == nil || *repositories.updated.DefaultBranch != "trunk" ||
+		repositories.updated.Groups == nil || (*repositories.updated.Groups)[0] != "docs" {
+		t.Fatalf("repository update=%#v", repositories.updated)
+	}
 	deleted, err := service.UnregisterRepository(context.Background(), UnregisterRepositoryCommand{
 		WorkspaceReference: "HELLO", Name: "loom",
 	})
 	if err != nil || deleted.Name != "loom" || repositories.deleted != "loom" {
 		t.Fatalf("unregister value=%#v err=%v repositories=%#v", deleted, err, repositories)
+	}
+}
+
+func TestUpdateRepositoryRejectsMissingPortAndName(t *testing.T) {
+	service, _ := New(&fakeCatalog{byKey: &Reference{Key: "HELLO", Name: "Hello"}})
+	if _, err := service.UpdateRepository(context.Background(), UpdateRepositoryCommand{WorkspaceReference: "HELLO", Name: "loom"}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected unavailable repository catalog, got %v", err)
+	}
+
+	service, _ = New(
+		&fakeCatalog{byKey: &Reference{Key: "HELLO", Name: "Hello"}},
+		WithRepositoryCatalog(&fakeRepositoryCatalog{}),
+	)
+	if _, err := service.UpdateRepository(context.Background(), UpdateRepositoryCommand{WorkspaceReference: "HELLO"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected invalid repository name, got %v", err)
+	}
+	if _, err := service.UpdateRepository(context.Background(), UpdateRepositoryCommand{WorkspaceReference: "HELLO", Name: "loom"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected invalid empty update, got %v", err)
 	}
 }

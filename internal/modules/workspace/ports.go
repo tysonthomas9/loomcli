@@ -34,6 +34,7 @@ type RepositoryCatalogStore interface {
 	Create(context.Context, RepositoryInput) (*Repository, error)
 	Get(context.Context, string, string) (*Repository, error)
 	List(context.Context, string) ([]Repository, error)
+	Update(context.Context, string, string, RepositoryUpdate) (*Repository, error)
 	Delete(context.Context, string, string) error
 }
 
@@ -45,4 +46,12 @@ type RepositoryInput struct {
 	DefaultBranch string
 	Groups        []string
 	SourceRepoID  string
+}
+
+type RepositoryUpdate struct {
+	RemoteURL     *string
+	Remote        *string
+	DefaultBranch *string
+	Groups        *[]string
+	SourceRepoID  *string
 }

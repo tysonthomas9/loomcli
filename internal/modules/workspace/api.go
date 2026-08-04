@@ -15,6 +15,7 @@ type API interface {
 	GetRepository(context.Context, GetRepositoryQuery) (*Repository, error)
 	ListRepositories(context.Context, ListRepositoriesQuery) ([]Repository, error)
 	RegisterRepository(context.Context, RegisterRepositoryCommand) (*Repository, error)
+	UpdateRepository(context.Context, UpdateRepositoryCommand) (*Repository, error)
 	UnregisterRepository(context.Context, UnregisterRepositoryCommand) (*Repository, error)
 }
 
@@ -74,6 +75,19 @@ type RegisterRepositoryCommand struct {
 	DefaultBranch      string
 	Groups             []string
 	SourceRepoID       string
+}
+
+// UpdateRepositoryCommand applies a partial update to Workspace-owned shared
+// repository catalog state. Nil fields preserve the current value; local path,
+// checkout, and worktree state deliberately remain outside this command.
+type UpdateRepositoryCommand struct {
+	WorkspaceReference string
+	Name               string
+	RemoteURL          *string
+	Remote             *string
+	DefaultBranch      *string
+	Groups             *[]string
+	SourceRepoID       *string
 }
 
 type UnregisterRepositoryCommand struct {

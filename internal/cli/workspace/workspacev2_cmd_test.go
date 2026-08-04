@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/infra/workspacecatalog"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -75,9 +77,8 @@ func TestRunWorkspaceSet_InvalidDesignFormat(t *testing.T) {
 	}
 }
 
-// TestWorkspaceSetPersistsDesignFormat verifies the store update the set
-// command performs (Update with a DesignFormat pointer) persists through
-// the WorkspaceStore contract, including clearing via --design-format "".
+// TestWorkspaceSetPersistsDesignFormat verifies the owner command persists
+// design-format changes, including clearing via --design-format "".
 func TestWorkspaceSetPersistsDesignFormat(t *testing.T) {
 	ctx := context.Background()
 	st := memstore.New()
@@ -86,10 +87,13 @@ func TestWorkspaceSetPersistsDesignFormat(t *testing.T) {
 	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "MYWS", Name: "MYWS"}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
+	workspace, err := workspacecatalog.New(st.Workspaces(), st.Repos())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, v := range []string{"html", "markdown", ""} {
-		value := v
-		if _, err := st.Workspaces().Update(ctx, "MYWS", store.WorkspaceUpdate{DesignFormat: &value}); err != nil {
+		if _, err := workspace.SetDesignFormat(ctx, workspacemodule.SetDesignFormatCommand{Reference: "MYWS", Format: v}); err != nil {
 			t.Fatalf("update design_format=%q: %v", v, err)
 		}
 		got, err := st.Workspaces().Get(ctx, "MYWS")

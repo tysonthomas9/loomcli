@@ -12,7 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 // Resolver abstracts workspace repo discovery.
@@ -554,7 +554,15 @@ func (r *Resolver) SetRepoDefaultBranch(repoName, branch string) error {
 	// Apply store-level tracing (this path bypasses cmdstore.OpenStore).
 	handle.Store = cmdstore.WrapStoreWithTracing(handle.Store)
 	defer func() { _ = handle.Close() }()
-	if _, err := handle.Store.Repos().Update(ctx, r.Workspace, repoName, store.RepoUpdate{DefaultBranch: &branch}); err != nil {
+	workspace, err := cmdstore.WorkspaceCatalog(handle)
+	if err != nil {
+		return fmt.Errorf("compose Workspace capability: %w", err)
+	}
+	if _, err := workspace.UpdateRepository(ctx, workspacemodule.UpdateRepositoryCommand{
+		WorkspaceReference: r.Workspace,
+		Name:               repoName,
+		DefaultBranch:      &branch,
+	}); err != nil {
 		return fmt.Errorf("update repo %q default branch in workspace %q: %w", repoName, r.Workspace, err)
 	}
 	if ws, ok := r.Config.Workspaces[r.Workspace]; ok {

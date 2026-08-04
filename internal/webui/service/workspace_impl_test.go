@@ -73,6 +73,10 @@ func (stub *workspaceCapabilityStub) RegisterRepository(context.Context, workspa
 	return nil, workspacemodule.ErrUnavailable
 }
 
+func (stub *workspaceCapabilityStub) UpdateRepository(context.Context, workspacemodule.UpdateRepositoryCommand) (*workspacemodule.Repository, error) {
+	return nil, workspacemodule.ErrUnavailable
+}
+
 func (stub *workspaceCapabilityStub) UnregisterRepository(context.Context, workspacemodule.UnregisterRepositoryCommand) (*workspacemodule.Repository, error) {
 	return nil, workspacemodule.ErrUnavailable
 }

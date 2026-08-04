@@ -126,7 +126,7 @@ func (s *Service) Rename(ctx context.Context, command RenameCommand) (*Reference
 
 func (s *Service) SetDesignFormat(ctx context.Context, command SetDesignFormatCommand) (*Reference, error) {
 	format := strings.TrimSpace(command.Format)
-	if format != DesignFormatMarkdown && format != DesignFormatHTML {
+	if format != "" && format != DesignFormatMarkdown && format != DesignFormatHTML {
 		return nil, fmt.Errorf("design format must be markdown or html: %w", ErrInvalid)
 	}
 	current, err := s.Resolve(ctx, ResolveQuery{Reference: command.Reference})
@@ -240,6 +240,36 @@ func (s *Service) RegisterRepository(ctx context.Context, command RegisterReposi
 	return validatedRepository(value, workspace.Key, "register repository "+name)
 }
 
+func (s *Service) UpdateRepository(ctx context.Context, command UpdateRepositoryCommand) (*Repository, error) {
+	if s.repositories == nil {
+		return nil, fmt.Errorf("Workspace repository catalog unavailable: %w", ErrUnavailable)
+	}
+	name := strings.TrimSpace(command.Name)
+	if name == "" {
+		return nil, fmt.Errorf("repository name is required: %w", ErrInvalid)
+	}
+	if command.RemoteURL == nil && command.Remote == nil && command.DefaultBranch == nil &&
+		command.Groups == nil && command.SourceRepoID == nil {
+		return nil, fmt.Errorf("repository update requires at least one field: %w", ErrInvalid)
+	}
+	workspace, err := s.Resolve(ctx, ResolveQuery{Reference: command.WorkspaceReference})
+	if err != nil {
+		return nil, err
+	}
+	update := RepositoryUpdate{
+		RemoteURL:     trimmedStringPointer(command.RemoteURL),
+		Remote:        trimmedStringPointer(command.Remote),
+		DefaultBranch: trimmedStringPointer(command.DefaultBranch),
+		Groups:        copiedStringSlicePointer(command.Groups),
+		SourceRepoID:  trimmedStringPointer(command.SourceRepoID),
+	}
+	value, err := s.repositories.Update(ctx, workspace.Key, name, update)
+	if err != nil {
+		return nil, err
+	}
+	return validatedRepository(value, workspace.Key, "update repository "+name)
+}
+
 func (s *Service) UnregisterRepository(ctx context.Context, command UnregisterRepositoryCommand) (*Repository, error) {
 	if s.repositories == nil {
 		return nil, fmt.Errorf("Workspace repository catalog unavailable: %w", ErrUnavailable)
@@ -297,4 +327,20 @@ func validState(state State) bool {
 	default:
 		return false
 	}
+}
+
+func trimmedStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	return &trimmed
+}
+
+func copiedStringSlicePointer(values *[]string) *[]string {
+	if values == nil {
+		return nil
+	}
+	copy := append([]string(nil), (*values)...)
+	return &copy
 }

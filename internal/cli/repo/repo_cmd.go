@@ -15,7 +15,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
-	"github.com/tysonthomas9/loomcli/internal/store"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -82,8 +82,9 @@ func init() {
 }
 
 func runRepoAdd(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		localPath, cloned, err := ensureRepoLocalCheckout(ctx, ws, args[0], args[1])
+	return cmdstore.WithActiveWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
+		name := strings.TrimSpace(args[0])
+		localPath, cloned, err := ensureRepoLocalCheckout(ctx, ws, name, args[1])
 		if err != nil {
 			return err
 		}
@@ -92,22 +93,25 @@ func runRepoAdd(_ *cobra.Command, args []string) error {
 				_ = os.RemoveAll(localPath)
 			}
 		}
-		r, err := h.Store.Repos().Create(ctx, store.RepoCreate{
-			WorkspaceKey:  ws,
-			Name:          args[0],
-			RemoteURL:     args[1],
-			Remote:        repoAddRemote,
-			DefaultBranch: repoAddBranch,
-			Groups:        repoAddGroups,
-			SourceRepoID:  repoAddSourceID,
+		r, err := workspace.RegisterRepository(ctx, workspacemodule.RegisterRepositoryCommand{
+			WorkspaceReference: ws,
+			Name:               name,
+			RemoteURL:          args[1],
+			Remote:             repoAddRemote,
+			DefaultBranch:      repoAddBranch,
+			Groups:             repoAddGroups,
+			SourceRepoID:       repoAddSourceID,
 		})
 		if err != nil {
 			rollbackClone()
 			return fmt.Errorf("create repo: %w", err)
 		}
 		if localPath != "" {
-			if err := rememberRepoLocalPath(ws, args[0], localPath); err != nil {
-				_ = h.Store.Repos().Delete(context.Background(), ws, args[0])
+			if err := rememberRepoLocalPath(ws, r.Name, localPath); err != nil {
+				_, _ = workspace.UnregisterRepository(context.Background(), workspacemodule.UnregisterRepositoryCommand{
+					WorkspaceReference: ws,
+					Name:               r.Name,
+				})
 				rollbackClone()
 				return err
 			}
@@ -167,8 +171,8 @@ func rememberRepoLocalPath(ws, name, repoPath string) error {
 }
 
 func runRepoList(_ *cobra.Command, _ []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		repos, err := h.Store.Repos().List(ctx, ws)
+	return cmdstore.WithActiveWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
+		repos, err := workspace.ListRepositories(ctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: ws})
 		if err != nil {
 			return fmt.Errorf("list repos: %w", err)
 		}
@@ -187,8 +191,8 @@ func runRepoList(_ *cobra.Command, _ []string) error {
 }
 
 func runRepoShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		r, err := h.Store.Repos().Get(ctx, ws, args[0])
+	return cmdstore.WithActiveWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
+		r, err := workspace.GetRepository(ctx, workspacemodule.GetRepositoryQuery{WorkspaceReference: ws, Name: args[0]})
 		if err != nil {
 			return fmt.Errorf("get repo: %w", err)
 		}
@@ -212,8 +216,8 @@ func runRepoShow(_ *cobra.Command, args []string) error {
 }
 
 func runRepoRemove(_ *cobra.Command, args []string) error {
-	return cmdstore.WithActiveWorkspace(func(ctx context.Context, h *bootstrap.StoreHandle, ws string) error {
-		if err := h.Store.Repos().Delete(ctx, ws, args[0]); err != nil {
+	return cmdstore.WithActiveWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API, ws string) error {
+		if _, err := workspace.UnregisterRepository(ctx, workspacemodule.UnregisterRepositoryCommand{WorkspaceReference: ws, Name: args[0]}); err != nil {
 			return fmt.Errorf("remove repo: %w", err)
 		}
 		fmt.Printf("Removed repo %s/%s\n", ws, args[0])

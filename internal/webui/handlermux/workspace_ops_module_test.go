@@ -174,6 +174,10 @@ func (*stubWorkspaceCatalog) RegisterRepository(context.Context, workspacemodule
 	return nil, nil
 }
 
+func (*stubWorkspaceCatalog) UpdateRepository(context.Context, workspacemodule.UpdateRepositoryCommand) (*workspacemodule.Repository, error) {
+	return nil, nil
+}
+
 func (*stubWorkspaceCatalog) UnregisterRepository(context.Context, workspacemodule.UnregisterRepositoryCommand) (*workspacemodule.Repository, error) {
 	return nil, nil
 }

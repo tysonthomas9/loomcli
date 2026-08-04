@@ -19,6 +19,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 )
 
 var (
@@ -214,15 +215,15 @@ func withWorkspaceOpsStatus(args []string, fn func(*WorkspaceOpsStatus) error) e
 
 func workspaceOpsStatusForArgs(args []string) (*WorkspaceOpsStatus, error) {
 	var loaded *WorkspaceOpsStatus
-	err := cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		key, err := pickWorkspaceKey(ctx, h.Store, args)
+	err := cmdstore.WithWorkspaceCatalog(func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+		key, err := pickWorkspaceKey(ctx, workspace, args)
 		if err != nil {
 			return err
 		}
 		if err := os.Setenv(bootstrap.EnvWorkspace, key); err != nil {
 			return err
 		}
-		ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, key)
+		ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, workspace, key)
 		if err != nil {
 			return err
 		}

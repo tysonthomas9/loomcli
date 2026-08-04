@@ -95,6 +95,13 @@ func TestWorkspaceCapabilityPersistsOwnedWorkspaceAndRepositoryCommands(t *testi
 	if err != nil || repository.WorkspaceKey != "HELLO" || repository.Groups[0] != "core" {
 		t.Fatalf("register repository value=%#v err=%v", repository, err)
 	}
+	branch = "stable"
+	repository, err = api.UpdateRepository(ctx, workspace.UpdateRepositoryCommand{
+		WorkspaceReference: "HELLO", Name: "loom", DefaultBranch: &branch,
+	})
+	if err != nil || repository.DefaultBranch != "stable" {
+		t.Fatalf("update repository value=%#v err=%v", repository, err)
+	}
 	deleted, err := api.UnregisterRepository(ctx, workspace.UnregisterRepositoryCommand{
 		WorkspaceReference: "HELLO", Name: "loom",
 	})

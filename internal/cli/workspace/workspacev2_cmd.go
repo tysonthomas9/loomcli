@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -99,9 +101,9 @@ func runWorkspaceAdd(_ *cobra.Command, args []string) error {
 	if !validDesignFormat(wsAddDesignFormat) {
 		return fmt.Errorf("invalid --design-format %q: must be \"markdown\" or \"html\"", wsAddDesignFormat)
 	}
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		key := args[0]
-		ws, err := h.Store.Workspaces().Create(ctx, store.WorkspaceCreate{
+		ws, err := workspace.Create(ctx, workspacemodule.CreateCommand{
 			Key:           key,
 			Name:          key,
 			Description:   wsAddDescription,
@@ -129,12 +131,12 @@ func runWorkspaceSet(cmd *cobra.Command, args []string) error {
 	if !validDesignFormat(wsSetDesignFormat) {
 		return fmt.Errorf("invalid --design-format %q: must be \"markdown\" or \"html\"", wsSetDesignFormat)
 	}
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		key := args[0]
 		v := wsSetDesignFormat
-		ws, err := h.Store.Workspaces().Update(ctx, key, store.WorkspaceUpdate{DesignFormat: &v})
+		ws, err := workspace.SetDesignFormat(ctx, workspacemodule.SetDesignFormatCommand{Reference: key, Format: v})
 		if err != nil {
-			if cmdstore.IsNotFound(err) {
+			if errors.Is(err, workspacemodule.ErrNotFound) {
 				return fmt.Errorf("workspace %q not found", key)
 			}
 			return fmt.Errorf("update workspace: %w", err)
@@ -157,30 +159,31 @@ func displayDesignFormat(v string) string {
 }
 
 func runWorkspaceUse(_ *cobra.Command, args []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
+	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
 		key := args[0]
-		if _, err := h.Store.Workspaces().Get(ctx, key); err != nil {
-			if cmdstore.IsNotFound(err) {
+		value, err := workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: key})
+		if err != nil {
+			if errors.Is(err, workspacemodule.ErrNotFound) {
 				return fmt.Errorf("workspace %q not found", key)
 			}
 			return err
 		}
-		if err := bootstrap.SetActiveWorkspaceKey(key); err != nil {
+		if err := bootstrap.SetActiveWorkspaceKey(value.Key); err != nil {
 			return fmt.Errorf("save selected workspace: %w", err)
 		}
-		fmt.Printf("Selected workspace: %s\n", key)
-		fmt.Printf("For runtime commands: export %s=%s\n", bootstrap.EnvWorkspace, key)
+		fmt.Printf("Selected workspace: %s\n", value.Key)
+		fmt.Printf("For runtime commands: export %s=%s\n", bootstrap.EnvWorkspace, value.Key)
 		return nil
 	})
 }
 
 func runWorkspaceShow(_ *cobra.Command, args []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		key, err := pickWorkspaceKey(ctx, h.Store, args)
+	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, h *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+		key, err := pickWorkspaceKey(ctx, workspace, args)
 		if err != nil {
 			return err
 		}
-		ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, key)
+		ws, repos, agents, roles, err := gatherWorkspaceDetails(ctx, h.Store, workspace, key)
 		if err != nil {
 			return fmt.Errorf("load workspace details: %w", err)
 		}
@@ -214,7 +217,7 @@ func runWorkspaceShow(_ *cobra.Command, args []string) error {
 // in parallel. Each List is independent and goes over HTTP, so serial
 // fan-out adds 2-3× round-trip latency for no benefit. Returns the first
 // error any of the four sub-fetches produces.
-func gatherWorkspaceDetails(ctx context.Context, s store.Store, key string) (*domain.Workspace, []*domain.Repo, []*domain.AgentService, []*domain.Role, error) {
+func gatherWorkspaceDetails(ctx context.Context, s store.Store, workspace workspacemodule.API, key string) (*domain.Workspace, []*domain.Repo, []*domain.AgentService, []*domain.Role, error) {
 	var (
 		ws     *domain.Workspace
 		repos  []*domain.Repo
@@ -222,8 +225,22 @@ func gatherWorkspaceDetails(ctx context.Context, s store.Store, key string) (*do
 		roles  []*domain.Role
 	)
 	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() (err error) { ws, err = s.Workspaces().Get(gctx, key); return })
-	g.Go(func() (err error) { repos, err = s.Repos().List(gctx, key); return })
+	g.Go(func() (err error) {
+		ws, err = workspace.Resolve(gctx, workspacemodule.ResolveQuery{Reference: key})
+		return
+	})
+	g.Go(func() (err error) {
+		values, listErr := workspace.ListRepositories(gctx, workspacemodule.ListRepositoriesQuery{WorkspaceReference: key})
+		if listErr != nil {
+			return listErr
+		}
+		repos = make([]*domain.Repo, len(values))
+		for index := range values {
+			value := values[index]
+			repos[index] = &value
+		}
+		return nil
+	})
 	g.Go(func() (err error) {
 		agents, err = s.AgentServices().List(gctx, key, store.AgentServiceFilter{})
 		return
@@ -236,12 +253,12 @@ func gatherWorkspaceDetails(ctx context.Context, s store.Store, key string) (*do
 }
 
 func runWorkspaceStatus(_ *cobra.Command, args []string) error {
-	return cmdstore.WithStore(func(ctx context.Context, h *bootstrap.StoreHandle) error {
-		key, err := pickWorkspaceKey(ctx, h.Store, args)
+	return cmdstore.WithWorkspaceCatalog(func(ctx context.Context, _ *bootstrap.StoreHandle, workspace workspacemodule.API) error {
+		key, err := pickWorkspaceKey(ctx, workspace, args)
 		if err != nil {
 			return err
 		}
-		ws, err := h.Store.Workspaces().Get(ctx, key)
+		ws, err := workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: key})
 		if err != nil {
 			return fmt.Errorf("get workspace: %w", err)
 		}
@@ -262,9 +279,13 @@ func runWorkspaceStatus(_ *cobra.Command, args []string) error {
 }
 
 // pickWorkspaceKey returns args[0] if provided, else the active workspace.
-func pickWorkspaceKey(ctx context.Context, s store.Store, args []string) (string, error) {
+func pickWorkspaceKey(ctx context.Context, workspace workspacemodule.API, args []string) (string, error) {
 	if len(args) > 0 {
-		return args[0], nil
+		value, err := workspace.Resolve(ctx, workspacemodule.ResolveQuery{Reference: args[0]})
+		if err != nil {
+			return "", err
+		}
+		return value.Key, nil
 	}
-	return cmdstore.ActiveWorkspace(ctx, s)
+	return cmdstore.ActiveWorkspaceCatalog(ctx, workspace)
 }

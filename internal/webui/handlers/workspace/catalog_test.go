@@ -68,6 +68,10 @@ func (f *fakeCatalogAPI) RegisterRepository(context.Context, workspacemodule.Reg
 	return nil, f.err
 }
 
+func (f *fakeCatalogAPI) UpdateRepository(context.Context, workspacemodule.UpdateRepositoryCommand) (*workspacemodule.Repository, error) {
+	return nil, f.err
+}
+
 func (f *fakeCatalogAPI) UnregisterRepository(context.Context, workspacemodule.UnregisterRepositoryCommand) (*workspacemodule.Repository, error) {
 	return nil, f.err
 }
