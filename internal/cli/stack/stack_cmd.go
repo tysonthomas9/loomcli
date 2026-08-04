@@ -18,7 +18,9 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
+	infrastackstore "github.com/tysonthomas9/loomcli/internal/infra/stackstoreadapter"
 	"github.com/tysonthomas9/loomcli/internal/localworkspace"
+	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	sl "github.com/tysonthomas9/loomcli/internal/stacklineage"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -52,6 +54,18 @@ func activeWorkspace() (string, error) {
 }
 
 func openStore() (*stackstore.LocalStore, error) { return stackstore.Default() }
+
+func openStackLifecycle() (sourcecontrol.StackLifecycle, error) {
+	store, err := openStore()
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := infrastackstore.New(store)
+	if err != nil {
+		return nil, err
+	}
+	return sourcecontrol.NewStackLifecycle(adapter)
+}
 
 var shaRe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 
@@ -122,15 +136,15 @@ func initCmd() *cobra.Command {
 			if strings.TrimSpace(repo) == "" {
 				return errors.New("--repo is required")
 			}
-			st, err := openStore()
+			stacks, err := openStackLifecycle()
 			if err != nil {
 				return err
 			}
-			stack := sl.Stack{
-				ID: sl.StackID(args[0]), WorkspaceKey: ws, RepoName: repo,
-				RootBase: base, DefaultCommitMode: sl.CommitMode(mode),
-			}
-			if err := st.EnsureStack(cmd.Context(), stack); err != nil {
+			stack, err := stacks.EnsureStack(cmd.Context(), sourcecontrol.EnsureStackCommand{
+				WorkspaceKey: ws, StackID: args[0], Repository: repo,
+				RootBase: base, DefaultCommitMode: mode,
+			})
+			if err != nil {
 				return err
 			}
 			if jsonOut {
@@ -337,33 +351,35 @@ func addCmd() *cobra.Command {
 		Short: "Register a task in a stack (appends to the tip; --after to chain, --root for a parallel chain)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, err := activeWorkspace()
+			if err != nil {
+				return err
+			}
+			if strings.TrimSpace(stackID) == "" {
+				return errors.New("--stack is required")
+			}
+			stacks, err := openStackLifecycle()
 			if err != nil {
 				return err
 			}
 			if root && after != "" {
 				return errors.New("--root and --after are mutually exclusive")
 			}
-			base := after
-			// --root starts a new parallel chain off the stack base. Otherwise, with
-			// no --after, append to the current tip (the tail of the last chain).
-			if !root && base == "" {
-				nodes, lerr := st.ListNodes(cmd.Context(), ws, id)
-				if lerr != nil {
-					return lerr
-				}
-				if ordered, oerr := sl.Ordered(nodes); oerr == nil && len(ordered) > 0 {
-					base = ordered[len(ordered)-1].TaskID
-				}
-			}
-			node, err := st.AddNode(cmd.Context(), ws, id, args[0], base, sl.CommitMode(mode))
+			node, err := stacks.AddStackNode(cmd.Context(), sourcecontrol.AddStackNodeCommand{
+				WorkspaceKey: ws, StackID: stackID, TaskID: args[0],
+				AfterTaskID: after, Root: root, CommitMode: mode,
+			})
 			if err != nil {
 				return err
 			}
 			if jsonOut {
 				return cmdstore.WriteJSON(node)
 			}
-			fmt.Printf("added %s (base=%s branch=%s)\n", node.TaskID, baseOrRoot(node, "<root>"), node.OutputBranch)
+			base := node.BaseTaskID
+			if base == "" {
+				base = "<root>"
+			}
+			fmt.Printf("added %s (base=%s branch=%s)\n", node.TaskID, base, node.OutputBranch)
 			return nil
 		},
 	}
@@ -383,14 +399,20 @@ func moveCmd() *cobra.Command {
 		Short: "Reorder a unit to sit after another unit",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, err := activeWorkspace()
+			if err != nil {
+				return err
+			}
+			stacks, err := openStackLifecycle()
 			if err != nil {
 				return err
 			}
 			if after == "" {
 				return errors.New("--after is required")
 			}
-			if err := st.MoveNode(cmd.Context(), ws, id, args[0], after); err != nil {
+			if err := stacks.MoveStackNode(cmd.Context(), sourcecontrol.MoveStackNodeCommand{
+				WorkspaceKey: ws, StackID: stackID, TaskID: args[0], AfterTaskID: after,
+			}); err != nil {
 				return err
 			}
 			fmt.Printf("moved %s after %s\n", args[0], after)
@@ -410,11 +432,17 @@ func setBaseCmd() *cobra.Command {
 		Short: "Set a unit's predecessor (\"\" for root)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, err := activeWorkspace()
 			if err != nil {
 				return err
 			}
-			if err := st.SetBase(cmd.Context(), ws, id, args[0], baseTask); err != nil {
+			stacks, err := openStackLifecycle()
+			if err != nil {
+				return err
+			}
+			if err := stacks.SetStackNodeBase(cmd.Context(), sourcecontrol.SetStackNodeBaseCommand{
+				WorkspaceKey: ws, StackID: stackID, TaskID: args[0], BaseTaskID: baseTask,
+			}); err != nil {
 				return err
 			}
 			fmt.Printf("set base of %s to %q\n", args[0], baseTask)
@@ -434,11 +462,17 @@ func removeCmd() *cobra.Command {
 		Short: "Remove a unit (children reparent onto its predecessor)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ws, st, id, err := loadCtxFlag(stackID)
+			ws, err := activeWorkspace()
 			if err != nil {
 				return err
 			}
-			if err := st.RemoveNode(cmd.Context(), ws, id, args[0]); err != nil {
+			stacks, err := openStackLifecycle()
+			if err != nil {
+				return err
+			}
+			if err := stacks.RemoveStackNode(cmd.Context(), sourcecontrol.RemoveStackNodeCommand{
+				WorkspaceKey: ws, StackID: stackID, TaskID: args[0],
+			}); err != nil {
 				return err
 			}
 			fmt.Printf("removed %s\n", args[0])
@@ -586,13 +620,6 @@ func loadCtx(stackID string) (string, *stackstore.LocalStore, sl.StackID, error)
 		return "", nil, "", err
 	}
 	return ws, st, sl.StackID(stackID), nil
-}
-
-func loadCtxFlag(stackID string) (string, *stackstore.LocalStore, sl.StackID, error) {
-	if strings.TrimSpace(stackID) == "" {
-		return "", nil, "", errors.New("--stack is required")
-	}
-	return loadCtx(stackID)
 }
 
 func baseOrRoot(n sl.Node, root string) string {

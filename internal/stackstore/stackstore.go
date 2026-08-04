@@ -34,6 +34,7 @@ type Store interface {
 
 	ListNodes(ctx context.Context, ws string, id sl.StackID) ([]sl.Node, error)
 	AddNode(ctx context.Context, ws string, id sl.StackID, taskID, baseTaskID string, mode sl.CommitMode) (sl.Node, error)
+	MoveNode(ctx context.Context, ws string, id sl.StackID, taskID, afterTaskID string) error
 	SetBase(ctx context.Context, ws string, id sl.StackID, taskID, baseTaskID string) error
 	RemoveNode(ctx context.Context, ws string, id sl.StackID, taskID string) error
 	UpdateNode(ctx context.Context, ws string, id sl.StackID, taskID string, fn func(*sl.Node) error) error

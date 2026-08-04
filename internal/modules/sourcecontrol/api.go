@@ -62,6 +62,21 @@ type TaskOutcomeRecorder interface {
 	RecordTaskOutcome(context.Context, TaskOutcomeCommand) (bool, error)
 }
 
+// StackLifecycle is the Source Control application API for stack queries and
+// topology mutations. CLI and orchestration callers do not receive a concrete
+// persistence store.
+type StackLifecycle interface {
+	EnsureStack(context.Context, EnsureStackCommand) (*Stack, error)
+	ListStacks(context.Context, string) ([]Stack, error)
+	GetStack(context.Context, string, string) (*Stack, error)
+	ListStackNodes(context.Context, string, string) ([]StackNode, error)
+	AddStackNode(context.Context, AddStackNodeCommand) (*StackNode, error)
+	MoveStackNode(context.Context, MoveStackNodeCommand) error
+	SetStackNodeBase(context.Context, SetStackNodeBaseCommand) error
+	RemoveStackNode(context.Context, RemoveStackNodeCommand) error
+	ReconcileStack(context.Context, ReconcileStackCommand) (*ReconcileStackResult, error)
+}
+
 type TaskOutcomeCommand struct {
 	WorkspaceKey string
 	Repository   string
