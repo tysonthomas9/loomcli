@@ -27,7 +27,7 @@ import (
 //
 //nolint:funlen // This ordered composition table keeps route precedence and one-pass dependency wiring auditable together.
 func New(deps routecontracts.Deps, automationModules automationroutes.Modules) []interface{ Register(*http.ServeMux) } {
-	onboardingModule := supportroutes.New(deps.IssueSvc, deps.Agents, deps.AgentsOperator)
+	onboardingModule := supportroutes.New(deps.WorkItems, deps.Agents, deps.AgentsOperator)
 	taskWorkflowRuns := newTaskWorkflowRunReader(deps)
 
 	return []interface{ Register(*http.ServeMux) }{

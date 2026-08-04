@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -11,10 +12,10 @@ import (
 
 	agentsmodule "github.com/tysonthomas9/loomcli/internal/modules/agents"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
-	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // cleanupTimeout bounds the compensating delete after a failed lifecycle
@@ -39,10 +40,6 @@ type runFirstTaskResponse struct {
 	Queued    bool            `json:"queued"`
 }
 
-type createdIssueRef struct {
-	ID string `json:"id"`
-}
-
 type normalizedRunFirstTaskRequest struct {
 	AgentName   string
 	Title       string
@@ -61,7 +58,7 @@ type AgentLifecycleAPI interface {
 // selected canonical Agent. The task remains unassigned and claimable by the
 // normal Execution path; no daemon command or task payload is emitted.
 func HandleRunFirstTask(
-	issueSvc service.IssueService,
+	workItems workitems.API,
 	agents AgentLifecycleAPI,
 	resolver workflowcataloghttp.OperatorAuthorityResolver,
 ) http.HandlerFunc {
@@ -91,7 +88,7 @@ func HandleRunFirstTask(
 			writeAgentLifecycleError(w, err, "Agent lifecycle authority denied")
 			return
 		}
-		created, err := createAndQueueFirstTask(r.Context(), issueSvc, agents, auth, ws, normalized)
+		created, err := createAndQueueFirstTask(r.Context(), workItems, agents, auth, ws, normalized)
 		if err != nil {
 			writeAgentLifecycleError(w, err, "queue first task failed")
 			return
@@ -125,10 +122,10 @@ func normalizeRunFirstTaskRequest(req runFirstTaskRequest) (normalizedRunFirstTa
 		SourceRepo:  strings.TrimSpace(req.SourceRepo),
 	}
 	if out.AgentName == "" {
-		return normalizedRunFirstTaskRequest{}, service.ErrValidation("agent_name is required")
+		return normalizedRunFirstTaskRequest{}, fmt.Errorf("agent_name is required: %w", workitems.ErrInvalid)
 	}
 	if out.Title == "" {
-		return normalizedRunFirstTaskRequest{}, service.ErrValidation("title is required")
+		return normalizedRunFirstTaskRequest{}, fmt.Errorf("title is required: %w", workitems.ErrInvalid)
 	}
 	if out.IssueType == "" {
 		out.IssueType = "task"
@@ -141,7 +138,7 @@ func normalizeRunFirstTaskRequest(req runFirstTaskRequest) (normalizedRunFirstTa
 
 func createAndQueueFirstTask(
 	ctx context.Context,
-	issueSvc service.IssueService,
+	workItems workitems.API,
 	agents AgentLifecycleAPI,
 	auth authority.OperatorAuthority,
 	ws string,
@@ -154,7 +151,7 @@ func createAndQueueFirstTask(
 	if agent == nil || agent.DeletedAt != nil {
 		return nil, agentsmodule.ErrNotFound
 	}
-	created, err := issueSvc.CreateIssue(ctx, service.CreateIssueParams{
+	created, err := workItems.Create(ctx, workitems.CreateCommand{
 		Title:       req.Title,
 		IssueType:   req.IssueType,
 		Priority:    req.Priority,
@@ -165,15 +162,19 @@ func createAndQueueFirstTask(
 	if err != nil {
 		return nil, err
 	}
-	issueID, err := decodeIssueID(created)
+	issueID, err := createdIssueID(created)
 	if err != nil {
 		return nil, err
 	}
 	if err := queueFirstTask(ctx, agents, auth, agent, issueID); err != nil {
-		deleteCreatedFirstTask(issueSvc, issueID)
+		deleteCreatedFirstTask(workItems, issueID)
 		return nil, err
 	}
-	return created, nil
+	raw, err := json.Marshal(created)
+	if err != nil {
+		return nil, fmt.Errorf("encode created issue: %w", workitems.ErrInvalidPersistedState)
+	}
+	return raw, nil
 }
 
 func queueFirstTask(
@@ -194,27 +195,37 @@ func queueFirstTask(
 	return err
 }
 
-func decodeIssueID(raw json.RawMessage) (string, error) {
-	var created createdIssueRef
-	if err := json.Unmarshal(raw, &created); err != nil {
-		return "", service.ErrInternal("failed to decode created issue", err)
+func createdIssueID(created *workitems.CreatedIssue) (string, error) {
+	if created == nil {
+		return "", fmt.Errorf("created issue response was empty: %w", workitems.ErrInvalidPersistedState)
 	}
-	if strings.TrimSpace(created.ID) == "" {
-		return "", service.ErrInternal("created issue response did not include an id", nil)
+	if created.Detail != nil && strings.TrimSpace(created.Detail.ID) != "" {
+		return created.Detail.ID, nil
 	}
-	return created.ID, nil
+	if created.Summary != nil && strings.TrimSpace(created.Summary.ID) != "" {
+		return created.Summary.ID, nil
+	}
+	return "", fmt.Errorf("created issue response did not include an id: %w", workitems.ErrInvalidPersistedState)
 }
 
-func deleteCreatedFirstTask(issueSvc service.IssueService, issueID string) {
+func deleteCreatedFirstTask(workItems workitems.API, issueID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
-	if _, err := issueSvc.DeleteIssue(ctx, issueID); err != nil {
+	if _, err := workItems.Delete(ctx, workitems.DeleteCommand{IssueID: issueID}); err != nil {
 		slog.Warn("onboarding first task cleanup failed", "issue_id", issueID, "err", err)
 	}
 }
 
 func writeAgentLifecycleError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, workitems.ErrInvalid),
+		errors.Is(err, workitems.ErrNotFound),
+		errors.Is(err, workitems.ErrConflict),
+		errors.Is(err, workitems.ErrUnavailable),
+		errors.Is(err, workitems.ErrTimeout),
+		errors.Is(err, workitems.ErrNotImplemented),
+		errors.Is(err, workitems.ErrInvalidPersistedState):
+		handler.HandleWorkItemsError(w, err)
 	case errors.Is(err, workflowcataloghttp.ErrUnauthenticated),
 		errors.Is(err, authority.ErrInvalidPrincipal),
 		errors.Is(err, authority.ErrPrincipalExpired):
@@ -236,6 +247,6 @@ func writeAgentLifecycleError(w http.ResponseWriter, err error, fallback string)
 	case errors.Is(err, agentsmodule.ErrUnavailable):
 		handler.RespondError(w, http.StatusServiceUnavailable, fallback)
 	default:
-		handler.HandleServiceError(w, err)
+		handler.RespondError(w, http.StatusInternalServerError, fallback)
 	}
 }

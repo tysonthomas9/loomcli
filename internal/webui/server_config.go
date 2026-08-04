@@ -159,12 +159,9 @@ type ServerConfig struct {
 	ArtifactsCapability    ArtifactsCapability                      // Active owner-fenced Artifact lifecycle; nil fails artifact mutations closed
 	Logger                 *slog.Logger                             // Structured logger (optional; nil falls back to slog.Default())
 	SentryDSN              string                                   // Sentry/GlitchTip DSN for error tracking (optional; empty disables)
-	// IssueBackendFn returns the active backend.IssueBackend used by the
-	// webui issue service for the migrated CRUD operations (Get, Create,
-	// Update/Patch, Close, Claim, Delete, AddComment, AddDependency,
-	// RemoveDependency, ListEvents). When nil, the service falls back to
-	// returning ErrUnavailable from those operations. Wired through
-	// service.IssueBackendProvider; see service.NewIssueServiceWithBackend.
+	// IssueBackendFn returns the active backend.IssueBackend wrapped at server
+	// composition by the Work Items capability's narrow durable adapter. When
+	// nil, Work Items HTTP and onboarding routes remain unavailable.
 	//
 	// Threaded as a closure rather than a backend.IssueBackend field so the
 	// cli wiring can resolve the backend lazily without webui depending on

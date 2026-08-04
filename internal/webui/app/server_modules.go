@@ -132,7 +132,7 @@ func (app *Server) buildStoreBackedInfraModules() {
 func (app *Server) unifiedAgentModuleDeps() modbuilder.UnifiedAgentModuleDeps {
 	deps := modbuilder.UnifiedAgentModuleDeps{
 		Store: app.config.Store, InteractiveAgentRuntime: app.agentRuntime,
-		IssueSvc: app.issueSvc, Hub: app.hub,
+		WorkItems: app.workItems, Hub: app.hub,
 		FleetBaseURL: app.config.FleetDBBaseURL, DriverAPIBaseURL: app.config.DriverAPIBaseURL,
 		ExecutionIssueBackends: app.config.ExecutionIssueBackends,
 		DriverAPIToken:         app.config.DriverAPIToken, DriverRunTokenKey: app.config.DriverRunTokenKey,

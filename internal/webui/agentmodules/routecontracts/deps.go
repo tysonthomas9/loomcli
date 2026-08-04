@@ -20,6 +20,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	"github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -31,7 +32,7 @@ type Deps struct {
 	Store                         store.Store
 	InteractiveAgentRuntime       service.InteractiveAgentRuntime
 	AgentSessionTranscripts       service.AgentSessionTranscriptService
-	IssueSvc                      service.IssueService
+	WorkItems                     workitems.API
 	Hub                           *realtime.Hub
 	FleetBaseURL                  string
 	ExecutionIssueBackends        func(workspace, actor string) (backend.IssueBackend, error)

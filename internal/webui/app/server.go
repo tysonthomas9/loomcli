@@ -56,7 +56,6 @@ type Server struct {
 	connectorDispatcher connectorsmodule.Dispatcher
 
 	// Service layer
-	issueSvc         service.IssueService
 	workItems        workitems.API
 	workspaceCatalog workspace.API
 	workspaceStore   store.WorkspaceStore
