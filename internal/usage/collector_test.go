@@ -170,3 +170,54 @@ func TestCollector_Finalize_Metadata(t *testing.T) {
 		t.Errorf("ExitCode = %d, want 137", u.ExitCode)
 	}
 }
+
+func TestCollector_Totals(t *testing.T) {
+	c := NewCollector("claude", "agent")
+	c.Accumulate("msg-1", 100, 50, 10, 5)
+	c.Accumulate("msg-2", 200, 100, 20, 10)
+
+	inTok, outTok, cacheRead, cacheWrite := c.Totals()
+	if inTok != 300 {
+		t.Errorf("inputTokens = %d, want 300", inTok)
+	}
+	if outTok != 150 {
+		t.Errorf("outputTokens = %d, want 150", outTok)
+	}
+	if cacheRead != 30 {
+		t.Errorf("cacheReadTokens = %d, want 30", cacheRead)
+	}
+	if cacheWrite != 15 {
+		t.Errorf("cacheWriteTokens = %d, want 15", cacheWrite)
+	}
+}
+
+func TestCollector_TotalsEmpty(t *testing.T) {
+	c := NewCollector("claude", "agent")
+	inTok, outTok, cacheRead, cacheWrite := c.Totals()
+	if inTok != 0 || outTok != 0 || cacheRead != 0 || cacheWrite != 0 {
+		t.Errorf("expected all zeros, got (%d, %d, %d, %d)", inTok, outTok, cacheRead, cacheWrite)
+	}
+}
+
+func TestCollector_TotalsAfterFinalize(t *testing.T) {
+	c := NewCollector("claude", "agent")
+	c.Accumulate("msg-1", 100, 50, 10, 5)
+
+	now := time.Now()
+	_ = c.Finalize("task", "epic", now, now.Add(time.Minute), 0)
+
+	// Totals should still return correct values after Finalize
+	inTok, outTok, cacheRead, cacheWrite := c.Totals()
+	if inTok != 100 {
+		t.Errorf("inputTokens after Finalize = %d, want 100", inTok)
+	}
+	if outTok != 50 {
+		t.Errorf("outputTokens after Finalize = %d, want 50", outTok)
+	}
+	if cacheRead != 10 {
+		t.Errorf("cacheReadTokens after Finalize = %d, want 10", cacheRead)
+	}
+	if cacheWrite != 5 {
+		t.Errorf("cacheWriteTokens after Finalize = %d, want 5", cacheWrite)
+	}
+}

@@ -51,6 +51,14 @@ func (c *Collector) Accumulate(messageID string, input, output, cacheRead, cache
 	c.cacheWriteTokens += cacheWrite
 }
 
+// Totals returns the raw accumulated token counts without constructing a full
+// SessionUsage record. Safe to call before or after Finalize.
+func (c *Collector) Totals() (inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.inputTokens, c.outputTokens, c.cacheReadTokens, c.cacheWriteTokens
+}
+
 // Finalize produces a SessionUsage record from the accumulated totals.
 func (c *Collector) Finalize(taskID, epicID string, startedAt, endedAt time.Time, exitCode int) SessionUsage {
 	c.mu.Lock()

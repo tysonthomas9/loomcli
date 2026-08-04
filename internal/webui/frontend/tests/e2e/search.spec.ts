@@ -1,4 +1,5 @@
 import { test, expect, Page } from "@playwright/test"
+import { setupFleetMocks, waitForWorkspaceIssues, workspacePath } from "./helpers/fleet"
 
 /**
  * Mock issues for testing search filtering.
@@ -51,13 +52,7 @@ const mockIssues = [
  * Set up API mocks for search tests.
  */
 async function setupMocks(page: Page) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: mockIssues }),
-    })
-  })
+  await setupFleetMocks(page, mockIssues)
 }
 
 /**
@@ -65,10 +60,8 @@ async function setupMocks(page: Page) {
  */
 async function navigateAndWait(page: Page, path: string) {
   const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
-    ),
-    page.goto(path),
+    waitForWorkspaceIssues(page),
+    page.goto(workspacePath(path)),
   ])
   expect(response.ok()).toBe(true)
 }
@@ -172,9 +165,7 @@ test.describe("SearchInput filtering", () => {
       expect(await countVisibleCards(page)).toBe(0)
     }).toPass({ timeout: 2000 })
 
-    // Verify all columns show 0 count badges
-    const openColumn = page.locator('section[data-status="ready"]')
-    await expect(openColumn.getByLabel("0 issues")).toBeVisible()
+    await expect(page.getByText("No issues yet")).toBeVisible()
   })
 
   test("clearing search shows all issues", async ({ page }) => {

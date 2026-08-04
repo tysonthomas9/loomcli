@@ -1,13 +1,14 @@
 /**
  * SSE stream mock for simulating real-time events in Playwright E2E tests.
- * Uses page.route() to intercept /api/events and stream SSE data back.
+ * Uses page.route() to intercept workspace-scoped /api/workspaces/:id/events
+ * and stream SSE data back.
  */
 
 import type { Page, Route } from '@playwright/test';
 import type { MutationPayload } from '../../src/api/sse';
 
 export interface SSEMockController {
-  /** Intercepts GET /api/events and holds the response open as an SSE stream. */
+  /** Intercepts GET /api/workspaces/:id/events and holds the response open as an SSE stream. */
   connect(): Promise<void>;
   /** Pushes a `event: mutation` frame to the connected stream. */
   sendMutation(payload: MutationPayload): void;
@@ -25,16 +26,20 @@ export interface SSEMockController {
  * Usage:
  *   const sse = createSSEMock(page);
  *   await sse.connect();
- *   await page.goto('/');
+ *   await page.goto('/ws/default/kanban');
  *   sse.sendConnected();
  *   sse.sendMutation({ type: 'update', issue_id: 'test-001', timestamp: '...' });
  *   sse.close();
  */
+const SSE_PATTERN = '**/workspaces/*/events**';
+
 export function createSSEMock(page: Page): SSEMockController {
   let pendingRoutes: Array<{ route: Route; resolve: () => void }> = [];
   let buffer: string[] = [];
   let connected = false;
   let connectionCount = 0;
+  // Store handler ref so close() can unroute to prevent handler accumulation
+  let routeHandler: ((route: Route) => Promise<void>) | null = null;
 
   function flushBuffer(): void {
     if (pendingRoutes.length === 0 || buffer.length === 0) return;
@@ -73,8 +78,20 @@ export function createSSEMock(page: Page): SSEMockController {
     connectionCount: 0,
 
     async connect(): Promise<void> {
+      // Unroute previous handler if connect() is called again after close()
+      if (routeHandler) {
+        await page.unroute(SSE_PATTERN, routeHandler);
+        routeHandler = null;
+      }
+
       connected = true;
-      await page.route('**/api/events**', async (route) => {
+      routeHandler = async (route: Route) => {
+        // Let events/token requests fall through to the mockSseToken handler
+        if (route.request().url().includes('/events/token')) {
+          await route.fallback();
+          return;
+        }
+
         connectionCount++;
         controller.connectionCount = connectionCount;
 
@@ -92,7 +109,8 @@ export function createSSEMock(page: Page): SSEMockController {
         flushBuffer();
 
         await routePromise;
-      });
+      };
+      await page.route(SSE_PATTERN, routeHandler);
     },
 
     sendMutation(payload: MutationPayload): void {
@@ -119,6 +137,8 @@ export function createSSEMock(page: Page): SSEMockController {
       }
       pendingRoutes = [];
       buffer = [];
+      // Note: routeHandler is cleaned up in connect() if called again.
+      // Page teardown automatically cleans up all routes.
     },
   };
 

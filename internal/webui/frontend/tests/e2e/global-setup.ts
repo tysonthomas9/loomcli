@@ -46,6 +46,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
 
   const localServer = !!process.env.LOOM_LOCAL_SERVER
   const baseURL = process.env.LOOM_BASE_URL || 'http://localhost:8080'
+  const frontendBaseURL = process.env.LOOM_FRONTEND_BASE_URL || baseURL
 
   if (localServer) {
     // Local mode: just health-check the running loom serve instance
@@ -54,7 +55,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
 
     await fs.writeFile(STATE_FILE, JSON.stringify({
       startedAt: new Date().toISOString(),
-      webUrl: baseURL,
+      webUrl: frontendBaseURL,
       loomUrl: baseURL,
       composeDir: COMPOSE_DIR,
       localMode: true,
@@ -68,9 +69,10 @@ async function globalSetup(config: FullConfig): Promise<void> {
   // Just write state file so teardown doesn't error.
   if (!process.env.PODMAN_COMPOSE) {
     console.log('webServer mode — Playwright manages server lifecycle')
+
     await fs.writeFile(STATE_FILE, JSON.stringify({
       startedAt: new Date().toISOString(),
-      webUrl: baseURL,
+      webUrl: frontendBaseURL,
       loomUrl: baseURL,
       composeDir: COMPOSE_DIR,
       localMode: true,
@@ -95,14 +97,14 @@ async function globalSetup(config: FullConfig): Promise<void> {
   console.log('Waiting for services to become healthy...')
 
   await Promise.all([
-    waitForHealth('http://localhost:8081/health'),
+    waitForHealth('http://localhost:8080/health'),
     waitForHealth('http://localhost:9000/health'),
   ])
 
   // Write state file for teardown and tests
   await fs.writeFile(STATE_FILE, JSON.stringify({
     startedAt: new Date().toISOString(),
-    webUrl: 'http://localhost:8081',
+    webUrl: 'http://localhost:8080',
     loomUrl: 'http://localhost:9000',
     composeDir: COMPOSE_DIR,
     localMode: false,

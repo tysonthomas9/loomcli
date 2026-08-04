@@ -8,7 +8,7 @@
 import { memo, useMemo } from "react";
 
 import type { Issue } from "@/types";
-import { formatIssueId } from "@/utils/formatIssueId";
+import { formatIssueId } from "@/utils/issue";
 
 import styles from "./NodeTooltip.module.css";
 
@@ -135,7 +135,9 @@ function NodeTooltipComponent({
       aria-hidden="true"
     >
       {/* Issue ID */}
-      <span className={styles.issueId}>{displayId}</span>
+      <span className={styles.issueId} title={issue.id}>
+        {displayId}
+      </span>
 
       {/* Title */}
       <h4 className={styles.title}>{displayTitle}</h4>

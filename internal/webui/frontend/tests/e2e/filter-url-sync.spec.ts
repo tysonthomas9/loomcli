@@ -38,12 +38,88 @@ const mockIssues = [
  * Set up API mocks for filter URL sync tests.
  */
 async function setupMocks(page: Page) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: mockIssues }),
-    })
+  const workspace = {
+    id: "default",
+    name: "Default",
+    path: "/tmp/default",
+    repos: [],
+    groups: [],
+    agents: [],
+    workspaces: [
+      {
+        id: "default",
+        name: "Default",
+        path: "/tmp/default",
+        active: true,
+        repo_count: 0,
+        is_default: true,
+      },
+    ],
+    workspace_order: ["default"],
+    default_workspace: "Default",
+  }
+
+  await page.route("**/*", async (route) => {
+    const pathname = new URL(route.request().url()).pathname
+    if (pathname === "/api/config") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+    } else if (
+      pathname === "/api/workspaces/active" ||
+      pathname === "/api/workspaces/default"
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: workspace }),
+      })
+    } else if (pathname === "/api/workspaces/default/issues") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: mockIssues }),
+      })
+    } else if (pathname === "/api/workspaces/default/stats") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total_issues: mockIssues.length,
+          open_issues: mockIssues.filter((i) => i.status === "open").length,
+          in_progress_issues: mockIssues.filter((i) => i.status === "in_progress").length,
+          closed_issues: 0,
+          blocked_issues: 0,
+          deferred_issues: 0,
+          ready_issues: mockIssues.filter((i) => i.status === "open").length,
+          tombstone_issues: 0,
+          pinned_issues: 0,
+          epics_eligible_for_closure: 0,
+          average_lead_time_hours: 0,
+        }),
+      })
+    } else if (
+      pathname === "/api/workspaces/default/blocked" ||
+      pathname === "/api/workspaces/default/terminal/tabs"
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, data: [] }),
+      })
+    } else if (pathname === "/api/workspaces/default/terminal/state") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ active_tab: "" }),
+      })
+    } else if (pathname.startsWith("/api/") && pathname.includes("/events")) {
+      await route.abort()
+    } else {
+      await route.continue()
+    }
   })
 }
 
@@ -51,11 +127,19 @@ async function setupMocks(page: Page) {
  * Navigate to a page and wait for API response.
  */
 async function navigateAndWait(page: Page, path: string) {
+  const appPath =
+    path === "/"
+      ? "/ws/default/kanban"
+      : path.startsWith("/?")
+        ? `/ws/default/kanban${path.slice(1)}`
+        : path
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
+      (res) =>
+        new URL(res.url()).pathname === "/api/workspaces/default/issues" &&
+        res.status() === 200
     ),
-    page.goto(path),
+    page.goto(appPath),
   ])
   expect(response.ok()).toBe(true)
 }
@@ -299,7 +383,10 @@ test.describe("Filter URL Synchronization - Edge Cases", () => {
     await page.reload()
 
     // Wait for API response after reload
-    await page.waitForResponse((res) => res.url().includes("/api/ready"))
+    await page.waitForResponse(
+      (res) =>
+        new URL(res.url()).pathname === "/api/workspaces/default/issues",
+    )
 
     // Verify filter still applied
     await expect(priorityFilter).toHaveValue("2")

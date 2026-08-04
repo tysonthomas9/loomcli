@@ -128,7 +128,7 @@ export const TIMING_EXPECTATIONS = {
   updateLatency: 200,
   /** Browser's EventSource reconnection delay (approximate) */
   browserReconnectDelayMs: 3000,
-  /** Initial application reconnect delay (for useSSE hook) */
+  /** Initial application reconnect delay */
   reconnectDelayMs: 1000,
   /** Maximum reconnect delay with backoff */
   maxReconnectDelayMs: 30000,
@@ -141,8 +141,8 @@ export const TIMING_EXPECTATIONS = {
  * and remain open (streaming) rather than completing immediately like regular requests.
  */
 export const NETWORK_PATTERNS = {
-  /** SSE endpoint for real-time events (shows as "eventsource" type in DevTools) */
-  sseEndpoint: "/api/events",
+  /** SSE endpoint prefix for real-time events (shows as "eventsource" type in DevTools) */
+  sseEndpoint: "/api/workspaces/",
   /** Initial data fetch (regular fetch request) */
   readyEndpoint: "/api/ready",
   /** Issue detail endpoint pattern */
@@ -169,6 +169,24 @@ export const A11Y_ATTRIBUTES = {
   },
   retryButton: {
     ariaLabel: "Retry connection now",
+  },
+  navRail: {
+    containerRole: "navigation",
+    ariaLabel: "Primary",
+  },
+  bulkActionToolbar: {
+    role: "toolbar",
+    ariaLabelPattern: /Bulk actions for \d+ selected issue/,
+  },
+  priorityDropdown: {
+    ariaHasPopup: "listbox",
+    ariaLabelPattern: /Priority: P\d - .+/,
+  },
+  liveRegion: {
+    politeTestId: "live-region-polite",
+    assertiveTestId: "live-region-assertive",
+    politeAriaLive: "polite",
+    assertiveAriaLive: "assertive",
   },
 } as const;
 

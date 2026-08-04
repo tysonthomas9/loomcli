@@ -27,7 +27,7 @@ func TestStaleDetector_LeaderElection_SingleInstance(t *testing.T) {
 		LeaderKey: DefaultLeaderKey,
 	}
 
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 	acquired, err := sd.tryAcquireLeadership(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -55,8 +55,8 @@ func TestStaleDetector_LeaderElection_MultipleInstances(t *testing.T) {
 		LeaderKey: DefaultLeaderKey,
 	}
 
-	sd1 := NewStaleDetector(client, cfg, "server-1", nil)
-	sd2 := NewStaleDetector(client, cfg, "server-2", nil)
+	sd1 := NewStaleDetector(client, cfg, "server-1")
+	sd2 := NewStaleDetector(client, cfg, "server-2")
 
 	// Server 1 acquires
 	acquired, err := sd1.tryAcquireLeadership(ctx)
@@ -86,8 +86,8 @@ func TestStaleDetector_LeaderExpiry(t *testing.T) {
 		LeaderKey: DefaultLeaderKey,
 	}
 
-	sd1 := NewStaleDetector(client, cfg, "server-1", nil)
-	sd2 := NewStaleDetector(client, cfg, "server-2", nil)
+	sd1 := NewStaleDetector(client, cfg, "server-1")
+	sd2 := NewStaleDetector(client, cfg, "server-2")
 
 	// Server 1 acquires
 	_, err := sd1.tryAcquireLeadership(ctx)
@@ -117,7 +117,7 @@ func TestStaleDetector_DetectStaleWorkers(t *testing.T) {
 		LeaderTTL:      30 * time.Second,
 		LeaderKey:      DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Seed a stale worker (heartbeat 10 minutes ago)
 	staleTime := float64(time.Now().Add(-10 * time.Minute).UnixMilli())
@@ -153,7 +153,7 @@ func TestStaleDetector_CleanupWorker(t *testing.T) {
 	cfg := StaleDetectorConfig{
 		LeaderKey: DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Set up worker state
 	mr.ZAdd(activeWorkersKey(), float64(time.Now().UnixMilli()), "worker-1")
@@ -197,7 +197,7 @@ func TestStaleDetector_NoStaleWorkers(t *testing.T) {
 		StaleThreshold: 5 * time.Minute,
 		LeaderKey:      DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Only fresh workers
 	freshTime := float64(time.Now().UnixMilli())
@@ -220,7 +220,7 @@ func TestStaleDetector_CleanupWorker_AlreadyExpired(t *testing.T) {
 	cfg := StaleDetectorConfig{
 		LeaderKey: DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Worker with no Redis state (already expired via TTL)
 	sw := StaleWorker{
@@ -242,7 +242,7 @@ func TestStaleDetector_CleanupWorker_TaskOwnedByDifferentWorker(t *testing.T) {
 	cfg := StaleDetectorConfig{
 		LeaderKey: DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Set up: worker-1 is stale, but task was already reclaimed by worker-2
 	mr.ZAdd(activeWorkersKey(), float64(time.Now().UnixMilli()), "worker-1")
@@ -284,7 +284,7 @@ func TestStaleDetector_GracefulShutdown(t *testing.T) {
 		LeaderTTL:      30 * time.Second,
 		LeaderKey:      DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Ensure the key doesn't get expired by miniredis during our test
 	_ = mr
@@ -319,7 +319,7 @@ func TestStaleDetector_ReleaseLeadership(t *testing.T) {
 		LeaderKey: DefaultLeaderKey,
 	}
 
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Acquire leadership
 	acquired, _ := sd.tryAcquireLeadership(ctx)
@@ -331,7 +331,7 @@ func TestStaleDetector_ReleaseLeadership(t *testing.T) {
 	sd.releaseLeadership(ctx)
 
 	// Another server should now be able to acquire
-	sd2 := NewStaleDetector(client, cfg, "server-2", nil)
+	sd2 := NewStaleDetector(client, cfg, "server-2")
 	acquired, _ = sd2.tryAcquireLeadership(ctx)
 	if !acquired {
 		t.Fatal("server-2 should acquire after server-1 released")
@@ -347,7 +347,7 @@ func TestStaleDetector_RenewLeadership(t *testing.T) {
 		LeaderKey: DefaultLeaderKey,
 	}
 
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Acquire leadership
 	_, err := sd.tryAcquireLeadership(ctx)
@@ -383,7 +383,7 @@ func TestStaleDetector_Status(t *testing.T) {
 	cfg := StaleDetectorConfig{
 		LeaderKey: DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	status := sd.Status()
 	if !status.Enabled {
@@ -405,8 +405,7 @@ func TestStaleDetector_FullCycle(t *testing.T) {
 		LeaderKey:      DefaultLeaderKey,
 	}
 
-	// No reconciler since we can't exec bd in tests
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Seed a stale worker manually (heartbeat 10 minutes ago)
 	staleTime := float64(time.Now().Add(-10 * time.Minute).UnixMilli())
@@ -657,7 +656,7 @@ func TestStaleDetector_RunCycle_NoStaleWorkers(t *testing.T) {
 		LeaderTTL:      30 * time.Second,
 		LeaderKey:      DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Only fresh workers
 	freshTime := float64(time.Now().UnixMilli())
@@ -675,7 +674,7 @@ func TestStaleDetector_RunCycle_NoStaleWorkers(t *testing.T) {
 	}
 }
 
-func TestStaleDetector_RunCycle_WithReconciler(t *testing.T) {
+func TestStaleDetector_RunCycle_ReleasesTaskOwnership(t *testing.T) {
 	client, mr := setupStaleTest(t)
 	ctx := context.Background()
 
@@ -686,9 +685,7 @@ func TestStaleDetector_RunCycle_WithReconciler(t *testing.T) {
 		LeaderKey:      DefaultLeaderKey,
 	}
 
-	// Use /usr/bin/true as a stub binary that exits successfully
-	reconciler := NewReconciler("/usr/bin/true")
-	sd := NewStaleDetector(client, cfg, "server-1", reconciler)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Seed a stale worker with a task
 	staleTime := float64(time.Now().Add(-10 * time.Minute).UnixMilli())
@@ -702,9 +699,13 @@ func TestStaleDetector_RunCycle_WithReconciler(t *testing.T) {
 	if status.StaleWorkersFound != 1 {
 		t.Errorf("expected StaleWorkersFound=1, got %d", status.StaleWorkersFound)
 	}
-	// The reconciler runs /usr/bin/true which succeeds
-	if status.TasksReconciled != 1 {
-		t.Errorf("expected TasksReconciled=1, got %d", status.TasksReconciled)
+	if status.TasksReleased != 1 {
+		t.Errorf("expected TasksReleased=1, got %d", status.TasksReleased)
+	}
+	if owner, err := client.GetTaskOwner(ctx, "task-orphan"); err != nil {
+		t.Fatalf("GetTaskOwner: %v", err)
+	} else if owner != "" {
+		t.Errorf("expected released task owner, got %q", owner)
 	}
 }
 
@@ -715,7 +716,7 @@ func TestStaleDetector_CleanupWorker_NoTask(t *testing.T) {
 	cfg := StaleDetectorConfig{
 		LeaderKey: DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Idle worker that went stale (no task)
 	mr.ZAdd(activeWorkersKey(), float64(time.Now().UnixMilli()), "idle-worker")
@@ -754,7 +755,7 @@ func TestStaleDetector_ReleaseLeadership_NotLeader(t *testing.T) {
 		LeaderKey: DefaultLeaderKey,
 	}
 
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Don't acquire leadership, just call release - should be a no-op
 	sd.releaseLeadership(ctx)
@@ -775,14 +776,14 @@ func TestStaleDetector_ReleaseLeadership_DifferentOwner(t *testing.T) {
 	}
 
 	// server-1 acquires leadership
-	sd1 := NewStaleDetector(client, cfg, "server-1", nil)
+	sd1 := NewStaleDetector(client, cfg, "server-1")
 	acquired, _ := sd1.tryAcquireLeadership(ctx)
 	if !acquired {
 		t.Fatal("expected server-1 to acquire leadership")
 	}
 
 	// server-2 tries to release — should be a no-op since it doesn't own the key
-	sd2 := NewStaleDetector(client, cfg, "server-2", nil)
+	sd2 := NewStaleDetector(client, cfg, "server-2")
 	sd2.releaseLeadership(ctx)
 
 	// Key should still exist and be owned by server-1
@@ -929,7 +930,7 @@ func TestCleanupWorker_AtomicOwnershipCheck(t *testing.T) {
 	cfg := StaleDetectorConfig{
 		LeaderKey: DefaultLeaderKey,
 	}
-	sd := NewStaleDetector(client, cfg, "server-1", nil)
+	sd := NewStaleDetector(client, cfg, "server-1")
 
 	// Set up worker-1 as stale with task-abc
 	mr.ZAdd(activeWorkersKey(), float64(time.Now().UnixMilli()), "worker-1")

@@ -1,0 +1,107 @@
+/**
+ * ActivityLog styles.
+ * Timeline-style layout with connected entries.
+ */
+
+.section {
+  margin-bottom: 28px;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  margin: 0 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.emptyState {
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+  margin: 0;
+  text-align: center;
+  padding: 12px 0;
+}
+
+/* Timeline container with subtle vertical line */
+.timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--color-border-light);
+}
+
+/* Comment entries - larger block */
+.commentEntry {
+  display: flex;
+  gap: 10px;
+  padding: 8px 0;
+  position: relative;
+}
+
+.commentContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.commentMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.author {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.timestamp {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.commentBodyWrap {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+/* Event entries - compact inline */
+.eventEntry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  position: relative;
+}
+
+.eventIcon {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  /* Center on the timeline line (line is at 13px, icon is 16px) */
+  margin-left: 5px;
+}
+
+.eventDescription {
+  font-size: var(--font-size-base);
+  color: var(--color-text-muted);
+  flex: 1;
+  min-width: 0;
+}

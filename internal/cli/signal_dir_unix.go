@@ -11,7 +11,7 @@ import (
 // ensureSignalDir safely creates or validates the signal directory.
 // It verifies the path is not a symlink and is owned by the current user,
 // preventing symlink attacks and cross-user interference.
-func ensureSignalDir(dir string) error {
+func EnsureSignalDir(dir string) error {
 	fi, err := os.Lstat(dir)
 	if os.IsNotExist(err) {
 		if mkErr := os.MkdirAll(dir, 0700); mkErr != nil {
@@ -31,7 +31,7 @@ func ensureSignalDir(dir string) error {
 
 // validateSignalDir performs a read-only validation of the signal directory.
 // Used by the consumer side (automode) to verify the directory before trusting signal files.
-func validateSignalDir(dir string) error {
+func ValidateSignalDir(dir string) error {
 	fi, err := os.Lstat(dir)
 	if err != nil {
 		return fmt.Errorf("failed to check signal directory: %w", err)

@@ -5,6 +5,8 @@
 
 import type { ReactNode } from "react";
 
+import { LiveRegion } from "@/components/LiveRegion/LiveRegion";
+
 import styles from "./AppLayout.module.css";
 
 /**
@@ -21,8 +23,10 @@ export interface AppLayoutProps {
   actions?: ReactNode;
   /** Optional element to render in the left sidebar */
   sidebar?: ReactNode;
-  /** Application title displayed in header (defaults to "Beads") */
-  title?: string;
+  /** Application title displayed in header (defaults to "Loom") */
+  title?: ReactNode;
+  /** When set, the brand/title becomes a home button (design: logo → kanban) */
+  onTitleClick?: () => void;
   /** Additional CSS class name */
   className?: string;
 }
@@ -38,7 +42,8 @@ export function AppLayout({
   navigation,
   actions,
   sidebar,
-  title = "Beads",
+  title = "Loom",
+  onTitleClick,
   className,
 }: AppLayoutProps): JSX.Element {
   const rootClassName = className
@@ -47,13 +52,25 @@ export function AppLayout({
 
   return (
     <div className={rootClassName}>
+      <LiveRegion />
       <a href="#main-content" className={styles.skipLink}>
         Skip to main content
       </a>
       <header className={styles.header} role="banner">
         <div className={styles.headerContent}>
           <div className={styles.brand}>
-            <h1 className={styles.title}>{title}</h1>
+            {onTitleClick ? (
+              <button
+                type="button"
+                className={styles.brandButton}
+                onClick={onTitleClick}
+                aria-label="Go to board"
+              >
+                <h1 className={styles.title}>{title}</h1>
+              </button>
+            ) : (
+              <h1 className={styles.title}>{title}</h1>
+            )}
           </div>
           {navigation && (
             <nav className={styles.navigation} aria-label="Main navigation">
@@ -65,7 +82,7 @@ export function AppLayout({
       </header>
       <div className={styles.contentWrapper}>
         {navRail}
-        {sidebar}
+        {sidebar && <aside className={styles.sidebarSlot}>{sidebar}</aside>}
         <main className={styles.main} role="main" id="main-content">
           {children}
         </main>

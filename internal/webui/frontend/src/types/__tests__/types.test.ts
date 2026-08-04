@@ -291,7 +291,7 @@ describe("createMutationEvent", () => {
 
     const payload: MutationPayload = {
       type: "create",
-      issue_id: "bd-123",
+      issue_id: "loom-123",
       timestamp: "2024-01-15T10:00:00Z",
     };
 
@@ -305,7 +305,7 @@ describe("createMutationEvent", () => {
   it("preserves payload unchanged", () => {
     const payload: MutationPayload = {
       type: "status",
-      issue_id: "bd-456",
+      issue_id: "loom-456",
       timestamp: "2024-01-15T10:00:00Z",
       old_status: "open",
       new_status: "in_progress",
@@ -323,7 +323,7 @@ describe("createMutationEvent", () => {
   it("does not set sequence by default", () => {
     const payload: MutationPayload = {
       type: "create",
-      issue_id: "bd-789",
+      issue_id: "loom-789",
       timestamp: "2024-01-15T10:00:00Z",
     };
 
@@ -336,7 +336,7 @@ describe("Mutation type guards", () => {
   const createTestEvent = (type: MutationPayload["type"]): MutationEvent => ({
     mutation: {
       type,
-      issue_id: "bd-test",
+      issue_id: "loom-test",
       timestamp: "2024-01-15T10:00:00Z",
     },
     received_at: "2024-01-15T12:00:00Z",
@@ -396,7 +396,7 @@ describe("Mutation type guards", () => {
       const event: MutationEvent = {
         mutation: {
           type: "status",
-          issue_id: "bd-test",
+          issue_id: "loom-test",
           timestamp: "2024-01-15T10:00:00Z",
           old_status: "open",
           new_status: "in_progress",
@@ -417,9 +417,9 @@ describe("Mutation type guards", () => {
       const event: MutationEvent = {
         mutation: {
           type: "bonded",
-          issue_id: "bd-test",
+          issue_id: "loom-test",
           timestamp: "2024-01-15T10:00:00Z",
-          parent_id: "bd-parent",
+          parent_id: "loom-parent",
           step_count: 3,
         },
         received_at: "2024-01-15T12:00:00Z",

@@ -4,7 +4,7 @@
  */
 
 .statusColumn {
-  --column-bg: #e8e5dc;
+  --column-bg: var(--color-column-bg);
   display: flex;
   flex-direction: column;
   min-width: 220px;
@@ -23,7 +23,9 @@
   padding: 14px 16px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  background-color: #ece9df;
+  background-color: var(
+    --color-chrome
+  ); /* Aether column-header strip (#1a1a1a) */
 }
 
 .headerLabel {
@@ -76,7 +78,7 @@
   flex-shrink: 0;
   font-size: var(--font-size-sm);
   line-height: 1;
-  color: #8b8b8b;
+  color: var(--color-text-muted);
   display: inline-flex;
   align-items: center;
 }
@@ -89,8 +91,10 @@
 
 .title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
+  font-size: var(
+    --font-size-sm
+  ); /* 14px — Aether column header (text-sm font-black) */
+  font-weight: 900;
   letter-spacing: -0.01em;
   color: var(--color-text);
   line-height: var(--line-height-tight);
@@ -107,7 +111,7 @@
   font-size: 0.7rem;
   font-weight: 600;
   color: #6b7280;
-  background-color: #e4e1d9;
+  background-color: var(--color-bg-active);
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-full);
   text-align: center;
@@ -129,6 +133,11 @@
     border-color 0.15s ease;
   border: 1px solid transparent;
   overflow-y: auto; /* Scroll when cards overflow column height */
+  /* Cards must keep intrinsic height; otherwise flex shrink squashes them
+     when swim-lane columns are viewport-capped. */
+  > * {
+    flex-shrink: 0;
+  }
   /* Smooth momentum scrolling on iOS */
   -webkit-overflow-scrolling: touch;
   /* Firefox scrollbar styling */
@@ -221,7 +230,7 @@
  * ================================= */
 
 .statusColumn[data-column-type="backlog"] {
-  --column-bg: #e3e0d6;
+  --column-bg: var(--color-column-bg-muted);
   background-color: var(--column-bg);
 }
 
@@ -230,9 +239,18 @@
 }
 
 .statusColumn[data-column-type="backlog"] .title {
-  color: #777777;
+  color: var(--color-text-muted);
 }
 
 .statusColumn[data-column-type="backlog"] .count {
-  background-color: #dedace;
+  background-color: var(--color-bg-active);
+}
+
+/* Responsive: fixed-width columns for horizontal scrolling on mobile */
+@media (width <= 768px) {
+  .statusColumn {
+    min-width: 260px;
+    flex: 0 0 260px;
+    scroll-snap-align: start;
+  }
 }

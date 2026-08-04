@@ -6,7 +6,7 @@
 
 import type { DragEndEvent } from "@dnd-kit/core";
 
-import { updateIssue } from "@/api";
+import { updateIssue } from "@/hooks/api";
 import type { Issue, Status } from "@/types";
 
 /**
@@ -21,6 +21,8 @@ export interface IssueStatusChangeCallback {
  * Options for creating the drag end handler.
  */
 export interface HandleDragEndOptions {
+  /** Workspace ID for scoped API calls. */
+  workspaceId: string;
   /** Callback to update local state optimistically */
   onIssueStatusChange: IssueStatusChangeCallback;
   /** Optional callback when API call succeeds */
@@ -104,7 +106,7 @@ function isDroppableData(data: unknown): data is DroppableData {
  * ```
  */
 export function createDragEndHandler(options: HandleDragEndOptions) {
-  const { onIssueStatusChange, onSuccess, onError } = options;
+  const { workspaceId, onIssueStatusChange, onSuccess, onError } = options;
 
   return async (event: DragEndEvent): Promise<void> => {
     const { active, over } = event;
@@ -132,7 +134,7 @@ export function createDragEndHandler(options: HandleDragEndOptions) {
 
     try {
       // Persist to backend
-      await updateIssue(issue.id, { status: newStatus });
+      await updateIssue(workspaceId, issue.id, { status: newStatus });
       onSuccess?.(issue, newStatus);
     } catch (error) {
       // Call error handler for potential rollback (T035)

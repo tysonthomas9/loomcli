@@ -1,57 +1,10 @@
 package cli
 
-import (
-	"encoding/json"
-	"fmt"
-	"time"
-)
+import "time"
 
-// daemonStatus represents the JSON output of "bd daemon status --json"
-type daemonStatus struct {
-	Status string `json:"status"`
-	PID    int    `json:"pid"`
-}
-
-// EnsureBdDaemonRunning checks if the bd daemon is running and starts it if not.
-// Returns (true, nil) if we started the daemon, (false, nil) if it was already running,
-// or (false, err) if the daemon could not be started or did not become ready in time.
-func EnsureBdDaemonRunning(timeout time.Duration) (bool, error) {
-	if isDaemonRunning() {
-		return false, nil
-	}
-
-	result := execCommand(GetBeadsDir(), "bd", "daemon", "start")
-	if result.Err != nil {
-		return false, fmt.Errorf("failed to start bd daemon: %w", result.Err)
-	}
-
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	deadline := time.After(timeout)
-
-	for {
-		select {
-		case <-deadline:
-			return false, fmt.Errorf("daemon did not become ready within %s", timeout)
-		case <-ticker.C:
-			if isDaemonRunning() {
-				return true, nil
-			}
-		}
-	}
-}
-
-// isDaemonRunning checks if the bd daemon is currently running.
-func isDaemonRunning() bool {
-	result := execCommand(GetBeadsDir(), "bd", "daemon", "status", "--json")
-	if result.Err != nil {
-		return false
-	}
-
-	var status daemonStatus
-	if err := json.Unmarshal([]byte(result.Stdout), &status); err != nil {
-		return false
-	}
-
-	return status.Status == "running"
+// EnsureIssueBackendRunning is retained for serve startup call sites. FleetDB
+// owns issue storage directly, so there is no external issue backend daemon to
+// launch or stop.
+func EnsureIssueBackendRunning(_ *Deps, _ time.Duration) (bool, error) {
+	return false, nil
 }

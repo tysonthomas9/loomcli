@@ -14,7 +14,7 @@ const (
 	StatusReview     Status = "review"   // Needs human attention (plan approval, code review)
 	StatusClosed     Status = "closed"
 	StatusTombstone  Status = "tombstone" // Soft-deleted issue
-	StatusPinned     Status = "pinned"    // Persistent bead that stays open indefinitely
+	StatusPinned     Status = "pinned"    // Persistent context item that stays open indefinitely
 	StatusHooked     Status = "hooked"    // Work attached to an agent's hook (GUPP)
 )
 
@@ -28,7 +28,7 @@ func (s Status) IsValid() bool {
 }
 
 // IsValidWithCustom checks if the status is valid, including custom statuses.
-// Custom statuses are user-defined via bd config set status.custom "status1,status2,..."
+// Custom statuses are user-defined via runtime configuration.
 func (s Status) IsValidWithCustom(customStatuses []string) bool {
 	// First check built-in statuses
 	if s.IsValid() {
@@ -46,7 +46,7 @@ func (s Status) IsValidWithCustom(customStatuses []string) bool {
 // IssueType categorizes the kind of work
 type IssueType string
 
-// Core work type constants - these are the built-in types that beads validates.
+// Core work type constants.
 // All other types require configuration via types.custom in config.yaml.
 const (
 	TypeBug     IssueType = "bug"
@@ -57,7 +57,7 @@ const (
 )
 
 // Note: Gas Town types (molecule, gate, convoy, merge-request, slot, agent, role, rig, event, message)
-// were removed from beads core. They are now purely custom types with no built-in constants.
+// are custom types with no built-in constants.
 // Use string literals like types.IssueType("molecule") if needed, and configure types.custom.
 
 // IsValid checks if the issue type is a core work type.
@@ -80,7 +80,7 @@ func (t IssueType) IsBuiltIn() bool {
 }
 
 // IsValidWithCustom checks if the issue type is valid, including custom types.
-// Custom types are user-defined via bd config set types.custom "type1,type2,..."
+// Custom types are user-defined via runtime configuration.
 func (t IssueType) IsValidWithCustom(customTypes []string) bool {
 	// First check built-in types
 	if t.IsValid() {
@@ -108,7 +108,7 @@ func (t IssueType) Normalize() IssueType {
 }
 
 // RequiredSection describes a recommended section for an issue type.
-// Used by bd lint and bd create --validate for template validation.
+// Used for template validation.
 type RequiredSection struct {
 	Heading string // Markdown heading, e.g., "## Steps to Reproduce"
 	Hint    string // Guidance for what to include
@@ -156,7 +156,7 @@ const (
 func (s AgentState) IsValid() bool {
 	switch s {
 	case StateIdle, StateSpawning, StateRunning, StateWorking, StateStuck, StateDone, StateStopped, StateDead, "":
-		return true // empty is valid (non-agent beads)
+		return true // empty is valid for non-agent records
 	}
 	return false
 }
@@ -205,7 +205,7 @@ type SortPolicy string
 const (
 	// SortPolicyHybrid prioritizes recent issues by priority, older by age
 	// Recent = created within 48 hours
-	// This is the default for backwards compatibility
+	// Default sort policy.
 	SortPolicyHybrid SortPolicy = "hybrid"
 
 	// SortPolicyPriority always sorts by priority first, then creation date

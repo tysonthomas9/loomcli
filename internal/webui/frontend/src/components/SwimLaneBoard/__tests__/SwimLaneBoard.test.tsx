@@ -6,12 +6,20 @@
  * Unit tests for SwimLaneBoard component.
  */
 
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  within,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { BlockedInfo } from "@/components/KanbanBoard";
+import type { KanbanColumnConfig } from "@/components/KanbanBoard";
 import type { Issue, Status } from "@/types";
+import type { BlockedInfo } from "@/types/issue";
+import { formatStatusLabel } from "@/utils/issue";
 
 import { SwimLaneBoard } from "../SwimLaneBoard";
 
@@ -48,6 +56,19 @@ function createBlockedIssuesMap(
  * Default statuses for testing.
  */
 const defaultStatuses: Status[] = ["open", "in_progress", "closed"];
+const defaultColumns = columnsFromStatuses(defaultStatuses);
+
+function columnsFromStatuses(statuses: Status[]): KanbanColumnConfig[] {
+  return statuses.map((status) => ({
+    id: status,
+    label: formatStatusLabel(status),
+    filter: (issue: Issue) =>
+      status === "open"
+        ? issue.status === status || issue.status === undefined
+        : issue.status === status,
+    targetStatus: status,
+  }));
+}
 
 describe("SwimLaneBoard", () => {
   beforeEach(() => {
@@ -76,7 +97,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="none"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -90,8 +111,9 @@ describe("SwimLaneBoard", () => {
         screen.getByRole("heading", { name: "Closed" }),
       ).toBeInTheDocument();
 
-      // Should NOT have swim-lane-board test id
-      expect(screen.queryByTestId("swim-lane-board")).not.toBeInTheDocument();
+      // Wrapped in swim-lane-board shell with compact toggle + KanbanBoard inside
+      expect(screen.getByTestId("swim-lane-board")).toBeInTheDocument();
+      expect(screen.getByTestId("toggle-compact-columns")).toBeInTheDocument();
     });
 
     it("passes onIssueClick to KanbanBoard when groupBy=none", () => {
@@ -106,20 +128,70 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={[issue]}
           groupBy="none"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           onIssueClick={handleIssueClick}
         />,
       );
 
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
       expect(handleIssueClick).toHaveBeenCalledWith(
         expect.objectContaining({ id: "click-test" }),
       );
+    });
+
+    it("moves a card from Open to In Progress when its status prop changes", () => {
+      const issue = createMockIssue({
+        id: "live-task",
+        title: "Live Agent Task",
+        status: "open",
+      });
+
+      const { rerender } = render(
+        <SwimLaneBoard
+          issues={[issue]}
+          groupBy="none"
+          columns={defaultColumns}
+        />,
+      );
+
+      expect(
+        within(screen.getByRole("region", { name: "Open issues" })).getByText(
+          "Live Agent Task",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(
+          screen.getByRole("region", { name: "In Progress issues" }),
+        ).queryByText("Live Agent Task"),
+      ).not.toBeInTheDocument();
+
+      rerender(
+        <SwimLaneBoard
+          issues={[
+            {
+              ...issue,
+              status: "in_progress",
+              updated_at: "2024-01-01T00:01:00Z",
+            },
+          ]}
+          groupBy="none"
+          columns={defaultColumns}
+        />,
+      );
+
+      expect(
+        within(screen.getByRole("region", { name: "Open issues" })).queryByText(
+          "Live Agent Task",
+        ),
+      ).not.toBeInTheDocument();
+      expect(
+        within(
+          screen.getByRole("region", { name: "In Progress issues" }),
+        ).getByText("Live Agent Task"),
+      ).toBeInTheDocument();
     });
   });
 
@@ -139,7 +211,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -163,7 +235,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -186,7 +258,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="priority"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -212,7 +284,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="type"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -239,7 +311,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="epic"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -262,7 +334,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="label"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -290,7 +362,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           sortLanesBy="title"
         />,
       );
@@ -329,7 +401,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="priority"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           sortLanesBy="count"
         />,
       );
@@ -353,7 +425,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -382,7 +454,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -405,7 +477,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           defaultCollapsed={true}
         />,
       );
@@ -429,14 +501,12 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={[issue]}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           onIssueClick={handleIssueClick}
         />,
       );
 
-      const card = screen.getByRole("button", {
-        name: /Issue: Clickable Issue/i,
-      });
+      const card = screen.getByLabelText(/Issue: Clickable Issue/i);
       fireEvent.click(card);
 
       expect(handleIssueClick).toHaveBeenCalledTimes(1);
@@ -466,15 +536,13 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           onIssueClick={handleIssueClick}
         />,
       );
 
-      const aliceCard = screen.getByRole("button", {
-        name: /Issue: Alice Issue/i,
-      });
-      const bobCard = screen.getByRole("button", { name: /Issue: Bob Issue/i });
+      const aliceCard = screen.getByLabelText(/Issue: Alice Issue/i);
+      const bobCard = screen.getByLabelText(/Issue: Bob Issue/i);
 
       fireEvent.click(aliceCard);
       expect(handleIssueClick).toHaveBeenLastCalledWith(
@@ -487,6 +555,44 @@ describe("SwimLaneBoard", () => {
       );
 
       expect(handleIssueClick).toHaveBeenCalledTimes(2);
+    });
+
+    it("opens the epic issue when an epic lane title is clicked", () => {
+      const handleIssueClick = vi.fn();
+      const issues = [
+        createMockIssue({
+          id: "epic-1",
+          title: "Epic One",
+          issue_type: "epic",
+          status: "open",
+        }),
+        createMockIssue({
+          id: "task-1",
+          title: "Child Task",
+          issue_type: "task",
+          parent: "epic-1",
+          parent_title: "Epic One",
+          status: "open",
+        }),
+      ];
+
+      render(
+        <SwimLaneBoard
+          issues={issues}
+          groupBy="epic"
+          columns={defaultColumns}
+          onIssueClick={handleIssueClick}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open epic epic-1: Epic One" }),
+      );
+
+      expect(handleIssueClick).toHaveBeenCalledTimes(1);
+      expect(handleIssueClick).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "epic-1", title: "Epic One" }),
+      );
     });
   });
 
@@ -512,7 +618,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           blockedIssues={blockedIssues}
         />,
       );
@@ -542,7 +648,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           blockedIssues={blockedIssues}
           showBlocked={false}
         />,
@@ -561,7 +667,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           className="custom-board-class"
         />,
       );
@@ -570,8 +676,9 @@ describe("SwimLaneBoard", () => {
       expect(board).toHaveClass("custom-board-class");
     });
 
-    it("uses custom statuses", () => {
+    it("uses custom status columns", () => {
       const customStatuses: Status[] = ["blocked", "deferred"];
+      const customColumns = columnsFromStatuses(customStatuses);
       const issues = [
         createMockIssue({
           id: "issue-1",
@@ -584,7 +691,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={customStatuses}
+          columns={customColumns}
         />,
       );
 
@@ -610,7 +717,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           sortLanesBy="title"
         />,
       );
@@ -638,7 +745,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
           sortLanesBy="count"
         />,
       );
@@ -660,15 +767,31 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={[]}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
-      // Should render the board container but with no lanes
-      expect(screen.getByTestId("swim-lane-board")).toBeInTheDocument();
+      // Should render the EmptyWorkspaceBoard instead of empty lanes
+      expect(screen.getByTestId("empty-workspace-board")).toBeInTheDocument();
       expect(
-        screen.queryByRole("heading", { level: 3 }),
-      ).not.toBeInTheDocument();
+        screen.getByRole("heading", { name: "No issues yet" }),
+      ).toBeInTheDocument();
+    });
+
+    it("renders filtered empty state when caller filters are active", () => {
+      render(
+        <SwimLaneBoard
+          issues={[]}
+          groupBy="assignee"
+          columns={defaultColumns}
+          hasFiltersActive
+        />,
+      );
+
+      expect(screen.getByTestId("empty-workspace-board")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "No issues match your filters" }),
+      ).toBeInTheDocument();
     });
 
     it("handles issues appearing in multiple label lanes", () => {
@@ -691,7 +814,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="label"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -721,7 +844,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -748,7 +871,7 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
@@ -770,7 +893,7 @@ describe("SwimLaneBoard", () => {
           <SwimLaneBoard
             issues={issues}
             groupBy="assignee"
-            statuses={defaultStatuses}
+            columns={defaultColumns}
             onDragEnd={handleDragEnd}
           />,
         );
@@ -836,6 +959,33 @@ describe("SwimLaneBoard", () => {
       expect(screen.getByText("Epic Open")).toBeInTheDocument();
       expect(screen.getByText("Epic In Progress")).toBeInTheDocument();
       expect(screen.getByText("Epic Closed")).toBeInTheDocument();
+    });
+
+    it("hides epic issues from ungrouped cards when grouping by epic", () => {
+      const issues = [
+        createMockIssue({
+          id: "epic-1",
+          title: "Epic Issue",
+          issue_type: "epic",
+          status: "open",
+        }),
+        createMockIssue({
+          id: "task-1",
+          title: "Task Issue",
+          issue_type: "task",
+          parent: "epic-1",
+          parent_title: "Epic Issue",
+          status: "open",
+        }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="epic" />);
+
+      expect(screen.queryByText("Ungrouped")).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText(/Issue: Epic Issue/i),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("Task Issue")).toBeInTheDocument();
     });
 
     it("filters epic issues from flat kanban when groupBy=none (uses DEFAULT_COLUMNS)", () => {
@@ -911,8 +1061,7 @@ describe("SwimLaneBoard", () => {
       expect(screen.getByText("Epic Issue")).toBeInTheDocument();
     });
 
-    it("uses legacy statuses when provided, ignoring includeEpics logic", () => {
-      // When statuses prop is provided, statusesToColumns is used instead
+    it("uses explicit columns when provided, ignoring includeEpics logic", () => {
       const issues = [
         createMockIssue({
           id: "epic-1",
@@ -927,12 +1076,59 @@ describe("SwimLaneBoard", () => {
         <SwimLaneBoard
           issues={issues}
           groupBy="assignee"
-          statuses={defaultStatuses}
+          columns={defaultColumns}
         />,
       );
 
-      // Legacy statuses columns don't filter epics, so it should be visible
+      // Explicit status columns don't filter epics, so it should be visible
       expect(screen.getByText("Epic Issue")).toBeInTheDocument();
+    });
+  });
+
+  describe("compact columns mode", () => {
+    it("shows compact toggle in swim lane mode", () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", assignee: "alice", status: "open" }),
+      ];
+
+      render(<SwimLaneBoard issues={issues} groupBy="assignee" />);
+
+      expect(screen.getByTestId("toggle-compact-columns")).toBeInTheDocument();
+    });
+
+    it("hides empty columns when compact mode is enabled", () => {
+      const issues = [
+        createMockIssue({ id: "issue-1", assignee: "alice", status: "open" }),
+      ];
+
+      render(
+        <SwimLaneBoard
+          issues={issues}
+          groupBy="assignee"
+          columns={defaultColumns}
+        />,
+      );
+
+      const laneContent = screen.getByTestId("lane-content");
+      expect(within(laneContent).getByText("Open")).toBeInTheDocument();
+      expect(within(laneContent).getByText("In Progress")).toBeInTheDocument();
+      expect(within(laneContent).getByText("Closed")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("toggle-compact-columns"));
+
+      expect(screen.getByTestId("toggle-compact-columns")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(screen.getByTestId("swim-lane-board")).toHaveAttribute(
+        "data-compact-columns",
+        "true",
+      );
+      expect(within(laneContent).getByText("Open")).toBeInTheDocument();
+      expect(
+        within(laneContent).queryByText("In Progress"),
+      ).not.toBeInTheDocument();
+      expect(within(laneContent).queryByText("Closed")).not.toBeInTheDocument();
     });
   });
 });

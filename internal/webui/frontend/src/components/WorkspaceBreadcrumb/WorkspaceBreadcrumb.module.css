@@ -1,0 +1,10 @@
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.viewLabel {
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}

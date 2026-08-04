@@ -1,19 +1,22 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/testutil"
+	"github.com/tysonthomas9/loomcli/internal/usage"
 )
 
 // CommandStub represents an expected command call and its response
 type CommandStub struct {
 	Dir    string   // expected directory (empty = any)
-	Name   string   // expected command (e.g., "git", "bd")
+	Name   string   // expected command (e.g., "git", "issue-store")
 	Args   []string // expected arguments (nil = any)
 	Stdout string   // response stdout
 	Stderr string   // response stderr
@@ -83,16 +86,31 @@ func (m *CommandMock) Verify() {
 	}
 }
 
+// Run implements ExecRunner, delegating to Exec.
+func (m *CommandMock) Run(dir, name string, args ...string) CommandResult {
+	return m.Exec(dir, name, args...)
+}
+
 // Install installs the mock and registers cleanup with t.Cleanup().
-// WARNING: This modifies global state (execCommand). Tests using this mock
+// WARNING: This modifies global state (defaultDeps.Exec). Tests using this mock
 // MUST NOT use t.Parallel() as it would cause race conditions.
 func (m *CommandMock) Install() {
-	orig := execCommand
-	execCommand = m.Exec
+	deps := ensureDefaultDeps()
+	orig := deps.Exec
+	deps.Exec = m
 	m.t.Cleanup(func() {
-		execCommand = orig
+		deps.Exec = orig
 		m.Verify()
 	})
+}
+
+// InstallOn installs the mock on the given per-test Deps (no global mutation).
+// Safe for use with t.Parallel(). Also sets deps.Git to delegate Run through
+// the mock so runGit(deps, ...) works correctly.
+func (m *CommandMock) InstallOn(deps *Deps) {
+	deps.Exec = m
+	deps.Git = &execBridgeGitRunner{exec: m}
+	m.t.Cleanup(func() { m.Verify() })
 }
 
 // Calls returns the actual calls made to the mock
@@ -236,16 +254,30 @@ func (m *FlexibleCommandMock) Verify() {
 	}
 }
 
+// Run implements ExecRunner, delegating to Exec.
+func (m *FlexibleCommandMock) Run(dir, name string, args ...string) CommandResult {
+	return m.Exec(dir, name, args...)
+}
+
 // Install installs the mock and registers cleanup with t.Cleanup().
-// WARNING: This modifies global state (execCommand). Tests using this mock
+// WARNING: This modifies global state (defaultDeps.Exec). Tests using this mock
 // MUST NOT use t.Parallel() as it would cause race conditions.
 func (m *FlexibleCommandMock) Install() {
-	orig := execCommand
-	execCommand = m.Exec
+	orig := defaultDeps.Exec
+	defaultDeps.Exec = m
 	m.t.Cleanup(func() {
-		execCommand = orig
+		defaultDeps.Exec = orig
 		m.Verify()
 	})
+}
+
+// InstallOn installs the mock on the given per-test Deps (no global mutation).
+// Safe for use with t.Parallel(). Also sets deps.Git to delegate Run through
+// the mock so runGit(deps, ...) works correctly.
+func (m *FlexibleCommandMock) InstallOn(deps *Deps) {
+	deps.Exec = m
+	deps.Git = &execBridgeGitRunner{exec: m}
+	m.t.Cleanup(func() { m.Verify() })
 }
 
 // Calls returns the actual calls made to the mock
@@ -312,9 +344,8 @@ type MockAgentInvokerRecorder struct {
 func SetupMockAgentInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecorder {
 	t.Helper()
 	recorder := &MockAgentInvokerRecorder{ReturnErr: returnErr}
-	orig := claudeInvoker
 
-	claudeInvoker = func(workDir, prompt, agentName string) error {
+	installClaudeInvokerMock(t, func(workDir, prompt, agentName string) error {
 		recorder.mu.Lock()
 		recorder.Invocations = append(recorder.Invocations, struct {
 			WorkDir   string
@@ -323,21 +354,207 @@ func SetupMockAgentInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecor
 		}{workDir, prompt, agentName})
 		recorder.mu.Unlock()
 		return recorder.ReturnErr
-	}
-
-	t.Cleanup(func() {
-		claudeInvoker = orig
 	})
 
 	return recorder
 }
 
-// MockClaudeInvokerRecorder is a backwards-compatible alias.
-type MockClaudeInvokerRecorder = MockAgentInvokerRecorder
+// SetupMockAgentInvokerOn installs a mock agent invoker on the given per-test Deps.
+// Safe for use with t.Parallel().
+func SetupMockAgentInvokerOn(t *testing.T, deps *Deps, returnErr error) *MockAgentInvokerRecorder {
+	t.Helper()
+	recorder := &MockAgentInvokerRecorder{ReturnErr: returnErr}
+	deps.Agent = &MockAgentInvoker{
+		InteractiveFunc: func(workDir, prompt, agentName string) error {
+			recorder.mu.Lock()
+			recorder.Invocations = append(recorder.Invocations, struct {
+				WorkDir   string
+				Prompt    string
+				AgentName string
+			}{workDir, prompt, agentName})
+			recorder.mu.Unlock()
+			return recorder.ReturnErr
+		},
+	}
+	return recorder
+}
 
-// SetupMockClaudeInvoker is a backwards-compatible alias for SetupMockAgentInvoker.
-func SetupMockClaudeInvoker(t *testing.T, returnErr error) *MockAgentInvokerRecorder {
-	return SetupMockAgentInvoker(t, returnErr)
+// installExecMock installs a MockExecRunner as defaultDeps.Exec and
+// registers cleanup. Bridge pattern: sets the Deps field for production code
+// that calls defaultDeps.Exec.Run() directly.
+func installExecMock(t *testing.T, m *MockExecRunner) {
+	t.Helper()
+	orig := defaultDeps.Exec
+	defaultDeps.Exec = m
+	t.Cleanup(func() { defaultDeps.Exec = orig })
+}
+
+// gitOutputMockRunner wraps an OutputCommandMock to implement GitRunner.
+// Run() delegates to defaultDeps.Exec (so CommandMock intercepts git Run calls),
+// RunWithOutput() delegates to the OutputCommandMock.
+type gitOutputMockRunner struct {
+	outputFn func(dir string, args ...string) error
+}
+
+func (g *gitOutputMockRunner) Run(dir string, args ...string) CommandResult {
+	return defaultDeps.Exec.Run(dir, "git", args...)
+}
+
+func (g *gitOutputMockRunner) RunWithOutput(dir string, args ...string) error {
+	return g.outputFn(dir, args...)
+}
+
+// installGitOutputMock installs an OutputCommandMock as defaultDeps.Git
+// and registers cleanup with verification.
+func installGitOutputMock(t *testing.T, m *OutputCommandMock) {
+	t.Helper()
+	origGit := defaultDeps.Git
+	defaultDeps.Git = &gitOutputMockRunner{outputFn: m.Exec}
+	t.Cleanup(func() {
+		defaultDeps.Git = origGit
+		m.Verify()
+	})
+}
+
+// installLookPathMock installs a mock LookPath function on defaultDeps and registers cleanup.
+func installLookPathMock(t *testing.T, fn func(string) (string, error)) {
+	t.Helper()
+	orig := defaultDeps.LookPath
+	defaultDeps.LookPath = fn
+	t.Cleanup(func() { defaultDeps.LookPath = orig })
+}
+
+// funcExecContextRunner wraps a function as an ExecContextRunner.
+type funcExecContextRunner struct {
+	fn func(context.Context, string, string, ...string) CommandResult
+}
+
+func (f *funcExecContextRunner) Run(ctx context.Context, dir, name string, args ...string) CommandResult {
+	return f.fn(ctx, dir, name, args...)
+}
+
+// installExecContextMock installs a mock ExecContextRunner on defaultDeps and registers cleanup.
+func installExecContextMock(t *testing.T, fn func(context.Context, string, string, ...string) CommandResult) {
+	t.Helper()
+	orig := defaultDeps.ExecCtx
+	defaultDeps.ExecCtx = &funcExecContextRunner{fn: fn}
+	t.Cleanup(func() { defaultDeps.ExecCtx = orig })
+}
+
+// installClaudeInvokerMock installs a mock agent invoker via defaultDeps.Agent.
+// The per-backend invoker vars moved to the backends package; use Agent mock instead.
+func installClaudeInvokerMock(t *testing.T, fn func(workDir, prompt, agentName string) error) {
+	t.Helper()
+	orig := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{InteractiveFunc: fn}
+	t.Cleanup(func() { defaultDeps.Agent = orig })
+}
+
+// installClaudeNonInteractiveMock installs a mock non-interactive agent invoker.
+func installClaudeNonInteractiveMock(t *testing.T, fn func(workDir, prompt, agentName string, shutdown <-chan struct{}, collector *usage.Collector) error) {
+	t.Helper()
+	orig := defaultDeps.Agent
+	defaultDeps.Agent = &MockAgentInvoker{NonInteractiveFunc: fn}
+	t.Cleanup(func() { defaultDeps.Agent = orig })
+}
+
+// OutputCommandStub represents an expected output command call and its response
+type OutputCommandStub struct {
+	Dir  string   // expected directory (empty = any)
+	Args []string // expected arguments (nil = any)
+	Err  error    // response error
+}
+
+// OutputCommandMock provides a mock for output-streaming git commands
+type OutputCommandMock struct {
+	t     *testing.T
+	stubs []OutputCommandStub
+	calls []OutputCommandStub
+	idx   int
+}
+
+// NewOutputCommandMock creates a new output command mock with expected stubs
+func NewOutputCommandMock(t *testing.T, stubs []OutputCommandStub) *OutputCommandMock {
+	return &OutputCommandMock{t: t, stubs: stubs}
+}
+
+// Exec implements the outputCommandExecutor interface
+func (m *OutputCommandMock) Exec(dir string, args ...string) error {
+	call := OutputCommandStub{Dir: dir, Args: args}
+	m.calls = append(m.calls, call)
+
+	if m.idx >= len(m.stubs) {
+		m.t.Fatalf("unexpected output command call #%d: git %v in %s", m.idx+1, args, dir)
+	}
+
+	stub := m.stubs[m.idx]
+	m.idx++
+
+	// Validate command matches expectations (empty = any)
+	if stub.Dir != "" && stub.Dir != dir {
+		m.t.Errorf("call #%d: expected dir %q, got %q", m.idx, stub.Dir, dir)
+	}
+	if stub.Args != nil && !slicesEqual(stub.Args, args) {
+		m.t.Errorf("call #%d: expected args %v, got %v", m.idx, stub.Args, args)
+	}
+
+	return stub.Err
+}
+
+// Verify ensures all expected calls were made
+func (m *OutputCommandMock) Verify() {
+	if m.idx != len(m.stubs) {
+		m.t.Errorf("expected %d output command calls, got %d", len(m.stubs), m.idx)
+	}
+}
+
+// Install installs the mock and registers cleanup with t.Cleanup()
+func (m *OutputCommandMock) Install() {
+	installGitOutputMock(m.t, m)
+}
+
+// execBridgeGitRunner implements GitRunner by delegating Run() through an ExecRunner.
+// Used by CommandMock.InstallOn so that runGit(deps, ...) routes through the mock.
+// RunWithOutput is not supported — use OutputCommandMock.InstallOn when needed.
+type execBridgeGitRunner struct {
+	exec ExecRunner
+}
+
+func (g *execBridgeGitRunner) Run(dir string, args ...string) CommandResult {
+	return g.exec.Run(dir, "git", args...)
+}
+
+func (g *execBridgeGitRunner) RunWithOutput(dir string, args ...string) error {
+	return fmt.Errorf("RunWithOutput not mocked: use OutputCommandMock.InstallOn")
+}
+
+// compositeGitRunner delegates Run to deps.Exec and RunWithOutput to the mock.
+// Install CommandMock BEFORE OutputCommandMock so compositeGitRunner captures
+// the CommandMock as deps.Exec.
+type compositeGitRunner struct {
+	exec ExecRunner
+	out  func(dir string, args ...string) error
+}
+
+func (c *compositeGitRunner) Run(dir string, args ...string) CommandResult {
+	return c.exec.Run(dir, "git", args...)
+}
+
+func (c *compositeGitRunner) RunWithOutput(dir string, args ...string) error {
+	return c.out(dir, args...)
+}
+
+// InstallOn installs the mock on the given per-test Deps (no global mutation).
+// IMPORTANT: Call CommandMock.InstallOn(deps) BEFORE this method so that
+// deps.Exec is the CommandMock when compositeGitRunner captures it.
+func (m *OutputCommandMock) InstallOn(deps *Deps) {
+	deps.Git = &compositeGitRunner{exec: deps.Exec, out: m.Exec}
+	m.t.Cleanup(func() { m.Verify() })
+}
+
+// Calls returns the actual calls made to the mock
+func (m *OutputCommandMock) Calls() []OutputCommandStub {
+	return m.calls
 }
 
 // containsSubstring checks if any element in the slice contains the substring.

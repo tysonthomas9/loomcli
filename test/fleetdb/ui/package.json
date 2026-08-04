@@ -1,0 +1,20 @@
+{
+  "name": "loomcli-fleetdb-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FleetDB UI regression tests for loomcli.",
+  "scripts": {
+    "test": "playwright test",
+    "test:fleet-only": "FLEETDB_MODE=fleet-only playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:ui": "playwright test --ui",
+    "install-browsers": "playwright install --with-deps chromium",
+    "report": "playwright show-report artifacts/reports/html"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.45.0",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,68 @@
+/**
+ * WorkQueueSection styles.
+ * Matches the visual design of AgentsSidebar's Work Queue section.
+ */
+
+.workQueue {
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+}
+
+.workQueueHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.9rem 1.25rem;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  user-select: none;
+}
+
+.workQueueHeader:hover {
+  background: var(--color-bg-hover);
+}
+
+.workQueueToggle {
+  width: 12px;
+  font-family: monospace;
+  color: var(--color-text-tertiary);
+}
+
+.workQueueContent {
+  padding: 0 1.25rem 1rem;
+}
+
+.queueGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem 1.4rem;
+  font-size: 0.75rem;
+  padding-top: var(--space-2, 0.5rem);
+}
+
+.queueItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.15rem 0;
+  background: transparent;
+  border: none;
+  font: inherit;
+  color: var(--color-text-secondary);
+}
+
+.queueLabel {
+  color: var(--color-text-secondary);
+}
+
+.queueCount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+}
+
+.queueCount[data-highlight="true"] {
+  color: var(--color-status-working);
+}

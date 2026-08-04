@@ -72,14 +72,22 @@ describe("isExcluded", () => {
 
 describe("scanFile — /api/ paths", () => {
   it("detects hardcoded /api/ path in string literal", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", `const url = "/api/issues";`);
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      `const url = "/api/issues";`,
+    );
     expect(violations).toHaveLength(1);
     expect(violations[0].line).toBe(1);
     expect(violations[0].message).toContain("/api/");
   });
 
   it("detects /api/ in template literal", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", "const url = `/api/issues/${id}`;");
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      "const url = `/api/issues/${id}`;",
+    );
     expect(violations).toHaveLength(1);
   });
 
@@ -97,7 +105,11 @@ describe("scanFile — /api/ paths", () => {
   });
 
   it("reports correct source line preview", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", '  const url = "/api/issues";');
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      '  const url = "/api/issues";',
+    );
     expect(violations[0].source).toBe('  const url = "/api/issues";');
   });
 });
@@ -108,23 +120,39 @@ describe("scanFile — /api/ paths", () => {
 
 describe("scanFile — localhost URLs", () => {
   it("detects http://localhost", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "http://localhost:3000";');
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      'const x = "http://localhost:3000";',
+    );
     expect(violations).toHaveLength(1);
     expect(violations[0].message).toContain("localhost");
   });
 
   it("detects https://localhost", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "https://localhost";');
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      'const x = "https://localhost";',
+    );
     expect(violations).toHaveLength(1);
   });
 
   it("detects http://127.0.0.1", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "http://127.0.0.1:8080";');
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      'const x = "http://127.0.0.1:8080";',
+    );
     expect(violations).toHaveLength(1);
   });
 
   it("detects https://127.0.0.1", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'const x = "https://127.0.0.1";');
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      'const x = "https://127.0.0.1";',
+    );
     expect(violations).toHaveLength(1);
   });
 });
@@ -135,25 +163,39 @@ describe("scanFile — localhost URLs", () => {
 
 describe("scanFile — skip patterns", () => {
   it("skips single-line comments", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", '// fetch from /api/issues');
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      "// fetch from /api/issues",
+    );
     expect(violations).toHaveLength(0);
   });
 
   it("skips JSDoc comment lines", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", " * Maps to /api/issues/graph.");
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      " * Maps to /api/issues/graph.",
+    );
     expect(violations).toHaveLength(0);
   });
 
   it("skips block comments", () => {
-    const source = ["/* This calls /api/issues", " * and more /api/stuff", " */"].join(
-      "\n",
-    );
+    const source = [
+      "/* This calls /api/issues",
+      " * and more /api/stuff",
+      " */",
+    ].join("\n");
     const { violations } = scanFile("/fake/src/Foo.ts", "/fake", source);
     expect(violations).toHaveLength(0);
   });
 
   it("skips single-line block comments", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", "/* /api/test */");
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      "/* /api/test */",
+    );
     expect(violations).toHaveLength(0);
   });
 
@@ -169,7 +211,7 @@ describe("scanFile — skip patterns", () => {
   it("skips multi-line import continuations (} from ...)", () => {
     const source = [
       "import {",
-      "  BeadsSSEClient,",
+      "  WorkspaceSSEClient,",
       "  type ConnectionState,",
       '} from "../api/sse";',
     ].join("\n");
@@ -187,7 +229,11 @@ describe("scanFile — skip patterns", () => {
   });
 
   it("skips re-export star declarations", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", 'export * from "../api/sse";');
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      'export * from "../api/sse";',
+    );
     expect(violations).toHaveLength(0);
   });
 
@@ -225,13 +271,21 @@ describe("scanFile — skip patterns", () => {
 
 describe("scanFile — edge cases", () => {
   it("returns empty violations for empty file", () => {
-    const { violations, allowedCount } = scanFile("/fake/src/Foo.ts", "/fake", "");
+    const { violations, allowedCount } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      "",
+    );
     expect(violations).toHaveLength(0);
     expect(allowedCount).toBe(0);
   });
 
   it("returns empty violations for clean file", () => {
-    const { violations } = scanFile("/fake/src/Foo.ts", "/fake", "const x = 1;\nconst y = 2;\n");
+    const { violations } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      "const x = 1;\nconst y = 2;\n",
+    );
     expect(violations).toHaveLength(0);
   });
 
@@ -264,7 +318,7 @@ describe("scanFile — // allow-url", () => {
     const { violations, allowedCount } = scanFile(
       "/fake/src/Foo.ts",
       "/fake",
-      'const url = `/api/terminal/token`; // allow-url',
+      "const url = `/api/terminal/token`; // allow-url",
     );
     expect(violations).toHaveLength(0);
     expect(allowedCount).toBe(1);
@@ -286,7 +340,11 @@ describe("scanFile — // allow-url", () => {
       'const b = "/api/bar";',
       'const c = "/api/baz"; // allow-url',
     ].join("\n");
-    const { violations, allowedCount } = scanFile("/fake/src/Foo.ts", "/fake", source);
+    const { violations, allowedCount } = scanFile(
+      "/fake/src/Foo.ts",
+      "/fake",
+      source,
+    );
     expect(violations).toHaveLength(1);
     expect(violations[0].line).toBe(2);
     expect(allowedCount).toBe(2);
@@ -320,7 +378,11 @@ describe("scanAll", () => {
 
   it("scans src/ files and finds violations", () => {
     writeSource(root, "src/components/Foo.ts", 'const url = "/api/issues";');
-    writeSource(root, "src/hooks/useBar.ts", 'const x = "http://localhost:3000";');
+    writeSource(
+      root,
+      "src/hooks/useBar.ts",
+      'const x = "http://localhost:3000";',
+    );
 
     const result = scanAll(root);
     expect(result.violations).toHaveLength(2);
@@ -336,8 +398,16 @@ describe("scanAll", () => {
   });
 
   it("excludes test files", () => {
-    writeSource(root, "src/components/Foo.test.ts", 'const url = "/api/issues";');
-    writeSource(root, "src/components/__tests__/Bar.ts", 'const url = "/api/issues";');
+    writeSource(
+      root,
+      "src/components/Foo.test.ts",
+      'const url = "/api/issues";',
+    );
+    writeSource(
+      root,
+      "src/components/__tests__/Bar.ts",
+      'const url = "/api/issues";',
+    );
     writeSource(root, "src/components/Clean.ts", "const x = 1;");
 
     const result = scanAll(root);
@@ -346,7 +416,11 @@ describe("scanAll", () => {
   });
 
   it("respects inline // allow-url comments", () => {
-    writeSource(root, "src/components/Foo.ts", 'const url = "/api/issues"; // allow-url');
+    writeSource(
+      root,
+      "src/components/Foo.ts",
+      'const url = "/api/issues"; // allow-url',
+    );
 
     const result = scanAll(root);
     expect(result.violations).toHaveLength(0);

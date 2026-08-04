@@ -2,7 +2,8 @@ package daemon
 
 import (
 	"context"
-	"log"
+	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -10,15 +11,21 @@ import (
 )
 
 const (
+	// DefaultDialTimeout is the default timeout for establishing connections.
+	DefaultDialTimeout = 2 * time.Second
+
+	// DefaultRequestTimeout is the default timeout for RPC requests.
+	DefaultRequestTimeout = 30 * time.Second
+
+	// HealthCheckInterval is how often to check connection health.
+	HealthCheckInterval = 5 * time.Second
+
 	// DefaultPoolSize is the default number of connections in the pool.
 	// Set to 100 to support concurrent fleet worker requests.
 	DefaultPoolSize = 100
 
 	// DefaultPoolTimeout is the default timeout for acquiring a connection from the pool.
 	DefaultPoolTimeout = 10 * time.Second
-
-	// maxRetries limits the number of retry attempts when finding stale connections.
-	maxRetries = 3
 )
 
 // Pool is the interface for connection pool operations.
@@ -26,6 +33,7 @@ const (
 type Pool interface {
 	Get(ctx context.Context) (*rpc.Client, error)
 	Put(client *rpc.Client)
+	PutAfterError(client *rpc.Client)
 	Discard(client *rpc.Client)
 	Stats() PoolStats
 	Close() error
@@ -43,6 +51,11 @@ type ConnectionPool struct {
 	closed       bool
 	activeCount  int
 	createdCount int
+
+	// lastConnectedAt tracks when a connection was last successfully created or
+	// returned to the pool. Used by createConnection to distinguish a daemon that
+	// is alive-but-overloaded (semaphore full) from one that is genuinely dead.
+	lastConnectedAt time.Time
 }
 
 // NewConnectionPool creates a new connection pool with the specified size.
@@ -90,54 +103,26 @@ func (p *ConnectionPool) Get(ctx context.Context) (*rpc.Client, error) {
 	default:
 	}
 
-	// Use iterative approach with bounded retries to avoid unbounded recursion
-	for retries := 0; retries < maxRetries; retries++ {
-		client, err, shouldRetry := p.tryGet(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if client != nil {
-			return client, nil
-		}
-		if !shouldRetry {
-			break
-		}
-	}
-
-	return nil, ErrPoolExhausted
+	return p.tryGet(ctx)
 }
 
 // tryGet attempts to get a connection from the pool.
-// Returns (client, nil, false) on success.
-// Returns (nil, err, false) on error.
-// Returns (nil, nil, true) if a stale connection was found and caller should retry.
-func (p *ConnectionPool) tryGet(ctx context.Context) (*rpc.Client, error, bool) {
+func (p *ConnectionPool) tryGet(ctx context.Context) (*rpc.Client, error) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
-		return nil, ErrPoolClosed, false
+		return nil, ErrPoolClosed
 	}
 	p.mu.Unlock()
 
 	// Try to get an existing connection without blocking
 	select {
 	case client := <-p.available:
-		// Validate connection is still healthy
-		if p.validateConnection(client) {
-			p.mu.Lock()
-			p.activeCount++
-			p.mu.Unlock()
-			return client, nil, false
-		}
-		// Connection is stale, close it
-		_ = client.Close()
 		p.mu.Lock()
-		p.createdCount--
+		p.activeCount++
 		p.mu.Unlock()
-		// Signal retry - we freed a slot
-		return nil, nil, true
+		return client, nil
 	default:
-		// No connection available in channel
 	}
 
 	// Check if we can create a new connection
@@ -153,9 +138,9 @@ func (p *ConnectionPool) tryGet(ctx context.Context) (*rpc.Client, error, bool) 
 			p.createdCount--
 			p.activeCount--
 			p.mu.Unlock()
-			return nil, err, false
+			return nil, err
 		}
-		return client, nil, false
+		return client, nil
 	}
 	p.mu.Unlock()
 
@@ -164,7 +149,7 @@ func (p *ConnectionPool) tryGet(ctx context.Context) (*rpc.Client, error, bool) 
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return nil, ctx.Err(), false
+			return nil, ctx.Err()
 		}
 		if remaining < timeout {
 			timeout = remaining
@@ -173,24 +158,14 @@ func (p *ConnectionPool) tryGet(ctx context.Context) (*rpc.Client, error, bool) 
 
 	select {
 	case client := <-p.available:
-		if p.validateConnection(client) {
-			p.mu.Lock()
-			p.activeCount++
-			p.mu.Unlock()
-			return client, nil, false
-		}
-		// Connection is stale, close it and signal retry
-		_ = client.Close()
 		p.mu.Lock()
-		p.createdCount--
+		p.activeCount++
 		p.mu.Unlock()
-		return nil, nil, true
-
+		return client, nil
 	case <-time.After(timeout):
-		return nil, ErrPoolExhausted, false
-
+		return nil, ErrPoolExhausted
 	case <-ctx.Done():
-		return nil, ctx.Err(), false
+		return nil, ctx.Err()
 	}
 }
 
@@ -208,6 +183,7 @@ func (p *ConnectionPool) Put(client *rpc.Client) {
 		return
 	}
 	p.activeCount--
+	p.lastConnectedAt = time.Now()
 	p.mu.Unlock()
 
 	// Try to return to pool
@@ -221,6 +197,20 @@ func (p *ConnectionPool) Put(client *rpc.Client) {
 		p.createdCount--
 		p.mu.Unlock()
 	}
+}
+
+// PutAfterError validates a connection before deciding to return it to the pool
+// or discard it. Use this instead of Put when the caller's RPC operation failed
+// and the connection health is unknown.
+func (p *ConnectionPool) PutAfterError(client *rpc.Client) {
+	if client == nil {
+		return
+	}
+	if p.validateConnection(client) {
+		p.Put(client)
+		return
+	}
+	p.Discard(client)
 }
 
 // Discard closes a connection without returning it to the pool.
@@ -308,11 +298,29 @@ func (p *ConnectionPool) SocketPath() string {
 func (p *ConnectionPool) createConnection() (*rpc.Client, error) {
 	client, err := rpc.TryConnectWithTimeout(p.socketPath, p.dialTimeout)
 	if err != nil {
+		if errors.Is(err, rpc.ErrDaemonStarting) {
+			return nil, ErrDaemonStarting
+		}
 		return nil, ErrConnectionTimeout
 	}
 	if client == nil {
-		return nil, ErrDaemonNotRunning
+		// TryConnectWithTimeout returned nil, nil — the socket accepted and
+		// immediately closed (daemon semaphore full) or the daemon is down.
+		// Check whether we had a successful connection recently; if so the
+		// daemon is alive but overloaded, not dead.
+		p.mu.Lock()
+		recentlyAlive := !p.lastConnectedAt.IsZero() && time.Since(p.lastConnectedAt) < 30*time.Second
+		p.mu.Unlock()
+		if recentlyAlive {
+			return nil, ErrPoolExhausted // daemon alive but overloaded — don't trip breaker
+		}
+		return nil, ErrDaemonNotRunning // daemon genuinely unreachable
 	}
+
+	// Successful connection — stamp the last-connected time.
+	p.mu.Lock()
+	p.lastConnectedAt = time.Now()
+	p.mu.Unlock()
 
 	client.SetTimeout(DefaultRequestTimeout)
 	return client, nil
@@ -326,7 +334,7 @@ func (p *ConnectionPool) validateConnection(client *rpc.Client) bool {
 
 	// Try a ping to validate the connection
 	if err := client.Ping(); err != nil {
-		log.Printf("Pool: connection validation failed: %v", err)
+		slog.Warn("pool: connection validation failed", "err", err)
 		return false
 	}
 	return true

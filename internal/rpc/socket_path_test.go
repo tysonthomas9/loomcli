@@ -5,6 +5,7 @@ package rpc
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,11 +17,11 @@ import (
 func TestShortSocketPath_ShortWorkspace(t *testing.T) {
 	t.Parallel()
 
-	// Short workspace path - should use natural .beads/bd.sock path
+	// Short workspace path - should use natural .loom/loom.sock path
 	workspacePath := "/home/user/proj"
 	result := ShortSocketPath(workspacePath)
 
-	expected := filepath.Join(workspacePath, ".beads", "bd.sock")
+	expected := filepath.Join(workspacePath, ".loom", "loom.sock")
 	if result != expected {
 		t.Errorf("ShortSocketPath(%q) = %q, want %q", workspacePath, result, expected)
 	}
@@ -29,18 +30,18 @@ func TestShortSocketPath_ShortWorkspace(t *testing.T) {
 func TestShortSocketPath_LongWorkspace(t *testing.T) {
 	t.Parallel()
 
-	// Create a path that exceeds MaxUnixSocketPath when combined with .beads/bd.sock
-	// MaxUnixSocketPath is 103, .beads/bd.sock is 14 chars
+	// Create a path that exceeds MaxUnixSocketPath when combined with .loom/loom.sock
+	// MaxUnixSocketPath is 103, .loom/loom.sock is 14 chars
 	longDir := "/" + strings.Repeat("a", 100)
 	result := ShortSocketPath(longDir)
 
-	// Should use /tmp/beads-{hash}/bd.sock pattern
-	if !strings.HasPrefix(result, "/tmp/beads-") {
-		t.Errorf("ShortSocketPath() for long path should use /tmp/beads-*, got %q", result)
+	// Should use /tmp/loom-{hash}/loom.sock pattern
+	if !strings.HasPrefix(result, "/tmp/loom-") {
+		t.Errorf("ShortSocketPath() for long path should use /tmp/loom-*, got %q", result)
 	}
 
-	if !strings.HasSuffix(result, "/bd.sock") {
-		t.Errorf("ShortSocketPath() should end with /bd.sock, got %q", result)
+	if !strings.HasSuffix(result, "/loom.sock") {
+		t.Errorf("ShortSocketPath() should end with /loom.sock, got %q", result)
 	}
 
 	// Verify path is short enough
@@ -81,12 +82,12 @@ func TestShortSocketPath_Boundary(t *testing.T) {
 	t.Parallel()
 
 	// Test at exactly MaxUnixSocketPath boundary
-	// .beads/bd.sock is 14 chars, need path length = 103 - 14 = 89
+	// .loom/loom.sock is 14 chars, need path length = 103 - 14 = 89
 	// Account for leading slash
-	dirLen := MaxUnixSocketPath - len("/.beads/bd.sock")
+	dirLen := MaxUnixSocketPath - len("/.loom/loom.sock")
 	boundaryPath := "/" + strings.Repeat("x", dirLen-1)
 
-	naturalPath := filepath.Join(boundaryPath, ".beads", "bd.sock")
+	naturalPath := filepath.Join(boundaryPath, ".loom", "loom.sock")
 
 	t.Run("at_boundary", func(t *testing.T) {
 		if len(naturalPath) != MaxUnixSocketPath {
@@ -103,8 +104,8 @@ func TestShortSocketPath_Boundary(t *testing.T) {
 		overPath := boundaryPath + "y"
 		result := ShortSocketPath(overPath)
 		// Just over boundary, should use /tmp path
-		naturalOver := filepath.Join(overPath, ".beads", "bd.sock")
-		if len(naturalOver) > MaxUnixSocketPath && !strings.HasPrefix(result, "/tmp/beads-") {
+		naturalOver := filepath.Join(overPath, ".loom", "loom.sock")
+		if len(naturalOver) > MaxUnixSocketPath && !strings.HasPrefix(result, "/tmp/loom-") {
 			t.Errorf("Over boundary should use /tmp path, got %q", result)
 		}
 	})
@@ -138,10 +139,10 @@ func TestMaxUnixSocketPath_Constant(t *testing.T) {
 func TestEnsureSocketDir(t *testing.T) {
 	t.Parallel()
 
-	t.Run("tmp beads directory", func(t *testing.T) {
+	t.Run("tmp loom directory", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		// Simulate a /tmp/beads-* path structure
-		testPath := filepath.Join(tmpDir, "beads-abcd1234", "bd.sock")
+		// Simulate a /tmp/loom-* path structure
+		testPath := filepath.Join(tmpDir, "loom-abcd1234", "loom.sock")
 
 		result, err := EnsureSocketDir(testPath)
 		if err != nil {
@@ -152,13 +153,13 @@ func TestEnsureSocketDir(t *testing.T) {
 			t.Errorf("EnsureSocketDir() = %q, want %q", result, testPath)
 		}
 
-		// Note: We can't test actual /tmp/beads-* creation in parallel tests
+		// Note: We can't test actual /tmp/loom-* creation in parallel tests
 		// as it would conflict with other tests
 	})
 
-	t.Run("beads directory not created", func(t *testing.T) {
-		// For .beads directories, EnsureSocketDir should not create them
-		socketPath := "/some/path/.beads/bd.sock"
+	t.Run("loom directory not created", func(t *testing.T) {
+		// For .loom directories, EnsureSocketDir should not create them
+		socketPath := "/some/path/.loom/loom.sock"
 		result, err := EnsureSocketDir(socketPath)
 
 		// Should return the path unchanged (no creation attempted)
@@ -174,14 +175,14 @@ func TestEnsureSocketDir(t *testing.T) {
 func TestCleanupSocketDir(t *testing.T) {
 	t.Parallel()
 
-	t.Run("beads directory cleanup", func(t *testing.T) {
+	t.Run("loom directory cleanup", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		beadsDir := filepath.Join(tmpDir, ".beads")
-		if err := os.MkdirAll(beadsDir, 0755); err != nil {
-			t.Fatalf("Failed to create beads dir: %v", err)
+		runtimeDir := filepath.Join(tmpDir, ".loom")
+		if err := os.MkdirAll(runtimeDir, 0755); err != nil {
+			t.Fatalf("Failed to create runtime dir: %v", err)
 		}
 
-		socketPath := filepath.Join(beadsDir, "bd.sock")
+		socketPath := filepath.Join(runtimeDir, "loom.sock")
 		if err := os.WriteFile(socketPath, []byte{}, 0644); err != nil {
 			t.Fatalf("Failed to create socket file: %v", err)
 		}
@@ -196,15 +197,15 @@ func TestCleanupSocketDir(t *testing.T) {
 			t.Error("Socket file should be removed")
 		}
 
-		// Directory should remain (for .beads paths)
-		if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
-			t.Error(".beads directory should not be removed")
+		// Directory should remain (for .loom paths)
+		if _, err := os.Stat(runtimeDir); os.IsNotExist(err) {
+			t.Error(".loom directory should not be removed")
 		}
 	})
 
-	t.Run("tmp beads directory cleanup", func(t *testing.T) {
-		// Create a /tmp/beads-* directory to test the removal path
-		dirName := "beads-test-cleanup"
+	t.Run("tmp loom directory cleanup", func(t *testing.T) {
+		// Create a /tmp/loom-* directory to test the removal path
+		dirName := fmt.Sprintf("loom-test-cleanup-%d", os.Getpid())
 		dirPath := filepath.Join("/tmp", dirName)
 		t.Cleanup(func() { os.RemoveAll(dirPath) })
 
@@ -212,7 +213,7 @@ func TestCleanupSocketDir(t *testing.T) {
 			t.Fatalf("Mkdir() error: %v", err)
 		}
 
-		socketPath := filepath.Join(dirPath, "bd.sock")
+		socketPath := filepath.Join(dirPath, "loom.sock")
 		if err := os.WriteFile(socketPath, []byte{}, 0644); err != nil {
 			t.Fatalf("WriteFile() error: %v", err)
 		}
@@ -227,9 +228,9 @@ func TestCleanupSocketDir(t *testing.T) {
 			t.Error("Socket file should be removed")
 		}
 
-		// Directory should also be removed for /tmp/beads-* paths
+		// Directory should also be removed for /tmp/loom-* paths
 		if _, err := os.Stat(dirPath); !os.IsNotExist(err) {
-			t.Error("/tmp/beads-* directory should be removed after cleanup")
+			t.Error("/tmp/loom-* directory should be removed after cleanup")
 		}
 	})
 }
@@ -240,9 +241,9 @@ func TestShortSocketDir_HashLength(t *testing.T) {
 	// Verify the hash portion is 16 hex chars (8 bytes)
 	result := shortSocketDir("/some/canonical/path")
 
-	// Result should be /tmp/beads-{16 hex chars}/bd.sock
+	// Result should be /tmp/loom-{16 hex chars}/loom.sock
 	dir := filepath.Dir(result)
-	prefix := "/tmp/beads-"
+	prefix := "/tmp/loom-"
 	if !strings.HasPrefix(dir, prefix) {
 		t.Fatalf("shortSocketDir() dir = %q, want prefix %q", dir, prefix)
 	}
@@ -266,9 +267,9 @@ func TestShortSocketDir_HashLength(t *testing.T) {
 }
 
 func TestEnsureSocketDir_CreatesWithCorrectPermissions(t *testing.T) {
-	// Create a new /tmp/beads-* directory and verify it has mode 0700
-	dirName := "beads-test-perms-" + t.Name()
-	socketPath := filepath.Join("/tmp", dirName, "bd.sock")
+	// Create a new /tmp/loom-* directory and verify it has mode 0700
+	dirName := "loom-test-perms-" + t.Name()
+	socketPath := filepath.Join("/tmp", dirName, "loom.sock")
 	t.Cleanup(func() { os.RemoveAll(filepath.Dir(socketPath)) })
 
 	result, err := EnsureSocketDir(socketPath)
@@ -289,9 +290,9 @@ func TestEnsureSocketDir_CreatesWithCorrectPermissions(t *testing.T) {
 }
 
 func TestEnsureSocketDir_RejectsSymlink(t *testing.T) {
-	// Create a symlink at /tmp/beads-* pointing elsewhere — EnsureSocketDir should reject it
+	// Create a symlink at /tmp/loom-* pointing elsewhere — EnsureSocketDir should reject it
 	target := t.TempDir()
-	dirName := "beads-test-symlink-" + t.Name()
+	dirName := "loom-test-symlink-" + t.Name()
 	symlinkPath := filepath.Join("/tmp", dirName)
 	t.Cleanup(func() { os.Remove(symlinkPath) })
 
@@ -299,7 +300,7 @@ func TestEnsureSocketDir_RejectsSymlink(t *testing.T) {
 		t.Fatalf("Symlink() error: %v", err)
 	}
 
-	socketPath := filepath.Join(symlinkPath, "bd.sock")
+	socketPath := filepath.Join(symlinkPath, "loom.sock")
 	_, err := EnsureSocketDir(socketPath)
 	if err == nil {
 		t.Fatal("EnsureSocketDir() should reject symlink directory, got nil error")
@@ -311,7 +312,7 @@ func TestEnsureSocketDir_RejectsSymlink(t *testing.T) {
 
 func TestEnsureSocketDir_AcceptsExistingValidDir(t *testing.T) {
 	// Pre-create a valid directory with correct permissions
-	dirName := "beads-test-valid-" + t.Name()
+	dirName := "loom-test-valid-" + t.Name()
 	dirPath := filepath.Join("/tmp", dirName)
 	t.Cleanup(func() { os.RemoveAll(dirPath) })
 
@@ -319,7 +320,7 @@ func TestEnsureSocketDir_AcceptsExistingValidDir(t *testing.T) {
 		t.Fatalf("Mkdir() error: %v", err)
 	}
 
-	socketPath := filepath.Join(dirPath, "bd.sock")
+	socketPath := filepath.Join(dirPath, "loom.sock")
 	result, err := EnsureSocketDir(socketPath)
 	if err != nil {
 		t.Fatalf("EnsureSocketDir() error: %v", err)
@@ -331,7 +332,7 @@ func TestEnsureSocketDir_AcceptsExistingValidDir(t *testing.T) {
 
 func TestEnsureSocketDir_FixesBadPermissions(t *testing.T) {
 	// Create a directory with wrong permissions (owned by current user)
-	dirName := "beads-test-badperms-" + t.Name()
+	dirName := "loom-test-badperms-" + t.Name()
 	dirPath := filepath.Join("/tmp", dirName)
 	t.Cleanup(func() { os.RemoveAll(dirPath) })
 
@@ -339,7 +340,7 @@ func TestEnsureSocketDir_FixesBadPermissions(t *testing.T) {
 		t.Fatalf("Mkdir() error: %v", err)
 	}
 
-	socketPath := filepath.Join(dirPath, "bd.sock")
+	socketPath := filepath.Join(dirPath, "loom.sock")
 	_, err := EnsureSocketDir(socketPath)
 	if err != nil {
 		t.Fatalf("EnsureSocketDir() error: %v", err)
@@ -357,7 +358,7 @@ func TestEnsureSocketDir_FixesBadPermissions(t *testing.T) {
 
 func TestEnsureSocketDir_RejectsNonDirectory(t *testing.T) {
 	// Create a regular file where the directory should be
-	dirName := "beads-test-file-" + t.Name()
+	dirName := "loom-test-file-" + t.Name()
 	filePath := filepath.Join("/tmp", dirName)
 	t.Cleanup(func() { os.Remove(filePath) })
 
@@ -365,7 +366,7 @@ func TestEnsureSocketDir_RejectsNonDirectory(t *testing.T) {
 		t.Fatalf("WriteFile() error: %v", err)
 	}
 
-	socketPath := filepath.Join(filePath, "bd.sock")
+	socketPath := filepath.Join(filePath, "loom.sock")
 	_, err := EnsureSocketDir(socketPath)
 	if err == nil {
 		t.Fatal("EnsureSocketDir() should reject non-directory path, got nil error")
@@ -403,8 +404,8 @@ func TestNormalizePathForComparison(t *testing.T) {
 func TestEnsureSocketDir_LstatNonNotExistError(t *testing.T) {
 	// Trigger the path where os.Lstat returns an error that is NOT os.IsNotExist.
 	// A path component exceeding NAME_MAX (255 on macOS/Linux) causes ENAMETOOLONG.
-	longName := "beads-" + strings.Repeat("x", 300)
-	socketPath := filepath.Join("/tmp", longName, "bd.sock")
+	longName := "loom-" + strings.Repeat("x", 300)
+	socketPath := filepath.Join("/tmp", longName, "loom.sock")
 
 	_, err := EnsureSocketDir(socketPath)
 	if err == nil {
@@ -419,9 +420,9 @@ func TestEnsureSocketDir_MkdirNonExistError(t *testing.T) {
 	// Test the path where Mkdir fails with an error other than os.IsExist.
 	// Use a nested path under a non-existent parent so Lstat returns IsNotExist
 	// (triggering the Mkdir attempt) but Mkdir also fails (parent doesn't exist).
-	uniqueParent := "beads-noparent-" + strings.ReplaceAll(t.Name(), "/", "-")
+	uniqueParent := "loom-noparent-" + strings.ReplaceAll(t.Name(), "/", "-")
 	dir := filepath.Join("/tmp", uniqueParent, "nested")
-	socketPath := filepath.Join(dir, "bd.sock")
+	socketPath := filepath.Join(dir, "loom.sock")
 
 	os.RemoveAll(filepath.Join("/tmp", uniqueParent))
 	t.Cleanup(func() { os.RemoveAll(filepath.Join("/tmp", uniqueParent)) })
@@ -440,9 +441,9 @@ func TestEnsureSocketDir_ConcurrentMkdirRace(t *testing.T) {
 	// goroutines call EnsureSocketDir concurrently for a non-existent directory.
 	// Exactly one goroutine creates it via Mkdir; others hit os.IsExist and
 	// fall through to re-stat and validate. All must succeed.
-	dirName := "beads-test-race-" + strings.ReplaceAll(t.Name(), "/", "-")
+	dirName := "loom-test-race-" + strings.ReplaceAll(t.Name(), "/", "-")
 	dirPath := filepath.Join("/tmp", dirName)
-	socketPath := filepath.Join(dirPath, "bd.sock")
+	socketPath := filepath.Join(dirPath, "loom.sock")
 
 	// Ensure the directory does not exist before we start
 	os.RemoveAll(dirPath)

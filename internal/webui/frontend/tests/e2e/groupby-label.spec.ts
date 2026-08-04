@@ -1,5 +1,35 @@
 import { test, expect, Page } from "@playwright/test"
 
+const WORKSPACE_ID = "default"
+const WS_API = `/api/workspaces/${WORKSPACE_ID}`
+
+function ok<T>(data: T) {
+  return { success: true, data }
+}
+
+function workspaceData() {
+  return {
+    id: WORKSPACE_ID,
+    name: "Default",
+    path: "/tmp/default",
+    repos: [],
+    groups: [],
+    agents: [],
+    workspaces: [
+      {
+        id: WORKSPACE_ID,
+        name: "Default",
+        path: "/tmp/default",
+        active: true,
+        repo_count: 0,
+        is_default: true,
+      },
+    ],
+    workspace_order: [WORKSPACE_ID],
+    default_workspace: "Default",
+  }
+}
+
 /**
  * E2E tests for groupBy Label swim lanes.
  *
@@ -103,38 +133,82 @@ const mockLabelIssues = [
 /**
  * Set up API mocks for label grouping tests.
  */
-async function setupMocks(page: Page, issues = mockLabelIssues) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
-    })
-  })
-}
-
-/**
- * Set up mocks with PATCH tracking for drag-drop tests.
- */
 async function setupMocksWithPatch(
   page: Page,
-  issues = mockLabelIssues,
-  patchCalls: { url: string; body: object }[] = []
+  issues: object[] = mockLabelIssues,
+  patchCalls?: { url: string; body: object }[]
 ) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
-    })
-  })
-  await page.route("**/api/issues/*", async (route) => {
-    if (route.request().method() === "PATCH") {
-      const url = route.request().url()
+  await page.route("**/*", async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+
+    if (pathname === "/api/config") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+    } else if (
+      pathname === "/api/workspaces/active" ||
+      pathname === `/api/workspaces/${WORKSPACE_ID}`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok(workspaceData())),
+      })
+    } else if (
+      pathname === `${WS_API}/issues` ||
+      pathname === `${WS_API}/ready`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok(issues)),
+      })
+    } else if (pathname === `${WS_API}/stats`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total_issues: issues.length,
+          open_issues: issues.filter((i) => (i as { status?: string }).status === "open").length,
+          in_progress_issues: issues.filter((i) => (i as { status?: string }).status === "in_progress").length,
+          closed_issues: issues.filter((i) => (i as { status?: string }).status === "closed").length,
+          blocked_issues: 0,
+          deferred_issues: 0,
+          ready_issues: issues.filter((i) => (i as { status?: string }).status === "open").length,
+          tombstone_issues: 0,
+          pinned_issues: 0,
+          epics_eligible_for_closure: 0,
+          average_lead_time_hours: 0,
+        }),
+      })
+    } else if (
+      pathname === `${WS_API}/blocked` ||
+      pathname === `${WS_API}/terminal/tabs`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok([])),
+      })
+    } else if (pathname === `${WS_API}/terminal/state`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ active_tab: "" }),
+      })
+    } else if (
+      request.method() === "PATCH" &&
+      pathname.startsWith(`${WS_API}/issues/`)
+    ) {
+      const issueId = pathname.split("/").pop()
       const body = route.request().postDataJSON() as { status?: string }
-      patchCalls.push({ url, body })
-      const issueId = url.split("/").pop()
-      const issue = issues.find((i) => i.id === issueId)
+      patchCalls?.push({ url: request.url(), body })
+      const issue = issues.find(
+        (i) => (i as { id: string }).id === issueId
+      ) as object
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -143,24 +217,44 @@ async function setupMocksWithPatch(
           data: { ...issue, ...body, updated_at: new Date().toISOString() },
         }),
       })
+    } else if (pathname.startsWith("/api/") && pathname.includes("/events")) {
+      await route.abort()
     } else {
       await route.continue()
     }
   })
 }
 
+async function setupMocks(page: Page, issues: object[] = mockLabelIssues) {
+  await setupMocksWithPatch(page, issues)
+}
+
+async function showMoreFilters(page: Page) {
+  const groupByFilter = page.getByLabel("Group issues by")
+  if ((await groupByFilter.count()) === 0 || !(await groupByFilter.isVisible())) {
+    await page.getByRole("button", { name: "More filters" }).click()
+  }
+}
+
 /**
  * Navigate and wait for API response.
  */
-async function navigateAndWait(page: Page, path = "/?groupBy=label") {
+async function navigateAndWait(
+  page: Page,
+  path = `/ws/${WORKSPACE_ID}/kanban?groupBy=label`
+) {
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
+      (res) =>
+        new URL(res.url()).pathname === `${WS_API}/issues` &&
+        res.status() === 200
     ),
     page.goto(path),
   ])
   expect(response.ok()).toBe(true)
-  await expect(page.getByTestId("swim-lane-board")).toBeVisible()
+  await expect(
+    page.getByTestId("swim-lane-board").or(page.getByText("No issues yet"))
+  ).toBeVisible()
 }
 
 test.describe("groupBy Label Swim Lanes", () => {
@@ -493,6 +587,11 @@ test.describe("groupBy Label Swim Lanes", () => {
       await page.waitForTimeout(50)
 
       // Release at target
+      const patchResponse = page.waitForResponse(
+        (res) =>
+          new URL(res.url()).pathname === `${WS_API}/issues/issue-1` &&
+          res.request().method() === "PATCH"
+      )
       await page.dispatchEvent("body", "pointerup", {
         clientX: targetBox.x + targetBox.width / 2,
         clientY: targetBox.y + targetBox.height / 2,
@@ -502,12 +601,8 @@ test.describe("groupBy Label Swim Lanes", () => {
         pointerType: "mouse",
         isPrimary: true,
       })
-
-      await page.waitForResponse(
-        (res) =>
-          res.url().includes("/api/issues/issue-1") &&
-          res.request().method() === "PATCH"
-      )
+      await page.getByRole("button", { name: "Skip" }).click()
+      await patchResponse
 
       // Verify ONLY status changed, not labels
       expect(patchCalls).toHaveLength(1)
@@ -575,6 +670,11 @@ test.describe("groupBy Label Swim Lanes", () => {
       })
       await page.waitForTimeout(50)
 
+      const patchResponse = page.waitForResponse(
+        (res) =>
+          new URL(res.url()).pathname === `${WS_API}/issues/issue-1` &&
+          res.request().method() === "PATCH"
+      )
       await page.dispatchEvent("body", "pointerup", {
         clientX: targetBox.x + targetBox.width / 2,
         clientY: targetBox.y + targetBox.height / 2,
@@ -584,12 +684,8 @@ test.describe("groupBy Label Swim Lanes", () => {
         pointerType: "mouse",
         isPrimary: true,
       })
-
-      await page.waitForResponse(
-        (res) =>
-          res.url().includes("/api/issues/issue-1") &&
-          res.request().method() === "PATCH"
-      )
+      await page.getByRole("button", { name: "Skip" }).click()
+      await patchResponse
 
       // Only status changes, not labels
       expect(patchCalls).toHaveLength(1)
@@ -727,8 +823,10 @@ test.describe("groupBy Label Swim Lanes", () => {
 
     test("empty issues array shows no label lanes", async ({ page }) => {
       await setupMocks(page, [])
-      await page.goto("/?groupBy=label")
-      await page.waitForResponse((res) => res.url().includes("/api/ready"))
+      await page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=label`)
+      await page.waitForResponse(
+        (res) => new URL(res.url()).pathname === `${WS_API}/issues`
+      )
 
       // Swim lane board may or may not be visible with empty data
       // The key test is that there are no label lanes
@@ -775,7 +873,8 @@ test.describe("groupBy Label Swim Lanes", () => {
       ).toBeVisible()
 
       // Switch to assignee grouping
-      await page.getByTestId("groupby-filter").selectOption("assignee")
+      await showMoreFilters(page)
+      await page.getByLabel("Group issues by").selectOption("assignee")
 
       // Label lanes gone
       await expect(
@@ -792,11 +891,14 @@ test.describe("groupBy Label Swim Lanes", () => {
       page,
     }) => {
       await setupMocks(page)
-      await page.goto("/?groupBy=label")
-      await page.waitForResponse((res) => res.url().includes("/api/ready"))
+      await page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=label`)
+      await page.waitForResponse(
+        (res) => new URL(res.url()).pathname === `${WS_API}/issues`
+      )
 
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
-      await expect(page.getByTestId("groupby-filter")).toHaveValue("label")
+      await showMoreFilters(page)
+      await expect(page.getByLabel("Group issues by")).toHaveValue("label")
       await expect(
         page.getByRole("heading", { name: "frontend", exact: true })
       ).toBeVisible()

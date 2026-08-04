@@ -23,44 +23,8 @@ func TestValidateWorktreeName_PathTraversal(t *testing.T) {
 }
 
 func TestValidateWorktreeName_CurrentDir(t *testing.T) {
-	// "." should be cleaned to "." which is not "..", so it's valid
-	if err := validateWorktreeName("."); err != nil {
-		t.Errorf("validateWorktreeName(%q) = %v, want nil", ".", err)
-	}
-}
-
-func TestResolveLegacyPath_EmptyName(t *testing.T) {
-	// Empty name should return cwd
-	path, err := resolveLegacyPath("")
-	if err != nil {
-		t.Fatalf("resolveLegacyPath(%q) error = %v", "", err)
-	}
-	if path == "" {
-		t.Error("resolveLegacyPath(\"\") should return non-empty path (cwd)")
-	}
-}
-
-func TestResolveLegacyPath_AbsoluteExisting(t *testing.T) {
-	tmpDir := t.TempDir()
-	path, err := resolveLegacyPath(tmpDir)
-	if err != nil {
-		t.Fatalf("resolveLegacyPath(%q) error = %v", tmpDir, err)
-	}
-	if path != tmpDir {
-		t.Errorf("resolveLegacyPath(%q) = %q, want %q", tmpDir, path, tmpDir)
-	}
-}
-
-func TestResolveLegacyPath_AbsoluteNonExisting(t *testing.T) {
-	_, err := resolveLegacyPath("/nonexistent/path/should/fail")
-	if err == nil {
-		t.Error("resolveLegacyPath for non-existing absolute path should error")
-	}
-}
-
-func TestResolveLegacyPath_PathTraversal(t *testing.T) {
-	_, err := resolveLegacyPath("../../../etc/passwd")
-	if err == nil {
-		t.Error("resolveLegacyPath with path traversal should error")
+	// "." resolves to the worktrees parent directory itself, so it must be rejected
+	if err := validateWorktreeName("."); err == nil {
+		t.Errorf("validateWorktreeName(%q) = nil, want error", ".")
 	}
 }

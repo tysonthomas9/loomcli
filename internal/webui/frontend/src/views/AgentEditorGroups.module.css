@@ -1,0 +1,133 @@
+/**
+ * VS Code-style editor groups for the Agents view (Aether wireframe pin 12).
+ * Each column owns a tab strip; split moves the active tab into a right group.
+ */
+
+.panes {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.panes.split {
+  flex-direction: row;
+}
+
+.paneCol {
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panes.split .paneCol {
+  border-right: 1px solid var(--color-border);
+}
+
+.panes.split .paneCol:last-child {
+  border-right: none;
+}
+
+.strip {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  height: 40px;
+  padding-left: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-subtle);
+  overflow: visible;
+}
+
+.stripSpacer {
+  flex: 1;
+}
+
+.stripControls {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-left: 1px solid var(--color-border);
+}
+
+.stripControl {
+  width: 36px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
+}
+
+.stripControl:hover {
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+
+.stripIcon {
+  display: block;
+  flex-shrink: 0;
+}
+
+.editorTab {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--space-4);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  cursor: grab;
+  transition: color var(--transition-fast);
+}
+
+.editorTab:hover {
+  color: var(--color-text-primary);
+}
+
+.editorTab[data-active="true"] {
+  border-bottom-color: var(--color-warning);
+  color: var(--color-text-primary);
+  font-weight: 900;
+}
+
+.editorTab:active {
+  cursor: grabbing;
+}
+
+.paneBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.paneSlot {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.paneSlot[data-hidden="true"] {
+  display: none;
+}

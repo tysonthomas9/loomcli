@@ -111,18 +111,18 @@ describe("NodeTooltip", () => {
 
   describe("issue ID display", () => {
     it("displays issue ID in correct format", () => {
-      const issue = createTestIssue({ id: "beads-abc123def456" });
+      const issue = createTestIssue({ id: "issue-abc123def456" });
       render(<NodeTooltip issue={issue} position={defaultPosition} />);
 
-      // Should show last 7 characters for long IDs
-      expect(screen.getByText("3def456")).toBeInTheDocument();
+      // Should preserve prefix and truncate: "issue-abc12..."
+      expect(screen.getByText("issue-abc12...")).toBeInTheDocument();
     });
 
     it("displays short ID as-is", () => {
-      const issue = createTestIssue({ id: "bd-xyz" });
+      const issue = createTestIssue({ id: "loom-xyz" });
       render(<NodeTooltip issue={issue} position={defaultPosition} />);
 
-      expect(screen.getByText("bd-xyz")).toBeInTheDocument();
+      expect(screen.getByText("loom-xyz")).toBeInTheDocument();
     });
 
     it('displays "unknown" for empty ID', () => {
@@ -130,6 +130,32 @@ describe("NodeTooltip", () => {
       render(<NodeTooltip issue={issue} position={defaultPosition} />);
 
       expect(screen.getByText("unknown")).toBeInTheDocument();
+    });
+
+    it("issue ID span has title attribute with full ID for hover tooltip", () => {
+      const issue = createTestIssue({ id: "loomcli-af78e9a2.1.2" });
+      render(<NodeTooltip issue={issue} position={defaultPosition} />);
+
+      // The display text is truncated but the title should show the full ID
+      const idSpan = screen.getByText("loomcli-af78e...");
+      expect(idSpan).toHaveAttribute("title", "loomcli-af78e9a2.1.2");
+    });
+
+    it("title attribute shows full ID even when display is truncated", () => {
+      const longId = "some-very-long-issue-id-12345";
+      const issue = createTestIssue({ id: longId });
+      render(<NodeTooltip issue={issue} position={defaultPosition} />);
+
+      const idSpan = screen.getByText("some-very-...");
+      expect(idSpan).toHaveAttribute("title", longId);
+    });
+
+    it("title attribute matches display text for short IDs", () => {
+      const issue = createTestIssue({ id: "loom-xyz" });
+      render(<NodeTooltip issue={issue} position={defaultPosition} />);
+
+      const idSpan = screen.getByText("loom-xyz");
+      expect(idSpan).toHaveAttribute("title", "loom-xyz");
     });
   });
 

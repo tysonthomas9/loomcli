@@ -1,0 +1,120 @@
+/**
+ * Anchored dropdown for creating a new terminal tab by backend.
+ */
+
+.menuRoot {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  height: 100%;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 100%;
+  background: none;
+  border: none;
+  border-left: 1px solid var(--terminal-border);
+  color: var(--terminal-text-muted);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.trigger:hover:not(:disabled) {
+  background-color: var(--terminal-surface-hover);
+  color: var(--terminal-text-bright);
+}
+
+.trigger:focus {
+  outline: none;
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.trigger[data-open="true"] {
+  background-color: var(--terminal-surface-hover);
+  color: var(--terminal-text-bright);
+}
+
+.menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--z-dropdown, 100);
+  min-width: 200px;
+  margin-top: 0;
+  padding: 4px;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.menuHeader {
+  padding: 6px 10px 4px;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--color-text);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--transition-fast);
+}
+
+.option:hover,
+.option[data-focused="true"] {
+  background-color: var(--color-bg-secondary);
+}
+
+.option:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.brandDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.displayName {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusText {
+  padding: 10px;
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}

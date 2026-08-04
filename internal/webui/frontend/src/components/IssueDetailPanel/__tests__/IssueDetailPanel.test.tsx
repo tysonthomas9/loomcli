@@ -13,88 +13,179 @@ import {
   within,
   waitFor,
 } from "@testing-library/react";
-import {
-  describe,
-  it,
-  expect,
-  vi,
-  beforeEach as _beforeEach,
-  afterEach,
-} from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { Issue, IssueDetails, IssueWithDependencyMetadata } from "@/types";
+import type { SessionRecord } from "@/types/agent";
+import {
+  updateIssue,
+  startWorkflowRun,
+  createWorkspaceAgent,
+  deleteWorkspaceAgent,
+} from "@/api";
+import { createAgentStore } from "@/stores/agentStore";
 
 import { IssueDetailPanel } from "../IssueDetailPanel";
 
 // Create hoisted mocks
-const { mockUseAgentTerminalLogs } = vi.hoisted(() => ({
-  mockUseAgentTerminalLogs: vi.fn(() => ({
-    mode: "idle" as const,
-    chunks: [],
-    state: "disconnected" as const,
+const {
+  mockUseRegisterEscapeLayer,
+  mockDeleteTabMetadata,
+  mockScheduleSessionKill,
+  mockUseIssueTabPersistence,
+  mockUseLocalSettings,
+  mockUseWorkspaceContext,
+  mockUseAgentStoreInstance,
+  mockGetTaskSessions,
+  mockShowToast,
+  mockUseToast,
+} = vi.hoisted(() => ({
+  mockUseRegisterEscapeLayer: vi.fn(),
+  mockDeleteTabMetadata: vi.fn(() => Promise.resolve()),
+  mockScheduleSessionKill: vi.fn(() => Promise.resolve()),
+  mockUseIssueTabPersistence: vi.fn(() => ({
+    savedState: null,
+    isLoading: true,
+    saveTabs: vi.fn(),
+    clearTabs: vi.fn(),
+  })),
+  mockUseLocalSettings: vi.fn(() => ({
+    settings: {
+      version: 1,
+      fleetdb_redis: {
+        enabled: false,
+        db: 0,
+        tls: false,
+        password_set: false,
+      },
+      agent_runtime: { default: "local" },
+      local_task_runner: {},
+      runtime_credentials: {
+        daytona: { configured: false },
+        github: { configured: false },
+      },
+    },
+    isLoading: false,
+    isSaving: false,
     error: null,
-    resetVersion: 0,
-    refresh: vi.fn(),
-    resize: vi.fn(),
-    sendInput: vi.fn(),
-    loadOlderLogs: vi.fn(),
-    hasMoreLines: false,
-    isLoadingMore: false,
+    updateRedis: vi.fn(),
+    updateAgentRuntime: vi.fn(),
+    updateLocalTaskRunner: vi.fn(),
+    updateRuntimeCredentials: vi.fn(),
+    refetch: vi.fn(),
+  })),
+  mockUseWorkspaceContext: vi.fn(() => ({
+    workspace: null,
+    repos: [],
+    groups: [],
+    agents: [],
+    isLoading: false,
+    error: null,
+    refetch: () => {},
+    getRepoByName: () => undefined,
+    getReposByGroup: () => [],
+    getAgentByName: () => undefined,
+    workspaceId: "",
+    activeWorkspaceName: null,
+    setActiveWorkspace: () => {},
+    defaultWorkspaceName: null,
+    setDefaultWorkspace: () => Promise.resolve(),
+  })),
+  mockUseAgentStoreInstance: vi.fn(),
+  mockGetTaskSessions: vi.fn(() => Promise.resolve([])),
+  mockShowToast: vi.fn(),
+  mockUseToast: vi.fn(() => ({
+    toasts: [],
+    showToast: vi.fn(),
+    dismissToast: vi.fn(),
+    dismissAll: vi.fn(),
   })),
 }));
 
 // Mock the API module
 vi.mock("@/api", () => ({
+  EPIC_RUNNER_WORKFLOW_NAME: "epic-runner",
   updateIssue: vi.fn(),
+  createWorkspaceAgent: vi.fn(),
+  deleteWorkspaceAgent: vi.fn().mockResolvedValue(undefined),
+  startAgent: vi.fn().mockResolvedValue(undefined),
+  startWorkflowRun: vi.fn().mockResolvedValue({
+    workspace_key: "DESKTOP-QA",
+    run_id: "run-1",
+    driver_id: "driver-1",
+    driver_version_id: "version-1",
+    status: "queued",
+    created_at: "2026-01-23T00:00:00Z",
+    updated_at: "2026-01-23T00:00:00Z",
+  }),
   addDependency: vi.fn(),
   removeDependency: vi.fn(),
+  getIssueEvents: vi.fn().mockImplementation(() => new Promise(() => {})),
+  getTaskLogPhases: vi.fn().mockResolvedValue([]),
 }));
 
-// Mock the agent terminal logs hook
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return { ...actual, useToast: mockUseToast };
+});
+
+// Mock terminal API for cleanup verification
+vi.mock("@/api/terminal", () => ({
+  deleteTabMetadata: mockDeleteTabMetadata,
+  scheduleSessionKill: mockScheduleSessionKill,
+  getTaskSessions: mockGetTaskSessions,
+  listIssueSessions: vi.fn().mockImplementation(() => new Promise(() => {})),
+}));
+
+// Mock tab persistence hook for terminal tab restoration tests
+vi.mock("@/hooks/issues", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/issues")>("@/hooks/issues");
+  return { ...actual, useIssueTabPersistence: mockUseIssueTabPersistence };
+});
+
+// Mock workspace context for cleanup tests needing workspace ID
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
+  return {
+    ...actual,
+    useLocalSettings: mockUseLocalSettings,
+    useWorkspaceContext: mockUseWorkspaceContext,
+  };
+});
+
+vi.mock("@/hooks/common", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/common")>("@/hooks/common");
+  return { ...actual, useAgentStoreInstance: mockUseAgentStoreInstance };
+});
+
 vi.mock("@/hooks", async (importOriginal) => {
   const orig = await importOriginal<typeof import("@/hooks")>();
   return {
     ...orig,
-    useAgentTerminalLogs: mockUseAgentTerminalLogs,
+    useRegisterEscapeLayer: mockUseRegisterEscapeLayer,
+    useKeyboardShortcuts: vi.fn(() => ({
+      isCheatsheetOpen: false,
+      toggleCheatsheet: vi.fn(),
+      closeCheatsheet: vi.fn(),
+    })),
+    KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
+      children,
+    LAYER_CONFIRM_DIALOG: 60,
+    LAYER_TOAST: 50,
+    LAYER_CHEATSHEET: 45,
+    LAYER_MODAL: 40,
+    LAYER_TERMINAL_PANEL: 30,
+    LAYER_AGENT_PANEL: 20,
+    LAYER_ISSUE_PANEL: 10,
   };
 });
-
-// Mock xterm.js (used by LogViewer)
-vi.mock("@xterm/xterm", () => {
-  class MockTerminal {
-    options: Record<string, unknown> = { disableStdin: true };
-    open = vi.fn();
-    dispose = vi.fn();
-    write = vi.fn();
-    clear = vi.fn();
-    loadAddon = vi.fn();
-    scrollToBottom = vi.fn();
-    onScroll = vi.fn(() => ({ dispose: vi.fn() }));
-    onData = vi.fn(() => ({ dispose: vi.fn() }));
-    buffer = { active: { viewportY: 0, baseY: 0 } };
-  }
-  return { Terminal: MockTerminal };
-});
-
-vi.mock("@xterm/addon-fit", () => {
-  class MockFitAddon {
-    fit = vi.fn();
-    dispose = vi.fn();
-  }
-  return { FitAddon: MockFitAddon };
-});
-
-vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
-
-// Mock ResizeObserver (not available in jsdom, needed by LogViewer)
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe = vi.fn();
-    unobserve = vi.fn();
-    disconnect = vi.fn();
-  } as unknown as typeof ResizeObserver;
-}
 
 /**
  * Create a minimal test issue with required fields.
@@ -147,7 +238,149 @@ function createTestDependency(
   };
 }
 
+function createTestSession(
+  overrides: Partial<SessionRecord> = {},
+): SessionRecord {
+  return {
+    session_id: "sess-1",
+    task_id: "test-123",
+    agent_name: "planner",
+    backend: "codex",
+    status: "failed",
+    started_at: "2026-01-23T00:00:00Z",
+    ended_at: "2026-01-23T00:00:15Z",
+    duration_s: 15,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    estimated_cost_usd: 0,
+    exit_code: 1,
+    files_changed: 0,
+    lines_added: 0,
+    lines_removed: 0,
+    attempt_num: 1,
+    has_transcript: true,
+    has_diff: false,
+    is_active: false,
+    error_class: "AuthFailure",
+    ...overrides,
+  };
+}
+
+function createWorkspaceContext(overrides: Record<string, unknown> = {}) {
+  return {
+    workspace: null,
+    repos: [],
+    groups: [],
+    agents: [],
+    isLoading: false,
+    error: null,
+    refetch: () => {},
+    getRepoByName: () => undefined,
+    getReposByGroup: () => [],
+    getAgentByName: () => undefined,
+    workspaceId: "",
+    activeWorkspaceName: null,
+    setActiveWorkspace: () => {},
+    defaultWorkspaceName: null,
+    setDefaultWorkspace: () => Promise.resolve(),
+    ...overrides,
+  };
+}
+
+function createLocalSettingsHookReturn(
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    settings: {
+      version: 1,
+      fleetdb_redis: {
+        enabled: false,
+        db: 0,
+        tls: false,
+        password_set: false,
+      },
+      agent_runtime: { default: "local" },
+      local_task_runner: {},
+      runtime_credentials: {
+        daytona: { configured: false },
+        github: { configured: false },
+      },
+    },
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    updateRedis: vi.fn(),
+    updateAgentRuntime: vi.fn(),
+    updateLocalTaskRunner: vi.fn(),
+    updateRuntimeCredentials: vi.fn(),
+    refetch: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe("IssueDetailPanel", () => {
+  beforeEach(() => {
+    const agentStore = createAgentStore();
+    mockUseAgentStoreInstance.mockReset();
+    mockUseAgentStoreInstance.mockReturnValue(agentStore);
+    mockUseLocalSettings.mockReset();
+    mockUseLocalSettings.mockImplementation(() =>
+      createLocalSettingsHookReturn(),
+    );
+    mockUseWorkspaceContext.mockReset();
+    mockUseWorkspaceContext.mockImplementation(() => createWorkspaceContext());
+    mockGetTaskSessions.mockReset();
+    mockGetTaskSessions.mockResolvedValue([]);
+    mockShowToast.mockReset();
+    mockUseToast.mockReset();
+    mockUseToast.mockImplementation(() => ({
+      toasts: [],
+      showToast: mockShowToast,
+      dismissToast: vi.fn(),
+      dismissAll: vi.fn(),
+    }));
+    const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+    mockStartWorkflowRun.mockReset();
+    mockStartWorkflowRun.mockResolvedValue({
+      workspace_key: "DESKTOP-QA",
+      run_id: "run-1",
+      driver_id: "driver-1",
+      driver_version_id: "version-1",
+      status: "queued",
+      created_at: "2026-01-23T00:00:00Z",
+      updated_at: "2026-01-23T00:00:00Z",
+    });
+    const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
+      typeof vi.fn
+    >;
+    mockCreateWorkspaceAgent.mockReset();
+    mockCreateWorkspaceAgent.mockImplementation(
+      async (
+        _workspaceId: string,
+        request: {
+          name: string;
+          role_name: string;
+          repos?: string[];
+          repo_groups?: string[];
+          cross_repo?: boolean;
+        },
+      ) => ({
+        name: request.name,
+        repos: request.repos ?? [],
+        repo_groups: request.repo_groups ?? [],
+        cross_repo: request.cross_repo ?? false,
+        role_name: request.role_name,
+      }),
+    );
+    const mockDeleteWorkspaceAgent = deleteWorkspaceAgent as ReturnType<
+      typeof vi.fn
+    >;
+    mockDeleteWorkspaceAgent.mockReset();
+    mockDeleteWorkspaceAgent.mockResolvedValue(undefined);
+  });
+
   // Reset body overflow after each test
   afterEach(() => {
     document.body.style.overflow = "";
@@ -170,6 +403,63 @@ describe("IssueDetailPanel", () => {
         </IssueDetailPanel>,
       );
       expect(screen.getByTestId("child-content")).toBeInTheDocument();
+    });
+
+    it("shows latest failed task run and links to Runs tab", async () => {
+      mockGetTaskSessions.mockResolvedValue([
+        createTestSession({ error_class: "AuthFailure" }),
+      ]);
+      const mockIssue = createTestIssue({
+        issue_type: "task",
+        id: "test-123",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId("latest-run-failure-banner"),
+        ).toHaveTextContent("AuthFailure");
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "View run" }));
+      expect(screen.getByRole("tab", { name: "Runs" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    it("does not show failed-run banner when a newer run succeeded", async () => {
+      mockGetTaskSessions.mockResolvedValue([
+        createTestSession({
+          session_id: "old-failure",
+          status: "failed",
+          error_class: "AuthFailure",
+          started_at: "2026-01-23T00:00:00Z",
+        }),
+        createTestSession({
+          session_id: "new-success",
+          status: "completed",
+          error_class: undefined,
+          exit_code: 0,
+          started_at: "2026-01-23T01:00:00Z",
+        }),
+      ]);
+      const mockIssue = createTestIssue({
+        issue_type: "task",
+        id: "test-123",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(mockGetTaskSessions).toHaveBeenCalledWith("", "test-123");
+      });
+      expect(
+        screen.queryByTestId("latest-run-failure-banner"),
+      ).not.toBeInTheDocument();
     });
 
     it("applies open class when isOpen is true", () => {
@@ -221,12 +511,20 @@ describe("IssueDetailPanel", () => {
     });
 
     it("calls onClose when pressing Escape", () => {
+      mockUseRegisterEscapeLayer.mockClear();
       const mockIssue = createTestIssue();
       const onClose = vi.fn();
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={onClose} />,
       );
-      fireEvent.keyDown(document, { key: "Escape" });
+      // useRegisterEscapeLayer is mocked; verify it was called with the right args
+      // and manually invoke the registered handler to simulate Escape
+      const call = mockUseRegisterEscapeLayer.mock.calls.find(
+        (c: unknown[]) => c[2] === true, // active=true
+      );
+      expect(call).toBeDefined();
+      const handler = call![1] as () => void;
+      handler();
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
@@ -430,7 +728,7 @@ describe("IssueDetailPanel", () => {
   });
 
   describe("CollapsibleSection", () => {
-    it("renders design section expanded by default for short content", () => {
+    it("renders design section always visible (not collapsible at section level)", () => {
       const mockIssue = createTestIssueDetails({
         design: "Short design text",
       });
@@ -438,46 +736,14 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
       const designSection = screen.getByTestId("design-section");
-      const button = within(designSection).getByRole("button");
-      expect(button).toHaveAttribute("aria-expanded", "true");
+      expect(designSection).toBeInTheDocument();
+      // DesignPanel has a fullscreen button but no collapsible toggle for the section itself
+      expect(
+        within(designSection).getByLabelText("Enter fullscreen"),
+      ).toBeInTheDocument();
     });
 
-    it("renders design section collapsed by default for long content", () => {
-      const longDesign = "A".repeat(250); // More than 200 chars
-      const mockIssue = createTestIssueDetails({
-        design: longDesign,
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      const designSection = screen.getByTestId("design-section");
-      const button = within(designSection).getByRole("button");
-      expect(button).toHaveAttribute("aria-expanded", "false");
-    });
-
-    it("toggles expanded state when section header is clicked", () => {
-      const mockIssue = createTestIssueDetails({
-        design: "Some design content",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      const designSection = screen.getByTestId("design-section");
-      const button = within(designSection).getByRole("button");
-
-      // Initially expanded
-      expect(button).toHaveAttribute("aria-expanded", "true");
-
-      // Click to collapse
-      fireEvent.click(button);
-      expect(button).toHaveAttribute("aria-expanded", "false");
-
-      // Click to expand again
-      fireEvent.click(button);
-      expect(button).toHaveAttribute("aria-expanded", "true");
-    });
-
-    it("shows collapsible section title", () => {
+    it("renders design in right column with heading", () => {
       const mockIssue = createTestIssueDetails({
         design: "Design content",
       });
@@ -486,28 +752,6 @@ describe("IssueDetailPanel", () => {
       );
       const designSection = screen.getByTestId("design-section");
       expect(within(designSection).getByText("Design")).toBeInTheDocument();
-    });
-
-    it("hides content when collapsed", () => {
-      const mockIssue = createTestIssueDetails({
-        design: "Visible design content",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      const designSection = screen.getByTestId("design-section");
-      const button = within(designSection).getByRole("button");
-
-      // Content visible when expanded
-      expect(screen.getByText("Visible design content")).toBeInTheDocument();
-
-      // Collapse the section
-      fireEvent.click(button);
-
-      // Content should be hidden
-      expect(
-        screen.queryByText("Visible design content"),
-      ).not.toBeInTheDocument();
     });
 
     it("renders notes section when notes provided", () => {
@@ -631,46 +875,59 @@ describe("IssueDetailPanel", () => {
       expect(typeItem).toHaveTextContent("Task");
     });
 
-    it("renders owner when provided", () => {
+    it("does not render owner dropdown in metadata bar", () => {
       const mockIssue = createTestIssueDetails({
         owner: "john-doe",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      const ownerItem = screen.getByTestId("metadata-owner");
-      expect(ownerItem).toHaveTextContent("john-doe");
+      expect(
+        screen.queryByTestId("owner-dropdown-trigger"),
+      ).not.toBeInTheDocument();
     });
 
-    it("does not render owner when not provided", () => {
-      const mockIssue = createTestIssueDetails({
-        owner: undefined,
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      expect(screen.queryByTestId("metadata-owner")).not.toBeInTheDocument();
-    });
-
-    it("renders assignee with @ prefix", () => {
+    it("renders assignee dropdown with assignee name when provided", () => {
       const mockIssue = createTestIssueDetails({
         assignee: "jane-smith",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      const assigneeItem = screen.getByTestId("metadata-assignee");
-      expect(assigneeItem).toHaveTextContent("@jane-smith");
+      const assigneeTrigger = screen.getAllByTestId(
+        "assignee-dropdown-trigger",
+      )[0];
+      expect(assigneeTrigger).toHaveTextContent("jane-smith");
     });
 
-    it("does not render assignee when not provided", () => {
+    it("renders assignee dropdown with 'Unassigned' when not provided", () => {
       const mockIssue = createTestIssueDetails({
         assignee: undefined,
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
-      expect(screen.queryByTestId("metadata-assignee")).not.toBeInTheDocument();
+      const assigneeTrigger = screen.getAllByTestId(
+        "assignee-dropdown-trigger",
+      )[0];
+      expect(assigneeTrigger).toHaveTextContent("Unassigned");
+    });
+
+    it("renders repo dropdown in metadata bar when repo is set", () => {
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          repos: [{ name: "source-repo", path: "/repos/source-repo" }],
+        }),
+      );
+      const mockIssue = createTestIssueDetails({
+        labels: ["repo:source-repo"],
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByTestId("repo-dropdown-trigger")).toHaveTextContent(
+        "source-repo",
+      );
     });
 
     it("renders created date formatted correctly", () => {
@@ -952,7 +1209,7 @@ describe("IssueDetailPanel", () => {
     });
   });
 
-  describe("Details/Logs tabs", () => {
+  describe("Details tab", () => {
     it("always shows Details tab", () => {
       const mockIssue = createTestIssueDetails({
         description: "Test description",
@@ -961,28 +1218,6 @@ describe("IssueDetailPanel", () => {
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
       expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
-    });
-
-    it("shows Logs tab when issue has an assignee", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: "agent-1",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
-    });
-
-    it("does not show Logs tab when issue has no assignee", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: undefined,
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
-      );
-      expect(
-        screen.queryByRole("tab", { name: "Logs" }),
-      ).not.toBeInTheDocument();
     });
 
     it("defaults to Details tab and shows detail content", () => {
@@ -997,76 +1232,900 @@ describe("IssueDetailPanel", () => {
 
       const detailsTab = screen.getByRole("tab", { name: "Details" });
       expect(detailsTab).toHaveAttribute("aria-selected", "true");
-      expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument();
     });
 
-    it("shows LogViewer on Logs tab", () => {
+    it("Details tab close button is not shown", () => {
+      const mockIssue = createTestIssueDetails({
+        description: "Test description",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.queryByTestId("close-tab-details")).not.toBeInTheDocument();
+    });
+
+    it("does not show Files changed tab even when issue has an assignee agent", () => {
+      const agentStore = createAgentStore();
+      agentStore.setState({
+        agents: [
+          {
+            name: "agent-1",
+            status: "ready",
+            branch: "feature/test",
+            ahead: 2,
+            behind: 0,
+            worktree_path: "/tmp/agent-1",
+          },
+        ],
+      });
+      mockUseAgentStoreInstance.mockReturnValue(agentStore);
+
       const mockIssue = createTestIssueDetails({
         assignee: "agent-1",
+        description: "Test issue description",
       });
       render(
         <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
       );
 
-      fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
-      expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("tab", { name: "Files changed" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("issue-panel-tab-diff"),
+      ).not.toBeInTheDocument();
     });
+  });
 
-    it("switches back from Logs to Details tab correctly", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: "agent-1",
-        design: "# My Design",
+  describe("Epic runner", () => {
+    it("shows the epic runner action for open epics only", () => {
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
       });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      const task = createTestIssueDetails({
+        id: "DESKTOP-QA-3",
+        issue_type: "task",
+        status: "open",
+      });
+      const closedEpic = createTestIssueDetails({
+        id: "DESKTOP-QA-CLOSED",
+        issue_type: "epic",
+        status: "closed",
+      });
+
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
       );
 
-      // Switch to Logs tab
-      fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
-      expect(screen.getByTestId("log-viewer")).toBeInTheDocument();
+      expect(screen.getByTestId("header-run-epic-button")).toBeInTheDocument();
 
-      // Switch back to Details tab
-      fireEvent.click(screen.getByRole("tab", { name: "Details" }));
-      expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument();
-      expect(screen.getByTestId("design-section")).toBeInTheDocument();
-    });
-
-    it("shows Logs tab for all issue types with an assignee", () => {
-      const issueTypes = ["bug", "feature", "task", "epic"] as const;
-      for (const type of issueTypes) {
-        const mockIssue = createTestIssueDetails({
-          issue_type: type,
-          assignee: "agent-1",
-        });
-        const { unmount } = render(
-          <IssueDetailPanel
-            isOpen={true}
-            issue={mockIssue}
-            onClose={() => {}}
-          />,
-        );
-        expect(screen.getByRole("tab", { name: "Logs" })).toBeInTheDocument();
-        unmount();
-      }
-    });
-
-    it("passes agentName from assignee to useAgentTerminalLogs", () => {
-      const mockIssue = createTestIssueDetails({
-        assignee: "my-agent",
-      });
-      render(
-        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={task} onClose={() => {}} />,
       );
+      expect(
+        screen.queryByTestId("header-run-epic-button"),
+      ).not.toBeInTheDocument();
 
-      // Switch to Logs tab to enable the hook
-      fireEvent.click(screen.getByRole("tab", { name: "Logs" }));
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={closedEpic}
+          onClose={() => {}}
+        />,
+      );
+      expect(
+        screen.queryByTestId("header-run-epic-button"),
+      ).not.toBeInTheDocument();
+    });
 
-      expect(mockUseAgentTerminalLogs).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentName: "my-agent",
-          enabled: true,
+    it("starts the epic runner workflow with the selected epic payload", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
+        typeof vi.fn
+      >;
+      const mockUpsertAgent = vi.fn();
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          workspaceId: "DESKTOP-QA",
+          upsertAgent: mockUpsertAgent,
         }),
       );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
+          name: "lead-desktop-qa-epic",
+          role_name: "lead",
+          auto: false,
+          cross_repo: true,
+          repos: [],
+        });
+        expect(mockStartWorkflowRun).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "epic-runner",
+          {
+            epicId: "DESKTOP-QA-EPIC",
+            leadName: "lead-desktop-qa-epic",
+            requestedBy: "ui",
+            runner: "local-task-runner",
+          },
+        );
+      });
+      expect(mockUpsertAgent).toHaveBeenCalledWith({
+        name: "lead-desktop-qa-epic",
+        repos: [],
+        repo_groups: [],
+        cross_repo: true,
+        role_name: "lead",
+      });
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Epic runner queued for lead-desktop-qa-epic: run-1",
+        {
+          type: "success",
+        },
+      );
+    });
+
+    it("starts app-triggered epic runs on Daytona when selected in settings", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
+        typeof vi.fn
+      >;
+      mockUseLocalSettings.mockImplementation(() =>
+        createLocalSettingsHookReturn({
+          settings: {
+            version: 1,
+            fleetdb_redis: {
+              enabled: false,
+              db: 0,
+              tls: false,
+              password_set: false,
+            },
+            agent_runtime: { default: "daytona" },
+            local_task_runner: {},
+            runtime_credentials: {
+              daytona: { configured: true },
+              github: { configured: true },
+            },
+          },
+        }),
+      );
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          workspaceId: "DESKTOP-QA",
+          repos: [
+            {
+              name: "slack-clone",
+              source_repo_id: "repo-slack",
+              remote: "origin",
+              remote_url: "git@github.com:tyson/slack-clone-e2e.git",
+              default_branch: "develop",
+            },
+          ],
+        }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+        source_repo: "repo-slack",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
+          name: "lead-desktop-qa-epic",
+          role_name: "lead",
+          auto: false,
+          cross_repo: false,
+          repos: ["slack-clone"],
+        });
+        expect(mockStartWorkflowRun).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "epic-runner",
+          {
+            epicId: "DESKTOP-QA-EPIC",
+            leadName: "lead-desktop-qa-epic",
+            requestedBy: "ui",
+            runner: "daytona-task-runner",
+            repoUrl: "https://github.com/tyson/slack-clone-e2e.git",
+            baseBranch: "develop",
+            openPullRequest: true,
+            stackedPullRequests: true,
+          },
+        );
+      });
+    });
+
+    it("creates a fresh lead when the default epic lead name already exists", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      const mockCreateWorkspaceAgent = createWorkspaceAgent as ReturnType<
+        typeof vi.fn
+      >;
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({
+          workspaceId: "DESKTOP-QA",
+          agents: [
+            {
+              name: "lead-desktop-qa-epic",
+              repos: [],
+              repo_groups: [],
+              cross_repo: true,
+              role_name: "lead",
+            },
+          ],
+        }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockCreateWorkspaceAgent).toHaveBeenCalledWith("DESKTOP-QA", {
+          name: "lead-desktop-qa-epic-2",
+          role_name: "lead",
+          auto: false,
+          cross_repo: true,
+          repos: [],
+        });
+        expect(mockStartWorkflowRun).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "epic-runner",
+          {
+            epicId: "DESKTOP-QA-EPIC",
+            leadName: "lead-desktop-qa-epic-2",
+            requestedBy: "ui",
+            runner: "local-task-runner",
+          },
+        );
+      });
+    });
+
+    it("disables the epic runner action while the workflow request is in flight", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      let resolveRun: (value: unknown) => void = () => {};
+      mockStartWorkflowRun.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveRun = resolve;
+        }),
+      );
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      const button = screen.getByTestId("header-run-epic-button");
+      fireEvent.click(button);
+
+      await waitFor(() => {
+        expect(button).toBeDisabled();
+      });
+      expect(button).toHaveTextContent("Starting");
+
+      resolveRun({
+        workspace_key: "DESKTOP-QA",
+        run_id: "run-1",
+        driver_id: "driver-1",
+        driver_version_id: "version-1",
+        status: "queued",
+        created_at: "2026-01-23T00:00:00Z",
+        updated_at: "2026-01-23T00:00:00Z",
+      });
+
+      await waitFor(() => {
+        expect(button).not.toBeDisabled();
+      });
+    });
+
+    it("reports workflow start errors", async () => {
+      const mockStartWorkflowRun = startWorkflowRun as ReturnType<typeof vi.fn>;
+      const mockDeleteWorkspaceAgent = deleteWorkspaceAgent as ReturnType<
+        typeof vi.fn
+      >;
+      mockStartWorkflowRun.mockRejectedValueOnce(new Error("workflow missing"));
+      mockUseWorkspaceContext.mockImplementation(() =>
+        createWorkspaceContext({ workspaceId: "DESKTOP-QA" }),
+      );
+      const epic = createTestIssueDetails({
+        id: "DESKTOP-QA-EPIC",
+        issue_type: "epic",
+        status: "open",
+      });
+
+      render(
+        <IssueDetailPanel isOpen={true} issue={epic} onClose={() => {}} />,
+      );
+
+      fireEvent.click(screen.getByTestId("header-run-epic-button"));
+
+      await waitFor(() => {
+        expect(mockShowToast).toHaveBeenCalledWith(
+          "Epic runner failed: workflow missing",
+          { type: "error" },
+        );
+      });
+      await waitFor(() => {
+        expect(mockDeleteWorkspaceAgent).toHaveBeenCalledWith(
+          "DESKTOP-QA",
+          "lead-desktop-qa-epic",
+        );
+      });
+    });
+  });
+
+  describe("PR links via IssueHeader", () => {
+    it("passes PR props to IssueHeader when issue has PR external_ref", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: "https://github.com/owner/repo/pull/42",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByTestId("header-pr-view-link")).toBeInTheDocument();
+      expect(screen.getByTestId("header-pr-merge-link")).toBeInTheDocument();
+      expect(screen.getByTestId("header-pr-view-link")).toHaveTextContent(
+        "↗ #42",
+      );
+      expect(screen.getByTestId("header-pr-merge-link")).toHaveTextContent(
+        "→ merge #42",
+      );
+    });
+
+    it("does not pass PR props when external_ref is null", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: null,
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(
+        screen.queryByTestId("header-pr-view-link"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-pr-merge-link"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not pass PR props when external_ref is undefined", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: undefined,
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(
+        screen.queryByTestId("header-pr-view-link"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-pr-merge-link"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not pass PR props when external_ref is a non-PR URL", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: "JIRA-123",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(
+        screen.queryByTestId("header-pr-view-link"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("header-pr-merge-link"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("extracts PR number correctly from /pull/42 URL", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: "https://github.com/owner/repo/pull/42",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      const viewLink = screen.getByTestId("header-pr-view-link");
+      expect(viewLink).toHaveTextContent("↗ #42");
+      expect(viewLink).toHaveAttribute(
+        "href",
+        "https://github.com/owner/repo/pull/42",
+      );
+    });
+
+    it("extracts PR number correctly from /pulls/123 URL", () => {
+      const mockIssue = createTestIssueDetails({
+        external_ref: "https://github.com/owner/repo/pulls/123",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      const viewLink = screen.getByTestId("header-pr-view-link");
+      expect(viewLink).toHaveTextContent("↗ #123");
+      expect(viewLink).toHaveAttribute(
+        "href",
+        "https://github.com/owner/repo/pulls/123",
+      );
+    });
+  });
+
+  describe("handleTitleSave error handling", () => {
+    const mockUpdateIssue = updateIssue as ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      mockUpdateIssue.mockReset();
+    });
+
+    it("shows error toast when title save fails", async () => {
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+
+      const mockIssue = createTestIssueDetails({ title: "Original Title" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // Click the title display to enter edit mode
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      // Change the title and trigger save via Enter
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      // Error toast should appear
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("title-error-toast")).toHaveTextContent(
+        "Network error",
+      );
+    });
+
+    it("shows generic error message for non-Error exceptions", async () => {
+      mockUpdateIssue.mockRejectedValueOnce("string error");
+
+      const mockIssue = createTestIssueDetails({ title: "Original Title" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("title-error-toast")).toHaveTextContent(
+        "Failed to update title",
+      );
+    });
+
+    it("clears title error on next save attempt", async () => {
+      // First save fails
+      mockUpdateIssue.mockRejectedValueOnce(new Error("Network error"));
+
+      const mockIssue = createTestIssueDetails({ title: "Original Title" });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      // Enter edit mode and trigger failed save
+      const titleDisplay = screen.getByTestId("editable-title-display");
+      fireEvent.click(titleDisplay);
+
+      const input = screen.getByTestId("editable-title-input");
+      fireEvent.change(input, { target: { value: "New Title" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("title-error-toast")).toBeInTheDocument();
+      });
+
+      // Second save succeeds
+      mockUpdateIssue.mockResolvedValueOnce({
+        ...mockIssue,
+        title: "New Title",
+      });
+
+      // EditableTitle stays in edit mode after error, so input should still be there
+      const inputAfterError = screen.getByTestId("editable-title-input");
+      fireEvent.change(inputAfterError, { target: { value: "New Title" } });
+      fireEvent.keyDown(inputAfterError, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(
+          screen.queryByTestId("title-error-toast"),
+        ).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("terminal session cleanup on implicit tab discard", () => {
+    const TERMINAL_TABS_PERSISTED = {
+      savedState: {
+        issue_id: "test-123",
+        tabs: [
+          {
+            id: "details",
+            type: "details" as const,
+            label: "Details",
+            sort_order: 0,
+          },
+          {
+            id: "terminal-sess-1",
+            type: "terminal" as const,
+            label: "Terminal (shell)",
+            session_name: "sess-1",
+            sort_order: 1,
+          },
+        ],
+        active_tab_id: "terminal-sess-1",
+        updated_at: "2026-01-23T00:00:00Z",
+      },
+      isLoading: false,
+      saveTabs: vi.fn(),
+      clearTabs: vi.fn(),
+    };
+
+    beforeEach(() => {
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+      // Provide workspace ID so deleteTabMetadata is called
+      mockUseWorkspaceContext.mockReturnValue({
+        workspace: { id: "ws-1", name: "default" },
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: () => {},
+        getRepoByName: () => undefined,
+        getReposByGroup: () => [],
+        getAgentByName: () => undefined,
+        workspaceId: "ws-1",
+        activeWorkspaceName: "default",
+        setActiveWorkspace: () => {},
+        defaultWorkspaceName: "default",
+        setDefaultWorkspace: () => Promise.resolve(),
+      });
+    });
+
+    afterEach(() => {
+      // Reset to defaults
+      mockUseIssueTabPersistence.mockReturnValue({
+        savedState: null,
+        isLoading: true,
+        saveTabs: vi.fn(),
+        clearTabs: vi.fn(),
+      });
+      mockUseWorkspaceContext.mockReturnValue({
+        workspace: null,
+        repos: [],
+        groups: [],
+        agents: [],
+        isLoading: false,
+        error: null,
+        refetch: () => {},
+        getRepoByName: () => undefined,
+        getReposByGroup: () => [],
+        getAgentByName: () => undefined,
+        workspaceId: "",
+        activeWorkspaceName: null,
+        setActiveWorkspace: () => {},
+        defaultWorkspaceName: null,
+        setDefaultWorkspace: () => Promise.resolve(),
+      });
+    });
+
+    it("cleans up terminal sessions when issue ID changes", async () => {
+      // Return persisted state with a terminal tab for issue A
+      mockUseIssueTabPersistence.mockReturnValue(TERMINAL_TABS_PERSISTED);
+
+      const issueA = createTestIssue({ id: "issue-a" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+
+      // Wait for terminal tab to be restored
+      await waitFor(() => {
+        expect(
+          screen.getByRole("tab", { name: /Terminal/ }),
+        ).toBeInTheDocument();
+      });
+
+      // Clear mocks from initial render (cleanup fires on first mount too)
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+
+      // Change issue — should trigger cleanup of terminal tabs
+      const issueB = createTestIssue({ id: "issue-b" });
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-1");
+      });
+    });
+
+    it("cleans up terminal sessions on component unmount", async () => {
+      mockUseIssueTabPersistence.mockReturnValue(TERMINAL_TABS_PERSISTED);
+
+      const issue = createTestIssue({ id: "test-123" });
+      const { unmount } = render(
+        <IssueDetailPanel isOpen={true} issue={issue} onClose={() => {}} />,
+      );
+
+      // Wait for terminal tab to be restored
+      await waitFor(() => {
+        expect(
+          screen.getByRole("tab", { name: /Terminal/ }),
+        ).toBeInTheDocument();
+      });
+
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+
+      unmount();
+
+      expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-1");
+    });
+
+    it("does not call cleanup when no terminal tabs exist", () => {
+      // Default persistence: no saved state, no terminal tabs
+      mockUseIssueTabPersistence.mockReturnValue({
+        savedState: null,
+        isLoading: false,
+        saveTabs: vi.fn(),
+        clearTabs: vi.fn(),
+      });
+
+      const issueA = createTestIssue({ id: "issue-a" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+
+      const issueB = createTestIssue({ id: "issue-b" });
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+
+      expect(mockDeleteTabMetadata).not.toHaveBeenCalled();
+    });
+
+    it("cleans up multiple terminal tabs on issue change", async () => {
+      const multiTerminalPersisted = {
+        ...TERMINAL_TABS_PERSISTED,
+        savedState: {
+          issue_id: "test-123",
+          tabs: [
+            {
+              id: "details",
+              type: "details" as const,
+              label: "Details",
+              sort_order: 0,
+            },
+            {
+              id: "terminal-sess-1",
+              type: "terminal" as const,
+              label: "Terminal (shell)",
+              session_name: "sess-1",
+              sort_order: 1,
+            },
+            {
+              id: "terminal-sess-2",
+              type: "terminal" as const,
+              label: "Terminal (shell)",
+              session_name: "sess-2",
+              sort_order: 2,
+            },
+          ],
+          active_tab_id: "terminal-sess-1",
+          updated_at: "2026-01-23T00:00:00Z",
+        },
+      };
+      mockUseIssueTabPersistence.mockReturnValue(multiTerminalPersisted);
+
+      const issueA = createTestIssue({ id: "issue-a" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+
+      // Wait for terminal tabs to be restored
+      await waitFor(() => {
+        const terminalTabs = screen.getAllByRole("tab", { name: /Terminal/ });
+        expect(terminalTabs).toHaveLength(2);
+      });
+
+      mockDeleteTabMetadata.mockClear();
+      mockScheduleSessionKill.mockClear();
+
+      const issueB = createTestIssue({ id: "issue-b" });
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-1");
+        expect(mockDeleteTabMetadata).toHaveBeenCalledWith("ws-1", "sess-2");
+      });
+    });
+  });
+
+  describe("tab reset on issue change", () => {
+    it("includes Runs tab on initial render", () => {
+      const mockIssue = createTestIssue();
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+      expect(screen.getByRole("tab", { name: "Runs" })).toBeInTheDocument();
+    });
+
+    it("includes Runs tab after issue ID changes", () => {
+      const issueA = createTestIssue({ id: "issue-a" });
+      const issueB = createTestIssue({ id: "issue-b" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+      expect(screen.getByRole("tab", { name: "Runs" })).toBeInTheDocument();
+    });
+
+    it("resets active tab to Details when issue changes", () => {
+      const issueA = createTestIssueDetails({ id: "issue-a" });
+      const issueB = createTestIssueDetails({ id: "issue-b" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+
+      expect(screen.getByRole("tab", { name: "Runs" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+
+    it("falls back to Details when restored active tab has no renderer", async () => {
+      mockUseIssueTabPersistence.mockReturnValue({
+        savedState: {
+          issue_id: "test-123",
+          tabs: [
+            {
+              id: "details",
+              type: "details" as const,
+              label: "Details",
+              sort_order: 0,
+            },
+            {
+              id: "terminal-sess-unknown",
+              type: "terminal" as const,
+              label: "Terminal",
+              session_name: "sess-unknown",
+              sort_order: 2,
+            },
+          ],
+          active_tab_id: "terminal-sess-unknown",
+          updated_at: "2026-01-23T00:00:00Z",
+        },
+        isLoading: false,
+        saveTabs: vi.fn(),
+        clearTabs: vi.fn(),
+      });
+
+      const mockIssue = createTestIssueDetails({
+        description: "Visible details content",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
+          "aria-selected",
+          "true",
+        );
+      });
+      expect(screen.getByText("Visible details content")).toBeInTheDocument();
+    });
+
+    it("falls back to Details when restored active tab is legacy diff", async () => {
+      mockUseIssueTabPersistence.mockReturnValue({
+        savedState: {
+          issue_id: "test-123",
+          tabs: [
+            {
+              id: "details",
+              type: "details" as const,
+              label: "Details",
+              sort_order: 0,
+            },
+          ],
+          active_tab_id: "diff",
+          updated_at: "2026-01-23T00:00:00Z",
+        },
+        isLoading: false,
+        saveTabs: vi.fn(),
+        clearTabs: vi.fn(),
+      });
+
+      const mockIssue = createTestIssueDetails({
+        description: "Visible details content",
+      });
+      render(
+        <IssueDetailPanel isOpen={true} issue={mockIssue} onClose={() => {}} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("tab", { name: "Details" })).toHaveAttribute(
+          "aria-selected",
+          "true",
+        );
+      });
+      expect(
+        screen.queryByRole("tab", { name: "Files changed" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("preserves Details tab across multiple issue changes", () => {
+      const issueA = createTestIssue({ id: "issue-a" });
+      const issueB = createTestIssue({ id: "issue-b" });
+      const issueC = createTestIssue({ id: "issue-c" });
+      const { rerender } = render(
+        <IssueDetailPanel isOpen={true} issue={issueA} onClose={() => {}} />,
+      );
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueB} onClose={() => {}} />,
+      );
+      rerender(
+        <IssueDetailPanel isOpen={true} issue={issueC} onClose={() => {}} />,
+      );
+      expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Runs" })).toBeInTheDocument();
     });
   });
 });

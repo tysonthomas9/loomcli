@@ -10,8 +10,9 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { Status } from "@/types/status";
-import { USER_SELECTABLE_STATUSES } from "@/types/status";
+import type { Status } from "@/types/issue";
+import { USER_SELECTABLE_STATUSES } from "@/types/issue";
+import { expectNoA11yViolations } from "@/test-utils/a11y-helpers";
 
 import { StatusDropdown } from "../StatusDropdown";
 
@@ -427,6 +428,47 @@ describe("StatusDropdown", () => {
       fireEvent.change(select, { target: { value: "in_progress" } });
 
       expect(onStatusChange).toHaveBeenCalledWith("in_progress");
+    });
+  });
+
+  describe("axe accessibility", () => {
+    it("has no axe violations with default status", async () => {
+      const { container } = render(
+        <StatusDropdown status="open" onStatusChange={() => {}} />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations when disabled", async () => {
+      const { container } = render(
+        <StatusDropdown status="open" onStatusChange={() => {}} disabled />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations when saving", async () => {
+      const { container } = render(
+        <StatusDropdown
+          status="in_progress"
+          onStatusChange={() => {}}
+          isSaving
+        />,
+      );
+
+      await expectNoA11yViolations(container);
+    });
+
+    it("has no axe violations for each user-selectable status", async () => {
+      for (const status of USER_SELECTABLE_STATUSES) {
+        const { container, unmount } = render(
+          <StatusDropdown status={status} onStatusChange={() => {}} />,
+        );
+
+        await expectNoA11yViolations(container);
+        unmount();
+      }
     });
   });
 

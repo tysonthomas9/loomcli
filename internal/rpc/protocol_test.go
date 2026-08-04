@@ -17,7 +17,7 @@ func TestRequest_JSONRoundTrip(t *testing.T) {
 		RequestID:     "req-123",
 		Cwd:           "/home/user/project",
 		ClientVersion: "1.0.0",
-		ExpectedDB:    "/home/user/project/.beads/db.sqlite",
+		ExpectedDB:    "/home/user/project/.loom/db.sqlite",
 	}
 
 	data, err := json.Marshal(original) // #nosec G117 — test struct, no real secrets
@@ -50,7 +50,7 @@ func TestResponse_JSONRoundTrip(t *testing.T) {
 	t.Run("success response", func(t *testing.T) {
 		original := Response{
 			Success: true,
-			Data:    json.RawMessage(`{"id":"bd-123"}`),
+			Data:    json.RawMessage(`{"id":"loom-123"}`),
 		}
 
 		data, err := json.Marshal(original)
@@ -101,8 +101,8 @@ func TestCreateArgs_JSONRoundTrip(t *testing.T) {
 
 	estimatedMinutes := 60
 	original := CreateArgs{
-		ID:                 "bd-test",
-		Parent:             "bd-parent",
+		ID:                 "loom-test",
+		Parent:             "loom-parent",
 		Title:              "Test Issue",
 		Description:        "Test description",
 		IssueType:          "task",
@@ -114,12 +114,12 @@ func TestCreateArgs_JSONRoundTrip(t *testing.T) {
 		ExternalRef:        "gh-123",
 		EstimatedMinutes:   &estimatedMinutes,
 		Labels:             []string{"bug", "urgent"},
-		Dependencies:       []string{"bd-1", "bd-2"},
-		WaitsFor:           "bd-spawner",
+		Dependencies:       []string{"loom-1", "loom-2"},
+		WaitsFor:           "loom-spawner",
 		WaitsForGate:       "all-children",
 		Sender:             "bot",
 		Ephemeral:          true,
-		RepliesTo:          "bd-original",
+		RepliesTo:          "loom-original",
 		IDPrefix:           "mol",
 		CreatedBy:          "alice@example.com",
 		Owner:              "bob@example.com",
@@ -128,7 +128,7 @@ func TestCreateArgs_JSONRoundTrip(t *testing.T) {
 		Rig:                "rig-1",
 		EventCategory:      "patrol.started",
 		EventActor:         "entity://hop/gastown/org/agent",
-		EventTarget:        "bd-target",
+		EventTarget:        "loom-target",
 		EventPayload:       `{"key":"value"}`,
 		DueAt:              "2024-12-31",
 		DeferUntil:         "2024-01-01",
@@ -198,7 +198,7 @@ func TestUpdateArgs_JSONRoundTrip(t *testing.T) {
 	ephemeral := true
 
 	original := UpdateArgs{
-		ID:           "bd-123",
+		ID:           "loom-123",
 		Title:        &title,
 		Description:  &description,
 		Status:       &status,
@@ -238,7 +238,7 @@ func TestUpdateArgs_PointerFields(t *testing.T) {
 
 	// Test nil vs set for pointer fields
 	t.Run("nil pointer omitted", func(t *testing.T) {
-		args := UpdateArgs{ID: "bd-123"}
+		args := UpdateArgs{ID: "loom-123"}
 		data, _ := json.Marshal(args)
 		if strings.Contains(string(data), `"title"`) {
 			t.Error("Nil title should be omitted")
@@ -247,7 +247,7 @@ func TestUpdateArgs_PointerFields(t *testing.T) {
 
 	t.Run("set pointer included", func(t *testing.T) {
 		title := "New Title"
-		args := UpdateArgs{ID: "bd-123", Title: &title}
+		args := UpdateArgs{ID: "loom-123", Title: &title}
 		data, _ := json.Marshal(args)
 		if !strings.Contains(string(data), `"title"`) {
 			t.Error("Set title should be included")
@@ -259,7 +259,7 @@ func TestCloseArgs_JSONRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	original := CloseArgs{
-		ID:          "bd-123",
+		ID:          "loom-123",
 		Reason:      "completed successfully",
 		Session:     "session-abc",
 		SuggestNext: true,
@@ -305,7 +305,7 @@ func TestListArgs_JSONRoundTrip(t *testing.T) {
 		Assignee:            "alice",
 		Labels:              []string{"bug", "urgent"},
 		LabelsAny:           []string{"p0", "p1"},
-		IDs:                 []string{"bd-1", "bd-2"},
+		IDs:                 []string{"loom-1", "loom-2"},
 		Limit:               50,
 		TitleContains:       "test",
 		DescriptionContains: "description",
@@ -344,7 +344,7 @@ func TestDeleteArgs_JSONRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	original := DeleteArgs{
-		IDs:     []string{"bd-1", "bd-2", "bd-3"},
+		IDs:     []string{"loom-1", "loom-2", "loom-3"},
 		Force:   true,
 		DryRun:  true,
 		Cascade: true,
@@ -375,7 +375,7 @@ func TestBatchArgs_JSONRoundTrip(t *testing.T) {
 	original := BatchArgs{
 		Operations: []BatchOperation{
 			{Operation: OpCreate, Args: json.RawMessage(`{"title":"test1"}`)},
-			{Operation: OpUpdate, Args: json.RawMessage(`{"id":"bd-1","status":"closed"}`)},
+			{Operation: OpUpdate, Args: json.RawMessage(`{"id":"loom-1","status":"closed"}`)},
 		},
 	}
 
@@ -422,6 +422,7 @@ func TestOperationConstants(t *testing.T) {
 		"label_remove":          OpLabelRemove,
 		"comment_list":          OpCommentList,
 		"comment_add":           OpCommentAdd,
+		"event_list":            OpEventList,
 		"batch":                 OpBatch,
 		"resolve_id":            OpResolveID,
 		"compact":               OpCompact,

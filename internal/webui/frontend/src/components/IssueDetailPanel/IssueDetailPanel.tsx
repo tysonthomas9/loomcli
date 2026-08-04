@@ -5,94 +5,81 @@
  * and markdown rendering for design field.
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 
-import { updateIssue, addDependency, removeDependency } from "@/api";
-import { useAgentTerminalLogs } from "@/hooks";
+import {
+  updateIssue,
+  addDependency,
+  removeDependency,
+  getIssueEvents,
+  moveIssue,
+  deleteTabMetadata,
+  getTaskLogPhases,
+  startAgent,
+  EPIC_RUNNER_WORKFLOW_NAME,
+  createWorkspaceAgent,
+  deleteWorkspaceAgent,
+  startWorkflowRun,
+} from "@/hooks/api";
+import type { IssueTab } from "@/api/issues";
+import {
+  useFocusReturn,
+  useFocusTrap,
+  useRegisterEscapeLayer,
+  LAYER_ISSUE_PANEL,
+} from "@/hooks";
+import { useStore } from "zustand";
+
+import { useAgentStoreInstance, useIssueStoreInstance } from "@/hooks/common";
+import { useLocalSettings, useWorkspaceContext } from "@/hooks/workspace";
+import { useIssueTabPersistence } from "@/hooks/issues";
 import type {
   Issue,
   IssueDetails,
   IssueWithDependencyMetadata,
-  Priority,
-  IssueType,
   DependencyType,
   Comment,
+  Event,
 } from "@/types";
-import type { Status } from "@/types/status";
-import { getReviewType } from "@/utils/issueCategory";
+import type { Status } from "@/types/issue";
+import { formatStatusLabel, getReviewType, isPRUrl } from "@/utils/issue";
+import {
+  epicRunnerRuntimePayload,
+  issueRepoName,
+  leadAgentRepoNames,
+} from "@/utils/epicRunnerPayload";
 
-import { AssigneeDropdown } from "./AssigneeDropdown";
-import { CommentForm } from "./CommentForm";
-import { CommentsSection } from "./CommentsSection";
-import { DependencySection } from "./DependencySection";
-import { EditableDescription } from "./EditableDescription";
-import { IssueHeader } from "./IssueHeader";
-import { MarkdownRenderer } from "./MarkdownRenderer";
-import { PriorityDropdown } from "./PriorityDropdown";
-import { RejectCommentForm } from "./RejectCommentForm";
-import { TypeDropdown } from "./TypeDropdown";
+import {
+  getBackendFromSessionName,
+  type ConnectionState,
+} from "@/components/TerminalView";
+import { useTaskLogPolling, useTaskSessions } from "@/hooks/terminal";
+import type { SessionRecord } from "@/types/agent";
+
+import {
+  ActivityLog,
+  CommentForm,
+  DependencySection,
+  EditableDescription,
+  DesignPanel,
+  EpicRollup,
+  MarkdownRenderer,
+  PRSection,
+  RejectCommentForm,
+} from "./sections";
+import { IssueHeader } from "./header";
+import { AssigneeDropdown, RepoDropdown } from "./fields";
+import { ConfirmDialog } from "../ConfirmDialog";
+import { MoveIssueDialog } from "./actions";
+import { SplitDetailSummary } from "./SplitDetailSummary";
+import { EmbeddedTerminal } from "../EmbeddedTerminal";
+import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
-import { LogViewer } from "../LogViewer";
+import { useSplitRatio, useToast } from "@/hooks/ui";
+import { CollapsibleSection } from "./CollapsibleSection";
+import { SessionsTab } from "./sessions";
 import styles from "./IssueDetailPanel.module.css";
-
-/**
- * Props for CollapsibleSection.
- */
-interface CollapsibleSectionProps {
-  title: string;
-  count?: number;
-  defaultExpanded?: boolean;
-  children: React.ReactNode;
-  testId?: string;
-}
-
-/**
- * Collapsible section with chevron indicator.
- */
-function CollapsibleSection({
-  title,
-  count,
-  defaultExpanded = true,
-  children,
-  testId,
-}: CollapsibleSectionProps): JSX.Element {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-
-  return (
-    <section className={styles.collapsibleSection} data-testid={testId}>
-      <button
-        type="button"
-        className={styles.collapsibleHeader}
-        onClick={() => setIsExpanded(!isExpanded)}
-        aria-expanded={isExpanded}
-      >
-        <span className={styles.collapsibleTitle}>
-          {title}
-          {count !== undefined && (
-            <span className={styles.collapsibleCount}>({count})</span>
-          )}
-        </span>
-        <svg
-          className={`${styles.chevron} ${isExpanded ? styles.chevronExpanded : ""}`}
-          viewBox="0 0 16 16"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M6 4l4 4-4 4"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
-      {isExpanded && (
-        <div className={styles.collapsibleContent}>{children}</div>
-      )}
-    </section>
-  );
-}
+import { formatDate, formatIssueType, isIssueDetails } from "./utils";
 
 /**
  * Blocking banner component - shows when issue is in blocked state with open dependencies.
@@ -138,30 +125,6 @@ function BlockingBanner({
 }
 
 /**
- * Format issue type for display.
- */
-function formatIssueType(type: IssueType | undefined): string {
-  if (!type) return "Task";
-  if (type === "epic") return "Epic";
-  if (type === "task") return "Task";
-  if (type === "bug") return "Bug";
-  if (type === "feature") return "Feature";
-  return type;
-}
-
-/**
- * Format date for display.
- */
-function formatDate(dateString: string): string {
-  const date = new Date(dateString);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-/**
  * Props for the IssueDetailPanel component.
  */
 export interface IssueDetailPanelProps {
@@ -183,33 +146,74 @@ export interface IssueDetailPanelProps {
   onApprove?: (issue: Issue) => void | Promise<void>;
   /** Callback when reject is submitted with comment (only for review items) */
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
+  /** Callback when issue is updated (e.g., status, title, priority changed) */
+  onIssueUpdate?: (issue: Issue) => void;
+  /** Callback when copy-link button is clicked */
+  onCopyLink?: () => void;
+  /** Callback when a dependency/dependent issue is clicked for navigation */
+  onNavigateToIssue?: (issue: Issue) => void;
+  /**
+   * When true, renders the panel inline (no fixed-position overlay, no
+   * slide-out animation, no backdrop). Used by the /agents view to embed
+   * task details as a regular layout column. Default is false — every
+   * other surface keeps the slide-out behavior.
+   */
+  inline?: boolean;
 }
 
 /**
- * Type guard to check if issue has IssueDetails fields.
- * Checks for fields that indicate this is a detailed issue response.
- * Note: The backend may omit empty arrays (dependents, dependencies),
- * but always includes comments array in IssueDetails responses.
+ * Get the CSS class for a dependency status dot.
  */
-function isIssueDetails(issue: Issue | IssueDetails): issue is IssueDetails {
-  // Check for any IssueDetails-specific field that the backend includes
-  // Comments is always present in /api/issues/{id} responses
-  return (
-    "dependents" in issue || "dependencies" in issue || "comments" in issue
-  );
+function getDependentStatusDotClass(status: string | undefined): string {
+  switch (status) {
+    case "closed":
+      return styles.statusDotClosed ?? "";
+    case "in_progress":
+      return styles.statusDotInProgress ?? "";
+    case "blocked":
+      return styles.statusDotBlocked ?? "";
+    default:
+      return styles.statusDotOpen ?? "";
+  }
 }
 
 /**
- * Render a dependency/dependent issue link.
+ * Render a dependency/dependent issue as a clickable chip.
  */
-function renderDependencyItem(dep: IssueWithDependencyMetadata): JSX.Element {
+function renderDependencyChip(
+  dep: IssueWithDependencyMetadata,
+  onNavigateToIssue?: (issue: Issue) => void,
+): JSX.Element {
   const statusClass = dep.status === "closed" ? styles.dependencyClosed : "";
+  const isClickable = !!onNavigateToIssue;
   return (
-    <li key={dep.id} className={`${styles.dependencyItem} ${statusClass}`}>
+    <li
+      key={dep.id}
+      className={`${styles.dependencyChip} ${statusClass} ${isClickable ? styles.clickableChip : ""}`}
+      onClick={isClickable ? () => onNavigateToIssue(dep) : undefined}
+      role={isClickable ? "button" : undefined}
+      tabIndex={isClickable ? 0 : undefined}
+      onKeyDown={
+        isClickable
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onNavigateToIssue(dep);
+              }
+            }
+          : undefined
+      }
+    >
+      <span
+        className={`${styles.statusDot} ${getDependentStatusDotClass(dep.status)}`}
+        aria-label={dep.status ?? "open"}
+      />
       <span className={styles.dependencyId}>{dep.id}</span>
       <span className={styles.dependencyTitle}>{dep.title}</span>
       {dep.dependency_type && (
-        <span className={styles.dependencyType}>{dep.dependency_type}</span>
+        <span className={styles.dependencyType}>
+          {formatStatusLabel(dep.dependency_type.replace(/-/g, "_"))}
+        </span>
       )}
     </li>
   );
@@ -220,7 +224,6 @@ function renderDependencyItem(dep: IssueWithDependencyMetadata): JSX.Element {
  */
 interface DefaultContentProps {
   issue: Issue | IssueDetails | null;
-  isOpen: boolean;
   isLoading: boolean;
   error: string | null;
   onClose: () => void;
@@ -231,6 +234,193 @@ interface DefaultContentProps {
   onApprove?: (issue: Issue) => void | Promise<void>;
   /** Callback when reject is submitted with comment */
   onReject?: (issue: Issue, comment: string) => void | Promise<void>;
+  /** Callback when copy-link button is clicked */
+  onCopyLink?: () => void;
+  /** Callback when a dependency/dependent issue is clicked for navigation */
+  onNavigateToIssue?: (issue: Issue) => void;
+  /** Whether the panel is maximized to full-page */
+  isMaximized?: boolean;
+  /** Toggle full-page maximize */
+  onToggleMaximize?: () => void;
+}
+
+/**
+ * Tab model for dynamic tab management.
+ */
+interface DetailTabMetadata {
+  sessionName?: string | undefined;
+  backend?: string | undefined;
+  agentName?: string | null | undefined;
+  worktreePath?: string | undefined;
+}
+
+interface DetailTab {
+  id: string;
+  type: "details" | "terminal" | "sessions" | "task-log";
+  label: string;
+  closable: boolean;
+  metadata?: DetailTabMetadata | undefined;
+  connectionState?: ConnectionState | undefined;
+}
+
+const DETAILS_TAB: DetailTab = {
+  id: "details",
+  type: "details",
+  label: "Details",
+  closable: false,
+};
+
+const SESSIONS_TAB: DetailTab = {
+  id: "sessions",
+  type: "sessions",
+  label: "Runs",
+  closable: false,
+};
+
+function latestFailedRun(sessions: SessionRecord[]): SessionRecord | null {
+  const sorted = [...sessions].sort(
+    (a, b) =>
+      new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+  );
+  const latest = sorted[0];
+  if (!latest || !["failed", "aborted"].includes(latest.status)) return null;
+  return latest;
+}
+
+function runFailureMessage(run: SessionRecord): string {
+  return run.last_error || run.error_class || "Agent run failed.";
+}
+
+function formatUnknownError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+const MAX_EPIC_LEAD_NAME_SLUG_LENGTH = 48;
+
+function epicLeadNameSlug(epicId: string): string {
+  const slug = epicId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, MAX_EPIC_LEAD_NAME_SLUG_LENGTH)
+    .replace(/-+$/g, "");
+
+  return slug || "epic";
+}
+
+function nextEpicLeadName(
+  epicId: string,
+  existingNames: Iterable<string>,
+): string {
+  const existing = new Set(
+    Array.from(existingNames, (name) => name.toLowerCase()),
+  );
+  const base = `lead-${epicLeadNameSlug(epicId)}`;
+  if (!existing.has(base.toLowerCase())) return base;
+
+  for (let i = 2; ; i += 1) {
+    const candidate = `${base}-${i}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+function isAgentNameConflict(error: unknown): boolean {
+  const message = formatUnknownError(error, "").toLowerCase();
+  return (
+    message.includes("already") ||
+    message.includes("conflict") ||
+    message.includes("exists")
+  );
+}
+
+function LatestRunFailureBanner({
+  run,
+  onViewRuns,
+}: {
+  run: SessionRecord | null;
+  onViewRuns: () => void;
+}): JSX.Element | null {
+  if (!run) return null;
+
+  return (
+    <div
+      className={styles.runFailureBanner}
+      role="alert"
+      data-testid="latest-run-failure-banner"
+    >
+      <div className={styles.runFailureMain}>
+        <span className={styles.runFailureTitle}>Latest run failed</span>
+        <span className={styles.runFailureMeta}>
+          {run.agent_name} - {run.backend}
+        </span>
+        <span className={styles.runFailureMessage}>
+          {runFailureMessage(run)}
+        </span>
+      </div>
+      <button
+        type="button"
+        className={styles.runFailureAction}
+        onClick={onViewRuns}
+      >
+        View run
+      </button>
+    </div>
+  );
+}
+
+function formatPhaseLabel(phase: string): string {
+  return phase.charAt(0).toUpperCase() + phase.slice(1);
+}
+
+function canRenderDetailTab(tab: DetailTab | undefined): boolean {
+  if (!tab) return false;
+  switch (tab.type) {
+    case "details":
+    case "sessions":
+    case "task-log":
+      return true;
+    case "terminal":
+      return Boolean(tab.metadata?.sessionName && tab.metadata.backend);
+    default:
+      return false;
+  }
+}
+
+function TaskPhaseLogPanel({
+  issueId,
+  phase,
+}: {
+  issueId: string;
+  phase: "planning" | "implementation";
+}): JSX.Element {
+  const { chunks, state } = useTaskLogPolling({
+    taskId: issueId,
+    phase,
+    enabled: true,
+    pollIntervalMs: 500,
+  });
+  const text = useMemo(() => {
+    const decoder = new TextDecoder();
+    return chunks.map((chunk) => decoder.decode(chunk.chunk)).join("");
+  }, [chunks]);
+
+  return (
+    <div
+      className={styles.scrollableContent}
+      role="tabpanel"
+      id={`issue-panel-tabpanel-task-log-${phase}`}
+      aria-labelledby={`issue-panel-tab-task-log-${phase}`}
+    >
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>{formatPhaseLabel(phase)}</h3>
+        <div data-testid="log-viewer">
+          <span data-state={state}>{formatStatusLabel(state)}</span>
+          <pre data-testid="terminal-container">{text}</pre>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -238,7 +428,6 @@ interface DefaultContentProps {
  */
 function DefaultContent({
   issue,
-  isOpen,
   isLoading,
   error,
   onClose,
@@ -246,54 +435,325 @@ function DefaultContent({
   onIssueUpdate,
   onApprove,
   onReject,
+  onCopyLink,
+  onNavigateToIssue,
+  isMaximized: isPanelMaximized,
+  onToggleMaximize,
 }: DefaultContentProps): JSX.Element {
+  const {
+    workspaceId,
+    workspace,
+    repos,
+    agents: workspaceAgents,
+    upsertAgent,
+  } = useWorkspaceContext();
+  const { settings: localSettings } = useLocalSettings();
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isSavingStatus, setIsSavingStatus] = useState(false);
-  const [isSavingPriority, setIsSavingPriority] = useState(false);
-  const [isSavingType, setIsSavingType] = useState(false);
   const [isSavingAssignee, setIsSavingAssignee] = useState(false);
+  const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [titleError, setTitleError] = useState<string | null>(null);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [rejectError, setRejectError] = useState<string | null>(null);
+  const [showMoveDialog, setShowMoveDialog] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [isStartingEpicRun, setIsStartingEpicRun] = useState(false);
+  const { showToast } = useToast();
 
-  // Tab state
-  type TabType = "details" | "logs";
-  const [activeTab, setActiveTab] = useState<TabType>("details");
+  // Split view state for terminal tabs
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+  const { ratio, applyDelta, resetRatio, isMaximized, toggleMaximize } =
+    useSplitRatio();
 
-  // Agent-based log connection
-  const agentName = issue?.assignee || null;
-  const hasAgent = !!agentName;
+  // Workspace data for move dialog — use stable workspace ids, not display names.
+  const workspaces = workspace?.workspaces ?? [];
+  const currentWorkspace = workspaceId;
+  const canMove = workspaces.length > 1 && issue?.status !== "closed";
+  const taskRunId = issue?.issue_type === "task" ? issue.id : null;
+  const { sessions: taskRuns } = useTaskSessions(taskRunId);
+  const failedRun = useMemo(() => latestFailedRun(taskRuns), [taskRuns]);
 
+  const currentRepo = useMemo(() => issueRepoName(issue), [issue]);
+
+  const [taskLogPhases, setTaskLogPhases] = useState<
+    ("planning" | "implementation")[]
+  >([]);
+
+  // Child tickets of an epic (issues whose parent is this epic), for the
+  // EpicRollup progress + ticket list. Empty for non-epics.
+  // Tab persistence hook - loads/saves tab state to Redis
+  const issueId = issue?.id ?? "";
   const {
-    mode: logMode,
-    chunks: logChunks,
-    state: logConnectionState,
-    error: logError,
-    resetVersion: logResetVersion,
-    refresh: refreshLogs,
-    resize: resizeLogs,
-    sendInput: sendLogInput,
-    loadOlderLogs,
-    hasMoreLines,
-    isLoadingMore,
-  } = useAgentTerminalLogs({
-    agentName,
-    enabled: isOpen && activeTab === "logs" && hasAgent,
-  });
+    savedState: persistedTabState,
+    isLoading: isLoadingPersistedTabs,
+    saveTabs: persistTabs,
+  } = useIssueTabPersistence(issueId);
 
-  // Reset tab when issue changes
+  // Tab state - managed tab array with dynamic add/remove
+  const [tabs, setTabs] = useState<DetailTab[]>([DETAILS_TAB, SESSIONS_TAB]);
+  const [activeTabId, setActiveTabId] = useState("details");
+  // Track whether we've already restored tabs from persistence for this issue
+  const restoredIssueIdRef = useRef<string | null>(null);
+  // Ref mirroring tabs for cleanup effects (avoids adding tabs as dependency)
+  const tabsRef = useRef<DetailTab[]>(tabs);
   useEffect(() => {
-    setActiveTab("details");
-  }, [issue?.id]);
+    tabsRef.current = tabs;
+  }, [tabs]);
 
-  // Reset tab when agent removed while on logs tab
   useEffect(() => {
-    if (activeTab === "logs" && !hasAgent) {
-      setActiveTab("details");
+    let cancelled = false;
+    setTaskLogPhases([]);
+    if (!issue?.id || issue.issue_type !== "task") return;
+
+    getTaskLogPhases(workspaceId, issue.id)
+      .then((phases) => {
+        if (cancelled) return;
+        setTaskLogPhases(
+          phases.filter(
+            (phase): phase is "planning" | "implementation" =>
+              phase === "planning" || phase === "implementation",
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setTaskLogPhases([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [issue?.id, issue?.issue_type, workspaceId]);
+
+  // Pending close confirmation state
+  const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
+    null,
+  );
+
+  // Fire-and-forget cleanup for terminal tabs discarded implicitly (issue change, unmount)
+  const cleanupTerminalTabs = useCallback(
+    (tabList: DetailTab[]) => {
+      for (const tab of tabList) {
+        if (tab.type !== "terminal" || !tab.metadata?.sessionName) continue;
+        const sn = tab.metadata.sessionName;
+        // Only tab metadata cleanup remains — PTYs die with their WS so no
+        // server-side kill call is needed.
+        if (workspace?.id) deleteTabMetadata(workspace.id, sn).catch(() => {});
+      }
+    },
+    [workspace?.id],
+  );
+
+  // Close a tab: remove from state, clean up backend resources
+  const closeTab = useCallback(
+    (id: string) => {
+      const tab = tabs.find((t) => t.id === id);
+      if (tab) cleanupTerminalTabs([tab]);
+      setTabs((prev) => prev.filter((t) => t.id !== id));
+      setActiveTabId((prev) => (prev === id ? "details" : prev));
+    },
+    [tabs, cleanupTerminalTabs],
+  );
+
+  // Handle tab close: confirm if terminal has active connection
+  const handleTabClose = useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((t) => t.id === tabId);
+      if (!tab || !tab.closable) return;
+
+      if (tab.type === "terminal" && tab.connectionState === "connected") {
+        setPendingCloseTabId(tabId);
+        return;
+      }
+
+      closeTab(tabId);
+    },
+    [tabs, closeTab],
+  );
+
+  // Track connectionState changes from EmbeddedTerminal
+  const handleConnectionStateChange = useCallback(
+    (tabId: string, state: ConnectionState) => {
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === tabId ? { ...t, connectionState: state } : t,
+        ),
+      );
+    },
+    [],
+  );
+
+  // Agent data for StartWorkButton (shared store, no duplicate polling)
+  const agentStore = useAgentStoreInstance();
+  const agents = useStore(agentStore, (s) => s.agents);
+  const agentTasks = useStore(agentStore, (s) => s.agentTasks);
+
+  // Epic overview data (Aether design, pin 25): the epic's child tickets
+  // from the already-fetched issue store, plus the lead currently running
+  // the epic (lead.parent === epic id) for the claim badge.
+  const issueStore = useIssueStoreInstance();
+  const issuesMap = useStore(issueStore, (s) => s.issuesMap);
+  const epicChildren = useMemo<Issue[]>(() => {
+    if (!issue || issue.issue_type !== "epic") return [];
+    const children: Issue[] = [];
+    for (const candidate of issuesMap.values()) {
+      if (candidate.parent !== issue.id) continue;
+      if (candidate.issue_type === "epic") continue;
+      children.push(candidate);
     }
-  }, [activeTab, hasAgent]);
+    return children;
+  }, [issuesMap, issue]);
+
+  // Reset tabs when issue changes — clean up orphaned terminal sessions first
+  useEffect(() => {
+    cleanupTerminalTabs(tabsRef.current);
+    // Sync ref immediately so unmount cleanup won't re-clean the same tabs
+    tabsRef.current = [DETAILS_TAB, SESSIONS_TAB];
+    restoredIssueIdRef.current = null;
+    setTabs([DETAILS_TAB, SESSIONS_TAB]);
+    setActiveTabId("details");
+  }, [issue?.id, cleanupTerminalTabs]);
+
+  // Restore tabs from persisted state once loaded
+  useEffect(() => {
+    if (
+      !persistedTabState ||
+      !persistedTabState.tabs ||
+      isLoadingPersistedTabs ||
+      !issue?.id ||
+      restoredIssueIdRef.current === issue.id
+    ) {
+      return;
+    }
+    restoredIssueIdRef.current = issue.id;
+
+    const validTypes = new Set(["details", "terminal", "sessions"]);
+    const restoredTabs: DetailTab[] = persistedTabState.tabs
+      .filter((t) => validTypes.has(t.type))
+      .map((t) => ({
+        id: t.id,
+        type: t.type as DetailTab["type"],
+        label: t.id === "sessions" ? SESSIONS_TAB.label : t.label,
+        closable: t.type !== "details" && t.type !== "sessions",
+        metadata:
+          t.type === "terminal" && t.session_name
+            ? (() => {
+                const derived = getBackendFromSessionName(t.session_name);
+                return {
+                  sessionName: t.session_name,
+                  backend:
+                    t.backend || (derived !== "unknown" ? derived : undefined),
+                };
+              })()
+            : undefined,
+        connectionState:
+          t.type === "terminal"
+            ? ("disconnected" as ConnectionState)
+            : undefined,
+      }));
+
+    // Ensure details tab is always present
+    if (!restoredTabs.some((t) => t.id === "details")) {
+      restoredTabs.unshift(DETAILS_TAB);
+    }
+    if (!restoredTabs.some((t) => t.id === "sessions")) {
+      const detailsIdx = restoredTabs.findIndex((t) => t.id === "details");
+      restoredTabs.splice(detailsIdx + 1, 0, SESSIONS_TAB);
+    }
+    if (restoredTabs.length > 0) {
+      setTabs(restoredTabs);
+      const activeId =
+        persistedTabState.active_tab_id === "diff"
+          ? "details"
+          : persistedTabState.active_tab_id;
+      if (activeId && restoredTabs.some((t) => t.id === activeId)) {
+        setActiveTabId(activeId);
+      }
+    }
+  }, [persistedTabState, isLoadingPersistedTabs, issue?.id]);
+
+  // Persist tab state on changes (debounced via hook)
+  useEffect(() => {
+    // Don't persist while still loading persisted state or before restoration
+    if (
+      isLoadingPersistedTabs ||
+      !issue?.id ||
+      restoredIssueIdRef.current !== issue.id
+    ) {
+      return;
+    }
+    // Only persist if there's something beyond the default Details + Runs tabs
+    const isDefault =
+      tabs.length === 2 &&
+      tabs[0]?.id === "details" &&
+      tabs[1]?.id === "sessions" &&
+      activeTabId === "details";
+    if (isDefault) return;
+
+    const persistableTabs = tabs.filter((t) => t.type !== "task-log");
+    const tabsToSave: IssueTab[] = persistableTabs.map((t, i) => {
+      const tab: IssueTab = {
+        id: t.id,
+        type: t.type as IssueTab["type"],
+        label: t.label,
+        sort_order: i,
+      };
+      if (t.metadata?.sessionName) {
+        tab.session_name = t.metadata.sessionName;
+      }
+      if (t.metadata?.backend) {
+        tab.backend = t.metadata.backend;
+      }
+      return tab;
+    });
+    const activeTabIsPersistable = persistableTabs.some(
+      (t) => t.id === activeTabId && canRenderDetailTab(t),
+    );
+    persistTabs(tabsToSave, activeTabIsPersistable ? activeTabId : "details");
+  }, [tabs, activeTabId, issue?.id, isLoadingPersistedTabs, persistTabs]);
+
+  const visibleTabs = useMemo(() => {
+    const phaseTabs: DetailTab[] = taskLogPhases.map((phase) => ({
+      id: `task-log-${phase}`,
+      type: "task-log",
+      label: formatPhaseLabel(phase),
+      closable: false,
+    }));
+    const detailsIndex = tabs.findIndex((tab) => tab.id === "details");
+    if (detailsIndex === -1) return [...phaseTabs, ...tabs];
+    return [
+      ...tabs.slice(0, detailsIndex + 1),
+      ...phaseTabs,
+      ...tabs.slice(detailsIndex + 1),
+    ];
+  }, [tabs, taskLogPhases]);
+  const activeTab = useMemo(
+    () => visibleTabs.find((tab) => tab.id === activeTabId),
+    [activeTabId, visibleTabs],
+  );
+  const renderedActiveTabId = canRenderDetailTab(activeTab)
+    ? activeTabId
+    : "details";
+
+  useEffect(() => {
+    if (activeTabId !== renderedActiveTabId) {
+      setActiveTabId(renderedActiveTabId);
+    }
+  }, [activeTabId, renderedActiveTabId]);
+
+  // Ref to cleanupTerminalTabs so unmount cleanup uses latest without re-registering
+  const cleanupRef = useRef(cleanupTerminalTabs);
+  useEffect(() => {
+    cleanupRef.current = cleanupTerminalTabs;
+  }, [cleanupTerminalTabs]);
+  useEffect(
+    () => () => {
+      cleanupRef.current(tabsRef.current);
+    },
+    [],
+  );
 
   // Local state for comments to enable optimistic updates
   const hasDetails = issue && isIssueDetails(issue);
@@ -301,6 +761,9 @@ function DefaultContent({
   const [localComments, setLocalComments] = useState<Comment[] | undefined>(
     initialComments,
   );
+
+  // Local state for events (activity log)
+  const [events, setEvents] = useState<Event[]>([]);
 
   // Sync local comments when issue changes (e.g., different issue selected)
   useEffect(() => {
@@ -310,6 +773,27 @@ function DefaultContent({
       setLocalComments(undefined);
     }
   }, [issue]);
+
+  // Fetch events when issue changes
+  const eventIssueId = issue?.id;
+  useEffect(() => {
+    if (!eventIssueId) {
+      setEvents([]);
+      return;
+    }
+    let cancelled = false;
+    getIssueEvents(workspaceId, eventIssueId).then(
+      (data) => {
+        if (!cancelled) setEvents(data ?? []);
+      },
+      () => {
+        if (!cancelled) setEvents([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [eventIssueId]);
 
   // Handler for when a new comment is added
   const handleCommentAdded = useCallback((newComment: Comment) => {
@@ -323,10 +807,18 @@ function DefaultContent({
     async (newTitle: string) => {
       if (!issue) return;
 
+      setTitleError(null);
       setIsSavingTitle(true);
       try {
-        const updatedIssue = await updateIssue(issue.id, { title: newTitle });
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          title: newTitle,
+        });
         onIssueUpdate?.(updatedIssue);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to update title";
+        setTitleError(message);
+        throw err; // Re-throw so EditableTitle's internal error handling activates
       } finally {
         setIsSavingTitle(false);
       }
@@ -341,7 +833,9 @@ function DefaultContent({
       setIsSavingStatus(true);
       setStatusError(null);
       try {
-        const updatedIssue = await updateIssue(issue.id, { status: newStatus });
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          status: newStatus,
+        });
         onIssueUpdate?.(updatedIssue);
       } catch (err) {
         const message =
@@ -354,61 +848,180 @@ function DefaultContent({
     [issue, onIssueUpdate],
   );
 
-  const handlePrioritySave = useCallback(
-    async (newPriority: Priority) => {
-      if (!issue) return;
-
-      setIsSavingPriority(true);
-      try {
-        const updatedIssue = await updateIssue(issue.id, {
-          priority: newPriority,
-        });
-        onIssueUpdate?.(updatedIssue);
-      } finally {
-        setIsSavingPriority(false);
-      }
-    },
-    [issue, onIssueUpdate],
-  );
-
-  const handleTypeSave = useCallback(
-    async (newType: IssueType) => {
-      if (!issue) return;
-
-      setIsSavingType(true);
-      try {
-        const updatedIssue = await updateIssue(issue.id, {
-          issue_type: newType,
-        });
-        onIssueUpdate?.(updatedIssue);
-      } finally {
-        setIsSavingType(false);
-      }
-    },
-    [issue, onIssueUpdate],
-  );
-
   const handleAssigneeSave = useCallback(
     async (newAssignee: string) => {
       if (!issue) return;
 
       setIsSavingAssignee(true);
       try {
-        const updatedIssue = await updateIssue(issue.id, {
+        // Assigning an agent to an open or review issue starts work, like
+        // the old Start Work flow: an open issue moves to in_progress and
+        // the agent daemon claims the task; a review issue keeps its status
+        // (the PR stays in the review queue while the agent works it).
+        const isAgentAssignment =
+          newAssignee !== "" &&
+          !newAssignee.startsWith("[H]") &&
+          agents.some((a) => a.name === newAssignee);
+        const startsWork =
+          isAgentAssignment &&
+          (issue.status === "open" || issue.status === "review");
+
+        if (!startsWork) {
+          const updatedIssue = await updateIssue(workspaceId, issue.id, {
+            assignee: newAssignee,
+          });
+          onIssueUpdate?.(updatedIssue);
+          return;
+        }
+
+        const previousAssignee = issue.assignee ?? "";
+        const previousStatus = issue.status ?? "open";
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
           assignee: newAssignee,
+          ...(issue.status === "review" ? {} : { status: "in_progress" }),
         });
-        onIssueUpdate?.(updatedIssue);
+        try {
+          await startAgent(workspaceId, newAssignee, { taskId: issue.id });
+          onIssueUpdate?.(updatedIssue);
+        } catch (err) {
+          try {
+            const rolledBackIssue = await updateIssue(workspaceId, issue.id, {
+              assignee: previousAssignee,
+              status: previousStatus,
+            });
+            onIssueUpdate?.(rolledBackIssue);
+          } catch {
+            // Keep the original start failure visible to the dropdown.
+          }
+          throw err;
+        }
       } finally {
         setIsSavingAssignee(false);
       }
     },
-    [issue, onIssueUpdate],
+    [agents, issue, onIssueUpdate, workspaceId],
   );
+
+  const handleRepoSave = useCallback(
+    async (newRepo: string | null) => {
+      if (!issue) return;
+
+      setIsSavingRepo(true);
+      try {
+        const currentLabels = issue.labels ?? [];
+        const repoLabelsToRemove = currentLabels.filter((l) =>
+          l.startsWith("repo:"),
+        );
+        const updatedIssue = await updateIssue(workspaceId, issue.id, {
+          ...(repoLabelsToRemove.length > 0
+            ? { remove_labels: repoLabelsToRemove }
+            : {}),
+          ...(newRepo ? { add_labels: [`repo:${newRepo}`] } : {}),
+        });
+        onIssueUpdate?.(updatedIssue);
+      } finally {
+        setIsSavingRepo(false);
+      }
+    },
+    [issue, onIssueUpdate, workspaceId],
+  );
+
+  const handleRunEpicWorkflow = useCallback(async () => {
+    if (!issue || issue.issue_type !== "epic" || isStartingEpicRun) return;
+
+    setIsStartingEpicRun(true);
+    try {
+      const runtimePayload = epicRunnerRuntimePayload({
+        localSettings,
+        repos,
+        currentRepo,
+      });
+      const repoNames = leadAgentRepoNames(repos, currentRepo);
+      const leadNames = new Set<string>([
+        ...workspaceAgents.map((agent) => agent.name),
+        ...agents.map((agent) => agent.name),
+      ]);
+      let leadAgentName = "";
+      let createdLeadAgentName = "";
+      let lastCreateError: unknown = null;
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const candidate = nextEpicLeadName(issue.id, leadNames);
+        leadNames.add(candidate);
+
+        try {
+          const leadAgent = await createWorkspaceAgent(workspaceId, {
+            name: candidate,
+            role_name: "lead",
+            auto: false,
+            cross_repo: repoNames.length === 0,
+            repos: repoNames,
+          });
+          upsertAgent?.(leadAgent);
+          leadAgentName = leadAgent.name;
+          createdLeadAgentName = leadAgent.name;
+          break;
+        } catch (err) {
+          lastCreateError = err;
+          if (!isAgentNameConflict(err)) throw err;
+        }
+      }
+
+      if (!leadAgentName) {
+        throw lastCreateError instanceof Error
+          ? lastCreateError
+          : new Error("Unable to create lead agent");
+      }
+
+      let run;
+      try {
+        run = await startWorkflowRun(workspaceId, EPIC_RUNNER_WORKFLOW_NAME, {
+          epicId: issue.id,
+          leadName: leadAgentName,
+          requestedBy: "ui",
+          ...runtimePayload,
+        });
+      } catch (err) {
+        if (createdLeadAgentName) {
+          deleteWorkspaceAgent(workspaceId, createdLeadAgentName).catch(
+            (cleanupErr: unknown) => {
+              console.warn(
+                "failed to delete epic-runner lead after workflow start failed",
+                cleanupErr,
+              );
+            },
+          );
+        }
+        throw err;
+      }
+      showToast(`Epic runner queued for ${leadAgentName}: ${run.run_id}`, {
+        type: "success",
+      });
+    } catch (err) {
+      showToast(
+        `Epic runner failed: ${formatUnknownError(err, "Unable to start workflow")}`,
+        { type: "error" },
+      );
+    } finally {
+      setIsStartingEpicRun(false);
+    }
+  }, [
+    agents,
+    currentRepo,
+    issue,
+    isStartingEpicRun,
+    localSettings?.agent_runtime.default,
+    repos,
+    showToast,
+    upsertAgent,
+    workspaceAgents,
+    workspaceId,
+  ]);
 
   const handleAddDependency = useCallback(
     async (dependsOnId: string, type: DependencyType) => {
       if (!issue) return;
-      await addDependency(issue.id, dependsOnId, type);
+      await addDependency(workspaceId, issue.id, dependsOnId, type);
       // The parent component should refresh issue details via SSE or manual refetch
     },
     [issue],
@@ -417,7 +1030,7 @@ function DefaultContent({
   const handleRemoveDependency = useCallback(
     async (dependsOnId: string) => {
       if (!issue) return;
-      await removeDependency(issue.id, dependsOnId);
+      await removeDependency(workspaceId, issue.id, dependsOnId);
       // The parent component should refresh issue details via SSE or manual refetch
     },
     [issue],
@@ -465,12 +1078,33 @@ function DefaultContent({
     [issue, onReject, isRejecting],
   );
 
+  // Move issue handler
+  const handleMoveConfirm = useCallback(
+    async (targetWorkspace: string) => {
+      if (!issue) return;
+      setMoveError(null);
+      try {
+        await moveIssue(workspaceId, issue.id, targetWorkspace);
+        setShowMoveDialog(false);
+        onClose();
+      } catch (err) {
+        setMoveError(
+          err instanceof Error ? err.message : "Failed to move issue",
+        );
+      }
+    },
+    [issue, onClose, workspaceId],
+  );
+
   // Reset reject form state when issue changes
   useEffect(() => {
     setShowRejectForm(false);
     setIsApproving(false);
     setIsRejecting(false);
     setRejectError(null);
+    setShowMoveDialog(false);
+    setMoveError(null);
+    setIsStartingEpicRun(false);
   }, [issue?.id]);
 
   // Loading state
@@ -509,6 +1143,13 @@ function DefaultContent({
   const issueHasDetails = isIssueDetails(issue);
   const dependencies = issueHasDetails ? issue.dependencies : undefined;
   const dependents = issueHasDetails ? issue.dependents : undefined;
+  // "Blocks" should list genuine blocking relations only. Parent-child edges
+  // are a containment relation (an epic's children / a task's subtasks), not a
+  // block — and for epics they fully duplicate the EpicRollup ticket list, a
+  // redundancy the design's epic panel doesn't have. Exclude them here.
+  const blockingDependents = dependents?.filter(
+    (dep) => dep.dependency_type !== "parent-child",
+  );
 
   // Determine if this is a review item
   const reviewType = getReviewType(issue);
@@ -518,11 +1159,16 @@ function DefaultContent({
   const openBlockerCount =
     dependencies?.filter((d) => d.status !== "closed").length ?? 0;
 
-  // Auto-collapse logic for Design/Notes (collapse if long, but keep expanded for review items)
-  const shouldCollapseDesign =
-    !isReviewItem &&
-    issue.design &&
-    (issue.design.length > 200 || issue.design.split("\n").length > 5);
+  // Extract PR URL and number from external_ref for header links
+  const prNumber =
+    issue.external_ref && isPRUrl(issue.external_ref)
+      ? issue.external_ref.match(/\/pulls?\/(\d+)/)?.[1]
+      : undefined;
+  const prProps = prNumber ? { prUrl: issue.external_ref!, prNumber } : {};
+  const canRunEpicWorkflow =
+    issue.issue_type === "epic" && issue.status !== "closed";
+
+  // Auto-collapse logic for Notes (collapse if long, but keep expanded for review items)
   const shouldCollapseNotes =
     issue.notes &&
     (issue.notes.length > 200 || issue.notes.split("\n").length > 5);
@@ -531,7 +1177,7 @@ function DefaultContent({
     <>
       {/* Sticky Header Wrapper */}
       <div className={styles.stickyHeaderWrapper}>
-        {/* Header with ID, status dropdown, priority badge, close button, and title */}
+        {/* Header with ID, status dropdown, close button, and title */}
         <IssueHeader
           issue={issue}
           onClose={onClose}
@@ -539,7 +1185,22 @@ function DefaultContent({
           isSavingTitle={isSavingTitle}
           onStatusChange={handleStatusChange}
           isSavingStatus={isSavingStatus}
-          showPriority={true}
+          {...(canRunEpicWorkflow && {
+            onRunEpic: handleRunEpicWorkflow,
+            isRunningEpic: isStartingEpicRun,
+          })}
+          {...(onCopyLink !== undefined && { onCopyLink })}
+          {...(canMove && {
+            onMove: () => {
+              setMoveError(null);
+              setShowMoveDialog(true);
+            },
+          })}
+          {...prProps}
+          {...(onToggleMaximize !== undefined && {
+            onToggleMaximize,
+            isMaximized: isPanelMaximized ?? false,
+          })}
           sticky={true}
         />
 
@@ -556,48 +1217,20 @@ function DefaultContent({
             </svg>
             {formatIssueType(issue.issue_type)}
           </span>
-          {issue.owner && (
-            <span className={styles.metadataItem} data-testid="metadata-owner">
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle
-                  cx="8"
-                  cy="5"
-                  r="3"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="M2 14c0-2.5 2.5-4 6-4s6 1.5 6 4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              {issue.owner}
-            </span>
-          )}
-          {issue.assignee && (
-            <span
-              className={styles.metadataItem}
-              data-testid="metadata-assignee"
-            >
-              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <circle
-                  cx="8"
-                  cy="5"
-                  r="3"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="M2 14c0-2.5 2.5-4 6-4s6 1.5 6 4"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              @{issue.assignee}
-            </span>
+          <AssigneeDropdown
+            assignee={issue.assignee}
+            onSave={handleAssigneeSave}
+            isSaving={isSavingAssignee}
+            agents={agents}
+            agentTasks={agentTasks}
+          />
+          {(repos.length > 0 || currentRepo !== null) && (
+            <RepoDropdown
+              currentRepo={currentRepo}
+              repos={repos.map((r) => r.name)}
+              onSave={handleRepoSave}
+              isSaving={isSavingRepo}
+            />
           )}
           {issue.created_at && (
             <span
@@ -652,81 +1285,121 @@ function DefaultContent({
         status={issue.status}
       />
 
+      <LatestRunFailureBanner
+        run={failedRun}
+        onViewRuns={() => setActiveTabId("sessions")}
+      />
+
       {/* Tab Bar */}
-      <div
-        className={styles.tabBar}
-        role="tablist"
-        aria-label="Issue detail tabs"
-      >
-        <button
-          type="button"
-          role="tab"
-          className={`${styles.tab} ${activeTab === "details" ? styles.activeTab : ""}`}
-          aria-selected={activeTab === "details"}
-          aria-controls="issue-panel-tabpanel-details"
-          id="issue-panel-tab-details"
-          onClick={() => setActiveTab("details")}
+      <div className={styles.tabBarWrapper}>
+        <div
+          className={styles.tabBar}
+          role="tablist"
+          aria-label="Issue detail tabs"
         >
-          Details
-        </button>
-        {hasAgent && (
-          <button
-            type="button"
-            role="tab"
-            className={`${styles.tab} ${activeTab === "logs" ? styles.activeTab : ""}`}
-            aria-selected={activeTab === "logs"}
-            aria-controls="issue-panel-tabpanel-logs"
-            id="issue-panel-tab-logs"
-            onClick={() => setActiveTab("logs")}
-          >
-            Logs
-          </button>
-        )}
+          {visibleTabs.map((tab) => (
+            <div
+              key={tab.id}
+              role="tab"
+              className={`${styles.tab} ${renderedActiveTabId === tab.id ? styles.activeTab : ""}`}
+              aria-selected={renderedActiveTabId === tab.id}
+              aria-controls={`issue-panel-tabpanel-${tab.id}`}
+              id={`issue-panel-tab-${tab.id}`}
+              onClick={() => setActiveTabId(tab.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveTabId(tab.id);
+                }
+              }}
+              tabIndex={renderedActiveTabId === tab.id ? 0 : -1}
+            >
+              {tab.type === "terminal" && tab.connectionState && (
+                <span
+                  className={styles.tabConnectionDot}
+                  data-state={tab.connectionState}
+                  data-testid={`tab-connection-dot-${tab.id}`}
+                />
+              )}
+              <span className={styles.tabLabel}>{tab.label}</span>
+              {tab.closable && (
+                <button
+                  type="button"
+                  className={styles.tabCloseButton}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleTabClose(tab.id);
+                  }}
+                  aria-label={`Close ${tab.label} tab`}
+                  data-testid={`close-tab-${tab.id}`}
+                >
+                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path
+                      d="M4 4l8 8M12 4l-8 8"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {activeTab === "logs" && hasAgent ? (
-        <div
-          className={styles.logsContainer}
-          role="tabpanel"
-          id="issue-panel-tabpanel-logs"
-          aria-labelledby="issue-panel-tab-logs"
-        >
-          <div className={styles.logsMetaRow}>
-            <span className={styles.logsModeBadge} data-mode={logMode}>
-              {logMode === "tmux"
-                ? "Live (tmux)"
-                : logMode === "archive"
-                  ? "Archive snapshot"
-                  : logMode === "loading"
-                    ? "Loading logs..."
-                    : "Idle"}
-            </span>
-            {logMode === "archive" && (
-              <button
-                type="button"
-                className={styles.logsRefreshButton}
-                onClick={refreshLogs}
+      {/* Terminal tab content — split view: details on top, terminal on bottom */}
+      {renderedActiveTabId.startsWith("terminal-") &&
+        (() => {
+          const activeTab = tabs.find((t) => t.id === renderedActiveTabId);
+          if (!activeTab?.metadata?.sessionName || !activeTab.metadata.backend)
+            return null;
+          return (
+            <div
+              ref={splitContainerRef}
+              className={styles.splitContainer}
+              role="tabpanel"
+              id={`issue-panel-tabpanel-${renderedActiveTabId}`}
+              aria-labelledby={`issue-panel-tab-${renderedActiveTabId}`}
+            >
+              <div
+                className={styles.splitTop}
+                style={{ flex: `0 0 ${ratio * 100}%` }}
               >
-                Refresh
-              </button>
-            )}
-          </div>
-          <LogViewer
-            chunks={logChunks}
-            connectionState={logConnectionState}
-            error={logError}
-            height="100%"
-            autoScroll={logMode !== "tmux"}
-            resetVersion={logResetVersion}
-            mode={logMode === "tmux" ? "interactive" : "static"}
-            onTerminalResize={resizeLogs}
-            onScrollToTop={logMode === "archive" ? loadOlderLogs : undefined}
-            isLoadingMore={isLoadingMore}
-            hasMoreOlder={logMode === "archive" ? hasMoreLines : false}
-            {...(logMode === "tmux" ? { onTerminalData: sendLogInput } : {})}
-          />
-        </div>
-      ) : (
+                <SplitDetailSummary
+                  issue={issue}
+                  onIssueUpdate={onIssueUpdate}
+                />
+              </div>
+              <ResizeDivider
+                onDragDelta={(deltaY) =>
+                  applyDelta(
+                    splitContainerRef.current?.clientHeight ?? 600,
+                    deltaY,
+                  )
+                }
+                onDoubleClick={resetRatio}
+                ratio={ratio}
+              />
+              <div className={styles.splitBottom}>
+                <EmbeddedTerminal
+                  sessionName={activeTab.metadata.sessionName}
+                  backend={activeTab.metadata.backend}
+                  agentName={activeTab.metadata.agentName ?? null}
+                  worktreePath={activeTab.metadata.worktreePath}
+                  isActive={true}
+                  onConnectionStateChange={(state) =>
+                    handleConnectionStateChange(activeTab.id, state)
+                  }
+                  onMaximize={toggleMaximize}
+                  isMaximized={isMaximized}
+                />
+              </div>
+            </div>
+          );
+        })()}
+
+      {renderedActiveTabId === "details" && (
         <div
           className={styles.scrollableContent}
           role="tabpanel"
@@ -734,49 +1407,63 @@ function DefaultContent({
           aria-labelledby="issue-panel-tab-details"
         >
           <div className={styles.detailContent}>
-            {/* Priority/Type dropdowns for editing */}
-            <div className={styles.statusRow}>
-              <PriorityDropdown
-                priority={issue.priority as Priority}
-                onSave={handlePrioritySave}
-                isSaving={isSavingPriority}
-              />
-              <TypeDropdown
-                type={issue.issue_type}
-                onSave={handleTypeSave}
-                isSaving={isSavingType}
-              />
-              <AssigneeDropdown
-                assignee={issue.assignee}
-                onSave={handleAssigneeSave}
-                isSaving={isSavingAssignee}
-              />
+            {/* Two-column layout: left=metadata+description, right=design */}
+            <div className={issue.design ? styles.detailColumns : undefined}>
+              <div
+                className={
+                  issue.design
+                    ? styles.detailColumnLeft
+                    : styles.detailColumnFull
+                }
+              >
+                {/* Description */}
+                <section className={styles.section}>
+                  <h3 className={styles.sectionTitle}>Description</h3>
+                  <EditableDescription
+                    description={issue.description}
+                    isEditable={true}
+                    onSave={async (newDescription) => {
+                      const updatedIssue = await updateIssue(
+                        workspaceId,
+                        issue.id,
+                        {
+                          description: newDescription,
+                        },
+                      );
+                      onIssueUpdate?.(updatedIssue);
+                    }}
+                  />
+                </section>
+
+                {/* Pull request card / "no PR yet" placeholder (design
+                    pr-card + pr-empty) — non-epics only. */}
+                {issue.issue_type !== "epic" && <PRSection issue={issue} />}
+              </div>
+
+              {/* Design in right column */}
+              {issue.design && (
+                <div
+                  className={styles.detailColumnRight}
+                  data-testid="design-section"
+                >
+                  <DesignPanel
+                    content={issue.design}
+                    format={issue.design_format}
+                  />
+                </div>
+              )}
             </div>
 
-            {/* Description */}
-            <section className={styles.section}>
-              <h3 className={styles.sectionTitle}>Description</h3>
-              <EditableDescription
-                description={issue.description}
-                isEditable={true}
-                onSave={async (newDescription) => {
-                  const updatedIssue = await updateIssue(issue.id, {
-                    description: newDescription,
-                  });
-                  onIssueUpdate?.(updatedIssue);
-                }}
-              />
-            </section>
+            {/* Full-width sections below the columns */}
 
-            {/* Design (collapsible, markdown rendered) */}
-            {issue.design && (
-              <CollapsibleSection
-                title="Design"
-                defaultExpanded={!shouldCollapseDesign}
-                testId="design-section"
-              >
-                <MarkdownRenderer content={issue.design} />
-              </CollapsibleSection>
+            {/* Epic roll-up: progress distribution + child tickets */}
+            {issue.issue_type === "epic" && (
+              <EpicRollup
+                tickets={epicChildren}
+                {...(onNavigateToIssue !== undefined && {
+                  onTicketClick: onNavigateToIssue,
+                })}
+              />
             )}
 
             {/* Notes (collapsible) */}
@@ -797,43 +1484,57 @@ function DefaultContent({
                 dependencies={dependencies ?? []}
                 onAddDependency={handleAddDependency}
                 onRemoveDependency={handleRemoveDependency}
+                {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
                 disabled={isLoading}
               />
             )}
 
-            {/* Dependents (this issue blocks) */}
-            {dependents && dependents.length > 0 && (
+            {/* Dependents (this issue blocks) — parent-child containment edges
+                excluded (see blockingDependents); the EpicRollup already lists
+                an epic's children. */}
+            {blockingDependents && blockingDependents.length > 0 && (
               <section className={styles.section}>
                 <h3 className={styles.sectionTitle}>
-                  Blocks ({dependents.length})
+                  Blocks ({blockingDependents.length})
                 </h3>
                 <ul className={styles.dependencyList}>
-                  {dependents.map(renderDependencyItem)}
+                  {blockingDependents.map((dep) =>
+                    renderDependencyChip(dep, onNavigateToIssue),
+                  )}
                 </ul>
               </section>
             )}
 
-            {/* Comments */}
-            <CommentsSection comments={localComments} />
+            {/* Activity Log (comments + events) */}
+            <ActivityLog
+              comments={localComments ?? []}
+              events={events}
+              issueId={issue.id}
+            />
             <CommentForm
               issueId={issue.id}
               onCommentAdded={handleCommentAdded}
             />
-
-            {/* Labels */}
-            {issue.labels && issue.labels.length > 0 && (
-              <section className={styles.section}>
-                <h3 className={styles.sectionTitle}>Labels</h3>
-                <div className={styles.labels}>
-                  {issue.labels.map((label) => (
-                    <span key={label} className={styles.label}>
-                      {label}
-                    </span>
-                  ))}
-                </div>
-              </section>
-            )}
           </div>
+        </div>
+      )}
+
+      {renderedActiveTabId === "task-log-planning" && (
+        <TaskPhaseLogPanel issueId={issue.id} phase="planning" />
+      )}
+
+      {renderedActiveTabId === "task-log-implementation" && (
+        <TaskPhaseLogPanel issueId={issue.id} phase="implementation" />
+      )}
+
+      {renderedActiveTabId === "sessions" && (
+        <div
+          className={styles.logsContainer}
+          role="tabpanel"
+          id="issue-panel-tabpanel-sessions"
+          aria-labelledby="issue-panel-tab-sessions"
+        >
+          <SessionsTab taskId={issue.id} />
         </div>
       )}
 
@@ -845,6 +1546,44 @@ function DefaultContent({
           testId="status-error-toast"
         />
       )}
+
+      {/* Error toast for title save failures */}
+      {titleError && (
+        <ErrorToast
+          message={titleError}
+          onDismiss={() => setTitleError(null)}
+          testId="title-error-toast"
+        />
+      )}
+
+      {/* Close confirmation dialog for terminal tabs with active sessions */}
+      <ConfirmDialog
+        isOpen={pendingCloseTabId !== null}
+        title="Close terminal?"
+        message="This terminal has an active session. Closing it will terminate the session after a brief grace period."
+        confirmLabel="Close"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingCloseTabId) closeTab(pendingCloseTabId);
+          setPendingCloseTabId(null);
+        }}
+        onCancel={() => setPendingCloseTabId(null)}
+      />
+
+      {/* Move issue dialog */}
+      <MoveIssueDialog
+        isOpen={showMoveDialog}
+        issue={issue}
+        workspaces={workspaces}
+        currentWorkspace={currentWorkspace}
+        dependencies={dependencies}
+        error={moveError}
+        onConfirm={handleMoveConfirm}
+        onCancel={() => {
+          setMoveError(null);
+          setShowMoveDialog(false);
+        }}
+      />
     </>
   );
 }
@@ -869,71 +1608,97 @@ export function IssueDetailPanel({
   children,
   onApprove,
   onReject,
+  onIssueUpdate,
+  onCopyLink,
+  onNavigateToIssue,
+  inline = false,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
-  // Handle Escape key to close panel
+  // Full-page maximize toggle for the slide-over.
+  const [isMaximized, setIsMaximized] = useState(false);
+  const toggleMaximize = useCallback(() => setIsMaximized((v) => !v), []);
+  // Reset to the default slide-over width when the panel closes or the
+  // selected issue changes, so a maximized panel doesn't "stick" across opens.
   useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
-
-  // Lock body scroll when open, restoring previous value on close.
-  // Note: Only ONE panel should be open at a time. Multiple concurrent panels
-  // would require a scroll lock manager to handle overflow restoration properly.
+    if (!isOpen) setIsMaximized(false);
+  }, [isOpen]);
   useEffect(() => {
-    if (isOpen) {
+    setIsMaximized(false);
+  }, [issue?.id]);
+
+  // Handle Escape key to close panel via global shortcut layer system.
+  // Inline mode skips this — the embedding view owns close semantics.
+  useRegisterEscapeLayer(LAYER_ISSUE_PANEL, onClose, isOpen && !inline);
+
+  // Lock body scroll when open as a slide-out overlay. Inline mode is part
+  // of the page flow, so don't lock scroll.
+  useEffect(() => {
+    if (isOpen && !inline) {
       const previousOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = previousOverflow;
       };
     }
-  }, [isOpen]);
+  }, [isOpen, inline]);
 
-  // Focus management: focus the panel when opened, restore focus on close
-  useEffect(() => {
-    if (isOpen && panelRef.current) {
-      const previouslyFocused = document.activeElement as HTMLElement | null;
-      panelRef.current.focus();
-      return () => {
-        // Check element is still in DOM before restoring focus (could be unmounted)
-        if (
-          previouslyFocused &&
-          document.contains(previouslyFocused) &&
-          previouslyFocused.focus
-        ) {
-          previouslyFocused.focus();
-        }
-      };
-    }
-  }, [isOpen]);
-
-  // Build root class name
-  const rootClassName = [styles.overlay, isOpen && styles.open, className]
-    .filter(Boolean)
-    .join(" ");
+  // Focus management: only meaningful for the slide-out overlay.
+  useFocusReturn(isOpen && !inline, { focusTarget: panelRef });
+  useFocusTrap(panelRef, isOpen && !inline);
 
   // Determine content: children override default, otherwise render default content
   const content = children ?? (
     <DefaultContent
       issue={issue}
-      isOpen={isOpen}
       isLoading={isLoading ?? false}
       error={error ?? null}
       onClose={onClose}
       {...(onApprove !== undefined && { onApprove })}
       {...(onReject !== undefined && { onReject })}
+      {...(onIssueUpdate !== undefined && { onIssueUpdate })}
+      {...(onCopyLink !== undefined && { onCopyLink })}
+      {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
+      {...(!inline && {
+        isMaximized,
+        onToggleMaximize: toggleMaximize,
+      })}
     />
   );
+
+  // Inline mode: render a regular column without overlay, backdrop, or
+  // slide-out animation. The embedding layout reserves the space.
+  if (inline) {
+    return (
+      <aside
+        ref={panelRef}
+        className={[styles.panel, className].filter(Boolean).join(" ")}
+        role="region"
+        aria-label={issue ? `Details for ${issue.title}` : "Issue details"}
+        data-testid="issue-detail-panel"
+        data-state={isOpen ? "open" : "closed"}
+        data-loading={isLoading ? "true" : "false"}
+        data-error={error ? "true" : "false"}
+        data-inline="true"
+        style={{
+          position: "static",
+          width: "100%",
+          height: "100%",
+          maxWidth: "none",
+          flexShrink: 0,
+          transform: "none",
+          boxShadow: "none",
+        }}
+      >
+        <div className={styles.content}>{content}</div>
+      </aside>
+    );
+  }
+
+  // Build root class name
+  const rootClassName = [styles.overlay, isOpen && styles.open, className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
@@ -944,8 +1709,11 @@ export function IssueDetailPanel({
     >
       <aside
         ref={panelRef}
-        className={styles.panel}
+        className={[styles.panel, isMaximized && styles.panelMaximized]
+          .filter(Boolean)
+          .join(" ")}
         onClick={(e) => e.stopPropagation()}
+        data-maximized={isMaximized || undefined}
         role="dialog"
         aria-modal="true"
         aria-label={issue ? `Details for ${issue.title}` : "Issue details"}

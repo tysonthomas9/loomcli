@@ -1,0 +1,53 @@
+#!/bin/sh
+# Crashes shortly after invoke. Smoke template for the daemon's failure
+# classification and retry/backoff machinery — the failure path that real
+# backends hit when an LLM CLI exits non-zero (API error, OOM, command
+# not found, etc.).
+#
+# Failure mode: claim the task, write a started marker, sleep briefly to
+# look like a real run starting up, then exit with status from
+# LOOM_PLAYGROUND_CRASH_EXIT_CODE. The daemon should log the non-zero
+# exit and apply its backoff policy.
+#
+# Env knobs:
+#   LOOM_PLAYGROUND_CRASH_DELAY_SECONDS  — pre-crash settle time (default 2)
+#   LOOM_PLAYGROUND_CRASH_EXIT_CODE      — exit status to return (default 1)
+#   LOOM_PLAYGROUND_CRASH_MARKER_DIR     — override marker dir (testing only)
+
+set -eu
+
+cmd="${1:-}"
+delay="${LOOM_PLAYGROUND_CRASH_DELAY_SECONDS:-2}"
+exit_code="${LOOM_PLAYGROUND_CRASH_EXIT_CODE:-1}"
+marker_root="${LOOM_PLAYGROUND_CRASH_MARKER_DIR:-${LOOM_WORKSPACE_RUNTIME_DIR:-/tmp/playground-crash}/crash}"
+
+run_invoke() {
+  task_id="${LOOM_ASSIGNED_TASK_ID:-PLAYGROUND-CRASH-1}"
+  agent="${LOOM_AGENT_NAME:-playground-crash}"
+
+  mkdir -p "$marker_root"
+  : > "$marker_root/started.flag"
+
+  echo "[playground-crash] ${agent} claiming ${task_id}"
+  loom claim "$task_id" || true
+
+  sleep "$delay"
+  echo "[playground-crash] simulated crash, exiting ${exit_code}" >&2
+  exit "$exit_code"
+}
+
+case "$cmd" in
+  meta)
+    printf '{"display_name":"Playground Crash","version":"1","description":"Exits non-zero to exercise daemon failure classification + backoff","binary_name":"loom-backend-playground-crash"}\n'
+    ;;
+  health)
+    printf '{"installed":true,"healthy":true,"message":"ready"}\n'
+    ;;
+  invoke)
+    run_invoke
+    ;;
+  *)
+    echo "usage: loom-backend-playground-crash {meta|health|invoke}" >&2
+    exit 2
+    ;;
+esac

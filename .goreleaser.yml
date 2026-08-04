@@ -6,6 +6,7 @@ version: 2
 before:
   hooks:
     - go mod tidy
+    - cmd: bash -c "cd internal/webui/frontend && npm ci && npm run build"
 
 builds:
   - id: loom
@@ -23,25 +24,23 @@ builds:
       - -s -w
       - -X github.com/tysonthomas9/loomcli/internal/cli.Version={{.Version}}
       - -X github.com/tysonthomas9/loomcli/internal/cli.Build={{.ShortCommit}}
-  - id: bd
-    dir: third_party/beads
-    main: ./cmd/bd
-    binary: bd
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
-
 archives:
-  - format: tar.gz
+  - id: loom-binaries
+    ids: [loom]
+    format: tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
+      - LICENSE
+      - README.md
+
+  - id: loom-frontend
+    meta: true
+    format: tar.gz
+    name_template: "loomcli-frontend_{{ .Version }}"
+    files:
+      - src: internal/webui/frontend/dist/**/*
+        dst: dist
+        strip_parent: true
       - LICENSE
       - README.md
 
@@ -83,3 +82,10 @@ release:
 
     **Manual Install:**
     Download the appropriate binary for your platform below, extract it, and place it in your PATH.
+
+    ### Frontend (web UI)
+
+    The static frontend ships as `loomcli-frontend_{{.Version}}.tar.gz`. Extract
+    to any static host (nginx, S3, CDN, Vercel) and configure your reverse proxy
+    to forward `/api/*` to a running `loom serve`. See the `deploy/` directory in
+    the repo for an example with Docker Compose + nginx.

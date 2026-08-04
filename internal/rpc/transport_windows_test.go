@@ -14,7 +14,7 @@ import (
 func TestPipeName_Deterministic(t *testing.T) {
 	t.Parallel()
 
-	socketPath := `C:\Users\test\project\.beads\bd.sock`
+	socketPath := `C:\Users\test\project\.loom\loom.sock`
 	result1 := pipeName(socketPath)
 	result2 := pipeName(socketPath)
 
@@ -26,8 +26,8 @@ func TestPipeName_Deterministic(t *testing.T) {
 func TestPipeName_DifferentWorkspaces(t *testing.T) {
 	t.Parallel()
 
-	path1 := `C:\Users\test\project1\.beads\bd.sock`
-	path2 := `C:\Users\test\project2\.beads\bd.sock`
+	path1 := `C:\Users\test\project1\.loom\loom.sock`
+	path2 := `C:\Users\test\project2\.loom\loom.sock`
 
 	result1 := pipeName(path1)
 	result2 := pipeName(path2)
@@ -40,15 +40,15 @@ func TestPipeName_DifferentWorkspaces(t *testing.T) {
 func TestPipeName_Format(t *testing.T) {
 	t.Parallel()
 
-	socketPath := `C:\Users\test\project\.beads\bd.sock`
+	socketPath := `C:\Users\test\project\.loom\loom.sock`
 	result := pipeName(socketPath)
 
-	if !strings.HasPrefix(result, `\\.\pipe\beads-`) {
-		t.Errorf("pipe name should start with \\\\.\\pipe\\beads-, got %q", result)
+	if !strings.HasPrefix(result, `\\.\pipe\loom-`) {
+		t.Errorf("pipe name should start with \\\\.\\pipe\\loom-, got %q", result)
 	}
 
 	// Extract the hash portion
-	hash := strings.TrimPrefix(result, `\\.\pipe\beads-`)
+	hash := strings.TrimPrefix(result, `\\.\pipe\loom-`)
 	if len(hash) != 16 {
 		t.Errorf("pipe name hash should be 16 hex chars, got %d chars: %q", len(hash), hash)
 	}
@@ -89,9 +89,9 @@ func TestEndpointInfoPipeRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "bd.sock")
+	socketPath := filepath.Join(tmpDir, "loom.sock")
 
-	pipePath := `\\.\pipe\beads-abcdef0123456789`
+	pipePath := `\\.\pipe\loom-abcdef0123456789`
 	info := endpointInfo{
 		Network: "pipe",
 		Address: pipePath,
@@ -130,7 +130,7 @@ func TestDialRPC_TCPFallback(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "bd.sock")
+	socketPath := filepath.Join(tmpDir, "loom.sock")
 
 	// Write TCP endpoint info (simulating old daemon)
 	info := endpointInfo{
@@ -162,7 +162,7 @@ func TestDialRPC_UnsupportedNetwork(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "bd.sock")
+	socketPath := filepath.Join(tmpDir, "loom.sock")
 
 	info := endpointInfo{
 		Network: "udp",
@@ -191,7 +191,7 @@ func TestDialRPC_MissingAddress(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	socketPath := filepath.Join(tmpDir, "bd.sock")
+	socketPath := filepath.Join(tmpDir, "loom.sock")
 
 	info := endpointInfo{
 		Network: "pipe",
@@ -219,7 +219,7 @@ func TestDialRPC_MissingAddress(t *testing.T) {
 func TestDialRPC_MissingFile(t *testing.T) {
 	t.Parallel()
 
-	_, err := dialRPC(`C:\nonexistent\bd.sock`, 100*time.Millisecond)
+	_, err := dialRPC(`C:\nonexistent\loom.sock`, 100*time.Millisecond)
 	if err == nil {
 		t.Error("dialRPC should fail for nonexistent socket path")
 	}

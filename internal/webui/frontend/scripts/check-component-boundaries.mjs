@@ -8,25 +8,29 @@ import { join, relative, extname, sep, dirname, normalize } from "path";
 import { fileURLToPath } from "url";
 import ts from "typescript";
 
-// Known legacy violations allowlisted by { source, target } pairs.
+// Known boundary exceptions allowlisted by { source, target } pairs.
 // source = relative path from frontend root (e.g. "src/components/SwimLaneBoard/SwimLaneBoard.tsx")
 // target = the internal import path (e.g. "@/components/KanbanBoard/columnConfigs")
 export const ALLOWLIST = [
-  {
-    source: "src/components/SwimLaneBoard/SwimLaneBoard.tsx",
-    target: "@/components/KanbanBoard/columnConfigs",
-  },
-  {
-    source: "src/components/SwimLaneBoard/SwimLaneBoard.tsx",
-    target: "@/components/KanbanBoard/types",
-  },
   {
     source: "src/components/SwimLane/SwimLane.tsx",
     target: "@/components/KanbanBoard/types",
   },
   {
-    source: "src/components/IssueDetailPanel/CommentsSection.tsx",
+    source: "src/components/IssueDetailPanel/sections/CommentsSection.tsx",
     target: "@/components/table/columns",
+  },
+  {
+    source: "src/components/RepoSelector/RepoSelector.tsx",
+    target: "../FilterBar/FilterBar.module.css",
+  },
+  {
+    source: "src/components/IssueDetailPanel/fields/PriorityDropdown.tsx",
+    target: "@/components/VisuallyHidden/VisuallyHidden",
+  },
+  {
+    source: "src/components/AppLayout/AppLayout.tsx",
+    target: "@/components/LiveRegion/LiveRegion",
   },
 ];
 

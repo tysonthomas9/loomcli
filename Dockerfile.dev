@@ -1,0 +1,78 @@
+# syntax=docker/dockerfile:1.6
+#
+# Dockerfile.dev — Loom web UI dev container.
+#
+# Differs from e2e/Dockerfile in three ways:
+#   - Installs real AI CLIs (claude, codex, opencode) instead of stubs.
+#   - Runs loom serve + vite preview together via scripts/dev-container-start.sh.
+#   - Seeds two workspaces on first boot so the UI is usable out of the box.
+#
+# Build:  podman build -f Dockerfile.dev -t loomcli-dev .
+# Run:    scripts/dev-container-run.sh              # port 8091 by default
+
+ARG GO_VERSION=1.25.6
+
+# ── Stage 1: Build loom binary ──
+FROM golang:${GO_VERSION}-bookworm AS builder
+WORKDIR /src
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download \
+    && CGO_ENABLED=0 go build -o /out/loom ./cmd/loom
+
+# ── Stage 2: Build frontend dist ──
+#
+# node_modules lives in the layer (not a cache mount) so stage 3 can COPY it
+# and use vite preview without reinstalling. --mount=type=cache on /root/.npm
+# still accelerates the install.
+FROM node:24-bookworm-slim AS frontend
+WORKDIR /app/internal/webui/frontend
+COPY internal/webui/frontend/ .
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci && npm run build
+
+# ── Stage 3: Runtime (debian/glibc) ──
+# Debian (glibc) rather than Alpine (musl): cursor-agent ships glibc-only Linux
+# binaries (a glibc node + *.linux-*-gnu.node addons) that cannot run on musl.
+# glibc also runs the codex/claude/opencode CLIs, so every local backend works here.
+FROM node:24-bookworm-slim AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        tmux git jq curl ca-certificates bash lsof \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Real AI backend CLIs. Users can override any of these at runtime:
+#   -v $(which claude):/usr/local/bin/claude:ro
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g \
+        @anthropic-ai/claude-code \
+        @openai/codex \
+        opencode-ai
+
+COPY --from=builder /out/loom /usr/local/bin/loom
+
+# Frontend dist + the node_modules the frontend stage already resolved, so
+# vite preview can read vite.config.ts (imports @vitejs/plugin-react from
+# node_modules) without a second npm install.
+WORKDIR /src/internal/webui/frontend
+COPY internal/webui/frontend/package.json internal/webui/frontend/package-lock.json internal/webui/frontend/vite.config.ts ./
+COPY --from=frontend /app/internal/webui/frontend/dist/ ./dist/
+COPY --from=frontend /app/internal/webui/frontend/node_modules/ ./node_modules/
+
+COPY scripts/dev-container-start.sh /usr/local/bin/dev-start.sh
+RUN chmod +x /usr/local/bin/dev-start.sh
+
+ENV LOOM_DISABLE_H2C=1 \
+    TERM=xterm-256color \
+    LOOM_FRONTEND_URL=http://localhost:8091
+
+EXPOSE 3000
+CMD ["/usr/local/bin/dev-start.sh"]

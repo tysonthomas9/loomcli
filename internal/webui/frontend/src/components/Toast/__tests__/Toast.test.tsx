@@ -112,6 +112,31 @@ describe("Toast", () => {
     });
   });
 
+  describe("undo button", () => {
+    it("renders undo button when onUndo is provided", () => {
+      const onUndo = vi.fn();
+      render(<Toast {...defaultProps} onUndo={onUndo} />);
+      expect(screen.getByLabelText("Undo action")).toBeInTheDocument();
+    });
+
+    it("does not render undo button when onUndo is not provided", () => {
+      render(<Toast {...defaultProps} />);
+      expect(screen.queryByLabelText("Undo action")).not.toBeInTheDocument();
+    });
+
+    it("calls onUndo and onDismiss when undo button clicked", () => {
+      const onUndo = vi.fn();
+      const onDismiss = vi.fn();
+      render(<Toast {...defaultProps} onUndo={onUndo} onDismiss={onDismiss} />);
+
+      fireEvent.click(screen.getByLabelText("Undo action"));
+
+      expect(onUndo).toHaveBeenCalledTimes(1);
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+      expect(onDismiss).toHaveBeenCalledWith("toast-1");
+    });
+  });
+
   describe("icons per type", () => {
     it("renders checkmark for success type", () => {
       const { container } = render(<Toast {...defaultProps} type="success" />);

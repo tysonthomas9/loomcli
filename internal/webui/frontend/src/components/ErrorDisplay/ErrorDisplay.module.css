@@ -28,6 +28,27 @@
   color: var(--color-danger);
 }
 
+.iconWrapperLoading {
+  background-color: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
+.iconWrapperLoading .icon {
+  color: var(--color-primary);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
 .title {
   margin: 0;
   font-size: var(--font-size-lg);

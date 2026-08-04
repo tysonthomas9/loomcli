@@ -1,4 +1,9 @@
-import { test, expect, Page } from "@playwright/test"
+import { test, expect } from "@playwright/test"
+import type { Page } from "@playwright/test"
+import { ok, workspaceApi, workspaceData } from "./helpers/fleet"
+
+const FIXTURE_WORKSPACE_ID = "fixture-workspace"
+const FIXTURE_WS_API = workspaceApi(FIXTURE_WORKSPACE_ID)
 
 /**
  * E2E tests for StatusDropdown component.
@@ -70,40 +75,80 @@ async function setupMocks(
     patchDelay?: number
     patchError?: boolean
     onPatch?: (body: { status?: string }) => void
-  }
+  },
 ) {
   // Track patch calls
   const patchCalls: { url: string; body: { status?: string } }[] = []
 
-  // Mock GET and PATCH /api/issues/{id}
-  await page.route("**/api/issues/*", async (route) => {
+  await page.route("**/*", async (route) => {
     const request = route.request()
-    const url = request.url()
+    const url = new URL(request.url())
+    const pathname = url.pathname
     const method = request.method()
 
+    if (pathname === "/api/config") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+      return
+    }
+
+    if (pathname === FIXTURE_WS_API) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(
+          ok(workspaceData(FIXTURE_WORKSPACE_ID, "Fixture Workspace")),
+        ),
+      })
+      return
+    }
+
+    if (
+      pathname.startsWith(`${FIXTURE_WS_API}/issues/`) &&
+      (pathname.endsWith("/tabs") || pathname.endsWith("/events"))
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok([])),
+      })
+      return
+    }
+
+    const issueMatch = pathname.match(
+      new RegExp(`^${FIXTURE_WS_API}/issues/([^/]+)$`),
+    )
+    if (!issueMatch) {
+      await route.continue()
+      return
+    }
+
     if (method === "GET") {
-      // GET /api/issues/{id} returns IssueDetails directly without wrapper
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
+      const id = issueMatch[1]
       const issue = testIssues.find((i) => i.id === id)
 
       if (issue) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({
-            ...issue,
-            created_at: "2026-01-27T10:00:00Z",
-            updated_at: "2026-01-27T10:00:00Z",
-            dependencies: [],
-            dependents: [],
-          }),
+          body: JSON.stringify(
+            ok({
+              ...issue,
+              created_at: "2026-01-27T10:00:00Z",
+              updated_at: "2026-01-27T10:00:00Z",
+              dependencies: [],
+              dependents: [],
+            }),
+          ),
         })
       } else {
         await route.fulfill({
           status: 404,
           contentType: "application/json",
-          body: JSON.stringify({ error: "Not found" }),
+          body: JSON.stringify({ success: false, error: "Not found" }),
         })
       }
     } else if (method === "PATCH") {
@@ -112,7 +157,7 @@ async function setupMocks(
       }
 
       const body = request.postDataJSON() as { status?: string }
-      patchCalls.push({ url, body })
+      patchCalls.push({ url: request.url(), body })
       options?.onPatch?.(body)
 
       if (options?.patchError) {
@@ -124,8 +169,7 @@ async function setupMocks(
         return
       }
 
-      const idMatch = url.match(/\/api\/issues\/([^/?]+)/)
-      const id = idMatch ? idMatch[1] : null
+      const id = issueMatch[1]
       const issue = testIssues.find((i) => i.id === id)
 
       await route.fulfill({
@@ -197,7 +241,7 @@ test.describe("StatusDropdown", () => {
       // Get all options in the dropdown
       const options = dropdown.locator("option")
       const optionValues = await options.evaluateAll((opts) =>
-        opts.map((o) => (o as HTMLOptionElement).value)
+        opts.map((o) => (o as HTMLOptionElement).value),
       )
 
       // Should include user-selectable statuses
@@ -224,12 +268,17 @@ test.describe("StatusDropdown", () => {
       await openTestPanel(page, 0)
 
       const dropdown = getStatusDropdown(page)
-      await expect(dropdown).toHaveAttribute("aria-label", "Change issue status")
+      await expect(dropdown).toHaveAttribute(
+        "aria-label",
+        "Change issue status",
+      )
     })
   })
 
   test.describe("Selection", () => {
-    test("changing status calls API with correct parameters", async ({ page }) => {
+    test("changing status calls API with correct parameters", async ({
+      page,
+    }) => {
       const { patchCalls } = await setupMocks(page)
       await openTestPanel(page, 0)
 
@@ -240,13 +289,15 @@ test.describe("StatusDropdown", () => {
       // Wait for PATCH call
       await page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/status-test-1") &&
-          res.request().method() === "PATCH"
+          res.url().includes(`${FIXTURE_WS_API}/issues/status-test-1`) &&
+          res.request().method() === "PATCH",
       )
 
       // Verify API call was made with correct parameters
       expect(patchCalls).toHaveLength(1)
-      expect(patchCalls[0].url).toContain("/api/issues/status-test-1")
+      expect(patchCalls[0].url).toContain(
+        `${FIXTURE_WS_API}/issues/status-test-1`,
+      )
       expect(patchCalls[0].body).toEqual({ status: "in_progress" })
 
       // Note: The dropdown value doesn't update because IssueDetailPanel
@@ -289,8 +340,8 @@ test.describe("StatusDropdown", () => {
       // Start the status change
       const patchPromise = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/status-test-1") &&
-          res.request().method() === "PATCH"
+          res.url().includes(`${FIXTURE_WS_API}/issues/status-test-1`) &&
+          res.request().method() === "PATCH",
       )
       await dropdown.selectOption("closed")
 
@@ -319,9 +370,9 @@ test.describe("StatusDropdown", () => {
       // Wait for the failed PATCH
       await page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/status-test-1") &&
+          res.url().includes(`${FIXTURE_WS_API}/issues/status-test-1`) &&
           res.request().method() === "PATCH" &&
-          res.status() === 500
+          res.status() === 500,
       )
 
       // Error toast should appear

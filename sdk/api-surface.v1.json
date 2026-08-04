@@ -1,0 +1,148 @@
+{
+  "contract": "loom-driver-sdk/v1",
+  "description": "FROZEN @loom/sdk v1 surface manifest (SP1 contract freeze). contract.test.mjs verifies the runtime client against this file and internal/webui/handlers/driverapi/contract_test.go pins the server op table. Any mismatch is a breaking change: removing/renaming anything here requires a major version bump; additions must be recorded here in the same change.",
+  "wireCasing": "camelCase",
+  "auth": {
+    "tokenOnly": {
+      "trigger": "runToken option or LOOM_RUN_TOKEN env",
+      "headers": ["Authorization"],
+      "forbiddenHeaderPrefix": "x-loom-driver-"
+    },
+    "legacy": {
+      "headers": [
+        "X-Loom-Driver-Run-Id",
+        "X-Loom-Driver-Node-Id",
+        "X-Loom-Driver-Lease-Id",
+        "X-Loom-Driver-Fencing-Token",
+        "Authorization"
+      ]
+    }
+  },
+  "errorEnvelope": {
+    "fields": ["code", "message", "retryable"],
+    "optionalFields": ["details"],
+    "codes": [
+      "internal",
+      "invalid",
+      "timeout",
+      "canceled",
+      "unavailable",
+      "unknown_op",
+      "not_found",
+      "not_owner",
+      "conflict",
+      "unschedulable",
+      "invalid_transition",
+      "unauthenticated",
+      "identity_mismatch",
+      "token_expired",
+      "grant_denied",
+      "precondition_required",
+      "stale_subject",
+      "rate_limited",
+      "upstream_error",
+      "await_pattern_unscoped",
+      "await_timeout_required",
+      "await_instance_key_malformed",
+      "await_actor_forbidden",
+      "driver_run_already_resumed",
+      "composition_depth_exceeded"
+    ],
+    "neverRetryable": ["token_expired"]
+  },
+  "resultStatuses": ["completed", "failed", "needs_review", "cancelled"],
+  "suspendedResultStatus": "suspended_awaiting_event",
+  "watch": {
+    "path": "watch/epic",
+    "method": "GET",
+    "transport": "sse",
+    "query": ["epicId"],
+    "eventTypes": ["snapshot", "taskRun", "closed"],
+    "terminalEventType": "closed",
+    "resumeHeader": "Last-Event-ID"
+  },
+  "await": {
+    "wireStatuses": ["satisfied", "timed_out", "suspended"],
+    "returnedStatuses": ["satisfied", "timed_out"],
+    "suspendSignal": "WorkflowSuspended",
+    "timeoutRequired": true,
+    "timeoutRefusalCode": "await_timeout_required",
+    "indexing": "call-order",
+    "sharedCounterOps": ["events/await", "workflows/await"]
+  },
+  "ops": {
+    "claim-ready": { "method": "POST", "fields": ["epicId", "actor", "limit"] },
+    "epic-get": { "method": "POST", "fields": ["epicId"] },
+    "epic-snapshot": { "method": "POST", "fields": ["epicId"] },
+    "list-agents": { "method": "POST", "fields": [] },
+    "agent-orchestration-session": { "method": "POST", "fields": ["agent"] },
+    "update-agent-parent": { "method": "POST", "fields": ["agent", "parent", "expectParent"] },
+    "deliver-lead-assignment": { "method": "POST", "fields": ["agent"] },
+    "deliver-agent-message": { "method": "POST", "fields": ["agent", "message"] },
+    "exec-task": {
+      "method": "POST",
+      "fields": [
+        "taskId",
+        "runner",
+        "taskRunId",
+        "workerProfileId",
+        "parentSessionId",
+        "nodeId",
+        "runnerId",
+        "driverStepId",
+        "capabilities",
+        "leaseToken",
+        "deferCompletion",
+        "enqueueOnly",
+        "input"
+      ]
+    },
+    "task-run-get": { "method": "POST", "fields": ["taskRunId"] },
+    "active-task-runs": { "method": "POST", "fields": ["epicId", "limit"] },
+    "recover-stale-tasks": { "method": "POST", "fields": ["staleBefore", "maxAgeSeconds", "errorClass", "errorMessage"] },
+    "complete-task": {
+      "method": "POST",
+      "fields": ["taskId", "taskRunId", "reason", "completionId", "leaseToken", "logsRef", "artifactsRef", "artifactIds"]
+    },
+    "release-task": { "method": "POST", "fields": ["taskId", "actor"] },
+    "connector-dispatch": {
+      "method": "POST",
+      "fields": ["connectorId", "action", "resource", "args", "preconditions", "callSeq"]
+    },
+    "events/await": { "method": "POST", "fields": ["pattern", "actor", "timeoutMs", "awaitIndex"] },
+    "events/awaits": { "method": "GET", "fields": [] },
+    "workflows/start": { "method": "POST", "fields": ["workflowName", "idempotencyKey", "startIndex", "input"] },
+    "workflows/await": { "method": "POST", "fields": ["childRunId", "timeoutMs", "awaitIndex"] }
+  },
+  "client": {
+    "namespaces": {
+      "epics": ["get", "snapshot", "watch"],
+      "agents": ["list", "orchestrationSession", "updateParent", "deliverAssignment", "message"],
+      "tasks": ["claimReady", "complete", "release"],
+      "taskRuns": ["request", "get", "await", "active", "recoverStale"],
+      "connectors": ["dispatch", "github", "slack", "datadog"],
+      "events": ["await", "list"],
+      "workflows": ["start", "await"]
+    },
+    "connectorMethods": {
+      "github": {
+        "merge": "github.merge",
+        "postReview": "github.review.post",
+        "readPullRequest": "github.pull_request.read",
+        "listPulls": "github.pulls.list",
+        "compare": "github.compare.read",
+        "postIssueComment": "github.issue_comment.post"
+      },
+      "slack": {
+        "post": "slack.chat.post",
+        "readConversations": "slack.conversations.read"
+      },
+      "datadog": {
+        "readMonitors": "datadog.monitors.read",
+        "readAlert": "datadog.alert.read",
+        "declareIncident": "datadog.incidents.write"
+      }
+    },
+    "resultHelpers": ["completed", "failed", "needsReview"]
+  }
+}

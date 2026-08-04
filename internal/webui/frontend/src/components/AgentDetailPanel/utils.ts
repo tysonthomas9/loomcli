@@ -2,32 +2,7 @@
  * Helper utilities for AgentDetailPanel.
  */
 
-const AVATAR_COLORS = [
-  "#9DC08B",
-  "#F59E87",
-  "#B6B2DF",
-  "#95CBE9",
-  "#F5C28E",
-  "#E8A5B3",
-  "#A5D4C8",
-  "#D4A5D8",
-];
-
-export function getAvatarColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#9DC08B";
-}
-
-export function shouldUseWhiteText(hex: string): boolean {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-  return brightness < 160;
-}
+export { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
 export function getStatusDotColor(type: string): string {
   switch (type) {

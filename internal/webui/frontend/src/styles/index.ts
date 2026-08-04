@@ -1,5 +1,5 @@
 /**
- * Styles barrel exports for the beads-web-ui frontend.
+ * Styles barrel exports for the loom web UI frontend.
  * Exports TypeScript color constants and helpers.
  */
 

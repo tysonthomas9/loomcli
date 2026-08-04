@@ -1,0 +1,37 @@
+/**
+ * ResizeDivider styles.
+ * Horizontal drag handle between details and terminal in split view.
+ */
+
+.divider {
+  height: 6px;
+  cursor: row-resize;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+
+.dividerBar {
+  height: 2px;
+  width: 40px;
+  border-radius: 1px;
+  background: var(--color-border);
+  transition: background-color var(--transition-fast);
+}
+
+.divider:hover .dividerBar {
+  background: var(--color-primary);
+}
+
+.divider[data-dragging="true"] .dividerBar {
+  background: var(--color-primary);
+}
+
+.divider:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -1px;
+}

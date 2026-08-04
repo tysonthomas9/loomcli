@@ -63,7 +63,7 @@ Only basic file reading is tested. Missing:
 - `EnsureSocketDir()` line 119-121: ownership mismatch check not tested
 - Race condition in `Mkdir` (line 91-92) when multiple processes create directory
 
-**Risk**: Security vulnerability - symlink attack on `/tmp/beads-*` directories could redirect daemon communication.
+**Risk**: Security vulnerability - symlink attack on runtime socket directories could redirect daemon communication.
 
 ### 5. RPC: Response Size Limit
 
@@ -121,7 +121,7 @@ Three functions with no test coverage:
 |---|---|---|
 | `runAutoMode()` | Full loop with daemon RPC interaction | Medium |
 | `selectNextTask()` | No available tasks after filtering | Low |
-| `hasAvailablePlanningTasks()` | Malformed JSON from `bd ready` | Medium |
+| `hasAvailablePlanningTasks()` | Malformed ready-queue response | Medium |
 
 #### Prompts (prompts.go)
 
@@ -195,6 +195,7 @@ Three functions with no test coverage:
 | `handleFleetClaim()` | Timeout (claim takes >5s) | Medium |
 | `handleFleetRegister()` | Rate limiter exhaustion | Medium |
 | `handleFleetDone()` | Invalid task ID | Low |
+| `handleFleetDone()` | Auth middleware coverage (resolved — `FleetAuthMiddleware` now wraps done endpoint) | ~~Medium~~ Resolved |
 
 #### Terminal (terminal.go)
 

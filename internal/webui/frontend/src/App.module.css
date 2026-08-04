@@ -1,16 +1,40 @@
 /**
  * App component styles.
- * Layout styling for loading states and navigation bar.
+ * Layout styling for navigation bar.
  * Uses CSS Modules for component-scoped styling.
  */
 
 /* ===========================
- * Loading State Container
+ * Brand (wireframe wf-header pin 1)
  * =========================== */
-.loadingContainer {
-  display: flex;
-  gap: var(--space-4);
-  padding: var(--space-4);
+.brandButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: default;
+  font: inherit;
+  color: var(--color-text-primary);
+}
+
+.brandButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.brandMark {
+  color: var(--color-primary);
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.brandName {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 /* ===========================
@@ -24,38 +48,173 @@
   min-width: 0;
 }
 
+/* ===========================
+ * Board toolbar (tabs · filters · search · New Issue)
+ * Relocated here from the top bar to match the Aether design.
+ * =========================== */
+.boardToolbar {
+  display: grid;
+  grid-template-columns: 1fr calc(100vw / 3) 1fr;
+  grid-template-areas: "tabs search actions";
+  align-items: center;
+  gap: 16px;
+  min-height: 48px;
+  padding: 6px 16px;
+  background-color: var(--color-chrome); /* Aether #1a1a1a board-header strip */
+  border-bottom: 1px solid var(--color-border);
+}
+
+.boardToolbarTabs {
+  grid-area: tabs;
+  justify-self: start;
+  min-width: 0;
+}
+
+.boardToolbarSearch {
+  grid-area: search;
+  justify-self: stretch;
+  min-width: 0;
+  width: 100%;
+}
+
+.boardToolbarActions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-self: end;
+  min-width: 0;
+}
+
+@media (width <= 768px) {
+  .boardToolbar {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "tabs actions"
+      "search search";
+  }
+
+  .boardToolbarSearch {
+    justify-self: center;
+    width: calc(100vw / 3);
+  }
+}
+
 .headerActions {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 0.625rem;
 }
 
 .searchWrapper {
-  width: min(460px, 42vw);
-  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* SearchInput should fill remaining space when scope chip is present */
+.searchWrapper > :last-child {
+  flex: 1;
+  min-width: 0;
 }
 
 .filtersWrapper {
   display: flex;
   align-items: center;
-  flex-shrink: 0;
+  gap: var(--space-2);
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
-.kanbanShell {
+.newIssueButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 12px;
+  font-family: var(--font-family-base);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: #fff;
+  background-color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.newIssueButton:hover {
+  background-color: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.newIssueButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+.workspaceOnboarding {
+  min-height: 0;
+}
+
+.workspaceContent {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.workspaceContentWithOnboarding {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 380px);
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.workspaceMainContent {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.onboardingSidePanel {
   display: flex;
   flex-direction: column;
-  flex: 1 1 0; /* Fill available space to constrain column height */
-  min-height: 0; /* Allow flex item to shrink below content height */
-  overflow: hidden; /* Columns handle their own scrolling */
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: auto;
+  background: var(--color-bg);
+  border-left: 1px solid var(--color-border);
+}
+
+.terminalHidden {
+  display: none;
+}
+
+.terminalRouteContainer {
+  display: contents;
+  flex: 1;
+  min-height: 0;
 }
 
 @media (width <= 1024px) {
   .headerControls {
     gap: var(--space-3);
-  }
-
-  .searchWrapper {
-    width: min(380px, 44vw);
   }
 }
 
@@ -63,8 +222,28 @@
   .headerControls {
     gap: var(--space-2);
   }
+}
 
-  .searchWrapper {
-    width: min(280px, 56vw);
+@media (width <= 640px) {
+  .headerControls {
+    width: 100%;
+    gap: var(--space-2);
+  }
+
+  .filtersWrapper {
+    display: none;
+  }
+
+  .newIssueButton {
+    width: 32px;
+    min-width: 32px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .newIssueButton::before {
+    content: "+";
+    font-size: 1.15rem;
+    line-height: 1;
   }
 }

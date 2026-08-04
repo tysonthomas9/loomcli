@@ -22,12 +22,29 @@
 }
 
 .card[role="button"]:hover {
-  background: #ece9e1;
+  background: var(--color-bg-hover);
 }
 
 .card[role="button"]:focus {
   outline: 2px solid var(--color-focus);
   outline-offset: -2px;
+}
+
+.card[data-selected="true"] {
+  background: color-mix(
+    in srgb,
+    var(--color-accent, #c96442) 12%,
+    var(--color-bg-primary, #fff)
+  );
+  box-shadow: inset 3px 0 0 var(--color-accent, #c96442);
+}
+
+.card[data-selected="true"][role="button"]:hover {
+  background: color-mix(
+    in srgb,
+    var(--color-accent, #c96442) 18%,
+    var(--color-bg-primary, #fff)
+  );
 }
 
 /* Avatar container with status dot */
@@ -47,6 +64,7 @@
   justify-content: center;
   font-size: 0.84rem;
   font-weight: var(--font-weight-semibold, 600);
+  letter-spacing: -0.02em;
   text-transform: uppercase;
   color: #fff;
   user-select: none;
@@ -91,6 +109,7 @@
   font-weight: var(--font-weight-bold, 700);
   font-size: 0.94rem;
   color: var(--color-text-primary);
+  text-transform: capitalize;
   line-height: 1.2;
 }
 
@@ -98,6 +117,23 @@
   font-size: 0.74rem;
   color: var(--color-text-tertiary);
   line-height: 1.2;
+}
+
+/* Repo info line */
+.repoLine {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.crossRepoIndicator {
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 0.7rem;
+  flex-shrink: 0;
+  user-select: none;
 }
 
 .meta {
@@ -121,16 +157,16 @@
   color: var(--color-status-error, #ef4444);
 }
 
-/* Commit counts container */
-.commitCounts {
+/* Diff stats container */
+.diffStats {
   display: flex;
   flex-direction: row;
   gap: 0.4rem;
   align-items: center;
 }
 
-/* Commit count badge */
-.commitCount {
+/* Lines added badge */
+.linesAdded {
   font-size: 0.9rem;
   color: var(--color-success, #16a34a);
   font-variant-numeric: tabular-nums;
@@ -138,11 +174,49 @@
   flex-shrink: 0;
 }
 
-/* Behind count badge */
-.behindCount {
+/* Lines removed badge */
+.linesRemoved {
   font-size: 0.9rem;
-  color: var(--color-warning, #f59e0b);
+  color: var(--color-danger, #ef4444);
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono, ui-monospace, monospace);
   flex-shrink: 0;
+}
+
+/* Sidebar / workspace tree list */
+.compact {
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+}
+
+.compact .avatarContainer,
+.compact .avatar {
+  width: 26px;
+  height: 26px;
+}
+
+.compact .avatar {
+  font-size: 0.58rem;
+  letter-spacing: -0.03em;
+}
+
+.compact .statusDot {
+  width: 6px;
+  height: 6px;
+  border-width: 1.5px;
+}
+
+.compact .name {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.compact .role,
+.compact .statusLine {
+  font-size: 0.65rem;
+}
+
+.compact .repoLine,
+.compact .crossRepoIndicator {
+  font-size: 0.625rem;
 }

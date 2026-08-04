@@ -13,39 +13,69 @@ import { render, screen, fireEvent, within, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
-import type { UseBackendConfigReturn } from "@/hooks/useBackendConfig";
-import type { UseTerminalFontReturn } from "@/hooks/useTerminalFont";
-import type { BackendConfigData } from "@/api/config";
+import type {
+  UseBackendConfigReturn,
+  UseBackendsReturn,
+  UseLocalSettingsReturn,
+} from "@/hooks/workspace";
+import type { UseTerminalFontReturn } from "@/hooks/terminal";
+import type { BackendConfigData } from "@/api/common";
 
 import { SettingsView } from "../SettingsView";
 
 // Mock the hooks used by SettingsView
-vi.mock("@/hooks/useBackendConfig", () => ({
-  useBackendConfig: vi.fn(),
-}));
-
-vi.mock("@/hooks/useTerminalFont", async () => {
-  const actual = await vi.importActual("@/hooks/useTerminalFont");
+vi.mock("@/hooks/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/workspace")>(
+      "@/hooks/workspace",
+    );
   return {
     ...actual,
-    useTerminalFont: vi.fn(),
+    useBackendConfig: vi.fn(),
+    useBackends: vi.fn(),
+    useLocalSettings: vi.fn(),
+    useWorkspaceDesignFormat: vi.fn(),
+    useWorkspaceContext: vi.fn(),
   };
 });
 
-vi.mock("@/hooks/useToast", () => ({
-  useToast: vi.fn(() => ({
-    showToast: vi.fn(),
-    toasts: [],
-    dismissToast: vi.fn(),
-    dismissAll: vi.fn(),
-  })),
-}));
+vi.mock("@/hooks/terminal", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/terminal")>(
+      "@/hooks/terminal",
+    );
+  return { ...actual, useTerminalFont: vi.fn() };
+});
 
-import { useBackendConfig } from "@/hooks/useBackendConfig";
-import { useTerminalFont } from "@/hooks/useTerminalFont";
-import { useToast } from "@/hooks/useToast";
+vi.mock("@/hooks/ui", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/hooks/ui")>("@/hooks/ui");
+  return {
+    ...actual,
+    useToast: vi.fn(() => ({
+      showToast: vi.fn(),
+      toasts: [],
+      dismissToast: vi.fn(),
+      dismissAll: vi.fn(),
+    })),
+  };
+});
+
+import {
+  useBackendConfig,
+  useBackends,
+  useLocalSettings,
+  useWorkspaceDesignFormat,
+  useWorkspaceContext,
+} from "@/hooks/workspace";
+import { useTerminalFont } from "@/hooks/terminal";
+import { useToast } from "@/hooks/ui";
 
 const mockUseBackendConfig = vi.mocked(useBackendConfig);
+const mockUseBackends = vi.mocked(useBackends);
+const mockUseLocalSettings = vi.mocked(useLocalSettings);
+const mockUseWorkspaceDesignFormat = vi.mocked(useWorkspaceDesignFormat);
+const mockUseWorkspaceContext = vi.mocked(useWorkspaceContext);
 const mockUseTerminalFont = vi.mocked(useTerminalFont);
 const mockUseToast = vi.mocked(useToast);
 
@@ -57,7 +87,7 @@ function createMockConfig(
 ): BackendConfigData {
   return {
     backend: "anthropic",
-    source: "project",
+    source: "fleetdb",
     available: ["anthropic", "openai", "local"],
     agents: [],
     ...overrides,
@@ -75,7 +105,72 @@ function createMockHookReturn(
     isLoading: false,
     error: null,
     isSaving: false,
+    isCached: false,
     updateBackend: vi.fn().mockResolvedValue(undefined),
+    refetch: vi.fn(),
+    ...overrides,
+  };
+}
+
+function createMockBackendsReturn(
+  overrides?: Partial<UseBackendsReturn>,
+): UseBackendsReturn {
+  return {
+    backends: [
+      {
+        name: "anthropic",
+        displayName: "Anthropic",
+        provider: "Anthropic",
+        brandColor: "#d4a574",
+        available: true,
+        installed: true,
+        apiKeySet: true,
+      },
+      {
+        name: "openai",
+        displayName: "OpenAI",
+        provider: "OpenAI",
+        brandColor: "#10a37f",
+        available: false,
+        installed: false,
+        apiKeySet: false,
+      },
+    ],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+    ...overrides,
+  };
+}
+
+function createMockLocalSettingsReturn(
+  overrides?: Partial<UseLocalSettingsReturn>,
+): UseLocalSettingsReturn {
+  return {
+    settings: {
+      version: 1,
+      fleetdb_redis: {
+        enabled: false,
+        db: 0,
+        tls: false,
+        password_set: false,
+      },
+      agent_runtime: {
+        default: "local",
+      },
+      local_task_runner: {},
+      runtime_credentials: {
+        daytona: { configured: false },
+        github: { configured: false },
+      },
+    },
+    isLoading: false,
+    isSaving: false,
+    error: null,
+    updateRedis: vi.fn().mockResolvedValue(true),
+    updateAgentRuntime: vi.fn().mockResolvedValue(true),
+    updateLocalTaskRunner: vi.fn().mockResolvedValue(true),
+    updateRuntimeCredentials: vi.fn().mockResolvedValue(true),
     refetch: vi.fn(),
     ...overrides,
   };
@@ -107,7 +202,29 @@ describe("SettingsView", () => {
       dismissToast: vi.fn(),
       dismissAll: vi.fn(),
     });
+    mockUseBackends.mockReturnValue(createMockBackendsReturn());
     mockUseTerminalFont.mockReturnValue(createMockFontReturn());
+    mockUseLocalSettings.mockReturnValue(createMockLocalSettingsReturn());
+    mockUseWorkspaceContext.mockReturnValue({
+      workspaceId: "ALPHA",
+      workspace: {
+        id: "ALPHA",
+        name: "Alpha",
+        path: "/tmp/alpha",
+        repos: [],
+        groups: [],
+        agents: [],
+        workspaces: [],
+        default_workspace: "",
+        design_format: "markdown",
+      },
+      refetch: vi.fn(),
+    } as ReturnType<typeof useWorkspaceContext>);
+    mockUseWorkspaceDesignFormat.mockReturnValue({
+      isSaving: false,
+      error: null,
+      updateDesignFormat: vi.fn().mockResolvedValue(true),
+    });
   });
 
   describe("loading state", () => {
@@ -183,16 +300,16 @@ describe("SettingsView", () => {
       expect(options[3]).toHaveTextContent("azure");
     });
 
-    it("renders source tag with config source", () => {
+    it("renders FleetDB source tag for store-backed config", () => {
       mockUseBackendConfig.mockReturnValue(
         createMockHookReturn({
-          config: createMockConfig({ source: "project" }),
+          config: createMockConfig({ source: "fleetdb" }),
         }),
       );
 
       render(<SettingsView />);
 
-      expect(screen.getByText("From project loom.yaml")).toBeInTheDocument();
+      expect(screen.getByText("From FleetDB")).toBeInTheDocument();
     });
 
     it('renders "Default" source tag when source is not project', () => {
@@ -205,6 +322,132 @@ describe("SettingsView", () => {
       render(<SettingsView />);
 
       expect(screen.getByText("Default")).toBeInTheDocument();
+    });
+  });
+
+  describe("credential sections", () => {
+    it("groups GitHub separately from remote runtime credentials", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      const githubPanel = screen.getByTestId("github-settings-panel");
+      const remoteRuntimesPanel = screen.getByTestId("remote-runtimes-panel");
+
+      expect(
+        within(githubPanel).getByRole("heading", { name: "GitHub" }),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).getByLabelText(
+          "GitHub Token for Runtimes and PR Review",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).getByText(
+          "Used for GitHub PR review and remote runtime provisioning.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(githubPanel).queryByTestId("daytona-api-key-input"),
+      ).not.toBeInTheDocument();
+
+      expect(
+        within(remoteRuntimesPanel).getByRole("heading", {
+          name: "Remote runtimes",
+        }),
+      ).toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).getByTestId("daytona-api-key-input"),
+      ).toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).queryByTestId("github-token-input"),
+      ).not.toBeInTheDocument();
+      expect(
+        within(remoteRuntimesPanel).queryByText(/GitHub/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("saves the GitHub token with the existing runtime credential shape", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRuntimeCredentials }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("github-token-input"), {
+        target: { value: " github_pat_new " },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("github-credential-save-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        github: { token: "github_pat_new" },
+      });
+    });
+
+    it("clears the configured GitHub token with the existing PATCH shape", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          settings: {
+            version: 1,
+            fleetdb_redis: {
+              enabled: false,
+              db: 0,
+              tls: false,
+              password_set: false,
+            },
+            agent_runtime: { default: "local" },
+            local_task_runner: {},
+            runtime_credentials: {
+              daytona: { configured: false },
+              github: {
+                configured: true,
+                updated_at: "2026-07-13T12:00:00Z",
+              },
+            },
+          },
+          updateRuntimeCredentials,
+        }),
+      );
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("github-settings-panel")).toHaveTextContent(
+        "Credential saved.",
+      );
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("github-credential-clear-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        github: { clear: true },
+      });
+    });
+
+    it("keeps Daytona saves scoped to the remote runtime credential", async () => {
+      const updateRuntimeCredentials = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRuntimeCredentials }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("daytona-api-key-input"), {
+        target: { value: " dtn_new " },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("daytona-credential-save-button"));
+      });
+
+      expect(updateRuntimeCredentials).toHaveBeenCalledWith({
+        daytona: { api_key: "dtn_new" },
+      });
     });
   });
 
@@ -347,6 +590,172 @@ describe("SettingsView", () => {
       expect(
         screen.getByText("No per-agent overrides configured."),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("planner design format", () => {
+    it("resets an unsaved selection when the active workspace changes", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      const { rerender } = render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("design-format-select"), {
+        target: { value: "html" },
+      });
+      expect(screen.getByTestId("design-format-select")).toHaveValue("html");
+
+      mockUseWorkspaceContext.mockReturnValue({
+        workspaceId: "BETA",
+        workspace: {
+          id: "BETA",
+          name: "Beta",
+          path: "/tmp/beta",
+          repos: [],
+          groups: [],
+          agents: [],
+          workspaces: [],
+          default_workspace: "",
+          design_format: "markdown",
+        },
+        refetch: vi.fn(),
+      } as ReturnType<typeof useWorkspaceContext>);
+      rerender(<SettingsView />);
+
+      expect(screen.getByTestId("design-format-select")).toHaveValue(
+        "markdown",
+      );
+      expect(screen.getByTestId("design-format-save-button")).toBeDisabled();
+    });
+
+    it("persists an HTML selection for the active workspace", async () => {
+      const updateDesignFormat = vi.fn().mockResolvedValue(true);
+      mockUseWorkspaceDesignFormat.mockReturnValue({
+        isSaving: false,
+        error: null,
+        updateDesignFormat,
+      });
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("design-format-select")).toHaveValue(
+        "markdown",
+      );
+      fireEvent.change(screen.getByTestId("design-format-select"), {
+        target: { value: "html" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("design-format-save-button"));
+      });
+
+      expect(updateDesignFormat).toHaveBeenCalledWith("html");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Design format updated successfully",
+        { type: "success" },
+      );
+    });
+  });
+
+  describe("local task runner settings", () => {
+    it("saves the opencode model setting", async () => {
+      const mockUpdateLocalTaskRunner = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          updateLocalTaskRunner: mockUpdateLocalTaskRunner,
+        }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.change(screen.getByTestId("opencode-model-input"), {
+        target: { value: "anthropic/claude-sonnet-4-20250514" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("local-task-runner-save-button"));
+      });
+
+      expect(mockUpdateLocalTaskRunner).toHaveBeenCalledWith({
+        opencode_model: "anthropic/claude-sonnet-4-20250514",
+      });
+    });
+  });
+
+  describe("FleetDB Redis panel", () => {
+    it("renders disabled Redis settings by default", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("fleetdb-redis-panel")).toBeInTheDocument();
+      expect(screen.getByText("FleetDB Redis")).toBeInTheDocument();
+      expect(screen.getByTestId("redis-enabled-checkbox")).not.toBeChecked();
+      expect(screen.queryByTestId("redis-url-input")).not.toBeInTheDocument();
+    });
+
+    it("shows saved Redis connection metadata without the password", () => {
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({
+          settings: {
+            version: 1,
+            fleetdb_redis: {
+              enabled: true,
+              addr: "example.redis:6379",
+              db: 2,
+              tls: true,
+              password_set: true,
+            },
+          },
+        }),
+      );
+
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("redis-enabled-checkbox")).toBeChecked();
+      expect(screen.getByTestId("redis-current")).toHaveTextContent(
+        "example.redis:6379",
+      );
+      expect(screen.getByTestId("redis-current")).toHaveTextContent(
+        "database 2",
+      );
+      expect(screen.getByTestId("redis-current")).toHaveTextContent("TLS");
+      expect(screen.getByTestId("redis-current")).toHaveTextContent(
+        "password saved",
+      );
+    });
+
+    it("saves a pasted redis-cli TLS command", async () => {
+      const mockUpdateRedis = vi.fn().mockResolvedValue(true);
+      mockUseBackendConfig.mockReturnValue(createMockHookReturn());
+      mockUseLocalSettings.mockReturnValue(
+        createMockLocalSettingsReturn({ updateRedis: mockUpdateRedis }),
+      );
+
+      render(<SettingsView />);
+
+      fireEvent.click(screen.getByTestId("redis-enabled-checkbox"));
+      expect(screen.getByLabelText("Database index")).toBeInTheDocument();
+      fireEvent.change(screen.getByTestId("redis-url-input"), {
+        target: {
+          value: "redis-cli --tls -u redis://default:secret@example.redis:6379",
+        },
+      });
+      fireEvent.change(screen.getByTestId("redis-db-input"), {
+        target: { value: "1" },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("redis-save-button"));
+      });
+
+      expect(mockUpdateRedis).toHaveBeenCalledWith({
+        enabled: true,
+        db: 1,
+        tls: true,
+        redis_url:
+          "redis-cli --tls -u redis://default:secret@example.redis:6379",
+      });
     });
   });
 

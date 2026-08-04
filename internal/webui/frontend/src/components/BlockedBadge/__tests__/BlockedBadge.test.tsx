@@ -543,7 +543,7 @@ describe("BlockedBadge", () => {
       expect(screen.queryByText("ISSUE-1:")).not.toBeInTheDocument();
     });
 
-    it("shows IDs only when issueDetails is not provided (backward compatibility)", () => {
+    it("shows IDs only when issueDetails is not provided (existing behavior)", () => {
       render(
         <BlockedBadge count={2} issueIds={["blocker-abc", "blocker-def"]} />,
       );

@@ -1,5 +1,35 @@
 import { test, expect, Page } from "@playwright/test"
 
+const WORKSPACE_ID = "default"
+const WS_API = `/api/workspaces/${WORKSPACE_ID}`
+
+function ok<T>(data: T) {
+  return { success: true, data }
+}
+
+function workspaceData() {
+  return {
+    id: WORKSPACE_ID,
+    name: "Default",
+    path: "/tmp/default",
+    repos: [],
+    groups: [],
+    agents: [],
+    workspaces: [
+      {
+        id: WORKSPACE_ID,
+        name: "Default",
+        path: "/tmp/default",
+        active: true,
+        repo_count: 0,
+        is_default: true,
+      },
+    ],
+    workspace_order: [WORKSPACE_ID],
+    default_workspace: "Default",
+  }
+}
+
 /**
  * Mock issues for testing groupBy Assignee swim lanes.
  * Distribution:
@@ -98,20 +128,78 @@ const mockIssues = [
 /**
  * Set up API mocks for assignee grouping tests.
  */
-async function setupMocks(page: Page, issues: object[] = mockIssues) {
-  await page.route("**/api/ready", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ success: true, data: issues }),
-    })
-  })
-
-  await page.route("**/api/issues/*", async (route) => {
-    if (route.request().method() === "PATCH") {
-      const url = route.request().url()
-      const issueId = url.split("/").pop()
+async function setupMocks(
+  page: Page,
+  issues: object[] = mockIssues,
+  patchCalls?: { url: string; body: object }[],
+) {
+  await page.route("**/*", async (route) => {
+    const request = route.request()
+    const pathname = new URL(request.url()).pathname
+    if (pathname === "/api/config") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ mode: "open" }),
+      })
+    } else if (
+      pathname === "/api/workspaces/active" ||
+      pathname === `/api/workspaces/${WORKSPACE_ID}`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok(workspaceData())),
+      })
+    } else if (
+      pathname === `${WS_API}/issues` ||
+      pathname === `${WS_API}/ready`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok(issues)),
+      })
+    } else if (pathname === `${WS_API}/stats`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          total_issues: issues.length,
+          open_issues: issues.filter((i) => (i as { status?: string }).status === "open").length,
+          in_progress_issues: issues.filter((i) => (i as { status?: string }).status === "in_progress").length,
+          closed_issues: issues.filter((i) => (i as { status?: string }).status === "closed").length,
+          blocked_issues: 0,
+          deferred_issues: 0,
+          ready_issues: issues.filter((i) => (i as { status?: string }).status === "open").length,
+          tombstone_issues: 0,
+          pinned_issues: 0,
+          epics_eligible_for_closure: 0,
+          average_lead_time_hours: 0,
+        }),
+      })
+    } else if (
+      pathname === `${WS_API}/blocked` ||
+      pathname === `${WS_API}/terminal/tabs`
+    ) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(ok([])),
+      })
+    } else if (pathname === `${WS_API}/terminal/state`) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ active_tab: "" }),
+      })
+    } else if (
+      request.method() === "PATCH" &&
+      pathname.startsWith(`${WS_API}/issues/`)
+    ) {
+      const issueId = pathname.split("/").pop()
       const body = route.request().postDataJSON() as { status?: string }
+      patchCalls?.push({ url: request.url(), body })
       const issue = issues.find(
         (i) => (i as { id: string }).id === issueId
       ) as object
@@ -123,11 +211,20 @@ async function setupMocks(page: Page, issues: object[] = mockIssues) {
           data: { ...issue, ...body, updated_at: new Date().toISOString() },
         }),
       })
+    } else if (pathname.startsWith("/api/") && pathname.includes("/events")) {
+      await route.abort()
     } else {
       await route.continue()
     }
   })
 
+}
+
+async function showMoreFilters(page: Page) {
+  const groupByFilter = page.getByLabel("Group issues by")
+  if ((await groupByFilter.count()) === 0 || !(await groupByFilter.isVisible())) {
+    await page.getByRole("button", { name: "More filters" }).click()
+  }
 }
 
 /**
@@ -136,12 +233,16 @@ async function setupMocks(page: Page, issues: object[] = mockIssues) {
 async function navigateToAssigneeView(page: Page) {
   const [response] = await Promise.all([
     page.waitForResponse(
-      (res) => res.url().includes("/api/ready") && res.status() === 200
+      (res) =>
+        new URL(res.url()).pathname === `${WS_API}/issues` &&
+        res.status() === 200
     ),
-    page.goto("/?groupBy=assignee"),
+    page.goto(`/ws/${WORKSPACE_ID}/kanban?groupBy=assignee`),
   ])
   expect(response.ok()).toBe(true)
-  await expect(page.getByTestId("swim-lane-board")).toBeVisible()
+  await expect(
+    page.getByTestId("swim-lane-board").or(page.getByText("No issues yet"))
+  ).toBeVisible()
 }
 
 /**
@@ -338,32 +439,7 @@ test.describe("groupBy Assignee Swim Lanes", () => {
     test("drag issue changes status within assignee lane", async ({ page }) => {
       const patchCalls: { url: string; body: object }[] = []
 
-      await page.route("**/api/ready", async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: mockIssues }),
-        })
-      })
-
-      await page.route("**/api/issues/*", async (route) => {
-        if (route.request().method() === "PATCH") {
-          const url = route.request().url()
-          const body = route.request().postDataJSON() as { status?: string }
-          patchCalls.push({ url, body })
-
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              success: true,
-              data: { ...mockIssues[3], status: body.status },
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupMocks(page, mockIssues, patchCalls)
 
       await navigateToAssigneeView(page)
 
@@ -443,12 +519,13 @@ test.describe("groupBy Assignee Swim Lanes", () => {
         isPrimary: true,
       })
 
-      // Wait for PATCH
-      await page.waitForResponse(
+      const patchResponse = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/bob-1") &&
+          new URL(res.url()).pathname === `${WS_API}/issues/bob-1` &&
           res.request().method() === "PATCH"
       )
+      await page.getByRole("button", { name: "Skip" }).click()
+      await patchResponse
 
       // Verify API call
       expect(patchCalls).toHaveLength(1)
@@ -463,32 +540,7 @@ test.describe("groupBy Assignee Swim Lanes", () => {
     }) => {
       const patchCalls: { url: string; body: object }[] = []
 
-      await page.route("**/api/ready", async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ success: true, data: mockIssues }),
-        })
-      })
-
-      await page.route("**/api/issues/*", async (route) => {
-        if (route.request().method() === "PATCH") {
-          const url = route.request().url()
-          const body = route.request().postDataJSON() as Record<string, unknown>
-          patchCalls.push({ url, body })
-
-          await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-              success: true,
-              data: { ...mockIssues[0], ...body },
-            }),
-          })
-        } else {
-          await route.continue()
-        }
-      })
+      await setupMocks(page, mockIssues, patchCalls)
 
       await navigateToAssigneeView(page)
 
@@ -563,12 +615,13 @@ test.describe("groupBy Assignee Swim Lanes", () => {
         isPrimary: true,
       })
 
-      // Wait for PATCH
-      await page.waitForResponse(
+      const patchResponse = page.waitForResponse(
         (res) =>
-          res.url().includes("/api/issues/alice-open") &&
+          new URL(res.url()).pathname === `${WS_API}/issues/alice-open` &&
           res.request().method() === "PATCH"
       )
+      await page.getByRole("button", { name: "Skip" }).click()
+      await patchResponse
 
       // Verify ONLY status changed, NOT assignee
       expect(patchCalls).toHaveLength(1)
@@ -734,10 +787,9 @@ test.describe("groupBy Assignee Swim Lanes", () => {
 
     test("empty issues array shows no assignee lanes", async ({ page }) => {
       await setupMocks(page, [])
-      await page.goto("/?groupBy=assignee")
-      await page.waitForResponse((res) => res.url().includes("/api/ready"))
+      await navigateToAssigneeView(page)
 
-      await expect(page.getByTestId("swim-lane-board")).toBeVisible()
+      await expect(page.getByText("No issues yet")).toBeVisible()
       const lanes = page.locator('[data-testid^="swim-lane-lane-assignee-"]')
       await expect(lanes).toHaveCount(0)
     })
@@ -805,7 +857,8 @@ test.describe("groupBy Assignee Swim Lanes", () => {
       ).toBeVisible()
 
       // Switch to epic grouping
-      await page.getByTestId("groupby-filter").selectOption("epic")
+      await showMoreFilters(page)
+      await page.getByLabel("Group issues by").selectOption("epic")
 
       // Assignee lanes should be gone
       await expect(
@@ -825,14 +878,14 @@ test.describe("groupBy Assignee Swim Lanes", () => {
       page,
     }) => {
       await setupMocks(page)
-      await page.goto("/?groupBy=assignee")
-      await page.waitForResponse((res) => res.url().includes("/api/ready"))
+      await navigateToAssigneeView(page)
 
       // Verify swim lanes visible
       await expect(page.getByTestId("swim-lane-board")).toBeVisible()
 
       // Verify dropdown shows assignee selected
-      await expect(page.getByTestId("groupby-filter")).toHaveValue("assignee")
+      await showMoreFilters(page)
+      await expect(page.getByLabel("Group issues by")).toHaveValue("assignee")
 
       // Verify assignee lanes present
       await expect(

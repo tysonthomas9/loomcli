@@ -101,6 +101,14 @@
     0 0 6px 1px color-mix(in srgb, var(--color-danger) 40%, transparent);
 }
 
+/* Connection lost - danger red with stronger glow */
+.connectionStatus[data-state="connection-lost"] .indicator {
+  background-color: var(--color-danger);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-danger) 30%, transparent),
+    0 0 8px 2px color-mix(in srgb, var(--color-danger) 50%, transparent);
+}
+
 /* Fallback for unknown state */
 .indicator {
   background-color: var(--color-text-muted);
@@ -150,7 +158,8 @@
  * Disconnected state text emphasis
  * Red text provides urgency/warning
  * =========================== */
-.connectionStatus[data-state="disconnected"] .text {
+.connectionStatus[data-state="disconnected"] .text,
+.connectionStatus[data-state="connection-lost"] .text {
   color: var(--color-danger);
 }
 
@@ -167,7 +176,8 @@
   border-color: var(--color-warning);
 }
 
-.badge[data-state="disconnected"] {
+.badge[data-state="disconnected"],
+.badge[data-state="connection-lost"] {
   border-color: var(--color-danger);
 }
 

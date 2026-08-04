@@ -1,0 +1,238 @@
+/**
+ * BackendSelectorDropdown component styles.
+ * Custom dropdown with brand-colored backend indicators.
+ */
+
+.backendSelector {
+  position: relative;
+  display: inline-block;
+}
+
+/* Trigger button - styled like PriorityDropdown trigger */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: var(--font-xs);
+  font-weight: 500;
+  background-color: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast);
+  max-width: 200px;
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: var(--color-border);
+  background-color: var(--color-bg-secondary);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Saving state - pulsing animation */
+.trigger[data-saving="true"] {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.triggerText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropdownArrow {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+/* Brand-colored dot */
+.brandDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Dropdown menu */
+.menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: var(--z-dropdown, 100);
+  min-width: 220px;
+  margin-top: var(--space-1, 4px);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+/* Search input */
+.searchInput {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  background-color: var(--color-bg);
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.searchInput::placeholder {
+  color: var(--color-text-muted);
+}
+
+.searchInput:focus {
+  background-color: var(--color-bg-secondary);
+}
+
+/* Options list */
+.optionsList {
+  padding: var(--space-1, 4px);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* Menu option */
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: var(--font-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast);
+}
+
+.option:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+.option[data-selected="true"] {
+  background-color: var(--color-bg-tertiary);
+  font-weight: 500;
+}
+
+.option[data-focused="true"] {
+  background-color: var(--color-bg-secondary);
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+/* Disabled/unavailable option */
+.option[data-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.option[data-disabled="true"]:hover {
+  background-color: transparent;
+}
+
+/* Option text layout */
+.optionContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.displayName {
+  display: block;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.provider {
+  display: block;
+  font-size: var(--font-xs);
+  color: var(--color-text-muted);
+}
+
+.configureLink {
+  font-size: var(--font-xs);
+  color: var(--color-primary);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.configureLink:hover {
+  text-decoration: underline;
+}
+
+.checkmark {
+  color: var(--color-success);
+  font-size: var(--font-sm);
+  flex-shrink: 0;
+}
+
+/* Empty state */
+.emptyState {
+  padding: 12px 10px;
+  font-size: var(--font-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* Saving indicator */
+.savingIndicator {
+  position: absolute;
+  top: 50%;
+  right: -20px;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: translateY(-50%) rotate(360deg);
+  }
+}
+
+/* Error state */
+.error {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: var(--space-1, 4px);
+  font-size: var(--font-xs);
+  color: var(--color-danger);
+  white-space: nowrap;
+}

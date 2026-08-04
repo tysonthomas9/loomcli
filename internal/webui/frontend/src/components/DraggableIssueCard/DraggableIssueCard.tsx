@@ -5,37 +5,10 @@
  */
 
 import { useDraggable } from "@dnd-kit/core";
+import { memo } from "react";
 
 import { IssueCard, type IssueCardProps } from "../IssueCard";
 import styles from "./DraggableIssueCard.module.css";
-
-/**
- * Drag handle icon (6 grip dots in 2x3 grid).
- * Provides visual affordance that cards are draggable.
- */
-function DragHandleIcon({
-  className,
-}: {
-  className?: string | undefined;
-}): JSX.Element {
-  return (
-    <svg
-      className={className}
-      width="12"
-      height="16"
-      viewBox="0 0 12 16"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <circle cx="3" cy="3" r="1.5" />
-      <circle cx="9" cy="3" r="1.5" />
-      <circle cx="3" cy="8" r="1.5" />
-      <circle cx="9" cy="8" r="1.5" />
-      <circle cx="3" cy="13" r="1.5" />
-      <circle cx="9" cy="13" r="1.5" />
-    </svg>
-  );
-}
 
 /**
  * Props for the DraggableIssueCard component.
@@ -45,6 +18,8 @@ export interface DraggableIssueCardProps extends IssueCardProps {
   isOverlay?: boolean;
   /** Column ID this card belongs to (for drag restrictions) */
   columnId?: string;
+  /** Whether this card has a pending optimistic update awaiting API confirmation */
+  isPending?: boolean;
 }
 
 /**
@@ -55,7 +30,7 @@ export interface DraggableIssueCardProps extends IssueCardProps {
  * When rendered in overlay mode (isOverlay=true), it renders without drag
  * functionality for use in DragOverlay.
  */
-export function DraggableIssueCard({
+export const DraggableIssueCard = memo(function DraggableIssueCard({
   issue,
   onClick,
   className,
@@ -65,6 +40,8 @@ export function DraggableIssueCard({
   blockedByDetails,
   columnId,
   isBacklog,
+  hasActiveSession,
+  isPending = false,
 }: DraggableIssueCardProps): JSX.Element {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -73,8 +50,7 @@ export function DraggableIssueCard({
       disabled: isOverlay,
     });
 
-  // Build IssueCard props, only including optional fields if defined
-  // (required for exactOptionalPropertyTypes compatibility)
+  // Build IssueCard props, only including optional fields if defined.
   const cardProps = {
     issue,
     ...(onClick !== undefined && { onClick }),
@@ -84,6 +60,7 @@ export function DraggableIssueCard({
     ...(blockedByDetails !== undefined && { blockedByDetails }),
     ...(isBacklog !== undefined && { isBacklog }),
     ...(columnId !== undefined && { columnId }),
+    ...(hasActiveSession !== undefined && { hasActiveSession }),
   };
 
   // In overlay mode, render without drag functionality
@@ -104,16 +81,16 @@ export function DraggableIssueCard({
   };
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={styles.draggable}
-      data-dragging={isDragging ? "true" : undefined}
-      {...listeners}
-      {...attributes}
-    >
-      <DragHandleIcon className={styles.dragHandle} />
-      <IssueCard {...cardProps} />
-    </div>
+    <IssueCard
+      {...cardProps}
+      dragProps={{
+        ref: setNodeRef,
+        style,
+        listeners,
+        attributes,
+        isDragging,
+        isPending,
+      }}
+    />
   );
-}
+});

@@ -1,0 +1,44 @@
+# Caddyfile — serves the prebuilt frontend SPA + proxies API calls to the
+# co-located loom backend. One Caddy instance per backend (reference/fleet) so
+# the browser sees a single origin and tests don't have to fight CORS.
+#
+# Two virtual hosts share one Caddy process via SRV-style env vars:
+#   FRONTEND_PORT — caddy listen port (set in compose)
+#   LOOM_UPSTREAM — http://loom-fleet:8080 or http://loom-reference:8080
+#
+# `handle` is mutually exclusive (Caddy short-circuits on the first match),
+# which is what we want — once /api/* matches, the static file_server
+# below never fires for the same request.
+
+{
+    auto_https off
+    admin off
+}
+
+:{$FRONTEND_PORT} {
+    # Backend routes — proxied to the loom container's :8080.
+    @api path /api/* /healthz /sse/* /ws-tab/*
+    handle @api {
+        reverse_proxy {$LOOM_UPSTREAM} {
+            flush_interval -1
+        }
+    }
+
+    # Everything else: serve the SPA dist with index.html as the
+    # client-side router fallback.
+    handle {
+        root * /srv
+        # The fleetdb test stack is rebuilt frequently during product dogfood.
+        # Do not let the browser keep an old index.html pointing at deleted
+        # hashed assets or stale onboarding logic.
+        header Cache-Control "no-store"
+        try_files {path} /index.html
+        file_server
+    }
+
+    log {
+        output stdout
+        format console
+        level WARN
+    }
+}

@@ -8,7 +8,7 @@
   flex-direction: column;
   height: 100%;
   position: relative;
-  background: #1e1e1e;
+  background: var(--terminal-bg);
   overflow: hidden;
 }
 
@@ -29,7 +29,37 @@
   height: 100%;
   position: absolute;
   inset: 0;
+  display: flex;
   flex-direction: column;
+}
+
+/* Split view layout */
+.splitContainer {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+}
+
+.splitPaneLeft,
+.splitPaneRight {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.splitPaneRight {
+  border-left: 1px solid var(--terminal-border, #333);
+}
+
+.terminalPaneSplit {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .loading {
@@ -41,62 +71,128 @@
   font-size: var(--font-sm);
 }
 
-/* SearchBar overlay - VS Code style top-right */
-.searchOverlay {
-  position: absolute;
-  top: 0;
-  right: 20px;
-  z-index: var(--z-dropdown);
-  display: flex;
+.cliSetupBanner {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: var(--space-3);
   align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--terminal-border, #333);
+  background: color-mix(in srgb, var(--terminal-bg) 88%, white 12%);
+  color: var(--terminal-text, #e5e7eb);
+}
+
+.cliSetupDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.cliSetupBody {
+  min-width: 0;
+  display: grid;
   gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  background: #252526;
-  border: 1px solid #3c3c3c;
-  border-top: none;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.searchInput {
-  padding: 4px 8px;
+.cliSetupHeader {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cliSetupHeader strong {
   font-size: var(--font-sm);
-  background: #3c3c3c;
-  border: 1px solid #5a5a5a;
-  border-radius: var(--radius-sm);
-  color: #cccccc;
-  outline: none;
-  min-width: 180px;
+  font-weight: 650;
 }
 
-.searchInput::placeholder {
-  color: #808080;
+.cliSetupHeader span,
+.cliSetupBody p {
+  color: var(--color-text-muted);
+  font-size: var(--font-xs);
 }
 
-.searchInput:focus {
-  border-color: var(--color-primary);
+.cliSetupBody p {
+  margin: 0;
 }
 
-.searchButton {
+.cliSetupBody code {
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--terminal-border, #333);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--terminal-bg) 70%, black 30%);
+  color: var(--terminal-text, #e5e7eb);
+  font-size: var(--font-xs);
+  white-space: nowrap;
+}
+
+.cliSetupStatus {
+  width: fit-content;
+  max-width: 100%;
+  font-size: var(--font-xs);
+  font-weight: 650;
+}
+
+.starting {
+  color: #facc15;
+}
+
+.running {
+  color: #34d399;
+}
+
+.manual {
+  color: var(--color-text-muted);
+}
+
+.failed {
+  color: #fb7185;
+}
+
+.cliSetupActions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: #cccccc;
+  gap: var(--space-2);
+}
+
+.cliSetupButton,
+.cliSetupDismiss {
+  border: 1px solid var(--terminal-border, #333);
+  border-radius: 6px;
+  padding: 5px var(--space-3);
+  font-size: var(--font-xs);
+  font-weight: 600;
   cursor: pointer;
-  font-size: 10px;
-  transition: background-color var(--transition-fast);
 }
 
-.searchButton:hover {
-  background: #3c3c3c;
+.cliSetupButton {
+  background: var(--color-primary, #2563eb);
+  color: var(--color-primary-foreground, #fff);
+  border-color: transparent;
 }
 
-.searchButton:focus-visible {
-  outline: 1px solid var(--color-primary);
+.cliSetupDismiss {
+  background: transparent;
+  color: var(--terminal-text, #e5e7eb);
+}
+
+.cliSetupButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Screen-reader-only live region for keyboard shortcut announcements */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

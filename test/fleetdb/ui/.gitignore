@@ -1,0 +1,17 @@
+# Dependencies (installed per-operator)
+node_modules/
+
+# Playwright outputs (never commit)
+artifacts/reports/
+artifacts/screenshots/
+artifacts/network-traces/
+artifacts/forensics/
+artifacts/test-output/
+
+# Keep the top-level artifacts/ dir so first-run can populate it
+!artifacts/
+!artifacts/.gitkeep
+
+# CLI-parity harness output (written by `make test-parity-cli`)
+cli-report.json
+cli-fleetdb-only-report.json

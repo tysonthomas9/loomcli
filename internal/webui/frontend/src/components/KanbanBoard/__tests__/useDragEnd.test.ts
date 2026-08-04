@@ -170,7 +170,10 @@ describe("useDragEnd", () => {
     describe("early returns (validation)", () => {
       it("returns early when over is null (no drop target)", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, null);
@@ -183,7 +186,10 @@ describe("useDragEnd", () => {
 
       it("returns early when active data is missing issue", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const event = createMockDragEvent(null, "in_progress");
 
@@ -195,7 +201,10 @@ describe("useDragEnd", () => {
 
       it("returns early when active data has wrong type", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, "in_progress", {
@@ -210,7 +219,10 @@ describe("useDragEnd", () => {
 
       it("returns early when over data is missing status", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, "in_progress", {
@@ -225,7 +237,10 @@ describe("useDragEnd", () => {
 
       it("returns early when dropping on same column (same status)", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, "open");
@@ -240,7 +255,10 @@ describe("useDragEnd", () => {
     describe("callback execution", () => {
       it("calls onIssueStatusChange with correct arguments", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ id: "test-123", status: "open" });
         const event = createMockDragEvent(issue, "in_progress");
@@ -266,7 +284,10 @@ describe("useDragEnd", () => {
           return createMockIssue();
         });
 
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, "closed");
@@ -280,6 +301,7 @@ describe("useDragEnd", () => {
         const onIssueStatusChange = vi.fn();
         const onSuccess = vi.fn();
         const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
           onIssueStatusChange,
           onSuccess,
         });
@@ -303,6 +325,7 @@ describe("useDragEnd", () => {
         const onSuccess = vi.fn();
         const onError = vi.fn();
         const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
           onIssueStatusChange,
           onSuccess,
           onError,
@@ -322,7 +345,11 @@ describe("useDragEnd", () => {
 
         const onIssueStatusChange = vi.fn();
         const onError = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange, onError });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+          onError,
+        });
 
         const issue = createMockIssue({
           id: "error-test",
@@ -342,7 +369,10 @@ describe("useDragEnd", () => {
 
       it("does not throw when onSuccess is not provided", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, "closed");
@@ -354,7 +384,10 @@ describe("useDragEnd", () => {
         vi.mocked(api.updateIssue).mockRejectedValue(new Error("API Error"));
 
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, "closed");
@@ -366,7 +399,10 @@ describe("useDragEnd", () => {
     describe("API interaction", () => {
       it("calls updateIssue with correct issue ID", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ id: "api-test-id", status: "open" });
         const event = createMockDragEvent(issue, "in_progress");
@@ -374,6 +410,7 @@ describe("useDragEnd", () => {
         await handler(event);
 
         expect(api.updateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
           "api-test-id",
           expect.any(Object),
         );
@@ -381,21 +418,31 @@ describe("useDragEnd", () => {
 
       it("calls updateIssue with status update payload", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, "closed");
 
         await handler(event);
 
-        expect(api.updateIssue).toHaveBeenCalledWith(expect.any(String), {
-          status: "closed",
-        });
+        expect(api.updateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.any(String),
+          {
+            status: "closed",
+          },
+        );
       });
 
       it("handles different status transitions", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const transitions: [Status, Status][] = [
           ["open", "in_progress"],
@@ -413,9 +460,13 @@ describe("useDragEnd", () => {
 
           await handler(event);
 
-          expect(api.updateIssue).toHaveBeenCalledWith(expect.any(String), {
-            status: to,
-          });
+          expect(api.updateIssue).toHaveBeenCalledWith(
+            "test-ws-id",
+            expect.any(String),
+            {
+              status: to,
+            },
+          );
         }
       });
     });
@@ -424,7 +475,11 @@ describe("useDragEnd", () => {
       it("handles issue with undefined status (defaults to open)", async () => {
         const onIssueStatusChange = vi.fn();
         const onError = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange, onError });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+          onError,
+        });
 
         vi.mocked(api.updateIssue).mockRejectedValue(new Error("fail"));
 
@@ -446,7 +501,10 @@ describe("useDragEnd", () => {
 
       it("handles custom status values", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "custom_status" as Status });
         const event = createMockDragEvent(issue, "another_custom" as Status);
@@ -457,16 +515,23 @@ describe("useDragEnd", () => {
           expect.any(String),
           "another_custom",
         );
-        expect(api.updateIssue).toHaveBeenCalledWith(expect.any(String), {
-          status: "another_custom",
-        });
+        expect(api.updateIssue).toHaveBeenCalledWith(
+          "test-ws-id",
+          expect.any(String),
+          {
+            status: "another_custom",
+          },
+        );
       });
 
       it("optimistic update still happens even if API fails", async () => {
         vi.mocked(api.updateIssue).mockRejectedValue(new Error("API Error"));
 
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, "closed");
@@ -482,7 +547,10 @@ describe("useDragEnd", () => {
 
       it("returns a Promise that resolves", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const issue = createMockIssue({ status: "open" });
         const event = createMockDragEvent(issue, "closed");
@@ -495,7 +563,10 @@ describe("useDragEnd", () => {
 
       it("returns early for empty active data current", async () => {
         const onIssueStatusChange = vi.fn();
-        const handler = createDragEndHandler({ onIssueStatusChange });
+        const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
+          onIssueStatusChange,
+        });
 
         const event: DragEndEvent = {
           active: {
@@ -523,6 +594,7 @@ describe("useDragEnd", () => {
     describe("handler factory", () => {
       it("returns a function", () => {
         const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
           onIssueStatusChange: vi.fn(),
         });
 
@@ -534,9 +606,11 @@ describe("useDragEnd", () => {
         const callback2 = vi.fn();
 
         const handler1 = createDragEndHandler({
+          workspaceId: "test-ws-id",
           onIssueStatusChange: callback1,
         });
         const _handler2 = createDragEndHandler({
+          workspaceId: "test-ws-id",
           onIssueStatusChange: callback2,
         });
 
@@ -552,6 +626,7 @@ describe("useDragEnd", () => {
       it("captures options at creation time", async () => {
         const onSuccess = vi.fn();
         const handler = createDragEndHandler({
+          workspaceId: "test-ws-id",
           onIssueStatusChange: vi.fn(),
           onSuccess,
         });

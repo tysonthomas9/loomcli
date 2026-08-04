@@ -1,6 +1,6 @@
 #!/bin/sh
-# verify_todo.sh — Smoke test for loom CLI + bd integration in the E2E Docker container.
-# Verifies: binary existence, stub output, bd task CRUD, loom commands, lock files, signal files.
+# verify_todo.sh — Smoke test for the loom CLI E2E Docker container.
+# Verifies: binary existence, stub output, workspace setup, loom commands, and signal files.
 #
 # Usage: verify_todo.sh [-v|--verbose] [-q|--quiet] [-h|--help]
 # Exit codes: 0 = all passed, 1 = one or more failed
@@ -11,9 +11,6 @@ QUIET=0
 PASS_COUNT=0
 FAIL_COUNT=0
 CLEANUP_DIR=""
-TASK_NODESIGN=""
-TASK_READY=""
-TASK_EPIC=""
 
 # ── Argument parsing ──────────────────────────────────────────────────────
 while [ $# -gt 0 ]; do
@@ -73,7 +70,7 @@ if [ "$QUIET" -eq 0 ]; then
 fi
 
 # ── Test 1: Binary existence ──────────────────────────────────────────────
-for bin in loom bd git tmux jq claude codex opencode; do
+for bin in loom git tmux jq claude codex opencode; do
     if command -v "$bin" >/dev/null 2>&1; then
         pass "Binary exists: $bin"
     else
@@ -83,12 +80,12 @@ done
 
 # ── Test 2: Backend stub output ──────────────────────────────────────────
 
-# Claude stub: stream-json mode
-output=$(printf 'test prompt' | claude -p --output-format stream-json 2>&1)
-if printf '%s' "$output" | grep -q '"type":"assistant"'; then
-    pass "Claude stub stream-json output"
+# Claude stub: interactive mode
+output=$(claude --dangerously-skip-permissions "test prompt" 2>&1)
+if printf '%s' "$output" | grep -q 'Claude Code'; then
+    pass "Claude stub interactive output"
 else
-    fail "Claude stub stream-json output" "Expected '\"type\":\"assistant\"' in output"
+    fail "Claude stub interactive output" "Expected 'Claude Code' in output"
 fi
 
 # Codex stub: exec --json mode
@@ -129,89 +126,29 @@ else
     fail "OpenCode stub exit code override" "Expected exit code 1, got $ec"
 fi
 
-# ── Test 3: BD initialization and task creation ──────────────────────────
+# ── Test 3: Workspace setup and fixture parsing ──────────────────────────
 CLEANUP_DIR=$(mktemp -d)
 WORK_DIR="$CLEANUP_DIR/workspace"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR" || { fail "cd to workspace" "Cannot cd to $WORK_DIR"; exit 1; }
 
-# Initialize git repo (required by bd)
 git init -q .
 git config user.email "test@e2e"
 git config user.name "E2E Test"
 git commit --allow-empty -q -m "initial"
 verbose "Git repo initialized in $WORK_DIR"
 
-# Initialize beads
-if bd init >/dev/null 2>&1; then
-    pass "BD init"
-    verbose "BD initialized in $WORK_DIR"
-else
-    fail "BD init" "bd init failed in $WORK_DIR"
-fi
-
-# Create tasks from template
 if [ ! -f "$TEMPLATE_PATH" ]; then
     fail "Task template exists" "$TEMPLATE_PATH not found"
 else
     pass "Task template exists"
 
-    # Task needing planning (no design)
-    title=$(jq -r '.needs_plan.title' "$TEMPLATE_PATH")
-    desc=$(jq -r '.needs_plan.description' "$TEMPLATE_PATH")
-    prio=$(jq -r '.needs_plan.priority' "$TEMPLATE_PATH")
-    type_val=$(jq -r '.needs_plan.type' "$TEMPLATE_PATH")
-    create_out=$(bd create "$title" --type="$type_val" --priority="$prio" --description="$desc" 2>&1)
-    TASK_NODESIGN=$(printf '%s\n' "$create_out" | awk '/[Ii]ssue:/{print $NF}')
-    if [ -n "$TASK_NODESIGN" ]; then
-        pass "Create task (needs plan): $TASK_NODESIGN"
-    else
-        fail "Create task (needs plan)" "bd create returned no ID: $create_out"
-    fi
-
-    # Task ready for implementation (has design)
     title=$(jq -r '.ready_to_implement.title' "$TEMPLATE_PATH")
-    desc=$(jq -r '.ready_to_implement.description' "$TEMPLATE_PATH")
     design=$(jq -r '.ready_to_implement.design' "$TEMPLATE_PATH")
-    prio=$(jq -r '.ready_to_implement.priority' "$TEMPLATE_PATH")
-    type_val=$(jq -r '.ready_to_implement.type' "$TEMPLATE_PATH")
-    create_out=$(bd create "$title" --type="$type_val" --priority="$prio" --description="$desc" --design="$design" 2>&1)
-    TASK_READY=$(printf '%s\n' "$create_out" | awk '/[Ii]ssue:/{print $NF}')
-    if [ -n "$TASK_READY" ]; then
-        pass "Create task (ready to implement): $TASK_READY"
+    if [ -n "$title" ] && [ "$title" != "null" ] && [ -n "$design" ] && [ "$design" != "null" ]; then
+        pass "Task template ready_to_implement fixture parses"
     else
-        fail "Create task (ready to implement)" "bd create returned no ID: $create_out"
-    fi
-
-    # Epic (should be skipped by agents)
-    title=$(jq -r '.epic.title' "$TEMPLATE_PATH")
-    desc=$(jq -r '.epic.description' "$TEMPLATE_PATH")
-    prio=$(jq -r '.epic.priority' "$TEMPLATE_PATH")
-    type_val=$(jq -r '.epic.type' "$TEMPLATE_PATH")
-    create_out=$(bd create "$title" --type="$type_val" --priority="$prio" --description="$desc" 2>&1)
-    TASK_EPIC=$(printf '%s\n' "$create_out" | awk '/[Ii]ssue:/{print $NF}')
-    if [ -n "$TASK_EPIC" ]; then
-        pass "Create epic: $TASK_EPIC"
-    else
-        fail "Create epic" "bd create returned no ID: $create_out"
-    fi
-
-    # Verify bd ready lists tasks
-    ready_json=$(bd ready --json 2>/dev/null || printf '[]')
-    ready_count=$(printf '%s' "$ready_json" | jq 'length')
-    if [ "$ready_count" -ge 2 ]; then
-        pass "BD ready lists tasks ($ready_count found)"
-    else
-        fail "BD ready lists tasks" "Expected >=2, got $ready_count"
-    fi
-
-    # Verify bd list shows all
-    list_json=$(bd list --status=open --json 2>/dev/null || printf '[]')
-    list_count=$(printf '%s' "$list_json" | jq 'length')
-    if [ "$list_count" -ge 3 ]; then
-        pass "BD list shows all tasks ($list_count found)"
-    else
-        fail "BD list shows all tasks" "Expected >=3, got $list_count"
+        fail "Task template ready_to_implement fixture parses" "title='$title' design='$design'"
     fi
 fi
 
@@ -227,49 +164,17 @@ for pair in "plan:planning" "task:implementation" "claim:lock" "complete:complet
     fi
 done
 
-# ── Test 5: Loom claim (lock file integration) ──────────────────────────
-LOCK_FILE="$WORK_DIR/.agent.lock"
-
-# Create a lock file manually (simulates what loom plan/task does via AcquireLock)
-cat > "$LOCK_FILE" <<LOCKEOF
-{
-  "pid": $$,
-  "command": "task",
-  "started_at": "2026-01-01T00:00:00Z",
-  "agent_name": "e2e-test"
-}
-LOCKEOF
-
-if [ -n "$TASK_READY" ]; then
-    claim_out=$(loom claim "$TASK_READY" 2>&1); claim_ec=$?
-    if [ "$claim_ec" -eq 0 ]; then
-        pass "Loom claim exits successfully"
-
-        lock_task_id=$(jq -r '.task_id' "$LOCK_FILE" 2>/dev/null || printf '')
-        if [ "$lock_task_id" = "$TASK_READY" ]; then
-            pass "Lock file updated with task_id"
-        else
-            fail "Lock file updated with task_id" "Expected '$TASK_READY', got '$lock_task_id'"
-        fi
-
-        lock_title=$(jq -r '.task_title' "$LOCK_FILE" 2>/dev/null || printf '')
-        if [ -n "$lock_title" ] && [ "$lock_title" != "null" ]; then
-            pass "Lock file contains task_title"
-        else
-            fail "Lock file contains task_title" "task_title is empty or null"
-        fi
+# ── Test 5: Backend-aware data command help ──────────────────────────────
+for pair in "data:backend-aware" "data ready:ready" "data claim:claim"; do
+    cmd=$(printf '%s' "$pair" | cut -d: -f1)
+    keyword=$(printf '%s' "$pair" | cut -d: -f2)
+    help_out=$(loom $cmd --help 2>&1)
+    if printf '%s' "$help_out" | grep -qi "$keyword"; then
+        pass "Loom $cmd --help contains '$keyword'"
     else
-        fail "Loom claim exits successfully" "Exit code $claim_ec: $claim_out"
-        fail "Lock file updated with task_id" "Claim failed, skipping"
-        fail "Lock file contains task_title" "Claim failed, skipping"
+        fail "Loom $cmd --help contains '$keyword'" "Keyword not found in help output"
     fi
-else
-    fail "Loom claim (skipped)" "No task ID from earlier step"
-    fail "Lock file updated with task_id (skipped)" "No task ID"
-    fail "Lock file contains task_title (skipped)" "No task ID"
-fi
-
-rm -f "$LOCK_FILE"
+done
 
 # ── Test 6: Loom complete (signal file) ──────────────────────────────────
 # Create a timestamp marker right before calling complete (used for -newer fallback)

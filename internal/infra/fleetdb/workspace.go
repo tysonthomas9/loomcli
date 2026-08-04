@@ -1,0 +1,134 @@
+package fleetdb
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/store"
+)
+
+// workspaceStore implements store.WorkspaceStore against fleet-db's
+// /api/v1/admin/workspaces endpoints. Bound to a parent *Client which
+// owns the HTTP transport + auth state.
+type workspaceStore struct{ client *Client }
+
+var _ store.WorkspaceStore = (*workspaceStore)(nil)
+
+// workspaceWire is the JSON shape fleet-db emits for a workspace.
+// Mirrors models.Workspace but lives here so loom doesn't import
+// fleet-db packages directly.
+type workspaceWire struct {
+	Key         string    `json:"key"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	Repos       []string  `json:"repos,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	// Optional fields fleet-db may add (state, default_branch, etc.).
+	// Decoded if present, ignored if absent.
+	State         string `json:"state,omitempty"`
+	ErrorMessage  string `json:"error_message,omitempty"`
+	DefaultBranch string `json:"default_branch,omitempty"`
+	DesignFormat  string `json:"design_format,omitempty"`
+}
+
+func (w workspaceWire) toDomain() *domain.Workspace {
+	return &domain.Workspace{
+		Key:           w.Key,
+		Name:          w.Name,
+		Description:   w.Description,
+		State:         domain.WorkspaceState(w.State),
+		ErrorMessage:  w.ErrorMessage,
+		DefaultBranch: w.DefaultBranch,
+		DesignFormat:  w.DesignFormat,
+		CreatedAt:     w.CreatedAt,
+		UpdatedAt:     w.UpdatedAt,
+	}
+}
+
+func (s *workspaceStore) Create(ctx context.Context, in store.WorkspaceCreate) (*domain.Workspace, error) {
+	body := struct {
+		Key          string `json:"key"`
+		Name         string `json:"name"`
+		Description  string `json:"description,omitempty"`
+		DesignFormat string `json:"design_format,omitempty"`
+	}{
+		Key:          in.Key,
+		Name:         in.Name,
+		Description:  in.Description,
+		DesignFormat: in.DesignFormat,
+	}
+	var resp workspaceWire
+	if err := s.client.do(ctx, "POST", "/api/v1/admin/workspaces", body, &resp); err != nil {
+		return nil, err
+	}
+	ws := resp.toDomain()
+	if ws.DefaultBranch == "" {
+		ws.DefaultBranch = in.DefaultBranch
+	}
+	return ws, nil
+}
+
+func (s *workspaceStore) Get(ctx context.Context, key string) (*domain.Workspace, error) {
+	var resp workspaceWire
+	if err := s.client.do(ctx, "GET", "/api/v1/admin/workspaces/"+pathEscape(key), nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp.toDomain(), nil
+}
+
+func (s *workspaceStore) GetByName(ctx context.Context, name string) (*domain.Workspace, error) {
+	// Fleet-db does not currently expose a name-lookup endpoint, so we
+	// fall back to List + scan. List is cheap (workspace count is tiny);
+	// upgrade to a dedicated endpoint if it ever becomes a hotspot.
+	all, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, ws := range all {
+		if ws.Name == name {
+			return ws, nil
+		}
+	}
+	return nil, fmt.Errorf("fleetdb: workspace name %q: %w", name, domain.ErrNotFound)
+}
+
+func (s *workspaceStore) List(ctx context.Context) ([]*domain.Workspace, error) {
+	var resp struct {
+		Workspaces []workspaceWire `json:"workspaces"`
+	}
+	if err := s.client.do(ctx, "GET", "/api/v1/admin/workspaces", nil, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]*domain.Workspace, 0, len(resp.Workspaces))
+	for _, w := range resp.Workspaces {
+		out = append(out, w.toDomain())
+	}
+	return out, nil
+}
+
+func (s *workspaceStore) Update(ctx context.Context, key string, patch store.WorkspaceUpdate) (*domain.Workspace, error) {
+	// Of this client-side patch shape, fleet-db's admin PATCH persists name
+	// and design_format. Lifecycle/default-branch fields are supported by
+	// in-process stores but are not persisted through fleet-db.
+	if patch.Name == nil && patch.DesignFormat == nil {
+		return s.Get(ctx, key)
+	}
+	body := struct {
+		Name         *string `json:"name,omitempty"`
+		DesignFormat *string `json:"design_format,omitempty"`
+	}{
+		Name:         patch.Name,
+		DesignFormat: patch.DesignFormat,
+	}
+	if err := s.client.do(ctx, "PATCH", "/api/v1/admin/workspaces/"+pathEscape(key), body, nil); err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, key)
+}
+
+func (s *workspaceStore) Delete(ctx context.Context, key string) error {
+	return s.client.do(ctx, "DELETE", "/api/v1/admin/workspaces/"+pathEscape(key)+"?force=true", nil, nil)
+}
