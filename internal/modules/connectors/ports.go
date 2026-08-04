@@ -20,6 +20,33 @@ type CreateGrantMutation struct {
 	ResourcePattern string
 }
 
+// ManagementStore is the Connector owner's durable definition, grant, and
+// audit port. Secret reads, vault operations, and provider dispatch are
+// deliberately absent from this query/lifecycle slice.
+type ManagementStore interface {
+	CreateConnectorRecord(context.Context, CreateConnectorMutation) (*Connector, error)
+	GetConnectorRecord(context.Context, string, string) (*Connector, error)
+	ListConnectorRecords(context.Context, string, ConnectorFilter) ([]*Connector, error)
+	CreateManagementGrant(context.Context, CreateGrantMutation) (*ConnectorGrant, error)
+	RevokeGrantRecord(context.Context, string, string) error
+	ListGrantRecordsByBinding(context.Context, string, string) ([]*ConnectorGrant, error)
+	ListGrantRecordsByConnector(context.Context, string, string) ([]*ConnectorGrant, error)
+	ListCallRecordsByRun(context.Context, string, string, ConnectorCallFilter) ([]*ConnectorCallRecord, error)
+	ListCallRecordsByBinding(context.Context, string, string, ConnectorCallFilter) ([]*ConnectorCallRecord, error)
+}
+
+type CreateConnectorMutation struct {
+	WorkspaceKey             string
+	ConnectorID              string
+	SourceKind               ConnectorSourceKind
+	DisplayName              string
+	InboundEndpointPath      string
+	InboundSecret            string
+	OutboundCredentialSealed []byte
+	Status                   ConnectorStatus
+	CreatedBy                string
+}
+
 // GitReadExecutor is the Connectors-owned provider-dispatch port. Concrete
 // implementations may resolve a secret internally, but neither this port nor
 // its command/result types contain plaintext credential fields.

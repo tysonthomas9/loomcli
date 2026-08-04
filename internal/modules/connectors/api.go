@@ -42,3 +42,16 @@ type GitReadBroker interface {
 type GrantCommands interface {
 	EnsureGrant(context.Context, authority.SystemAuthority, EnsureGrantCommand) (*ConnectorGrant, error)
 }
+
+// Management is the operator-facing Connector definition, grant, and audit
+// surface. Results are transport-neutral owner projections and Connector
+// results never contain inbound secrets or sealed credential bytes.
+type Management interface {
+	CreateConnector(context.Context, CreateConnectorCommand) (*Connector, error)
+	GetConnector(context.Context, GetConnectorQuery) (*Connector, error)
+	ListConnectors(context.Context, ListConnectorsQuery) ([]*Connector, error)
+	CreateGrant(context.Context, CreateGrantCommand) (*ConnectorGrant, error)
+	RevokeGrant(context.Context, RevokeGrantCommand) error
+	ListGrants(context.Context, ListGrantsQuery) ([]*ConnectorGrant, error)
+	ListCalls(context.Context, ListCallsQuery) ([]*ConnectorCallRecord, error)
+}

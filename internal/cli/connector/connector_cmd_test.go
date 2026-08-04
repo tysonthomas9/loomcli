@@ -15,7 +15,9 @@ import (
 
 	vault "github.com/tysonthomas9/loomcli/internal/connector"
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/infra/connectorscatalog"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	connectorsmodule "github.com/tysonthomas9/loomcli/internal/modules/connectors"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
 
@@ -25,6 +27,19 @@ const (
 	testCredential    = "ghp-OUTBOUND-token-1"
 	testRotatedSecret = "whsec-ROTATED-secret-2"
 )
+
+func testConnectorManagement(t *testing.T, st store.Store) connectorsmodule.Management {
+	t.Helper()
+	adapter, err := connectorscatalog.New(st.Connectors(), st.ConnectorGrants(), st.ConnectorCalls())
+	if err != nil {
+		t.Fatalf("compose connector adapter: %v", err)
+	}
+	management, err := connectorsmodule.NewManagement(adapter)
+	if err != nil {
+		t.Fatalf("compose connector management: %v", err)
+	}
+	return management
+}
 
 // setVaultKey installs a valid 32-byte vault key for the test's duration and
 // returns the raw key so assertions can unseal what the CLI sealed.
@@ -66,7 +81,7 @@ func TestCreateThenList_RedactsAndNeverEchoesSecrets(t *testing.T) {
 			st := memstore.New()
 			var out bytes.Buffer
 			stdin := strings.NewReader(testInboundSecret + "\n" + testCredential + "\n")
-			err := createConnector(ctx, st, testWS, createParams{
+			err := createConnector(ctx, testConnectorManagement(t, st), testWS, createParams{
 				connectorID: "gh-main",
 				source:      domain.ConnectorSourceGitHub,
 				displayName: "GitHub main",
@@ -88,7 +103,7 @@ func TestCreateThenList_RedactsAndNeverEchoesSecrets(t *testing.T) {
 	// Create once more on the shared store for the list + resolve assertions.
 	var out bytes.Buffer
 	stdin := strings.NewReader(testInboundSecret + "\n" + testCredential + "\n")
-	if err := createConnector(ctx, st, testWS, createParams{
+	if err := createConnector(ctx, testConnectorManagement(t, st), testWS, createParams{
 		source:      domain.ConnectorSourceGitHub, // connectorID defaults to "github"
 		secretStdin: true,
 		credStdin:   true,
@@ -97,7 +112,7 @@ func TestCreateThenList_RedactsAndNeverEchoesSecrets(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := listConnectors(ctx, st, testWS, store.ConnectorFilter{}, true, &out); err != nil {
+	if err := listConnectors(ctx, testConnectorManagement(t, st), testWS, connectorsmodule.ConnectorFilter{}, true, &out); err != nil {
 		t.Fatalf("listConnectors json: %v", err)
 	}
 	if !strings.Contains(out.String(), `"connector_id": "github"`) {
@@ -106,7 +121,7 @@ func TestCreateThenList_RedactsAndNeverEchoesSecrets(t *testing.T) {
 	assertNoSecrets(t, out.String(), testInboundSecret, testCredential)
 
 	out.Reset()
-	if err := listConnectors(ctx, st, testWS, store.ConnectorFilter{}, false, &out); err != nil {
+	if err := listConnectors(ctx, testConnectorManagement(t, st), testWS, connectorsmodule.ConnectorFilter{}, false, &out); err != nil {
 		t.Fatalf("listConnectors human: %v", err)
 	}
 	if !strings.Contains(out.String(), "github") || !strings.Contains(out.String(), "status=active") {
@@ -147,7 +162,7 @@ func TestCreateConnectorUsesServeVaultFallback(t *testing.T) {
 	t.Setenv("LOOM_CONFIG_DIR", dataDir)
 	st := memstore.New()
 	var out bytes.Buffer
-	if err := createConnector(context.Background(), st, testWS, createParams{
+	if err := createConnector(context.Background(), testConnectorManagement(t, st), testWS, createParams{
 		connectorID: "github",
 		source:      domain.ConnectorSourceGitHub,
 		credStdin:   true,
@@ -233,7 +248,7 @@ func TestCreateConnector_ErrorPaths(t *testing.T) {
 				}
 			}
 			var out bytes.Buffer
-			err := createConnector(ctx, st, testWS, tt.params, strings.NewReader(tt.stdin), &out)
+			err := createConnector(ctx, testConnectorManagement(t, st), testWS, tt.params, strings.NewReader(tt.stdin), &out)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("createConnector error = %v, want errors.Is %v", err, tt.wantErr)
@@ -423,7 +438,8 @@ func TestGrantRoundTrip(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := createGrant(ctx, st, in, false, &out); err != nil {
+	management := testConnectorManagement(t, st)
+	if err := createGrant(ctx, management, in, false, &out); err != nil {
 		t.Fatalf("createGrant: %v", err)
 	}
 	want := "Created grant grant-binding-pr-github-merge (connector gh-main, binding binding-pr, action github.merge, resource repo:octocat/hello)\n"
@@ -434,7 +450,7 @@ func TestGrantRoundTrip(t *testing.T) {
 	// Listing by binding and by connector both show the active grant.
 	for _, sel := range []struct{ binding, connector string }{{binding: "binding-pr"}, {connector: "gh-main"}} {
 		out.Reset()
-		if err := listGrants(ctx, st, testWS, sel.binding, sel.connector, false, &out); err != nil {
+		if err := listGrants(ctx, management, testWS, sel.binding, sel.connector, false, &out); err != nil {
 			t.Fatalf("listGrants(%+v): %v", sel, err)
 		}
 		if !strings.Contains(out.String(), "grant-binding-pr-github-merge") || !strings.Contains(out.String(), "action=github.merge") {
@@ -443,12 +459,12 @@ func TestGrantRoundTrip(t *testing.T) {
 	}
 
 	// Duplicate create fails with the store sentinel.
-	if err := createGrant(ctx, st, in, false, &out); !errors.Is(err, domain.ErrAlreadyExists) {
+	if err := createGrant(ctx, management, in, false, &out); !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Fatalf("duplicate createGrant = %v, want ErrAlreadyExists", err)
 	}
 
 	out.Reset()
-	if err := revokeGrant(ctx, st, testWS, "grant-binding-pr-github-merge", &out); err != nil {
+	if err := revokeGrant(ctx, management, testWS, "grant-binding-pr-github-merge", &out); err != nil {
 		t.Fatalf("revokeGrant: %v", err)
 	}
 	if out.String() != "Revoked grant grant-binding-pr-github-merge\n" {
@@ -457,7 +473,7 @@ func TestGrantRoundTrip(t *testing.T) {
 
 	// Revoked grants disappear from listings (deny-by-default message shown).
 	out.Reset()
-	if err := listGrants(ctx, st, testWS, "binding-pr", "", false, &out); err != nil {
+	if err := listGrants(ctx, management, testWS, "binding-pr", "", false, &out); err != nil {
 		t.Fatalf("listGrants after revoke: %v", err)
 	}
 	if !strings.Contains(out.String(), "No active grants (egress is deny-by-default).") {
@@ -465,14 +481,14 @@ func TestGrantRoundTrip(t *testing.T) {
 	}
 
 	// Double revoke surfaces the ErrGrantRevoked sentinel.
-	if err := revokeGrant(ctx, st, testWS, "grant-binding-pr-github-merge", &out); !errors.Is(err, domain.ErrGrantRevoked) {
+	if err := revokeGrant(ctx, management, testWS, "grant-binding-pr-github-merge", &out); !errors.Is(err, domain.ErrGrantRevoked) {
 		t.Fatalf("second revokeGrant = %v, want ErrGrantRevoked", err)
 	}
 }
 
 // grantInputForTest builds the grant create input through the same flag-state
 // path runGrantCreate uses, exercising defaulting + validation.
-func grantInputForTest(t *testing.T, ws string) (store.ConnectorGrantCreate, bool) {
+func grantInputForTest(t *testing.T, ws string) (connectorsmodule.CreateGrantCommand, bool) {
 	t.Helper()
 	saved := []*string{&grantCreateID, &grantCreateConnector, &grantCreateBinding, &grantCreateAction, &grantCreateResource}
 	savedVals := make([]string, len(saved))
@@ -567,7 +583,8 @@ func TestListGrants_SelectorValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var out bytes.Buffer
-			err := listGrants(context.Background(), memstore.New(), testWS, tt.binding, tt.connector, false, &out)
+			st := memstore.New()
+			err := listGrants(context.Background(), testConnectorManagement(t, st), testWS, tt.binding, tt.connector, false, &out)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("listGrants = %v, want error containing %q", err, tt.wantErr)
 			}
@@ -633,7 +650,7 @@ func TestListAudit_RendersDecisions(t *testing.T) {
 		},
 		{
 			name:      "decision filter",
-			params:    auditParams{runID: "run-1", decision: domain.ConnectorCallDenied},
+			params:    auditParams{runID: "run-1", decision: connectorsmodule.ConnectorCallDenied},
 			wantLines: []string{"decision=denied"},
 			notWant:   []string{"decision=granted"},
 		},
@@ -657,7 +674,7 @@ func TestListAudit_RendersDecisions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var out bytes.Buffer
-			err := listAudit(ctx, st, testWS, tt.params, &out)
+			err := listAudit(ctx, testConnectorManagement(t, st), testWS, tt.params, &out)
 			if err != nil {
 				t.Fatalf("listAudit: %v", err)
 			}
@@ -686,7 +703,7 @@ func TestAuditParamsValidate(t *testing.T) {
 		{name: "neither", params: auditParams{}, wantErr: "exactly one of --run or --binding"},
 		{name: "both", params: auditParams{runID: "r1", bindingID: "b1"}, wantErr: "exactly one of --run or --binding"},
 		{name: "bad decision", params: auditParams{runID: "r1", decision: "maybe"}, wantErr: `--decision "maybe" is invalid`},
-		{name: "good decision", params: auditParams{runID: "r1", decision: domain.ConnectorCallStaleSubject}},
+		{name: "good decision", params: auditParams{runID: "r1", decision: connectorsmodule.ConnectorCallStaleSubject}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -710,18 +727,18 @@ func TestFormatConnectorRowGolden(t *testing.T) {
 	rotated := time.Date(2026, 6, 11, 9, 30, 0, 0, time.UTC)
 	tests := []struct {
 		name string
-		conn domain.Connector
+		conn connectorsmodule.Connector
 		want string
 	}{
 		{
 			name: "minimal",
-			conn: domain.Connector{ConnectorID: "github", SourceKind: domain.ConnectorSourceGitHub, Status: domain.ConnectorStatusActive},
+			conn: connectorsmodule.Connector{ConnectorID: "github", SourceKind: connectorsmodule.ConnectorSourceGitHub, Status: connectorsmodule.ConnectorStatusActive},
 			want: "github                   source=github    status=active   ",
 		},
 		{
 			name: "full",
-			conn: domain.Connector{
-				ConnectorID: "dd-alerts", SourceKind: domain.ConnectorSourceDatadog, Status: domain.ConnectorStatusDisabled,
+			conn: connectorsmodule.Connector{
+				ConnectorID: "dd-alerts", SourceKind: connectorsmodule.ConnectorSourceDatadog, Status: connectorsmodule.ConnectorStatusDisabled,
 				DisplayName: "Datadog alerts", InboundEndpointPath: "/hooks/dd", RotatedAt: &rotated,
 			},
 			want: `dd-alerts                source=datadog   status=disabled  name="Datadog alerts" endpoint=/hooks/dd rotated=2026-06-11T09:30:00Z`,

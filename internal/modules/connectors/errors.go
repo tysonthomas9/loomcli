@@ -22,6 +22,11 @@ var (
 	// ErrNotFound means a Connector or binding referenced by a grant does not
 	// exist in the workspace.
 	ErrNotFound = errors.New("connectors: not found")
+	// ErrConflict means a requested definition or grant identity already
+	// exists with incompatible state.
+	ErrConflict = errors.New("connectors: conflict")
+	// ErrGrantRevoked means the requested grant was already revoked.
+	ErrGrantRevoked = errors.New("connectors: grant revoked")
 	// ErrInvalidPersistedState means Fleet returned a malformed, cross-scope,
 	// revoked, duplicate, or otherwise contradictory grant projection.
 	ErrInvalidPersistedState = errors.New("connectors: invalid persisted state")

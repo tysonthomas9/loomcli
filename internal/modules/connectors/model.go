@@ -2,6 +2,143 @@ package connectors
 
 import "time"
 
+type ConnectorSourceKind string
+
+const (
+	ConnectorSourceGitHub   ConnectorSourceKind = "github"
+	ConnectorSourceSlack    ConnectorSourceKind = "slack"
+	ConnectorSourceDatadog  ConnectorSourceKind = "datadog"
+	ConnectorSourceInternal ConnectorSourceKind = "internal"
+)
+
+func (kind ConnectorSourceKind) Valid() bool {
+	switch kind {
+	case ConnectorSourceGitHub, ConnectorSourceSlack, ConnectorSourceDatadog, ConnectorSourceInternal:
+		return true
+	default:
+		return false
+	}
+}
+
+type ConnectorStatus string
+
+const (
+	ConnectorStatusActive   ConnectorStatus = "active"
+	ConnectorStatusDisabled ConnectorStatus = "disabled"
+)
+
+func (status ConnectorStatus) Valid() bool {
+	return status == ConnectorStatusActive || status == ConnectorStatusDisabled
+}
+
+// Connector is a redacted Connector definition projection. Credential and
+// signing-secret fields do not exist on the public model, so an adapter cannot
+// accidentally expose them through JSON, logs, or UI responses.
+type Connector struct {
+	WorkspaceKey        string              `json:"workspace_key"`
+	ConnectorID         string              `json:"connector_id"`
+	SourceKind          ConnectorSourceKind `json:"source_kind"`
+	DisplayName         string              `json:"display_name,omitempty"`
+	InboundEndpointPath string              `json:"inbound_endpoint_path,omitempty"`
+	Status              ConnectorStatus     `json:"status"`
+	CreatedBy           string              `json:"created_by,omitempty"`
+	CreatedAt           time.Time           `json:"created_at"`
+	UpdatedAt           time.Time           `json:"updated_at"`
+	RotatedAt           *time.Time          `json:"rotated_at,omitempty"`
+}
+
+type CreateConnectorCommand struct {
+	WorkspaceKey        string
+	ConnectorID         string
+	SourceKind          ConnectorSourceKind
+	DisplayName         string
+	InboundEndpointPath string
+	InboundSecret       string
+	// OutboundCredentialSealed is opaque ciphertext produced by the
+	// Connectors vault seam. Persistence never receives plaintext.
+	OutboundCredentialSealed []byte
+	Status                   ConnectorStatus
+	CreatedBy                string
+}
+
+type GetConnectorQuery struct {
+	WorkspaceKey string
+	ConnectorID  string
+}
+
+type ConnectorFilter struct {
+	SourceKind ConnectorSourceKind
+	Status     ConnectorStatus
+	Limit      int
+}
+
+type ListConnectorsQuery struct {
+	WorkspaceKey string
+	Filter       ConnectorFilter
+}
+
+type CreateGrantCommand = EnsureGrantCommand
+
+type RevokeGrantCommand struct {
+	WorkspaceKey string
+	GrantID      string
+}
+
+type ListGrantsQuery struct {
+	WorkspaceKey string
+	BindingID    string
+	ConnectorID  string
+}
+
+type ConnectorCallDecision string
+
+const (
+	ConnectorCallGranted              ConnectorCallDecision = "granted"
+	ConnectorCallDenied               ConnectorCallDecision = "denied"
+	ConnectorCallStaleSubject         ConnectorCallDecision = "stale_subject"
+	ConnectorCallPreconditionRequired ConnectorCallDecision = "precondition_required"
+	ConnectorCallUpstreamError        ConnectorCallDecision = "upstream_error"
+)
+
+func (decision ConnectorCallDecision) Valid() bool {
+	switch decision {
+	case ConnectorCallGranted, ConnectorCallDenied, ConnectorCallStaleSubject,
+		ConnectorCallPreconditionRequired, ConnectorCallUpstreamError:
+		return true
+	default:
+		return false
+	}
+}
+
+type ConnectorCallRecord struct {
+	WorkspaceKey     string                `json:"workspace_key"`
+	CallID           string                `json:"call_id"`
+	Seq              int                   `json:"seq"`
+	RunID            string                `json:"run_id"`
+	BindingID        string                `json:"binding_id"`
+	ConnectorID      string                `json:"connector_id"`
+	SourceKind       ConnectorSourceKind   `json:"source_kind"`
+	Action           string                `json:"action"`
+	Resource         string                `json:"resource,omitempty"`
+	Decision         ConnectorCallDecision `json:"decision"`
+	UpstreamStatus   int                   `json:"upstream_status,omitempty"`
+	ErrorClass       string                `json:"error_class,omitempty"`
+	SanitizedSummary string                `json:"sanitized_summary,omitempty"`
+	OccurredAt       time.Time             `json:"occurred_at"`
+}
+
+type ConnectorCallFilter struct {
+	Decision ConnectorCallDecision
+	Limit    int
+}
+
+type ListCallsQuery struct {
+	WorkspaceKey string
+	RunID        string
+	BindingID    string
+	Filter       ConnectorCallFilter
+}
+
 // ConnectorGrant is the Connectors-owned, transport-neutral projection of
 // one active or historical binding-scoped egress grant. The immutable tuple
 // (GrantID, ConnectorID, BindingID, Action, ResourcePattern) is the durable
