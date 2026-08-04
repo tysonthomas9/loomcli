@@ -358,7 +358,7 @@ func TestLocalModeEntrypointTitleLookupUsesFleetSearchBeyondFirstPage(t *testing
 		return fleetIssueBackend
 	})
 	mux := http.NewServeMux()
-	issuehandlers.NewIssueModule(svc, nil).Register(mux)
+	issuehandlers.NewIssueModule(svc, nil, nil).Register(mux)
 	loomServer := httptest.NewServer(mux)
 	t.Cleanup(loomServer.Close)
 	loomURL, err := url.Parse(loomServer.URL)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
@@ -20,6 +21,7 @@ import (
 // mux will panic (duplicate route patterns in Go 1.22+ ServeMux).
 type IssueModule struct {
 	svc           service.IssueService
+	workItems     workitems.API
 	repositorySvc issueRepositoryCommand
 	store         store.Store
 }
@@ -46,10 +48,11 @@ func (a issueRepositoryServiceAdapter) SetIssueRepository(ctx context.Context, i
 // NewIssueModule returns an IssueModule that will register routes using the
 // given service and store handle. Nil values are accepted — the
 // underlying handler functions handle nil deps at request time.
-func NewIssueModule(svc service.IssueService, st store.Store) *IssueModule {
+func NewIssueModule(svc service.IssueService, workItems workitems.API, st store.Store) *IssueModule {
 	repositorySvc, _ := svc.(service.IssueRepositoryService)
 	return &IssueModule{
 		svc:           svc,
+		workItems:     workItems,
 		repositorySvc: issueRepositoryServiceAdapter{svc: repositorySvc},
 		store:         st,
 	}
@@ -75,14 +78,14 @@ func (m *IssueModule) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}", HandleDeleteIssue(m.svc))
 
 	// Comments
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/comments", HandleListComments(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", HandleAddComment(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/comments", HandleListWorkItemComments(m.workItems))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/comments", HandleAddWorkItemComment(m.workItems))
 
 	// Events
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/events", HandleGetIssueEvents(m.svc))
 
 	// Dependencies
-	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/dependencies", HandleListDependencies(m.svc))
-	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", HandleAddDependency(m.svc))
-	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", HandleRemoveDependency(m.svc))
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/dependencies", HandleListWorkItemDependencies(m.workItems))
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/dependencies", HandleAddWorkItemDependency(m.workItems))
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/issues/{id}/dependencies/{depId}", HandleRemoveWorkItemDependency(m.workItems))
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/agents"
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/platform/authority"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/issues"
@@ -23,9 +24,9 @@ import (
 )
 
 // NewIssueModules creates the issue and session modules.
-func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
+func NewIssueModules(issueSvc service.IssueService, workItems workitems.API, sessSvc service.SessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
 	return []interface{ Register(*http.ServeMux) }{
-		issues.NewIssueModule(issueSvc, st),
+		issues.NewIssueModule(issueSvc, workItems, st),
 		issues.NewSessionModule(sessSvc, issues.SessionModuleOpts{
 			ListTaskSessions:     misc.HandleListTaskSessions(sessSvc),
 			GetSession:           misc.HandleGetSession(sessSvc),

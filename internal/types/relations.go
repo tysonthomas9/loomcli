@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 )
 
 // Dependency represents a relationship between issues
@@ -204,14 +206,9 @@ type Label struct {
 	Label   string `json:"label"`
 }
 
-// Comment represents a comment on an issue
-type Comment struct {
-	ID        int64     `json:"id"`
-	IssueID   string    `json:"issue_id"`
-	Author    string    `json:"author"`
-	Text      string    `json:"text"`
-	CreatedAt time.Time `json:"created_at"`
-}
+// Comment is a compatibility alias for the Work Items-owned comment model.
+// New capability callers import internal/modules/workitems directly.
+type Comment = workitems.Comment
 
 // Event represents an audit trail entry
 type Event struct {

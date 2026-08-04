@@ -16,6 +16,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 
 	"github.com/tysonthomas9/loomcli/internal/connector"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/appinfra"
 	"github.com/tysonthomas9/loomcli/internal/webui/appstores"
@@ -53,6 +54,7 @@ type Server struct {
 
 	// Service layer
 	issueSvc     service.IssueService
+	workItems    workitems.API
 	agentSvc     service.AgentService
 	agentRuntime service.InteractiveAgentRuntime
 	workspaceSvc service.WorkspaceService

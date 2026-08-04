@@ -1,6 +1,6 @@
 schema_version: 1
 status: complete
-source_head: 7d33f3468e86d95781d68e322afe8477804b1188
+source_head: d78c7cf34081c6dc1457aef43eaf02004832368f
 adapter_roots:
   - internal/app
   - internal/cli
@@ -62,6 +62,9 @@ persistence_packages:
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     receiver_names: [AuthoringStore, VersionLifecycleStore]
+    receiver_suffixes: []
+  - path: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    receiver_names: [Store]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/sessions
     receiver_names: [Session, Store]
@@ -344,6 +347,9 @@ method_sets:
   - name: workflowcatalog_authoring
     read_only: []
     mutating: [AuthorVersion]
+  - name: workitems_port
+    read_only: [ListComments, ListDependencies]
+    mutating: [AddComment, AddDependency, RemoveDependency]
   - name: workspace_admission_store
     read_only: [AgentServices, Agents, Repos, Roles, Workspaces]
     mutating: []
@@ -484,6 +490,10 @@ receiver_surfaces:
     package: github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog
     method_set: store_repository
     capability_owner: workflowcatalog
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workitems.Store
+    package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    method_set: workitems_port
+    capability_owner: workitems
   - receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
     package: github.com/tysonthomas9/loomcli/internal/stackstore
     method_set: stack_store
@@ -845,6 +855,10 @@ function_surfaces:
     function: VersionApproved
     access: read-only
     capability_owner: workflowcatalog
+  - package: github.com/tysonthomas9/loomcli/internal/modules/workitems
+    function: New
+    access: read-only
+    capability_owner: workitems
   - package: github.com/tysonthomas9/loomcli/internal/sessions
     function: EncodeDiffStatsMetadata
     access: read-only

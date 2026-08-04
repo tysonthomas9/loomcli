@@ -74,7 +74,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
 	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {
-		t.Fatalf("module roots = %v, want active Phase 5 extractions %v", got, want)
+		t.Fatalf("module roots = %v, want active capability extractions %v", got, want)
 	}
 	if got, want := len(report.PendingDecisions), 0; got != want {
 		t.Fatalf("pending decisions = %d, want %d", got, want)

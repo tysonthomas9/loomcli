@@ -115,6 +115,10 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 		middleware.WithWorkspace,
 		service.IssueBackendProvider(config.IssueBackendFn),
 	)
+	app.workItems, err = capabilitycomposition.NewWorkItems(config.IssueBackendFn)
+	if err != nil {
+		return nil, fmt.Errorf("compose Work Items capability: %w", err)
+	}
 
 	// Create SSE hub for real-time push notifications
 	app.hub = appstores.NewHub()

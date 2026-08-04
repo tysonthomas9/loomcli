@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
@@ -70,6 +71,27 @@ func HandleServiceError(w http.ResponseWriter, err error) {
 	}
 	slog.Error("unexpected error", "err", err)
 	WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+}
+
+// HandleWorkItemsError maps the Work Items capability's public failure
+// vocabulary without translating it back through the legacy Web UI service.
+func HandleWorkItemsError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	message := workitems.PublicErrorMessage(err)
+	switch {
+	case errors.Is(err, workitems.ErrInvalid):
+		status = http.StatusBadRequest
+	case errors.Is(err, workitems.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, workitems.ErrConflict):
+		status = http.StatusConflict
+	case errors.Is(err, workitems.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+	case errors.Is(err, workitems.ErrTimeout):
+		status = http.StatusGatewayTimeout
+	}
+	slog.Error("work items error", "status", status, "err", err)
+	WriteJSON(w, status, map[string]string{"error": message})
 }
 
 // IsControlPlaneRateLimited reports whether a compatibility dependency

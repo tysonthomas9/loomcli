@@ -14,6 +14,7 @@ var checkedInModuleRoots = []string{
 	"interaction",
 	"sourcecontrol",
 	"workflowcatalog",
+	"workitems",
 }
 
 // checkedInSnapshotViolations keeps the current migration snapshot exact while

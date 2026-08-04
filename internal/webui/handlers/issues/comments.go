@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/types"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 	"github.com/tysonthomas9/loomcli/internal/webui/service"
@@ -18,6 +19,59 @@ import (
 type CommentRequest struct {
 	Text string `json:"text,omitempty"`
 	Body string `json:"body,omitempty"`
+}
+
+// HandleListWorkItemComments is the Work Items-owned route adapter. The
+// legacy HandleListComments remains temporarily for non-route compatibility
+// tests and callers while the rest of IssueService migrates.
+func HandleListWorkItemComments(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, CommentListResponse{Success: false, Data: []*types.Comment{}, Error: "missing issue ID"})
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		comments, err := api.ListComments(r.Context(), workitems.ListCommentsQuery{IssueID: issueID})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		if comments == nil {
+			comments = []*workitems.Comment{}
+		}
+		handler.WriteJSON(w, http.StatusOK, CommentListResponse{Success: true, Data: comments})
+	}
+}
+
+// HandleAddWorkItemComment adapts the HTTP dialect to the Work Items command.
+func HandleAddWorkItemComment(api workitems.API) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		issueID := r.PathValue("id")
+		if issueID == "" {
+			handler.WriteJSON(w, http.StatusBadRequest, CommentResponse{Success: false, Error: "missing issue ID"})
+			return
+		}
+		var req CommentRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			slog.Warn("invalid request body in HandleAddWorkItemComment", "err", err)
+			handler.WriteJSON(w, http.StatusBadRequest, CommentResponse{Success: false, Error: "invalid request body"})
+			return
+		}
+		if api == nil {
+			handler.HandleWorkItemsError(w, workitems.ErrUnavailable)
+			return
+		}
+		comment, err := api.AddComment(r.Context(), workitems.AddCommentCommand{IssueID: issueID, Author: "web-ui", Text: req.Content()})
+		if err != nil {
+			handler.HandleWorkItemsError(w, err)
+			return
+		}
+		handler.WriteJSON(w, http.StatusCreated, CommentResponse{Success: true, Data: comment})
+	}
 }
 
 // Content returns the comment text regardless of which JSON key the

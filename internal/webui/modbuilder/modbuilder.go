@@ -11,6 +11,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/modules/interaction"
 	"github.com/tysonthomas9/loomcli/internal/modules/sourcecontrol"
 	workflowcataloghttp "github.com/tysonthomas9/loomcli/internal/modules/workflowcatalog/httpapi"
+	"github.com/tysonthomas9/loomcli/internal/modules/workitems"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/issuetabs"
 	"github.com/tysonthomas9/loomcli/internal/webui/modbuilder/agentcomposition"
@@ -33,8 +34,8 @@ type CredentialSeedInvalidator = reviewcomposition.CredentialSeedInvalidator
 type LocalSettingsHandlers = reviewcomposition.LocalSettingsHandlers
 
 // NewIssueModules creates the issue and session modules.
-func NewIssueModules(issueSvc service.IssueService, sessSvc service.SessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
-	return sessioncomposition.NewIssueModules(issueSvc, sessSvc, st)
+func NewIssueModules(issueSvc service.IssueService, workItems workitems.API, sessSvc service.SessionService, st store.Store) []interface{ Register(*http.ServeMux) } {
+	return sessioncomposition.NewIssueModules(issueSvc, workItems, sessSvc, st)
 }
 
 // TerminalModuleDeps holds dependencies for the (now tmux-free) terminal
