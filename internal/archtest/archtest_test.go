@@ -70,7 +70,7 @@ func TestCheckedInManifestsAndRepository(t *testing.T) {
 	if got, want := len(report.CompositeStoreOutside), 54; got != want {
 		t.Fatalf("outside-composition Store file count = %d, want %d", got, want)
 	}
-	if got, want := len(report.LegacyHandlerImports), 79; got != want {
+	if got, want := len(report.LegacyHandlerImports), 77; got != want {
 		t.Fatalf("legacy handler imports = %d, want %d", got, want)
 	}
 	if got, want := report.ModuleRoots, checkedInModuleRoots; !slices.Equal(got, want) {
@@ -463,13 +463,16 @@ func TestPhase5InteractionLedgerPinsDeliveryAuthorityAndAttemptFencing(t *testin
 	}
 }
 
-func TestCheckedInPhase6ArchitectureContracts(t *testing.T) {
+func TestCheckedInPhase7ArchitectureContracts(t *testing.T) {
 	graph, err := LoadCapabilityGraph(filepath.Join("testdata", "capability-graph.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if graph.CompletedPhase != 6 {
-		t.Fatalf("completed phase = %d, want 6", graph.CompletedPhase)
+	if graph.CompletedPhase != 7 {
+		t.Fatalf("completed phase = %d, want 7", graph.CompletedPhase)
+	}
+	if len(graph.LegacyPaths) != 0 {
+		t.Fatalf("legacy paths remain after Phase 7 completion: %+v", graph.LegacyPaths)
 	}
 	statusByCapability := make(map[string]string, len(graph.Capabilities))
 	for _, capability := range graph.Capabilities {
@@ -483,7 +486,9 @@ func TestCheckedInPhase6ArchitectureContracts(t *testing.T) {
 		"execution",
 		"interaction",
 		"sourcecontrol",
+		"workitems",
 		"workflowcatalog",
+		"workspace",
 	} {
 		if statusByCapability[capability] != "active" {
 			t.Fatalf("capability %s status = %q, want active", capability, statusByCapability[capability])
@@ -556,8 +561,8 @@ func TestPhase5InteractionOwnershipBlockerRatchet(t *testing.T) {
 			observed,
 		)
 	}
-	if graph.CompletedPhase != 6 {
-		t.Fatalf("completed_phase = %d after zero direct Interaction aggregate mutation blockers, want 6", graph.CompletedPhase)
+	if graph.CompletedPhase != 7 {
+		t.Fatalf("completed_phase = %d after zero direct Interaction aggregate mutation blockers, want 7", graph.CompletedPhase)
 	}
 }
 

@@ -1,6 +1,6 @@
 schema_version: 1
 status: approved
-completed_phase: 6
+completed_phase: 7
 decision_dependencies:
   - MM-1
   - MM-2
@@ -113,27 +113,7 @@ aggregate_ownership:
   - record: Worktree, stack lineage, publication state
     owner: sourcecontrol
     cross_capability_rule: Workspace owns catalog configuration while Source Control owns materialization.
-legacy_paths:
-  - path: internal/domain
-    owner: architecture-guardrail-lane
-    removal_issue: MM-LEGACY-DOMAIN
-    expires_after_phase: 7
-  - path: internal/store
-    owner: architecture-guardrail-lane
-    removal_issue: MM-LEGACY-STORE
-    expires_after_phase: 7
-  - path: internal/webui/handlers
-    owner: frontend-and-http-lane
-    removal_issue: MM-LEGACY-HANDLERS
-    expires_after_phase: 7
-  - path: internal/webui/service
-    owner: frontend-and-http-lane
-    removal_issue: MM-LEGACY-SERVICE
-    expires_after_phase: 7
-  - path: internal/webui/svcimpl
-    owner: frontend-and-http-lane
-    removal_issue: MM-LEGACY-SVCIMPL
-    expires_after_phase: 7
+legacy_paths: []
 edges:
   - from: sourcecontrol
     to: workspace

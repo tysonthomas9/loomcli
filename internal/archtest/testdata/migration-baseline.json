@@ -887,8 +887,6 @@
         {"file": "internal/webui/handlers/misc/logs.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
         {"file": "internal/webui/handlers/misc/module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
         {"file": "internal/webui/handlers/misc/sessions.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/onboarding/first_task.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
-        {"file": "internal/webui/handlers/onboarding/module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
         {"file": "internal/webui/handlers/prreview/module.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
         {"file": "internal/webui/handlers/terminal/agent.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
         {"file": "internal/webui/handlers/terminal/agent_session.go", "import": "github.com/tysonthomas9/loomcli/internal/webui/service"},
