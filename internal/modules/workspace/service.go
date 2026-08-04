@@ -120,6 +120,17 @@ func (s *Service) SetDesignFormat(ctx context.Context, command SetDesignFormatCo
 	return validatedReference(updated, "set workspace design format "+current.Key)
 }
 
+func (s *Service) Delete(ctx context.Context, command DeleteCommand) (*Reference, error) {
+	current, err := s.Resolve(ctx, ResolveQuery{Reference: command.Reference})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.Delete(ctx, current.Key); err != nil {
+		return nil, err
+	}
+	return validatedReference(current, "delete workspace "+current.Key)
+}
+
 func (s *Service) GetRepository(ctx context.Context, query GetRepositoryQuery) (*Repository, error) {
 	if s.repositories == nil {
 		return nil, fmt.Errorf("Workspace repository catalog unavailable: %w", ErrUnavailable)

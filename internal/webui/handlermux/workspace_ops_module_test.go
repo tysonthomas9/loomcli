@@ -145,6 +145,10 @@ func (*stubWorkspaceCatalog) SetDesignFormat(context.Context, workspacemodule.Se
 	return nil, nil
 }
 
+func (*stubWorkspaceCatalog) Delete(context.Context, workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
+	return nil, nil
+}
+
 func (*stubWorkspaceCatalog) GetRepository(context.Context, workspacemodule.GetRepositoryQuery) (*workspacemodule.Repository, error) {
 	return nil, nil
 }

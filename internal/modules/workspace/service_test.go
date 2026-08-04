@@ -7,20 +7,22 @@ import (
 )
 
 type fakeCatalog struct {
-	byKey     *Reference
-	byName    *Reference
-	listed    []Reference
-	updated   *Reference
-	keyErr    error
-	nameErr   error
-	listErr   error
-	updateErr error
-	keyQuery  string
-	nameQuery string
-	renameKey string
-	renameTo  string
-	formatKey string
-	formatTo  string
+	byKey      *Reference
+	byName     *Reference
+	listed     []Reference
+	updated    *Reference
+	keyErr     error
+	nameErr    error
+	listErr    error
+	updateErr  error
+	keyQuery   string
+	nameQuery  string
+	renameKey  string
+	renameTo   string
+	formatKey  string
+	formatTo   string
+	deletedKey string
+	deleteErr  error
 }
 
 type fakeRepositoryCatalog struct {
@@ -63,6 +65,11 @@ func (f *fakeCatalog) Rename(_ context.Context, key, name string) (*Reference, e
 func (f *fakeCatalog) SetDesignFormat(_ context.Context, key, format string) (*Reference, error) {
 	f.formatKey, f.formatTo = key, format
 	return f.updated, f.updateErr
+}
+
+func (f *fakeCatalog) Delete(_ context.Context, key string) error {
+	f.deletedKey = key
+	return f.deleteErr
 }
 
 func TestResolvePrefersKeyAndReturnsCopy(t *testing.T) {
@@ -181,6 +188,21 @@ func TestSetDesignFormatOwnsValidationAndNoOp(t *testing.T) {
 	}
 	if store.formatKey != "" {
 		t.Fatal("idempotent design-format update wrote persistence")
+	}
+}
+
+func TestDeleteResolvesCanonicalWorkspaceBeforeOwnerWrite(t *testing.T) {
+	catalog := &fakeCatalog{keyErr: ErrNotFound, byName: &Reference{Key: "HELLO", Name: "Hello"}}
+	service, err := New(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := service.Delete(context.Background(), DeleteCommand{Reference: "Hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalog.deletedKey != "HELLO" || deleted.Key != "HELLO" {
+		t.Fatalf("deleted key=%q result=%#v", catalog.deletedKey, deleted)
 	}
 }
 

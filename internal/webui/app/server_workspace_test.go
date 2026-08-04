@@ -383,6 +383,25 @@ func TestWrapWorkspaceDeleteFn_NilInner(t *testing.T) {
 	}
 }
 
+func TestWrapWorkspaceDeleteCleanupFnUsesCanonicalKey(t *testing.T) {
+	registry, state := newTestRegistry(t)
+	const key = "ALPHA"
+	if err := registry.Register(key, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	cleaned := ""
+	cleanup := wrapWorkspaceDeleteCleanupFn(func(value string) error {
+		cleaned = value
+		return nil
+	}, registry)
+	if err := cleanup(key); err != nil {
+		t.Fatal(err)
+	}
+	if cleaned != key || state.PoolForWorkspace(key) != nil {
+		t.Fatalf("cleaned=%q registered=%v", cleaned, state.PoolForWorkspace(key))
+	}
+}
+
 func TestWrapWorkspaceDeleteFn_Success(t *testing.T) {
 	registry, multiPool := newTestRegistry(t)
 

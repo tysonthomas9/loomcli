@@ -358,7 +358,7 @@ method_sets:
     mutating: []
   - name: workspace_catalog
     read_only: [GetByKey, GetByName, List]
-    mutating: [Rename, SetDesignFormat]
+    mutating: [Delete, Rename, SetDesignFormat]
   - name: workspace_repository_catalog
     read_only: [Get, List]
     mutating: []

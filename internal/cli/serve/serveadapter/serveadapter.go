@@ -71,15 +71,14 @@ func deleteWorkspaceLocalState(key string) error {
 	if key == "" {
 		return nil
 	}
-	return bootstrap.MutateStateCache(func(sc *bootstrap.StateCache) error {
-		if sc.Workspaces != nil {
-			delete(sc.Workspaces, key)
-		}
-		if sc.LastWorkspace == key {
-			sc.LastWorkspace = ""
-		}
-		return nil
-	})
+	return bootstrap.RemoveWorkspaceLocalState(key)
+}
+
+// BuildWorkspaceDeleteCleanupFn returns the machine-local cleanup half of a
+// Workspace deletion. The durable record must already have been removed by
+// the Workspace owner command.
+func BuildWorkspaceDeleteCleanupFn() func(string) error {
+	return deleteWorkspaceLocalState
 }
 
 // BuildSetDefaultWorkspaceFn is retained for compatibility with older server

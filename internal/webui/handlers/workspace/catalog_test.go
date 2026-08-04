@@ -43,6 +43,10 @@ func (f *fakeCatalogAPI) SetDesignFormat(_ context.Context, command workspacemod
 	return f.value, f.err
 }
 
+func (f *fakeCatalogAPI) Delete(context.Context, workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
+	return f.value, f.err
+}
+
 func (f *fakeCatalogAPI) GetRepository(context.Context, workspacemodule.GetRepositoryQuery) (*workspacemodule.Repository, error) {
 	return nil, f.err
 }

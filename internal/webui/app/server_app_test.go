@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
+	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	"github.com/tysonthomas9/loomcli/internal/webui/tabmeta"
 	"github.com/tysonthomas9/loomcli/internal/webui/terminal"
@@ -107,6 +108,43 @@ func TestNewServerFleetClientHealthProbe(t *testing.T) {
 	}
 	if _, ok := body["pool"]; ok {
 		t.Fatal("/api/health should not report daemon pool stats in FleetDB-backed mode")
+	}
+}
+
+func TestNewServerWorkspaceDeleteUsesOwnerCommandAndCleanup(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	t.Setenv("LOOM_WORKSPACE", "")
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(t.Context(), store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	cleaned := ""
+	app, err := NewServer(t.Context(), webui.ServerConfig{
+		Port:            freeTCPPort(t),
+		BindAddress:     "127.0.0.1",
+		MaxPortAttempts: 1,
+		Store:           st,
+		WorkspaceDeleteCleanupFn: func(key string) error {
+			cleaned = key
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { app.Close() })
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodDelete, "/api/workspaces/ALPHA", nil)
+	app.mux.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if cleaned != "ALPHA" {
+		t.Fatalf("cleanup key=%q", cleaned)
+	}
+	if _, err := st.Workspaces().Get(t.Context(), "ALPHA"); err == nil {
+		t.Fatal("Workspace owner command did not delete durable record")
 	}
 }
 

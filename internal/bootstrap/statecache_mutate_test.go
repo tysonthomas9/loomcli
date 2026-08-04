@@ -62,6 +62,28 @@ func TestMutateStateCacheDeleteDoesNotResurrect(t *testing.T) {
 	}
 }
 
+func TestRemoveWorkspaceLocalStateClearsMatchingSelectionOnly(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	if err := MutateStateCache(func(sc *StateCache) error {
+		sc.Workspaces["A"] = WorkspaceLocalState{Path: "/tmp/a"}
+		sc.Workspaces["B"] = WorkspaceLocalState{Path: "/tmp/b"}
+		sc.LastWorkspace = "A"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveWorkspaceLocalState("A"); err != nil {
+		t.Fatal(err)
+	}
+	sc, err := LoadStateCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sc.Workspaces["A"]; ok || sc.Workspaces["B"].Path != "/tmp/b" || sc.LastWorkspace != "" {
+		t.Fatalf("unexpected state after removal: %#v", sc)
+	}
+}
+
 func TestMutateStateCacheNilFn(t *testing.T) {
 	if err := MutateStateCache(nil); err == nil {
 		t.Fatal("MutateStateCache(nil) = nil error, want error")

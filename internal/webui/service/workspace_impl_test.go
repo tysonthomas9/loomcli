@@ -24,6 +24,7 @@ type workspaceAgentDirectoryStub struct {
 
 type workspaceCapabilityStub struct {
 	setDesignFormatFn func(context.Context, workspacemodule.SetDesignFormatCommand) (*workspacemodule.Reference, error)
+	deleteFn          func(context.Context, workspacemodule.DeleteCommand) (*workspacemodule.Reference, error)
 }
 
 func (stub *workspaceCapabilityStub) Resolve(context.Context, workspacemodule.ResolveQuery) (*workspacemodule.Reference, error) {
@@ -43,6 +44,13 @@ func (stub *workspaceCapabilityStub) SetDesignFormat(ctx context.Context, comman
 		return nil, workspacemodule.ErrInvalid
 	}
 	return stub.setDesignFormatFn(ctx, command)
+}
+
+func (stub *workspaceCapabilityStub) Delete(ctx context.Context, command workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
+	if stub.deleteFn == nil {
+		return nil, workspacemodule.ErrUnavailable
+	}
+	return stub.deleteFn(ctx, command)
 }
 
 func (stub *workspaceCapabilityStub) GetRepository(context.Context, workspacemodule.GetRepositoryQuery) (*workspacemodule.Repository, error) {
@@ -151,6 +159,68 @@ func TestDeleteWorkspace_StoreBackedUsesWorkspaceKey(t *testing.T) {
 	}
 	if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("workspace still exists or unexpected error: %v", err)
+	}
+}
+
+func TestDeleteWorkspaceUsesOwnerCommandThenLocalCleanup(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha Project"}); err != nil {
+		t.Fatal(err)
+	}
+	legacyCalls := 0
+	cleanupKey := ""
+	capability := &workspaceCapabilityStub{deleteFn: func(ctx context.Context, command workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
+		if command.Reference != "Alpha Project" {
+			t.Fatalf("delete reference = %q", command.Reference)
+		}
+		if err := st.Workspaces().Delete(ctx, "ALPHA"); err != nil {
+			return nil, err
+		}
+		return &workspacemodule.Reference{Key: "ALPHA", Name: "Alpha Project"}, nil
+	}}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store:     st,
+		Workspace: capability,
+		DeleteFn: func(string) error {
+			legacyCalls++
+			return nil
+		},
+		DeleteCleanupFn: func(key string) error {
+			cleanupKey = key
+			return nil
+		},
+	})
+
+	if _, err := svc.DeleteWorkspace(ctx, "Alpha Project"); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCalls != 0 || cleanupKey != "ALPHA" {
+		t.Fatalf("legacy calls=%d cleanup key=%q", legacyCalls, cleanupKey)
+	}
+	if _, err := st.Workspaces().Get(ctx, "ALPHA"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("workspace still exists: %v", err)
+	}
+}
+
+func TestDeleteWorkspaceDoesNotReportFailureAfterDurableDelete(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "ALPHA", Name: "Alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	capability := &workspaceCapabilityStub{deleteFn: func(ctx context.Context, _ workspacemodule.DeleteCommand) (*workspacemodule.Reference, error) {
+		if err := st.Workspaces().Delete(ctx, "ALPHA"); err != nil {
+			return nil, err
+		}
+		return &workspacemodule.Reference{Key: "ALPHA", Name: "Alpha"}, nil
+	}}
+	svc := NewWorkspaceService(WorkspaceServiceConfig{
+		Store: st, Workspace: capability,
+		DeleteCleanupFn: func(string) error { return errors.New("disk cleanup failed") },
+	})
+	if _, err := svc.DeleteWorkspace(ctx, "ALPHA"); err != nil {
+		t.Fatalf("durable delete was reported as failed: %v", err)
 	}
 }
 

@@ -9,6 +9,7 @@ type CatalogStore interface {
 	List(context.Context) ([]Reference, error)
 	Rename(context.Context, string, string) (*Reference, error)
 	SetDesignFormat(context.Context, string, string) (*Reference, error)
+	Delete(context.Context, string) error
 }
 
 // RepositoryCatalogStore is the Workspace-owned durable repository query

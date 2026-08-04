@@ -36,7 +36,8 @@ type WorkspaceServiceConfig struct {
 	Workspace            workspacemodule.API           // Workspace-owned catalog commands and queries
 	CreateFn             WorkspaceCreateFn             // Already wrapped with registry hooks
 	AddReposFn           WorkspaceAddReposFn           // Store-backed repo attachment
-	DeleteFn             func(string) error            // Already wrapped with cleanup hooks
+	DeleteFn             func(string) error            // Legacy durable-delete fallback when Workspace is unavailable.
+	DeleteCleanupFn      func(string) error            // Machine-local cleanup after a Workspace-owned durable delete.
 	JobStore             JobStore                      // For async creation; nil = async unavailable
 	AdmissionCoordinator WorkspaceAdmissionCoordinator // Optional durable admission seam for async mutations
 	SetDefaultFn         func(string) error            // Deprecated compatibility hook; default workspace selection is disabled.
@@ -59,6 +60,7 @@ type workspaceServiceImpl struct {
 	createFn             WorkspaceCreateFn
 	addReposFn           WorkspaceAddReposFn
 	deleteFn             func(string) error
+	deleteCleanupFn      func(string) error
 	jobStore             JobStore
 	admissionCoordinator WorkspaceAdmissionCoordinator
 	setDefaultFn         func(string) error
@@ -75,6 +77,7 @@ func NewWorkspaceService(cfg WorkspaceServiceConfig) WorkspaceService {
 		createFn:             cfg.CreateFn,
 		addReposFn:           cfg.AddReposFn,
 		deleteFn:             cfg.DeleteFn,
+		deleteCleanupFn:      cfg.DeleteCleanupFn,
 		jobStore:             cfg.JobStore,
 		admissionCoordinator: cfg.AdmissionCoordinator,
 		setDefaultFn:         cfg.SetDefaultFn,
@@ -502,30 +505,18 @@ func (s *workspaceServiceImpl) workspaceJobFromStore(ctx context.Context, key st
 }
 
 func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string) (*ops.WorkspaceData, error) {
-	if s.deleteFn == nil {
-		return nil, ErrUnavailable("workspace deletion not available")
-	}
 	if s.store == nil {
 		return nil, ErrUnavailable("workspace store unavailable")
 	}
 
-	key := wsID
-	if _, err := s.store.Workspaces().Get(ctx, key); err != nil {
-		if ws, byNameErr := s.store.Workspaces().GetByName(ctx, wsID); byNameErr == nil && ws != nil {
-			key = ws.Key
-		} else {
-			return nil, ErrNotFound(fmt.Sprintf("workspace with ID %q not found", wsID))
-		}
+	key, deleteErr := s.deleteDurableWorkspace(ctx, wsID)
+	if deleteErr != nil {
+		return nil, deleteErr
 	}
-	if err := s.deleteFn(key); err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "not found") {
-			return nil, ErrNotFound(errMsg)
+	if s.deleteCleanupFn != nil {
+		if err := s.deleteCleanupFn(key); err != nil {
+			slog.Warn("workspace deleted but machine-local cleanup failed", "workspace", key, "err", err)
 		}
-		if strings.Contains(errMsg, "has running agents") {
-			return nil, ErrConflict(errMsg)
-		}
-		return nil, ErrInternal(errMsg, err)
 	}
 	s.invalidateWorkspaceCache()
 
@@ -538,6 +529,41 @@ func (s *workspaceServiceImpl) DeleteWorkspace(ctx context.Context, wsID string)
 	}
 	normalizeWorkspaceData(data)
 	return data, nil
+}
+
+func (s *workspaceServiceImpl) deleteDurableWorkspace(ctx context.Context, reference string) (string, *ServiceError) {
+	if s.workspace != nil {
+		deleted, err := s.workspace.Delete(ctx, workspacemodule.DeleteCommand{Reference: reference})
+		if err != nil {
+			return "", classifyWorkspaceCapabilityError("failed to delete workspace", err)
+		}
+		if deleted == nil || strings.TrimSpace(deleted.Key) == "" {
+			return "", ErrInternal("Workspace delete returned an invalid reference", nil)
+		}
+		return deleted.Key, nil
+	}
+	if s.deleteFn == nil {
+		return "", ErrUnavailable("workspace deletion not available")
+	}
+	key := reference
+	if _, err := s.store.Workspaces().Get(ctx, key); err != nil {
+		if ws, byNameErr := s.store.Workspaces().GetByName(ctx, reference); byNameErr == nil && ws != nil {
+			key = ws.Key
+		} else {
+			return "", ErrNotFound(fmt.Sprintf("workspace with ID %q not found", reference))
+		}
+	}
+	if err := s.deleteFn(key); err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "not found") {
+			return "", ErrNotFound(errMsg)
+		}
+		if strings.Contains(errMsg, "has running agents") {
+			return "", ErrConflict(errMsg)
+		}
+		return "", ErrInternal(errMsg, err)
+	}
+	return key, nil
 }
 
 func (s *workspaceServiceImpl) RenameWorkspace(ctx context.Context, wsID string, newName string) (*ops.WorkspaceData, error) {

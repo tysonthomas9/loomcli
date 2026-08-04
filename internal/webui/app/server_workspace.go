@@ -103,6 +103,28 @@ func wrapWorkspaceDeleteFn(
 	}
 }
 
+// wrapWorkspaceDeleteCleanupFn composes machine-local cleanup that runs only
+// after the Workspace owner command has durably deleted the aggregate.
+func wrapWorkspaceDeleteCleanupFn(
+	innerCleanup func(string) error,
+	registry *appinfra.WorkspaceRegistry,
+) func(string) error {
+	if innerCleanup == nil && registry == nil {
+		return nil
+	}
+	return func(key string) error {
+		var cleanupErr error
+		if innerCleanup != nil {
+			cleanupErr = innerCleanup(key)
+		}
+		if key != "" && registry != nil {
+			registry.Deregister(key)
+			logger.Info("workspace runtime cleaned up after owner deletion", "workspace_id", key)
+		}
+		return cleanupErr
+	}
+}
+
 // safeLogPath builds a log file path for an agent, guarding against path traversal.
 func safeLogPath(basePath, agent string) string {
 	logsDir := filepath.Join(basePath, ".loom", "logs")

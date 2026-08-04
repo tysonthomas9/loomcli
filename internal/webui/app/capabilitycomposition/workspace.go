@@ -114,6 +114,10 @@ func (s workspaceCatalogStore) SetDesignFormat(ctx context.Context, key, format 
 	return workspaceReference(value), nil
 }
 
+func (s workspaceCatalogStore) Delete(ctx context.Context, key string) error {
+	return translateWorkspaceStoreError(s.store.Delete(ctx, key))
+}
+
 func workspaceReference(value *domain.Workspace) *workspace.Reference {
 	if value == nil {
 		return nil
@@ -143,6 +147,8 @@ func translateWorkspaceStoreError(err error) error {
 		return workspace.ErrNotFound
 	case errors.Is(err, domain.ErrInvalid):
 		return fmt.Errorf("%s: %w", err.Error(), workspace.ErrInvalid)
+	case errors.Is(err, domain.ErrConflict):
+		return fmt.Errorf("%s: %w", err.Error(), workspace.ErrConflict)
 	case errors.Is(err, domain.ErrUnavailable):
 		return fmt.Errorf("%s: %w", err.Error(), workspace.ErrUnavailable)
 	default:

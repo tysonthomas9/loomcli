@@ -123,6 +123,7 @@ type ServerConfig struct {
 	GitOps                    ops.GitOps                  // Git operations interface (optional; nil disables git endpoints)
 	FileOps                   ops.FileOps                 // File operations interface (optional; nil disables file endpoints)
 	WorkspaceDeleteFn         func(name string) error     // Workspace deletion function; nil = deletion unavailable
+	WorkspaceDeleteCleanupFn  func(key string) error      // Machine-local cleanup after an owner-command deletion.
 	SetDefaultWorkspaceFn     func(name string) error     // Deprecated compatibility hook; default workspace selection is disabled.
 	ClearDefaultWorkspaceFn   func() error                // Deprecated compatibility hook; default workspace selection is disabled.
 	WorkspaceCreateFn         service.WorkspaceCreateFn   // Workspace creation function; nil = creation unavailable
