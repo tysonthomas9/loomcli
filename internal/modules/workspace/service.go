@@ -10,16 +10,38 @@ import (
 const maxWorkspaceNameLength = 64
 
 type Service struct {
-	store CatalogStore
+	store        CatalogStore
+	repositories RepositoryCatalogStore
 }
 
 var _ API = (*Service)(nil)
 
-func New(store CatalogStore) (*Service, error) {
+type Option func(*Service) error
+
+func WithRepositoryCatalog(repositories RepositoryCatalogStore) Option {
+	return func(service *Service) error {
+		if repositories == nil {
+			return fmt.Errorf("compose Workspace: repository catalog is required: %w", ErrUnavailable)
+		}
+		service.repositories = repositories
+		return nil
+	}
+}
+
+func New(store CatalogStore, options ...Option) (*Service, error) {
 	if store == nil {
 		return nil, fmt.Errorf("compose Workspace: catalog store is required: %w", ErrUnavailable)
 	}
-	return &Service{store: store}, nil
+	service := &Service{store: store}
+	for _, option := range options {
+		if option == nil {
+			continue
+		}
+		if err := option(service); err != nil {
+			return nil, err
+		}
+	}
+	return service, nil
 }
 
 func (s *Service) Resolve(ctx context.Context, query ResolveQuery) (*Reference, error) {
@@ -98,11 +120,62 @@ func (s *Service) SetDesignFormat(ctx context.Context, command SetDesignFormatCo
 	return validatedReference(updated, "set workspace design format "+current.Key)
 }
 
+func (s *Service) GetRepository(ctx context.Context, query GetRepositoryQuery) (*Repository, error) {
+	if s.repositories == nil {
+		return nil, fmt.Errorf("Workspace repository catalog unavailable: %w", ErrUnavailable)
+	}
+	name := strings.TrimSpace(query.Name)
+	if name == "" {
+		return nil, fmt.Errorf("repository name is required: %w", ErrInvalid)
+	}
+	workspace, err := s.Resolve(ctx, ResolveQuery{Reference: query.WorkspaceReference})
+	if err != nil {
+		return nil, err
+	}
+	value, err := s.repositories.Get(ctx, workspace.Key, name)
+	if err != nil {
+		return nil, err
+	}
+	return validatedRepository(value, workspace.Key, "get repository "+name)
+}
+
+func (s *Service) ListRepositories(ctx context.Context, query ListRepositoriesQuery) ([]Repository, error) {
+	if s.repositories == nil {
+		return nil, fmt.Errorf("Workspace repository catalog unavailable: %w", ErrUnavailable)
+	}
+	workspace, err := s.Resolve(ctx, ResolveQuery{Reference: query.WorkspaceReference})
+	if err != nil {
+		return nil, err
+	}
+	values, err := s.repositories.List(ctx, workspace.Key)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Repository, len(values))
+	for index := range values {
+		value, err := validatedRepository(&values[index], workspace.Key, "list repositories")
+		if err != nil {
+			return nil, err
+		}
+		out[index] = *value
+	}
+	return out, nil
+}
+
 func validatedReference(value *Reference, operation string) (*Reference, error) {
 	if value == nil || strings.TrimSpace(value.Key) == "" || strings.TrimSpace(value.Name) == "" {
 		return nil, fmt.Errorf("%s returned an invalid reference: %w", operation, ErrInvalidPersistedState)
 	}
 	copy := *value
+	return &copy, nil
+}
+
+func validatedRepository(value *Repository, workspaceKey, operation string) (*Repository, error) {
+	if value == nil || strings.TrimSpace(value.Name) == "" || value.WorkspaceKey != workspaceKey {
+		return nil, fmt.Errorf("%s returned an invalid repository: %w", operation, ErrInvalidPersistedState)
+	}
+	copy := *value
+	copy.Groups = append([]string(nil), value.Groups...)
 	return &copy, nil
 }
 

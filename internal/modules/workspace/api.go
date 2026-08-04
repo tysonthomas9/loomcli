@@ -9,6 +9,8 @@ type API interface {
 	List(context.Context, ListQuery) ([]Reference, error)
 	Rename(context.Context, RenameCommand) (*Reference, error)
 	SetDesignFormat(context.Context, SetDesignFormatCommand) (*Reference, error)
+	GetRepository(context.Context, GetRepositoryQuery) (*Repository, error)
+	ListRepositories(context.Context, ListRepositoriesQuery) ([]Repository, error)
 }
 
 type ResolveQuery struct {
@@ -27,4 +29,13 @@ type RenameCommand struct {
 type SetDesignFormatCommand struct {
 	Reference string
 	Format    string
+}
+
+type GetRepositoryQuery struct {
+	WorkspaceReference string
+	Name               string
+}
+
+type ListRepositoriesQuery struct {
+	WorkspaceReference string
 }

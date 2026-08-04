@@ -45,6 +45,14 @@ func (stub *workspaceCapabilityStub) SetDesignFormat(ctx context.Context, comman
 	return stub.setDesignFormatFn(ctx, command)
 }
 
+func (stub *workspaceCapabilityStub) GetRepository(context.Context, workspacemodule.GetRepositoryQuery) (*workspacemodule.Repository, error) {
+	return nil, workspacemodule.ErrUnavailable
+}
+
+func (stub *workspaceCapabilityStub) ListRepositories(context.Context, workspacemodule.ListRepositoriesQuery) ([]workspacemodule.Repository, error) {
+	return nil, workspacemodule.ErrUnavailable
+}
+
 func (stub *workspaceAgentDirectoryStub) ListAgents(
 	_ context.Context,
 	_ string,

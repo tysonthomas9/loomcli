@@ -68,6 +68,54 @@ func HandleCatalogGet(api workspacemodule.API, projection CatalogProjection) htt
 	}
 }
 
+func HandleCatalogRepositories(api workspacemodule.API, projection CatalogProjection) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reference := workspaceIDFromRequest(r)
+		if reference == "" {
+			handler.RespondError(w, http.StatusBadRequest, "workspace ID is required")
+			return
+		}
+		workspace, err := api.Resolve(r.Context(), workspacemodule.ResolveQuery{Reference: reference})
+		if err != nil {
+			handler.HandleWorkspaceError(w, err)
+			return
+		}
+		repositories, err := api.ListRepositories(r.Context(), workspacemodule.ListRepositoriesQuery{WorkspaceReference: workspace.Key})
+		if err != nil {
+			handler.HandleWorkspaceError(w, err)
+			return
+		}
+		topology, err := projection.WorkspaceTopology(r.Context(), workspace.Key)
+		if err != nil {
+			handler.HandleServiceError(w, err)
+			return
+		}
+		localByName := make(map[string]ops.WorkspaceRepo, len(topology.Repos))
+		for _, repository := range topology.Repos {
+			localByName[repository.Name] = repository
+		}
+		items := make([]ops.WorkspaceRepo, 0, len(repositories))
+		for _, repository := range repositories {
+			local := localByName[repository.Name]
+			defaultBranch := repository.DefaultBranch
+			if defaultBranch == "" {
+				defaultBranch = "main"
+			}
+			remote := repository.Remote
+			if remote == "" {
+				remote = "origin"
+			}
+			items = append(items, ops.WorkspaceRepo{
+				Name: repository.Name, Path: local.Path, DefaultBranch: defaultBranch,
+				CurrentBranch: local.CurrentBranch, Remote: remote, RemoteURL: repository.RemoteURL,
+				SourceRepoID: repository.SourceRepoID, Groups: append([]string(nil), repository.Groups...),
+				IsLinkedWorktree: local.IsLinkedWorktree,
+			})
+		}
+		handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "repos": items})
+	}
+}
+
 func HandleCatalogRename(api workspacemodule.API, projection CatalogProjection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reference := middleware.WorkspaceFromContext(r.Context())

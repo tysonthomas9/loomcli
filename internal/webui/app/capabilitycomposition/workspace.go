@@ -19,8 +19,51 @@ func NewWorkspaceCatalog(st store.WorkspaceStore) (workspace.API, error) {
 	return workspace.New(workspaceCatalogStore{store: st})
 }
 
+// NewWorkspaceCapability composes the complete shared Workspace catalog. Git
+// checkout and worktree state remains outside this adapter in Source Control.
+func NewWorkspaceCapability(workspaces store.WorkspaceStore, repositories store.RepoStore) (workspace.API, error) {
+	if workspaces == nil {
+		return nil, nil
+	}
+	if repositories == nil {
+		return nil, fmt.Errorf("compose Workspace repositories: %w", workspace.ErrUnavailable)
+	}
+	return workspace.New(
+		workspaceCatalogStore{store: workspaces},
+		workspace.WithRepositoryCatalog(workspaceRepositoryCatalogStore{store: repositories}),
+	)
+}
+
 type workspaceCatalogStore struct {
 	store store.WorkspaceStore
+}
+
+type workspaceRepositoryCatalogStore struct {
+	store store.RepoStore
+}
+
+func (s workspaceRepositoryCatalogStore) Get(ctx context.Context, workspaceKey, name string) (*workspace.Repository, error) {
+	value, err := s.store.Get(ctx, workspaceKey, name)
+	if err != nil {
+		return nil, translateWorkspaceStoreError(err)
+	}
+	return workspaceRepository(value), nil
+}
+
+func (s workspaceRepositoryCatalogStore) List(ctx context.Context, workspaceKey string) ([]workspace.Repository, error) {
+	values, err := s.store.List(ctx, workspaceKey)
+	if err != nil {
+		return nil, translateWorkspaceStoreError(err)
+	}
+	out := make([]workspace.Repository, len(values))
+	for index, value := range values {
+		mapped := workspaceRepository(value)
+		if mapped == nil {
+			return nil, workspace.ErrInvalidPersistedState
+		}
+		out[index] = *mapped
+	}
+	return out, nil
 }
 
 func (s workspaceCatalogStore) GetByKey(ctx context.Context, key string) (*workspace.Reference, error) {
@@ -81,6 +124,15 @@ func workspaceReference(value *domain.Workspace) *workspace.Reference {
 		DefaultBranch: value.DefaultBranch, DesignFormat: value.DesignFormat,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
+}
+
+func workspaceRepository(value *domain.Repo) *workspace.Repository {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	copy.Groups = append([]string(nil), value.Groups...)
+	return &copy
 }
 
 func translateWorkspaceStoreError(err error) error {

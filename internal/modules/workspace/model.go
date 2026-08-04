@@ -36,3 +36,17 @@ type Workspace struct {
 // Reference is the immutable Workspace catalog projection used by
 // cross-capability coordinators.
 type Reference = Workspace
+
+// Repository is Workspace-owned shared catalog state. Checkout paths,
+// worktrees, and current branches are machine-local Source Control state.
+type Repository struct {
+	WorkspaceKey  string    `json:"workspace_key"`
+	Name          string    `json:"name"`
+	RemoteURL     string    `json:"remote_url,omitempty"`
+	Remote        string    `json:"remote,omitempty"`
+	DefaultBranch string    `json:"default_branch,omitempty"`
+	Groups        []string  `json:"groups,omitempty"`
+	SourceRepoID  string    `json:"source_repo_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}

@@ -25,10 +25,12 @@ type Module interface {
 
 // WorkspaceOpsModule registers workspace-scoped operations routes.
 type WorkspaceOpsModule struct {
-	workspaceSvc   service.WorkspaceService
-	agentQueueH    http.HandlerFunc
-	issueBackendFn func(ctx context.Context) backend.IssueBackend
-	localPathFn    healthhandlers.WorkspaceLocalPathFn
+	workspaceSvc        service.WorkspaceService
+	workspaceCatalog    workspacemodule.API
+	workspaceProjection workspace.CatalogProjection
+	agentQueueH         http.HandlerFunc
+	issueBackendFn      func(ctx context.Context) backend.IssueBackend
+	localPathFn         healthhandlers.WorkspaceLocalPathFn
 }
 
 // NewWorkspaceOpsModule creates a WorkspaceOpsModule. Callers supply an
@@ -53,9 +55,22 @@ func (m *WorkspaceOpsModule) WithLocalWorkspacePathFn(fn healthhandlers.Workspac
 	return m
 }
 
+// WithWorkspaceCatalog routes Workspace-owned catalog reads through the
+// capability API while retaining the legacy service for mutation coordinators
+// that have not yet moved behind capability boundaries.
+func (m *WorkspaceOpsModule) WithWorkspaceCatalog(api workspacemodule.API, projection workspace.CatalogProjection) *WorkspaceOpsModule {
+	m.workspaceCatalog = api
+	m.workspaceProjection = projection
+	return m
+}
+
 // Register implements Module.
 func (m *WorkspaceOpsModule) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleListWorkspaceRepos(m.workspaceSvc))
+	if m.workspaceCatalog != nil && m.workspaceProjection != nil {
+		mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleCatalogRepositories(m.workspaceCatalog, m.workspaceProjection))
+	} else {
+		mux.HandleFunc("GET /api/workspaces/{ws}/repos", workspace.HandleListWorkspaceRepos(m.workspaceSvc))
+	}
 	mux.HandleFunc("POST /api/workspaces/{ws}/repos", workspace.HandleAddWorkspaceRepos(m.workspaceSvc))
 	mux.HandleFunc("GET /api/workspaces/{ws}/stats",
 		healthhandlers.HandleStatsWithBackend(healthhandlers.IssueBackendFn(m.issueBackendFn)))
@@ -127,6 +142,10 @@ func HandleWorkspaceCatalogList(api workspacemodule.API, projection workspace.Ca
 
 func HandleWorkspaceCatalogGet(api workspacemodule.API, projection workspace.CatalogProjection) http.HandlerFunc {
 	return workspace.HandleCatalogGet(api, projection)
+}
+
+func HandleWorkspaceCatalogRepositories(api workspacemodule.API, projection workspace.CatalogProjection) http.HandlerFunc {
+	return workspace.HandleCatalogRepositories(api, projection)
 }
 
 func HandleWorkspaceCatalogRename(api workspacemodule.API, projection workspace.CatalogProjection) http.HandlerFunc {

@@ -20,6 +20,8 @@ type fakeCatalogAPI struct {
 	resolveQuery  workspacemodule.ResolveQuery
 	renameCommand workspacemodule.RenameCommand
 	formatCommand workspacemodule.SetDesignFormatCommand
+	repoValues    []workspacemodule.Repository
+	repoListQuery workspacemodule.ListRepositoriesQuery
 }
 
 func (f *fakeCatalogAPI) Resolve(_ context.Context, query workspacemodule.ResolveQuery) (*workspacemodule.Reference, error) {
@@ -39,6 +41,15 @@ func (f *fakeCatalogAPI) Rename(_ context.Context, command workspacemodule.Renam
 func (f *fakeCatalogAPI) SetDesignFormat(_ context.Context, command workspacemodule.SetDesignFormatCommand) (*workspacemodule.Reference, error) {
 	f.formatCommand = command
 	return f.value, f.err
+}
+
+func (f *fakeCatalogAPI) GetRepository(context.Context, workspacemodule.GetRepositoryQuery) (*workspacemodule.Repository, error) {
+	return nil, f.err
+}
+
+func (f *fakeCatalogAPI) ListRepositories(_ context.Context, query workspacemodule.ListRepositoriesQuery) ([]workspacemodule.Repository, error) {
+	f.repoListQuery = query
+	return f.repoValues, f.err
 }
 
 type fakeCatalogProjection struct {
@@ -87,6 +98,36 @@ func TestCatalogGetResolvesBeforeReadingTopology(t *testing.T) {
 	HandleCatalogGet(api, projection).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || api.resolveQuery.Reference != "Alpha" || projection.topologyKey != "ALPHA" {
 		t.Fatalf("status=%d query=%#v topology_key=%q body=%s", recorder.Code, api.resolveQuery, projection.topologyKey, recorder.Body.String())
+	}
+}
+
+func TestCatalogRepositoriesUsesWorkspaceCatalogWithLocalProjectionOnlyForCheckoutState(t *testing.T) {
+	api := &fakeCatalogAPI{
+		value: &workspacemodule.Reference{Key: "ALPHA", Name: "Alpha"},
+		repoValues: []workspacemodule.Repository{{
+			WorkspaceKey: "ALPHA", Name: "loom", RemoteURL: "https://example.com/loom.git",
+			Groups: []string{"core"},
+		}},
+	}
+	projection := &fakeCatalogProjection{topology: &ops.WorkspaceData{Repos: []ops.WorkspaceRepo{{
+		Name: "loom", Path: "/workspace/loom", CurrentBranch: "feature", RemoteURL: "must-not-win",
+	}}}}
+	request := httptest.NewRequest(http.MethodGet, "/api/workspaces/Alpha/repos", nil)
+	request.SetPathValue("ws", "Alpha")
+	recorder := httptest.NewRecorder()
+	HandleCatalogRepositories(api, projection).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || api.repoListQuery.WorkspaceReference != "ALPHA" || projection.topologyKey != "ALPHA" {
+		t.Fatalf("status=%d query=%#v topology_key=%q body=%s", recorder.Code, api.repoListQuery, projection.topologyKey, recorder.Body.String())
+	}
+	var body struct {
+		Repos []ops.WorkspaceRepo `json:"repos"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Repos) != 1 || body.Repos[0].Path != "/workspace/loom" || body.Repos[0].CurrentBranch != "feature" ||
+		body.Repos[0].RemoteURL != "https://example.com/loom.git" || body.Repos[0].DefaultBranch != "main" || body.Repos[0].Remote != "origin" {
+		t.Fatalf("unexpected repositories: %#v", body.Repos)
 	}
 }
 

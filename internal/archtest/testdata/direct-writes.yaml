@@ -67,7 +67,7 @@ persistence_packages:
     receiver_names: [Store]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/modules/workspace
-    receiver_names: [CatalogStore]
+    receiver_names: [CatalogStore, RepositoryCatalogStore]
     receiver_suffixes: []
   - path: github.com/tysonthomas9/loomcli/internal/sessions
     receiver_names: [Session, Store]
@@ -359,6 +359,9 @@ method_sets:
   - name: workspace_catalog
     read_only: [GetByKey, GetByName, List]
     mutating: [Rename, SetDesignFormat]
+  - name: workspace_repository_catalog
+    read_only: [Get, List]
+    mutating: []
 receiver_surfaces:
   - receiver: "*github.com/tysonthomas9/loomcli/internal/events.MetricsStore"
     package: github.com/tysonthomas9/loomcli/internal/events
@@ -503,6 +506,10 @@ receiver_surfaces:
   - receiver: github.com/tysonthomas9/loomcli/internal/modules/workspace.CatalogStore
     package: github.com/tysonthomas9/loomcli/internal/modules/workspace
     method_set: workspace_catalog
+    capability_owner: workspace
+  - receiver: github.com/tysonthomas9/loomcli/internal/modules/workspace.RepositoryCatalogStore
+    package: github.com/tysonthomas9/loomcli/internal/modules/workspace
+    method_set: workspace_repository_catalog
     capability_owner: workspace
   - receiver: github.com/tysonthomas9/loomcli/internal/stackstore.Store
     package: github.com/tysonthomas9/loomcli/internal/stackstore

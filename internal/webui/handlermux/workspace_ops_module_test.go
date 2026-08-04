@@ -4,9 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
+	workspacemodule "github.com/tysonthomas9/loomcli/internal/modules/workspace"
+	"github.com/tysonthomas9/loomcli/internal/ops"
 )
 
 // Compile-time assertion: *WorkspaceOpsModule implements Module.
@@ -88,10 +91,80 @@ func TestWorkspaceOpsModuleUsesBackend(t *testing.T) {
 	}
 }
 
+func TestWorkspaceOpsModuleUsesWorkspaceCatalogForRepositoryReads(t *testing.T) {
+	catalog := &stubWorkspaceCatalog{}
+	projection := &stubWorkspaceCatalogProjection{}
+	mod := NewWorkspaceOpsModule(&mockWorkspaceService{}, nil).
+		WithWorkspaceCatalog(catalog, projection)
+
+	mux := http.NewServeMux()
+	mod.Register(mux)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/workspaces/alpha/repos", nil)
+	mux.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET repositories status = %d, want %d; body: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if catalog.reference != "alpha" || catalog.repositoryWorkspace != "ALPHA" || projection.workspace != "ALPHA" {
+		t.Fatalf("catalog reference=%q repository workspace=%q projection workspace=%q", catalog.reference, catalog.repositoryWorkspace, projection.workspace)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, `"remote_url":"https://example.com/loom.git"`) || !strings.Contains(body, `"path":"/workspace/loom"`) {
+		t.Fatalf("response does not compose catalog and local checkout state: %s", body)
+	}
+}
+
 type stubIssueBackend struct {
 	backend.IssueBackend
 }
 
 func (s *stubIssueBackend) Ready(_ context.Context, _ backend.ReadyOpts) ([]backend.IssueData, error) {
 	return []backend.IssueData{}, nil
+}
+
+type stubWorkspaceCatalog struct {
+	reference           string
+	repositoryWorkspace string
+}
+
+func (s *stubWorkspaceCatalog) Resolve(_ context.Context, query workspacemodule.ResolveQuery) (*workspacemodule.Reference, error) {
+	s.reference = query.Reference
+	return &workspacemodule.Reference{Key: "ALPHA", Name: "Alpha"}, nil
+}
+
+func (*stubWorkspaceCatalog) List(context.Context, workspacemodule.ListQuery) ([]workspacemodule.Reference, error) {
+	return nil, nil
+}
+
+func (*stubWorkspaceCatalog) Rename(context.Context, workspacemodule.RenameCommand) (*workspacemodule.Reference, error) {
+	return nil, nil
+}
+
+func (*stubWorkspaceCatalog) SetDesignFormat(context.Context, workspacemodule.SetDesignFormatCommand) (*workspacemodule.Reference, error) {
+	return nil, nil
+}
+
+func (*stubWorkspaceCatalog) GetRepository(context.Context, workspacemodule.GetRepositoryQuery) (*workspacemodule.Repository, error) {
+	return nil, nil
+}
+
+func (s *stubWorkspaceCatalog) ListRepositories(_ context.Context, query workspacemodule.ListRepositoriesQuery) ([]workspacemodule.Repository, error) {
+	s.repositoryWorkspace = query.WorkspaceReference
+	return []workspacemodule.Repository{{
+		WorkspaceKey: "ALPHA",
+		Name:         "loom",
+		RemoteURL:    "https://example.com/loom.git",
+	}}, nil
+}
+
+type stubWorkspaceCatalogProjection struct {
+	workspace string
+}
+
+func (*stubWorkspaceCatalogProjection) ActiveWorkspaceKey(context.Context) string { return "" }
+func (*stubWorkspaceCatalogProjection) WorkspacePath(string) string               { return "" }
+func (s *stubWorkspaceCatalogProjection) WorkspaceTopology(_ context.Context, workspace string) (*ops.WorkspaceData, error) {
+	s.workspace = workspace
+	return &ops.WorkspaceData{Repos: []ops.WorkspaceRepo{{Name: "loom", Path: "/workspace/loom"}}}, nil
 }

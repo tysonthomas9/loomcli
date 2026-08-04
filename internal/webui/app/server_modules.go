@@ -23,6 +23,10 @@ func (app *Server) buildModules() {
 
 	// Core workspace operations use the workflow-catalog IssueBackend port.
 	opsModule := handlermux.NewWorkspaceOpsModule(app.workspaceSvc, nil)
+	if app.workspaceCatalog != nil && app.workspaceStore != nil && app.workspaceSvc != nil {
+		workspaceProjection := capabilitycomposition.NewWorkspaceHTTPProjection(app.workspaceStore, app.workspaceSvc)
+		opsModule = opsModule.WithWorkspaceCatalog(app.workspaceCatalog, workspaceProjection)
+	}
 	if app.config.IssueBackendFn != nil {
 		opsModule = opsModule.WithIssueBackendFn(app.config.IssueBackendFn)
 	}

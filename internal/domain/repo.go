@@ -1,6 +1,6 @@
 package domain
 
-import "time"
+import "github.com/tysonthomas9/loomcli/internal/modules/workspace"
 
 // Repo is a source-code repository within a Workspace. Multiple repos per
 // workspace is the normal case (multi-repo workflows).
@@ -12,14 +12,4 @@ import "time"
 // SourceRepoID is the stable identifier server-side code uses for
 // filtering issues by repo (Issue.Repo matches SourceRepoID). When
 // unset, callers should default it to Name.
-type Repo struct {
-	WorkspaceKey  string    `json:"workspace_key"`
-	Name          string    `json:"name"`
-	RemoteURL     string    `json:"remote_url,omitempty"`
-	Remote        string    `json:"remote,omitempty"`
-	DefaultBranch string    `json:"default_branch,omitempty"`
-	Groups        []string  `json:"groups,omitempty"`
-	SourceRepoID  string    `json:"source_repo_id,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
+type Repo = workspace.Repository

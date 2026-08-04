@@ -48,3 +48,22 @@ func TestWorkspaceCatalogListsAndUpdatesPersistedWorkspace(t *testing.T) {
 		t.Fatalf("unexpected format update: value=%#v err=%v", formatted, err)
 	}
 }
+
+func TestWorkspaceCapabilityListsOwnedRepositoryCatalog(t *testing.T) {
+	st := memstore.New()
+	ctx := context.Background()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "HELLO", Name: "Hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Repos().Create(ctx, store.RepoCreate{WorkspaceKey: "HELLO", Name: "loom", Groups: []string{"core"}}); err != nil {
+		t.Fatal(err)
+	}
+	api, err := NewWorkspaceCapability(st.Workspaces(), st.Repos())
+	if err != nil {
+		t.Fatal(err)
+	}
+	values, err := api.ListRepositories(ctx, workspace.ListRepositoriesQuery{WorkspaceReference: "Hello"})
+	if err != nil || len(values) != 1 || values[0].Name != "loom" || values[0].WorkspaceKey != "HELLO" {
+		t.Fatalf("unexpected repositories: values=%#v err=%v", values, err)
+	}
+}

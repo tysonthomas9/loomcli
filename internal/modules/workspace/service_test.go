@@ -23,6 +23,24 @@ type fakeCatalog struct {
 	formatTo  string
 }
 
+type fakeRepositoryCatalog struct {
+	value        *Repository
+	values       []Repository
+	err          error
+	workspaceKey string
+	name         string
+}
+
+func (f *fakeRepositoryCatalog) Get(_ context.Context, workspaceKey, name string) (*Repository, error) {
+	f.workspaceKey, f.name = workspaceKey, name
+	return f.value, f.err
+}
+
+func (f *fakeRepositoryCatalog) List(_ context.Context, workspaceKey string) ([]Repository, error) {
+	f.workspaceKey = workspaceKey
+	return f.values, f.err
+}
+
 func (f *fakeCatalog) GetByKey(_ context.Context, key string) (*Reference, error) {
 	f.keyQuery = key
 	return f.byKey, f.keyErr
@@ -163,5 +181,52 @@ func TestSetDesignFormatOwnsValidationAndNoOp(t *testing.T) {
 	}
 	if store.formatKey != "" {
 		t.Fatal("idempotent design-format update wrote persistence")
+	}
+}
+
+func TestRepositoryQueriesResolveWorkspaceAndDefensivelyCopy(t *testing.T) {
+	repositories := &fakeRepositoryCatalog{
+		value:  &Repository{WorkspaceKey: "HELLO", Name: "loom", Groups: []string{"core"}},
+		values: []Repository{{WorkspaceKey: "HELLO", Name: "loom", Groups: []string{"core"}}},
+	}
+	service, err := New(
+		&fakeCatalog{byKey: &Reference{Key: "HELLO", Name: "Hello"}},
+		WithRepositoryCatalog(repositories),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := service.GetRepository(context.Background(), GetRepositoryQuery{WorkspaceReference: "HELLO", Name: " loom "})
+	if err != nil || repositories.workspaceKey != "HELLO" || repositories.name != "loom" || value.Name != "loom" {
+		t.Fatalf("unexpected get: value=%#v repositories=%#v err=%v", value, repositories, err)
+	}
+	value.Groups[0] = "mutated"
+	if repositories.value.Groups[0] != "core" {
+		t.Fatal("get leaked persisted repository groups")
+	}
+
+	values, err := service.ListRepositories(context.Background(), ListRepositoriesQuery{WorkspaceReference: "HELLO"})
+	if err != nil || len(values) != 1 || values[0].Name != "loom" {
+		t.Fatalf("unexpected list: values=%#v err=%v", values, err)
+	}
+	values[0].Groups[0] = "mutated"
+	if repositories.values[0].Groups[0] != "core" {
+		t.Fatal("list leaked persisted repository groups")
+	}
+}
+
+func TestRepositoryQueriesFailClosedForMissingPortAndInvalidOwnership(t *testing.T) {
+	service, _ := New(&fakeCatalog{byKey: &Reference{Key: "HELLO", Name: "Hello"}})
+	if _, err := service.ListRepositories(context.Background(), ListRepositoriesQuery{WorkspaceReference: "HELLO"}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("expected unavailable repository catalog, got %v", err)
+	}
+
+	repositories := &fakeRepositoryCatalog{value: &Repository{WorkspaceKey: "OTHER", Name: "loom"}}
+	service, _ = New(
+		&fakeCatalog{byKey: &Reference{Key: "HELLO", Name: "Hello"}},
+		WithRepositoryCatalog(repositories),
+	)
+	if _, err := service.GetRepository(context.Background(), GetRepositoryQuery{WorkspaceReference: "HELLO", Name: "loom"}); !errors.Is(err, ErrInvalidPersistedState) {
+		t.Fatalf("expected invalid persisted ownership, got %v", err)
 	}
 }
