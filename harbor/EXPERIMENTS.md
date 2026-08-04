@@ -209,6 +209,19 @@ second session and a lead that stays behavior-blind. If both land ~equal,
 ownership doesn't matter and the value was the duty itself; if neither moves
 vs B2b, deterministic gates (codex L2) — not roles — are the right lever.
 
+### PROTOCOL AMENDMENT (2026-08-04, operator directive): judging instrument
+From run 17 onward the ux half is scored by the claude-judge replica
+(`scripts/claude-judge/claude_judge.py`, codex-vetted rev 2; agreement with
+the official CUA within 1/16 on both calibration apps: b2c 0.3125 vs
+0.28125, b2d 0.9375 vs 1.0). The official CUA runs only on explicit
+operator request (e.g. for leaderboard-comparable claims). Mechanics:
+harbor launches WITHOUT --env-file — the correctness stage is key-free and
+stays official; the CUA stage hard-fails by design (trial records
+RewardFileNotFoundError; correctness metrics.json intact); the replica then
+judges the /app artifact. Scores computed as 0.5×correctness_binary +
+0.5×replica_ux and ALWAYS labeled "replica-ux"; tables must footnote which
+instrument judged each run. Runs 1–16 remain official-CUA-judged.
+
 ### B3. fractal-generic — infrastructure COMMITTED
 Mission mode `generic` (verbatim spec + finish sentence — the hardcoded
 preamble is bypassed; strip-vet #3); hidden reserve pinned to 0; concurrency
